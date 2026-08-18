@@ -24,7 +24,14 @@
  * the counts are the parts worth pinning, and none of them need a DOM.
  */
 
-import type { ResponseValidation, RunReport, ScenarioStepEvent, StepOutcome } from "@/types";
+import type {
+	ResponseValidation,
+	RunReport,
+	ScenarioStepEvent,
+	StepOutcome,
+	StepTestTally,
+	TestResult,
+} from "@/types";
 import type { RunResultSample } from "@/modules/request-builder/utils/restore-response";
 
 /** How many step executions ended in each outcome. */
@@ -69,8 +76,36 @@ export interface ScenarioStepRow {
 	 * absent is never rendered as "checked and fine".
 	 */
 	validation?: ResponseValidation;
+	/**
+	 * How many of this step's assertions held (issue #724), on a row that has no
+	 * stored result yet.
+	 *
+	 * **The live half only**, for the reason the verdict above is: a stored
+	 * row's assertions come back as the list itself, through the funnel its
+	 * response comes from, and `ScenarioStepCard` tallies that list rather than
+	 * reading a second copy the engine would have to keep in step.
+	 */
+	tests?: StepTestTally;
 	/** The stored result, present only on a row read back from the report. */
 	result?: RunResultSample;
+}
+
+/**
+ * The tally of a stored step's assertion list, or `undefined` when it made none.
+ *
+ * The live half arrives counted (the `step` frame carries two numbers); a
+ * stored row arrives as the list, so this is where the two meet. `undefined`
+ * for an empty list keeps the chip absent on a scriptless step rather than
+ * claiming "0 tests passed" - and a run stored before #724 has no list at all,
+ * which reads the same way rather than as a failure.
+ */
+export function tallyTests(results: readonly TestResult[] | undefined): StepTestTally | undefined {
+	if (!results?.length) return undefined;
+	let passed = 0;
+	for (const test of results) {
+		if (test.passed) passed += 1;
+	}
+	return { passed, failed: results.length - passed };
 }
 
 /**

@@ -120,6 +120,31 @@ std::string& error) {
 }
 
 /**
+ * What the test script's assertions came to, or `std::nullopt` for a step that
+ * made none (issue #724).
+ *
+ * The test script alone, because that is what `build_script_result_node`
+ * serializes onto the trace - a tally counting a pre-request script's
+ * assertions would name a number the step's own list cannot account for. That
+ * the node drops those assertions while `describe_failed_tests` counts them is
+ * a separate gap - issue #810 - rather than something to paper over here.
+ */
+std::optional<StepTestTally> tally_tests (const vayu::ScriptResult& post_script_result) {
+    if (post_script_result.tests.empty ()) {
+        return std::nullopt;
+    }
+    StepTestTally tally;
+    for (const auto& test : post_script_result.tests) {
+        if (test.passed) {
+            ++tally.passed;
+        } else {
+            ++tally.failed;
+        }
+    }
+    return tally;
+}
+
+/**
  * The verdict one step's response gets, or `std::nullopt` for a step nothing
  * judged (issue #681).
  *
@@ -312,6 +337,15 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
     // Same terms as `dataRowIndex`: absent here is absent there.
     if (record.validation) {
         data["validation"] = build_validation_payload (*record.validation);
+    }
+    // The assertions, as two numbers (issue #724). The list itself is on the
+    // stored row: a frame carries what is constant-size, so a step that made
+    // 400 assertions cannot push the rest of the run out of the tick ring.
+    // Absent on the same terms as everything else here - a step that asserted
+    // nothing sends no node rather than a `0/0` that reads as a result.
+    if (record.tests) {
+        data["tests"] = { { "passed", record.tests->passed },
+            { "failed", record.tests->failed } };
     }
     return build_sse_frame ("step", data.dump (), offset);
 }
@@ -595,6 +629,10 @@ RunManager& manager) {
                 record.status_code = exchange.response.status_code;
                 record.status_text = exchange.response.status_text;
                 record.latency_ms  = exchange.response.timing.total_ms;
+                // The assertions this step made (issue #724), for the frame a
+                // live watcher reads. A step whose row could not bind ran no
+                // script and gets no tally - `exchange` is the default one.
+                record.tests = tally_tests (exchange.post_script_result);
 
                 // What the contract says about what came back (issue #681).
                 // Only for a step that sent: a skipped step and one whose data
@@ -687,6 +725,24 @@ RunManager& manager) {
                 }
                 stamp_step_identity (record.trace, record);
                 vayu::json::cap_trace_bodies (record.trace, max_trace_body_bytes);
+
+                // What the scripts produced, on the node design mode already
+                // writes and `restore-response.ts` already reads (issue #724).
+                // Without it a step's detail could only ever show the one-line
+                // summary `classify_step` folded the assertions into, while the
+                // same request sent on its own shows every one of them.
+                //
+                // After the body cap for the reason `record_design_result`
+                // gives: `cap_trace_bodies` walks the request and response body
+                // nodes and does not reach this one, so writing it here makes
+                // that impossible to misread as covered. Only when the scripts
+                // said something - an empty node would put a Tests pane's worth
+                // of nothing on every stored step.
+                if (auto scripts = vayu::http::routes::build_script_result_node (
+                    exchange.pre_script_result, exchange.post_script_result);
+                    !scripts.empty ()) {
+                    record.trace["scripts"] = std::move (scripts);
+                }
 
                 ++summary.steps_executed;
                 // Only a step that actually sent counts towards coverage: a

@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import {
 	SampledExchange,
+	TestsChip,
 	UnifiedResponseViewer,
 	ValidationChip,
 	phasesFromTrace,
@@ -38,10 +39,11 @@ import {
 	type ExchangeState,
 } from "@/components/shared/response-viewer";
 import SchemaValidation from "@/modules/request-builder/components/ResponseViewer/SchemaValidation";
+import TestResults from "@/modules/request-builder/components/ResponseViewer/TestResults";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { cn } from "@/lib/utils";
 import type { StepOutcome } from "@/types";
-import type { ScenarioStepRow } from "../scenario-steps";
+import { tallyTests, type ScenarioStepRow } from "../scenario-steps";
 
 /**
  * How each outcome reads in the row.
@@ -92,6 +94,14 @@ export default function ScenarioStepCard({
 	// either way: the engine publishes and stores the same node.
 	const validation = step.validation ?? response?.validation;
 
+	// The assertions this step made (issue #724). The stored list wins the
+	// moment there is one - it is the same assertions the live tally counted,
+	// and the row below renders from it - so a step does not change its numbers
+	// when its stored row arrives. A live row keeps the frame's tally, which is
+	// all a run being watched has.
+	const testResults = response?.testResults;
+	const tests = tallyTests(testResults) ?? step.tests;
+
 	// The step's own failure text: a test assertion that did not hold, or the
 	// error that ended the iteration. A live row has none until its stored row
 	// arrives, which is why the shell renders without one rather than blank.
@@ -126,6 +136,14 @@ export default function ScenarioStepCard({
 					 * response pane already uses.
 					 */}
 					{validation && <ValidationChip validation={validation} className="shrink-0" />}
+					{/*
+					 * Beside the verdict and not folded into the outcome either:
+					 * a step is `failed` whether one assertion did not hold or
+					 * twelve did not, and the row is where that difference is
+					 * cheap to show. Present live, from the frame's tally, so a
+					 * run being watched says more than "failed".
+					 */}
+					{tests && <TestsChip tests={tests} className="shrink-0" />}
 				</span>
 			}
 			state={OUTCOME_STATE[step.outcome]}
@@ -163,6 +181,21 @@ export default function ScenarioStepCard({
 			 * copy of them here would not receive that section's fixes.
 			 */}
 			{validation && <SchemaValidation validation={validation} />}
+
+			{/*
+			 * Every assertion the step's test script made (issue #724), from the
+			 * stored trace. The same component the response pane's Tests tab
+			 * renders, stacked under the schema verdict the way that tab stacks
+			 * them - `inset={false}` because this expansion owns the padding,
+			 * exactly as the tab does for the pair.
+			 *
+			 * A live row has none: the list rides the stored trace, so what the
+			 * chip above shows from the frame's tally is all there is until the
+			 * run ends and the row is written.
+			 */}
+			{testResults && testResults.length > 0 && (
+				<TestResults results={testResults} inset={false} />
+			)}
 
 			{response && (
 				<div className="space-y-2">

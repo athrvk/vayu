@@ -22,6 +22,7 @@ import {
 	outcomeCountsFromReport,
 	stepKey,
 	stepRowsFromReport,
+	tallyTests,
 	thinningDisclosure,
 	type ScenarioStepRow,
 } from "./scenario-steps";
@@ -379,5 +380,28 @@ describe("thinningDisclosure", () => {
 		// tell" must not render as "nothing was dropped".
 		expect(thinningDisclosure(report({}))).toBeNull();
 		expect(thinningDisclosure(undefined)).toBeNull();
+	});
+});
+
+describe("tallyTests", () => {
+	it("counts a stored step's assertion list the way the live frame counts it", () => {
+		// The engine sends two numbers live and stores the list; this is where
+		// the two meet, so a step must not change its numbers when its stored
+		// row arrives.
+		expect(
+			tallyTests([
+				{ name: "status is 200", passed: true },
+				{ name: "body names a pet", passed: false, error: "expected undefined" },
+				{ name: "took under a second", passed: true },
+			])
+		).toEqual({ passed: 2, failed: 1 });
+	});
+
+	it("says nothing for a step that asserted nothing", () => {
+		// Absent, not `{ passed: 0, failed: 0 }` - the chip is not rendered at
+		// all for a scriptless step, where "0 tests passed" would read as a
+		// result. A run stored before the list existed reads the same way.
+		expect(tallyTests([])).toBeUndefined();
+		expect(tallyTests(undefined)).toBeUndefined();
 	});
 });
