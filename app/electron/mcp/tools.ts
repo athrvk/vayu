@@ -1030,6 +1030,26 @@ function removeVariablesInput(subject: string) {
 		);
 }
 
+/**
+ * Read the `variables` argument as a patch, refusing anything that is not a
+ * name -> value map.
+ *
+ * The throwing form of the check `create_environment` / `update_environment`
+ * make inline (`dispatchTool` turns a `ToolArgError` into the same tool error
+ * their `errorResult` produces, with the same message). It is a function here
+ * because the collection tools take the argument at two more call sites, and a
+ * fourth hand-written copy of "is this an object" is how the four start
+ * disagreeing about what a malformed one does.
+ */
+function readVariablesPatch(args: Record<string, unknown>): Record<string, unknown> | undefined {
+	const value = args.variables;
+	if (value === undefined || value === null) return undefined;
+	if (!isRecord(value)) {
+		throw new ToolArgError('"variables" must be an object mapping names to values.');
+	}
+	return value;
+}
+
 /** Read and validate `removeVariables` off raw arguments. */
 function removalNames(args: Record<string, unknown>): string[] {
 	const value = args.removeVariables;
@@ -1656,6 +1676,30 @@ function storedScriptInput(which: "pre" | "post", clearable: boolean) {
 }
 
 /**
+ * A collection's stored scripts - the ones that run around *every* request in
+ * it, not around one (issue #759).
+ *
+ * A separate fragment from `storedScriptInput` rather than a parameter on it,
+ * because what an agent has to know here is the scope: a script written onto a
+ * collection runs for every request below it, including the ones in its
+ * sub-collections, so the blast radius of a wrong one is a whole tree rather
+ * than a row. Both take the same clearing rule the request scripts do on an
+ * update - the engine merge-patches strings, so an empty string is a value.
+ */
+function collectionScriptInput(which: "pre" | "post") {
+	const when =
+		which === "pre"
+			? "before each request in this collection is sent, ahead of that request's own pre-request script"
+			: "after each response in this collection arrives, ahead of that request's own test script";
+	return z
+		.string()
+		.optional()
+		.describe(
+			`JavaScript stored on the collection and run ${when} - the app's collection-level scripts. It runs for every request in the collection and in its sub-collections, so scope it accordingly. Read the \`vayu://scripting/completions\` resource for the sandbox's surface. Leave it out to keep the stored script; pass an empty string to clear it.`
+		);
+}
+
+/**
  * Optional auth block. Callers can copy a saved request's `auth` object verbatim
  * (read via list_requests). The engine applies it - bearer/basic/apikey and
  * oauth2 (using its token cache) - after `{{variables}}` inside it are resolved;
@@ -1668,6 +1712,90 @@ const authInput = z
 	.describe(
 		"Optional auth block (e.g. { mode: 'bearer', token: '{{apiToken}}' }); the engine resolves and applies it."
 	);
+
+/**
+ * The auth block as it is *stored* on a document, described for the resource
+ * holding it (issue #759).
+ *
+ * The same schema `run_request` and `start_load_run` take - one definition, not
+ * a copy - because a saved request's auth and an ad-hoc one are the same object
+ * in the same shape, and an agent that read a request's `auth` over
+ * `list_requests` must be able to write it back verbatim. What differs per
+ * subject is only which modes are meaningful: a request may `inherit` (its
+ * default), while a collection is the root of the chain and never does.
+ */
+function storedAuthInput(subject: string, extra: string) {
+	return authInput.describe(
+		`Auth block stored on ${subject}, in the same shape run_request takes - e.g. { mode: 'bearer', token: '{{apiToken}}' }. It is stored as written and resolved when the request is sent, so {{variables}} inside it are fine. ${extra}`
+	);
+}
+
+/**
+ * The **Settings** tab's four per-request fields, as the engine stores them on
+ * the row (issue #759).
+ *
+ * One definition spread into both `create_request` and `update_request`: the
+ * fields mean the same thing on either verb, and the merge-patch difference is
+ * carried by the surrounding tool description rather than by two copies of four
+ * schemas. Ranges are the engine's own (`apply_request_fields`) rather than new
+ * numbers - `maxRedirects` is clamped to 0-100 there, and an unrecognized
+ * `httpVersion` is a 400 rather than a coercion, which is why the enum is
+ * closed here too.
+ *
+ * `verifySSL` is deliberately **not** among them: it is stored beside these
+ * (issue #706) and belongs to the transport epic's own CRUD pass - see #795.
+ */
+function requestSettingsInput() {
+	return {
+		followRedirects: z
+			.boolean()
+			.optional()
+			.describe(
+				"Follow 3xx redirects when this request is sent (default true). The request builder's Settings tab."
+			),
+		maxRedirects: z
+			.number()
+			.int()
+			.min(0)
+			.max(100)
+			.optional()
+			.describe("How many redirects to follow before giving up (default 10, 0-100)."),
+		httpVersion: z
+			.enum(HTTP_VERSIONS)
+			.optional()
+			.describe(
+				'Protocol to negotiate when this request is sent: "auto" | "http1.1" | "http2" (default "auto").'
+			),
+		stream: z
+			.boolean()
+			.optional()
+			.describe(
+				"Consume the response as a text/event-stream rather than buffering it (default false). Stored on the request, so a later send - from the app or from run_request - streams without being told to."
+			),
+	};
+}
+
+/** The stored settings a call named, forwarded verbatim; an unnamed one is absent. */
+const REQUEST_SETTINGS_KEYS = ["followRedirects", "maxRedirects", "httpVersion", "stream"] as const;
+
+/**
+ * Lay the caller's stored-settings fields onto a request payload.
+ *
+ * Values pass through unvalidated on purpose: the schema above owns the shapes,
+ * and the engine owns the ranges - re-deriving either here would be a second
+ * copy that refuses what the engine accepts the moment one side moves. What
+ * this owns is the *absent* rule, which is the merge-patch contract: a field the
+ * caller did not name is never written, so an update cannot silently reset the
+ * redirect policy a user set in the app.
+ */
+function applyRequestSettings(
+	args: Record<string, unknown>,
+	payload: Record<string, unknown>
+): void {
+	for (const key of REQUEST_SETTINGS_KEYS) {
+		if (args[key] !== undefined) payload[key] = args[key];
+	}
+}
 
 // --- Structured output schemas ----------------------------------------------
 
@@ -2283,11 +2411,29 @@ function toKeyValueEntries(
 
 // --- Cascade accounting for delete_collection --------------------------------
 
-/** A `GET /collections` row, narrowed to the fields the cascade walk reads. */
+/**
+ * A `GET /collections` row, narrowed to the fields the cascade walk reads - plus
+ * the `order` a move reads, since both work from the same one list read.
+ */
 interface CollectionRow {
 	id: string;
 	name?: string;
 	parentId?: string | null;
+	order?: number;
+}
+
+/**
+ * The collection a row sits under, or `null` for a root one.
+ *
+ * Two spellings reach here for "no parent": the engine serializes a root
+ * collection's `parentId` as `null`, while a row that has been through a client
+ * whose type calls it optional can arrive without the key at all. An empty
+ * string is the third - what the cascade walk has always treated as a root.
+ * Comparing raw values would file a root collection under a parent named "",
+ * which is a destination that does not exist.
+ */
+function collectionParent(row: CollectionRow): string | null {
+	return typeof row.parentId === "string" && row.parentId !== "" ? row.parentId : null;
 }
 
 /** The collections list, dropping anything without a usable id. */
@@ -2577,6 +2723,187 @@ export const MAX_INBOX_CAPTURE_LIMIT = 100;
 function boundInboxCaptures(value: unknown): unknown {
 	if (!isRecord(value) || !Array.isArray(value.data)) return value;
 	return { ...value, data: value.data.map(boundTraceNode) };
+}
+
+// --- Saved example responses -------------------------------------------------
+
+/**
+ * How much of a stored example body one result carries, and how much a whole
+ * list may spend (issue #759, on the #767 / #769 precedent).
+ *
+ * An example body is capped engine-side at 1 MB and a request may hold 100 of
+ * them, so an unbounded list is a 100 MB tool result - the same shape that made
+ * `get_run_report` blow the token limit before #769 bounded its traces. The two
+ * numbers are that fix's, not new ones: `MAX_INLINE_BODY_BYTES` per body, and
+ * three times it across the list, which is the largest single row the per-body
+ * bound can produce.
+ */
+export const MAX_EXAMPLES_BODY_BYTES = MAX_INLINE_BODY_BYTES * 3;
+
+/** A list of examples with its bodies bounded, and what that cost. */
+interface BoundedExamples {
+	examples: unknown[];
+	/** Rows whose body did not fit the list budget at all. */
+	bodiesOmitted: number;
+	bodyBudgetBytes: number;
+}
+
+/**
+ * Bound the bodies of one request's examples, disclosing every cut.
+ *
+ * The flags are deliberately **not** the engine's `bodyTruncated`: that field
+ * already means something else on this row - the client that captured the
+ * response stored only a prefix of it - and reusing the name would leave an
+ * agent unable to tell a short capture from a short *read*. So a body cut to fit
+ * this result is `bodyClipped` with the stored size in `bodyBytes`, and one that
+ * did not fit at all is `bodyOmitted` with the same size, keeping every scalar
+ * (id, name, status, headers, order, origin) that says what the row is.
+ */
+function boundExampleBodies(value: unknown): BoundedExamples {
+	const rows = Array.isArray(value) ? value : [];
+	let spent = 0;
+	let bodiesOmitted = 0;
+	const examples = rows.map((row) => {
+		if (!isRecord(row) || typeof row.body !== "string" || row.body === "") return row;
+		const stored = Buffer.byteLength(row.body, "utf8");
+		const remaining = MAX_EXAMPLES_BODY_BYTES - spent;
+		if (remaining <= 0) {
+			bodiesOmitted++;
+			return { ...row, body: "", bodyOmitted: true, bodyBytes: stored };
+		}
+		const bounded = boundText(row.body, Math.min(MAX_INLINE_BODY_BYTES, remaining));
+		spent += Buffer.byteLength(bounded.text, "utf8");
+		if (!bounded.truncated) return row;
+		return { ...row, body: bounded.text, bodyClipped: true, bodyBytes: bounded.bytes };
+	});
+	return { examples, bodiesOmitted, bodyBudgetBytes: MAX_EXAMPLES_BODY_BYTES };
+}
+
+/**
+ * The fields an example write may state, in the engine's spelling
+ * (`apply_request_example_fields`).
+ *
+ * **`origin` is not among them, and that is the point.** The column says who
+ * wrote the row - `import` for an importer or a spec sync, `user` for what the
+ * app saved from a live response - and the OpenAPI sync replaces the first kind
+ * without touching the second (#588, #722). An agent that could claim `import`
+ * could hand its own example to the next sync to overwrite; one that could claim
+ * `user` could pin a stale imported row against the document it came from.
+ * Neither is the agent's call, so the field is refused by omission: the SDK
+ * strips what the schema does not declare, and the payload builder copies only
+ * the keys below.
+ */
+const EXAMPLE_WRITE_KEYS = ["name", "status", "contentType"] as const;
+
+/**
+ * The body of an example write - the named fields only, so an update leaves
+ * what it did not mention alone (the engine merge-patches on `PUT`).
+ *
+ * `headers` follows the request tools' rule: a string map in, the engine's
+ * `{key, value, enabled}` rows out, replacing the stored list wholesale.
+ */
+function exampleWritePayload(args: Record<string, unknown>): Record<string, unknown> {
+	const payload: Record<string, unknown> = {};
+	for (const key of EXAMPLE_WRITE_KEYS) {
+		if (args[key] !== undefined) payload[key] = args[key];
+	}
+	if (args.headers !== undefined) {
+		if (!isRecord(args.headers)) {
+			throw new ToolArgError('"headers" must be an object mapping header names to values.');
+		}
+		payload.headers = toKeyValueEntries(args.headers);
+	}
+	const body = str(args, "body");
+	if (body !== undefined) payload.body = body;
+	return payload;
+}
+
+/** One stored example named in words, for the prompt that asks to delete it. */
+function describeExample(exampleId: string, example: Record<string, unknown>): string {
+	const name = typeof example.name === "string" && example.name !== "" ? example.name : exampleId;
+	const status = typeof example.status === "number" ? ` (status ${example.status})` : "";
+	return `"${name}"${status}`;
+}
+
+// --- Moving an item to another parent ----------------------------------------
+
+/**
+ * Where a moved row lands among its new siblings.
+ *
+ * Two positions, not an index: `POST /reorder` writes dense positions and a
+ * drag computes them from a pointer, which an agent has none of. Naming a slot
+ * in the middle would mean an agent maintaining the app's ordering arithmetic
+ * (`modules/collections/reorder-math.ts`) from the outside, and getting it wrong
+ * is a folder that visibly reshuffles. First and last are the two an agent can
+ * mean unambiguously; anything finer stays a UI gesture.
+ */
+const MOVE_POSITIONS = ["first", "last"] as const;
+
+/**
+ * The reorder batch that lands `movedId` at either end of its destination.
+ *
+ * `siblings` is the destination block **as the engine lists it** - already
+ * sorted by `order`, then `createdAt`, then `id` - with the moved row itself
+ * removed, so the arrangement this produces is simply that array with the row
+ * put on one end. Every position in the block is then stated outright rather
+ * than left to the engine's `normalize` pass, because the two would have to
+ * agree about a block the moved row is still inside while it runs: normalizing
+ * `[A, B, C]` and then writing `A` at `2` puts it level with `C`, and the tie
+ * goes to whichever row was created first. Stating the whole arrangement cannot
+ * tie.
+ *
+ * Only rows whose stored `order` actually changes get an entry - the rule
+ * `reorder-math.ts` follows for a drag, and what keeps a move inside a large
+ * collection from rewriting every row in it. The moved row is always written:
+ * it is the one carrying the destination owner, which is the move.
+ *
+ * The scope it *left* keeps a gap where it was (the rows after it are not
+ * renumbered). That is invisible - display order reads the column's relative
+ * values, never its density - and closing it would double the batch for
+ * nothing.
+ */
+function moveBatch(params: {
+	type: "collection" | "request";
+	movedId: string;
+	position: "first" | "last";
+	/** The destination's own key: `parentId` (null = the top level) or `collectionId`. */
+	owner: Record<string, unknown>;
+	siblings: readonly OrderedSibling[];
+}): Record<string, unknown> {
+	const { type, movedId, position, owner, siblings } = params;
+	const offset = position === "first" ? 1 : 0;
+	const moves: Record<string, unknown>[] = [
+		{
+			type,
+			id: movedId,
+			order: position === "first" ? 0 : siblings.length,
+			...owner,
+		},
+	];
+	siblings.forEach((row, index) => {
+		if (row.order === index + offset) return;
+		moves.push({ type, id: row.id, order: index + offset });
+	});
+	return { moves };
+}
+
+/** A destination row, narrowed to what a move has to know about it. */
+interface OrderedSibling {
+	id: string;
+	order?: number;
+}
+
+/**
+ * The rows of a `GET /requests?collectionId=` answer, in the order it lists
+ * them - which is the order the tree displays, since the engine sorts every
+ * list read by the same three keys the renderer's comparator uses.
+ */
+function readOrderedSiblings(value: unknown): OrderedSibling[] {
+	if (!Array.isArray(value)) return [];
+	return value.filter(
+		(row): row is OrderedSibling =>
+			!!row && typeof row === "object" && typeof (row as OrderedSibling).id === "string"
+	);
 }
 
 // --- Tool definitions --------------------------------------------------------
@@ -3082,7 +3409,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Create a collection (the folder saved requests live in). GUARDED: requires write access to be enabled in Vayu Settings. Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`.",
+			"Create a collection (the folder saved requests live in), with the variables, auth and pre/post-request scripts every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`.",
 		annotations: {
 			title: "Create collection",
 			readOnlyHint: false,
@@ -3096,6 +3423,13 @@ export const TOOLS: McpTool[] = [
 				.optional()
 				.describe("Optional parent collection ID; omit for a top-level collection."),
 			description: z.string().optional(),
+			variables: variablesInput("the new collection"),
+			auth: storedAuthInput(
+				"this collection",
+				'A collection is the root of an auth chain and never inherits, so "inherit" is refused by the engine; requests below it that store { mode: "inherit" } resolve to this block.'
+			),
+			preRequestScript: collectionScriptInput("pre"),
+			postRequestScript: collectionScriptInput("post"),
 		},
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
@@ -3103,8 +3437,17 @@ export const TOOLS: McpTool[] = [
 			const payload: Record<string, unknown> = { name: requireStr(args, "name") };
 			const parentId = str(args, "parentId");
 			if (parentId !== undefined) payload.parentId = parentId;
-			const description = str(args, "description");
-			if (description !== undefined) payload.description = description;
+			for (const field of ["description", "preRequestScript", "postRequestScript"] as const) {
+				const value = str(args, field);
+				if (value !== undefined) payload[field] = value;
+			}
+			const auth = readAuthArg(args);
+			if (auth) payload.auth = auth;
+			const patch = readVariablesPatch(args);
+			// Merged against nothing, the way create_environment does it: on a
+			// create every variable is new, which is what turns the string form
+			// into a stored entry and enforces "a new variable carries a value".
+			if (patch !== undefined) payload.variables = mergeVariables({}, patch, []).variables;
 			return callEngine(() => ctx.client.createCollection(payload, signal));
 		},
 	},
@@ -3113,7 +3456,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Rename or re-describe a collection. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - everything else the collection holds (its variables, auth, scripts, and the requests inside it) is left alone. This is not a move: re-parenting a collection is a reorder operation and is not exposed here.",
+			"Change a collection: its name, description, variables, auth or pre/post-request scripts - the state every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change, and the requests inside it are never touched. Variables merge: one you do not name is left alone, and a named one keeps every flag you do not state; removeVariables deletes names outright. Auth replaces the stored block whole. This is not a move - to re-parent a collection, use move_item.",
 		annotations: {
 			title: "Update collection",
 			readOnlyHint: false,
@@ -3125,6 +3468,14 @@ export const TOOLS: McpTool[] = [
 			collectionId: z.string().describe("Collection ID to update."),
 			name: z.string().optional().describe("New display name."),
 			description: z.string().optional().describe("New description."),
+			variables: variablesInput("this collection"),
+			removeVariables: removeVariablesInput("this collection"),
+			auth: storedAuthInput(
+				"this collection",
+				'A collection never inherits - it is the root of the chain - so the engine refuses "inherit" here; { mode: "none" } is how a collection stops being an auth source.'
+			),
+			preRequestScript: collectionScriptInput("pre"),
+			postRequestScript: collectionScriptInput("post"),
 		},
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
@@ -3133,14 +3484,49 @@ export const TOOLS: McpTool[] = [
 			// The engine merge-patches, so a body naming nothing would be a write
 			// that changes nothing while reporting success. Say so instead.
 			const payload: Record<string, unknown> = {};
-			for (const field of ["name", "description"] as const) {
+			for (const field of [
+				"name",
+				"description",
+				// An empty string is a value here, not an omission - the same rule
+				// update_request's scripts follow, and how one gets cleared.
+				"preRequestScript",
+				"postRequestScript",
+			] as const) {
 				const value = str(args, field);
 				if (value !== undefined) payload[field] = value;
 			}
-			if (Object.keys(payload).length === 0) {
-				return errorResult('Pass at least one of "name" or "description" to change.');
+			const auth = readAuthArg(args);
+			if (auth) payload.auth = auth;
+			const patch = readVariablesPatch(args);
+			const removals = removalNames(args);
+			if (Object.keys(payload).length === 0 && patch === undefined && removals.length === 0) {
+				return errorResult(
+					'Pass at least one field to change ("name", "description", "variables", "removeVariables", "auth", "preRequestScript" or "postRequestScript").'
+				);
 			}
-			return callEngine(() => ctx.client.updateCollection(collectionId, payload, signal));
+			let absentRemovals: string[] = [];
+			if (patch !== undefined || removals.length > 0) {
+				// `PUT /collections/:id` replaces the whole variables blob, exactly
+				// as the environment PUT does, so "change one variable" is a
+				// read-merge-write here too - without the read, an agent setting one
+				// variable would drop every other one the collection holds.
+				let existing: Record<string, unknown>;
+				try {
+					existing = ((await ctx.client.getCollection(collectionId, signal)) ??
+						{}) as Record<string, unknown>;
+				} catch (err) {
+					return engineErrorResult(err);
+				}
+				const merged = mergeVariables(existing.variables, patch, removals);
+				payload.variables = merged.variables;
+				absentRemovals = merged.absentRemovals;
+			}
+			const result = await callEngine(() =>
+				ctx.client.updateCollection(collectionId, payload, signal)
+			);
+			return result.isError
+				? result
+				: withCaveat(result, absentRemovalCaveat(absentRemovals));
 		},
 	},
 	{
@@ -3203,7 +3589,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Create a saved request inside a collection (stores it; does not send it), optionally with its pre-request and test scripts. GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed, and a stored script runs only when the request is later sent.",
+			'Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol and stream flag, and its pre-request and test scripts - everything the app\'s builder stores except file body parts. GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed, and a stored script runs only when the request is later sent. Auth is stored as written and resolved at send time, so {{variables}} inside it are fine; leaving `auth` out stores the default "inherit", which resolves against the collection chain.',
 		annotations: {
 			title: "Create saved request",
 			readOnlyHint: false,
@@ -3224,6 +3610,11 @@ export const TOOLS: McpTool[] = [
 					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. File parts are not supported here - a multipart file part names a path on the user\'s machine, which an agent cannot choose for them; author it in the app. An xml `body` is stored and sent verbatim as application/xml.'
 				),
 			description: z.string().optional(),
+			auth: storedAuthInput(
+				"this request",
+				'Omit it for the stored default, "inherit", which resolves against the collection chain when the request is sent.'
+			),
+			...requestSettingsInput(),
 			preRequestScript: storedScriptInput("pre", false),
 			postRequestScript: storedScriptInput("post", false),
 		},
@@ -3236,6 +3627,9 @@ export const TOOLS: McpTool[] = [
 				url: requireStr(args, "url"),
 				method: str(args, "method") ?? "GET",
 			};
+			const auth = readAuthArg(args);
+			if (auth) payload.auth = auth;
+			applyRequestSettings(args, payload);
 			if (args.headers && typeof args.headers === "object") {
 				payload.headers = toKeyValueEntries(args.headers);
 			}
@@ -3262,7 +3656,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Correct a saved request: its name, URL, method, headers, body, description or pre/post-request scripts. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value, including the request's auth. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing a script replaces that script, and an empty string clears it.",
+			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, description or pre/post-request scripts. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing a script replaces that script, and an empty string clears it.",
 		annotations: {
 			title: "Update saved request",
 			readOnlyHint: false,
@@ -3287,6 +3681,11 @@ export const TOOLS: McpTool[] = [
 					"Body type for `body`: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded. Only meaningful alongside `body`. A jsonrpc `body` is enveloped engine-side exactly as `create_request` describes; an xml `body` is stored and sent verbatim as application/xml. File parts are not supported here; a stored one is left alone unless `body` replaces the whole body."
 				),
 			description: z.string().optional().describe("New description."),
+			auth: storedAuthInput(
+				"this request",
+				"Replaces the stored block whole - send the mode and its credentials together. Leave it out to keep what is stored."
+			),
+			...requestSettingsInput(),
 			preRequestScript: storedScriptInput("pre", true),
 			postRequestScript: storedScriptInput("post", true),
 		},
@@ -3317,6 +3716,13 @@ export const TOOLS: McpTool[] = [
 			if (args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)) {
 				payload.headers = toKeyValueEntries(args.headers);
 			}
+			// Auth and the four Settings fields ride the same rule as the strings
+			// above: stated is written, absent is left alone. The block replaces
+			// the stored one wholesale because the engine stores it as one JSON
+			// column - there is no per-credential patch to offer.
+			const auth = readAuthArg(args);
+			if (auth) payload.auth = auth;
+			applyRequestSettings(args, payload);
 			const body = str(args, "body");
 			const bodyType = str(args, "bodyType");
 			if (body !== undefined) {
@@ -3333,7 +3739,7 @@ export const TOOLS: McpTool[] = [
 			}
 			if (Object.keys(payload).length === 0) {
 				return errorResult(
-					"Pass at least one field to change (name, url, method, headers, body, description, preRequestScript or postRequestScript)."
+					"Pass at least one field to change (name, url, method, headers, body, auth, followRedirects, maxRedirects, httpVersion, stream, description, preRequestScript or postRequestScript)."
 				);
 			}
 			return callEngine(() => ctx.client.updateRequest(requestId, payload, signal));
@@ -3391,6 +3797,299 @@ export const TOOLS: McpTool[] = [
 			});
 			if (unconfirmed) return unconfirmed;
 			return callEngine(() => ctx.client.deleteRequest(requestId, signal));
+		},
+	},
+	{
+		name: "list_request_examples",
+		category: "read",
+		invalidates: [],
+		description:
+			"List a request's saved example responses - the responses stored beside it, in the order a mock server would serve them (the first match answers). Every row carries its name, status, headers, content type, `order` and `origin` (`import` for what an importer or an OpenAPI sync wrote, `user` for what was saved from a live response). " +
+			`Bodies are bounded: one over ${MAX_INLINE_BODY_BYTES} bytes comes back cut with \`bodyClipped: true\` and its stored size in \`bodyBytes\`, and once the list has spent ${MAX_EXAMPLES_BODY_BYTES} bytes the remaining bodies are dropped with \`bodyOmitted: true\` (the row's scalars are always kept). \`bodiesOmitted\` counts them. The engine's own \`bodyTruncated\` is a different fact - it says the response was already cut when it was captured.`,
+		annotations: {
+			title: "List saved examples",
+			readOnlyHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			requestId: z.string().describe("Saved request whose examples to list."),
+		},
+		handler: async (args, ctx, signal) => {
+			const requestId = requireStr(args, "requestId");
+			return callEngine(
+				() => ctx.client.listRequestExamples(requestId, signal),
+				boundExampleBodies
+			);
+		},
+	},
+	{
+		name: "create_request_example",
+		category: "write",
+		invalidates: ["request"],
+		description:
+			"Save an example response on a request - what a mock server for its collection answers with, and what the Examples tab shows. GUARDED: requires write access to be enabled in Vayu Settings. Vayu assigns the id and appends the example after the request's current ones; a request already holding the maximum (100) is refused by the engine. The example is marked as written by hand: an agent cannot claim an example came from an import, because an OpenAPI sync replaces imported examples and leaves the others alone.",
+		annotations: {
+			title: "Create saved example",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			requestId: z.string().describe("Saved request to attach the example to."),
+			name: z.string().describe("Display name for the example (e.g. '200 OK')."),
+			status: z
+				.number()
+				.int()
+				.min(100)
+				.max(599)
+				.optional()
+				.describe("HTTP status the example answers with (default 200)."),
+			headers: z.record(z.string()).optional().describe("Response headers as a string map."),
+			body: z.string().optional().describe("Response body, stored verbatim."),
+			contentType: z
+				.string()
+				.optional()
+				.describe(
+					"Content type of `body` (e.g. application/json). Stored beside the headers; a mock server sends it."
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const requestId = requireStr(args, "requestId");
+			const payload = exampleWritePayload(args);
+			payload.name = requireStr(args, "name");
+			// Stated rather than left to the engine's default, which is `import`:
+			// this row was written by an agent, and the sync that replaces
+			// imported rows must not be handed one it did not write (#588, #722).
+			payload.origin = "user";
+			return callEngine(() => ctx.client.createRequestExample(requestId, payload, signal));
+		},
+	},
+	{
+		name: "update_request_example",
+		category: "write",
+		invalidates: ["request"],
+		description:
+			"Correct a saved example: its name, status, headers, body or content type. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change; passing `headers` replaces the whole header list. Where the example came from is not editable - an imported example stays imported, which is what lets an OpenAPI sync tell the two apart.",
+		annotations: {
+			title: "Update saved example",
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			requestId: z.string().describe("Request that owns the example."),
+			exampleId: z.string().describe("Example ID to update."),
+			name: z.string().optional().describe("New display name."),
+			status: z.number().int().min(100).max(599).optional().describe("New HTTP status."),
+			headers: z
+				.record(z.string())
+				.optional()
+				.describe(
+					"Replacement response headers as a string map (replaces the stored list)."
+				),
+			body: z.string().optional().describe("New response body."),
+			contentType: z.string().optional().describe("New content type for `body`."),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const requestId = requireStr(args, "requestId");
+			const exampleId = requireStr(args, "exampleId");
+			const payload = exampleWritePayload(args);
+			if (Object.keys(payload).length === 0) {
+				return errorResult(
+					'Pass at least one field to change ("name", "status", "headers", "body" or "contentType").'
+				);
+			}
+			return callEngine(() =>
+				ctx.client.updateRequestExample(requestId, exampleId, payload, signal)
+			);
+		},
+	},
+	{
+		name: "delete_request_example",
+		category: "write",
+		invalidates: ["request"],
+		description:
+			"Delete one saved example from a request. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the example's name and what a mock server loses; otherwise call once for a preview, then again with `confirmed: true`. There is no undo, and a mock server for this collection stops answering with it once it is restarted.",
+		annotations: {
+			title: "Delete saved example",
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			requestId: z.string().describe("Request that owns the example."),
+			exampleId: z.string().describe("Example ID to delete."),
+			confirmed: confirmedInput("actually delete the example"),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const requestId = requireStr(args, "requestId");
+			const exampleId = requireStr(args, "exampleId");
+			// Read the list first so the prompt names the example rather than an
+			// id - the same rule delete_request follows. There is no by-id read
+			// for one example, and the owner check the engine makes on every
+			// nested path is exactly this scan: an id stored under another
+			// request is "no such example" here too.
+			let stored: Record<string, unknown> | undefined;
+			try {
+				const rows = await ctx.client.listRequestExamples(requestId, signal);
+				stored = (Array.isArray(rows) ? rows : []).find(
+					(row) => isRecord(row) && row.id === exampleId
+				) as Record<string, unknown> | undefined;
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			if (!stored) {
+				return errorResult(`No example with id "${exampleId}" on request "${requestId}".`);
+			}
+			const subject = describeExample(exampleId, stored);
+			const consequence =
+				"A mock server for this collection stops answering with it once it is restarted. This cannot be undone.";
+			const unconfirmed = await confirmDestructive(args, ctx, {
+				message: `Delete the saved example ${subject}?\n\n${consequence}`,
+				acceptTitle: "Delete the example",
+				acceptDescription: "Confirm to delete this saved example.",
+				declined: "Example not deleted - the user declined.",
+				preview:
+					"AWAITING CONFIRMATION - nothing was deleted.\n\n" +
+					`This would delete the saved example ${subject}. ${consequence}\n\n` +
+					"This is a preview. To delete it, call delete_request_example again with confirmed: true and the same arguments.",
+			});
+			if (unconfirmed) return unconfirmed;
+			return callEngine(() => ctx.client.deleteRequestExample(requestId, exampleId, signal));
+		},
+	},
+	{
+		name: "move_item",
+		category: "write",
+		/*
+		 * Both families, and the pair is load-bearing rather than cautious. The
+		 * `request` event narrows on the `collectionId` the call named, which for
+		 * a move is the *destination* - the list the row left would stay stale on
+		 * its own. `collection` is the coarse one (`collections.all` +
+		 * `requests.all`), so it covers the source list, the two parents' orders,
+		 * and the subtree a moved collection took with it.
+		 */
+		invalidates: ["collection", "request"],
+		description:
+			"Move a collection or a saved request into another collection - the row menu's 'Move to...', over MCP. GUARDED: requires write access to be enabled in Vayu Settings. It lands at the end of its new parent by default, or at the front with `position: 'first'`; positions in between stay a UI gesture, because naming one means doing the app's ordering arithmetic from the outside. A collection may move to the top level (`parentId: null`); a request always belongs to a collection. Refused, with nothing written, when a collection would move into itself or into its own subtree.",
+		annotations: {
+			title: "Move an item",
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			type: z
+				.enum(["collection", "request"])
+				.describe("What is being moved: a collection (folder) or a saved request."),
+			id: z.string().describe("ID of the collection or request to move."),
+			parentId: z
+				.string()
+				.nullable()
+				.optional()
+				.describe(
+					"Destination for a collection: another collection's id, or null for the top level. Required when `type` is 'collection'."
+				),
+			collectionId: z
+				.string()
+				.optional()
+				.describe(
+					"Destination collection for a request. Required when `type` is 'request'."
+				),
+			position: z
+				.enum(MOVE_POSITIONS)
+				.optional()
+				.describe("Where it lands among its new siblings: 'last' (default) or 'first'."),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const type = requireStr(args, "type");
+			if (type !== "collection" && type !== "request") {
+				return errorResult('"type" must be "collection" or "request".');
+			}
+			const id = requireStr(args, "id");
+			// Read off the raw value rather than through `str`, which answers
+			// `undefined` for a non-string: a `position: 0` would then default to
+			// "last" and land the row at the opposite end of the one it named.
+			const position = args.position === undefined ? "last" : args.position;
+			if (position !== "first" && position !== "last") {
+				return errorResult('"position" must be "first" or "last".');
+			}
+
+			let batch: Record<string, unknown>;
+			try {
+				if (type === "collection") {
+					// Stated, not inferred: `parentId` absent would have to mean
+					// either "the top level" or "leave it where it is", and a move
+					// that guessed wrong is a folder somewhere nobody asked for.
+					if (!("parentId" in args)) {
+						return errorResult(
+							'Moving a collection needs "parentId" - another collection\'s id, or null for the top level.'
+						);
+					}
+					const parentId = args.parentId === null ? null : str(args, "parentId");
+					if (parentId === undefined) {
+						return errorResult('"parentId" must be a collection id or null.');
+					}
+					const rows = readCollectionRows(await ctx.client.listCollections(signal));
+					const subtree = collectionSubtree(rows, id);
+					if (subtree === null) return errorResult(`No collection with id "${id}".`);
+					// The UI's own refusal set, walked here so the answer names the
+					// problem. The engine rejects the same batch under its lock -
+					// that check is the one that is race-free and stays the
+					// authority; this one exists so an agent is told "into its own
+					// subtree" rather than handed a 400 about a move entry.
+					if (parentId !== null && subtree.includes(parentId)) {
+						return errorResult(
+							parentId === id
+								? `A collection cannot be moved into itself ("${id}").`
+								: `"${id}" cannot be moved into "${parentId}" - that collection is inside it.`
+						);
+					}
+					if (parentId !== null && !rows.some((row) => row.id === parentId)) {
+						return errorResult(`No collection with id "${parentId}".`);
+					}
+					batch = moveBatch({
+						type,
+						movedId: id,
+						position,
+						owner: { parentId },
+						siblings: rows.filter(
+							(row) => collectionParent(row) === parentId && row.id !== id
+						),
+					});
+				} else {
+					const collectionId = str(args, "collectionId");
+					if (collectionId === undefined) {
+						return errorResult(
+							'Moving a request needs "collectionId" - the collection it should end up in.'
+						);
+					}
+					const siblings = readOrderedSiblings(
+						await ctx.client.listRequests(collectionId, signal)
+					).filter((row) => row.id !== id);
+					batch = moveBatch({
+						type,
+						movedId: id,
+						position,
+						owner: { collectionId },
+						siblings,
+					});
+				}
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			return callEngine(() => ctx.client.reorder(batch, signal));
 		},
 	},
 	{
