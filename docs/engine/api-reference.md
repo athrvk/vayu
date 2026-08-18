@@ -4611,6 +4611,7 @@ the index existed all report no block rather than a contract covered zero of.
 | `declaredResponsesTotal` / `declaredResponsesHit` / `declaredResponseCoveragePct` | Declared status patterns, and how many the run produced |
 | `undeclaredStatusesSeen` | Distinct (operation, status) pairs the document declares nothing for |
 | `operations[]` | Per operation: `sent`, `statusesSeen`, `declaredHit`, `declaredMissed`, `undeclaredSeen`, and `transportErrors` / `otherStatusResponses` / `statusesTruncated` when non-zero |
+| `operations[].statusesTruncated` | Distinct statuses the operation answered with that appear in **neither** list - the two are capped at 50 each and `undeclaredSeen` repeats codes from `statusesSeen`, so this is not the entries the two dropped between them |
 | `transportErrors` / `undeclaredOperationRequests` | Whole-run findings, present only when they happened |
 
 Rows come back **uncovered first** - an operation nothing exercised is the

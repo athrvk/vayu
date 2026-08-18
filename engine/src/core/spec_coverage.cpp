@@ -65,16 +65,21 @@ bool matches_range (const std::string& pattern, int status) {
     return status >= hundreds * 100 && status < (hundreds + 1) * 100;
 }
 
-/// Serialize at most `MAX_STATUSES_PER_OPERATION` codes, ascending. Whatever is
-/// dropped is added to @p dropped and named by the row, never elided.
-nlohmann::json capped_statuses (const std::set<int>& codes, size_t& dropped) {
+/// Serialize at most `MAX_STATUSES_PER_OPERATION` codes, ascending. Every code
+/// it emits joins @p shown, which is what lets the row name the distinct
+/// statuses it hides rather than the entries the two lists dropped between them
+/// (issue #786): `undeclaredSeen` is a subset of `statusesSeen`, so a counter
+/// shared by the two calls counts a code past both caps twice, and a code the
+/// undeclared list still carries is not hidden at all.
+nlohmann::json capped_statuses (const std::set<int>& codes, std::set<int>& shown) {
     nlohmann::json out = nlohmann::json::array ();
     for (const int code : codes) {
+        // Ascending, so nothing after the cap can be emitted either.
         if (out.size () >= limits::MAX_STATUSES_PER_OPERATION) {
-            ++dropped;
-            continue;
+            break;
         }
         out.push_back (code);
+        shown.insert (code);
     }
     return out;
 }
@@ -358,12 +363,14 @@ size_t undeclared_operation_requests) {
             (hit[p] ? declared_hit : declared_missed).push_back (operation.responses[p]);
         }
 
-        size_t statuses_dropped = 0;
+        // Braced initialization evaluates left to right, so both lists have
+        // filled this by the time the row is read below.
+        std::set<int> statuses_shown;
         nlohmann::json row{ { "method", operation.method }, { "path", operation.path },
             { "sent", seen.sent },
-            { "statusesSeen", capped_statuses (statuses_seen, statuses_dropped) },
+            { "statusesSeen", capped_statuses (statuses_seen, statuses_shown) },
             { "declaredHit", declared_hit }, { "declaredMissed", declared_missed },
-            { "undeclaredSeen", capped_statuses (undeclared, statuses_dropped) } };
+            { "undeclaredSeen", capped_statuses (undeclared, statuses_shown) } };
         // Absent rather than "" for an operation the document gives no id - the
         // same absent-not-empty rule the binding itself follows.
         if (!operation.operation_id.empty ()) {
@@ -377,8 +384,11 @@ size_t undeclared_operation_requests) {
         if (seen.other_status_responses > 0) {
             row["otherStatusResponses"] = seen.other_status_responses;
         }
-        if (statuses_dropped > 0) {
-            row["statusesTruncated"] = statuses_dropped;
+        // Every emitted code is drawn from `statuses_seen` - the undeclared set
+        // is a subset of it - so what neither list carries is one subtraction.
+        const size_t statuses_hidden = statuses_seen.size () - statuses_shown.size ();
+        if (statuses_hidden > 0) {
+            row["statusesTruncated"] = statuses_hidden;
         }
 
         const bool covered = seen.sent > 0;

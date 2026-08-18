@@ -492,7 +492,7 @@ zero on almost every one:
 
 | On the row | What it means |
 |---|---|
-| `+N more` | The per-operation status list is capped, and N entries were dropped |
+| `+N more` | The per-operation status list is capped, and N distinct statuses this operation answered with are not among the ones shown |
 | `N off-range` | Responses whose status fell outside 100-599, which no status class describes |
 | `N failed` | Sends that never got a response at all |
 
