@@ -289,13 +289,31 @@ describe("buildSyncPayload", () => {
 		expect(body.create.every((item) => item.collectionId === undefined)).toBe(true);
 	});
 
-	it("puts an untagged operation on the bound collection itself", () => {
+	it("puts an untagged operation where an import would - its path folder (#710)", () => {
 		const fetched = doc({
 			"/pets": { get: { operationId: "listPets", summary: "List pets", tags: ["pets"] } },
 			"/owners": {
 				get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] },
 			},
 			"/health": { get: { operationId: "health", summary: "Health" } },
+		});
+		const body = payload(fetched, boundCollection());
+
+		// A synced collection has to end up shaped like an imported one, so the
+		// added request follows the import's grouping rather than the rule that
+		// held before the path fallback existed.
+		expect(body.collections).toHaveLength(1);
+		expect(body.collections[0].name).toBe("health");
+		expect(body.create[0].collectionTempId).toBe(body.collections[0].tempId);
+	});
+
+	it("still puts an operation whose path names no resource on the bound collection", () => {
+		const fetched = doc({
+			"/pets": { get: { operationId: "listPets", summary: "List pets", tags: ["pets"] } },
+			"/owners": {
+				get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] },
+			},
+			"/{id}": { get: { operationId: "byId", summary: "By id" } },
 		});
 		const body = payload(fetched, boundCollection());
 

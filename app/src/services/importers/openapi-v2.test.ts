@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { OpenApiV2Parser, swaggerSchemeToAuth } from "./openapi-v2";
+import { requestsOf } from "@/test/import-drafts";
 
 const raw = readFileSync(join(__dirname, "__fixtures__/swagger-v2.json"), "utf8");
 const parsed = JSON.parse(raw);
@@ -23,7 +24,7 @@ describe("OpenApiV2Parser", () => {
 			},
 		};
 		const result = p.parse(spec, JSON.stringify(spec), opts);
-		const requests = result.collections[0].requests;
+		const requests = requestsOf(result);
 
 		expect(requests.find((r) => r.name === "List A")!.specOperation).toEqual({
 			operationId: "list",
@@ -119,9 +120,9 @@ describe("OpenApiV2Parser", () => {
 				},
 			},
 		};
-		const get = p
-			.parse(spec, JSON.stringify(spec), opts)
-			.collections[0].requests.find((r) => r.name === "List items")!;
+		const get = requestsOf(p.parse(spec, JSON.stringify(spec), opts)).find(
+			(r) => r.name === "List items"
+		)!;
 		expect(get.params).toContainEqual({ key: "status", value: "", enabled: false });
 	});
 
@@ -139,9 +140,9 @@ describe("OpenApiV2Parser", () => {
 				},
 			},
 		};
-		const get = p
-			.parse(spec, JSON.stringify(spec), opts)
-			.collections[0].requests.find((r) => r.name === "List items")!;
+		const get = requestsOf(p.parse(spec, JSON.stringify(spec), opts)).find(
+			(r) => r.name === "List items"
+		)!;
 		expect(get.params).toEqual([
 			{ key: "q", value: "", enabled: false, description: "op-level" },
 		]);
@@ -166,9 +167,9 @@ describe("OpenApiV2Parser", () => {
 
 	const formBody = (consumes?: string[]) => {
 		const spec = formSpec(consumes);
-		return p
-			.parse(spec, JSON.stringify(spec), opts)
-			.collections[0].requests.find((r) => r.name === "Log in")!.body;
+		return requestsOf(p.parse(spec, JSON.stringify(spec), opts)).find(
+			(r) => r.name === "Log in"
+		)!.body;
 	};
 
 	it("maps formData to urlencoded or multipart per consumes", () => {
@@ -199,9 +200,9 @@ describe("OpenApiV2Parser", () => {
 
 	it("falls back to the spec-level consumes for the form encoding", () => {
 		const spec = { ...formSpec(), consumes: ["application/x-www-form-urlencoded"] };
-		const body = p
-			.parse(spec, JSON.stringify(spec), opts)
-			.collections[0].requests.find((r) => r.name === "Log in")!.body;
+		const body = requestsOf(p.parse(spec, JSON.stringify(spec), opts)).find(
+			(r) => r.name === "Log in"
+		)!.body;
 		expect(body.mode).toBe("x-www-form-urlencoded");
 	});
 
@@ -216,7 +217,7 @@ describe("OpenApiV2Parser", () => {
 			"x-pathItems": { UserOps: { get: { summary: "Get user" } } },
 		};
 		const result = p.parse(spec, JSON.stringify(spec), opts);
-		expect(result.collections[0].requests.map((r) => r.name)).toEqual(["Get user", "Health"]);
+		expect(requestsOf(result).map((r) => r.name)).toEqual(["Get user", "Health"]);
 		expect(result.meta.requestCount).toBe(2);
 		expect(result.meta.skipped).toEqual([]);
 	});
@@ -235,10 +236,8 @@ describe("OpenApiV2Parser", () => {
 		};
 		const result = p.parse(spec, JSON.stringify(spec), opts);
 		expect(result.meta.requestCount).toBe(2);
-		expect(result.collections[0].requests.find((r) => r.name === "List items")!.params).toEqual(
-			[]
-		);
-		expect(result.collections[0].requests.find((r) => r.name === "Other")!.params).toEqual([
+		expect(requestsOf(result).find((r) => r.name === "List items")!.params).toEqual([]);
+		expect(requestsOf(result).find((r) => r.name === "Other")!.params).toEqual([
 			{ key: "ok", value: "", enabled: false },
 		]);
 		expect(result.meta.skipped).toEqual([{ kind: "malformed_spec", count: 1 }]);
@@ -272,7 +271,7 @@ describe("OpenApiV2Parser", () => {
 
 	it("imports a `type: file` formData param as a file part, not an empty text row", () => {
 		const result = uploadResult(["multipart/form-data"]);
-		expect(result.collections[0].requests[0].body).toEqual({
+		expect(requestsOf(result)[0].body).toEqual({
 			mode: "form-data",
 			fields: [
 				{ key: "caption", value: "", enabled: true },
@@ -287,7 +286,7 @@ describe("OpenApiV2Parser", () => {
 	it("forces multipart for a file param a urlencoded-only consumes contradicts", () => {
 		// Only multipart has a file form on the wire, so the encoding follows the part.
 		expect(
-			uploadResult(["application/x-www-form-urlencoded"]).collections[0].requests[0].body
+			requestsOf(uploadResult(["application/x-www-form-urlencoded"]))[0].body
 		).toMatchObject({ mode: "form-data" });
 	});
 
@@ -316,9 +315,9 @@ describe("OpenApiV2Parser", () => {
 				},
 			},
 		};
-		const post = p
-			.parse(spec, JSON.stringify(spec), opts)
-			.collections[0].requests.find((r) => r.name === "Create item")!;
+		const post = requestsOf(p.parse(spec, JSON.stringify(spec), opts)).find(
+			(r) => r.name === "Create item"
+		)!;
 		expect(post.body.mode).toBe("json");
 	});
 
@@ -333,7 +332,7 @@ describe("OpenApiV2Parser", () => {
 				info: { title: "Params API" },
 				paths: { "/items": { get: { summary: "List items", parameters } } },
 			};
-			return p.parse(spec, JSON.stringify(spec), opts).collections[0].requests[0].params;
+			return requestsOf(p.parse(spec, JSON.stringify(spec), opts))[0].params;
 		};
 
 		it("imports an optional value-less parameter disabled and a required one enabled", () => {
@@ -387,7 +386,7 @@ describe("OpenApiV2Parser", () => {
 				info: { title: "Header API" },
 				paths: { "/items": { get: { summary: "List items", parameters } } },
 			};
-			return p.parse(spec, JSON.stringify(spec), opts).collections[0].requests[0].headers;
+			return requestsOf(p.parse(spec, JSON.stringify(spec), opts))[0].headers;
 		};
 
 		it("imports an optional value-less header disabled and a required one enabled", () => {

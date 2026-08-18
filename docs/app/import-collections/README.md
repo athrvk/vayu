@@ -267,8 +267,15 @@ stored order - a mock server answers with the first example of a matched request
 **`EnvironmentDraft`** - `name`, `description`, `variables: Record<string, VariableValue>`.
 
 **`ImportMeta`** - `format`, `fileName?`, `requestCount`, `folderCount`,
-`environmentCount`, `globalCount`, `exampleCount`, `skipped: SkippedItem[]`,
-`nonExecutableAuth: number`, `unattachedFileParts: number`.
+`folderStrategy?`, `environmentCount`, `globalCount`, `exampleCount`,
+`skipped: SkippedItem[]`, `nonExecutableAuth: number`, `unattachedFileParts: number`.
+
+`folderStrategy` (`"tags" | "paths" | "mixed"`) says which rule an OpenAPI import grouped its
+folders by, and the Preview states it whenever paths were involved - a folder tree the
+document never spelled out must not read as one it did (issue #710, see
+[openapi-v3.md](./openapi-v3.md#tree-structure)). Only the two OpenAPI parsers set it: a
+format that carries its own folders makes no such choice, and a parser that says nothing must
+not look like one that said `"tags"`.
 
 `exampleCount` totals the saved example responses across the whole tree, from
 `countExamples(collections)` in `shared.ts` - read off the finished drafts for the same
@@ -283,8 +290,8 @@ than tallying while building them, so the number and the rows cannot disagree.
 
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
-"external_ref" | "duplicate_operation_id" | "cookie_param" | "unmapped_body" |
-"unresolved_base_url", count }`.
+"default_response" | "external_ref" | "duplicate_operation_id" | "cookie_param" |
+"unmapped_body" | "unresolved_base_url", count }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose
 HTTP method has no `HttpMethod` (OpenAPI 3's `trace`), and `malformed_item` / `malformed_spec`
@@ -293,9 +300,13 @@ are shapes the source file got wrong - a Postman `item[]` entry that is not an o
 spec allows - stepped over so the rest of the file still imports. The two OpenAPI kinds are
 counted via `SkipTally` in `openapi-shared.ts`, shared by both OpenAPI parsers: they are
 structural clones, and a second copy would drift. `example_no_status` is a fourth
-non-representability case: an OpenAPI response keyed `default` or `2XX` documents a real
-response, but an example is served under one status line and there is no honest value to
-pick, so it is counted rather than guessed at. `external_ref` is the fifth, and the only
+non-representability case: an OpenAPI response keyed `2XX` (or with a junk key) documents a
+real response, but an example is served under one status line and there is no honest value
+to pick, so it is counted rather than guessed at. `default_response` is the same skip for the
+`default` key, on a counter of its own (issue #710) because it is conformant and declared on
+nearly every operation of a vendor spec - the Preview names it as information rather than as
+damage, which is what keeps a 568-count line from burying the one warning that needs acting
+on. `external_ref` is the fifth, and the only
 kind no parser produces: a `$ref` naming another file that the bundling pass could not
 read (`ref-bundler.ts`, issue #649) is counted **before** parse and stamped into
 `meta.skipped` by `parseImport`, one per reference - because each one is an operation that

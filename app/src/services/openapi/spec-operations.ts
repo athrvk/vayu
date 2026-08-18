@@ -37,9 +37,9 @@ export interface SpecRequestDraft {
 	operation: SpecOperation;
 	draft: RequestDraft;
 	/**
-	 * The sub-collection an import files this operation under - its first tag -
-	 * and `""` for an operation with no tag, which imports onto the root
-	 * (issue #655).
+	 * The sub-collection an import files this operation under - its first tag,
+	 * else the folder its path names (issue #710) - and `""` for an operation
+	 * that gets neither, which imports onto the root (issue #655).
 	 *
 	 * Kept because applying an *added* operation has to put the request
 	 * somewhere, and "where an import would have put it" is the only answer that

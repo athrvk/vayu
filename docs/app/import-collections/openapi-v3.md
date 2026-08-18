@@ -1,6 +1,6 @@
 ---
 description: >-
-  What Vayu generates from an OpenAPI 3.0 or 3.1 specification - collections per tag, request stubs, servers, security schemes, and schema-sampled bodies.
+  What Vayu generates from an OpenAPI 3.0 or 3.1 specification - collections per tag (or per path segment for untagged operations), request stubs, servers, security schemes, and schema-sampled bodies.
 ---
 
 # OpenAPI 3.0
@@ -37,26 +37,37 @@ The top-level `openapi` field must be a string beginning with `"3."` (so `3.0.0`
 
 ## Tree structure
 
-The spec maps to a single root collection, with operations grouped into child collections by their first tag.
+The spec maps to a single root collection, with operations grouped into child collections by their first tag - or, for an operation that declares no tag, by the first meaningful segment of its path (issue #710).
 
 - **Root collection** ← the whole spec (named from `info.title`). It directly holds:
-  - `requests`: every **untagged** operation.
-  - `children`: one child collection per distinct first-tag, in first-encounter order.
-- **Tag child collections** ← created lazily by `makeTagCollection(spec, tag)` the first time a tag is seen, keyed in a `Map<string, CollectionDraft>`. Description comes from the matching entry in the top-level `tags[]` array (if any).
+  - `requests`: every operation that has neither a tag nor a groupable path.
+  - `children`: one child collection per distinct folder name, in first-encounter order.
+- **Child collections** ← created lazily by `OperationFolders` (`openapi-shared.ts`) the first time a name is seen, keyed in a `Map<string, CollectionDraft>`. A tag-named folder takes its description from the matching entry in the top-level `tags[]` array (if any); a path-named folder has none, because the document declares none.
 
 Iteration order: `parse` loops over `spec.paths` entries, resolves each path item through `resolvePathItem` (`openapi-shared.ts`) so a `{"$ref": "#/components/pathItems/X"}` item is read from its target instead of contributing nothing, and then loops over the fixed `HTTP_METHODS` list (`get, post, put, patch, delete, head, options`). A path item that is not an object - or whose `$ref` does not resolve to one - is counted as a `malformed_spec` [`SkippedItem`](./README.md#draft-model-the-parser-output-contract) and skipped, so the drop is named in the preview rather than silent. The ref is followed **one hop only**, like the parameter and `requestBody` refs. For each present operation `parse` calls `buildOperation(...)`, then routes by tag:
 
 ```ts
-const tag = op.tags?.[0];   // ONLY the first tag is used
-if (tag) tagCollections.get(tag).requests.push(req);
-else     rootRequests.push(req);
+const tag  = op.tags?.[0];              // ONLY the first tag is used
+const name = tag ?? pathFolderName(path);  // the fallback, per operation
+if (name) folders.get(name).requests.push(req);
+else      rootRequests.push(req);
 ```
 
-**Multi-tag operations:** only `op.tags[0]` is consulted. An operation with `tags: ["a", "b"]` lands solely in the `a` child collection; `b` is ignored (no duplication, no extra folder). An operation with no `tags` (or `tags: []`) becomes a root request.
+**Multi-tag operations:** only `op.tags[0]` is consulted. An operation with `tags: ["a", "b"]` lands solely in the `a` child collection; `b` is ignored (no duplication, no extra folder).
+
+**Untagged operations - the path fallback.** A document whose operations carry no `tags` at all is common and not broken: Stripe's official spec declares root-level `tags:` that **no operation references**, so grouping by tag alone imported all 568 of its operations as one flat list. `pathFolderName` (`openapi-shared.ts`) therefore names a folder from the first path segment that names a resource:
+
+- Leading segments that name no resource are stepped over: a version (`v1`, `v2.1`), the `api` mount point, and a whole-`{template}` segment. `/api/v2/{tenant}/orders` is `orders`.
+- The segment is taken exactly as written (`account_links`), because that is the name the vendor's own documentation uses.
+- A path with nothing left - `/`, `/v1`, `/{id}` - yields no folder, and its request stays on the root rather than being filed under a placeholder.
+
+The fallback applies **per operation**, so a partly tagged document gets both rules. A path-derived name that a tag also uses is one folder holding both, not two folders with one name; the tag's description is kept. Inferring folders from root `tags[]` entries that no operation references (Stripe's `x-kind: api-group` list) is a recorded **non-goal** - matching those names onto paths is vendor-specific guesswork.
+
+Which rule ran is reported as `meta.folderStrategy` (`"tags"`, `"paths"` or `"mixed"`), and the import preview states it whenever paths were involved: a folder tree the document never spelled out must not read as one it did.
 
 **`trace` operations:** OpenAPI 3's Path Item Object also defines `trace`, which is **not** in `HTTP_METHODS` because `HttpMethod` (`types/domain.ts`) has no `"TRACE"` - Vayu cannot execute one. A `trace` operation is therefore not built, is **not** counted in `requestCount`, and is counted as an `unsupported_method` `SkippedItem` so the preview says so. `UNSUPPORTED_METHODS` in `openapi-v3.ts` is the list; `trace` is its only member, since a path item defines exactly the eight methods.
 
-Key internal functions: `buildOperation` (per-operation `RequestDraft`), `makeTagCollection` (per-tag `CollectionDraft`), `buildBody` / `findJsonMedia` (request body), `pickPrimaryScheme` / `schemeToAuth` (collection auth), and `createRefResolver` (`openapi-shared.ts`) for `$ref` resolution - shared with the v2 parser, which built the identical closure by hand until issue #649.
+Key internal functions: `buildOperation` (per-operation `RequestDraft`), `OperationFolders` / `pathFolderName` (`openapi-shared.ts`, folder routing - shared with the v2 parser), `buildBody` / `findJsonMedia` (request body), `pickPrimaryScheme` / `schemeToAuth` (collection auth), and `createRefResolver` (`openapi-shared.ts`) for `$ref` resolution - shared with the v2 parser, which built the identical closure by hand until issue #649.
 
 ## External `$ref`s
 
@@ -110,18 +121,18 @@ A response `$ref` is resolved (single hop, like the parser's other refs). An `ex
 
 A response that documents **no body** still imports: `204 No Content` is a real answer and a mock server has to be able to give it.
 
-A key that is not a numeric status - `default`, or a `2XX` wildcard - is **skipped and counted** as `example_no_status`. It documents a real response, but an example is served under one status line and there is no honest value to pick.
-| tag groups | `children` | `[...tagCollections.values()]` |
-| untagged operations | `requests` | |
+A key that is not a numeric status is **skipped and counted**: `default` as `default_response`, anything else (a `2XX` wildcard, junk) as `example_no_status`. Both document a real response, but an example is served under one status line and there is no honest value to pick. They are counted apart because `default` is conformant and near-universal - every one of Stripe's 568 operations declares one - so the preview names it as information while a malformed key stays a warning (issue #710).
+| tag and path groups | `children` | `folders.children()` |
+| operations with neither | `requests` | |
 
-### Collection (per tag)
+### Collection (per folder)
 
-Built by `makeTagCollection(spec, tag)`.
+Built by `OperationFolders` (`openapi-shared.ts`), shared with the v2 parser.
 
 | OpenAPI | Vayu `CollectionDraft` | Notes |
 |---------|------------------------|-------|
-| `tag` (the string) | `name` | |
-| `tags[].description` where `tags[].name === tag` | `description` | fallback `""` |
+| `tags[0]`, else the first meaningful path segment | `name` | see [Tree structure](#tree-structure) |
+| `tags[].description` where `tags[].name === tag` | `description` | fallback `""`; a path-named folder has none unless a tag of the same name arrives |
 | (none) | `variables` | always `{}` (baseUrl lives only on the root) |
 | (none) | `auth` | always `{ mode: "none" }` - tag collections do not carry security |
 | (none) | `children` | always `[]` (tags are flat; no nesting) |
@@ -262,19 +273,21 @@ Dropped / not represented:
 - **Cookie parameters** and **path parameters as params**: not emitted (path params live in the URL only).
 - **`authorization` / `content-type` header parameters:** dropped (Vayu manages them).
 - **Multi-tag grouping:** only the first tag groups an operation.
+- **Root `tags[]` entries no operation references:** not turned into folders - see the path fallback in [Tree structure](#tree-structure).
 - **`trace` operations:** dropped - `HttpMethod` has no `"TRACE"`. Counted as `unsupported_method` (see [Tree structure](#tree-structure)), not silently omitted.
 - **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
 - **Form-field property schemas:** only field **names** and whether the field is a file (`format: binary`) are imported; `required`, other types, and nested structure are not.
 - **A whole-body binary** (`application/octet-stream` and other non-form, non-JSON, non-text media types): no body is produced (`{ mode: "none" }`) and the operation is counted as `unmapped_body` (issue #719) - unlike a multipart file part, which imports (see [File parts](#file-parts)). An operation that declares no `requestBody` at all is **not** counted: it lost nothing, and the two used to be indistinguishable.
 - **Cookie parameters** (`in: "cookie"`): dropped and counted as `cookie_param` (issue #719). Vayu has no cookie-parameter row - a request's cookies come from the jar - and mapping them onto a `Cookie` header is a recorded non-goal: the header is one joined value while a spec declares these one at a time, so building it would mean inventing a merge the document never wrote. `in: "path"` is neither dropped nor counted; it is already carried, as the `{{param}}` the URL template holds.
 
-`meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built (TRACE excluded), `folderCount` = number of tag collections, `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `countExamples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the `SkipTally`:
+`meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built (TRACE excluded), `folderCount` = number of folders (`folders.count()`), `folderStrategy` = which rule produced them (`"tags"` / `"paths"` / `"mixed"`, absent when there are no folders), `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `countExamples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattachedFileParts` = file parts imported with no file attached (`unattachedFileParts`, read off the finished drafts), and `skipped` from the `SkipTally`:
 
 | `SkippedItem.kind` | Counted when |
 |--------------------|--------------|
 | `unsupported_method` | a path item carries a `trace` operation |
 | `malformed_spec` | a path item is not an object / its `$ref` does not resolve; or a `parameters` value is present but not an array |
-| `example_no_status` | a response key is not a three-digit status - `default`, or a `2XX` wildcard |
+| `example_no_status` | a response key is neither a three-digit status nor `default` - a `2XX` wildcard, or junk |
+| `default_response` | a response keyed `default` - conformant, and reported as information rather than as a loss |
 | `duplicate_operation_id` | an `operationId` another operation in this document already declared (see [Operation identity](#operation-identity)) |
 | `cookie_param` | a parameter declared `in: "cookie"` - one per distinct cookie parameter per operation |
 | `unmapped_body` | a `requestBody` declaring only media types with no Vayu mode - one per operation, however many such media types it listed |

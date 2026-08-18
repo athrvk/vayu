@@ -35,6 +35,7 @@ import {
 	exampleBodyText,
 	resolvePathItem,
 	responseExample,
+	OperationFolders,
 	SkipTally,
 	createOperationIdentifier,
 } from "./openapi-shared";
@@ -109,8 +110,7 @@ export class OpenApiV2Parser implements ImportParser {
 		const defs = asRecord(spec.securityDefinitions) ?? {};
 		const primaryScheme = (reqName && defs[reqName]) || Object.values(defs)[0];
 
-		const tagCollections = new Map<string, CollectionDraft>();
-		const rootRequests: RequestDraft[] = [];
+		const folders = new OperationFolders(spec.tags);
 		const tally = new SkipTally();
 		// One identifier for the whole document: it is what keeps a repeated
 		// `operationId` off the second request that would otherwise claim it
@@ -158,25 +158,7 @@ export class OpenApiV2Parser implements ImportParser {
 					tally,
 					identity
 				);
-				const tag = asStr(asArray(op.tags)[0]);
-				if (tag) {
-					if (!tagCollections.has(tag)) {
-						const def = asArray(spec.tags).find((t) => prop(t, "name") === tag);
-						tagCollections.set(tag, {
-							name: tag,
-							description: asStr(prop(def, "description")) ?? "",
-							variables: {},
-							auth: { mode: "none" },
-							preRequestScript: "",
-							postRequestScript: "",
-							children: [],
-							requests: [],
-						});
-					}
-					tagCollections.get(tag)!.requests.push(req);
-				} else {
-					rootRequests.push(req);
-				}
+				folders.place(req, path, op.tags);
 			}
 		}
 
@@ -189,8 +171,8 @@ export class OpenApiV2Parser implements ImportParser {
 			auth: swaggerSchemeToAuth(primaryScheme),
 			preRequestScript: "",
 			postRequestScript: "",
-			children: [...tagCollections.values()],
-			requests: rootRequests,
+			children: folders.children(),
+			requests: folders.rootRequests(),
 			// The document itself, so the import can store it and bind this
 			// collection to it in the same atomic call (issue #637) - see the v3
 			// parser for why it is `raw` rather than a re-serialization, and for
@@ -209,7 +191,8 @@ export class OpenApiV2Parser implements ImportParser {
 			meta: {
 				format: this.formatName,
 				requestCount,
-				folderCount: tagCollections.size,
+				folderCount: folders.count(),
+				...(folders.strategy() ? { folderStrategy: folders.strategy() } : {}),
 				environmentCount: 0,
 				globalCount: 0,
 				exampleCount: countExamples([root]),

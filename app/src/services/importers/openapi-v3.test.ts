@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { OpenApiV3Parser } from "./openapi-v3";
+import { requestNamed, requestsOf } from "@/test/import-drafts";
 
 const raw = readFileSync(join(__dirname, "__fixtures__/openapi-v3.json"), "utf8");
 const parsed = JSON.parse(raw);
@@ -46,9 +47,15 @@ describe("OpenApiV3Parser", () => {
 		});
 	});
 
-	it("places untagged operations directly on the root", () => {
+	it("files an untagged operation under a folder named by its path (#710)", () => {
+		// `/health` carries no `tags`, so it used to land on the root beside the
+		// tag folders. The grouping tests live in `openapi-folders.test.ts`; this
+		// case stays here because the shared fixture is what the rest of this file
+		// reads, and a fixture that quietly regrouped would move every assertion.
 		const root = p.parse(parsed, raw, opts).collections[0];
-		expect(root.requests.find((r) => r.name === "Health")).toBeTruthy();
+		expect(root.requests).toEqual([]);
+		const health = root.children.find((c) => c.name === "health")!;
+		expect(health.requests.map((r) => r.name)).toEqual(["Health"]);
 	});
 
 	it("generates JSON body for charset/+json content types", () => {
@@ -72,8 +79,8 @@ describe("OpenApiV3Parser", () => {
 				},
 			},
 		};
-		const root = p.parse(spec, JSON.stringify(spec), opts).collections[0];
-		const req = root.requests.find((r) => r.name === "Make thing")!;
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		const req = requestNamed(result, "Make thing");
 		expect(req.body).toEqual({ mode: "json", content: JSON.stringify({ a: "" }, null, 2) });
 	});
 
@@ -87,8 +94,8 @@ describe("OpenApiV3Parser", () => {
 				},
 			},
 		};
-		const root = p.parse(spec, JSON.stringify(spec), opts).collections[0];
-		const req = root.requests.find((r) => r.name === "List items")!;
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		const req = requestNamed(result, "List items");
 		expect(req.params).toContainEqual({ key: "shared", value: "", enabled: false });
 	});
 
@@ -111,11 +118,11 @@ describe("OpenApiV3Parser", () => {
 			paths: { "/users/{id}": { $ref: "#/components/pathItems/UserOps" } },
 		};
 		const result = p.parse(spec, JSON.stringify(spec), opts);
-		const names = result.collections[0].requests.map((r) => r.name);
+		const names = requestsOf(result).map((r) => r.name);
 		expect(names).toEqual(["Get user", "Delete user"]);
 		expect(result.meta.requestCount).toBe(2);
 		// The referenced item's shared parameters come along with it.
-		const get = result.collections[0].requests[0];
+		const get = requestsOf(result)[0];
 		expect(get.params).toEqual([{ key: "expand", value: "", enabled: false }]);
 		expect(get.url).toBe("{{baseUrl}}/users/{{id}}");
 		expect(result.meta.skipped).toEqual([]);
@@ -164,9 +171,9 @@ describe("OpenApiV3Parser", () => {
 				},
 			},
 		};
-		const req = p
-			.parse(spec, JSON.stringify(spec), opts)
-			.collections[0].requests.find((r) => r.name === "Get token")!;
+		const req = requestsOf(p.parse(spec, JSON.stringify(spec), opts)).find(
+			(r) => r.name === "Get token"
+		)!;
 		expect(req.body).toEqual({
 			mode: "x-www-form-urlencoded",
 			fields: [
@@ -198,9 +205,9 @@ describe("OpenApiV3Parser", () => {
 				},
 			},
 		};
-		const req = p
-			.parse(spec, JSON.stringify(spec), opts)
-			.collections[0].requests.find((r) => r.name === "Upload")!;
+		const req = requestsOf(p.parse(spec, JSON.stringify(spec), opts)).find(
+			(r) => r.name === "Upload"
+		)!;
 		expect(req.body).toEqual({
 			mode: "form-data",
 			fields: [{ key: "file", value: "", enabled: true }],
@@ -234,7 +241,7 @@ describe("OpenApiV3Parser", () => {
 	it("imports a `format: binary` multipart property as a file part, not an empty text row", () => {
 		const spec = uploadSpec("multipart/form-data");
 		const result = p.parse(spec, JSON.stringify(spec), opts);
-		expect(result.collections[0].requests[0].body).toEqual({
+		expect(requestsOf(result)[0].body).toEqual({
 			mode: "form-data",
 			fields: [
 				{ key: "caption", value: "", enabled: true },
@@ -249,7 +256,7 @@ describe("OpenApiV3Parser", () => {
 	it("leaves a binary property under urlencoded as text - that wire form has no file", () => {
 		const spec = uploadSpec("application/x-www-form-urlencoded");
 		const result = p.parse(spec, JSON.stringify(spec), opts);
-		expect(result.collections[0].requests[0].body).toEqual({
+		expect(requestsOf(result)[0].body).toEqual({
 			mode: "x-www-form-urlencoded",
 			fields: [
 				{ key: "caption", value: "", enabled: true },
@@ -283,7 +290,7 @@ describe("OpenApiV3Parser", () => {
 		};
 		const result = p.parse(spec, JSON.stringify(spec), opts);
 		expect(result.meta.requestCount).toBe(1); // TRACE cannot be built; the count stays honest
-		expect(result.collections[0].requests.map((r) => r.name)).toEqual(["Get it"]);
+		expect(requestsOf(result).map((r) => r.name)).toEqual(["Get it"]);
 		expect(result.meta.skipped).toEqual([{ kind: "unsupported_method", count: 1 }]);
 	});
 
@@ -306,10 +313,10 @@ describe("OpenApiV3Parser", () => {
 		};
 		const result = p.parse(spec, JSON.stringify(spec), opts);
 		expect(result.meta.requestCount).toBe(2);
-		const list = result.collections[0].requests.find((r) => r.name === "List items")!;
+		const list = requestsOf(result).find((r) => r.name === "List items")!;
 		expect(list.params).toEqual([]);
 		// Every other path still imports, params and all.
-		const other = result.collections[0].requests.find((r) => r.name === "Other")!;
+		const other = requestsOf(result).find((r) => r.name === "Other")!;
 		expect(other.params).toEqual([{ key: "ok", value: "", enabled: false }]);
 		expect(result.meta.skipped).toEqual([{ kind: "malformed_spec", count: 2 }]);
 	});
@@ -341,7 +348,7 @@ describe("OpenApiV3Parser", () => {
 		const parse = () => p.parse(spec, JSON.stringify(spec), opts);
 
 		it("keeps the id on the first declaration and identifies the second by its path alone", () => {
-			const requests = parse().collections[0].requests;
+			const requests = requestsOf(parse());
 			expect(requests.find((r) => r.name === "List A")!.specOperation).toEqual({
 				operationId: "list",
 				method: "GET",
@@ -488,8 +495,8 @@ describe("OpenApiV3Parser", () => {
 				},
 			},
 		};
-		const root = p.parse(spec, JSON.stringify(spec), opts).collections[0];
-		const req = root.requests.find((r) => r.name === "Create pet")!;
+		const result = p.parse(spec, JSON.stringify(spec), opts);
+		const req = requestNamed(result, "Create pet");
 		expect(req.body).toEqual({
 			mode: "json",
 			content: JSON.stringify({ id: 0, name: "" }, null, 2),
@@ -509,7 +516,7 @@ describe("OpenApiV3Parser", () => {
 				components: { schemas: { Limit: { type: "integer", default: 25 } } },
 				paths: { "/items": { get: { summary: "List items", parameters } } },
 			};
-			return p.parse(spec, JSON.stringify(spec), opts).collections[0].requests[0].params;
+			return requestsOf(p.parse(spec, JSON.stringify(spec), opts))[0].params;
 		};
 
 		it("imports an optional value-less parameter disabled and a required one enabled", () => {
@@ -609,7 +616,7 @@ describe("OpenApiV3Parser", () => {
 				components: { schemas: { Tenant: { type: "string", default: "acme" } } },
 				paths: { "/items": { get: { summary: "List items", parameters } } },
 			};
-			return p.parse(spec, JSON.stringify(spec), opts).collections[0].requests[0].headers;
+			return requestsOf(p.parse(spec, JSON.stringify(spec), opts))[0].headers;
 		};
 
 		it("imports an optional value-less header disabled and a required one enabled", () => {
@@ -697,7 +704,7 @@ describe("OpenApiV3Parser", () => {
 				},
 			};
 			const result = p.parse(spec, JSON.stringify(spec), opts);
-			const request = result.collections[0].requests[0];
+			const request = requestsOf(result)[0];
 			expect(request.headers).toEqual([]);
 			expect(request.params).toEqual([{ key: "q", value: "", enabled: false }]);
 			// The path parameter is carried, as the URL template - so it is a drop
@@ -728,7 +735,7 @@ describe("OpenApiV3Parser", () => {
 					"application/octet-stream": { schema: { type: "string", format: "binary" } },
 				},
 			});
-			expect(result.collections[0].requests[0].body).toEqual({ mode: "none" });
+			expect(requestsOf(result)[0].body).toEqual({ mode: "none" });
 			expect(result.meta.requestCount).toBe(1);
 			expect(result.meta.skipped).toEqual([{ kind: "unmapped_body", count: 1 }]);
 		});
@@ -750,7 +757,7 @@ describe("OpenApiV3Parser", () => {
 			});
 			expect(json.meta.skipped).toEqual([]);
 			const text = parseWithBody({ content: { "text/plain": {} } });
-			expect(text.collections[0].requests[0].body).toEqual({ mode: "text", content: "" });
+			expect(requestsOf(text)[0].body).toEqual({ mode: "text", content: "" });
 			expect(text.meta.skipped).toEqual([]);
 		});
 	});

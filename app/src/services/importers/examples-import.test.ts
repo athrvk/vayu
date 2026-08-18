@@ -28,6 +28,7 @@ import { ImportOrchestrator, type ImportApi } from "./orchestrator";
 import { assignTempIds } from "./assign-ids";
 import type { ImportApplyRequest } from "@/types";
 import type { ImportResult, RequestDraft } from "./types";
+import { requestsOf } from "@/test/import-drafts";
 
 const opts = { importEnvironments: true, importScripts: true };
 
@@ -46,7 +47,7 @@ function postmanWith(responses: unknown[]): Record<string, unknown> {
 }
 
 function firstRequest(result: ImportResult): RequestDraft {
-	return result.collections[0].requests[0];
+	return requestsOf(result)[0];
 }
 
 describe("Postman saved responses", () => {
@@ -217,7 +218,7 @@ describe("OpenAPI 3 documented responses", () => {
 		]);
 	});
 
-	it("counts a `default` or wildcard response rather than guessing a status", () => {
+	it("counts a `default` or wildcard response rather than guessing a status, each on its own counter", () => {
 		const result = new OpenApiV3Parser().parse(
 			openApiWith({
 				"200": { description: "ok" },
@@ -228,7 +229,11 @@ describe("OpenAPI 3 documented responses", () => {
 			opts
 		);
 		expect(firstRequest(result).examples).toHaveLength(1);
-		expect(result.meta.skipped).toContainEqual({ kind: "example_no_status", count: 2 });
+		// Both are skipped for the same reason and reported apart (#710): `default`
+		// is conformant and on nearly every operation of a vendor spec, while a
+		// `4XX` wildcard is a key the preview should keep flagging as a loss.
+		expect(result.meta.skipped).toContainEqual({ kind: "default_response", count: 1 });
+		expect(result.meta.skipped).toContainEqual({ kind: "example_no_status", count: 1 });
 	});
 
 	it("follows a $ref'd response object", () => {

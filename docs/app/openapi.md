@@ -333,10 +333,12 @@ in the same apply as everything else you ticked.
 
 ### Where a new operation lands
 
-In the sub-collection named after its first tag, exactly where an import would
-have filed it - matched by name against the folders the bound collection
-already has, and created once per tag when there is none. An operation with no
-tag lands on the bound collection itself.
+In the sub-collection named after its first tag - or, when the operation
+declares no tag, the one named after the first meaningful segment of its path -
+exactly where an import would have filed it. The folder is matched by name
+against those the bound collection already has, and created once when there is
+none. An operation that gets neither name (a path like `/` or `/{id}`) lands on
+the bound collection itself.
 
 ### What applying does to examples
 

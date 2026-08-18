@@ -6,8 +6,14 @@
  */
 
 import type { KeyValueEntry, SpecOperation } from "@/types";
-import type { ExampleDraft, SkippedItem } from "./types";
-import { asRecord, asStr, prop } from "@/lib/json-node";
+import type {
+	CollectionDraft,
+	ExampleDraft,
+	FolderStrategy,
+	RequestDraft,
+	SkippedItem,
+} from "./types";
+import { asArray, asRecord, asStr, prop } from "@/lib/json-node";
 
 export type RefResolver = (ref: string) => unknown;
 
@@ -151,6 +157,130 @@ export class SkipTally {
 	}
 }
 
+/** A path segment that names the API's version rather than a resource. */
+const VERSION_SEGMENT = /^v\d+(\.\d+)*$/i;
+
+/** A path segment that is entirely a `{template}`, which names a value, not a resource. */
+const TEMPLATE_SEGMENT = /^\{.*\}$/;
+
+/**
+ * The folder an untagged operation belongs in, read off its path (issue #710) -
+ * or `undefined` when the path names no resource to group by.
+ *
+ * A document whose operations carry no `tags` is not a broken document: Stripe's
+ * official spec declares root-level tags that **no operation references**, so
+ * every one of its 568 operations grouped by tag alone lands in one flat list.
+ * The first meaningful path segment is what the vendor's own documentation is
+ * organized by (`/v1/checkout/sessions` is "checkout"), so it is the grouping the
+ * reader already expects.
+ *
+ * Leading segments that name no resource are stepped over: a version (`v1`,
+ * `v2.1`), the ubiquitous `api` mount point, and a `{template}` segment, which
+ * holds a value rather than naming anything. `/api/v2/{tenant}/orders` is
+ * therefore "orders". A path with nothing left after that - `/`, `/v1`, `/{id}` -
+ * yields `undefined`, and its request stays on the root rather than getting a
+ * folder named after a placeholder.
+ *
+ * The segment is taken exactly as written (`account_links`, not "Account links"):
+ * a prettified name is one the document never contained, and it is the name a
+ * user matches against the vendor's docs.
+ */
+export function pathFolderName(path: string): string | undefined {
+	for (const segment of path.split("/")) {
+		if (!segment) continue;
+		if (TEMPLATE_SEGMENT.test(segment)) continue;
+		if (VERSION_SEGMENT.test(segment) || segment.toLowerCase() === "api") continue;
+		return segment;
+	}
+	return undefined;
+}
+
+/**
+ * Where each operation's request goes: a folder named by the operation's first
+ * tag, a folder named by its path (issue #710), or the root collection.
+ *
+ * Shared rather than written per parser because it is one decision the two make
+ * identically - both used to keep their own `Map<string, CollectionDraft>` plus
+ * the same tag-description lookup, and the path fallback would have been the
+ * third copy of the same routing to drift.
+ *
+ * **Only the first tag groups an operation**, unchanged from before: an operation
+ * tagged `["a", "b"]` lands in `a` alone, because a request duplicated into two
+ * folders is two requests to edit.
+ */
+export class OperationFolders {
+	private readonly folders = new Map<string, CollectionDraft>();
+	private readonly root: RequestDraft[] = [];
+	private tagged = false;
+	private pathed = false;
+
+	/** @param declaredTags the document's top-level `tags[]`, for folder descriptions. */
+	constructor(private readonly declaredTags: unknown) {}
+
+	place(request: RequestDraft, path: string, tags: unknown): void {
+		const tag = asStr(asArray(tags)[0]);
+		const name = tag ?? pathFolderName(path);
+		if (!name) {
+			this.root.push(request);
+			return;
+		}
+		if (tag) this.tagged = true;
+		else this.pathed = true;
+		let folder = this.folders.get(name);
+		if (!folder) {
+			folder = {
+				name,
+				description: tag ? this.describe(tag) : "",
+				variables: {},
+				auth: { mode: "none" },
+				preRequestScript: "",
+				postRequestScript: "",
+				children: [],
+				requests: [],
+			};
+			this.folders.set(name, folder);
+		} else if (tag && !folder.description) {
+			// A path segment can be spelled exactly like a tag, in which case the
+			// folder already exists with no description. The tag's description still
+			// describes what is in it, so it is filled in rather than dropped.
+			folder.description = this.describe(tag);
+		}
+		folder.requests.push(request);
+	}
+
+	/** The folders, in first-encounter order. */
+	children(): CollectionDraft[] {
+		return [...this.folders.values()];
+	}
+
+	/** Requests whose operation had neither a tag nor a groupable path. */
+	rootRequests(): RequestDraft[] {
+		return this.root;
+	}
+
+	count(): number {
+		return this.folders.size;
+	}
+
+	/**
+	 * Which rule produced the folders, so the preview can say so - a spec that
+	 * declares no operation tags gets a folder tree the document never spelled
+	 * out, and that must not be a surprise. `undefined` when there are no folders
+	 * to explain.
+	 */
+	strategy(): FolderStrategy | undefined {
+		if (this.tagged && this.pathed) return "mixed";
+		if (this.tagged) return "tags";
+		if (this.pathed) return "paths";
+		return undefined;
+	}
+
+	private describe(tag: string): string {
+		const def = asArray(this.declaredTags).find((t) => prop(t, "name") === tag);
+		return asStr(prop(def, "description")) ?? "";
+	}
+}
+
 /**
  * {@link specOperationOf} for a whole document, with a **duplicated
  * `operationId` kept on its first declaration only** (issue #715).
@@ -206,7 +336,13 @@ export function createOperationIdentifier(
  *
  * A key that is not a numeric status (`default`, `2XX`) has no status line to
  * be served under, so it is skipped and tallied rather than guessed at - the
- * caller passes the tally, and the preview names the loss.
+ * caller passes the tally, and the preview names it.
+ *
+ * `default` gets a counter of its own (issue #710). It is the spec-conformant
+ * catch-all every major vendor declares on every operation - Stripe on all 568,
+ * GitHub likewise - so counting it beside malformed keys reported a fully valid
+ * document as one defect per operation, in the same red as the one warning that
+ * needed action. Same behaviour, told apart so the preview can rank them.
  */
 export function responseExample(
 	code: string,
@@ -222,6 +358,10 @@ export function responseExample(
 		return undefined;
 	}
 	const status = Number(code);
+	if (code === "default") {
+		tally.add("default_response");
+		return undefined;
+	}
 	if (!/^\d{3}$/.test(code) || status < 100 || status > 599) {
 		tally.add("example_no_status");
 		return undefined;
