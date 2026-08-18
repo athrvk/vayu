@@ -38,4 +38,20 @@ function TooltipContent({
 	);
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };
+/**
+ * Secondary text inside a tooltip - a shortcut, a URL, the source of a value.
+ *
+ * **`--muted-foreground` is not a de-emphasis here, it is a disappearance.** A
+ * tooltip is `bg-primary-fill`, and that token is tuned against the canvas: on
+ * the accent fills it measures 1.04-2.27:1, worst on Blue, where the hint is
+ * often a URL the reader is meant to read off the tooltip. De-emphasis on a
+ * *filled* surface has to be an alpha of the foreground that already reads on
+ * it - the same argument `surface-sunken` makes for its `--rule` - which is
+ * what this is, so the one value lives here rather than at each call site.
+ * → `tooltip-hint-contrast.test.ts`
+ */
+function TooltipHint({ className, ...props }: React.ComponentProps<"span">) {
+	return <span className={cn("text-primary-foreground/80", className)} {...props} />;
+}
+
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipHint, TooltipProvider };

@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { TooltipProvider } from "./tooltip";
 import { TooltipIconButton } from "./tooltip-icon-button";
 
@@ -40,6 +40,39 @@ describe("TooltipIconButton", () => {
 		);
 		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 		expect(onClick).toHaveBeenCalledOnce(); // still once - disabled swallowed it
+	});
+
+	/*
+	 * The hint is secondary text on `bg-primary-fill`, so it has to be a tint of
+	 * the foreground that reads there. It carried `text-muted-foreground` - a
+	 * canvas token, ~1.0-2.3:1 on the accent fills - which made the mock-server
+	 * row's URL unreadable inside its own tooltip. A source scan would not catch
+	 * a regression that arrives through `cn()`, so the class is read off the
+	 * rendered element; the ratios themselves are `tooltip-hint-contrast.test.ts`.
+	 */
+	it("paints the hint as a tint of the tooltip's own foreground", async () => {
+		renderButton(
+			<TooltipIconButton
+				label="Copy mock server URL"
+				tooltipHint="http://127.0.0.1:51056"
+				icon={<svg />}
+			/>
+		);
+
+		// Radix opens on focus, which needs no pointer geometry in jsdom.
+		await act(async () => {
+			fireEvent.focus(screen.getByRole("button", { name: "Copy mock server URL" }));
+		});
+
+		// Radix mirrors the content into a visually-hidden copy for the
+		// `aria-describedby` announcement, so both spans are matched and both
+		// are asserted rather than picking one and hoping it is the visible one.
+		const hints = await screen.findAllByText("http://127.0.0.1:51056");
+		expect(hints.length).toBeGreaterThan(0);
+		for (const hint of hints) {
+			expect(hint.className).toContain("text-primary-foreground/");
+			expect(hint.className).not.toContain("text-muted-foreground");
+		}
 	});
 
 	it("forwards arbitrary button props such as aria-pressed", () => {

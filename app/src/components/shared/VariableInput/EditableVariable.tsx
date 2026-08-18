@@ -19,7 +19,13 @@
  * written to - happen here.
  */
 
-import { VariablePopover, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import {
+	VariablePopover,
+	Tooltip,
+	TooltipContent,
+	TooltipHint,
+	TooltipTrigger,
+} from "@/components/ui";
 import type { VariableScope } from "@/components/ui";
 import { cn } from "@/lib/utils";
 // The specific module, not the `../../context` barrel - matching the sibling
@@ -155,9 +161,7 @@ export default function EditableVariable({
 									{secret ? "secret" : value || "empty"}
 								</span>
 								{sourceName && (
-									<span className="shrink-0 text-primary-foreground/70">
-										{sourceName}
-									</span>
+									<TooltipHint className="shrink-0">{sourceName}</TooltipHint>
 								)}
 							</span>
 						)}
