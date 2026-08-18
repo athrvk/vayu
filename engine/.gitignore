@@ -60,6 +60,12 @@ test_*.db-wal
 test_*.db-shm
 test_*.db.bak
 
+# Each test *process* now runs inside its own vayu-tests-* subdirectory of that
+# working directory, so `ctest -j` cannot collide two tests on one filename (see
+# tests/main.cpp and tests/temp_database.hpp). The process removes its own on
+# exit; this catches the ones a killed run leaves behind.
+vayu-tests-*/
+
 
 # Logs
 logs/

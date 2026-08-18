@@ -256,76 +256,80 @@
   ],
   "testPresets": [
     {
+      "name": "test-base",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 8
+      }
+    },
+    {
       "name": "windows-dev",
       "displayName": "Test Windows Debug",
       "configurePreset": "windows-dev",
-      "output": {
-        "outputOnFailure": true
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 1
+      },
+      "environment": {
+        "VAYU_TEST_NO_SCRATCH_ISOLATION": "1"
       }
     },
     {
       "name": "windows-prod",
       "displayName": "Test Windows Release",
       "configurePreset": "windows-prod",
-      "output": {
-        "outputOnFailure": true
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 1
+      },
+      "environment": {
+        "VAYU_TEST_NO_SCRATCH_ISOLATION": "1"
       }
     },
     {
       "name": "linux-dev",
       "displayName": "Test Linux Debug",
       "configurePreset": "linux-dev",
-      "output": {
-        "outputOnFailure": true
-      }
+      "inherits": ["test-base"]
     },
     {
       "name": "linux-asan",
       "displayName": "Test Linux Debug + AddressSanitizer",
       "configurePreset": "linux-asan",
-      "output": {
-        "outputOnFailure": true
-      }
+      "inherits": ["test-base"]
     },
     {
       "name": "linux-prod",
       "displayName": "Test Linux Release",
       "configurePreset": "linux-prod",
-      "output": {
-        "outputOnFailure": true
-      }
+      "inherits": ["test-base"]
     },
     {
       "name": "macos-dev",
       "displayName": "Test macOS Debug",
       "configurePreset": "macos-dev",
-      "output": {
-        "outputOnFailure": true
-      }
+      "inherits": ["test-base"]
     },
     {
       "name": "macos-prod",
       "displayName": "Test macOS Release (native arch)",
       "configurePreset": "macos-prod",
-      "output": {
-        "outputOnFailure": true
-      }
+      "inherits": ["test-base"]
     },
     {
       "name": "macos-prod-arm64",
       "displayName": "Test macOS Release arm64",
       "configurePreset": "macos-prod-arm64",
-      "output": {
-        "outputOnFailure": true
-      }
+      "inherits": ["test-base"]
     },
     {
       "name": "macos-prod-x64",
       "displayName": "Test macOS Release x64",
       "configurePreset": "macos-prod-x64",
-      "output": {
-        "outputOnFailure": true
-      }
+      "inherits": ["test-base"]
     }
   ]
 }
