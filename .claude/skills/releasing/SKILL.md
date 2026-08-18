@@ -37,18 +37,30 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    Changelog format, see below).
 4. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes
    file together).
-5. Tag: `git tag v$(cat VERSION) && git push origin --tags`
+5. Tag: `git tag v$(cat VERSION) && git push origin --tags`. **First wait for the
+   release merge's "Warm build cache" run to go green.** The version bump is in
+   `cache-warm.yml`'s `push` paths, so merging the release PR fires a warm run
+   that compiles the engine into the master sccache scope; the tag sits on that
+   same merge commit, so a tag build started before the warm run finishes reads
+   an empty scope and compiles cold (issue #700). The warm run is ~15-25 min per
+   platform.
 6. CI builds installers and publishes the GitHub Release, using
    `.github/release-notes/<tag>.md` as the release body automatically (no manual
    paste).
 7. Read the sccache hit rate in the release run's log and expect **more than
-   zero engine hits** (issue #659 item 5). A version bump used to edit a header
-   every translation unit preprocessed, so every release compiled the engine
-   cold on all three platforms at a 0% hit rate by construction;
-   `core/user_agent.hpp` exists to keep the version behind a declaration. Zero
-   hits again means something has pulled `vayu/version.hpp` back into a widely
-   included header, and `version_isolation_test.cpp` is the guard that should
-   have caught it.
+   zero engine hits** (issues #659 item 5, #700). Two different causes produce a
+   structural 0%, and they need different fixes:
+   - **The warm scope was never populated for this commit** - the most likely
+     cause now that the header is isolated. Either the release merge's "Warm
+     build cache" run had not finished (or failed) before the tag was pushed, or
+     the version bump did not trigger it. Check that run went green on the merge
+     commit *before* tagging (step 5); re-run it and re-tag if it did not.
+   - **A header regression.** A version bump used to edit a header every
+     translation unit preprocessed, so every release compiled the engine cold by
+     construction; `core/user_agent.hpp` keeps the version behind a declaration.
+     Zero hits *with* a green warm run means something pulled `vayu/version.hpp`
+     back into a widely included header, and `version_isolation_test.cpp` is the
+     guard that should have caught it.
 
 A release commit needs no test run - every edit is a version string or Markdown.
 The version stamp is worth one cheap check (`./build/vayu-engine --help` prints
