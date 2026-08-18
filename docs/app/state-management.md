@@ -1104,7 +1104,12 @@ sibling lists and a drop index into the minimal set of rows to rewrite.
   **not** sit under `runs.lists()`: `RequestBuilderProvider` mounts it for every
   open request tab, and the delete-run patch walks that prefix as
   `InfiniteData`. Keeping the two shapes apart at the root is the rule - a
-  prefix patch must never meet a cache shape it did not write.
+  prefix patch must never meet a cache shape it did not write. Under the
+  `lastDesigns()` prefix, like the three families below it, so a delete, a
+  cleared history or an MCP `run` event reaches it without knowing which
+  request it belonged to (#776): a run id gives no way back to one, and until
+  the prefix existed a deleted design run went on being restored into the tab
+  that had it open.
 - **`useRecentDesignRunsQuery(requestId)`** - The last `RECENT_DESIGN_RUN_LIMIT`
   (5) design runs of a request, newest first, behind the context bar's **Recent
   sends** section. One filtered call (`?requestId=&type=design&limit=5`) and
@@ -1225,6 +1230,7 @@ runs: {
   all: ["runs"],
   lists: () => ["runs", "list"],
   list: (filters = {}) => ["runs", "list", filters],      // keyed by its server-side filters (q, baseline)
+  lastDesigns: () => ["runs", "lastDesign"],               // prefix: invalidate every request's last run
   lastDesign: (requestId) => ["runs", "lastDesign", requestId],
   recentDesigns: () => ["runs", "recentDesign"],           // prefix: invalidate every request's list
   recentDesign: (requestId) => ["runs", "recentDesign", requestId],
@@ -1300,7 +1306,7 @@ to keys through `lib/mcp-invalidation.ts`:
 | `collection` | `collections.all`, `requests.all` | A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely |
 | `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, plus `requests.detail(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open |
 | `environment` | `environments.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and nothing refetches a composition on its own |
-| `run` | `runs.lists()`, `runs.allRuns()`, `runs.baselines()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, plus `runs.lastDesign(requestId)` when the call named one - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends and Last run do not. The three prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
+| `run` | `runs.lists()`, `runs.allRuns()`, `runs.baselines()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The four prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
 | `config` | `config.all` | |
 | `service` | `inbox.list()`, plus a **removal** of `inbox.captures(inboxId)` for a named inbox | The drawer and the Dock's count poll, so the list is about immediacy; the captures cannot be invalidated, because `useInboxCapturesQuery` merges its fetched page into the cache and would union back the rows a `clear_inbox_captures` just destroyed |
@@ -1318,17 +1324,20 @@ rendering under an open History tab until its entry was garbage collected.
 `HistoryDetail`'s "This run no longer exists" state instead of a run the sidebar
 no longer lists. The hint says *which* run changed, not *how*, so a `set_run_baseline`
 costs an open detail pane one refetch of data it already had; a stale answer is
-a lie and a refetch is a wait. `runs.lastDesign` has no prefix family, so a
-deleted design run can still leave one stale - issue #776, shared with
-`useDeleteRunMutation`. The `service` family (issue #756) takes the same shape
-one level down: `inboxId` is its scope hint, and a named inbox has its capture
-list *removed* rather than invalidated for a reason the run family does not
-have - three writers share that one cache entry (the fetch, the load-more pages
-and the live SSE stream), so every write to it is a union by capture id, and a
-refetch into a cache still holding cleared rows puts them straight back. The
-app's own clear mutation writes an empty page first for exactly this; from the
-main process the equivalent is to drop the entry. Only inboxes are wired today -
-mock servers and the OAuth issuers join the family in #757. The entity list is duplicated across the process boundary
+a lie and a refetch is a wait. `runs.lastDesigns()` is taken at its prefix and
+never per request (#776): `delete_run` and `set_run_baseline` name a `runId` and
+no request, so the narrow key could not reach the tab whose run went away, and
+the cost of the prefix is that a `run_request` refetches one filtered row per
+*mounted* tab instead of one. The `service` family (issue #756) takes the same
+shape one level down: `inboxId` is its scope hint, and a named inbox has its
+capture list *removed* rather than invalidated for a reason the run family does
+not have - three writers share that one cache entry (the fetch, the load-more
+pages and the live SSE stream), so every write to it is a union by capture id,
+and a refetch into a cache still holding cleared rows puts them straight back.
+The app's own clear mutation writes an empty page first for exactly this; from
+the main process the equivalent is to drop the entry. Only inboxes are wired
+today - mock servers and the OAuth issuers join the family in #757.
+The entity list is duplicated across the process boundary
 (`MCP_DATA_ENTITIES` in `electron/mcp/tools.ts`, `McpDataEntity` in
 `types/domain.ts`) because production code under `electron/` cannot import from
 `app/src`; `data-changed.conformance.test.ts` is what keeps the copies equal,

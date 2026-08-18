@@ -105,9 +105,13 @@ const INVALIDATORS: Record<
 	 * `useDeleteRunMutation` makes for the same reason: a run id gives no way
 	 * back to the request or collection it belonged to.
 	 *
-	 * `lastDesign` has no prefix family of its own, so it stays per request and
-	 * is reached only when the call named one. Issue #776 tracks that gap, which
-	 * `useDeleteRunMutation` shares.
+	 * `lastDesigns()` is a prefix for that same reason and takes the same trade
+	 * knowingly: `delete_run` and `set_run_baseline` name a `runId` and no
+	 * request, so a per-request key could never reach the tab whose run went
+	 * away, while a `run_request` now invalidates every open tab's last-design
+	 * query rather than the one it ran. Each is a single filtered row, only
+	 * mounted tabs refetch, and the alternative is carrying a run-to-request map
+	 * purely to patch it.
 	 *
 	 * Per-run *report* and series keys are still not invalidated wholesale, and
 	 * that exclusion is the point: a `run_request` creates a run and cannot have
@@ -120,11 +124,7 @@ const INVALIDATORS: Record<
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
-		if (event.requestId) {
-			void queryClient.invalidateQueries({
-				queryKey: queryKeys.runs.lastDesign(event.requestId),
-			});
-		}
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastDesigns() });
 		/*
 		 * A named run is one that already existed and was rewritten or removed
 		 * (`delete_run`, `stop_run`, `set_run_baseline` - the only tools that take

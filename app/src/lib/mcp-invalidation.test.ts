@@ -102,9 +102,38 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toContainEqual(queryKeys.runs.lastCollectionRuns());
 	});
 
-	test("a run linked to a saved request also invalidates its last design run", () => {
+	test("a run invalidates the last-design family whether or not it named a request", () => {
+		// The tools that take a run away - `delete_run`, `set_run_baseline` -
+		// name a `runId` and no request, so the per-request key could never
+		// reach the tab whose run went. Every open request tab mounts
+		// `useLastDesignRunQuery`, which is what would otherwise go on
+		// restoring a deleted run's response.
+		expect(keysFor({ entity: "run", runId: "run_1" }).keys).toContainEqual(
+			queryKeys.runs.lastDesigns()
+		);
+		expect(keysFor({ entity: "run", requestId: "req_7" }).keys).toContainEqual(
+			queryKeys.runs.lastDesigns()
+		);
+	});
+
+	test("the last-design prefix is taken instead of the narrower per-request key", () => {
+		// Not both: the prefix already covers the row, and a duplicate narrower
+		// invalidation is the kind of near-copy that drifts from the prefix.
 		const { keys } = keysFor({ entity: "run", requestId: "req_7" });
-		expect(keys).toContainEqual(queryKeys.runs.lastDesign("req_7"));
+		expect(keys).not.toContainEqual(queryKeys.runs.lastDesign("req_7"));
+	});
+
+	test("a run really does clear an open tab's last-design cache, not just the named request's", () => {
+		// Against a real client: the prefix has to match a cache keyed by a
+		// request the event never mentioned, which is the whole point of it.
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(queryKeys.runs.lastDesign("req_other"), { data: [{ id: "r1" }] });
+
+		invalidateForMcpEvent(queryClient, { entity: "run", runId: "run_1" });
+
+		expect(
+			queryClient.getQueryState(queryKeys.runs.lastDesign("req_other"))?.isInvalidated
+		).toBe(true);
 	});
 
 	test("a run that named no id leaves every per-run cache alone", () => {
