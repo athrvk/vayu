@@ -17,6 +17,7 @@ import { Folder } from "lucide-react";
 import {
 	Dialog,
 	DialogContent,
+	DialogBody,
 	DialogHeader,
 	DialogTitle,
 	DialogDescription,
@@ -44,7 +45,7 @@ export function CollectionPicker({
 					<DialogTitle>Add request to</DialogTitle>
 					<DialogDescription>Pick the collection for the new request.</DialogDescription>
 				</DialogHeader>
-				<div className="flex max-h-72 flex-col gap-1 overflow-auto">
+				<DialogBody className="flex max-h-72 flex-col gap-1">
 					{collections.map((collection) => (
 						<button
 							key={collection.id}
@@ -56,7 +57,7 @@ export function CollectionPicker({
 							<TruncatedText>{collection.name}</TruncatedText>
 						</button>
 					))}
-				</div>
+				</DialogBody>
 			</DialogContent>
 		</Dialog>
 	);

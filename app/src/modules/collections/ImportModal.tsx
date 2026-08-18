@@ -576,6 +576,14 @@ export function ImportModal() {
 				// `w-[560px]` this carried: a fixed width is one the panel keeps
 				// on a viewport narrower than it, and the primitive's `w-full`
 				// under a cap gives the same stable band without that edge.
+				//
+				// The height guard stays this dialog's own (issue #773): the
+				// primitive's `max-h-[85vh]` + `DialogBody` is for a panel with
+				// one scrolling middle, and this one has bands of its own - a
+				// tab strip, a body, a footer, each with a divider - with the
+				// scroll already on the band that needs it. `overflow-hidden`
+				// keeps that scroll where the bands put it, and 82vh leaves the
+				// divider lines clear of the viewport edge.
 				className="flex max-w-xl max-h-[82vh] flex-col gap-0 overflow-hidden border-border-strong bg-card surface-card p-0"
 				// No prose description; without this Radix logs a missing
 				// aria-describedby warning.

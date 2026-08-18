@@ -16,7 +16,7 @@
  * toggles, the Iterations field, the data file's Remove button and the
  * Cancel/Run footer all rendered outside the panel, over the dimmed backdrop.
  *
- * The mechanism is the grid: `DialogContent` is a grid whose single track is
+ * The mechanism was the grid: `DialogContent` was a grid whose single track is
  * `auto`, and an auto track's minimum is its items' min-content - so the
  * preview table's min-content grew the track past the panel's `max-w`, which
  * cannot follow it. Every row in that grid then lays out at the track's width,
@@ -24,10 +24,18 @@
  * table's wrapper `overflow-auto` does not prevent this: it bounds the box, not
  * the min-content width the box contributes upward.
  *
+ * The panel is a **column flex container** since issue #773, which needed the
+ * height cap a grid cannot honour, and it refuses the same widening for a
+ * different reason: `min-width: auto` does not apply on the cross axis, so an
+ * item stretches to the line - the panel's own content width - and a wide
+ * descendant overflows inside it instead of widening it. So this file still
+ * guards #701; only the declaration that buys it changed.
+ *
  * jsdom reports 0 for every measurement, so what is asserted here is the
  * declaration that fixes it, on the element that carries it - measured
- * separately in a real engine, where seven columns spilled the footer 428px
- * past the painted edge before the clamp and 0px after it.
+ * separately in a real browser, where seven columns spilled the footer 428px
+ * past the painted edge before the clamp, 580px under a bare `auto` track, and
+ * 0px under either `grid-cols-1` or this flex column.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -57,19 +65,20 @@ beforeEach(() => {
 });
 
 describe("the run dialog's panel", () => {
-	it("clamps its grid track so no descendant can widen it past the painted panel", () => {
+	it("lays its rows out in a column no descendant can widen past the painted panel", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 
 		const panel = document.querySelector('[data-slot="dialog-content"]');
 		expect(panel).toBeTruthy();
 
-		// `grid-cols-1` is `repeat(1, minmax(0, 1fr))`, and the 0 is the whole
-		// fix: it lets the track be smaller than its content's min-content, which
-		// is what hands the scrollers inside it something to scroll within. The
-		// arbitrary `grid-cols-[minmax(0,1fr)]` would say it more plainly and
-		// compiles to nothing, so this asserts the utility that has a rule.
-		expect(panel?.className).toContain("grid-cols-1");
-		expect(panel?.className).toContain("grid");
+		// A column flex line has a definite cross size - this panel's content
+		// width - and a stretched item takes it, because `min-width: auto` is a
+		// main-axis rule. That is what hands the scrollers inside it something
+		// to scroll within. An `auto` grid track, which is what this was before
+		// `grid-cols-1`, is the shape that spills.
+		expect(panel?.className).toContain("flex-col");
+		expect(panel?.className).toContain("flex");
+		expect(panel?.className).not.toContain("grid");
 	});
 
 	it("still caps the panel's own width - the clamp is not a licence to grow", () => {

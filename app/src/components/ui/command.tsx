@@ -51,7 +51,13 @@ const CommandDialog = ({
 	return (
 		<Dialog {...props}>
 			{/* No corner close button: it would land on top of the search field,
-			    and Escape or a click outside is how a palette is dismissed. */}
+			    and Escape or a click outside is how a palette is dismissed.
+
+			    No `DialogBody` either (issue #773): a palette is its input plus
+			    `CommandList`, which caps and scrolls itself, so the band that
+			    would claim the leftover height already exists one level in. The
+			    panel's cap still applies, and `overflow-hidden` keeps the list's
+			    own scroll the only one. */}
 			<DialogContent showClose={false} className={cn("overflow-hidden p-0", className)}>
 				<DialogTitle className="sr-only">{title}</DialogTitle>
 				<DialogDescription className="sr-only">{description}</DialogDescription>
