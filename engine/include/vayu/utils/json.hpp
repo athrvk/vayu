@@ -62,6 +62,17 @@ using Json = nlohmann::json;
 [[nodiscard]] Json serialize (const vayu::db::Environment& environment);
 
 /**
+ * @brief Serialize a client-certificate registry entry (issue #707).
+ *
+ * `passphrase` is **not** part of the shape: it is write-only over the wire.
+ * The card that manages these entries never needs to display one - it needs to
+ * know whether the key has one, which `hasPassphrase` says - and a secret that
+ * is never sent back cannot end up in a log, a screenshot or a bug report.
+ * Storing it plaintext is the repo's precedent; echoing it would be a new one.
+ */
+[[nodiscard]] Json serialize (const vayu::db::ClientCertificate& certificate);
+
+/**
  * @brief Serialize a Run to JSON
  */
 [[nodiscard]] Json serialize (const vayu::db::Run& run);

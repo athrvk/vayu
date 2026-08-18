@@ -242,6 +242,10 @@ export default function ResponseViewer() {
 					statusText={shown.statusText}
 					time={shown.time}
 					size={shown.size}
+					// The failure path needs this more than the success one: a
+					// handshake refused by the server is the exchange where
+					// "which certificate did we present" is the whole question.
+					clientCertificate={shown.clientCertificate}
 					receivedAt={shown.receivedAt}
 					restoredFrom={shown.restoredFrom}
 				/>
@@ -268,6 +272,7 @@ export default function ResponseViewer() {
 				size={shown.size}
 				httpVersion={shown.httpVersion}
 				httpVersionDowngraded={shown.httpVersionDowngraded}
+				clientCertificate={shown.clientCertificate}
 				receivedAt={shown.receivedAt}
 				restoredFrom={shown.restoredFrom}
 				validation={shown.validation}

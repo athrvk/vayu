@@ -457,7 +457,10 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     // Until #705 this path set no proxy option at all, so a configured proxy
     // covered every send and every load run and silently skipped streams. The
     // shared applier is what makes that unrepeatable.
-    detail::apply_transport_policy (curl, request.transport, request.request.verify_ssl);
+    if (const ClientCertRule* certificate = detail::apply_transport_policy (
+        curl, request.transport, request.request.verify_ssl, request.request.url)) {
+        response.client_certificate = client_cert_label (*certificate);
+    }
     curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
     vayu::http::to_curl_http_version (request.request.http_version));
     if (request.cookie_jar) {

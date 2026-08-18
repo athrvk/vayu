@@ -461,8 +461,14 @@ Result<Response> Client::send (const Request& request) {
         curl_easy_setopt (curl, CURLOPT_MAXREDIRS, static_cast<long> (request.max_redirects));
     }
 
-    // TLS verification and the proxy, both through the one shared applier.
-    detail::apply_transport_policy (curl, impl_->config.transport, request.verify_ssl);
+    // TLS verification, the proxy and this target's client certificate, all
+    // through the one shared applier. The matched registry entry is recorded on
+    // the response rather than looked up again by a reader: see
+    // Response::client_certificate.
+    if (const ClientCertRule* certificate = detail::apply_transport_policy (
+        curl, impl_->config.transport, request.verify_ssl, request.url)) {
+        response.client_certificate = client_cert_label (*certificate);
+    }
 
     // Protocol selection. This path (POST /execute, "Send") previously set no
     // CURLOPT_HTTP_VERSION at all and ran at libcurl's implicit default -

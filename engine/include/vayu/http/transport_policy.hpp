@@ -25,6 +25,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace vayu::db {
 class Database;
@@ -85,6 +86,79 @@ std::optional<ProxyMode> proxy_mode_from_string (std::string_view value);
 std::optional<std::string> proxy_url_rejection (std::string_view url);
 
 /**
+ * @brief One registry row: the certificate a host is called with (issue #707).
+ *
+ * A certificate is a property of *where you are calling*, not of one request -
+ * which is why this is a registry keyed by host rather than a request field.
+ * The request that needs mTLS is usually the third one in a chain (a token
+ * fetch, a redirect, a script's `pm.sendRequest`), and none of those are places
+ * a user can attach anything.
+ *
+ * **Paths, never contents.** The private key stays on disk where the user's
+ * own tooling put it; the database holds the way to find it. That is the
+ * strongest storage decision available without a keystore, and it is the one
+ * asymmetry worth stating out loud: `passphrase` below *is* stored, in
+ * plaintext, on the repo's existing credential precedent (#704 decision 6).
+ */
+struct ClientCertRule {
+    /// Engine-assigned id of the `client_certificates` row this came from.
+    std::string id;
+
+    /**
+     * The host this certificate answers for, lower-cased, with no scheme, port
+     * or path - the same spelling `parse_authority` produces, so a match is a
+     * string compare rather than a second URL parser. An IPv6 literal is stored
+     * without its brackets, again because that is the form the parser yields.
+     *
+     * Exact match only. Wildcards are deliberately absent in v1: a
+     * `*.example.com` that matched `a.b.example.com` but not `example.com`
+     * would be a rule the card cannot state in one line, and a certificate
+     * silently *not* used is the failure this feature exists to end.
+     */
+    std::string host;
+
+    /// The port this row is specific to, or nullopt when it answers for the
+    /// host on every port. An entry naming the port wins over one that does not
+    /// - see `match_client_certificate`.
+    std::optional<int> port;
+
+    /// PEM (or, per platform, PKCS#12) certificate file, passed to
+    /// `CURLOPT_SSLCERT` verbatim.
+    std::string cert_path;
+
+    /// Private key file, passed to `CURLOPT_SSLKEY` verbatim.
+    std::string key_path;
+
+    /// The key's passphrase, empty when it has none. Stored plaintext - see the
+    /// struct comment and `docs/engine/db-schema.md`.
+    std::string passphrase;
+};
+
+/**
+ * @brief What a rule is called on screen and in a trace: `host` or `host:port`.
+ *
+ * One spelling, because the response pane, the log line and the Settings card
+ * all name the same row and three renderings of it would be three things to
+ * cross-reference by eye.
+ */
+std::string client_cert_label (const ClientCertRule& rule);
+
+/**
+ * @brief Why this registry entry cannot be stored, or nullopt when it can.
+ *
+ * The one copy of the rule: the CRUD routes reject a bad entry with it, and the
+ * resolver re-checks a row that was hand-edited around them. Strict about what
+ * can never work - a host carrying a scheme, a port outside 1..65535, a
+ * certificate or key file this process cannot open - because every one of those
+ * surfaces at handshake time as a TLS error that names the endpoint rather than
+ * the setting, which is the shape this epic exists to stop.
+ */
+std::optional<std::string> client_cert_rejection (std::string_view host,
+const std::optional<int>& port,
+std::string_view cert_path,
+std::string_view key_path);
+
+/**
  * @brief Everything the wire needs to know about how to leave this machine.
  */
 struct TransportPolicy {
@@ -123,7 +197,40 @@ struct TransportPolicy {
      * than by hoping the backend merges for us. See `resolve_transport_policy`.
      */
     std::string ca_bundle_path;
+
+    /**
+     * The client-certificate registry as it stood when this policy was
+     * resolved (issue #707), empty when the user has registered none.
+     *
+     * The *whole* registry travels with the policy rather than one
+     * pre-selected certificate, because one policy serves many hosts: a load
+     * run has one target but a scenario run walks a collection, a script's
+     * `pm.sendRequest` dials wherever it likes, and a redirect can leave the
+     * host the run started on. Matching therefore happens per transfer
+     * (`match_client_certificate`) while the *reading* happens once - which is
+     * the load path's rule from #704 decision 3 kept without giving the hot
+     * path a database.
+     */
+    std::vector<ClientCertRule> client_certificates;
 };
+
+/**
+ * @brief The registry entry that answers for @p host on @p port, or null.
+ *
+ * Most specific wins: an entry naming this exact port beats one that answers
+ * for the host on any port. Beyond that there is nothing to rank, because
+ * `client_cert_rejection` refuses a second entry for a host+port pair that is
+ * already registered - so a match is unique by construction rather than by a
+ * tie-break nobody could predict from the card.
+ *
+ * @param host Lower-cased hostname, as `parse_authority` yields it.
+ * @param port The port the transfer dials, scheme default included - never 0,
+ *             since "any port" is a property of the *entry*, not the transfer.
+ * @return A pointer into @p policy, valid as long as it is. Callers that keep
+ *         it past the policy's lifetime must copy what they need.
+ */
+const ClientCertRule*
+match_client_certificate (const TransportPolicy& policy, std::string_view host, int port);
 
 /**
  * @brief Why @p pem cannot be a CA bundle, or nullopt when it can.

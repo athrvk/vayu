@@ -64,6 +64,11 @@ vi.mock("@/queries", () => ({
 /** Driven by the test - the store the sidebar would write on a click. */
 let selectedCategory = "network_performance";
 
+// The registry card the Network category mounts above its entries (issue
+// #707) reads the engine over its own queries, which is not what this file is
+// about - stubbed on the `CookiesCard` precedent in the save-model test.
+vi.mock("./panels/ClientCertificatesCard", () => ({ ClientCertificatesCard: () => null }));
+
 vi.mock("@/modules/settings/settings-store", () => ({
 	useSettingsStore: () => ({ selectedCategory, restartRequiredKeys: [] }),
 }));

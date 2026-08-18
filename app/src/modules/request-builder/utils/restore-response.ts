@@ -207,6 +207,17 @@ function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
 }
 
 /**
+ * The client-certificate entry this exchange presented (issue #707), or nothing.
+ *
+ * A spread rather than a field so an absent key stays absent: the live funnel
+ * maps `""` to `undefined` for the same reason, and the two must produce the
+ * same `ResponseState` - `response-funnels.test.ts` drives both and compares.
+ */
+function clientCertificateFromTrace(trace: NonNullable<RunResultSample["trace"]>) {
+	return trace.clientCertificate ? { clientCertificate: trace.clientCertificate } : {};
+}
+
+/**
  * Reconstruct a `ResponseState` from the last stored design-run result.
  *
  * Returns `null` when the result carries neither a response trace nor an error
@@ -252,6 +263,7 @@ export function responseFromRunResult(
 			...eventsFromTrace(trace),
 			...scriptsFromTrace(trace),
 			...validationFromTrace(trace),
+			...clientCertificateFromTrace(trace),
 		};
 	}
 
@@ -294,5 +306,6 @@ export function responseFromRunResult(
 		...eventsFromTrace(trace),
 		...scriptsFromTrace(trace),
 		...validationFromTrace(trace),
+		...clientCertificateFromTrace(trace),
 	};
 }

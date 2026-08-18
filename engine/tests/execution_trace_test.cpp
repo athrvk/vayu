@@ -300,4 +300,43 @@ TEST (ExecutionTrace, FailureStoresErrorInsteadOfResponse) {
     EXPECT_TRUE (trace.contains ("firstByteMs"));
 }
 
+// The client certificate the exchange presented (issue #707). Same
+// live-equals-stored invariant as the two above, and one thing the others do
+// not need: it survives a *failed* transfer, because a handshake refused by the
+// server is the exchange where "which certificate did we send" is the whole
+// question - and that one stores no `response` node at all.
+TEST (ExecutionTrace, StoredClientCertificateMatchesTheLiveKey) {
+    auto response               = make_response ();
+    response.client_certificate = "api.example.com:8443";
+
+    auto trace = build_result_trace (make_request (), response);
+    auto live  = vayu::json::serialize (response);
+
+    EXPECT_EQ (trace["clientCertificate"], "api.example.com:8443");
+    EXPECT_EQ (trace["clientCertificate"], live["clientCertificate"]);
+}
+
+TEST (ExecutionTrace, StoresTheClientCertificateOnAFailedExchangeToo) {
+    auto response               = make_response ();
+    response.status_code        = 0;
+    response.error_code         = vayu::ErrorCode::SslError;
+    response.error_message      = "handshake failure";
+    response.client_certificate = "api.example.com";
+
+    auto trace = build_result_trace (make_request (), response);
+
+    EXPECT_FALSE (trace.contains ("response"));
+    EXPECT_EQ (trace["clientCertificate"], "api.example.com");
+}
+
+// Omitted rather than stored empty, unlike the always-present live key: every
+// row written before the registry existed would otherwise be indistinguishable
+// from one that matched nothing, and the two are the same fact.
+TEST (ExecutionTrace, OmitsTheClientCertificateWhenNoneWasUsed) {
+    auto trace = build_result_trace (make_request (), make_response ());
+
+    EXPECT_FALSE (trace.contains ("clientCertificate"));
+    EXPECT_EQ (vayu::json::serialize (make_response ())["clientCertificate"], "");
+}
+
 } // namespace

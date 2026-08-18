@@ -89,6 +89,14 @@ export { useGlobalsQuery, useUpdateGlobalsMutation } from "./globals";
 // Cookie jar
 export { useCookiesQuery, useClearCookiesMutation } from "./cookies";
 
+// Client-certificate registry (issue #707)
+export {
+	useClientCertificatesQuery,
+	useCreateClientCertificateMutation,
+	useUpdateClientCertificateMutation,
+	useDeleteClientCertificateMutation,
+} from "./client-certificates";
+
 // Webhook inbox
 export {
 	useInboxesQuery,

@@ -185,6 +185,10 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		rawRequest: result.rawRequest,
 		httpVersion: result.httpVersion,
 		httpVersionDowngraded: result.httpVersionDowngraded,
+		// `""` means no certificate matched, and the pane has nothing to show
+		// for that - mapped to `undefined` so this funnel and the restored one
+		// build the same state (see `clientCertificateFromTrace`).
+		clientCertificate: result.clientCertificate || undefined,
 		body,
 		bodyRaw,
 		bodyType: bodyTypeFromContentType(result.headers),

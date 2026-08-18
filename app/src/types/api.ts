@@ -762,6 +762,42 @@ export interface ClearCookiesResponse {
 	cleared: number;
 }
 
+// Client-certificate registry (issue #707)
+
+/**
+ * One registry entry, as `GET /client-certificates` reports it.
+ *
+ * The passphrase is deliberately absent: the engine never echoes it (it is
+ * write-only over the wire), so this shape carries `hasPassphrase` instead -
+ * which is the only thing the card has to render. Sending it back would put a
+ * secret into every screenshot of the Settings panel.
+ */
+export interface ClientCertificate {
+	id: string;
+	/** Lower-cased hostname, no scheme or port - the engine stores it this way. */
+	host: string;
+	/** The port this entry is specific to, or null when it answers on every one. */
+	port: number | null;
+	certPath: string;
+	keyPath: string;
+	hasPassphrase: boolean;
+	createdAt: number;
+	updatedAt: number;
+}
+
+/**
+ * A create or update body. `port: null` means every port, and on an update
+ * `passphrase: null` clears a stored one - the engine's standard
+ * null-vs-absent rule, which is why both are nullable rather than optional.
+ */
+export interface ClientCertificateInput {
+	host: string;
+	port: number | null;
+	certPath: string;
+	keyPath: string;
+	passphrase?: string | null;
+}
+
 // Webhook inbox API (issue #480). An inbox is engine-hosted listener state, so
 // none of these shapes is stored client-side - the surface reads them back.
 

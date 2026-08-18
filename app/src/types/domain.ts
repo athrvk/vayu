@@ -1086,6 +1086,17 @@ export interface RunResultTrace {
 	 * describes.
 	 */
 	validation?: ResponseValidation;
+	/**
+	 * Which client-certificate registry entry this exchange presented, as
+	 * `host` or `host:port` (issue #707). Top level rather than under
+	 * `response` because it is a property of the transfer: the exchange that
+	 * most needs to name its certificate is the one whose handshake failed, and
+	 * that one has no `response` node at all.
+	 *
+	 * Absent means no certificate was used - which is also what a row stored
+	 * before the registry existed means, and the two are the same fact.
+	 */
+	clientCertificate?: string;
 	/*
 	 * Step identity, stamped onto a scenario run's per-step trace by
 	 * `stamp_step_identity` (engine/src/core/scenario_runner.cpp) and read by
@@ -1453,6 +1464,13 @@ export interface HttpResponse {
 	 * changed, and the answer belongs to the exchange, not to the editor.
 	 */
 	httpVersionDowngraded?: boolean;
+	/**
+	 * Which client-certificate registry entry this exchange presented, as
+	 * `host` or `host:port`; `""` when none matched (issue #707). Always
+	 * present on a live body, like `httpVersion` above and for the same reason:
+	 * an absent key would be an engine too old to say, not "no certificate".
+	 */
+	clientCertificate?: string;
 }
 
 export interface TestResult {

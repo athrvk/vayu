@@ -51,6 +51,10 @@ vi.mock("@/queries", () => ({
 	useUpdateConfigMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+// See the note in SettingsMain.category-switch.test.tsx - the Network
+// category mounts the client-certificate registry card, which reads the engine.
+vi.mock("./panels/ClientCertificatesCard", () => ({ ClientCertificatesCard: () => null }));
+
 vi.mock("@/modules/settings/settings-store", () => ({
 	useSettingsStore: () => ({
 		selectedCategory: "network_performance",

@@ -167,6 +167,11 @@ export const queryKeys = {
 		all: ["cookies"] as const,
 	},
 
+	// Client-certificate registry (issue #707)
+	clientCertificates: {
+		all: ["clientCertificates"] as const,
+	},
+
 	// Health
 	health: {
 		all: ["health"] as const,

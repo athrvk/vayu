@@ -44,6 +44,7 @@ vi.mock("@/queries/runs", () => ({
 }));
 vi.mock("./panels/UpdatesCard", () => ({ UpdatesCard: () => null }));
 vi.mock("./panels/CookiesCard", () => ({ CookiesCard: () => null }));
+vi.mock("./panels/ClientCertificatesCard", () => ({ ClientCertificatesCard: () => null }));
 
 const clearHighlight = vi.fn();
 vi.mock("@/modules/settings/settings-store", () => ({

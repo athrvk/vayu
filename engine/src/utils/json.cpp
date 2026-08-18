@@ -539,6 +539,27 @@ Json serialize (const vayu::db::Environment& e) {
     return json;
 }
 
+Json serialize (const vayu::db::ClientCertificate& certificate) {
+    Json json;
+    json["id"]   = certificate.id;
+    json["host"] = certificate.host;
+    // `null`, not 0 or an omitted key: "every port" is the absence of a port
+    // and the card renders it as such. An omitted key would make a reader
+    // unable to tell it from an engine too old to answer.
+    if (certificate.port) {
+        json["port"] = *certificate.port;
+    } else {
+        json["port"] = nullptr;
+    }
+    json["certPath"] = certificate.cert_path;
+    json["keyPath"]  = certificate.key_path;
+    // Whether the key has a passphrase, never the passphrase - see the header.
+    json["hasPassphrase"] = !certificate.passphrase.empty ();
+    json["createdAt"]     = certificate.created_at;
+    json["updatedAt"]     = certificate.updated_at;
+    return json;
+}
+
 vayu::Environment parse_variables (const std::string& json_str) {
     vayu::Environment env;
     if (json_str.empty ()) {
@@ -862,6 +883,13 @@ Json serialize (const Response& response) {
     // reader must be able to tell "not downgraded" from "this engine is too old
     // to say". See Response::http_version_downgraded.
     json["httpVersionDowngraded"] = response.http_version_downgraded;
+
+    // Which registry entry's certificate this exchange presented, "" when none
+    // (issue #707). Always present, like the two above and for the same reason:
+    // "no certificate was used" and "this engine cannot say" are different
+    // facts. `build_result_trace` writes the same value under the same name, so
+    // the live pane and a restored one read one field.
+    json["clientCertificate"] = response.client_certificate;
 
     // Try to parse body as JSON
     if (auto parsed = try_parse_body (response.body)) {

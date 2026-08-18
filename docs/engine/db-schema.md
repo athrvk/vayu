@@ -478,6 +478,48 @@ clients on the same database agree - the app mirrors it into
 
 ---
 
+### `client_certificates`
+
+The registry that maps a host to the client certificate Vayu presents to it
+(issue #707). Read into the transport policy at the point of use - once per run
+on the load and collection paths - and applied by the shared applier every
+outbound transfer goes through. See
+[api-reference.md](api-reference.md#client-certificates) for the routes and the
+matching rule.
+
+| Column       | Type    | Notes                                                     |
+|--------------|---------|-----------------------------------------------------------|
+| `id`         | TEXT PK | `cert_` + UUID                                            |
+| `host`       | TEXT    | Hostname, lower-cased, no scheme/port/path. IPv6 without brackets |
+| `port`       | INTEGER | NULL = answers for the host on every port                 |
+| `cert_path`  | TEXT    | Path to the certificate file                              |
+| `key_path`   | TEXT    | Path to the private key file                              |
+| `passphrase` | TEXT    | The key's passphrase, `""` when it has none. **Plaintext** - see below |
+| `created_at` | INTEGER | Unix ms                                                   |
+| `updated_at` | INTEGER | Unix ms                                                   |
+
+**The private key never enters this database.** `cert_path` and `key_path` are
+paths, and the engine opens the files at send time - the strongest storage
+decision available without a keystore, and the reason a registry entry survives
+being copied between machines only if the files do.
+
+**The passphrase is stored in plaintext, and that is disclosed rather than
+hidden.** It is the same treatment every other credential in this file already
+gets - request auth, and `oauth_tokens.access_token` / `refresh_token` - and
+libsodium, though linked, encrypts nothing here. OS-keychain storage is
+explicitly out of scope for the transport epic (#704, decision 6); it would be
+its own change, touching every stored credential rather than this one column.
+The wire is narrower than the file: reads never echo the passphrase, answering
+`hasPassphrase` instead.
+
+`port` is nullable rather than a sentinel because "every port" is the *absence*
+of a port, the same distinction `result_bodies.stream_events` draws. At most one
+row may claim a given `host` + `port` pair - the routes answer `409` on the
+second - so the per-transfer match is unique by construction and needs no
+tie-break.
+
+---
+
 ### `globals`
 
 Singleton table; always has exactly one row with `id = "globals"`.

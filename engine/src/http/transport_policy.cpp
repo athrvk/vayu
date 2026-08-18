@@ -21,6 +21,8 @@
 #include <mutex>
 #include <sstream>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 #include <curl/curl.h>
 
@@ -281,6 +283,103 @@ std::optional<std::string> proxy_url_rejection (std::string_view url) {
     return std::nullopt;
 }
 
+std::string client_cert_label (const ClientCertRule& rule) {
+    return rule.port ? rule.host + ":" + std::to_string (*rule.port) : rule.host;
+}
+
+std::optional<std::string> client_cert_rejection (std::string_view host,
+const std::optional<int>& port,
+std::string_view cert_path,
+std::string_view key_path) {
+    if (host.empty () || is_blank (host)) {
+        return std::string ("host is empty");
+    }
+    if (std::any_of (host.begin (), host.end (),
+        [] (unsigned char c) { return std::isspace (c) != 0; })) {
+        return std::string ("host contains whitespace");
+    }
+    // The three shapes a user reaches for when they copy the address bar. Each
+    // is refused by name rather than stored and quietly never matched, because
+    // a registry entry that cannot match is indistinguishable from a feature
+    // that does not work.
+    if (host.find ("://") != std::string_view::npos) {
+        return std::string ("host must not carry a scheme - register 'api.example.com', "
+                            "not 'https://api.example.com'");
+    }
+    if (host.find ('/') != std::string_view::npos) {
+        return std::string ("host must not carry a path");
+    }
+    // An IPv6 literal is stored bracketless (the form `parse_authority` yields),
+    // so a colon is only ever an attempt at a port - which has its own field.
+    if (host.find (':') != std::string_view::npos && host.find (']') == std::string_view::npos &&
+    std::count (host.begin (), host.end (), ':') == 1) {
+        return std::string ("host must not carry a port - use the port field");
+    }
+    if (host.find ('[') != std::string_view::npos || host.find (']') != std::string_view::npos) {
+        return std::string ("an IPv6 host is registered without brackets, e.g. '::1'");
+    }
+
+    if (port && (*port < 1 || *port > 65535)) {
+        return "port " + std::to_string (*port) + " is outside 1..65535";
+    }
+
+    // Both files are checked *here*, at the moment the user can still fix the
+    // path, rather than at handshake time where curl reports
+    // `CURLE_SSL_CERTPROBLEM` against the endpoint and says nothing about which
+    // setting named a file that is not there.
+    for (const auto& [label, path] : { std::pair{ "certificate file", cert_path },
+             std::pair{ "key file", key_path } }) {
+        if (path.empty () || is_blank (path)) {
+            return std::string (label) + " is empty";
+        }
+        std::error_code ec;
+        const std::filesystem::path fs_path{ std::string (path) };
+        if (!std::filesystem::is_regular_file (fs_path, ec)) {
+            return std::string (label) + " '" + std::string (path) + "' is not a readable file";
+        }
+        std::ifstream probe (fs_path, std::ios::binary);
+        if (!probe) {
+            return std::string (label) + " '" + std::string (path) + "' cannot be opened";
+        }
+    }
+
+    return std::nullopt;
+}
+
+const ClientCertRule*
+match_client_certificate (const TransportPolicy& policy, std::string_view host, int port) {
+    if (policy.client_certificates.empty () || host.empty ()) {
+        return nullptr;
+    }
+
+    std::string wanted (host);
+    std::transform (wanted.begin (), wanted.end (), wanted.begin (),
+    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+
+    const ClientCertRule* any_port = nullptr;
+    for (const auto& rule : policy.client_certificates) {
+        if (rule.host != wanted) {
+            continue;
+        }
+        if (rule.port) {
+            // The specific entry, and there is at most one - the routes refuse
+            // a duplicate host+port pair - so this is the answer, not a
+            // candidate to keep ranking.
+            if (*rule.port == port) {
+                return &rule;
+            }
+            continue;
+        }
+        // Remembered rather than returned: a later entry may still name this
+        // exact port, and the specific one outranks the catch-all whatever
+        // order the rows come back in.
+        if (any_port == nullptr) {
+            any_port = &rule;
+        }
+    }
+    return any_port;
+}
+
 std::optional<std::string> ca_pem_rejection (std::string_view pem) {
     if (pem.empty () || is_blank (pem)) {
         return std::string ("no certificate found");
@@ -313,6 +412,30 @@ std::string system_ca_bundle_pem () {
 
 TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
     TransportPolicy policy;
+
+    // The client-certificate registry (issue #707), read whole because a policy
+    // serves every host a run may reach - see TransportPolicy::client_certificates.
+    for (const auto& row : db.get_client_certificates ()) {
+        if (const auto rejection =
+            client_cert_rejection (row.host, row.port, row.cert_path, row.key_path)) {
+            // The routes refuse this shape, so only a hand-edited row or a file
+            // that has moved since it was registered reaches here. Named rather
+            // than swallowed, and named *now*: the alternative is a handshake
+            // failure against the endpoint, which is precisely the "the API is
+            // down" misdiagnosis this epic exists to end.
+            vayu::utils::log_error ("Client certificate '" + row.id + "' for host '" + row.host +
+            "' is unusable (" + *rejection + "); requests to that host will be sent without it");
+            continue;
+        }
+        ClientCertRule rule;
+        rule.id         = row.id;
+        rule.host       = row.host;
+        rule.port       = row.port;
+        rule.cert_path  = row.cert_path;
+        rule.key_path   = row.key_path;
+        rule.passphrase = row.passphrase;
+        policy.client_certificates.push_back (std::move (rule));
+    }
 
     // TLS trust first: it is independent of the proxy, and the manual-mode
     // early return below would otherwise skip it for every direct sender.

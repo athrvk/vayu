@@ -928,6 +928,7 @@ forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
   bodyRaw: '{"users":[...]}',
   httpVersion: "HTTP/1.1",
   httpVersionDowngraded: false,
+  clientCertificate: "",
   timing: { total: 150, dns: 10, connect: 20, ... },
   testResults: [
     { name: "Status 200", passed: true }
@@ -962,6 +963,17 @@ it is true. Load runs carry the whole-run count as
 the requested protocol - without it a run measured entirely over HTTP/1.1 still
 read "HTTP/2" there
 ([#215](https://github.com/athrvk/vayu/issues/215)).
+
+`clientCertificate` names the client-certificate registry entry the exchange
+presented, as `host` or `host:port`, and `""` when none matched (issue #707).
+The renderer maps that empty string to `undefined` and `ResponseStatusBar` draws
+a chip only when there is one - the same show-it-only-when-it-happened rule the
+downgrade warning follows. Nothing on the request names a certificate (the
+engine matches one per transfer by host), which is exactly why the *response*
+has to say which was used: two calls to what looks like the same API can differ
+only in which registry entry matched. The stored trace carries the same value
+under the same key, so `responseFromExecuteResult` and `responseFromRunResult`
+agree - see `client-certificate-funnels.test.ts`.
 
 `report.sampling` carries what each of the run's bounded stores thinned away -
 `successTracesDropped` / `slowTracesDropped` for the trace records behind
