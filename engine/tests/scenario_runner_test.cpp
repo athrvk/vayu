@@ -367,6 +367,26 @@ class ScenarioRunnerTest : public ::testing::Test {
         return vayu::RunStatus::Failed;
     }
 
+    /// The run's context, whether or not it has finished.
+    ///
+    /// `get_run` reads `active_runs_` alone, and `retain_run` - the scenario
+    /// worker's last act - moves a finished run out of there into
+    /// `retained_runs_`. So a test holding a run id has no way to know which
+    /// map answers for it: a one-iteration run against a loopback mock can
+    /// reach `retain_run` before the test's next line, which is what failed
+    /// the v0.19.0 release build on macOS. `get_run_or_retained` reads both
+    /// and is what `GET /runs/:id/metrics` already uses for the same question.
+    ///
+    /// A helper rather than the call spelled out at each site: five tests want
+    /// this handle, and a hand-written sixth would reach for `get_run` exactly
+    /// as these did.
+    [[nodiscard]] std::shared_ptr<vayu::core::RunContext>
+    context_for (const std::string& run_id) {
+        auto context = manager_.get_run_or_retained (run_id);
+        EXPECT_TRUE (context != nullptr) << "No context for run " << run_id;
+        return context;
+    }
+
     [[nodiscard]] json summary_of (const std::string& run_id) {
         auto run = db_->get_run (run_id);
         EXPECT_TRUE (run.has_value ());
@@ -571,7 +591,10 @@ TEST_F (ScenarioRunnerTest, AStopIsHonouredBetweenStepsNotAfterTheIteration) {
     seed_request ("req_d", 3, "/slow");
 
     const auto run_id = start (/*iterations=*/20);
-    auto context      = manager_.get_run (run_id);
+    // `get_run` rather than `context_for` here, and not by oversight: this
+    // test steers a run that must still be in flight, so "active" is the
+    // state it means. 80 steps of 120ms is far too long to have finished.
+    auto context = manager_.get_run (run_id);
     ASSERT_TRUE (context != nullptr);
 
     // Long enough for the run to be inside its first iteration, short enough
@@ -712,7 +735,7 @@ TEST_F (ScenarioRunnerTest, TheRunPublishesOneStepEventPerStepAndClosesTheStream
     seed_request ("req_b", 1, "/login");
 
     const auto run_id = start (/*iterations=*/2);
-    auto context      = manager_.get_run (run_id);
+    auto context      = context_for (run_id);
     ASSERT_TRUE (context != nullptr);
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
@@ -1127,11 +1150,7 @@ TEST_F (ScenarioRunnerTest, ARunOfAnUnboundCollectionCarriesNoVerdictAnywhere) {
     stamp_spec_operation ("req_ok", json{ { "method", "GET" }, { "path", "/pet" } });
 
     const auto run_id  = start (/*iterations=*/1);
-    // get_run(), not get_run_or_retained(): a single-iteration run against a
-    // fast local server can finish and move to retained_runs_ before this
-    // line runs, which made this assertion racy rather than wrong (observed
-    // failing 2/2 on the macOS x64/Rosetta release leg).
-    const auto context = manager_.get_run_or_retained (run_id);
+    const auto context = context_for (run_id);
     ASSERT_TRUE (context != nullptr);
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
@@ -1485,7 +1504,7 @@ TEST_F (ScenarioRunnerTest, StepFramesCarryTheTallyOnTheSameTermsAsTheStoredList
     seed_request ("req_bare", 1, "/ok");
 
     const auto run_id  = start (/*iterations=*/1);
-    const auto context = manager_.get_run (run_id);
+    const auto context = context_for (run_id);
     ASSERT_TRUE (context != nullptr);
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
@@ -1535,7 +1554,7 @@ TEST_F (ScenarioRunnerTest, APreRequestAssertionIsListedCountedAndNamedTogether)
     )");
 
     const auto run_id  = start (/*iterations=*/1);
-    const auto context = manager_.get_run (run_id);
+    const auto context = context_for (run_id);
     ASSERT_TRUE (context != nullptr);
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
