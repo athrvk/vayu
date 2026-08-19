@@ -691,6 +691,19 @@ own `SSL_ERROR` - the validation on the way in is about the *shape* of the
 paste, deliberately, so a chain curl would accept is never refused by a parser
 of ours.
 
+**A TLS connection that never answers is an `SSL_ERROR` too**, whatever code
+libcurl put on it. The mapping needs that rule because the interesting
+refusals do not arrive as TLS errors: under TLS 1.3 the server's verdict about
+the *client* - a certificate it will not accept, or one it demanded and did not
+get - reaches us after our own handshake has finished, so libcurl reports the
+generic receive error of a connection that went away, carrying the alert in its
+message. A key the stored passphrase does not open arrives as a generic
+argument error in the same way. All three used to surface as `INTERNAL_ERROR`,
+which says the failure was ours. The rule applies only where the mapping has no
+answer of its own, and only to an `https` transfer that produced no response
+line at all - so a `4xx`, a timeout, a refused connection and a proxy failure
+all keep the code they had (issue #802).
+
 Per-request, `verifySSL: false` turns verification off for one endpoint
 entirely (see [POST /execute](#post-execute)); trusting the authority here is
 the answer that keeps verification on everywhere else.
@@ -2068,12 +2081,19 @@ fails at handshake time as an SSL error against the endpoint, which reads as
 A cert-authenticated exchange says so. `POST /execute` returns
 `clientCertificate` on the response (`""` when none matched) and the stored
 trace carries the same value under the same name, so a restored response names
-the entry a live one named. The format the certificate files must be in is the
-TLS backend's business, and the two backends differ - OpenSSL (Linux and macOS)
-takes a PEM certificate and key pair; Schannel (Windows) expects a PKCS#12 file
-or a certificate store reference. The engine passes the paths through
-unchanged, and a format a backend rejects fails at handshake time with
-libcurl's own error.
+the entry a live one named.
+
+**A registered pair goes out as PEM.** The engine writes the two paths and no
+certificate *type*, so libcurl reads them in its default format - a PEM
+certificate and a PEM key, optionally encrypted under the stored passphrase.
+That is what every OpenSSL-backed build takes, which is Linux and macOS, and
+the handshake is asserted on a wire there (a design send, an SSE stream, a load
+run and a `pm.sendRequest` against a listener that demands a client
+certificate). **Windows cannot present one yet**: that build is Schannel-backed
+and wants a PKCS#12 file or a certificate-store reference, neither of which
+libcurl will read without being told the type. Issue #833 tracks giving a row
+its format; until it lands, an entry registered on Windows fails at handshake
+time with libcurl's own error.
 
 ### GET /client-certificates
 

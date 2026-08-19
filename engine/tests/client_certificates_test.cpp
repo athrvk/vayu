@@ -3,21 +3,17 @@
  * @brief The client-certificate registry (issue #707): what a row may say, how
  *        a target picks one, and that the pick reaches every driver.
  *
- * **What is not here, and why.** There is no live mTLS handshake. A TLS server
- * exists in the suite now - #812 added `tests/tls_server.hpp` and the
- * `cpp-httplib[openssl]` feature it needs - so the first of the two reasons
- * this was deferred is gone, and what remains is the second and harder one:
- * the certificate *formats* the CI backends accept differ (Schannel wants a
- * PKCS#12 or a store thumbprint where OpenSSL wants a PEM pair), so a fixture
- * that presents one identity everywhere would fail on Windows while proving
- * nothing about the code under test. #802 owns that matrix, and is expected to
- * extend `TlsServer` rather than stand up a second listener. What that
- * leaves is covered three ways instead: the lookup is unit-tested at the
- * boundary, the *outcome* of the lookup is asserted end-to-end through the
- * design and stream drivers (both record the entry they matched on the
- * response), and the backend's willingness to take the three curl options at
- * all is probed on each platform the way `TlsBackend` probes `CURLOPT_CAINFO`.
- * The live handshake is tracked separately.
+ * **The live handshake is in `mutual_tls_test.cpp`** (#802), not here, and the
+ * split is deliberate: this file is about the *registry* - which row a target
+ * picks, and what a row may say - so its material is the bytes
+ * `not-a-real-certificate`, and nothing in it puts a certificate on a wire.
+ * That keeps the lookup asserted at the boundary, the lookup's *outcome*
+ * asserted end to end through the design and stream drivers (both record the
+ * entry they matched), and the backend's willingness to take the three curl
+ * options at all probed per platform the way `TlsBackend` probes
+ * `CURLOPT_CAINFO` - while the question of whether the bytes behind those paths
+ * are accepted by a server demanding a certificate is asked where a server
+ * exists to answer it.
  */
 
 #include <curl/curl.h>

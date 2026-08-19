@@ -471,6 +471,7 @@ if(VAYU_BUILD_TESTS)
         tests/transport_policy_test.cpp
         tests/tls_verification_test.cpp
         tests/client_certificates_test.cpp
+        tests/mutual_tls_test.cpp
         tests/requests_route_test.cpp
         tests/examples_route_test.cpp
         tests/specs_route_test.cpp

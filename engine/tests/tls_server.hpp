@@ -23,11 +23,12 @@
  * In-process rather than a script under `scripts/test/`, following the
  * precedent of `mock_server.hpp`, `echo_server.hpp` and `proxy_server.hpp`.
  *
- * It is not a general-purpose TLS server. #802's mTLS fixture is expected to
- * extend `TlsServer` with a client-certificate store rather than stand up a
- * second listener - `TestCertificateAuthority::issue` already mints the client
- * identity such a test would present, and `CrlServer` below is the CRL that
- * fixture should reuse rather than build a second one (#819).
+ * It is not a general-purpose TLS server. **It demands a client certificate
+ * when it is built with a second CA** (#802): that listener is what proves a
+ * registered client certificate completes a real handshake, and it is the same
+ * listener rather than a second one, so the CRL below is reused rather than
+ * duplicated (#819) and `TestCertificateAuthority::issue` mints both ends of
+ * the exchange.
  *
  * **The CA publishes a CRL, and the leaf says where to find it** (#819). A
  * backend that revocation-checks the chain - curl's Schannel path passes
@@ -169,10 +170,33 @@ struct CertificateAndKey {
     }
 
     /// The private key as unencrypted PEM. Only ever this process's own
-    /// short-lived key material: nothing here is written to disk, and the
-    /// listener below takes it from memory.
+    /// short-lived key material, and the listener below takes it from memory -
+    /// a *client* identity is the one thing here that has to reach the disk,
+    /// because the registry stores paths and libcurl opens them itself.
     std::string key_pem () const {
         return tls_detail::to_pem (key.get ());
+    }
+
+    /**
+     * @brief The private key as PEM encrypted under @p passphrase.
+     *
+     * What the registry's `passphrase` field exists for. A key a backend
+     * cannot open without it is the only way to tell a passphrase that is
+     * *used* apart from one that is merely stored: drop `CURLOPT_KEYPASSWD`
+     * and a test presenting this key stops connecting.
+     */
+    std::string encrypted_key_pem (const std::string& passphrase) const {
+        tls_detail::BioPtr bio (BIO_new (BIO_s_mem ()));
+        // The passphrase travels as a length-counted buffer rather than
+        // through the callback: OpenSSL's default callback reads from a
+        // terminal, which a test process does not have.
+        if (!bio ||
+        PEM_write_bio_PrivateKey (bio.get (), key.get (), EVP_aes_256_cbc (),
+        reinterpret_cast<const unsigned char*> (passphrase.data ()),
+        static_cast<int> (passphrase.size ()), nullptr, nullptr) != 1) {
+            tls_detail::fail ("could not serialize an encrypted private key");
+        }
+        return tls_detail::read_bio (bio, "an encrypted private key");
     }
 
     /**
@@ -505,28 +529,33 @@ class CrlServer {
 
 /**
  * @brief An HTTPS listener on 127.0.0.1, holding a certificate the given CA
- *        signed.
+ *        signed - and, given a second CA, demanding a certificate *that* one
+ *        signed in return (#802).
  *
- * Serves one route, `/hello`. What is under test is the handshake in front of
- * it: a body only arrives at all if verification passed, so a 200 here is the
- * assertion and the payload is only there to make a partial read visible.
+ * Serves `/hello` and `/events`. What is under test is the handshake in front
+ * of them: a body only arrives at all if verification passed, so a 200 here is
+ * the assertion and the payload is only there to make a partial read visible.
+ * `/events` is the same assertion for the SSE driver, which reads a stream
+ * rather than a body and so cannot be pointed at `/hello`.
  */
 class TlsServer {
     public:
+    /// A listener that asks the client for nothing.
     explicit TlsServer (const TestCertificateAuthority& ca)
-    : crl_ (ca),
-      identity_ (ca.issue ("127.0.0.1", "IP:127.0.0.1,DNS:localhost", crl_.url ())),
-      cert_pem_ (identity_.pem ()), key_pem_ (identity_.key_pem ()),
-      svr_ (pem_memory ()) {
-        if (!svr_.is_valid ()) {
-            tls_detail::fail ("the TLS listener refused its own certificate");
-        }
-        svr_.Get ("/hello", [] (const httplib::Request&, httplib::Response& res) {
-            res.set_content (R"({"over":"tls"})", "application/json");
-        });
-        port_   = svr_.bind_to_any_port ("127.0.0.1");
-        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
-        svr_.wait_until_ready ();
+    : TlsServer (ca, nullptr) {
+    }
+
+    /**
+     * @brief A listener that completes a handshake only with a client
+     *        presenting a certificate @p client_ca signed.
+     *
+     * Passing the same CA twice is the ordinary case - one authority for both
+     * ends of a test - and passing a different one is what lets a test assert
+     * that an identity from *elsewhere* is refused, which is the difference
+     * between "mTLS is configured" and "any certificate is waved through".
+     */
+    TlsServer (const TestCertificateAuthority& ca, const TestCertificateAuthority& client_ca)
+    : TlsServer (ca, &client_ca) {
     }
 
     ~TlsServer () {
@@ -543,6 +572,12 @@ class TlsServer {
         return "https://127.0.0.1:" + std::to_string (port_) + path;
     }
 
+    /// The ephemeral port this listener took, for a test registering something
+    /// against this exact target rather than against the host.
+    int port () const {
+        return port_;
+    }
+
     /// Where this listener's CRL is served, which is also what its certificate
     /// names as a distribution point - the fixture guard asserts those agree.
     std::string crl_url () const {
@@ -557,17 +592,47 @@ class TlsServer {
 
     private:
     /**
+     * The one constructor body. @p client_ca is null for a listener that asks
+     * the client for nothing, and names the authority whose signature it will
+     * accept otherwise.
+     */
+    TlsServer (const TestCertificateAuthority& ca, const TestCertificateAuthority* client_ca)
+    : crl_ (ca),
+      identity_ (ca.issue ("127.0.0.1", "IP:127.0.0.1,DNS:localhost", crl_.url ())),
+      cert_pem_ (identity_.pem ()), key_pem_ (identity_.key_pem ()),
+      client_ca_pem_ (client_ca != nullptr ? client_ca->pem () : std::string ()),
+      svr_ (pem_memory ()) {
+        if (!svr_.is_valid ()) {
+            tls_detail::fail ("the TLS listener refused its own certificate");
+        }
+        svr_.Get ("/hello", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content (R"({"over":"tls"})", "application/json");
+        });
+        svr_.Get ("/events", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content ("data: one\n\ndata: two\n\n", "text/event-stream");
+        });
+        port_   = svr_.bind_to_any_port ("127.0.0.1");
+        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
+        svr_.wait_until_ready ();
+    }
+
+    /**
      * The listener takes its identity as PEM in memory rather than as a pair of
      * file paths - the only two shapes `httplib::SSLServer` offers since 0.53 -
      * so no private key is ever written to disk, not even to a scratch
      * directory a failing run would leave behind.
      *
-     * `client_ca_pem` is left null: this listener asks for no client
-     * certificate. That is the field #802's mTLS fixture fills in.
+     * A non-empty `client_ca_pem` is what turns this into an mTLS listener:
+     * `SSLServer` loads it as the verify store and switches the context to
+     * `SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT`, so a client with no
+     * certificate, or one this authority did not sign, never reaches a route.
+     * That refusal is the assertion, which is why it is left to the library
+     * rather than re-implemented per test.
      */
     httplib::SSLServer::PemMemory pem_memory () const {
         return { cert_pem_.c_str (), cert_pem_.size (), key_pem_.c_str (),
-            key_pem_.size (), nullptr, 0, nullptr };
+            key_pem_.size (), client_ca_pem_.empty () ? nullptr : client_ca_pem_.c_str (),
+            client_ca_pem_.size (), nullptr };
     }
 
     /// Declared first because the leaf below is minted naming its URL: the
@@ -577,6 +642,9 @@ class TlsServer {
     CertificateAndKey identity_;
     std::string cert_pem_;
     std::string key_pem_;
+    /// Empty for a listener that asks the client for nothing - the two states
+    /// this class has, held as one string rather than a flag beside it.
+    std::string client_ca_pem_;
     httplib::SSLServer svr_;
     std::thread thread_;
     int port_ = 0;

@@ -35,6 +35,7 @@
 
 #include "proxy_server.hpp"
 #include "temp_database.hpp"
+#include "tls_backend.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/debug_redact.hpp"
@@ -426,15 +427,7 @@ TEST_F (TransportPolicyDbTest, AnUnusablePasteIsNotMaterialized) {
     EXPECT_TRUE (policy.ca_bundle_path.empty ());
 }
 
-/// What `curl_version_info()` says this build verifies with, or empty when it
-/// will not say - which is itself a finding, not a default to paper over.
-std::string tls_backend_name () {
-    const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
-    if (info == nullptr || info->ssl_version == nullptr) {
-        return {};
-    }
-    return info->ssl_version;
-}
+using vayu::tests::tls_backend_name;
 
 /// Whether @p backend verifies against the file `CURLOPT_CAINFO` names - which
 /// is the same question as whether that option *replaces* the trust store
