@@ -260,8 +260,17 @@ Three things worth knowing before you design around them:
   a bundle read and ignored - and still verifies when a second anchor is added
   beside it, which is the additive rule observed rather than asserted. That
   listener is why `cpp-httplib` carries the `openssl` feature in
-  `engine/vcpkg.json`. Still structural, not on a wire: the *client*
-  certificate's handshake, tracked by #802.
+  `engine/vcpkg.json`. **The two backends do not answer this the same way, and
+  the wire is how we found out.** Where curl revocation-checks the chain itself
+  - the Schannel path does, passing `CERT_CHAIN_REVOCATION_CHECK_CHAIN` unless
+  told not to - a certificate authority minted for one test run is refused for
+  publishing no CRL, with the anchor loaded and the signature good. So the two
+  *positive* cases skip there, loudly and only on an error text naming
+  revocation, and #819 carries both halves of that: a fixture that serves a CRL,
+  and the user-facing question it exposes (someone pasting an internal CA with
+  no reachable distribution point gets the same refusal, and no doc says so).
+  The negative cases are asserted on every platform. Still structural, not on a
+  wire: the *client* certificate's handshake, tracked by #802.
   A proxy-hop failure is **`ErrorCode::ProxyError`**, distinct from
   the target's `ConnectionFailed` - and `curl_to_error` now takes the handle,
   because a 407 answered to a CONNECT is a plain `CURLE_RECV_ERROR` and only
