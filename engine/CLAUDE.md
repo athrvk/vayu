@@ -271,14 +271,24 @@ Three things worth knowing before you design around them:
   `engine/vcpkg.json`. **The two backends do not answer this the same way, and
   the wire is how we found out.** Where curl revocation-checks the chain itself
   - the Schannel path does, passing `CERT_CHAIN_REVOCATION_CHECK_CHAIN` unless
-  told not to - a certificate authority minted for one test run is refused for
-  publishing no CRL, with the anchor loaded and the signature good. So the two
-  *positive* cases skip there, loudly and only on an error text naming
-  revocation, and #819 carries both halves of that: a fixture that serves a CRL,
-  and the user-facing question it exposes (someone pasting an internal CA with
-  no reachable distribution point gets the same refusal, and no doc says so).
-  The negative cases are asserted on every platform. Still structural, not on a
-  wire: the *client* certificate's handshake, tracked by #802.
+  told not to - a certificate authority minted for one test run was refused for
+  publishing no CRL, with the anchor loaded and the signature good, and the two
+  *positive* cases skipped there. **The fixture publishes one now** (#819): the
+  CA signs an empty CRL, a plain-HTTP `CrlServer` serves it, and the leaf names
+  that listener as its distribution point - on the leaf, because
+  `CERT_CHAIN_REVOCATION_CHECK_CHAIN` checks below the root. A backend that
+  never asks would report nothing about any of that, so
+  `TheFixtureServesACaSignedCrlAtTheLeafsDistributionPoint` asserts on every
+  leg that the extension is on the certificate served and that the document
+  behind it parses, is this CA's, and is current. The skip stays until a CI run
+  on a revocation-checking backend shows it unreachable; it fires only on an
+  error text naming revocation, and every other refusal still fails. What #819
+  keeps after that is the user-facing half, which is a decision rather than a
+  fix: someone pasting an internal CA with no reachable distribution point gets
+  the same refusal, and no doc says so. The negative cases are asserted on every
+  platform. Still structural, not on a wire: the *client* certificate's
+  handshake, tracked by #802 - which should reuse this CRL rather than build a
+  second one.
   A proxy-hop failure is **`ErrorCode::ProxyError`**, distinct from
   the target's `ConnectionFailed` - and `curl_to_error` now takes the handle,
   because a 407 answered to a CONNECT is a plain `CURLE_RECV_ERROR` and only

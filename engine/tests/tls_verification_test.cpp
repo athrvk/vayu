@@ -26,12 +26,26 @@
  * Schannel on Windows), and a claim about trust that holds on one is not a
  * claim about the others. That is not a formality - the backends answered
  * differently the first time this ran. A backend that revocation-checks the
- * chain refuses a CA minted for this run, because a CA minted for this run
- * publishes no CRL, and the *positive* cases below therefore skip there rather
- * than assert. The skip is narrow and loud: it fires only when the backend's
- * own error text names revocation, prints that text, and is tracked by #819;
- * every other refusal, on every platform, still fails. The negative cases have
- * no such carve-out and are asserted everywhere.
+ * chain refused a CA minted for this run, because a CA minted for this run
+ * published no CRL, and the *positive* cases below skipped there rather than
+ * assert.
+ *
+ * **The fixture now publishes one** (#819): the CA signs an empty CRL, a
+ * plain-HTTP listener serves it, and the leaf names that listener as its
+ * distribution point, so the revocation question has an answer on the backends
+ * that ask it. The skip is kept until a CI run on such a backend shows it
+ * unreachable - deleting it on the strength of a local run that never asks
+ * would be replacing one unread claim with another, which is the defect #812
+ * was filed about. It is narrow and loud either way: it fires only when the
+ * backend's own error text names revocation, prints that text, and every other
+ * refusal, on every platform, still fails. The negative cases have no such
+ * carve-out and are asserted everywhere.
+ *
+ * `TheFixtureServesACaSignedCrlAtTheLeafsDistributionPoint` is what keeps that
+ * honest on the backends that never ask. Without it the whole CRL apparatus
+ * could be broken - unparseable bytes, a wrong signer, a stale window - and
+ * every leg would stay green while Windows went on skipping for a reason
+ * nobody would think to re-examine.
  */
 
 #include <gtest/gtest.h>
@@ -160,6 +174,34 @@ class CustomCaVerificationTest : public ::testing::Test {
 };
 
 // ---------------------------------------------------------------------------
+
+TEST_F (CustomCaVerificationTest, TheFixtureServesACaSignedCrlAtTheLeafsDistributionPoint) {
+    // The guard for everything the revocation half of this fixture rests on,
+    // asserted where every backend can see it. A backend that revocation-checks
+    // the chain fetches this document and refuses the handshake if it is not
+    // there, not this CA's, or not current - and the backends that do not ask
+    // would report none of that.
+    TestCertificateAuthority ca;
+    TlsServer server (ca);
+
+    const std::string distribution_point = server.crl_distribution_point_text ();
+    ASSERT_FALSE (distribution_point.empty ())
+    << "the certificate the listener presents carries no crlDistributionPoints "
+       "extension, so no backend will ever fetch the CRL below";
+    EXPECT_NE (distribution_point.find (server.crl_url ()), std::string::npos)
+    << "the leaf points somewhere other than where the CRL is served: " << distribution_point
+    << " vs " << server.crl_url ();
+
+    const auto policy       = resolve_transport_policy (*db_);
+    const Response response = send_through (policy, server.crl_url ());
+    ASSERT_EQ (response.status_code, 200)
+    << "the distribution point answered " << response.status_code << ": "
+    << to_string (response.error_code) << ": " << response.error_message;
+
+    EXPECT_EQ (ca.crl_defect (response.body), "")
+    << "what the distribution point served is not a CRL this CA vouches for, "
+       "so a revocation-checking backend is no better off than before #819";
+}
 
 TEST_F (CustomCaVerificationTest, AHostSignedByTheAddedCaVerifies) {
     TestCertificateAuthority ca;
