@@ -3166,6 +3166,59 @@ function readOrderedSiblings(value: unknown): OrderedSibling[] {
 	);
 }
 
+// --- OpenAPI spec bindings ---------------------------------------------------
+
+/**
+ * A collection's binding to a stored OpenAPI document, as the collection row
+ * carries it (`openapi`, issue #637).
+ *
+ * The engine stores `{}` for the unbound state and refuses a non-empty binding
+ * that names no `specId`, so a row with a string `specId` is the only shape that
+ * means "bound" - and the only one this reads. `specHash` is stamped engine-side
+ * from the stored document at bind time; `syncedAt` is set by a spec sync.
+ */
+interface SpecBinding {
+	specId: string;
+	specHash?: string;
+	syncedAt?: number;
+}
+
+function readSpecBinding(collection: unknown): SpecBinding | null {
+	if (!isRecord(collection)) return null;
+	const binding = collection.openapi;
+	if (!isRecord(binding) || typeof binding.specId !== "string" || binding.specId === "") {
+		return null;
+	}
+	return {
+		specId: binding.specId,
+		...(typeof binding.specHash === "string" ? { specHash: binding.specHash } : {}),
+		...(typeof binding.syncedAt === "number" ? { syncedAt: binding.syncedAt } : {}),
+	};
+}
+
+/**
+ * The document's text as `get_spec` hands it back, bounded (issue #767's rule
+ * applied to a surface whose ceiling is far higher than a response body's).
+ *
+ * A stored spec may be up to `maxSpecDocumentBytes` - megabytes for a real one:
+ * Stripe's is 12 MB, GitHub's 9.7 MB - so the whole of it in a tool result
+ * exceeds the result token limit outright. The cut is `MAX_INLINE_BODY_BYTES`,
+ * this codebase's existing answer to "how much text does an automated reader
+ * get", and `contentBytes` beside it is the engine's own count of the whole
+ * document, so a truncated read always says what it is a prefix of.
+ *
+ * A document with no text answers `content: null` rather than dropping the
+ * field: a caller that asked for the content and got a result without it cannot
+ * tell "empty" from "this tool decided not to send it".
+ */
+function boundSpecContent(document: unknown): Record<string, unknown> {
+	if (!isRecord(document) || typeof document.content !== "string") {
+		return { content: null, contentTruncated: false };
+	}
+	const { text, truncated } = boundText(document.content);
+	return { content: text, contentTruncated: truncated };
+}
+
 // --- Tool definitions --------------------------------------------------------
 
 export const TOOLS: McpTool[] = [
@@ -3846,6 +3899,169 @@ export const TOOLS: McpTool[] = [
 				: withCaveat(
 						result,
 						`\n\nDeleted "${scope.name}" with ${scope.descendants} sub-collection(s) and ${scope.requests} saved request(s).`
+					);
+		},
+	},
+	{
+		name: "get_spec",
+		category: "read",
+		invalidates: [],
+		description:
+			"Read the OpenAPI document a collection is bound to - where it came from, when it was fetched, its content hash and its size - by `collectionId` (resolving the collection's binding) or by `specId` directly. The document text is NOT included by default: a real spec runs to megabytes, so pass includeContent: true to get it, capped at 32 KB with `contentBytes` reporting the true size. A collection that binds nothing answers `bound: false` rather than failing.",
+		annotations: {
+			title: "Get bound OpenAPI spec",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z
+				.string()
+				.optional()
+				.describe("Collection whose binding to resolve. Pass this or specId, not both."),
+			specId: z
+				.string()
+				.optional()
+				.describe(
+					"Stored document to read directly. Spec IDs come from a collection's binding - there is no list route for them."
+				),
+			includeContent: z
+				.boolean()
+				.optional()
+				.describe(
+					"Include the document text (capped at 32 KB). Off by default - the metadata is what describes a binding, and the text can be megabytes."
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const collectionId = str(args, "collectionId");
+			const specIdArg = str(args, "specId");
+			if (!collectionId && !specIdArg) {
+				return errorResult('Pass either "collectionId" or "specId".');
+			}
+			if (collectionId && specIdArg) {
+				return errorResult(
+					'Pass either "collectionId" or "specId", not both - they would have to agree, and this tool cannot say which one you meant if they do not.'
+				);
+			}
+			const includeContent = args.includeContent === true;
+
+			// Assigned on both arms below - by the argument, or by the binding the
+			// collection resolves to - so it is a string by the time it is read.
+			let specId: string;
+			let binding: SpecBinding | null = null;
+			if (collectionId) {
+				let collection: unknown;
+				try {
+					collection = await ctx.client.getCollection(collectionId, signal);
+				} catch (err) {
+					return engineErrorResult(err);
+				}
+				if (collection === null) {
+					return errorResult(`No collection with id "${collectionId}".`);
+				}
+				binding = readSpecBinding(collection);
+				// Unbound is an answer, not a failure: "which spec does this
+				// collection use" has "none" as a legitimate reply, and an error
+				// here would read as an engine or id problem.
+				if (!binding) {
+					return withCaveat(
+						jsonResult({ collectionId, bound: false }),
+						"\n\nThis collection is not bound to an OpenAPI document. Binding one is done in the Vayu app (Collection → Spec) - see https://github.com/athrvk/vayu/issues/761."
+					);
+				}
+				specId = binding.specId;
+			} else {
+				specId = specIdArg;
+			}
+
+			try {
+				// The metadata route unless the text was asked for: it is the whole
+				// point of `GET /specs/:id/meta` that describing a document does not
+				// transfer it, and the full read carries the two extracted indexes
+				// as well, which are as heavy as the document itself.
+				const document = includeContent
+					? await ctx.client.getSpec(specId, signal)
+					: await ctx.client.getSpecMeta(specId, signal);
+				const meta = isRecord(document) ? document : {};
+				const value: Record<string, unknown> = {
+					specId,
+					sourceUrl: meta.sourceUrl ?? null,
+					fetchedAt: meta.fetchedAt ?? null,
+					hash: meta.hash ?? null,
+					// `contentBytes` is only on the meta read; the full read carries
+					// the bytes themselves, so measure them the same way the engine
+					// does (`content.size()`) rather than reporting nothing.
+					contentBytes:
+						typeof meta.contentBytes === "number"
+							? meta.contentBytes
+							: typeof meta.content === "string"
+								? Buffer.byteLength(meta.content, "utf8")
+								: null,
+					...(binding ? { collectionId, bound: true, binding } : {}),
+					...(includeContent ? boundSpecContent(meta) : {}),
+				};
+				return jsonResult(value);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+		},
+	},
+	{
+		name: "unbind_spec",
+		category: "write",
+		invalidates: ["collection"],
+		description:
+			"Detach a collection from the OpenAPI document it is bound to. GUARDED: requires write access to be enabled in Vayu Settings. The document itself is kept - other collections may bind it - and the requests keep the operation identities they were stamped with, exactly as the app's Unbind button leaves them, so re-binding the same document later costs nothing. After this the collection's runs report no contract coverage and its responses are no longer schema-checked. There is no bind over MCP yet: binding has to match every request to an operation, which is app-side logic (see issue #761), so re-binding is done in Vayu (Collection → Spec).",
+		annotations: {
+			title: "Unbind OpenAPI spec",
+			readOnlyHint: false,
+			// The binding goes, nothing it named does: the document stays stored and
+			// the stamps stay on the requests, and a re-bind in the app restores the
+			// state this leaves. That is not the irreversible loss the hint marks.
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z.string().describe("Collection to unbind from its OpenAPI document."),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const collectionId = requireStr(args, "collectionId");
+			let collection: unknown;
+			try {
+				collection = await ctx.client.getCollection(collectionId, signal);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			if (collection === null) {
+				return errorResult(`No collection with id "${collectionId}".`);
+			}
+			const binding = readSpecBinding(collection);
+			// Read first so an unbound collection is reported as already unbound
+			// rather than written to. The PUT would succeed either way - the engine
+			// reads `null` as "reset to the default", and the default is unbound -
+			// and an agent told "unbound" about a collection that was never bound
+			// would believe it had changed something.
+			if (!binding) {
+				return withCaveat(
+					jsonResult({ collectionId, bound: false }),
+					"\n\nNothing to do: this collection was not bound to an OpenAPI document."
+				);
+			}
+			// `null`, not `{}`: the engine reads an absent field as "keep" and null
+			// as "reset to the default", which is unbound. The same value the Spec
+			// tab's Unbind sends, so the two paths cannot come to mean different
+			// things.
+			const result = await callEngine(() =>
+				ctx.client.updateCollection(collectionId, { openapi: null }, signal)
+			);
+			return result.isError
+				? result
+				: withCaveat(
+						result,
+						`\n\nUnbound from spec ${binding.specId}. The document is still stored (another collection may bind it), and the requests keep their recorded operation identities.`
 					);
 		},
 	},

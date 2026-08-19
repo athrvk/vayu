@@ -125,6 +125,13 @@ describe("the registry declares its effects", () => {
 			create_collection: ["collection"],
 			update_collection: ["collection"],
 			delete_collection: ["collection"],
+			// Detaching an OpenAPI document (#761 phase A) rewrites one field of
+			// the collection row - `openapi` - and the Spec tab reads the binding
+			// off that row, so the family that refetches collections is the one
+			// that refreshes it. No `spec` family: the stored document is
+			// immutable under its id and this write neither changes nor deletes
+			// one, so the caches keyed by spec id cannot go stale here.
+			unbind_spec: ["collection"],
 			create_request: ["request"],
 			update_request: ["request"],
 			delete_request: ["request"],

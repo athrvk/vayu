@@ -150,6 +150,22 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			preRequestScript: "",
 			postRequestScript: "",
 		}),
+		getSpecMeta: vi.fn().mockResolvedValue({
+			id: "spec_1",
+			sourceUrl: "https://api.example.com/openapi.json",
+			fetchedAt: 1_755_000_000_000,
+			hash: "abc123",
+			contentBytes: 4,
+		}),
+		getSpec: vi.fn().mockResolvedValue({
+			id: "spec_1",
+			content: "{ }\n",
+			sourceUrl: "https://api.example.com/openapi.json",
+			fetchedAt: 1_755_000_000_000,
+			hash: "abc123",
+			operations: null,
+			responseSchemas: null,
+		}),
 		listRequestExamples: vi.fn().mockResolvedValue([]),
 		createRequestExample: vi
 			.fn()
@@ -6943,5 +6959,215 @@ describe("OAuth 2.0 token tools", () => {
 		expect(tools.get("fetch_oauth2_token")?.invalidates).toEqual(["oauth"]);
 		expect(tools.get("clear_oauth2_token")?.invalidates).toEqual(["oauth"]);
 		expect(tools.get("get_oauth2_token_status")?.invalidates).toEqual([]);
+	});
+});
+
+/**
+ * OpenAPI spec binding, phase A (issue #761).
+ *
+ * Two things are worth locking here, and neither is the passthrough.
+ *
+ * The first is that describing a binding must not transfer the document. That
+ * is the whole reason `GET /specs/:id/meta` exists (#712) - a real spec is
+ * megabytes, and one in a tool result exceeds the result token limit outright -
+ * so the tests assert *which route was called*, not just what came back. A
+ * version that read the full document and dropped `content` would answer
+ * identically and cost the same megabytes.
+ *
+ * The second is that `unbind_spec` writes `openapi: null` and never `{}`. The
+ * engine reads an absent field as "keep" and null as "reset to the default";
+ * `{}` is a value that happens to serialize as unbound today, and the two would
+ * drift the first time the default changed. The Spec tab's Unbind sends null for
+ * the same reason.
+ */
+describe("OpenAPI spec binding tools", () => {
+	const WRITES = { allowWrites: true };
+	const allText = (r: { content: Array<{ text: string }> }) =>
+		r.content.map((c) => c.text).join("\n");
+
+	/** A collection row bound to `spec_1`, as the engine serializes one. */
+	const boundCollection = {
+		id: "col_1",
+		name: "API",
+		openapi: { specId: "spec_1", specHash: "abc123", syncedAt: 1_755_000_000_000 },
+	};
+
+	/** The unbound state as the engine stores it: an empty object, not absent. */
+	const unboundCollection = { id: "col_1", name: "API", openapi: {} };
+
+	test("get_spec resolves a collection's binding and reads metadata, not the document", async () => {
+		const client = fakeClient({
+			getCollection: vi.fn().mockResolvedValue(boundCollection),
+		});
+		const res = await dispatchTool("get_spec", { collectionId: "col_1" }, ctxWith(client));
+		expect(res.isError).toBeFalsy();
+		expect(client.getSpecMeta).toHaveBeenCalledWith("spec_1", undefined);
+		// The document itself is never fetched for a metadata read - the point.
+		expect(client.getSpec).not.toHaveBeenCalled();
+		const value = JSON.parse(firstText(res));
+		expect(value).toMatchObject({
+			specId: "spec_1",
+			bound: true,
+			collectionId: "col_1",
+			sourceUrl: "https://api.example.com/openapi.json",
+			hash: "abc123",
+			contentBytes: 4,
+			binding: { specId: "spec_1", specHash: "abc123" },
+		});
+		expect(value).not.toHaveProperty("content");
+	});
+
+	test("get_spec reads a spec by id without touching collections", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool("get_spec", { specId: "spec_9" }, ctxWith(client));
+		expect(res.isError).toBeFalsy();
+		expect(client.getCollection).not.toHaveBeenCalled();
+		expect(client.getSpecMeta).toHaveBeenCalledWith("spec_9", undefined);
+		// No collection was named, so there is no binding to report - the field is
+		// absent rather than null, which would read as "bound to nothing".
+		expect(JSON.parse(firstText(res))).not.toHaveProperty("binding");
+	});
+
+	test("an unbound collection is an answer, not an error, and reads no spec", async () => {
+		const client = fakeClient({
+			getCollection: vi.fn().mockResolvedValue(unboundCollection),
+		});
+		const res = await dispatchTool("get_spec", { collectionId: "col_1" }, ctxWith(client));
+		expect(res.isError).toBeFalsy();
+		expect(JSON.parse(firstText(res))).toEqual({ collectionId: "col_1", bound: false });
+		expect(client.getSpecMeta).not.toHaveBeenCalled();
+		expect(allText(res)).toMatch(/not bound/i);
+	});
+
+	test("get_spec refuses no selector and both selectors", async () => {
+		const client = fakeClient();
+		const neither = await dispatchTool("get_spec", {}, ctxWith(client));
+		expect(neither.isError).toBe(true);
+		const both = await dispatchTool(
+			"get_spec",
+			{ collectionId: "col_1", specId: "spec_1" },
+			ctxWith(client)
+		);
+		expect(both.isError).toBe(true);
+		expect(firstText(both)).toMatch(/not both/i);
+		expect(client.getSpecMeta).not.toHaveBeenCalled();
+	});
+
+	test("get_spec names a collection id nothing matches", async () => {
+		const client = fakeClient({ getCollection: vi.fn().mockResolvedValue(null) });
+		const res = await dispatchTool("get_spec", { collectionId: "nope" }, ctxWith(client));
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("nope");
+		expect(client.getSpecMeta).not.toHaveBeenCalled();
+	});
+
+	test("includeContent reads the document and caps it, reporting the true size", async () => {
+		const document = "x".repeat(MAX_INLINE_BODY_BYTES * 2);
+		const client = fakeClient({
+			getSpec: vi.fn().mockResolvedValue({
+				id: "spec_1",
+				content: document,
+				sourceUrl: null,
+				fetchedAt: 1,
+				hash: "h",
+			}),
+		});
+		const res = await dispatchTool(
+			"get_spec",
+			{ specId: "spec_1", includeContent: true },
+			ctxWith(client)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.getSpec).toHaveBeenCalledWith("spec_1", undefined);
+		expect(client.getSpecMeta).not.toHaveBeenCalled();
+		const value = JSON.parse(firstText(res));
+		expect(Buffer.byteLength(value.content as string, "utf8")).toBeLessThanOrEqual(
+			MAX_INLINE_BODY_BYTES
+		);
+		expect(value.contentTruncated).toBe(true);
+		// The full read carries no `contentBytes`, so the true size has to be
+		// measured here - a cut that reported its own length would tell an agent
+		// the spec is 32 KB.
+		expect(value.contentBytes).toBe(document.length);
+		expect(value.sourceUrl).toBeNull();
+	});
+
+	test("unbind_spec is refused while writes are off, and reads nothing", async () => {
+		const client = fakeClient({
+			getCollection: vi.fn().mockResolvedValue(boundCollection),
+		});
+		const res = await dispatchTool(
+			"unbind_spec",
+			{ collectionId: "col_1" },
+			ctxWith(client, { allowWrites: false })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.updateCollection).not.toHaveBeenCalled();
+		expect(client.getCollection).not.toHaveBeenCalled();
+	});
+
+	test("unbind_spec sends openapi: null and names the document it detached", async () => {
+		const client = fakeClient({
+			getCollection: vi.fn().mockResolvedValue(boundCollection),
+		});
+		const res = await dispatchTool(
+			"unbind_spec",
+			{ collectionId: "col_1" },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		const [id, payload] = (client.updateCollection as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(id).toBe("col_1");
+		// Null, not `{}` - see this block's header.
+		expect(payload).toEqual({ openapi: null });
+		expect(Object.prototype.hasOwnProperty.call(payload, "openapi")).toBe(true);
+		expect((payload as { openapi: unknown }).openapi).toBeNull();
+		expect(allText(res)).toContain("spec_1");
+	});
+
+	test("unbind_spec writes nothing for a collection that binds nothing", async () => {
+		const client = fakeClient({
+			getCollection: vi.fn().mockResolvedValue(unboundCollection),
+		});
+		const res = await dispatchTool(
+			"unbind_spec",
+			{ collectionId: "col_1" },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.updateCollection).not.toHaveBeenCalled();
+		expect(allText(res)).toMatch(/Nothing to do/i);
+	});
+
+	test("unbind_spec names a collection id nothing matches", async () => {
+		const client = fakeClient({ getCollection: vi.fn().mockResolvedValue(null) });
+		const res = await dispatchTool(
+			"unbind_spec",
+			{ collectionId: "nope" },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBe(true);
+		expect(client.updateCollection).not.toHaveBeenCalled();
+	});
+
+	test("the categories and cache families are declared", () => {
+		const tools = new Map(TOOLS.map((t) => [t.name, t]));
+		expect(tools.get("get_spec")?.category).toBe("read");
+		expect(tools.get("get_spec")?.invalidates).toEqual([]);
+		expect(tools.get("unbind_spec")?.category).toBe("write");
+		// The Spec tab reads the binding off the collection row, so the family that
+		// refetches collections is the one that refreshes it - no `spec` entity.
+		expect(tools.get("unbind_spec")?.invalidates).toEqual(["collection"]);
+		// Nothing it names is destroyed: the document stays and so do the stamps.
+		expect(tools.get("unbind_spec")?.annotations.destructiveHint).toBe(false);
+	});
+
+	test("phase A ships no bind tool", () => {
+		// Deliberate, and recorded on #761: binding without operation matching
+		// would store a document with no operations/responseSchemas index and
+		// leave stale stamps uncleared, which makes coverage claim the wrong
+		// operation rather than none. If a bind lands later, this expectation is
+		// the thing that should be updated in the same commit.
+		expect(TOOLS.map((t) => t.name)).not.toContain("bind_spec");
 	});
 });
