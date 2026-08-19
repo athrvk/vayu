@@ -322,6 +322,31 @@ export class EngineClient {
 	}
 
 	/**
+	 * What a stored OpenAPI document *is* - id, sourceUrl, fetchedAt, hash and
+	 * contentBytes - without the document (`GET /specs/:id/meta`, issue #712).
+	 *
+	 * The default read for a spec, on the renderer's reasoning: the fields that
+	 * describe a binding live on the document, and fetching a 12 MB spec to print
+	 * a source line and a date is what this route was added to stop. A 404 arrives
+	 * as an {@link EngineRequestError}.
+	 */
+	getSpecMeta(id: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", `/specs/${encodeURIComponent(id)}/meta`, undefined, signal);
+	}
+
+	/**
+	 * The whole stored document, `content` included (`GET /specs/:id`).
+	 *
+	 * Only for a caller that asked for the text: the two extracted indexes
+	 * (`operations`, `responseSchemas`) ride along on this route and are as heavy
+	 * as the document, so a reader that only wants metadata takes
+	 * {@link getSpecMeta} instead.
+	 */
+	getSpec(id: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", `/specs/${encodeURIComponent(id)}`, undefined, signal);
+	}
+
+	/**
 	 * A page of run history (newest first), bounded so a caller never pulls
 	 * unbounded history. Returns the `{data, pagination}` envelope; `data` rows
 	 * carry the compact `summary`, not the full config_snapshot.
