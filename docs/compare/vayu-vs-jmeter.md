@@ -27,9 +27,22 @@ the request in.
 | **Scripting** | QuickJS (`pm.*` syntax) | Groovy / BeanShell |
 | **Distributed execution** | No - single machine | Yes (controller + workers) |
 | **MCP / agent control** | Built in, local, drives the load engine | No |
+| **Proxy / custom CA / client certs** | In Settings - four proxy modes, additive CAs, per-host certs\* | JVM properties and the Java keystore |
 | **Postman collection import** | Yes (v2.0 + v2.1) | No |
 | **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | No |
 | **Open source** | Yes (dual-license) | Yes (Apache 2.0) |
+
+\* **Two asterisks that row has earned.** Client certificates are proven on a
+wire on Linux and macOS; **on Windows an mTLS handshake does not complete
+yet** - an upstream libcurl defect carried in curl's own `KNOWN_BUGS`, not a
+setting you can fix, with the backend change that resolves it approved and
+queued. And `system` proxy mode resolves a PAC script **once**, against a probe
+URL, applying that one answer engine-wide rather than per URL; a headless
+engine with nothing resolved falls back to environment-variable pickup rather
+than to no proxy. Detail:
+[proxy settings](../engine/api-reference.md#proxy-settings),
+[TLS trust](../engine/api-reference.md#tls-trust-settings) and
+[client certificates](../engine/api-reference.md#client-certificates).
 
 ## The engine, and what it does not cost you
 

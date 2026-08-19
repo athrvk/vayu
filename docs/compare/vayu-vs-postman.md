@@ -25,9 +25,22 @@ native C++ load engine in the same app.
 | **SSE streaming** | Live Events view, scriptable, load-tested | Client-side inspection |
 | **Mock servers** | Collection mock + OAuth issuer + webhook inbox | Yes (cloud tier) |
 | **Data-driven runs** | CSV / TSV / JSON / JSONL | CSV / JSON |
+| **Proxy / custom CA / client certs** | In Settings - four proxy modes, additive CAs, per-host certs\* | In Settings - proxy, CA file, per-domain certs |
 | **Postman collection import** | Yes (v2.0 + v2.1) | Native |
 | **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | Yes |
 | **Open source** | Yes (dual-license) | Partial |
+
+\* **Two asterisks that row has earned.** Client certificates are proven on a
+wire on Linux and macOS; **on Windows an mTLS handshake does not complete
+yet** - an upstream libcurl defect carried in curl's own `KNOWN_BUGS`, not a
+setting you can fix, with the backend change that resolves it approved and
+queued. And `system` proxy mode resolves a PAC script **once**, against a probe
+URL, applying that one answer engine-wide rather than per URL; a headless
+engine with nothing resolved falls back to environment-variable pickup rather
+than to no proxy. Detail:
+[proxy settings](../engine/api-reference.md#proxy-settings),
+[TLS trust](../engine/api-reference.md#tls-trust-settings) and
+[client certificates](../engine/api-reference.md#client-certificates).
 
 ## One app instead of two
 
@@ -49,8 +62,12 @@ component to sync with. Collections, environments, secrets, and run history live
 in a SQLite database in your home directory, and the app contacts no external
 service during normal use - no telemetry, no license check. That is what makes
 it usable behind a corporate firewall or on an air-gapped network, where a
-client that wants to reach a workspace API simply cannot work. The trade is
-real and stated plainly below: nothing syncs itself between machines either.
+client that wants to reach a workspace API simply cannot work. The firewall
+half of that is now true in both directions: the engine goes *through* the
+proxy your company runs, verifies against the CA it injects, and presents the
+client certificate its APIs ask for - configured once in Settings > Network &
+connectivity, applied to every outbound path. The trade is real and stated
+plainly below: nothing syncs itself between machines either.
 
 ## Your agent can drive it
 

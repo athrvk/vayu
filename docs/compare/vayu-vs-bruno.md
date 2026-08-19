@@ -25,9 +25,22 @@ the request comes back green.
 | **SSE streaming** | Live Events view, scriptable, load-tested | Connects, no event UI |
 | **Mock servers** | Collection mock + OAuth issuer + webhook inbox | No |
 | **Data-driven runs** | CSV / TSV / JSON / JSONL | CSV / JSON |
+| **Proxy / custom CA / client certs** | In Settings - four proxy modes, additive CAs, per-host certs\* | In Preferences - proxy and CA file; certs per collection |
 | **Postman collection import** | Yes (v2.0 + v2.1) | Yes (via converter) |
 | **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | No |
 | **Open source** | Yes (dual-license) | Yes (MIT) |
+
+\* **Two asterisks that row has earned.** Client certificates are proven on a
+wire on Linux and macOS; **on Windows an mTLS handshake does not complete
+yet** - an upstream libcurl defect carried in curl's own `KNOWN_BUGS`, not a
+setting you can fix, with the backend change that resolves it approved and
+queued. And `system` proxy mode resolves a PAC script **once**, against a probe
+URL, applying that one answer engine-wide rather than per URL; a headless
+engine with nothing resolved falls back to environment-variable pickup rather
+than to no proxy. Detail:
+[proxy settings](../engine/api-reference.md#proxy-settings),
+[TLS trust](../engine/api-reference.md#tls-trust-settings) and
+[client certificates](../engine/api-reference.md#client-certificates).
 
 ## The native load engine is the difference
 

@@ -25,9 +25,22 @@ k6 was built for exactly that and Vayu is not trying to be it.
 | **Distributed / cloud execution** | No - single machine | Yes |
 | **MCP / agent control** | Built in, local, drives the load engine | Official server (experimental) |
 | **Data-driven runs** | CSV / TSV / JSON / JSONL | Yes (in script) |
+| **Proxy / custom CA / client certs** | In Settings - four proxy modes, additive CAs, per-host certs\* | Environment variables and script options (`tlsAuth`) |
 | **Postman collection import** | Yes (v2.0 + v2.1) | Limited |
 | **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | No |
 | **Open source** | Yes (dual-license) | Yes (AGPL v3) |
+
+\* **Two asterisks that row has earned.** Client certificates are proven on a
+wire on Linux and macOS; **on Windows an mTLS handshake does not complete
+yet** - an upstream libcurl defect carried in curl's own `KNOWN_BUGS`, not a
+setting you can fix, with the backend change that resolves it approved and
+queued. And `system` proxy mode resolves a PAC script **once**, against a probe
+URL, applying that one answer engine-wide rather than per URL; a headless
+engine with nothing resolved falls back to environment-variable pickup rather
+than to no proxy. Detail:
+[proxy settings](../engine/api-reference.md#proxy-settings),
+[TLS trust](../engine/api-reference.md#tls-trust-settings) and
+[client certificates](../engine/api-reference.md#client-certificates).
 
 ## The throughput is in the same class
 
