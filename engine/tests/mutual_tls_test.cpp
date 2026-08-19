@@ -25,20 +25,24 @@
  *
  * ## The per-backend format matrix
  *
- * A client identity does not travel in one shape:
+ * A client identity does not travel in one shape, and since #833 the row says
+ * which one it is in - so every case here runs **once per format this build can
+ * present**, rather than once in the only format the engine could write:
  *
- * | Backend | This build | A client identity arrives as |
+ * | Backend | This build | A client identity may arrive as |
  * |---|---|---|
- * | OpenSSL (Linux, macOS) | yes | a PEM certificate and a PEM key |
- * | Schannel (Windows) | yes | PKCS#12, or a certificate-store reference |
+ * | OpenSSL (Linux, macOS) | yes | a PEM certificate + PEM key, or PKCS#12 |
+ * | Schannel (Windows) | yes | PKCS#12 (or a certificate-store reference) |
  *
- * The engine writes `CURLOPT_SSLCERT` / `CURLOPT_SSLKEY` and **no**
- * `CURLOPT_SSLCERTTYPE`, so what it can present is libcurl's default, a PEM
- * pair - which is every backend in this repo except Schannel. The Windows leg
- * therefore skips these cases, loudly and with that reason, rather than
- * asserting a shape it cannot produce; `NoBackendIsSkippedForAReasonThatWentAway`
- * is the guard that stops the skip from outliving its cause, and #833 tracks
- * giving the registry a certificate format so the skip can go away entirely.
+ * That set comes from `client_identity_formats()`, so no leg is dark and no leg
+ * asserts a shape its backend cannot load: Windows runs the PKCS#12 half of
+ * every case below and skips nothing, where before #833 it ran none of them.
+ * A backend nothing here classifies presents an empty set, which
+ * `ThisBuildCanPresentAClientIdentityAtAll` fails on rather than letting the
+ * suite quietly instantiate nothing.
+ *
+ * A certificate-store reference is Schannel's other shape and is out of scope
+ * (#833): the registry stores file paths, and a store expression is not a file.
  */
 
 #include <gtest/gtest.h>
@@ -81,59 +85,43 @@ using vayu::tests::TlsServer;
 namespace routes = vayu::http::routes;
 
 // ---------------------------------------------------------------------------
-// What this build can host
-// ---------------------------------------------------------------------------
-
-/// Why @p backend cannot present the identity this fixture mints, or empty if
-/// it can. Phrased as a sentence because it is printed by a skip: a leg that
-/// silently runs nothing is worse than one that runs nothing and says why.
-std::string cannot_present_a_pem_pair (std::string_view backend) {
-    switch (vayu::tests::client_identity_format (backend)) {
-    case ClientIdentityFormat::PemPair: return {};
-    case ClientIdentityFormat::Pkcs12:
-        return "TLS backend '" + std::string (backend) +
-        "' takes a client identity as PKCS#12 or as a certificate-store "
-        "reference, never as the PEM pair libcurl reads by default - and the "
-        "engine writes no CURLOPT_SSLCERTTYPE, so a PEM pair is the only shape "
-        "it can present. Registering a PKCS#12 file here would fail on the "
-        "format rather than on anything this suite is about. Tracked in #833.";
-    case ClientIdentityFormat::Unknown: break;
-    }
-    return "TLS backend '" + std::string (backend) +
-    "' is one no statement in this repo covers, so what a client identity must "
-    "look like for it is unknown - decide and record it rather than letting "
-    "this fixture guess.";
-}
-
-// ---------------------------------------------------------------------------
 // Fixture material
 // ---------------------------------------------------------------------------
 
 /**
- * A PEM file on disk, removed when the test ends.
+ * A file on disk, removed when the test ends.
  *
  * The registry stores **paths** and libcurl opens them itself, so a client
  * identity is the one piece of material here that cannot stay in memory the
  * way the listener's does. It lands in the per-process scratch directory
- * (`temp_database.hpp`), lives for one test, and is named after it.
+ * (`temp_database.hpp`), lives for one test, and is named after it. Binary,
+ * because a PKCS#12 bundle is DER and a text-mode write would corrupt it on
+ * the one platform that cannot use anything else.
  */
-class PemFile {
+class IdentityFile {
     public:
-    PemFile (std::string name, const std::string& contents)
+    IdentityFile (std::string name, const std::string& contents)
     : path_ (std::move (name)) {
         std::ofstream out (path_, std::ios::binary | std::ios::trunc);
-        out << contents;
+        out.write (contents.data (), static_cast<std::streamsize> (contents.size ()));
         out.close ();
         if (!out) {
             throw std::runtime_error ("mutual_tls_test: could not write " + path_);
         }
     }
-    ~PemFile () {
+    ~IdentityFile () {
+        if (path_.empty ()) {
+            return; // Moved from: the file belongs to whoever took it.
+        }
         std::error_code ec;
         std::filesystem::remove (path_, ec);
     }
-    PemFile (const PemFile&)            = delete;
-    PemFile& operator= (const PemFile&) = delete;
+    IdentityFile (IdentityFile&& other) noexcept : path_ (std::move (other.path_)) {
+        other.path_.clear ();
+    }
+    IdentityFile (const IdentityFile&)            = delete;
+    IdentityFile& operator= (const IdentityFile&) = delete;
+    IdentityFile& operator= (IdentityFile&&)      = delete;
 
     const std::string& path () const {
         return path_;
@@ -143,11 +131,22 @@ class PemFile {
     std::string path_;
 };
 
-/// A client identity as the registry wants it: two paths, and optionally a
-/// passphrase the key is actually encrypted under.
+/**
+ * A client identity as the registry wants it, in one format or the other: a
+ * certificate file, and a key file only where the format keeps the key in one.
+ *
+ * The `key` being *absent* rather than empty is the shape under test as much as
+ * the bytes are - a PKCS#12 row names no key path at all, and a fixture that
+ * passed an empty string would be registering something the route refuses.
+ */
 struct ClientIdentity {
-    PemFile certificate;
-    PemFile key;
+    IdentityFile certificate;
+    std::optional<IdentityFile> key;
+
+    /// What the registry stores for the key, which is nothing for a bundle.
+    std::string key_path () const {
+        return key ? key->path () : std::string{};
+    }
 };
 
 Request get_request (const std::string& url) {
@@ -175,14 +174,18 @@ Response send_through (const TransportPolicy& transport, const std::string& url)
     return result.is_ok () ? result.value () : Response{};
 }
 
-class MutualTlsTest : public ::testing::Test {
+/**
+ * Every case, once per format this build can present (#833).
+ *
+ * Parameterized rather than skipped: the formats a backend takes are a set, so
+ * "which cases run here" is a property of the build and not a leg being dark.
+ * A case that does not read the parameter - the refusal with no entry
+ * registered - still runs once per format, because it shares this fixture and a
+ * second fixture for one test would cost more than the handshake does.
+ */
+class MutualTlsTest : public ::testing::TestWithParam<ClientIdentityFormat> {
     protected:
     void SetUp () override {
-        if (const std::string why =
-            cannot_present_a_pem_pair (vayu::tests::tls_backend_name ());
-            !why.empty ()) {
-            GTEST_SKIP () << why;
-        }
         vayu::tests::remove_database_files (path_);
         db_ = std::make_unique<vayu::db::Database> (path_);
         db_->seed_default_config ();
@@ -214,25 +217,44 @@ class MutualTlsTest : public ::testing::Test {
         db_->save_config_entry (*entry);
     }
 
-    /// An identity @p issuer signed, written where the registry can name it.
-    /// @p passphrase encrypts the key when it is not empty.
+    /// The format this instance is exercising, and the `certFormat` a row
+    /// registered here declares.
+    ClientIdentityFormat format () const {
+        return GetParam ();
+    }
+
+    /**
+     * An identity @p issuer signed, in this instance's format, written where
+     * the registry can name it. @p passphrase protects the key when it is not
+     * empty - the PEM key by encryption, the bundle by its import password,
+     * which is the same `passphrase` column either way.
+     */
     ClientIdentity identity (const std::string& name,
     const TestCertificateAuthority& issuer,
     const std::string& passphrase = {}) {
         const CertificateAndKey minted =
         issuer.issue ("vayu-test-client", "DNS:vayu-test-client");
-        return ClientIdentity{ PemFile{ name + "_cert.pem", minted.pem () },
-            PemFile{ name + "_key.pem",
+        if (format () == ClientIdentityFormat::Pkcs12) {
+            return ClientIdentity{ IdentityFile{ name + "_identity.p12",
+                                   minted.pkcs12 (passphrase) },
+                std::nullopt };
+        }
+        return ClientIdentity{ IdentityFile{ name + "_cert.pem", minted.pem () },
+            IdentityFile{ name + "_key.pem",
             passphrase.empty () ? minted.key_pem () : minted.encrypted_key_pem (passphrase) } };
     }
 
     /// Register an entry the way the app does, through the route - so the row
-    /// under test is one the shipped validation accepted.
+    /// under test is one the shipped validation accepted, `certFormat` and the
+    /// key path it does or does not carry included.
     void register_entry (const ClientIdentity& id,
     std::optional<int> port       = std::nullopt,
     const std::string& passphrase = {}) {
-        json payload = { { "host", "127.0.0.1" },
-            { "certPath", id.certificate.path () }, { "keyPath", id.key.path () } };
+        json payload = { { "host", "127.0.0.1" }, { "certPath", id.certificate.path () },
+            { "certFormat", vayu::tests::client_identity_format_name (format ()) } };
+        if (!id.key_path ().empty ()) {
+            payload["keyPath"] = id.key_path ();
+        }
         if (port) {
             payload["port"] = *port;
         }
@@ -266,47 +288,31 @@ class MutualTlsTest : public ::testing::Test {
 // ---------------------------------------------------------------------------
 
 TEST (MutualTlsBackend, ClassifiesTheBackendsThisRepoCanBeBuiltAgainst) {
-    // Runs everywhere, including where the skip below is not taken: a
-    // classifier that answered "PEM pair" to everything would be green on
-    // Linux and macOS and would only be caught by the Windows leg - the rule
-    // that a per-platform branch must not be asserted only where it happens to
-    // be taken.
-    EXPECT_EQ (vayu::tests::client_identity_format ("OpenSSL/3.6.3"),
-    ClientIdentityFormat::PemPair);
-    EXPECT_EQ (vayu::tests::client_identity_format ("Schannel"), ClientIdentityFormat::Pkcs12);
-    EXPECT_EQ (vayu::tests::client_identity_format ("GnuTLS/3.8.4"),
-    ClientIdentityFormat::Unknown);
-    EXPECT_EQ (vayu::tests::client_identity_format (""), ClientIdentityFormat::Unknown);
-
-    EXPECT_TRUE (cannot_present_a_pem_pair ("OpenSSL/3.6.3").empty ());
-    EXPECT_FALSE (cannot_present_a_pem_pair ("Schannel").empty ());
-    EXPECT_FALSE (cannot_present_a_pem_pair ("GnuTLS/3.8.4").empty ());
+    // Runs everywhere, not only where each answer is taken: a classifier that
+    // returned both formats for everything would be green on Linux and macOS
+    // and would only be caught by the Windows leg - the rule that a
+    // per-platform branch must not be asserted only where it happens to apply.
+    EXPECT_EQ (vayu::tests::client_identity_formats ("OpenSSL/3.6.3"),
+    (std::vector<ClientIdentityFormat>{ ClientIdentityFormat::PemPair,
+    ClientIdentityFormat::Pkcs12 }));
+    EXPECT_EQ (vayu::tests::client_identity_formats ("Schannel"),
+    (std::vector<ClientIdentityFormat>{ ClientIdentityFormat::Pkcs12 }));
+    // A PEM pair is the shape Schannel takes *no* file in, which is the whole
+    // reason the format is stored - assert the absence, not just the presence.
+    EXPECT_TRUE (vayu::tests::client_identity_formats ("GnuTLS/3.8.4").empty ());
+    EXPECT_TRUE (vayu::tests::client_identity_formats ("").empty ());
 }
 
-TEST (MutualTlsBackend, NoBackendIsSkippedForAReasonThatWentAway) {
-    // The skip above rests on one fact about the shipped code: the applier
-    // writes no certificate *type*, so libcurl's default - a PEM pair - is the
-    // only shape the engine can present. The day that changes (#833), the
-    // Windows leg stops being unhostable, and a skip nobody revisits would
-    // quietly keep it dark. So the fact is read off the source rather than
-    // remembered.
-    const std::filesystem::path applier = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
-    "src" / "http" / "event_loop" / "curl_utils.cpp";
-    std::ifstream file (applier);
-    std::stringstream buffer;
-    buffer << file.rdbuf ();
-    const std::string source = buffer.str ();
-
-    // A guard reading an empty string passes forever.
-    ASSERT_GT (source.size (), 1000u) << "read nothing from " << applier;
-    ASSERT_NE (source.find ("CURLOPT_SSLCERT"), std::string::npos)
-    << "the client-certificate options are not in " << applier
-    << " any more, so this suite is asserting against the wrong file";
-
-    EXPECT_EQ (source.find ("CURLOPT_SSLCERTTYPE"), std::string::npos)
-    << "the applier now names a certificate type, so a backend that wants "
-       "PKCS#12 may be hostable after all - revisit the skip in this file "
-       "(#833) instead of leaving Windows dark";
+TEST (MutualTlsBackend, ThisBuildCanPresentAClientIdentityAtAll) {
+    // The instantiation below draws its parameters from this list, so an empty
+    // one would silently generate no tests - a leg reporting nothing, which is
+    // exactly the darkness #833 removed. Failing here names the backend
+    // instead.
+    EXPECT_FALSE (vayu::tests::client_identity_formats ().empty ())
+    << "TLS backend '" << vayu::tests::tls_backend_name ()
+    << "' is one no statement in this repo covers, so what a client identity "
+       "must look like for it is unknown - decide and record it rather than "
+       "letting this fixture guess";
 }
 
 TEST (MutualTlsErrorMapping, AnUnreachableHttpsEndpointIsStillAConnectionFailure) {
@@ -328,7 +334,7 @@ TEST (MutualTlsErrorMapping, AnUnreachableHttpsEndpointIsStillAConnectionFailure
     << to_string (response.error_code) << ": " << response.error_message;
 }
 
-TEST_F (MutualTlsTest, TheListenerRefusesAClientWithNoCertificate) {
+TEST_P (MutualTlsTest, TheListenerRefusesAClientWithNoCertificate) {
     // Without this, every success below would prove nothing: a listener that
     // asked for a certificate and shrugged when none came would answer 200 to
     // an engine that presented nothing at all.
@@ -347,7 +353,7 @@ TEST_F (MutualTlsTest, TheListenerRefusesAClientWithNoCertificate) {
     << to_string (response.error_code) << ": " << response.error_message;
 }
 
-TEST_F (MutualTlsTest, AnIdentityFromAnotherAuthorityIsRefused) {
+TEST_P (MutualTlsTest, AnIdentityFromAnotherAuthorityIsRefused) {
     // The case that tells "a certificate was presented" apart from "this
     // certificate was accepted". The identity is well-formed and loads
     // cleanly; only its issuer is wrong.
@@ -368,7 +374,7 @@ TEST_F (MutualTlsTest, AnIdentityFromAnotherAuthorityIsRefused) {
 // The drivers
 // ---------------------------------------------------------------------------
 
-TEST_F (MutualTlsTest, ADesignSendCompletesTheHandshakeAndNamesTheEntry) {
+TEST_P (MutualTlsTest, ADesignSendCompletesTheHandshakeAndNamesTheEntry) {
     TlsServer server (ca_, ca_);
     const ClientIdentity client = identity ("design", ca_);
     register_entry (client);
@@ -385,7 +391,7 @@ TEST_F (MutualTlsTest, ADesignSendCompletesTheHandshakeAndNamesTheEntry) {
     EXPECT_EQ (response.client_certificate, "127.0.0.1");
 }
 
-TEST_F (MutualTlsTest, AnSseStreamPresentsTheCertificate) {
+TEST_P (MutualTlsTest, AnSseStreamPresentsTheCertificate) {
     // The driver that had no proxy option at all before #705, and would have
     // been the one to miss certificates too if each driver configured its own
     // transport.
@@ -407,7 +413,7 @@ TEST_F (MutualTlsTest, AnSseStreamPresentsTheCertificate) {
     EXPECT_EQ (response.client_certificate, "127.0.0.1");
 }
 
-TEST_F (MutualTlsTest, ALoadRunPresentsTheCertificate) {
+TEST_P (MutualTlsTest, ALoadRunPresentsTheCertificate) {
     // The load path resolves the policy once at run start and matches per
     // transfer from that snapshot, and its handles are pooled - so this also
     // says a reused handle keeps presenting the identity.
@@ -430,7 +436,7 @@ TEST_F (MutualTlsTest, ALoadRunPresentsTheCertificate) {
     EXPECT_EQ (batch.failed, 0u);
 }
 
-TEST_F (MutualTlsTest, PmSendRequestPresentsTheCertificate) {
+TEST_P (MutualTlsTest, PmSendRequestPresentsTheCertificate) {
     // `pm.sendRequest` builds its own ClientConfig inside the script engine, so
     // the registry reaches it through the context or not at all - and a script
     // that logs in against an mTLS endpoint is exactly the transfer #707's
@@ -468,7 +474,7 @@ TEST_F (MutualTlsTest, PmSendRequestPresentsTheCertificate) {
 // Precedence and the passphrase, on a wire
 // ---------------------------------------------------------------------------
 
-TEST_F (MutualTlsTest, ThePortEntryOutranksTheCatchAllOnAWire) {
+TEST_P (MutualTlsTest, ThePortEntryOutranksTheCatchAllOnAWire) {
     // Precedence is unit-tested in `client_certificates_test.cpp` against a
     // registry in memory. Here the two entries hold *different identities* and
     // only one of them is one the listener accepts, so the handshake itself is
@@ -489,10 +495,12 @@ TEST_F (MutualTlsTest, ThePortEntryOutranksTheCatchAllOnAWire) {
     response.client_certificate, "127.0.0.1:" + std::to_string (server.port ()));
 }
 
-TEST_F (MutualTlsTest, AnEncryptedKeyOpensWithItsPassphraseAndNotWithout) {
+TEST_P (MutualTlsTest, AnEncryptedKeyOpensWithItsPassphraseAndNotWithout) {
     // Both halves in one test on purpose: the failure alone would pass against
     // an engine that never sends the passphrase at all, and the success alone
-    // would pass against a key that was never encrypted.
+    // would pass against a key that was never encrypted. One column covers both
+    // formats - libcurl reads `CURLOPT_KEYPASSWD` as the PKCS#12 import
+    // password too, so the bundle instance proves that reading as well.
     TlsServer server (ca_, ca_);
     const ClientIdentity client = identity ("passphrase", ca_, "hunter2");
     register_entry (client, std::nullopt, "hunter2");
@@ -520,6 +528,45 @@ TEST_F (MutualTlsTest, AnEncryptedKeyOpensWithItsPassphraseAndNotWithout) {
     << "the refusal names nothing, so a user is left to guess which of the two "
        "settings is wrong";
 }
+
+TEST_P (MutualTlsTest, AnEntryThatNamesNoFormatIsReadOffTheFileAndStillConnects) {
+    // The write-time default (#833), against real material rather than the
+    // byte-shaped fixtures in `client_certificates_test.cpp`: a user who never
+    // learns the field exists must still end up with a row that hands libcurl
+    // the right type. Declaring nothing and connecting anyway is the assertion,
+    // in both formats - a sniff that answered `pem` to everything would fail
+    // the bundle instance here and nowhere else.
+    TlsServer server (ca_, ca_);
+    const ClientIdentity client = identity ("sniffed", ca_);
+
+    json payload = { { "host", "127.0.0.1" }, { "certPath", client.certificate.path () } };
+    if (!client.key_path ().empty ()) {
+        payload["keyPath"] = client.key_path ();
+    }
+    const auto [status, created] = routes::create_client_certificate_response (*db_, payload);
+    ASSERT_EQ (status, 200) << created.dump ();
+    EXPECT_EQ (created["certFormat"], vayu::tests::client_identity_format_name (format ()));
+
+    const Response response = send_through (policy (), server.url ("/hello"));
+
+    ASSERT_EQ (response.error_code, ErrorCode::None)
+    << "an entry whose format was read off the file did not complete the "
+       "handshake: "
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+}
+
+/**
+ * One instance per format this build can present. `client_identity_formats()`
+ * is the single source of that set - a leg gets the cases its backend can
+ * actually load and no others, which is what replaced the Windows-wide skip.
+ */
+INSTANTIATE_TEST_SUITE_P (PerClientIdentityFormat,
+MutualTlsTest,
+::testing::ValuesIn (vayu::tests::client_identity_formats ()),
+[] (const ::testing::TestParamInfo<ClientIdentityFormat>& info) {
+    return vayu::tests::client_identity_format_name (info.param);
+});
 
 } // namespace
 } // namespace vayu::http

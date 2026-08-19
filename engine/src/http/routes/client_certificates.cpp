@@ -19,11 +19,12 @@
  * Two rules are enforced here rather than deeper down, because only a route can
  * answer with a status code:
  *
- *  1. **A registered entry is usable.** Host shape, port range and both file
- *     paths are checked at write time (`client_cert_rejection`). A path that is
- *     not there fails at handshake time as an SSL error naming the endpoint,
- *     which reads as "the API is broken" - the misdiagnosis this epic exists to
- *     end.
+ *  1. **A registered entry is usable.** Host shape, port range, the file paths
+ *     the declared format calls for, and that format against the file's own
+ *     bytes are all checked at write time (`client_cert_rejection`). A path
+ *     that is not there - or a PKCS#12 file registered as a PEM pair - fails at
+ *     handshake time as an SSL error naming the endpoint, which reads as "the
+ *     API is broken" - the misdiagnosis this epic exists to end.
  *  2. **One entry per host+port.** Two rows claiming the same target would make
  *     the certificate presented depend on row order, so the second one is a 409
  *     naming the first rather than a silent shadowing.
@@ -109,6 +110,71 @@ const std::string& self_id) {
     return std::nullopt;
 }
 
+/// The wire spellings a `certFormat` may take, for the tail of a rejection.
+/// Built from `all_client_cert_formats()` so the set accepted and the set
+/// advertised cannot drift - the `http_version_valid_list` rule.
+std::string cert_format_valid_list () {
+    std::string list;
+    for (const auto format : vayu::http::all_client_cert_formats ()) {
+        if (!list.empty ()) {
+            list += ", ";
+        }
+        list += "'" + std::string (vayu::http::to_string (format)) + "'";
+    }
+    return list;
+}
+
+/**
+ * The `certFormat` of a create or update body onto @p out (issue #833).
+ *
+ * Absent on create is the one place this engine *guesses*, and it guesses from
+ * the file rather than from a constant: a user who named a `.p12` gets a
+ * PKCS#12 row without having to know the field exists, and a file that says
+ * nothing this engine can read falls back to `pem`, which is what every row
+ * written before the field existed is. An explicit value is never overridden -
+ * `client_cert_rejection` then checks it against the file and refuses a
+ * contradiction, so correcting a bad sniff is possible and being wrong is loud.
+ *
+ * An unrecognised spelling is a 400 rather than the silent ignore
+ * `apply_string_field` would give it: an entry quietly registered as PEM
+ * because "PKCS12" was not the word we wanted is a handshake failure against
+ * the endpoint later.
+ */
+std::optional<std::pair<int, nlohmann::json>>
+apply_cert_format_field (const nlohmann::json& json,
+std::string& out,
+std::string_view cert_path,
+bool is_create) {
+    const auto seed = [&] () {
+        const auto sniffed = vayu::http::sniff_client_cert_format (cert_path);
+        out = sniffed ? vayu::http::to_string (*sniffed) :
+                        vayu::http::to_string (vayu::http::ClientCertFormat::Pem);
+    };
+    if (!json.contains ("certFormat")) {
+        if (is_create) {
+            seed ();
+        }
+        return std::nullopt;
+    }
+    if (json["certFormat"].is_null ()) {
+        seed ();
+        return std::nullopt;
+    }
+    if (!json["certFormat"].is_string ()) {
+        return std::make_pair (400,
+        error_body (400, "Invalid 'certFormat': must be a string. Valid values: " +
+        cert_format_valid_list ()));
+    }
+    const std::string candidate = json["certFormat"].get<std::string> ();
+    if (!vayu::http::client_cert_format_from_string (candidate)) {
+        return std::make_pair (400,
+        error_body (400, "Invalid 'certFormat': '" + candidate +
+        "' is not a certificate format. Valid values: " + cert_format_valid_list ()));
+    }
+    out = candidate;
+    return std::nullopt;
+}
+
 /**
  * The fields of a create or update body onto @p c, under the standard
  * null-vs-absent rule, ending in the shared usability check.
@@ -130,15 +196,48 @@ bool is_create) {
     if (auto err = apply_required_string_field (json, "certPath", c.cert_path, is_create)) {
         return err;
     }
-    if (auto err = apply_required_string_field (json, "keyPath", c.key_path, is_create)) {
+    // After `certPath`, because an absent format is read off that file.
+    if (auto err = apply_cert_format_field (json, c.cert_format, c.cert_path, is_create)) {
         return err;
+    }
+    // `keyPath` is required for a PEM pair and must be absent for a PKCS#12
+    // bundle, so it cannot go through `apply_required_string_field`: what a
+    // complete row looks like depends on the format beside it. `null` clears
+    // it, which is how an entry moves from PEM to PKCS#12 in one PUT; the
+    // "which format needs which file" rule itself stays in
+    // `client_cert_rejection`, the one copy both this route and the resolver
+    // read.
+    if (json.contains ("keyPath")) {
+        if (json["keyPath"].is_null ()) {
+            c.key_path.clear ();
+        } else if (!json["keyPath"].is_string ()) {
+            return std::make_pair (400,
+            error_body (400, "Invalid 'keyPath': must be a string, or null for a "
+                             "PKCS#12 entry that carries its own key"));
+        } else {
+            c.key_path = json["keyPath"].get<std::string> ();
+        }
+    } else if (is_create) {
+        c.key_path.clear ();
     }
     // The one field with a default: a key without a passphrase is the common
     // case, so absent on create means "none" and `null` on update clears it.
     apply_string_field (json, "passphrase", c.passphrase, "", is_create);
 
+    // The merged row's format. Unparseable only when the *stored* value is one
+    // no route would have written - a hand-edited row - and that is a 400
+    // rather than a fallback to `pem`: an update that answered 200 while
+    // leaving the row unusable is the silent acceptance this file exists to
+    // avoid, and the caller can fix it by naming `certFormat` here.
+    const auto format = vayu::http::client_cert_format_from_string (c.cert_format);
+    if (!format) {
+        return std::make_pair (400,
+        error_body (400, "Stored 'certFormat' is '" + c.cert_format +
+        "', which is not a certificate format - set it explicitly. Valid values: " +
+        cert_format_valid_list ()));
+    }
     if (const auto rejection =
-        vayu::http::client_cert_rejection (c.host, c.port, c.cert_path, c.key_path)) {
+        vayu::http::client_cert_rejection (c.host, c.port, *format, c.cert_path, c.key_path)) {
         return std::make_pair (
         400, error_body (400, "Invalid client certificate: " + *rejection));
     }
@@ -225,7 +324,8 @@ void register_client_certificate_routes (RouteContext& ctx) {
      * POST /client-certificates
      * Registers a certificate for a host. Create only.
      * Body params: host (required), port (int or null = every port),
-     * certPath (required), keyPath (required), passphrase.
+     * certPath (required), certFormat ('pem' | 'p12', read off the file when
+     * absent), keyPath (required for 'pem', refused for 'p12'), passphrase.
      * Returns: the created entry, 400 (bad shape, unreadable file, body `id`)
      * or 409 (host+port already registered).
      */

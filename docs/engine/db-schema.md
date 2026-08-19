@@ -512,7 +512,8 @@ matching rule.
 | `host`       | TEXT    | Hostname, lower-cased, no scheme/port/path. IPv6 without brackets |
 | `port`       | INTEGER | NULL = answers for the host on every port                 |
 | `cert_path`  | TEXT    | Path to the certificate file                              |
-| `key_path`   | TEXT    | Path to the private key file                              |
+| `key_path`   | TEXT    | Path to the private key file; `""` for a `p12` entry, which carries its own |
+| `cert_format`| TEXT    | `pem` or `p12` (issue #833). NOT NULL, default `pem` - what a row written before this column existed is |
 | `passphrase` | TEXT    | The key's passphrase, `""` when it has none. **Plaintext** - see below |
 | `created_at` | INTEGER | Unix ms                                                   |
 | `updated_at` | INTEGER | Unix ms                                                   |
@@ -521,6 +522,13 @@ matching rule.
 paths, and the engine opens the files at send time - the strongest storage
 decision available without a keystore, and the reason a registry entry survives
 being copied between machines only if the files do.
+
+**`cert_format` is stored rather than sniffed per send.** The applier runs on
+every handle of every load run, so reading the file each time would pay for the
+same answer thousands of times - and a format nothing recorded is one the
+Settings card cannot print back for the user to correct. It is written once, at
+the moment the entry is registered, from the body or from the file's own first
+bytes; `client_cert_rejection` refuses a row whose bytes contradict it.
 
 **The passphrase is stored in plaintext, and that is disclosed rather than
 hidden.** It is the same treatment every other credential in this file already

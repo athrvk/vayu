@@ -324,13 +324,19 @@ Three things worth knowing before you design around them:
   entry is recorded on `Response::client_certificate` and travels both design
   funnels (live body and stored trace) under `clientCertificate`, deliberately
   *not* on the load path: it is a per-transfer string for a fact that is
-  constant for the run. **What goes out is a PEM pair and nothing else**
-  (`tests/mutual_tls_test.cpp`, #802): the applier writes no
-  `CURLOPT_SSLCERTTYPE`, so libcurl reads both files in its default format -
-  right on every OpenSSL leg, and the reason the Schannel build, which wants
-  PKCS#12, can present nothing at all (#833). The live fixture skips that leg
-  with the reason printed and scans the applier so the skip cannot outlive its
-  cause.
+  constant for the run. **The row says what format its certificate is in**
+  (`cert_format`, #833): the applier writes `CURLOPT_SSLCERTTYPE` from it, so a
+  `p12` bundle goes out as one and the Schannel build - which takes no PEM pair
+  at all and could therefore present *nothing* a user registered - works. A
+  PKCS#12 row stores no `key_path` (the bundle carries the key) and one
+  `passphrase` column serves both, since libcurl reads it as the import
+  password too. The format is **stored, not sniffed per transfer**, defaulted at
+  write time from the file's first bytes and refused when those bytes
+  contradict it - a check that is deliberately shallow, like `ca_pem_rejection`:
+  only a contradiction is an error, a file we cannot classify is the backend's
+  to judge. `tests/mutual_tls_test.cpp` runs every driver case once per format
+  the leg's backend accepts (`client_identity_formats()`), so Windows now proves
+  the PKCS#12 half on a wire instead of skipping.
 
 ## Request composition (engine-owned - POST /compose)
 

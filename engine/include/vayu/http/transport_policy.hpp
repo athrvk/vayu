@@ -86,6 +86,55 @@ std::optional<ProxyMode> proxy_mode_from_string (std::string_view value);
 std::optional<std::string> proxy_url_rejection (std::string_view url);
 
 /**
+ * @brief The shape a stored client identity is in (issue #833).
+ *
+ * A property of the *row*, not of the transfer: the applier runs on every
+ * handle of every load run, so sniffing the file per send would pay for the
+ * same answer thousands of times - and an answer nothing stored is one the
+ * Settings card cannot print. It is written once, when the entry is registered.
+ */
+enum class ClientCertFormat {
+    /// A PEM certificate with its key in a second file - libcurl's default, and
+    /// the only shape an OpenSSL-backed build takes.
+    Pem,
+    /// A PKCS#12 file carrying certificate *and* key, which libcurl reads only
+    /// when told `CURLOPT_SSLCERTTYPE` is `P12`. The only file shape Schannel
+    /// takes.
+    Pkcs12
+};
+
+/// Every format, in the order the card offers them. The valid-values text of a
+/// rejection is built from this rather than from a literal list, so the set
+/// accepted and the set advertised cannot drift - `all_proxy_modes` exists for
+/// the same reason.
+std::array<ClientCertFormat, 2> all_client_cert_formats ();
+
+/// The wire spelling of @p format, as `certFormat` stores it.
+const char* to_string (ClientCertFormat format);
+
+/// What `CURLOPT_SSLCERTTYPE` is set to for @p format. Separate from the wire
+/// spelling because they are libcurl's words, not ours, and a rename of either
+/// must not silently become a rename of the other.
+const char* curl_ssl_cert_type (ClientCertFormat format);
+
+/// Parse a stored `certFormat`. An unrecognised value yields nullopt so the
+/// caller decides - the route rejects, the resolver logs and drops the row.
+std::optional<ClientCertFormat> client_cert_format_from_string (std::string_view value);
+
+/**
+ * @brief The format the bytes at @p path are in, or nullopt when they say
+ *        nothing this engine can read.
+ *
+ * Deliberately shallow, on `ca_pem_rejection`'s precedent: it asks what the
+ * first bytes *are*, never whether the certificate inside is valid, because a
+ * file curl would have accepted must not be refused by a parser of ours. PEM is
+ * `-----BEGIN` in the leading text; PKCS#12 is DER, so it opens with the ASN.1
+ * `SEQUENCE` tag. Anything else - a DER certificate, a truncated download, a
+ * text file - is nullopt, which callers treat as "unclassified", not "wrong".
+ */
+std::optional<ClientCertFormat> sniff_client_cert_format (std::string_view path);
+
+/**
  * @brief One registry row: the certificate a host is called with (issue #707).
  *
  * A certificate is a property of *where you are calling*, not of one request -
@@ -122,12 +171,20 @@ struct ClientCertRule {
     /// - see `match_client_certificate`.
     std::optional<int> port;
 
-    /// PEM (or, per platform, PKCS#12) certificate file, passed to
-    /// `CURLOPT_SSLCERT` verbatim.
+    /// Certificate file, passed to `CURLOPT_SSLCERT` verbatim. What libcurl
+    /// reads it as is `format` below, not a guess from its name.
     std::string cert_path;
 
-    /// Private key file, passed to `CURLOPT_SSLKEY` verbatim.
+    /// Private key file, passed to `CURLOPT_SSLKEY` verbatim. **Empty for
+    /// `Pkcs12`**, which carries its own key - and empty means the applier
+    /// writes null rather than `""`, so a pooled handle cannot keep a key path
+    /// a previous transfer set.
     std::string key_path;
+
+    /// What `cert_path` holds, and so what `CURLOPT_SSLCERTTYPE` says (#833).
+    /// Defaulted to `Pem` because that is what every row written before the
+    /// field existed is - the same value the column backfills to.
+    ClientCertFormat format = ClientCertFormat::Pem;
 
     /// The key's passphrase, empty when it has none. Stored plaintext - see the
     /// struct comment and `docs/engine/db-schema.md`.
@@ -152,9 +209,18 @@ std::string client_cert_label (const ClientCertRule& rule);
  * certificate or key file this process cannot open - because every one of those
  * surfaces at handshake time as a TLS error that names the endpoint rather than
  * the setting, which is the shape this epic exists to stop.
+ *
+ * @p format decides what a *complete* entry is (#833): a `Pem` row needs its
+ * key file and a `Pkcs12` row must not name one, because the bundle carries the
+ * key and a path nothing reads is a field the card would ask for in vain. The
+ * declared format is also checked against the file's own first bytes - but only
+ * where those bytes say something (see `sniff_client_cert_format`), so a file
+ * this engine cannot classify is left for the backend to judge rather than
+ * refused by a parser of ours.
  */
 std::optional<std::string> client_cert_rejection (std::string_view host,
 const std::optional<int>& port,
+ClientCertFormat format,
 std::string_view cert_path,
 std::string_view key_path);
 

@@ -682,11 +682,25 @@ const std::string& url) {
     }
     curl_easy_setopt (curl, CURLOPT_SSLCERT,
     matched != nullptr ? matched->cert_path.c_str () : static_cast<const char*> (nullptr));
+    // What that file is (issue #833). Without it libcurl reads whatever is
+    // there as PEM, which is why a Schannel build - the one backend that takes
+    // no PEM pair at all - could present nothing a user registered. Written on
+    // every handle for the same reason as the path beside it, and null on no
+    // match so a pooled handle cannot keep the type a previous transfer set.
+    curl_easy_setopt (curl, CURLOPT_SSLCERTTYPE,
+    matched != nullptr ? curl_ssl_cert_type (matched->format) :
+                         static_cast<const char*> (nullptr));
+    // A PKCS#12 bundle carries its own key and stores no key path, so this is
+    // null there rather than "" - an empty string is a path, and libcurl would
+    // fail to open it.
     curl_easy_setopt (curl, CURLOPT_SSLKEY,
-    matched != nullptr ? matched->key_path.c_str () : static_cast<const char*> (nullptr));
+    matched != nullptr && !matched->key_path.empty () ?
+    matched->key_path.c_str () :
+    static_cast<const char*> (nullptr));
     // Null rather than "" when there is no passphrase: an empty string is a
     // passphrase attempt, and on a key that has none the backend answers by
-    // failing the load.
+    // failing the load. One field for both formats, because libcurl reads it as
+    // the PKCS#12 import password too.
     curl_easy_setopt (curl, CURLOPT_KEYPASSWD,
     matched != nullptr && !matched->passphrase.empty () ?
     matched->passphrase.c_str () :

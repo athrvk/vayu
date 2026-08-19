@@ -470,7 +470,13 @@ inline auto make_storage (const std::string& path) {
     make_column ("host", &ClientCertificate::host),
     make_column ("port", &ClientCertificate::port), // NULL = every port
     make_column ("cert_path", &ClientCertificate::cert_path),
-    make_column ("key_path", &ClientCertificate::key_path),
+    make_column ("key_path", &ClientCertificate::key_path), // "" for PKCS#12
+    // What the certificate file holds (issue #833). NOT NULL with a
+    // default_value on the `http_version` precedent, so sync_schema can ALTER
+    // TABLE ADD COLUMN it onto a registry written before the field existed -
+    // and every such row backfills to `pem`, which is exactly what it is: the
+    // format libcurl read by default when nothing named one.
+    make_column ("cert_format", &ClientCertificate::cert_format, default_value ("pem")),
     make_column ("passphrase", &ClientCertificate::passphrase),
     make_column ("created_at", &ClientCertificate::created_at),
     make_column ("updated_at", &ClientCertificate::updated_at)));

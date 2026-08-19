@@ -51,6 +51,7 @@
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
+#include <openssl/pkcs12.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
@@ -90,12 +91,18 @@ struct Asn1TimeDeleter {
         ASN1_TIME_free (value);
     }
 };
+struct Pkcs12Deleter {
+    void operator() (PKCS12* value) const noexcept {
+        PKCS12_free (value);
+    }
+};
 
 using X509Ptr     = std::unique_ptr<X509, X509Deleter>;
 using KeyPtr      = std::unique_ptr<EVP_PKEY, KeyDeleter>;
 using BioPtr      = std::unique_ptr<BIO, BioDeleter>;
 using CrlPtr      = std::unique_ptr<X509_CRL, CrlDeleter>;
 using Asn1TimePtr = std::unique_ptr<ASN1_TIME, Asn1TimeDeleter>;
+using Pkcs12Ptr   = std::unique_ptr<PKCS12, Pkcs12Deleter>;
 
 /// Fail the way a fixture should: loudly, naming OpenSSL's own reason. A
 /// silently degraded fixture would leave the tests below asserting nothing.
@@ -133,6 +140,14 @@ inline std::string to_pem (EVP_PKEY* key) {
         fail ("could not serialize a private key to PEM");
     }
     return read_bio (bio, "a private key");
+}
+
+inline std::string to_der (PKCS12* bundle) {
+    BioPtr bio (BIO_new (BIO_s_mem ()));
+    if (!bio || i2d_PKCS12_bio (bio.get (), bundle) != 1) {
+        fail ("could not serialize a PKCS#12 bundle to DER");
+    }
+    return read_bio (bio, "a PKCS#12 bundle");
 }
 
 inline std::string to_der (X509_CRL* crl) {
@@ -197,6 +212,30 @@ struct CertificateAndKey {
             tls_detail::fail ("could not serialize an encrypted private key");
         }
         return tls_detail::read_bio (bio, "an encrypted private key");
+    }
+
+    /**
+     * @brief The certificate and its key in one DER-encoded PKCS#12 bundle,
+     *        protected by @p passphrase - empty for a bundle with none.
+     *
+     * The shape Schannel takes a client identity in, and the reason a Windows
+     * build could present nothing a user registered before #833. Written as one
+     * file by the caller, where the PEM pair needs two.
+     *
+     * **Deliberately old algorithms** (SHA-1 + 3DES for both the key and the
+     * certificate bag, rather than OpenSSL 3's AES-256 defaults). What is under
+     * test is whether the *engine* names the format, not which ciphers a
+     * platform's PKCS#12 reader has retired, and the widest-supported pair is
+     * the one that keeps a red here meaning the former.
+     */
+    std::string pkcs12 (const std::string& passphrase = {}) const {
+        tls_detail::Pkcs12Ptr bundle (PKCS12_create (passphrase.c_str (), "vayu-test-client",
+        key.get (), certificate.get (), nullptr, NID_pbe_WithSHA1And3_Key_TripleDES_CBC,
+        NID_pbe_WithSHA1And3_Key_TripleDES_CBC, 0, 0, 0));
+        if (!bundle) {
+            tls_detail::fail ("could not build a PKCS#12 bundle");
+        }
+        return tls_detail::to_der (bundle.get ());
     }
 
     /**

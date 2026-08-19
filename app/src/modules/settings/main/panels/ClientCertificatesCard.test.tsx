@@ -50,6 +50,7 @@ const certificates = [
 		port: 8443,
 		certPath: "/home/ada/certs/client.pem",
 		keyPath: "/home/ada/certs/client.key",
+		certFormat: "pem" as const,
 		hasPassphrase: true,
 		createdAt: 1,
 		updatedAt: 1,
@@ -58,8 +59,9 @@ const certificates = [
 		id: "cert_2",
 		host: "internal.example.com",
 		port: null,
-		certPath: "/home/ada/certs/internal.pem",
-		keyPath: "/home/ada/certs/internal.key",
+		certPath: "/home/ada/certs/internal.p12",
+		keyPath: "",
+		certFormat: "p12" as const,
 		hasPassphrase: false,
 		createdAt: 1,
 		updatedAt: 1,
@@ -131,6 +133,7 @@ describe("ClientCertificatesCard", () => {
 			host: "api.example.com",
 			port: null,
 			certPath: "/certs/client.pem",
+			certFormat: "pem",
 			keyPath: "/certs/client.key",
 			passphrase: undefined,
 		});
@@ -177,6 +180,48 @@ describe("ClientCertificatesCard", () => {
 		fireEvent.click(within(dialog).getByRole("button", { name: /^remove$/i }));
 
 		await waitFor(() => expect(deleteMutate).toHaveBeenCalledWith("cert_1"));
+	});
+
+	it("prints what each row will present, and no key file for a bundle", () => {
+		renderCard();
+
+		// The engine may have read the format off the file, so the row is where
+		// a user finds out what will actually go on the wire (#833).
+		expect(screen.getByText("PEM")).toBeInTheDocument();
+		expect(screen.getByText("PKCS#12")).toBeInTheDocument();
+		// A bundle stores no key path. An empty name here would read as a file
+		// whose name went missing rather than as a format that has none.
+		expect(screen.getByText("internal.p12")).toBeInTheDocument();
+		expect(screen.getByText("client.key")).toBeInTheDocument();
+	});
+
+	it("drops the key file for a PKCS#12 entry and sends null in its place", async () => {
+		renderCard();
+		fireEvent.click(screen.getByRole("button", { name: /add certificate/i }));
+		fireEvent.change(screen.getByLabelText("Host"), {
+			target: { value: "api.example.com" },
+		});
+		fireEvent.change(screen.getByLabelText("Certificate file"), {
+			target: { value: "/certs/client.pem" },
+		});
+		// Fill the key first, then switch: the path is still in the draft, and
+		// sending it would be a 400 from an engine that refuses a bundle naming
+		// a key file.
+		fireEvent.change(screen.getByLabelText("Private key file"), {
+			target: { value: "/certs/client.key" },
+		});
+		fireEvent.click(screen.getByRole("radio", { name: /PKCS#12 bundle/i }));
+
+		// Absent rather than disabled - a bundle has no key file to ask for.
+		expect(screen.queryByLabelText("Private key file")).not.toBeInTheDocument();
+		// And the field is not required to submit, which is the dead end this
+		// change removes: a Windows user could fill in nothing that worked.
+		fireEvent.click(screen.getByRole("button", { name: /^add certificate$/i }));
+
+		await waitFor(() => expect(createMutate).toHaveBeenCalled());
+		expect(createMutate).toHaveBeenCalledWith(
+			expect.objectContaining({ certFormat: "p12", keyPath: null })
+		);
 	});
 
 	it("says the engine did not answer rather than showing an empty registry", () => {
