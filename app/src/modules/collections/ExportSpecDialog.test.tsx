@@ -16,6 +16,11 @@
  * run, what the export could not carry, and that a document the engine would not
  * give up stops the export instead of silently downgrading it to a skeleton.
  * Those four are what this file locks.
+ *
+ * It also owns the two questions that live between the hook and the exporter
+ * (issue #721): which collections the subtree walk reaches, since a nested
+ * binding answers to a document of its own, and that assembly happens off the
+ * render pass, since neither the hook nor the exporter can see when it ran.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -32,13 +37,53 @@ const specQuery = {
 
 let requests: Request[] = [];
 let examples: RequestExample[] = [];
+/** Collections beyond the root, for the nested-binding cases. */
+let extraCollections: Array<Partial<Collection> & { id: string; parentId?: string }> = [];
+/** Requests filed under a collection other than the root. */
+let requestsByOtherCollection = new Map<string, Request[]>();
+let requestsMemo: {
+	key: string;
+	rows: Request[];
+	value: { requestsByCollection: Map<string, Request[]>; isLoading: boolean };
+} = { key: "", rows: [], value: { requestsByCollection: new Map(), isLoading: false } };
+
+/** How many times the exporter actually assembled a document. */
+const assembled = vi.hoisted(() => vi.fn<(format: string) => void>());
+/**
+ * Whether the pending line was on screen at the moment each assembly ran.
+ *
+ * Read inside the exporter rather than polled from the test, because the pending
+ * state is transient: a `findBy*` can miss it and report a freeze as a pass. An
+ * assembly that runs from render cannot see its own pending line, so a `false`
+ * here is exactly the defect.
+ */
+const pendingWhenAssembled = vi.hoisted(() => [] as boolean[]);
 
 vi.mock("@/queries/collections", () => ({
-	useCollectionsQuery: () => ({ data: [{ id: "col_1", name: "Petstore", parentId: undefined }] }),
-	useMultipleCollectionRequests: () => ({
-		requestsByCollection: new Map([["col_1", requests]]),
-		isLoading: false,
+	useCollectionsQuery: () => ({
+		data: [{ id: "col_1", name: "Petstore", parentId: undefined }, ...extraCollections],
 	}),
+	// Pinned to its contents, the way the real hook pins the map `combine`
+	// builds: it hands back the same object until the ids or the rows change,
+	// and a mock rebuilding it every render would model a hook this app does
+	// not have.
+	useMultipleCollectionRequests: (ids: string[]) => {
+		const key = ids.join(",");
+		if (requestsMemo.key !== key || requestsMemo.rows !== requests) {
+			requestsMemo = {
+				key,
+				rows: requests,
+				value: {
+					requestsByCollection: new Map([
+						["col_1", requests],
+						...[...requestsByOtherCollection].filter(([id]) => ids.includes(id)),
+					]),
+					isLoading: false,
+				},
+			};
+		}
+		return requestsMemo.value;
+	},
 }));
 
 vi.mock("@/queries/specs", () => ({ useSpecQuery: () => specQuery }));
@@ -46,6 +91,22 @@ vi.mock("@/queries/specs", () => ({ useSpecQuery: () => specQuery }));
 vi.mock("@/services/api", () => ({
 	apiService: { listRequestExamples: () => Promise.resolve(examples) },
 }));
+
+// The real exporter, counted. Assembly cost is the point of the deferral, and
+// only the number of times it ran says whether a format toggle re-paid it.
+vi.mock("@/services/exporters/openapi", async (importActual) => {
+	const actual = await importActual<typeof import("@/services/exporters/openapi")>();
+	return {
+		...actual,
+		exportOpenApi: (input: Parameters<typeof actual.exportOpenApi>[0]) => {
+			assembled(input.format);
+			pendingWhenAssembled.push(
+				document.body.textContent?.includes("Assembling the document") ?? false
+			);
+			return actual.exportOpenApi(input);
+		},
+	};
+});
 
 const { default: ExportSpecDialog } = await import("./ExportSpecDialog");
 
@@ -133,8 +194,17 @@ function captureDownload() {
 
 beforeEach(() => {
 	vi.restoreAllMocks();
+	assembled.mockClear();
+	pendingWhenAssembled.length = 0;
 	requests = [];
 	examples = [];
+	extraCollections = [];
+	requestsByOtherCollection = new Map();
+	requestsMemo = {
+		key: "",
+		rows: [],
+		value: { requestsByCollection: new Map(), isLoading: false },
+	};
 	specQuery.data = { content: SPEC };
 	specQuery.isLoading = false;
 	specQuery.isError = false;
@@ -188,6 +258,9 @@ describe("ExportSpecDialog", () => {
 		expect(Object.keys(parsed.paths)).toEqual(["/pets"]);
 
 		fireEvent.click(screen.getByRole("radio", { name: "YAML" }));
+		// The other format is assembled, not re-rendered: the click starts work
+		// that finishes after a paint, so the button it enables is the signal.
+		await waitFor(() => expect(assembled).toHaveBeenCalledTimes(2));
 		fireEvent.click(screen.getByRole("button", { name: "Download" }));
 		const asYaml = await download.read();
 		expect(asYaml.fileName).toBe("petstore.openapi.yaml");
@@ -225,6 +298,146 @@ describe("ExportSpecDialog", () => {
 				true
 			)
 		);
+	});
+
+	it("leaves a nested collection bound to another document out of this one", async () => {
+		// Collections re-parent freely, so spec B's collection can end up under
+		// spec A's. Its request names `listOwners` - a name this document happens
+		// to declare too, which is the whole hazard.
+		extraCollections = [
+			{
+				id: "col_2",
+				name: "Owners (another spec)",
+				parentId: "col_1",
+				openapi: { specId: "spec_2", specHash: "def456", syncedAt: 1 },
+			},
+		];
+		requests = [
+			request({ specOperation: { operationId: "listPets", method: "GET", path: "/pets" } }),
+		];
+		requestsByOtherCollection = new Map([
+			[
+				"col_2",
+				[
+					request({
+						id: "req_foreign",
+						collectionId: "col_2",
+						name: "List owners of the other spec",
+						specOperation: {
+							operationId: "listOwners",
+							method: "GET",
+							path: "/owners",
+						},
+					}),
+				],
+			],
+		]);
+		const download = captureDownload();
+		render(
+			withQueryClient(
+				<ExportSpecDialog collection={collection(true)} onOpenChange={vi.fn()} />
+			)
+		);
+
+		await screen.findByText(/own document, updated/);
+		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
+		expect(lines).toContain("1 request exported as an operation");
+		// `/owners` is removed because nothing in *this* collection claims it -
+		// the honest outcome. Without the boundary the foreign request claims it
+		// and rewrites it instead.
+		expect(lines).toContain("1 operation removed - nothing here claims it");
+		fireEvent.click(screen.getByRole("button", { name: "Download" }));
+		const json = JSON.parse((await download.read()).text);
+		expect(Object.keys(json.paths)).toEqual(["/pets"]);
+	});
+
+	it("keeps a nested collection bound to the same document, which describes it too", async () => {
+		extraCollections = [
+			{
+				id: "col_2",
+				name: "Owners",
+				parentId: "col_1",
+				openapi: { specId: "spec_1", specHash: "abc123", syncedAt: 1 },
+			},
+		];
+		requests = [
+			request({ specOperation: { operationId: "listPets", method: "GET", path: "/pets" } }),
+		];
+		requestsByOtherCollection = new Map([
+			[
+				"col_2",
+				[
+					request({
+						id: "req_owners",
+						collectionId: "col_2",
+						name: "List owners",
+						specOperation: {
+							operationId: "listOwners",
+							method: "GET",
+							path: "/owners",
+						},
+					}),
+				],
+			],
+		]);
+		const download = captureDownload();
+		render(
+			withQueryClient(
+				<ExportSpecDialog collection={collection(true)} onOpenChange={vi.fn()} />
+			)
+		);
+
+		await screen.findByText(/own document, updated/);
+		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
+		// A descendant bound to the *same* document describes the operations being
+		// patched. Stopping there would remove them as unclaimed - a deletion in
+		// place of a rewrite, which is not an improvement.
+		expect(lines).toContain("2 requests exported as an operation");
+		expect(lines).toContain("0 operations removed - nothing here claims it");
+		fireEvent.click(screen.getByRole("button", { name: "Download" }));
+		const json = JSON.parse((await download.read()).text);
+		expect(Object.keys(json.paths).sort()).toEqual(["/owners", "/pets"]);
+	});
+
+	it("assembles the document off the render pass, behind a line that says so", async () => {
+		requests = [
+			request({ specOperation: { operationId: "listPets", method: "GET", path: "/pets" } }),
+		];
+		render(
+			withQueryClient(
+				<ExportSpecDialog collection={collection(true)} onOpenChange={vi.fn()} />
+			)
+		);
+
+		await screen.findByText(/own document, updated/);
+		// Assembly happened while the pending line was on screen - which it cannot
+		// be if the work runs during render.
+		expect(pendingWhenAssembled).toEqual([true]);
+	});
+
+	it("assembles each format once, so toggling back is free", async () => {
+		requests = [
+			request({ specOperation: { operationId: "listPets", method: "GET", path: "/pets" } }),
+		];
+		render(
+			withQueryClient(
+				<ExportSpecDialog collection={collection(true)} onOpenChange={vi.fn()} />
+			)
+		);
+
+		await screen.findByText(/own document, updated/);
+		fireEvent.click(screen.getByRole("radio", { name: "YAML" }));
+		await waitFor(() => expect(assembled).toHaveBeenCalledTimes(2));
+		fireEvent.click(screen.getByRole("radio", { name: "JSON" }));
+
+		// The JSON document is still the one that was assembled first: a toggle
+		// back reads the cache rather than re-parsing the stored spec.
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: "Download" }).hasAttribute("disabled")).toBe(
+				false
+			)
+		);
+		expect(assembled.mock.calls.map((call) => call[0])).toEqual(["json", "yaml"]);
 	});
 
 	it("refuses to export a stored document it cannot parse", async () => {

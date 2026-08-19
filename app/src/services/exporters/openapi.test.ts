@@ -244,6 +244,57 @@ describe("bound export - the document, updated", () => {
 		expect(notes.examplesWritten).toBe(0);
 	});
 
+	it("never writes a truncated body as an example, and counts the ones it left out", () => {
+		const requests = boundRequests();
+		requests[0].examples = [
+			example({ id: "ex_part", body: '{"id":"p1","na', bodyTruncated: true }),
+			example({ id: "ex_whole", name: "200 - whole" }),
+		];
+		const { document, notes } = exportJson({ requests, specContent: bound });
+
+		const media = (
+			operationOf(document, "/pets", "get") as {
+				responses: Record<string, { content: Record<string, Record<string, never>> }>;
+			}
+		).responses["200"].content["application/json"];
+		// The complete example is the one that lands, as `example` rather than a
+		// two-entry map: the truncated one never reaches the grouping that would
+		// have made it the second.
+		expect(media.example).toEqual({ id: "p1", name: "Rex" });
+		expect(media.examples).toBeUndefined();
+		expect(notes.examplesWritten).toBe(1);
+		expect(notes.examplesTruncated).toBe(1);
+	});
+
+	it("writes a truncated example's response without its body, and counts it once", () => {
+		const requests = boundRequests();
+		requests[0].examples = [
+			example({
+				id: "ex_404",
+				name: "404 - missing",
+				status: 404,
+				body: "not fou",
+				contentType: "",
+				bodyTruncated: true,
+			}),
+		];
+		const { document, notes } = exportJson({ requests, specContent: bound });
+
+		const response = (
+			operationOf(document, "/pets", "get") as {
+				responses: Record<string, { description: string; content?: unknown }>;
+			}
+		).responses["404"];
+		// The status is still documented - that much is known - and only the body
+		// is withheld. Counted as truncated and not also as media-type-less: one
+		// example, one line in the summary, naming the loss that stopped it.
+		expect(response.description).toBe("404 - missing");
+		expect(response.content).toBeUndefined();
+		expect(notes.examplesTruncated).toBe(1);
+		expect(notes.examplesWithoutMediaType).toBe(0);
+		expect(notes.examplesWritten).toBe(0);
+	});
+
 	it("writes a request's parameter value as the declared parameter's example, and leaves a $ref alone", () => {
 		const requests = boundRequests();
 		requests[0].request = request({
@@ -451,6 +502,28 @@ describe("skeleton export - a starting point, not a contract", () => {
 		// A body that is not JSON is the text it is, never dropped.
 		expect(responses["500"].content["text/plain"].example).toBe("boom");
 		expect(notes.examplesWritten).toBe(2);
+	});
+
+	it("derives no schema from a body it only has part of", () => {
+		const { document, notes } = exportJson({
+			requests: [
+				entry({ id: "r1" }, [
+					example({ id: "ex_part", body: '{"id":"p1","na', bodyTruncated: true }),
+				]),
+			],
+		});
+
+		const responses = operationOf(document, "/pets", "get").responses as Record<
+			string,
+			{ description: string; content?: unknown }
+		>;
+		// A skeleton is the one direction that reads a shape off an example body,
+		// which makes a partial body worse here than in the bound direction: the
+		// contract would state the fields the capture happened to reach as the
+		// whole of the response.
+		expect(responses["200"].content).toBeUndefined();
+		expect(notes.examplesTruncated).toBe(1);
+		expect(notes.examplesWritten).toBe(0);
 	});
 
 	it("counts a request it cannot place instead of guessing at one", () => {

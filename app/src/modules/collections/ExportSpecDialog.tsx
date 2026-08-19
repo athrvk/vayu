@@ -23,9 +23,16 @@
  * Mounted only while open, like `RunCollectionDialog`: the mount is the reset,
  * and the three reads the source hook makes cost nothing for a dialog nobody
  * opened.
+ *
+ * **Assembly is not a render** (issue #721). Parsing a stored document, walking
+ * it and serializing it is seconds of synchronous work on a 12MB spec, and it ran
+ * in a `useMemo` - during render, again on every format toggle, with the window
+ * frozen and nothing on screen to say why. It runs from an effect now, behind a
+ * pending line, and each format's result is kept until the source changes so the
+ * second toggle back is free.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Copy, Download, FileJson, Loader2 } from "lucide-react";
 
 import {
@@ -47,9 +54,15 @@ import {
 	SpecDocumentError,
 	type ExportFormat,
 	type ExportNotes,
+	type ExportRequest,
+	type OpenApiExportInput,
+	type OpenApiExportResult,
 } from "@/services/exporters/openapi";
 import type { Collection } from "@/types";
 import { useOpenApiExportSource } from "./useOpenApiExportSource";
+
+/** An assembled document, or why it could not be assembled. Never both. */
+type Assembly = { value: OpenApiExportResult; error: null } | { value: null; error: string };
 
 export interface ExportSpecDialogProps {
 	/**
@@ -66,41 +79,44 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 	const source = useOpenApiExportSource(collection);
 	const copy = useCopy();
 
-	const result = useMemo(() => {
-		if (source.isLoading || source.specFailed) return null;
-		try {
-			return {
-				value: exportOpenApi({
-					collection,
-					requests: source.requests,
-					...(source.specContent === undefined
-						? {}
-						: { specContent: source.specContent }),
-					format,
-				}),
-				error: null as string | null,
-			};
-		} catch (error) {
-			// A stored document that cannot be read is refused rather than
-			// quietly downgraded to a skeleton: a skeleton in place of the
-			// document the user believes they are updating would drop every
-			// member of their spec Vayu does not model.
-			return {
-				value: null,
-				error:
-					error instanceof SpecDocumentError
-						? error.message
-						: `The document could not be assembled: ${(error as Error).message}`,
-			};
-		}
-	}, [
-		collection,
-		source.isLoading,
-		source.specFailed,
-		source.requests,
-		source.specContent,
-		format,
-	]);
+	// What has been assembled, and from which source. Held in state rather than
+	// beside a "pending" flag, so that stale is *derived*: a result belongs to
+	// one source key, and the moment the key moves it stops being the answer
+	// without anyone having to remember to clear it.
+	const [assembled, setAssembled] = useState<{
+		key: string;
+		byFormat: Partial<Record<ExportFormat, Assembly>>;
+	}>({ key: "", byFormat: {} });
+
+	const ready = !source.isLoading && !source.specFailed;
+	const { requests, specContent } = source;
+	const sourceKey = useMemo(() => describeSource(collection, requests), [collection, requests]);
+	const result = (assembled.key === sourceKey ? assembled.byFormat[format] : undefined) ?? null;
+
+	useEffect(() => {
+		// Both early exits are the derivation above having answered already:
+		// nothing to assemble yet, or this format assembled and kept - which is
+		// what makes a toggle back to JSON free rather than a second parse.
+		if (!ready || result) return;
+		// A task, not a microtask: a microtask runs before the browser paints, so
+		// the pending line below would never reach the screen and the window would
+		// freeze exactly as it did from render.
+		const scheduled = setTimeout(() => {
+			const assembly = assemble({
+				collection,
+				requests,
+				...(specContent === undefined ? {} : { specContent }),
+				format,
+			});
+			setAssembled((previous) =>
+				previous.key === sourceKey
+					? { key: sourceKey, byFormat: { ...previous.byFormat, [format]: assembly } }
+					: { key: sourceKey, byFormat: { [format]: assembly } }
+			);
+		}, 0);
+		return () => clearTimeout(scheduled);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- `sourceKey` is the contents of `collection` and `requests`
+	}, [ready, result, sourceKey, specContent, format]);
 
 	const handleDownload = () => {
 		if (!result?.value) return;
@@ -147,6 +163,19 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 						<p className="flex items-center gap-2 text-xs text-muted-foreground">
 							<Loader2 className="h-3.5 w-3.5 animate-spin" />
 							Reading the collection…
+						</p>
+					)}
+
+					{/*
+					 * The reads are in and the document is being put together. A
+					 * large spec spends real time here, and a dialog that showed
+					 * nothing would read as one that had finished with nothing to
+					 * say.
+					 */}
+					{ready && !result && (
+						<p className="flex items-center gap-2 text-xs text-muted-foreground">
+							<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							Assembling the document…
 						</p>
 					)}
 
@@ -263,6 +292,11 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 					label="example"
 					suffix="with no recorded media type - the response is written, the body is not"
 				/>
+				<Line
+					count={notes.examplesTruncated}
+					label="example"
+					suffix="stored only in part - the response is written, the truncated body is not"
+				/>
 			</ul>
 			{notes.vocabularyNotWritten && (
 				<p className="text-[11px] text-muted-foreground">
@@ -273,6 +307,50 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 			)}
 		</div>
 	);
+}
+
+/**
+ * The export, or the sentence that says why there is none.
+ *
+ * A stored document that cannot be read is refused rather than quietly
+ * downgraded to a skeleton: a skeleton in place of the document the user
+ * believes they are updating would drop every member of their spec Vayu does
+ * not model.
+ */
+function assemble(inputs: OpenApiExportInput): Assembly {
+	try {
+		return { value: exportOpenApi(inputs), error: null };
+	} catch (error) {
+		return {
+			value: null,
+			error:
+				error instanceof SpecDocumentError
+					? error.message
+					: `The document could not be assembled: ${(error as Error).message}`,
+		};
+	}
+}
+
+/**
+ * What the export would read, as a string that changes when it does.
+ *
+ * The rows themselves arrive as fresh arrays whenever a query re-runs, so
+ * keying the assembly on their identity would re-parse the document for a
+ * render that changed nothing. Timestamps carry the content: a request records
+ * `updatedAt` on every edit, and an example row is read-only in the app - it
+ * arrives with an import or a sync, both of which write new rows.
+ *
+ * `specContent` is not in here because it is a string, and a string is compared
+ * by value in the effect's dependency list already.
+ */
+function describeSource(collection: Collection, requests: readonly ExportRequest[]): string {
+	const rows = requests.map(
+		(entry) =>
+			`${entry.request.id}@${entry.request.updatedAt}+${entry.examples
+				.map((example) => example.id)
+				.join(".")}`
+	);
+	return `${collection.id}@${collection.updatedAt}|${rows.join(",")}`;
 }
 
 function Line({ count, label, suffix }: { count: number; label: string; suffix: string }) {
