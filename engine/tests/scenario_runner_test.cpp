@@ -1850,4 +1850,28 @@ TEST_F (ScenarioRunnerTest, StepEventsCarryTheRowIndexOnTheSameTermsAsTheStoredR
     EXPECT_FALSE (without_row.contains ("dataRowIndex"));
 }
 
+// The frame names the request the step ran (issue #831), so the app's way back
+// to it exists while the run streams rather than only once its rows are
+// written. Asserted here because a payload that stops sending the key would
+// otherwise return the app to the old behaviour silently - the step card
+// simply renders no link.
+TEST_F (ScenarioRunnerTest, StepEventsCarryTheRequestIdTheStoredRowIsStampedWith) {
+    vayu::core::StepRecord record;
+    record.iteration  = 0;
+    record.step_index = 2;
+    record.step_name  = "Checkout";
+    record.request_id = "req_checkout";
+
+    auto with_id = json::parse (vayu::core::build_step_payload (record, 0).substr (
+    vayu::core::build_step_payload (record, 0).find ("data: ") + 6));
+    EXPECT_EQ (with_id["requestId"].get<std::string> (), "req_checkout");
+
+    // A step whose plan entry names no stored request sends no key rather than
+    // an empty string the app would have to know to disbelieve.
+    record.request_id = "";
+    auto without_id = json::parse (vayu::core::build_step_payload (record, 0).substr (
+    vayu::core::build_step_payload (record, 0).find ("data: ") + 6));
+    EXPECT_FALSE (without_id.contains ("requestId"));
+}
+
 } // namespace

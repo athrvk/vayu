@@ -94,6 +94,11 @@ export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 		// Absent for a run with no data set, and left absent rather than
 		// defaulted: a `0` here would read as "row 1 of a data file".
 		...(typeof e.dataRowIndex === "number" ? { dataRowIndex: e.dataRowIndex } : {}),
+		// The request this step ran (issue #831), so a live row offers the same
+		// way back to it that a stored one does. Left absent unless the frame
+		// carries a non-empty id: the step card keys the action off its
+		// presence, and an empty string would be a link to nothing.
+		...(typeof e.requestId === "string" && e.requestId ? { requestId: e.requestId } : {}),
 		// The schema verdict (issue #681), passed through as the object the
 		// engine wrote rather than re-narrowed field by field: it is the same
 		// node the stored trace carries and `validationFromTrace` passes through

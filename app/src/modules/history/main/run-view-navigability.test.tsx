@@ -190,9 +190,33 @@ describe("a step's way back to its request", () => {
 		expect(screen.queryByRole("button", { name: /open the request/i })).toBeNull();
 	});
 
-	it("offers no link on a live row, whose frame carries no request id", () => {
+	it("opens the request from a live row, with the row that iteration bound", () => {
+		// The failure being watched arrive is when this link is worth most, so
+		// the frame names the request (issue #831) and the row does not wait
+		// for the run's stored rows to be written.
+		useScenarioRunStore.getState().startRun("run-1");
+		useScenarioRunStore.getState().addStep({
+			iteration: 11,
+			stepIndex: 0,
+			name: "Checkout",
+			outcome: "failed",
+			statusCode: 500,
+			latencyMs: 3,
+			requestId: "req_checkout",
+			dataRowIndex: 11,
+		});
 		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
 
+		fireEvent.click(screen.getByRole("button", { name: /row 12 selected/i }));
+
+		const { openTabs, dataRowTarget } = useTabsStore.getState();
+		expect(openTabs[0]).toMatchObject({ type: "request", entityId: "req_checkout" });
+		expect(dataRowTarget).toEqual({ requestId: "req_checkout", rowIndex: 11 });
+	});
+
+	it("offers no link on a live row whose frame names no request", () => {
+		// A step whose plan entry has no stored request behind it. Absent, not
+		// disabled, on the same terms as the stored row above.
 		useScenarioRunStore.getState().startRun("run-1");
 		useScenarioRunStore.getState().addStep({
 			iteration: 0,
@@ -202,7 +226,11 @@ describe("a step's way back to its request", () => {
 			statusCode: 500,
 			latencyMs: 3,
 		});
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
 
+		// The row is on screen - otherwise this asserts the absence of a link on
+		// a list that rendered nothing at all.
+		expect(screen.getByText("Log in")).toBeTruthy();
 		expect(screen.queryByRole("button", { name: /open the request/i })).toBeNull();
 	});
 });

@@ -48,6 +48,26 @@ describe("parseStepEvent", () => {
 		expect(parseStepEvent(base)).not.toHaveProperty("dataRowIndex");
 	});
 
+	it("carries the request the step ran, and omits the key for an empty or missing id", () => {
+		const base = {
+			iteration: 1,
+			stepIndex: 0,
+			name: "Checkout",
+			outcome: "failed",
+			statusCode: 500,
+			latencyMs: 12,
+		};
+
+		expect(parseStepEvent({ ...base, requestId: "req_checkout" })?.requestId).toBe(
+			"req_checkout"
+		);
+		expect(parseStepEvent(base)).not.toHaveProperty("requestId");
+		// An empty id is not a request: the step card keys its action off the
+		// field's presence, so carrying "" would offer a link to nothing.
+		expect(parseStepEvent({ ...base, requestId: "" })).not.toHaveProperty("requestId");
+		expect(parseStepEvent({ ...base, requestId: 7 })).not.toHaveProperty("requestId");
+	});
+
 	it("carries the schema verdict when the collection is bound, and no key when it is not", () => {
 		const base = {
 			iteration: 0,
