@@ -327,10 +327,17 @@ the serial wall**, because the route and load fixtures that dominate the suite's
 duration all open a database. The six fixtures the earlier analysis measured on
 Windows (197 tests, 57.2s, 19% of the wall here - within a point of the Windows
 figures, which is what makes this box a usable proxy for the *shape* of the
-suite) are only the visible tip of that group. Expect Windows around four fifths
-of its serial time, not the halving a fast band would suggest; getting past that
-means making the database tests themselves cheaper to run concurrently, which is
-issue #838.
+suite) are only the visible tip of that group.
+
+**What the first CI run of the hybrid model measured: 5m27s, 2071 tests, 0
+failures** (run 32249239500). That is inside the 4m40s-6m38s band the serial legs
+spanned, so **it is not a speedup** - one sample cannot be, against a baseline
+that noisy. What it does establish is that the mechanism works: the same `-j4`
+that took ~37 min without the lock now finishes in the time serial used to take,
+which is what the 81% number predicts and the reason to hold the expectation
+there rather than at the ~2.5 min this was first scoped for. Getting a real
+speedup means making the database tests cheaper to run concurrently, which is
+issue #838; treat that as the open work, not this paragraph as a win.
 
 Isolation is the **default** on every platform now, so a hand-run `ctest -j` is
 safe wherever it happens; the Windows presets used to set

@@ -109,8 +109,9 @@ pass `ctest -j8`, cutting its wall time on Linux and macOS to roughly a fifth
 open a scratch database sharing a CTest `RESOURCE_LOCK`** - a plain `-j` there
 measured ~6x *slower* than serial, because concurrent SQLite commits cost more
 than the concurrency returns, so those tests never overlap while the rest of the
-suite does. They are 81% of the serial wall, so expect Windows near four fifths
-of its serial time rather than a fifth; see `docs/engine/building.md`. A
+suite does. They are 81% of the serial wall, so Windows lands near its old
+serial time rather than at a fifth of it - the lock makes `-j4` survivable
+there, it does not make it fast; see `docs/engine/building.md`. A
 rebuild ~2.5min; the app suite ~90s. Running
 both after retouching a doc comment reads as diligence and is just latency. Ask
 what a failure would even look like before running anything: **if no test could
