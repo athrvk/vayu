@@ -145,8 +145,57 @@ class Client {
     std::unique_ptr<Impl> impl_;
 };
 
+/// What `pin_tls_backend` managed to do, in this engine's terms rather than
+/// libcurl's.
+///
+/// Named here rather than returning `CURLsslset` so this header does not have
+/// to include `curl/curl.h`: on Windows that reaches `windows.h`, whose
+/// `min`/`max` macros break `std::min`/`std::max` in every translation unit
+/// that includes this one. `NOMINMAX` is deliberately PRIVATE to `vayu_core`
+/// (`CMakeLists.txt`), so `vayu-engine` does not get it and `daemon.cpp` is
+/// where that lands - which is exactly how this was found.
+enum class TlsBackendSelection {
+    /// OpenSSL is the backend every transfer will use, because we said so.
+    Selected,
+    /// This build has no OpenSSL to select - so whatever it does verify with,
+    /// nothing this repo documents about trust applies to it.
+    Unavailable,
+    /// curl was already initialized, so the choice was made without us. A
+    /// caller reached curl before `global_init`.
+    TooLate
+};
+
+/**
+ * @brief Select OpenSSL as this process's TLS backend, before curl is
+ *        initialized (issue #851).
+ *
+ * **Why this exists rather than the manifest alone.** `engine/vcpkg.json` asks
+ * for `curl` with `default-features: false` and an explicit `openssl`, which
+ * should be the whole story - but the port's `http2` feature *itself* depends
+ * on `curl[ssl]`, and the engine requires `http2`. On Windows `ssl` resolves to
+ * Schannel, so the shipped libcurl is a **MultiSSL** build carrying both
+ * backends however the manifest is written (#858 tracks getting it down to
+ * one).
+ *
+ * On such a build libcurl picks the backend itself, and `multissl_setup`
+ * consults the **`CURL_SSL_BACKEND` environment variable** before falling back
+ * to the first compiled-in one. So an environment naming `schannel` - a
+ * corporate login script, a leftover shell export - would silently move every
+ * transfer onto the backend #851 exists to get off: mTLS stops working (#842)
+ * and the trust model changes, with every document here still describing
+ * OpenSSL. Naming the backend explicitly is what closes that, because
+ * `multissl_setup` reads the environment only when no caller has chosen.
+ *
+ * Idempotent, and deliberately separate from `global_init` so the ordering it
+ * depends on is one call a test can assert rather than a comment.
+ */
+TlsBackendSelection pin_tls_backend ();
+
 /**
  * @brief Initialize curl globally (call once at startup)
+ *
+ * Pins the TLS backend first - see `pin_tls_backend`, which must run before
+ * curl is initialized to have any effect.
  */
 void global_init ();
 

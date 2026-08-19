@@ -22,10 +22,13 @@
  * the setting, and a failure with the *wrong* setting.
  *
  * All four run on all three CI platforms, and getting there took two rounds.
- * The trust decision is made by a different backend on each (OpenSSL where curl
- * is built against it, Schannel on Windows), and a claim about trust that holds
- * on one is not a claim about the others - which is not a formality, because
- * the backends answered differently the first time this ran. A backend that
+ * The trust decision used to be made by a different backend on each (OpenSSL
+ * where curl was built against it, Schannel on Windows), and a claim about
+ * trust that holds on one is not a claim about the others - which was not a
+ * formality, because the backends answered differently the first time this ran.
+ * #851 pins one backend on all three, which removes the divergence rather than
+ * the reason these run everywhere: the pin itself is what is now being checked
+ * per leg. A backend that
  * revocation-checks the chain refused a CA minted for this run, since a CA
  * minted for this run published no CRL, and the two *positive* cases skipped
  * there rather than assert.
@@ -40,10 +43,12 @@
  * is telling us something.
  *
  * `TheFixtureServesACaSignedCrlAtTheLeafsDistributionPoint` is what keeps this
- * honest on the backends that never ask. Without it the whole CRL apparatus
- * could rot - unparseable bytes, a wrong signer, a stale window - and every
- * OpenSSL leg would stay green while the Schannel one went red for a reason
- * pointing at trust rather than at the fixture.
+ * honest on the backends that never ask, and after #851 that is every leg -
+ * OpenSSL does not revocation-check the chain on its own. Without it the whole
+ * CRL apparatus could rot - unparseable bytes, a wrong signer, a stale window -
+ * with nothing anywhere saying so, and the day someone reaches for a backend
+ * that does ask, it would go red for a reason pointing at trust rather than at
+ * the fixture.
  */
 
 #include <gtest/gtest.h>
@@ -237,6 +242,97 @@ TEST_F (CustomCaVerificationTest, TheAddedCaExtendsTheStoreRatherThanReplacingIt
     ASSERT_EQ (response.error_code, ErrorCode::None)
     << "a second anchor cost the first its trust: " << to_string (response.error_code)
     << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+}
+
+// ---------------------------------------------------------------------------
+// The anchors nobody pasted (issue #851)
+// ---------------------------------------------------------------------------
+
+/**
+ * The trust a user has before they configure anything.
+ *
+ * Every case above changes `customCaCertificates` and reads the result, so all
+ * of them would stay green on a build whose *default* store is empty - the
+ * paste is the only anchor any of them needs. That gap was free to leave while
+ * Windows ran on Schannel, because an OS-store backend cannot have an empty
+ * default. #851 makes Windows an OpenSSL build, where `CURLOPT_CAINFO` is the
+ * whole store and `curl_version_info()->cainfo` names a path from the machine
+ * the port was built on - so the default store there is whatever
+ * `CURLSSLOPT_NATIVE_CA` loads, and if the applier stopped setting it the
+ * platform would trust nothing at all with every one of those four cases still
+ * passing.
+ *
+ * Same fixture, opposite direction: nothing is pasted, and the handshake has to
+ * succeed anyway.
+ */
+class NativeStoreVerificationTest : public CustomCaVerificationTest {};
+
+TEST_F (NativeStoreVerificationTest, APublicCertificateVerifiesWithNothingPasted) {
+    // The one place in this suite that needs a certificate the *platform*
+    // vouches for, which no fixture can mint - so it is the one place that
+    // leaves the loopback interface. `example.com` is IANA's reserved
+    // documentation domain, held for exactly this and serving a certificate
+    // from an ordinary public authority.
+    static constexpr const char* PUBLIC_HTTPS_URL = "https://example.com/";
+
+    const auto policy = resolve_transport_policy (*db_);
+    ASSERT_TRUE (policy.ca_bundle_path.empty ())
+    << "something was pasted, so this would pass on the paste rather than on "
+       "the platform's own anchors";
+
+    const Response response = send_through (policy, PUBLIC_HTTPS_URL);
+
+    // A runner with no route to the public internet is a fact about the
+    // runner. A refused *handshake* is the failure this test exists to catch,
+    // so the two are separated rather than folded into "it did not work":
+    // skipping on an SslError would hide precisely the narrowing #851 could
+    // cause, and failing on a closed network would red every offline build.
+    if (response.error_code == ErrorCode::ConnectionFailed ||
+    response.error_code == ErrorCode::DnsError || response.error_code == ErrorCode::Timeout) {
+        GTEST_SKIP () << "no route to " << PUBLIC_HTTPS_URL << " ("
+                      << to_string (response.error_code) << ": " << response.error_message
+                      << ") - this asserts about the platform's trust store and "
+                         "needs a public host to assert against";
+    }
+
+    EXPECT_NE (response.error_code, ErrorCode::SslError)
+    << "a public certificate did not verify with an empty `customCaCertificates`, "
+       "so this build's default trust store is not the platform's: "
+    << response.error_message;
+    EXPECT_EQ (response.error_code, ErrorCode::None)
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+}
+
+TEST_F (NativeStoreVerificationTest, APasteExtendsThatStoreRatherThanReplacingIt) {
+    // The additive rule (#706) read on the branch the four cases above cannot
+    // reach: with a paste in force, the anchors that were there beforehand must
+    // still be. On the platforms that keep them in a file
+    // `materialize_ca_bundle` merges it, and on Windows - which ships no such
+    // file - `CURLSSLOPT_NATIVE_CA` keeps the store applying beside the bundle.
+    // Two mechanisms, one promise, and this is the promise rather than either
+    // mechanism: paste a CA that signed nothing here, and the public host that
+    // verified above must go on verifying.
+    static constexpr const char* PUBLIC_HTTPS_URL = "https://example.com/";
+
+    const TestCertificateAuthority unrelated ("Vayu Test CA (unrelated)");
+    set_custom_ca (unrelated.pem ());
+    const auto policy = resolve_transport_policy (*db_);
+    ASSERT_FALSE (policy.ca_bundle_path.empty ());
+
+    const Response response = send_through (policy, PUBLIC_HTTPS_URL);
+
+    if (response.error_code == ErrorCode::ConnectionFailed ||
+    response.error_code == ErrorCode::DnsError || response.error_code == ErrorCode::Timeout) {
+        GTEST_SKIP () << "no route to " << PUBLIC_HTTPS_URL << " ("
+                      << to_string (response.error_code) << ": " << response.error_message << ")";
+    }
+
+    EXPECT_NE (response.error_code, ErrorCode::SslError)
+    << "pasting one CA cost this machine every anchor it already had - the "
+       "additive rule is broken on this platform: "
+    << response.error_message;
     EXPECT_EQ (response.status_code, 200);
 }
 

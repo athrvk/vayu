@@ -135,7 +135,7 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 
 | Library | Purpose |
 |---------|---------|
-| curl | HTTP client library |
+| curl | HTTP client library - built with `default-features: false` and an explicit `openssl` (plus `http2`, `non-http`), so every platform *verifies* with OpenSSL ([#851](https://github.com/athrvk/vayu/issues/851)). It does not make Windows a single-backend build: the port's `http2` feature itself depends on `curl[ssl]`, which resolves to Schannel there, so the Windows libcurl is MultiSSL and the engine names its backend at startup instead (`pin_tls_backend()`). Keep the explicit `openssl` regardless - without it there is no OpenSSL to name. See [#858](https://github.com/athrvk/vayu/issues/858) |
 | libsodium | SHA-256, HMAC-SHA256, base64 and hex (PKCE, Basic/OAuth credentials, `pm.crypto`) |
 | nlohmann-json | JSON parsing/serialization |
 | valijson | JSON Schema validation of responses against a bound OpenAPI document |
@@ -223,23 +223,26 @@ Two consequences worth knowing before you change the build:
 
 `engine/res/vayu-windows.manifest` is embedded into `vayu-engine`, `vayu-cli`
 and `vayu_tests` by `vayu_embed_windows_manifest()` in
-`engine/CMakeLists.txt`. **Without it, HTTP/2 is impossible on Windows** - not
-slower, not intermittent: never negotiated, with a `200 OK` and a reported
-`HTTP/1.1` for a request that asked for h2.
+`engine/CMakeLists.txt`, and both guards below still assert it.
 
-The chain, because no part of it is guessable from the flag:
+**The chain it was added for is historical since
+[#851](https://github.com/athrvk/vayu/issues/851)**, and it is written out
+because no part of it is guessable from the flag - and because a return to
+Schannel brings it straight back:
 
-1. libcurl on Windows uses the Schannel TLS backend, and HTTP/2 over TLS is
+1. libcurl on Windows used the Schannel TLS backend, and HTTP/2 over TLS is
    only reachable through ALPN.
 2. curl's Schannel backend enables ALPN only when the OS is at least Windows
    8.1 (`s_win_has_alpn`, `lib/vtls/schannel.c`).
 3. That check prefers ntdll's `RtlVerifyVersionInfo`, which tells the truth -
    but resolves the pointer to it in `Curl_win32_init()`, which libcurl's
-   `global_init()` runs *after* `Curl_ssl_init()`. The one call that decides
-   ALPN for the whole process therefore falls back to `VerifyVersionInfoW`.
+   `global_init()` runs *after* `Curl_ssl_init()`. The one call that decided
+   ALPN for the whole process therefore fell back to `VerifyVersionInfoW`.
 4. `VerifyVersionInfoW` is version-shimmed: since Windows 8.1 it reports 6.2 to
    any process whose manifest does not declare support for a later OS. 6.2 <
-   6.3, so ALPN is switched off for the life of the process.
+   6.3, so ALPN was switched off for the life of the process - **HTTP/2 never
+   negotiated**, with a `200 OK` and a reported `HTTP/1.1` for a request that
+   asked for h2.
 
 The manifest's `supportedOS` ids turn the shim off. v0.11.0 through v0.14.0
 shipped without it and HTTP/2 was dead on Windows the whole time
@@ -248,6 +251,14 @@ which is why it is guarded twice: `HttpVersionSupport.WindowsOsVersionIsNotShimm
 asserts that the test binary is not being version-lied to, and
 `check-windows-deps.py` scans the *shipped* `vayu-engine.exe` for the ids, since
 a gtest can only vouch for the process it runs in.
+
+Since #851 the Windows build verifies with OpenSSL, whose ALPN is not gated on
+an OS version check - so step 2 no longer runs and HTTP/2 on Windows does not
+depend on the manifest. The manifest and its two guards stay: they are cheap,
+they are what makes a return to Schannel safe, and whether anything *else*
+still needs them is
+[#856](https://github.com/athrvk/vayu/issues/856) rather than a deletion made
+in passing.
 
 Add a fourth executable that links libcurl and you must call
 `vayu_embed_windows_manifest()` for it too. Note that the mechanism is a
@@ -479,8 +490,8 @@ Set `VCPKG_ROOT` environment variable or install vcpkg in a standard location.
 
 ### Linker Errors
 
-- Ensure all vcpkg dependencies are installed: `vcpkg install curl[http2] libsodium nlohmann-json valijson cpp-httplib[openssl] sqlite3 sqlite-orm gtest`
-  (the `http2` feature is required - without it libcurl is built without nghttp2 and the HTTP/2 support test fails; the `openssl` feature is required for the same reason one step further along - without it `httplib::SSLServer` does not exist and the TLS-verification tests do not compile)
+- Ensure all vcpkg dependencies are installed: `vcpkg install curl[core,http2,non-http,openssl] libsodium nlohmann-json valijson cpp-httplib[openssl] sqlite3 sqlite-orm gtest`
+  (the leading `core` is what `default-features: false` spells on the command line, and it is load-bearing on Windows - see the dependency table above. `http2` is required, without it libcurl is built without nghttp2 and the HTTP/2 support test fails; `non-http` is a default feature the engine relies on and has to be named once the defaults are off; cpp-httplib's `openssl` is required for the same reason one step further along - without it `httplib::SSLServer` does not exist and the TLS-verification tests do not compile)
 - On Windows, ensure Visual Studio C++ tools are installed
 
 ### Build Script Issues

@@ -97,10 +97,13 @@ constexpr std::string_view RSA_KEY_MARKER = "-----BEGIN RSA PRIVATE KEY-----";
 /// The last resort of three, and which one answers is a property of the build
 /// rather than of the platform: the linux-dev build at the pinned baseline
 /// reports `cainfo=/etc/ssl/certs/ca-certificates.crt`, so it never reaches
-/// this list. Every leg but Windows is OpenSSL-backed (#818) and therefore
-/// runs this resolver for real, which is why
-/// `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts that *some* probe
-/// answers rather than assuming a particular one does.
+/// this list. Linux and macOS run this resolver for real, which is why
+/// `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts there that *some*
+/// probe answers rather than assuming a particular one does. Windows is
+/// OpenSSL-backed too since #851 but has no bundle on any of these paths - the
+/// `cainfo` its port reports names the build machine - so it normally falls
+/// through to the empty path and takes its anchors from the certificate store
+/// via `CURLSSLOPT_NATIVE_CA` instead.
 constexpr std::array<std::string_view, 6> SYSTEM_CA_BUNDLES = {
     "/etc/ssl/certs/ca-certificates.crt", // Debian, Ubuntu, Alpine
     "/etc/pki/tls/certs/ca-bundle.crt",   // Fedora, RHEL
@@ -215,11 +218,16 @@ const std::filesystem::path& directory) {
 
     // The user's anchors *extend* the platform's rather than replacing them
     // (decision 4 of #704). On an OpenSSL-backed build `CURLOPT_CAINFO` is the
-    // whole trust store, so the merge has to happen here - and that is every
-    // leg but Windows, macOS included (#818). Where the platform verifies
-    // through an OS store instead (Schannel) there is no file to read and the
-    // bundle holds the user's certificates alone, with the OS store still
-    // consulted by the backend itself.
+    // whole trust store, so the merge has to happen here - and since #851
+    // every leg is one, macOS included (#818).
+    //
+    // Windows is the leg with nothing to merge: it keeps its anchors in a
+    // certificate store and ships no PEM bundle, so `system_ca_bundle_path()`
+    // finds none and this writes the user's certificates alone. The additive
+    // promise is kept there by `CURLSSLOPT_NATIVE_CA`, which the applier sets
+    // unconditionally on that platform (`curl_utils.cpp`) - so the store still
+    // applies beside this file. A machine that exports `CURL_CA_BUNDLE` puts a
+    // file back in reach and the merge below runs there like anywhere else.
     std::string content;
     const std::filesystem::path system_bundle = system_ca_bundle_path ();
     if (!system_bundle.empty ()) {

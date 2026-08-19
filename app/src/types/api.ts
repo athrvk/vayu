@@ -776,8 +776,10 @@ export interface ClearCookiesResponse {
  */
 /**
  * What the certificate file holds (issue #833). `pem` keeps the key in a second
- * file; `p12` is a PKCS#12 bundle carrying both, and the only shape a Schannel
- * (Windows) build can present at all.
+ * file; `p12` is a PKCS#12 bundle carrying both. Every platform reads both
+ * shapes since issue #851 - the engine still stores which one it is, because
+ * libcurl needs telling (`CURLOPT_SSLCERTTYPE`) and would otherwise hand a
+ * bundle to its PEM parser.
  */
 export type ClientCertificateFormat = "pem" | "p12";
 

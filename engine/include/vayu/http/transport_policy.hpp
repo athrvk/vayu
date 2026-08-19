@@ -112,12 +112,12 @@ std::optional<std::string> proxy_url_rejection (std::string_view url);
  * Settings card cannot print. It is written once, when the entry is registered.
  */
 enum class ClientCertFormat {
-    /// A PEM certificate with its key in a second file - libcurl's default, and
-    /// the only shape an OpenSSL-backed build takes.
+    /// A PEM certificate with its key in a second file - libcurl's default.
     Pem,
     /// A PKCS#12 file carrying certificate *and* key, which libcurl reads only
-    /// when told `CURLOPT_SSLCERTTYPE` is `P12`. The only file shape Schannel
-    /// takes.
+    /// when told `CURLOPT_SSLCERTTYPE` is `P12`. An OpenSSL-backed build - every
+    /// leg since #851 - reads both shapes; Schannel read only this one, which
+    /// is why the format is a stored column rather than an assumption.
     Pkcs12
 };
 
@@ -346,16 +346,18 @@ std::optional<std::string> ca_pem_rejection (std::string_view pem);
  * @brief The trust anchors this platform verifies with today, as PEM text.
  *
  * Empty when they cannot be read as a file - which is the normal case on
- * Windows, where Schannel keeps the anchors in an OS store rather than a
- * bundle. Every other leg is OpenSSL-backed at the pinned vcpkg baseline -
- * macOS included, which this comment denied until #818 - so it normally
- * returns *content* there, and the merge in `resolve_transport_policy` is
- * doing real work rather than the no-op that reading implied.
- * `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts exactly that on
- * every such leg, because a bundle-verifying build that finds nothing here
- * would narrow the user's trust to their own paste. Exposed for the tests and
- * for the per-platform disclosure in the docs; production code reaches it
- * through `resolve_transport_policy`.
+ * Windows, which ships its anchors in a certificate store and no PEM bundle
+ * for anything to read. Every leg is OpenSSL-backed since #851 - macOS
+ * included, which this comment denied until #818 - so Linux and macOS return
+ * *content* and the merge in `resolve_transport_policy` does real work there
+ * rather than the no-op that reading implied, while on Windows the anchors
+ * reach libcurl through `CURLSSLOPT_NATIVE_CA` instead and the materialized
+ * bundle carries the user's paste alone.
+ * `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts each of those on
+ * the leg it applies to, because a build that finds nothing here *and* does
+ * not load the store would narrow the user's trust to their own paste.
+ * Exposed for the tests and for the per-platform disclosure in the docs;
+ * production code reaches it through `resolve_transport_policy`.
  */
 std::string system_ca_bundle_pem ();
 
