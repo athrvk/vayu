@@ -295,14 +295,22 @@ Three things worth knowing before you design around them:
   so the skip and its helpers are gone and a refusal naming revocation is an
   ordinary failure again. What #819 keeps is the user-facing half, which is a
   decision rather than a fix: someone pasting an internal CA with no reachable
-  distribution point gets the same refusal, and no doc says so. Still
-  structural, not on a wire: the *client* certificate's
-  handshake, tracked by #802 - which should reuse this CRL rather than build a
-  second one.
+  distribution point gets the same refusal, and no doc says so. **The client
+  certificate's handshake is on a wire too now** (#802): the same `TlsServer`,
+  built with a second CA, demands a certificate that authority signed, so it
+  reuses this CRL rather than standing up a second listener.
   A proxy-hop failure is **`ErrorCode::ProxyError`**, distinct from
   the target's `ConnectionFailed` - and `curl_to_error` now takes the handle,
   because a 407 answered to a CONNECT is a plain `CURLE_RECV_ERROR` and only
-  `CURLINFO_HTTP_CONNECTCODE` remembers a proxy said no.
+  `CURLINFO_HTTP_CONNECTCODE` remembers a proxy said no. The handle answers a
+  second question for the same reason (#802): **an https transfer that failed
+  for a code with no mapping and produced no response line is an `SslError`**,
+  not the `InternalError` the default arm used to give it. Every
+  client-certificate refusal lands there - under TLS 1.3 the server's verdict
+  about the client arrives after the client's handshake finishes, so curl
+  reports `CURLE_RECV_ERROR` with the alert in its message. The rule is the
+  *shape*, never a list of codes, and it is consulted only after every mapping
+  with a meaning of its own has been tried.
 - **A client certificate belongs to a host, not to a request** (#707,
   `client_certificates`). The registry rides *inside* the `TransportPolicy`, so
   it reaches every outbound path with no per-site wiring and is read once per
@@ -316,7 +324,13 @@ Three things worth knowing before you design around them:
   entry is recorded on `Response::client_certificate` and travels both design
   funnels (live body and stored trace) under `clientCertificate`, deliberately
   *not* on the load path: it is a per-transfer string for a fact that is
-  constant for the run.
+  constant for the run. **What goes out is a PEM pair and nothing else**
+  (`tests/mutual_tls_test.cpp`, #802): the applier writes no
+  `CURLOPT_SSLCERTTYPE`, so libcurl reads both files in its default format -
+  right on every OpenSSL leg, and the reason the Schannel build, which wants
+  PKCS#12, can present nothing at all (#833). The live fixture skips that leg
+  with the reason printed and scans the applier so the skip cannot outlive its
+  cause.
 
 ## Request composition (engine-owned - POST /compose)
 

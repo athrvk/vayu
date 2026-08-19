@@ -475,6 +475,59 @@ bool proxy_refused_tunnel (CURL* curl) {
     return connect_code >= 400;
 }
 
+/**
+ * Whether a failure with no mapping of its own happened on a TLS connection
+ * that never answered - the shape every client-certificate refusal takes, and
+ * one no CURLcode names (issue #802).
+ *
+ * Three failures arrive this way and not one of them is internal to this
+ * engine: a key the stored passphrase does not open
+ * (`CURLE_BAD_FUNCTION_ARGUMENT` here, where the curl command line reports
+ * `CURLE_SSL_CERTPROBLEM` for the same event), a certificate the server will
+ * not accept, and a certificate the server demanded and did not get. The last
+ * two are `CURLE_RECV_ERROR`, because under TLS 1.3 the server's verdict about
+ * the *client* arrives after the client's own handshake has finished - so
+ * libcurl reports the ordinary code of a connection that went away
+ * mid-request, carrying the alert in its message ("tlsv13 alert certificate
+ * required", "tlsv1 alert unknown ca").
+ *
+ * The test is deliberately about that shape rather than about those three
+ * codes. An enumeration would be a list to extend every time a backend spread
+ * one event across another code - the trap `proxy_refused_tunnel` above exists
+ * to avoid - and it is consulted only where the mapping has already run out of
+ * meanings, so nothing with an answer of its own reaches it.
+ *
+ * What it costs: an https endpoint that accepts a connection and hangs up
+ * before answering for a reason of its own now reads as a TLS error. It read
+ * as an *internal* error before, which is worse - nothing inside this engine
+ * failed - and libcurl's own message travels with the code either way.
+ */
+bool tls_connection_never_answered (CURL* curl) {
+    if (!curl) {
+        return false;
+    }
+    char* scheme = nullptr;
+    if (curl_easy_getinfo (curl, CURLINFO_SCHEME, &scheme) != CURLE_OK || scheme == nullptr) {
+        return false;
+    }
+    // curl reports the scheme upper-cased; compared case-insensitively anyway,
+    // because that is a presentation detail of one version.
+    std::string lowered (scheme);
+    std::transform (lowered.begin (), lowered.end (), lowered.begin (),
+    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+    if (lowered != "https") {
+        return false;
+    }
+
+    // A response line, even a 4xx, means the TLS layer did its job and whatever
+    // failed after it is not a trust decision.
+    long response_code = 0;
+    if (curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &response_code) != CURLE_OK) {
+        return false;
+    }
+    return response_code == 0;
+}
+
 } // namespace
 
 Error curl_to_error (CURL* curl, CURLcode code, const char* error_buffer) {
@@ -511,7 +564,10 @@ Error curl_to_error (CURL* curl, CURLcode code, const char* error_buffer) {
         error.code = ErrorCode::SslError;
         break;
     case CURLE_URL_MALFORMAT: error.code = ErrorCode::InvalidUrl; break;
-    default: error.code = ErrorCode::InternalError; break;
+    default:
+        error.code = tls_connection_never_answered (curl) ? ErrorCode::SslError :
+                                                            ErrorCode::InternalError;
+        break;
     }
 
     return error;
