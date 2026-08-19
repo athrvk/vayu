@@ -17,7 +17,7 @@
  */
 
 import { create } from "zustand";
-import type { ConsoleLogEntry } from "@/types";
+import type { ConsoleLogEntry, TestResult } from "@/types";
 
 /**
  * A structural *subset* of the request builder's `ResponseState`, not a copy of
@@ -43,7 +43,8 @@ export interface StoredResponse {
 	// Script execution results
 	/** A `string` is the pre-structured engine shape - see `parse-logs.ts`. */
 	consoleLogs?: Array<ConsoleLogEntry | string>;
-	testResults?: Array<{ name: string; passed: boolean; error?: string }>;
+	/** Both scripts' assertions, each naming its script - see `TestResult`. */
+	testResults?: TestResult[];
 	preScriptError?: string;
 	postScriptError?: string;
 	// Metadata

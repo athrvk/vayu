@@ -3036,8 +3036,14 @@ run-shaped way of stating the same field, not a second store.
   },
   "testResults": [
     {
+      "name": "Token was issued",
+      "passed": true,
+      "source": "pre"
+    },
+    {
       "name": "Status is 200",
-      "passed": true
+      "passed": true,
+      "source": "test"
     }
   ],
   "consoleLogs": [
@@ -3068,6 +3074,13 @@ The same object is stored on the design run's `trace_data.validation`, so a
 restored response shows the verdict the live one did rather than recomputing it.
 A streaming send carries none - an event stream is not a document a response
 schema describes.
+
+`testResults` lists **both** scripts' assertions in execution order, each
+naming the script that made it in `source` (`"pre"` / `"test"`, the spellings
+`consoleLogs` uses) - `pm.test` is bound in both phases, and until issue #810 a
+pre-request assertion failed a collection-run step while appearing in no list.
+An entry stored before that carries no `source`; it is a test script's, which is
+all the list held.
 
 **The four script keys are stored the same way** (issue #725). `testResults`,
 `consoleLogs`, `preScriptError` and `postScriptError` are returned in the body

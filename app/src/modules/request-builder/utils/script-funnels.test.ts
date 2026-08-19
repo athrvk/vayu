@@ -27,10 +27,21 @@ import type { ConsoleLogEntry, SanityResult, TestResult } from "@/types";
 import { responseFromExecuteResult } from "./execute-mapping";
 import { responseFromRunResult, type RunResultSample } from "./restore-response";
 
-/** One passing and one failing assertion: the pane draws them differently. */
+/**
+ * One passing and one failing assertion: the pane draws them differently.
+ *
+ * One from each script, carrying the `source` the engine stamps (issue #810):
+ * the phase is inside the object both funnels pass through, so a funnel that
+ * rebuilt the list instead of carrying it would drop it here first.
+ */
 const TEST_RESULTS: TestResult[] = [
-	{ name: "Status is 200", passed: true },
-	{ name: "Body carries an id", passed: false, error: "expected undefined to equal 1" },
+	{ name: "Token was issued", passed: true, source: "pre" },
+	{
+		name: "Body carries an id",
+		passed: false,
+		error: "expected undefined to equal 1",
+		source: "test",
+	},
 ];
 
 const CONSOLE_LOGS: ConsoleLogEntry[] = [

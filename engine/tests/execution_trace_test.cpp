@@ -26,11 +26,35 @@ namespace vayu::http::routes {
 // Declared in execution.cpp.
 nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response);
+nlohmann::json build_script_result_node (const vayu::ScriptResult& pre_script_result,
+const vayu::ScriptResult& post_script_result);
 } // namespace vayu::http::routes
 
 namespace {
 
 using vayu::http::routes::build_result_trace;
+using vayu::http::routes::build_script_result_node;
+
+vayu::ScriptResult script_with (std::vector<vayu::TestResult> tests) {
+    vayu::ScriptResult result;
+    result.tests = std::move (tests);
+    return result;
+}
+
+vayu::TestResult passing (std::string name) {
+    vayu::TestResult test;
+    test.name   = std::move (name);
+    test.passed = true;
+    return test;
+}
+
+vayu::TestResult failing (std::string name, std::string message) {
+    vayu::TestResult test;
+    test.name          = std::move (name);
+    test.passed        = false;
+    test.error_message = std::move (message);
+    return test;
+}
 
 vayu::Request make_request () {
     vayu::Request request;
@@ -337,6 +361,71 @@ TEST (ExecutionTrace, OmitsTheClientCertificateWhenNoneWasUsed) {
 
     EXPECT_FALSE (trace.contains ("clientCertificate"));
     EXPECT_EQ (vayu::json::serialize (make_response ())["clientCertificate"], "");
+}
+
+// ============================================================================
+// The `scripts` node's assertion list (issue #810)
+// ============================================================================
+//
+// `pm.test` is bound in both script phases and has always recorded in both, and
+// a failing pre-request assertion fails its scenario step through
+// `describe_failed_tests`. The node listed the post-request script's assertions
+// alone, so that step was failed by an assertion no surface could name - and on
+// a design send a pre-request assertion was reported nowhere at all.
+
+TEST (ScriptResultNode, ListsBothScriptsAssertionsInExecutionOrder) {
+    const auto node = build_script_result_node (
+    script_with ({ passing ("token was issued") }),
+    script_with ({ failing ("status is 200", "expected 500 to equal 200") }));
+
+    ASSERT_TRUE (node.contains ("testResults")) << node.dump ();
+    const auto& tests = node["testResults"];
+    ASSERT_EQ (tests.size (), 2u) << tests.dump ();
+
+    // Pre first: the list reads as the run happened, which is the only ordering
+    // a reader can check the phases against.
+    EXPECT_EQ (tests[0]["name"], "token was issued");
+    EXPECT_EQ (tests[0]["source"], "pre");
+    EXPECT_TRUE (tests[0]["passed"].get<bool> ());
+    EXPECT_FALSE (tests[0].contains ("error"));
+
+    EXPECT_EQ (tests[1]["name"], "status is 200");
+    EXPECT_EQ (tests[1]["source"], "test");
+    EXPECT_FALSE (tests[1]["passed"].get<bool> ());
+    EXPECT_EQ (tests[1]["error"], "expected 500 to equal 200");
+}
+
+// The spellings are `consoleLogs`', deliberately: one pair of scripts, one pair
+// of names, and the app reads both through the same union.
+TEST (ScriptResultNode, NamesTheScriptTheWayConsoleLinesDo) {
+    vayu::ScriptResult pre;
+    pre.tests.push_back (passing ("fixture is present"));
+    pre.console_output.push_back ({ vayu::ConsoleLevel::Log, "checking the fixture" });
+
+    const auto node = build_script_result_node (pre, script_with ({ passing ("ok") }));
+
+    EXPECT_EQ (node["testResults"][0]["source"], node["consoleLogs"][0]["source"]);
+    EXPECT_EQ (node["testResults"][1]["source"], "test");
+}
+
+// A post-request-only list is what every stored trace and every older engine
+// carries, so it keeps meaning exactly what it did - with the phase now said
+// rather than assumed.
+TEST (ScriptResultNode, APostRequestOnlyListIsUnchangedApartFromTheSource) {
+    const auto node =
+    build_script_result_node (vayu::ScriptResult{}, script_with ({ passing ("status is 200") }));
+
+    ASSERT_EQ (node["testResults"].size (), 1u);
+    EXPECT_EQ (node["testResults"][0]["name"], "status is 200");
+    EXPECT_EQ (node["testResults"][0]["source"], "test");
+}
+
+// Absent, not empty: the pane reads an absent list as "no results", and an
+// empty one would put a Tests tab's worth of nothing on every scriptless send.
+TEST (ScriptResultNode, OmitsTheListWhenNeitherScriptAsserted) {
+    const auto node = build_script_result_node (vayu::ScriptResult{}, vayu::ScriptResult{});
+
+    EXPECT_FALSE (node.contains ("testResults")) << node.dump ();
 }
 
 } // namespace

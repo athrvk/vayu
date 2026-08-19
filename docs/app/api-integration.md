@@ -948,7 +948,8 @@ forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
   clientCertificate: "",
   timing: { total: 150, dns: 10, connect: 20, ... },
   testResults: [
-    { name: "Status 200", passed: true }
+    { name: "Token was issued", passed: true, source: "pre" },
+    { name: "Status 200", passed: true, source: "test" }
   ],
   consoleLogs: [
     { source: "pre", level: "log", message: "Pre-request" },
@@ -956,6 +957,12 @@ forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
   ]
 }
 ```
+
+`testResults` entries name the script that asserted them, in execution order:
+`pm.test` runs in a pre-request script too, and the Tests pane groups the list
+by `source` so an assertion made before the request went out does not read as
+one about the response (issue #810). An entry restored from a trace written
+before that carries no `source`, and is read as the test script's.
 
 `consoleLogs` entries name the script that wrote them and the `console.*` level
 that was called. A bare `string` is the pre-structured shape an older engine

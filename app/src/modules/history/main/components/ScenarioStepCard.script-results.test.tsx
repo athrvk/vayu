@@ -113,6 +113,29 @@ describe("ScenarioStepCard script results", () => {
 		expect(screen.getByText("1 test passed")).toBeTruthy();
 	});
 
+	it("keeps a pre-request assertion in the step it failed, under its own script", () => {
+		// The step this list could not account for (issue #810): a pre-request
+		// assertion has always decided the outcome and always named the error
+		// line, while the list beside it held the test script's alone. Both
+		// phases are listed now, and the heading is what keeps an assertion made
+		// before the request from reading as one about the response.
+		renderCard(
+			step({
+				result: storedWith([
+					{ name: "token was issued", passed: false, source: "pre" },
+					{ name: "status is 200", passed: true, source: "test" },
+				]),
+			}),
+			true
+		);
+
+		expect(screen.getByText("token was issued")).toBeTruthy();
+		expect(screen.getByText("Pre-request Script")).toBeTruthy();
+		// And it is counted: the chip reads the stored list, which is now what
+		// the engine's live tally counted for the same step.
+		expect(screen.getByText("1 passed, 1 failed")).toBeTruthy();
+	});
+
 	it("summarises a live step from the frame's tally, before any stored row exists", () => {
 		// A collection run has no live delivery for the list - every step is
 		// viewed through its stored trace - so the tally is all a run being
