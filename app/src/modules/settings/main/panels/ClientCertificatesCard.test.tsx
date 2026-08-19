@@ -238,6 +238,55 @@ describe("ClientCertificatesCard", () => {
 		expect(screen.getByText("pkcs12")).toBeInTheDocument();
 	});
 
+	it("prints what each row will and will not match", () => {
+		// Issue #803: the pattern text alone is what a reader guesses wrong in
+		// both directions - a plain host looks like it covers its subdomains,
+		// and `*.example.com` looks like it covers `example.com`. Dropping
+		// either half of the sentence reddens this.
+		queryResult = {
+			data: [certificates[0], { ...certificates[1], id: "cert_3", host: "*.example.com" }],
+			isError: false,
+		};
+		renderCard();
+
+		expect(
+			screen.getByText("Matches api.example.com exactly - not its subdomains.")
+		).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				"Matches any subdomain of example.com (api.example.com, a.b.example.com) - not example.com itself."
+			)
+		).toBeInTheDocument();
+	});
+
+	it("states the wildcard form where the host is typed", () => {
+		// A user who never learns the form registers one entry per service, and
+		// adds another every time a service appears - the case the wildcard
+		// shipped for.
+		renderCard();
+		fireEvent.click(screen.getByRole("button", { name: /add certificate/i }));
+
+		const hint = screen.getByText(/a host matches exactly/i);
+		expect(hint).toHaveTextContent("*.example.com");
+		expect(hint).toHaveTextContent("never");
+	});
+
+	it("sends a wildcard host through unchanged, for the engine to judge", () => {
+		// The card does not validate the pattern: the engine owns the one copy
+		// of that rule and its 400 names the shape that works, so a second
+		// (inevitably drifting) copy here would only refuse things the engine
+		// accepts.
+		renderCard();
+		fillDraft({ host: "*.example.com" });
+		fireEvent.click(screen.getByRole("button", { name: /^add certificate$/i }));
+
+		return waitFor(() =>
+			expect(createMutate).toHaveBeenCalledWith(
+				expect.objectContaining({ host: "*.example.com" })
+			)
+		);
+	});
+
 	it("says the engine did not answer rather than showing an empty registry", () => {
 		queryResult = { data: undefined, isError: true };
 		renderCard();

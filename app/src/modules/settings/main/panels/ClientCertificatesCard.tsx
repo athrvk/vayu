@@ -27,6 +27,14 @@
  * repo's existing credential precedent) and, once stored, never sent back -
  * which is why an entry that has one shows a badge and not a value.
  *
+ * **Every row says what it reaches** (issue #803). A host matches exactly and
+ * `*.example.com` matches every subdomain but not `example.com` itself - a
+ * distinction the pattern text does not carry on its own, so each row prints
+ * the scope in words and the form states the wildcard form where the host is
+ * typed. The matching itself stays in the engine; nothing here re-implements
+ * it, because two copies of a rule about which certificate goes on a wire is
+ * one copy too many.
+ *
  * **The format is a field, not a guess** (issue #833). A PEM certificate keeps
  * its key in a second file; a PKCS#12 bundle carries both, and is the only
  * shape a Windows build can present at all. So the form asks which one, drops
@@ -65,6 +73,32 @@ import { fileBaseName } from "@/lib/file-path";
 /** What an entry is called: the same `host` / `host:port` the engine traces. */
 function targetLabel(certificate: ClientCertificate): string {
 	return certificate.port === null ? certificate.host : `${certificate.host}:${certificate.port}`;
+}
+
+/** The one wildcard form the engine stores - see `matchSummary` (issue #803). */
+function isWildcardHost(host: string): boolean {
+	return host.startsWith("*.");
+}
+
+/**
+ * What a row will and will not answer for, in one sentence (issue #803).
+ *
+ * Printed for every row rather than only the wildcard ones, and stating the
+ * negative half explicitly, because the pattern text alone is exactly what a
+ * reader guesses wrong: `*.example.com` looks like it covers `example.com` and
+ * does not, and a plain host looks like it covers its subdomains and does not.
+ * A certificate silently *not* presented is the failure this registry exists to
+ * end, so the scope is on screen rather than in the docs.
+ *
+ * The port is deliberately absent here - it is already the row's title and its
+ * badge, and this sentence is about which *hosts* the entry reaches.
+ */
+function matchSummary(host: string): string {
+	if (!isWildcardHost(host)) {
+		return `Matches ${host} exactly - not its subdomains.`;
+	}
+	const domain = host.slice(2);
+	return `Matches any subdomain of ${domain} (api.${domain}, a.b.${domain}) - not ${domain} itself.`;
 }
 
 /**
@@ -291,6 +325,11 @@ export function ClientCertificatesCard() {
 											</Badge>
 										)}
 									</div>
+									{/* What this row reaches, spelled out - the pattern
+									    text alone is what a reader guesses wrong. */}
+									<p className="text-xs text-muted-foreground">
+										{matchSummary(certificate.host)}
+									</p>
 									{/* The basename reads; the full path is the title,
 									    because two `client.pem` in different directories
 									    are different certificates. */}
@@ -351,6 +390,15 @@ export function ClientCertificatesCard() {
 								/>
 							</div>
 						</div>
+						{/* The wildcard form is stated where the host is typed, not only
+						    on the row it produces: a user who never learns it exists
+						    registers one entry per service and adds one per new service. */}
+						<p className="text-xs text-muted-foreground">
+							A host matches exactly. Write{" "}
+							<code className="font-mono">*.example.com</code> to answer for every
+							subdomain instead - <code className="font-mono">api.example.com</code>{" "}
+							and deeper, never <code className="font-mono">example.com</code> itself.
+						</p>
 
 						<div className="space-y-1.5">
 							<Label>Format</Label>

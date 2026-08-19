@@ -509,7 +509,7 @@ matching rule.
 | Column       | Type    | Notes                                                     |
 |--------------|---------|-----------------------------------------------------------|
 | `id`         | TEXT PK | `cert_` + UUID                                            |
-| `host`       | TEXT    | Hostname, lower-cased, no scheme/port/path. IPv6 without brackets |
+| `host`       | TEXT    | Hostname, lower-cased, no scheme/port/path, or `*.example.com` for every subdomain of it (issue #803). IPv6 without brackets |
 | `port`       | INTEGER | NULL = answers for the host on every port                 |
 | `cert_path`  | TEXT    | Path to the certificate file                              |
 | `key_path`   | TEXT    | Path to the private key file; `""` for a `p12` entry, which carries its own |
@@ -542,8 +542,11 @@ The wire is narrower than the file: reads never echo the passphrase, answering
 `port` is nullable rather than a sentinel because "every port" is the *absence*
 of a port, the same distinction `result_bodies.stream_events` draws. At most one
 row may claim a given `host` + `port` pair - the routes answer `409` on the
-second - so the per-transfer match is unique by construction and needs no
-tie-break.
+second, and a wildcard pattern is a `host` like any other, so the rule covers it
+unchanged. Several rows may still *match* one transfer once patterns overlap
+(#803), and they are ranked rather than tie-broken: closest host, then port. A
+tie would need the same host and port twice, which is the pair the `409`
+forbids.
 
 ---
 

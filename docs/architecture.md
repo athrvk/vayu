@@ -260,8 +260,9 @@ client for a certificate, and a certificate belongs to the host being called
 rather than to one request - the transfer that needs it is as often a token
 fetch, a redirect or a script's `pm.sendRequest`. So the engine keeps a
 registry of host to certificate (Settings > Network & connectivity), matches an
-entry per transfer by exact host and optional port, and presents it on every one
-of the paths above without any request naming it. Only the file *paths* are
+entry per transfer by host and optional port - an exact name, or `*.example.com`
+for every subdomain of it but never the domain itself - and presents it on every
+one of the paths above without any request naming it. Only the file *paths* are
 stored, so the private key stays where the user's own tooling put it; a
 cert-authenticated exchange reports which entry it used, live and from History
 alike. See [Client

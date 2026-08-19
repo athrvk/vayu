@@ -783,7 +783,11 @@ export type ClientCertificateFormat = "pem" | "p12";
 
 export interface ClientCertificate {
 	id: string;
-	/** Lower-cased hostname, no scheme or port - the engine stores it this way. */
+	/**
+	 * Lower-cased hostname, no scheme or port - the engine stores it this way -
+	 * or the one wildcard form, `*.example.com`, which answers for every
+	 * subdomain and never for the domain itself (issue #803).
+	 */
 	host: string;
 	/** The port this entry is specific to, or null when it answers on every one. */
 	port: number | null;

@@ -993,6 +993,9 @@ read "HTTP/2" there
 
 `clientCertificate` names the client-certificate registry entry the exchange
 presented, as `host` or `host:port`, and `""` when none matched (issue #707).
+It is the entry's own spelling, so a wildcard row reads as `*.example.com`
+rather than as the host that was dialled - which is the point: it says which
+row answered (issue #803).
 The renderer maps that empty string to `undefined` and `ResponseStatusBar` draws
 a chip only when there is one - the same show-it-only-when-it-happened rule the
 downgrade warning follows. Nothing on the request names a certificate (the
