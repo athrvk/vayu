@@ -355,10 +355,24 @@ suite) are only the visible tip of that group.
 
 So the group's serial time - the floor the whole hybrid model sits on - is a
 little under half what it was, and the seed is the larger of the two halves.
-Note what this does *not* change: the group is still locked on Windows, because
-the lock's justification is the `-j4` blow-up and only a Windows run can say
-whether a cheaper group survives overlapping. Do not shrink
-`vayu_scratch_database_suites` on the strength of the table above.
+
+**What that turned into on CI**, first run after the change (32275928094), all
+three legs green:
+
+| leg | ctest step | before |
+|---|---:|---:|
+| ubuntu | 30s | ~1m15s |
+| macOS | 53s | ~1m06s |
+| **windows** | **2m32s** (2105 tests, 10 skipped, 0 failed) | 5m27s / 4m50s |
+
+The Windows leg is the one this was aimed at, and it lands at roughly half of
+the 4m40s-6m38s band its *serial* runs spanned - so the hybrid model is finally
+faster than the serial one it replaced, rather than merely no slower.
+
+Note what this does *not* change: the group is still locked on Windows. The
+lock's justification is the `-j4` blow-up, and the number above says the group
+got cheaper, not that it now survives overlapping - that is its own experiment.
+Do not shrink `vayu_scratch_database_suites` without one.
 
 **What CI measured on the hybrid model: 5m27s and 4m50s** on two runs of the
 same tree (32249239500 and 32252015024), 2071 tests, 0 failures, 9 skipped. Both
@@ -368,9 +382,9 @@ way. What they do establish is that the mechanism works: the same `-j4` that too
 ~37 min without the lock now finishes in the time serial used to take, which is
 what the 81% number predicts and the reason to hold the expectation there rather
 than at the ~2.5 min this was first scoped for. Getting a real speedup meant
-making the database tests cheaper, which is issue #838 and the table above; what
-that buys the Windows leg specifically is whatever its first CI run after #838
-records on that issue.
+making the database tests cheaper, which is issue #838 and the table above -
+and which took the Windows leg to 2m32s, close to the ~2.5 min this whole line
+of work was first scoped for.
 
 Isolation is the **default** on every platform now, so a hand-run `ctest -j` is
 safe wherever it happens; the Windows presets used to set
