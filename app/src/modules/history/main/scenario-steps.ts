@@ -103,6 +103,106 @@ export interface ScenarioStepRow {
 }
 
 /**
+ * What the reader has narrowed the step list to (issues #730, #832).
+ *
+ * Two controls, one predicate. Narrowing by outcome and by name at once is the
+ * useful case - "the failed executions of `POST /checkout`" - and two lists
+ * filtered in sequence would be the same thing said twice, with two empty
+ * states to keep in step.
+ */
+export interface StepListFilter {
+	/** The outcome chip that is pressed, or `null` for all four. */
+	outcome: StepOutcome | null;
+	/** What was typed in the search box; untrimmed, as the field holds it. */
+	query: string;
+}
+
+/**
+ * Whether a step's **name** contains `query`, case-insensitively.
+ *
+ * The name and nothing else. A row's URL lives in its stored trace, which a
+ * live row does not have, so matching it would make the box search less while
+ * a run streams than it does once the run ends - a control that quietly
+ * changes what it covers is worse than one that covers one field always. What
+ * it matches is stated on the field itself and in `docs/app/COMPONENTS.md`.
+ */
+function matchesQuery(step: ScenarioStepRow, query: string): boolean {
+	return step.name.toLowerCase().includes(query);
+}
+
+/**
+ * The rows to show under `filter`.
+ *
+ * Returns the same array reference when nothing narrows, so an untouched view
+ * hands `useGrowingWindow` the total it already had rather than a new array
+ * that only looks like a new list.
+ */
+export function filterSteps(
+	steps: readonly ScenarioStepRow[],
+	filter: StepListFilter
+): readonly ScenarioStepRow[] {
+	const query = filter.query.trim().toLowerCase();
+	const { outcome } = filter;
+	if (outcome === null && query === "") return steps;
+	return steps.filter(
+		(step) =>
+			(outcome === null || step.outcome === outcome) &&
+			(query === "" || matchesQuery(step, query))
+	);
+}
+
+/** Why the step list is empty, when a control rather than the run emptied it. */
+export interface EmptyStepListReason {
+	title: string;
+	description: string;
+}
+
+/**
+ * The empty state for a list some control narrowed to nothing, or `null` when
+ * no control is narrowing it - that case is the run's own emptiness and the
+ * view answers it with the run's status, not with this.
+ *
+ * Which control emptied the list is the whole content of the message, because
+ * the two are cleared in different places: a reader who reads "no failed steps"
+ * over a list their search emptied clears the wrong one. The outcome half also
+ * has to hold the thinning disclosure - the chip counts the *run* and the rows
+ * are the *store's*, and a filled store drops passes - which is why an
+ * outcome-shaped emptiness cannot reuse the search's wording.
+ */
+export function emptyStepListReason(
+	filter: StepListFilter,
+	thinned: ThinningDisclosure | null
+): EmptyStepListReason | null {
+	const query = filter.query.trim();
+	const { outcome } = filter;
+	if (outcome === null && query === "") return null;
+
+	// Said wherever the chip is one of the two controls: it counts the whole
+	// run, and this list is what the run's store kept.
+	const chipNote = thinned
+		? "This run's step store filled and dropped successes - the chip counts the whole run, this list holds what was kept."
+		: "The chip above counts the whole run; these rows are what it stored.";
+
+	if (outcome !== null && query !== "") {
+		return {
+			title: `No ${outcome} steps matching "${query}"`,
+			description: `Two controls are narrowing this list: the ${outcome} chip and the search, which matches the step name. Clear either one to widen it. ${chipNote}`,
+		};
+	}
+	if (outcome !== null) {
+		return {
+			title: `No ${outcome} steps in the stored rows`,
+			description: chipNote,
+		};
+	}
+	return {
+		title: `No steps matching "${query}"`,
+		description:
+			"The search matches the step name. Clear it to see every step this run stored.",
+	};
+}
+
+/**
  * The tally of a stored step's assertion list, or `undefined` when it made none.
  *
  * The live half arrives counted (the `step` frame carries two numbers); a

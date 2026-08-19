@@ -314,3 +314,122 @@ describe("a run at the storage cap", () => {
 		expect(screen.getByText(/showing 200 of 500 steps/i)).toBeTruthy();
 	});
 });
+
+describe("searching the step list by name", () => {
+	/** The search box, addressed the way a reader addresses it. */
+	function search() {
+		return screen.getByRole("textbox", { name: /search steps by name/i });
+	}
+
+	function type(value: string) {
+		fireEvent.change(search(), { target: { value } });
+	}
+
+	beforeEach(() => {
+		reportQuery.data = report({
+			results: [
+				storedStep(0, 0, "failed", { name: "POST /checkout" }),
+				storedStep(0, 1, "passed", { name: "GET /cart" }),
+				storedStep(1, 0, "passed", { name: "POST /checkout" }),
+				storedStep(1, 1, "skipped", { name: "GET /orders" }),
+			],
+		});
+	});
+
+	it("narrows the list to the steps whose name matches", () => {
+		render(<ScenarioRunView run={RUN} />);
+
+		type("checkout");
+
+		// Both executions of the one step, and neither of the others - a name
+		// repeated per iteration is exactly what the chips cannot separate.
+		expect(screen.getAllByText("POST /checkout")).toHaveLength(2);
+		expect(screen.queryByText("GET /cart")).toBeNull();
+		expect(screen.queryByText("GET /orders")).toBeNull();
+	});
+
+	it("says on the field itself which field it matches", () => {
+		render(<ScenarioRunView run={RUN} />);
+
+		// Rows carry a name, a status code and a latency; which one is searched
+		// is not guessable from a bare magnifier.
+		expect(search()).toHaveAttribute("placeholder", "Search step names");
+	});
+
+	it("composes with the outcome filter, in either order", () => {
+		render(<ScenarioRunView run={RUN} />);
+
+		fireEvent.click(chip("failed"));
+		type("checkout");
+
+		// "the failed executions of POST /checkout" - one of the two.
+		expect(screen.getAllByText("POST /checkout")).toHaveLength(1);
+		expect(screen.queryByText("GET /cart")).toBeNull();
+
+		// The other order reaches the same list: the two are one predicate,
+		// not a filter applied to a filter's output.
+		type("");
+		setOutcome(null);
+		type("checkout");
+		fireEvent.click(chip("failed"));
+
+		expect(screen.getAllByText("POST /checkout")).toHaveLength(1);
+		expect(screen.queryByText("GET /cart")).toBeNull();
+	});
+
+	function setOutcome(outcome: StepOutcome | null) {
+		if (outcome === null) {
+			for (const o of ["passed", "failed", "skipped", "errored"] as StepOutcome[]) {
+				if (chip(o).getAttribute("aria-pressed") === "true") fireEvent.click(chip(o));
+			}
+			return;
+		}
+		fireEvent.click(chip(outcome));
+	}
+
+	it("names the search when the search alone emptied the list", () => {
+		render(<ScenarioRunView run={RUN} />);
+
+		type("/refunds");
+
+		expect(screen.getByText('No steps matching "/refunds"')).toBeTruthy();
+		// Not the chip: the reader has to know which control to clear.
+		expect(screen.queryByText(/no passed steps/i)).toBeNull();
+		expect(screen.getByText(/matches the step name/i)).toBeTruthy();
+	});
+
+	it("names both controls when both narrowed it to nothing", () => {
+		render(<ScenarioRunView run={RUN} />);
+
+		fireEvent.click(chip("errored"));
+		type("checkout");
+
+		expect(screen.getByText('No errored steps matching "checkout"')).toBeTruthy();
+		expect(screen.getByText(/errored chip and the search/i)).toBeTruthy();
+	});
+
+	it("leaves the run's own emptiness to the run, not to the search", () => {
+		reportQuery.data = report({ results: [] });
+		render(<ScenarioRunView run={RUN} />);
+
+		// A completed run that stored nothing, with the field untouched: the
+		// empty state is the run's, and a filter message here would blame a
+		// control nobody used.
+		expect(screen.getByText(/no steps recorded/i)).toBeTruthy();
+	});
+
+	it("restarts the growing window when a search narrows the list", () => {
+		reportQuery.data = report({
+			results: Array.from({ length: 5_000 }, (_, i) =>
+				storedStep(i, 0, "passed", { name: i % 10 === 0 ? "POST /checkout" : "GET /cart" })
+			),
+		});
+		render(<ScenarioRunView run={RUN} />);
+
+		type("checkout");
+
+		// The window keys off the total, so a narrowed list starts at its own
+		// top rather than deep inside the one before it.
+		expect(screen.getByText(/showing 200 of 500 steps/i)).toBeTruthy();
+	});
+});
