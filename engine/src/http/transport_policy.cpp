@@ -53,16 +53,23 @@ constexpr std::string_view CERT_END       = "-----END CERTIFICATE-----";
 constexpr std::string_view KEY_MARKER     = "-----BEGIN PRIVATE KEY-----";
 constexpr std::string_view RSA_KEY_MARKER = "-----BEGIN RSA PRIVATE KEY-----";
 
-/// Where a Linux/BSD build keeps its trust store when libcurl was built
-/// without a compiled-in bundle path (`CURL_CA_FALLBACK`, which is how the
-/// pinned vcpkg port is built). Probed in the order curl's own fallback probes
-/// them, so the file we read is the file it would have read.
+/// Where a Unix build keeps its trust store, for a libcurl whose compiled-in
+/// `cainfo` names no file that exists. Probed in the order curl's own fallback
+/// probes them, so the file we read is the file it would have read.
+///
+/// The last resort of three, and which one answers is a property of the build
+/// rather than of the platform: the linux-dev build at the pinned baseline
+/// reports `cainfo=/etc/ssl/certs/ca-certificates.crt`, so it never reaches
+/// this list. Every leg but Windows is OpenSSL-backed (#818) and therefore
+/// runs this resolver for real, which is why
+/// `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts that *some* probe
+/// answers rather than assuming a particular one does.
 constexpr std::array<std::string_view, 6> SYSTEM_CA_BUNDLES = {
     "/etc/ssl/certs/ca-certificates.crt", // Debian, Ubuntu, Alpine
     "/etc/pki/tls/certs/ca-bundle.crt",   // Fedora, RHEL
     "/etc/ssl/ca-bundle.pem",             // openSUSE
     "/etc/pki/tls/cacert.pem",            // legacy RHEL
-    "/etc/ssl/cert.pem",                  // FreeBSD, some macOS installs
+    "/etc/ssl/cert.pem",                  // macOS, FreeBSD
     "/usr/local/share/certs/ca-root-nss.crt"
 };
 
@@ -171,10 +178,11 @@ const std::filesystem::path& directory) {
 
     // The user's anchors *extend* the platform's rather than replacing them
     // (decision 4 of #704). On an OpenSSL-backed build `CURLOPT_CAINFO` is the
-    // whole trust store, so the merge has to happen here; where the platform
-    // verifies through an OS store instead (Schannel, Apple SecTrust) there is
-    // no file to read and the bundle holds the user's certificates alone,
-    // with the OS store still consulted by the backend itself.
+    // whole trust store, so the merge has to happen here - and that is every
+    // leg but Windows, macOS included (#818). Where the platform verifies
+    // through an OS store instead (Schannel) there is no file to read and the
+    // bundle holds the user's certificates alone, with the OS store still
+    // consulted by the backend itself.
     std::string content;
     const std::filesystem::path system_bundle = system_ca_bundle_path ();
     if (!system_bundle.empty ()) {

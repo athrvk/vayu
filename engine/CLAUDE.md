@@ -252,7 +252,17 @@ Three things worth knowing before you design around them:
   `customCaCertificates` setting beside the database and **extends** the
   platform's trust rather than replacing it: on an OpenSSL build CAINFO *is*
   the whole store, so the file is the system anchors plus the user's, while
-  Schannel and Apple SecTrust keep their OS store. That claim is checked on
+  Schannel keeps its OS store. **The spread is two-way, not three** - the
+  pinned baseline's `curl` port takes `openssl` on `uwp | !windows` and `sspi`
+  only on Windows, so macOS is OpenSSL-backed like Linux and the merge does
+  real work there. Six statements across the engine and the docs said macOS
+  was on Apple SecTrust until #818, and none of them had been read off a
+  build - so the *backend itself* is now asserted per leg
+  (`TlsBackend.IsTheBackendEveryTrustStatementHereAssumes`), and a
+  bundle-verifying leg that cannot find the system anchors to merge with fails
+  the suite (`TlsBackend.FindsTheSystemAnchorsTheMergeExtends`), because that
+  is the shape in which this being wrong costs a user their trust store.
+  The additive claim itself is checked on
   each CI platform rather than reasoned about, because a wrong claim here is a
   security claim - by **two** tests answering two different questions, and the
   distinction matters because for a while only the first existed and the docs

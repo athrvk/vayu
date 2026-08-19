@@ -667,16 +667,24 @@ backend, and each is stated rather than assumed:
 | Platform | Backend at the pinned vcpkg baseline | What the bundle does |
 |----------|--------------------------------------|----------------------|
 | Linux | OpenSSL (default paths + `CURL_CA_FALLBACK`) | `CURLOPT_CAINFO` **replaces** the default bundle, so the materialized file is the platform's own anchors **concatenated with** the pasted ones. The system bundle is located the way curl locates it: `CURL_CA_BUNDLE` / `SSL_CERT_FILE`, then libcurl's compiled-in `cainfo`, then the standard distribution paths. |
-| macOS | Apple SecTrust (`USE_APPLE_SECTRUST=ON`) | The OS trust store is the backend's own and is not a file to merge, so the bundle holds the pasted certificates alone and the store keeps applying. |
-| Windows | Schannel | Same as macOS: the certificate store stays in force and the bundle extends it. |
+| macOS | OpenSSL | Same as Linux, not the OS store this table claimed until issue #818: the baseline's `curl` port takes its `openssl` feature on everything but Windows, so the anchors are read from `/etc/ssl/cert.pem` and merged into the materialized file. |
+| Windows | Schannel | The certificate store is the backend's own and is not a file to merge, so the bundle holds the pasted certificates alone and the store keeps applying. |
 
-Two things make that table checkable rather than a claim. `CURLOPT_CAINFO` is
-the one transport option a backend can refuse outright, so the engine checks
-the return code and logs an error naming the backend if it ever does - and the
-test suite asserts on every CI platform that this build's backend accepts it.
+Three things make that table checkable rather than a claim. The backend column
+itself is asserted on each CI platform, so the rows are read off the build
+rather than out of a port file - the mistake that left the macOS row wrong
+until issue #818. `CURLOPT_CAINFO` is the one transport option a backend can
+refuse outright, so the engine checks the return code and logs an error naming
+the backend if it ever does - and the test suite asserts on every CI platform
+that this build's backend accepts it. And wherever `CURLOPT_CAINFO` replaces
+the store, the suite asserts the system anchors were actually found, because a
+merge with nothing to merge would narrow trust to the pasted certificate alone
+while this page still promised the opposite.
+
 Where a bundle is in force the engine also sets `CURLSSLOPT_NATIVE_CA`, which
 asks the backends that implement it to keep consulting the OS store; it is a
-no-op on the rest, and on Linux the merge above is what carries the guarantee.
+no-op on the rest, and on Linux and macOS the merge above is what carries the
+guarantee.
 
 A certificate that still fails to verify fails at handshake time with libcurl's
 own `SSL_ERROR` - the validation on the way in is about the *shape* of the
@@ -2061,11 +2069,11 @@ A cert-authenticated exchange says so. `POST /execute` returns
 `clientCertificate` on the response (`""` when none matched) and the stored
 trace carries the same value under the same name, so a restored response names
 the entry a live one named. The format the certificate files must be in is the
-TLS backend's business, and the backends differ - OpenSSL (Linux) takes a PEM
-certificate and key pair; Schannel (Windows) expects a PKCS#12 file or a
-certificate store reference; Apple SecTrust (macOS) takes PKCS#12 or PEM. The
-engine passes the paths through unchanged, and a format a backend rejects fails
-at handshake time with libcurl's own error.
+TLS backend's business, and the two backends differ - OpenSSL (Linux and macOS)
+takes a PEM certificate and key pair; Schannel (Windows) expects a PKCS#12 file
+or a certificate store reference. The engine passes the paths through
+unchanged, and a format a backend rejects fails at handshake time with
+libcurl's own error.
 
 ### GET /client-certificates
 
