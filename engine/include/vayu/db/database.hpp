@@ -543,6 +543,20 @@ class Database {
      */
     int applied_cache_size_bytes () const;
 
+    /**
+     * @brief SQLite's `synchronous` level on this database's connection, read
+     * back from SQLite rather than echoed (0 = OFF, 1 = NORMAL, 2 = FULL).
+     *
+     * The sibling of `applied_cache_size_bytes` above, and for the same reason:
+     * the level is applied twice over the life of a `Database` - the engine's
+     * compile-time default before the constructor's schema sync, then whatever
+     * `dbSynchronous` holds once `init` can read it - and asking SQLite is the
+     * only way to say which one is in force. Issue #838, where the startup log
+     * line reported the level the engine had *asked* for while the schema sync
+     * and the config seed had already run at SQLite's own default.
+     */
+    int applied_synchronous () const;
+
     // Type-safe config getters (replaces ConfigManager)
     int get_config_int (const std::string& key, int default_value = 0);
     std::string get_config_string (const std::string& key,
