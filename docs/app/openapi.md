@@ -393,11 +393,25 @@ Vayu has something to say, and otherwise left exactly as it was:
 - **Saved examples become response examples**, whether they came from the import
   or from a response you kept. One example for a status and media type is written
   as `example`, several as a named `examples` map. This is where work done in
-  Vayu flows back into the contract.
+  Vayu flows back into the contract. An example Vayu only kept **part** of - the
+  Examples panel marks those, and a big response is capped as it is saved - is
+  the one kind that does not: the status is documented, the body is not, and the
+  dialog counts it. Half a payload written as the payload would be
+  indistinguishable from a complete one to everyone downstream, including the
+  mock server.
 - **Everything else survives.** Vendor extensions, `info`, `tags`, `security`,
   components nothing references - all of it is carried through, because export
   patches the document rather than rebuilding it. The dialect is left alone too:
   a 3.0 document exports as 3.0, never quietly upgraded.
+
+**The export reaches every request under the collection - down to the next
+document.** A sub-collection bound to a *different* spec answers to that spec,
+so its requests are left to its own export: they carry operation names of the
+other document (`listUsers`, `GET /users` - names generators hand out in every
+document), and letting them through would have them claim operations here and
+overwrite them with values from somewhere else. A sub-collection bound to the
+**same** document is part of this export, because its requests describe these
+very operations - stopping there would remove them as operations nothing claims.
 
 A **Swagger 2.0** document is the one partial case, and it is stated as one:
 operations nothing claims are still removed, but nothing is written *into* an
@@ -441,7 +455,13 @@ Everything in it is something the collection actually holds:
 Both directions state what they could not carry, and the zeros are part of the
 statement: a request whose URL states no path, two requests that reduce to the
 same method and path (the first wins), an example whose media type was never
-recorded (the response is written, the body is not). Nothing is dropped quietly.
+recorded, an example stored only in part (the response is written, the body is
+not, in both of those last two). Nothing is dropped quietly.
+
+A large document takes a moment to put together, and the dialog says
+**Assembling the document…** while it does. Switching between JSON and YAML
+assembles the other format once; switching back is immediate, because the first
+one is still there.
 
 ## Contract coverage
 

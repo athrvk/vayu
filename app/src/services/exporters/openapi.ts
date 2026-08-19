@@ -107,6 +107,14 @@ export interface ExportNotes {
 	 */
 	examplesWithoutMediaType: number;
 	/**
+	 * Examples whose stored body is only the first slice of the response it was
+	 * saved from (`bodyTruncated`, issue #659). The response is written, the body
+	 * is not: a partial body written as an `example` is indistinguishable from a
+	 * complete one, and a contract that documents half a payload as the payload
+	 * is worse than one that documents none.
+	 */
+	examplesTruncated: number;
+	/**
 	 * `$ref` parameters left exactly as they were. A shared parameter belongs to
 	 * every operation that names it, so writing one request's value into it
 	 * would edit the contract for operations this collection may not even have.
@@ -149,6 +157,7 @@ export function emptyNotes(direction: ExportNotes["direction"], dialect: string)
 		duplicateOperations: 0,
 		examplesWritten: 0,
 		examplesWithoutMediaType: 0,
+		examplesTruncated: 0,
 		sharedParametersLeft: 0,
 		vocabularyNotWritten: false,
 	};
