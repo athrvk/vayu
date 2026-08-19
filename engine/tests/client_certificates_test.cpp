@@ -239,9 +239,9 @@ TEST (ClientCertMatching, AnotherHostMatchesNothing) {
     policy.client_certificates.push_back (rule ("cert_1", "api.example.com", std::nullopt));
 
     EXPECT_EQ (match_client_certificate (policy, "other.example.com", 443), nullptr);
-    // Not a suffix match: an entry for the apex must not answer for a
-    // subdomain, because v1 registers exact hosts and a certificate quietly
-    // presented to a host nobody registered is the opposite of the promise.
+    // Not a suffix match: a plain host is an exact rule, so an entry for the
+    // apex must not answer for a subdomain. Widening one is what the wildcard
+    // form below is for, and it has to be asked for.
     EXPECT_EQ (match_client_certificate (policy, "eu.api.example.com", 443), nullptr);
     EXPECT_EQ (match_client_certificate (policy, "", 443), nullptr);
 }
@@ -251,6 +251,143 @@ TEST (ClientCertMatching, TheHostComparisonIgnoresCase) {
     policy.client_certificates.push_back (rule ("cert_1", "api.example.com", std::nullopt));
 
     EXPECT_NE (match_client_certificate (policy, "API.Example.COM", 443), nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Wildcards (issue #803)
+// ---------------------------------------------------------------------------
+
+TEST (ClientCertWildcardMatching, AWildcardAnswersForEverySubdomain) {
+    // The case the form exists for: one gateway fronting `api`, `auth` and
+    // `events`, where a new service otherwise means a row nobody remembers to
+    // add and an SSL error against the endpoint.
+    TransportPolicy policy;
+    policy.client_certificates.push_back (rule ("cert_star", "*.example.com", std::nullopt));
+
+    for (const char* host : { "api.example.com", "auth.example.com", "a.b.example.com" }) {
+        const ClientCertRule* matched = match_client_certificate (policy, host, 443);
+        ASSERT_NE (matched, nullptr) << host;
+        EXPECT_EQ (matched->id, "cert_star") << host;
+    }
+}
+
+TEST (ClientCertWildcardMatching, AWildcardAnswersForNeitherTheApexNorALookalike) {
+    // The two near-misses the rule is stated by. The apex is the one a user
+    // expects to be included and is not - `*.example.com` is "a subdomain of",
+    // which `example.com` is not one of - and the lookalike is the one that
+    // costs a client identity if the leading dot is ever dropped from the
+    // comparison.
+    TransportPolicy policy;
+    policy.client_certificates.push_back (rule ("cert_star", "*.example.com", std::nullopt));
+
+    EXPECT_EQ (match_client_certificate (policy, "example.com", 443), nullptr);
+    EXPECT_EQ (match_client_certificate (policy, "notexample.com", 443), nullptr);
+    EXPECT_EQ (match_client_certificate (policy, "example.com.evil.test", 443), nullptr);
+    EXPECT_EQ (match_client_certificate (policy, "api.example.org", 443), nullptr);
+}
+
+TEST (ClientCertWildcardMatching, AWildcardNeverAnswersForAnAddressLiteral) {
+    // A wildcard is a rule about DNS labels. Without this, `*.0.1` would
+    // present the user's identity to `127.0.0.1` - a certificate offered to a
+    // host nobody registered, which is worse than one not offered at all.
+    TransportPolicy policy;
+    policy.client_certificates.push_back (rule ("cert_star", "*.0.1", std::nullopt));
+
+    EXPECT_EQ (match_client_certificate (policy, "127.0.0.1", 443), nullptr);
+    // The IPv4-mapped form is the one that carries dots, so it is the one a
+    // textual suffix rule would otherwise answer for.
+    EXPECT_EQ (match_client_certificate (policy, "::ffff:127.0.0.1", 443), nullptr);
+    // …while an exact entry for an address still answers, as it always did.
+    policy.client_certificates.push_back (rule ("cert_exact", "127.0.0.1", std::nullopt));
+    const ClientCertRule* matched = match_client_certificate (policy, "127.0.0.1", 443);
+    ASSERT_NE (matched, nullptr);
+    EXPECT_EQ (matched->id, "cert_exact");
+}
+
+TEST (ClientCertWildcardMatching, TheWildcardComparisonIgnoresCase) {
+    TransportPolicy policy;
+    policy.client_certificates.push_back (rule ("cert_star", "*.example.com", std::nullopt));
+
+    EXPECT_NE (match_client_certificate (policy, "API.Example.COM", 443), nullptr);
+}
+
+TEST (ClientCertWildcardMatching, AnExactHostOutranksAWildcardThatAlsoMatches) {
+    // Tier one of three, asserted in both row orders because the implementation
+    // that returns the first match passes one order and fails the other - and
+    // the port is deliberately on the *wildcard* here: host specificity
+    // dominates, so an exact entry answering every port still wins. That is
+    // what makes the rule one a card can state.
+    const auto exact_row = rule ("cert_exact", "api.example.com", std::nullopt);
+    const auto wildcard_row = rule ("cert_star", "*.example.com", 8443);
+
+    TransportPolicy exact_first;
+    exact_first.client_certificates = { exact_row, wildcard_row };
+    TransportPolicy wildcard_first;
+    wildcard_first.client_certificates = { wildcard_row, exact_row };
+
+    for (const auto* policy : { &exact_first, &wildcard_first }) {
+        const ClientCertRule* matched =
+        match_client_certificate (*policy, "api.example.com", 8443);
+        ASSERT_NE (matched, nullptr);
+        EXPECT_EQ (matched->id, "cert_exact");
+    }
+
+    // …and a host the exact entry does not name still reaches the wildcard.
+    const ClientCertRule* other =
+    match_client_certificate (exact_first, "auth.example.com", 8443);
+    ASSERT_NE (other, nullptr);
+    EXPECT_EQ (other->id, "cert_star");
+}
+
+TEST (ClientCertWildcardMatching, TheLongestWildcardWins) {
+    // Tier two: two patterns can overlap - `*.example.com` and
+    // `*.eu.example.com` both answer for `api.eu.example.com` - so the registry
+    // needs a rule that is not "whichever row came back first". Longest suffix
+    // is the one a reader can apply by eye.
+    const auto broad  = rule ("cert_broad", "*.example.com", std::nullopt);
+    const auto narrow = rule ("cert_narrow", "*.eu.example.com", std::nullopt);
+
+    TransportPolicy broad_first;
+    broad_first.client_certificates = { broad, narrow };
+    TransportPolicy narrow_first;
+    narrow_first.client_certificates = { narrow, broad };
+
+    for (const auto* policy : { &broad_first, &narrow_first }) {
+        const ClientCertRule* matched =
+        match_client_certificate (*policy, "api.eu.example.com", 443);
+        ASSERT_NE (matched, nullptr);
+        EXPECT_EQ (matched->id, "cert_narrow");
+        // The broader one still owns everything outside the narrower's subtree.
+        const ClientCertRule* elsewhere =
+        match_client_certificate (*policy, "api.us.example.com", 443);
+        ASSERT_NE (elsewhere, nullptr);
+        EXPECT_EQ (elsewhere->id, "cert_broad");
+    }
+}
+
+TEST (ClientCertWildcardMatching, ThePortEntryOutranksTheWildcardCatchAll) {
+    // Tier three, inside one pattern: the port rule that already governed exact
+    // hosts governs wildcards the same way, so a second service on the same
+    // subtree can still have its own certificate.
+    const auto any_port  = rule ("cert_any", "*.example.com", std::nullopt);
+    const auto this_port = rule ("cert_8443", "*.example.com", 8443);
+
+    TransportPolicy any_first;
+    any_first.client_certificates = { any_port, this_port };
+    TransportPolicy port_first;
+    port_first.client_certificates = { this_port, any_port };
+
+    for (const auto* policy : { &any_first, &port_first }) {
+        const ClientCertRule* matched =
+        match_client_certificate (*policy, "api.example.com", 8443);
+        ASSERT_NE (matched, nullptr);
+        EXPECT_EQ (matched->id, "cert_8443");
+
+        const ClientCertRule* other =
+        match_client_certificate (*policy, "api.example.com", 443);
+        ASSERT_NE (other, nullptr);
+        EXPECT_EQ (other->id, "cert_any");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -289,6 +426,29 @@ TEST (ClientCertValidation, RejectsAHostThatCouldNeverMatch) {
     EXPECT_TRUE (reject ("api.example.com:8443").has_value ());
     EXPECT_TRUE (reject ("[::1]").has_value ());
     EXPECT_TRUE (reject ("api example com").has_value ());
+}
+
+TEST (ClientCertValidation, AcceptsTheWildcardFormAndRefusesEveryOtherStar) {
+    ScratchFile cert{ "validation_cert_wildcard.pem" };
+    ScratchFile key{ "validation_key_wildcard.pem" };
+    const auto reject = [&] (const std::string& host) {
+        return client_cert_rejection (
+        host, std::nullopt, ClientCertFormat::Pem, cert.path (), key.path ());
+    };
+
+    EXPECT_FALSE (reject ("*.example.com").has_value ());
+    // A single-label domain is the corporate-estate case this shipped for
+    // (`api.corp`, `auth.corp` behind one gateway), so it is not refused for
+    // looking too broad.
+    EXPECT_FALSE (reject ("*.corp").has_value ());
+
+    // Everything else carrying a `*` is refused *by name* rather than stored:
+    // each of these would otherwise be a hostname no transfer can ever equal,
+    // registered and silently never used.
+    for (const char* host : { "*", "*.", "*..example.com", "*example.com",
+         "api.*.com", "*.*.example.com", "**.example.com" }) {
+        EXPECT_TRUE (reject (host).has_value ()) << host;
+    }
 }
 
 TEST (ClientCertValidation, RejectsAPortOutsideTheRange) {
@@ -627,6 +787,42 @@ TEST_F (ClientCertificateDbTest, RefusesASecondEntryForTheSameTarget) {
     routes::create_client_certificate_response (*db_, body ("api.example.com")).first, 200);
 }
 
+TEST_F (ClientCertificateDbTest, AWildcardIsATargetLikeAnyOther) {
+    // The uniqueness rule extends to patterns because the pattern *is* the
+    // target string (#803) - without that, two rows for `*.example.com` would
+    // put the certificate presented back at the mercy of row order, which is
+    // the property the three-tier ranking exists to keep.
+    ASSERT_EQ (
+    routes::create_client_certificate_response (*db_, body ("*.example.com")).first, 200);
+
+    const auto [status, error] =
+    routes::create_client_certificate_response (*db_, body ("*.example.com"));
+    EXPECT_EQ (status, 409);
+    EXPECT_NE (error.dump ().find ("*.example.com"), std::string::npos);
+
+    // Overlapping-but-different patterns are allowed, and are exactly what the
+    // longest-suffix rule resolves: they can never tie, because two suffixes of
+    // the same length that both match a host are the same string.
+    EXPECT_EQ (
+    routes::create_client_certificate_response (*db_, body ("*.eu.example.com")).first, 200);
+    // As is the same pattern on one port, beside the catch-all.
+    EXPECT_EQ (routes::create_client_certificate_response (*db_, body ("*.example.com", 8443))
+               .first,
+    200);
+    EXPECT_EQ (db_->get_client_certificates ().size (), 3u);
+}
+
+TEST_F (ClientCertificateDbTest, RefusesAWildcardShapeThatCouldNeverMatch) {
+    // The route's half of the write-time check: a `*` outside the one form is a
+    // 400 naming the form, not a stored row that never answers.
+    const auto [status, error] =
+    routes::create_client_certificate_response (*db_, body ("*.*.com"));
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (error.dump ().find ("*.example.com"), std::string::npos)
+    << "the rejection has to show the one shape that works: " << error.dump ();
+    EXPECT_TRUE (db_->get_client_certificates ().empty ());
+}
+
 TEST_F (ClientCertificateDbTest, UpdatesMergePatchStyle) {
     const auto [created_status, created] =
     routes::create_client_certificate_response (*db_, body ("api.example.com", 8443));
@@ -698,6 +894,28 @@ TEST_F (ClientCertificateDbTest, TheRegistryReachesTheResolvedPolicy) {
     ASSERT_NE (matched, nullptr);
     EXPECT_EQ (matched->cert_path, cert_.path ());
     EXPECT_EQ (matched->key_path, key_.path ());
+}
+
+TEST_F (ClientCertificateDbTest, AStoredWildcardSurvivesTheResolverAndAnswers) {
+    // The stored-to-matched path in one test, because the resolver re-runs
+    // `client_cert_rejection` on every row it reads (a row hand-edited around
+    // the routes is dropped there): a wildcard the route accepted but the
+    // resolver refused would be a registry entry that vanished between the card
+    // and the wire, which is worse than one refused up front.
+    ASSERT_EQ (
+    routes::create_client_certificate_response (*db_, body ("*.example.com")).first, 200);
+
+    const auto policy = resolve_transport_policy (*db_);
+    ASSERT_EQ (policy.client_certificates.size (), 1u);
+
+    const ClientCertRule* matched =
+    match_client_certificate (policy, "api.example.com", 443);
+    ASSERT_NE (matched, nullptr);
+    EXPECT_EQ (matched->cert_path, cert_.path ());
+    // The label a trace and the response pane carry is the pattern itself, so a
+    // user reading either learns which registry row answered.
+    EXPECT_EQ (client_cert_label (*matched), "*.example.com");
+    EXPECT_EQ (match_client_certificate (policy, "example.com", 443), nullptr);
 }
 
 TEST_F (ClientCertificateDbTest, ARowWhoseFileWentMissingIsDroppedAndNamed) {

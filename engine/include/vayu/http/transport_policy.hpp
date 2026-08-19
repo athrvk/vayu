@@ -177,10 +177,12 @@ struct ClientCertRule {
      * string compare rather than a second URL parser. An IPv6 literal is stored
      * without its brackets, again because that is the form the parser yields.
      *
-     * Exact match only. Wildcards are deliberately absent in v1: a
-     * `*.example.com` that matched `a.b.example.com` but not `example.com`
-     * would be a rule the card cannot state in one line, and a certificate
-     * silently *not* used is the failure this feature exists to end.
+     * **Or one wildcard** (issue #803), written `*.example.com` and read as a
+     * label suffix: it answers for `api.example.com` and `a.b.example.com`,
+     * never for `example.com` itself and never for `notexample.com`. That is
+     * the whole syntax - a `*` anywhere else is refused at write time rather
+     * than stored as a hostname no transfer can equal. A wildcard never answers
+     * for an address literal, which only an exact entry matches.
      */
     std::string host;
 
@@ -226,7 +228,9 @@ std::string client_cert_label (const ClientCertRule& rule);
  * can never work - a host carrying a scheme, a port outside 1..65535, a
  * certificate or key file this process cannot open - because every one of those
  * surfaces at handshake time as a TLS error that names the endpoint rather than
- * the setting, which is the shape this epic exists to stop.
+ * the setting, which is the shape this epic exists to stop. A `*` that is not
+ * the `*.example.com` form is refused for the same reason (#803): it would
+ * store as a hostname no transfer can ever equal.
  *
  * @p format decides what a *complete* entry is (#833): a `Pem` row needs its
  * key file and a `Pkcs12` row must not name one, because the bundle carries the
@@ -305,11 +309,16 @@ struct TransportPolicy {
 /**
  * @brief The registry entry that answers for @p host on @p port, or null.
  *
- * Most specific wins: an entry naming this exact port beats one that answers
- * for the host on any port. Beyond that there is nothing to rank, because
- * `client_cert_rejection` refuses a second entry for a host+port pair that is
- * already registered - so a match is unique by construction rather than by a
- * tie-break nobody could predict from the card.
+ * Most specific wins, in three tiers (issue #803): the closest *host* first -
+ * an exact entry beats every wildcard, and a longer wildcard beats a shorter
+ * one - then the port, where an entry naming this exact port beats one that
+ * answers for the host on any port.
+ *
+ * That order is total, so the answer never depends on the order the rows come
+ * back in: two rules that rank equally would have to name the same host and the
+ * same port, and `reject_duplicate_target` answers the second such write with a
+ * 409. There is deliberately no tie-break beyond it - a rule nobody could
+ * predict from the card is the thing this ranking replaces, not adds.
  *
  * @param host Lower-cased hostname, as `parse_authority` yields it.
  * @param port The port the transfer dials, scheme default included - never 0,

@@ -321,8 +321,13 @@ Three things worth knowing before you design around them:
   `client_certificates`). The registry rides *inside* the `TransportPolicy`, so
   it reaches every outbound path with no per-site wiring and is read once per
   run on the load and collection paths - `match_client_certificate` then picks
-  the entry per transfer from that snapshot, exact host, port-specific beating
-  catch-all, no wildcards. Only file **paths** are stored (the key never enters
+  the entry per transfer from that snapshot, ranked in three tiers (#803):
+  closest host first - an exact name beats every wildcard, a longer wildcard
+  beats a shorter one - then port-specific beating catch-all. The only pattern
+  is `*.example.com`, a label suffix that answers for every subdomain and never
+  for the domain itself or an address literal; a `*` elsewhere is a write-time
+  400, and the ranking is total, so no match depends on row order.
+  Only file **paths** are stored (the key never enters
   the database); the passphrase is stored plaintext on the existing credential
   precedent and is **never echoed** - reads answer `hasPassphrase`. Both paths
   are checked at write time, because an unreadable file otherwise surfaces as an

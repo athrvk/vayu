@@ -15,10 +15,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <compare>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -42,6 +44,41 @@ constexpr std::array<std::string_view, 7> PROXY_SCHEMES = { "http", "https",
 bool is_blank (std::string_view value) {
     return std::all_of (value.begin (), value.end (),
     [] (unsigned char c) { return std::isspace (c) != 0; });
+}
+
+/// The one wildcard form the registry takes: a leading `*.` and nothing else
+/// (issue #803). Written once because the matcher and the write-time check must
+/// agree on what a pattern *is* - a shape one accepted and the other did not
+/// would store an entry that can never match.
+bool is_wildcard_host (std::string_view host) {
+    return host.rfind ("*.", 0) == 0;
+}
+
+/// The labels a wildcard answers for, dot included: `*.example.com` yields
+/// `.example.com`. That leading dot is the rule - it is what makes the apex a
+/// non-match without a second condition to forget.
+std::string_view wildcard_suffix (std::string_view pattern) {
+    return pattern.substr (1);
+}
+
+/**
+ * Whether @p host is an address rather than a name.
+ *
+ * A wildcard is a rule about DNS labels, so it must not answer for an address
+ * literal: without this, an entry for `*.0.1` presents the user's client
+ * identity to `127.0.0.1`, which is the failure this feature is most obliged
+ * not to introduce - a certificate offered to a host nobody registered. Shallow
+ * on purpose (digits and dots, or a colon): it decides what a *wildcard* may
+ * answer for, never whether an address is well formed, and an exact entry still
+ * matches an address literal the way it always did.
+ */
+bool is_address_literal (std::string_view host) {
+    if (host.find (':') != std::string_view::npos) {
+        return true; // an IPv6 literal, stored bracketless
+    }
+    return !host.empty () &&
+    std::all_of (host.begin (), host.end (),
+    [] (unsigned char c) { return std::isdigit (c) != 0 || c == '.'; });
 }
 
 /// The PEM markers a certificate is wrapped in. Only the certificate label is
@@ -366,6 +403,21 @@ std::string_view key_path) {
         [] (unsigned char c) { return std::isspace (c) != 0; })) {
         return std::string ("host contains whitespace");
     }
+    // The one wildcard form, and every near-miss refused by name (issue #803).
+    // A `*` anywhere else is a pattern this engine does not have - stored, it
+    // would be a hostname no transfer can ever equal, which is exactly the
+    // "registered and silently never used" state this registry exists to end.
+    if (const std::string_view labels = is_wildcard_host (host) ? host.substr (2) : host;
+        labels.find ('*') != std::string_view::npos) {
+        return std::string (
+        "a wildcard host is written '*.example.com' - one leading '*.' and "
+        "the domain it answers for, with no other '*'");
+    }
+    if (is_wildcard_host (host) && (host.size () == 2 || host[2] == '.')) {
+        return std::string ("'" + std::string (host) +
+        "' names no domain after the '*.' - register '*.example.com'");
+    }
+
     // The three shapes a user reaches for when they copy the address bar. Each
     // is refused by name rather than stored and quietly never matched, because
     // a registry entry that cannot match is indistinguishable from a feature
@@ -444,6 +496,68 @@ std::string_view key_path) {
     return std::nullopt;
 }
 
+namespace {
+
+/**
+ * How specific a matching rule is, most significant field first (issue #803).
+ *
+ * The three tiers the registry documents, as one comparable value: an exact
+ * host beats every wildcard, a longer wildcard beats a shorter one, and within
+ * one host pattern the entry naming this port beats the catch-all beside it.
+ *
+ * **Two matching rules can never tie**, which is what keeps the presented
+ * certificate independent of row order. Two exact rows that both match have the
+ * same host; two wildcards whose suffixes are the same length and both end at
+ * the end of the host *are* the same string. So a tie means one host+port pair
+ * twice, which the routes answer with a 409 and the resolver drops - there is
+ * no order-dependent case left for a tie-break to decide.
+ */
+struct ClientCertRank {
+    /// 1 for an exact host, 0 for a wildcard. Host specificity dominates: an
+    /// exact entry with no port still beats a wildcard that names one, because
+    /// "the closest host wins, then the port" is the rule a card can state.
+    int exact_host = 0;
+    /// Length of the wildcard suffix that matched, so the longest wins;
+    /// unused (and irrelevant) for an exact host, which already outranks these.
+    std::size_t suffix_length = 0;
+    /// 1 when the row names this port, 0 when it answers every port.
+    int exact_port = 0;
+
+    auto operator<=> (const ClientCertRank&) const = default;
+};
+
+/// How well @p rule answers for @p host on @p port, or nullopt when it does not.
+/// @p host is already lower-cased; rows are stored that way (`lowered` in the
+/// routes), so both sides of every comparison here are.
+std::optional<ClientCertRank>
+rank_client_cert_rule (const ClientCertRule& rule, std::string_view host, int port) {
+    if (rule.port && *rule.port != port) {
+        return std::nullopt;
+    }
+    const int exact_port = rule.port ? 1 : 0;
+
+    if (!is_wildcard_host (rule.host)) {
+        if (rule.host != host) {
+            return std::nullopt;
+        }
+        return ClientCertRank{ 1, 0, exact_port };
+    }
+
+    // `*.example.com` answers for `api.example.com` and `a.b.example.com`,
+    // never for `example.com` (which does not carry the leading dot) and never
+    // for `notexample.com` (same). One label of headroom is the whole rule:
+    // ending with `.example.com` *and* being longer than it means at least one
+    // character sits in front of that dot.
+    const std::string_view suffix = wildcard_suffix (rule.host);
+    if (host.size () <= suffix.size () || !host.ends_with (suffix) ||
+    is_address_literal (host)) {
+        return std::nullopt;
+    }
+    return ClientCertRank{ 0, suffix.size (), exact_port };
+}
+
+} // namespace
+
 const ClientCertRule*
 match_client_certificate (const TransportPolicy& policy, std::string_view host, int port) {
     if (policy.client_certificates.empty () || host.empty ()) {
@@ -454,28 +568,19 @@ match_client_certificate (const TransportPolicy& policy, std::string_view host, 
     std::transform (wanted.begin (), wanted.end (), wanted.begin (),
     [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
 
-    const ClientCertRule* any_port = nullptr;
+    const ClientCertRule* best = nullptr;
+    ClientCertRank best_rank;
     for (const auto& rule : policy.client_certificates) {
-        if (rule.host != wanted) {
+        const auto rank = rank_client_cert_rule (rule, wanted, port);
+        if (!rank) {
             continue;
         }
-        if (rule.port) {
-            // The specific entry, and there is at most one - the routes refuse
-            // a duplicate host+port pair - so this is the answer, not a
-            // candidate to keep ranking.
-            if (*rule.port == port) {
-                return &rule;
-            }
-            continue;
-        }
-        // Remembered rather than returned: a later entry may still name this
-        // exact port, and the specific one outranks the catch-all whatever
-        // order the rows come back in.
-        if (any_port == nullptr) {
-            any_port = &rule;
+        if (best == nullptr || best_rank < *rank) {
+            best      = &rule;
+            best_rank = *rank;
         }
     }
-    return any_port;
+    return best;
 }
 
 std::optional<std::string> ca_pem_rejection (std::string_view pem) {

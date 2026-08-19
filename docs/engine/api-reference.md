@@ -2078,12 +2078,27 @@ proxy, a load run and a collection run read the registry **once at run start**
 and hold it, because libcurl reuses a pooled connection only when its TLS
 identity matches.
 
-**Matching is by exact host, and most specific wins.** An entry naming a port
-answers only that port; an entry with `port: null` answers the host on every
-port; an entry naming this exact port beats the catch-all beside it. There are
-no wildcards in v1 - `*.example.com` is not a pattern, it is a hostname that
-matches nothing. Host comparison is case-insensitive (rows are stored
-lower-cased), and an IPv6 host is registered without its brackets (`::1`).
+**Matching is by host, and most specific wins.** A `host` is either an exact
+name (`api.example.com`) or the one wildcard form, `*.example.com`, which is
+read as a label suffix: it answers for `api.example.com` and `a.b.example.com`,
+never for `example.com` itself and never for `notexample.com`. That is the whole
+syntax - a `*` anywhere else is a `400` naming the form, rather than a row
+stored as a hostname no transfer can ever equal - and a wildcard never answers
+for an address literal (`127.0.0.1`), which only an exact entry matches.
+
+Three tiers decide which entry answers, closest host first:
+
+| Tier | Beats | Example against `api.eu.example.com:8443` |
+|------|-------|-------------------------------------------|
+| 1 | An exact host beats every wildcard | `api.eu.example.com` wins over `*.eu.example.com`, even if only the wildcard names the port |
+| 2 | A longer wildcard beats a shorter one | `*.eu.example.com` wins over `*.example.com` |
+| 3 | Within one host, the port beats the catch-all | `*.example.com` + `port: 8443` wins over `*.example.com` + `port: null` |
+
+The order is total, so the answer never depends on the order rows were added:
+two entries can only rank equally by naming the same host *and* the same port,
+and the second such write is a `409`. Host comparison is case-insensitive (rows
+are stored lower-cased), and an IPv6 host is registered without its brackets
+(`::1`).
 
 **Paths, not contents.** The row holds the *paths* of the certificate and key
 files and the engine opens them at send time, so the private key never enters
@@ -2177,7 +2192,7 @@ id](#the-engine-owns-every-id)).
 
 | Field | Required | Meaning |
 |-------|----------|---------|
-| `host` | yes | Hostname, no scheme, port or path. Stored lower-cased. |
+| `host` | yes | Hostname, no scheme, port or path - or `*.example.com` for every subdomain of it. Stored lower-cased. |
 | `port` | no | The port this entry is specific to; `null` or absent means every port. |
 | `certPath` | yes | Path to the certificate file. Must be readable now. |
 | `certFormat` | no | `pem` or `p12`. Absent or `null` reads it off `certPath`, falling back to `pem`. |
@@ -2188,7 +2203,7 @@ id](#the-engine-owns-every-id)).
 
 | Status | When |
 |--------|------|
-| `400` | A host that could never match (carries a scheme, a path, a port, or brackets), a port outside `1..65535`, a non-integer `port`, a missing `host` / `certPath`, a `pem` entry with no `keyPath`, a `p12` entry that names one, a `certFormat` outside `pem` / `p12`, a `certFormat` the file's own bytes contradict, a file that is not readable, or a body `id`. |
+| `400` | A host that could never match (carries a scheme, a path, a port, or brackets, or a `*` outside the `*.example.com` form), a port outside `1..65535`, a non-integer `port`, a missing `host` / `certPath`, a `pem` entry with no `keyPath`, a `p12` entry that names one, a `certFormat` outside `pem` / `p12`, a `certFormat` the file's own bytes contradict, a file that is not readable, or a body `id`. |
 | `409` | Another entry already claims this `host` + `port`. Two rows for one target would make the certificate presented depend on row order, so the second is refused with the id of the first rather than silently shadowing it. |
 
 ### PUT /client-certificates/:id
