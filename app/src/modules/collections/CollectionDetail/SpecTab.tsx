@@ -49,10 +49,9 @@ import {
 	useMultipleCollectionRequests,
 	useUpdateCollectionMutation,
 } from "@/queries/collections";
-import { useBindSpecMutation, useSpecMetaQuery } from "@/queries/specs";
+import { useBindSpecMutation, useSpecMatchQuery, useSpecMetaQuery } from "@/queries/specs";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { useSpecFileStore } from "@/stores";
-import { matchOperations } from "@/services/openapi/operation-match";
 import { readSpecOperations } from "@/services/openapi/spec-operations";
 import SpecCoverageLine from "./SpecCoverageLine";
 import { collectSubtreeIds } from "@/modules/collections/tree-utils";
@@ -152,10 +151,19 @@ export default function SpecTab({ collection }: SpecTabProps) {
 		}
 	}, [picked]);
 
-	const match = useMemo(
-		() => (parsed && !parsed.error ? matchOperations(requests, parsed.operations) : null),
-		[parsed, requests]
+	/*
+	 * The pairing is the engine's answer now (issue #761): the rule that decides
+	 * which request is which operation moved into `core/operation_match.hpp`, so
+	 * that binding a collection is something an agent over MCP can do the same
+	 * way rather than through a second copy of it. Nothing is written by asking -
+	 * the counts below still appear before the user commits to the bind.
+	 */
+	const matchQuery = useSpecMatchQuery(
+		collection.id,
+		requests,
+		parsed && !parsed.error ? parsed.operations : null
 	);
+	const match = matchQuery.data ?? null;
 
 	const mappedCount = requests.filter((r) => r.specOperation).length;
 
@@ -169,11 +177,13 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	 * such a stamp does not merely go unread; it claims whatever operation of the
 	 * new document happens to share the id.
 	 */
-	const staleStamps = useMemo(
-		() =>
-			match ? match.unmatchedRequests.filter((r) => r.specOperation).map((r) => r.id) : [],
-		[match]
-	);
+	const staleStamps = useMemo(() => {
+		if (!match) return [];
+		// The engine answers in ids; which of them *carry* a stamp is read off the
+		// request rows this tab already holds, rather than asked for a second time.
+		const stamped = new Set(requests.filter((r) => r.specOperation).map((r) => r.id));
+		return match.unmatchedRequests.filter((id) => stamped.has(id));
+	}, [match, requests]);
 
 	const handleFile = (file: File) => {
 		const reader = new FileReader();
@@ -212,8 +222,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				collectionId: collection.id,
 				content: picked.content,
 				sourceUrl: picked.sourceUrl ?? null,
-				stamps: match.matched.map(({ request, operation }) => ({
-					requestId: request.id,
+				stamps: match.matched.map(({ requestId, operation }) => ({
+					requestId,
 					specOperation: operation,
 				})),
 				clearStamps: staleStamps,
@@ -351,6 +361,26 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					{parsed?.error && (
 						<Callout severity="blocking" title="Not an OpenAPI document">
 							{parsed.error}
+						</Callout>
+					)}
+
+					{/* The pairing is an engine read now (issue #761), so it has the two
+					    states a computation did not: still arriving, and failed. A
+					    failure blocks the bind rather than falling back to a local
+					    match - a bind stamps identity, and identity worked out by a
+					    second implementation is the thing this move exists to end. */}
+					{/* `isFetching`, not `isPending`: a disabled query - nothing picked,
+					    or a document that did not parse - is pending forever. */}
+					{matchQuery.isFetching && (
+						<p className="flex items-center gap-2 text-xs text-muted-foreground">
+							<Loader2 className="h-3 w-3 animate-spin" />
+							Matching this document against the requests here...
+						</p>
+					)}
+
+					{matchQuery.isError && (
+						<Callout severity="blocking" title="Couldn't match that document">
+							{(matchQuery.error as Error).message}
 						</Callout>
 					)}
 

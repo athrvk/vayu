@@ -1474,6 +1474,74 @@ The refusal is deliberate rather than a cascade to unbound: the caller asked to
 delete a document, not to edit collections it never mentioned. Unbind with
 `PUT /collections/:id` and `{"openapi": null}`, then delete.
 
+### POST /specs/match
+
+Pair the requests in a collection's subtree with the operations a document
+declares - what binding a collection that already exists needs, and what an
+import does not (an import *creates* the requests, so it stamps each one's
+identity as it builds it).
+
+**Reads only.** Nothing is stored, stamped or created, so a caller may ask about
+a document it has not decided to bind - which is exactly what the app's Spec tab
+does, showing the counts before the user commits. The writes a bind performs are
+still `POST /specs` plus `PUT /collections/:id` and the per-request updates.
+
+**Request:**
+```json
+{
+  "collectionId": "col_9a1f...",
+  "operations": [
+    { "operationId": "listPets", "method": "GET", "path": "/pets" },
+    { "method": "GET", "path": "/pets/{petId}" }
+  ]
+}
+```
+
+`operations` are the same identity rows `POST /specs` accepts as its `operations`
+index, validated by the same rule - so a payload the store would refuse cannot
+be matched against here first. `responses` may ride along and is ignored.
+
+The requests are **not** sent. The engine gathers the whole subtree of
+`collectionId` itself, because an OpenAPI import binds the root and files every
+request under one sub-collection per tag: a caller sending "the collection's
+requests" would be matching against a set that excludes almost all of them.
+
+**Response:**
+```json
+{
+  "matched": [
+    {
+      "requestId": "req_4c8e...",
+      "operation": { "operationId": "listPets", "method": "GET", "path": "/pets" }
+    }
+  ],
+  "unmatchedRequests": ["req_7b21..."],
+  "unmatchedOperations": [{ "method": "GET", "path": "/pets/{petId}" }]
+}
+```
+
+`operationId` is **absent** rather than `""` for an operation that declares none,
+the same way a stored `spec_operation` omits it.
+
+**How it matches.** Both sides are reduced to a path shape: the origin dropped
+(`{{baseUrl}}`, `https://api.example.com` and a schemeless host alike), the query
+and fragment dropped, and every placeholder - Vayu's `{{petId}}` and the
+document's `{petId}` - flattened to `{}`. Flattening the name too is deliberate:
+a document that renames its path parameter describes the same endpoint, and a
+match that turned on the parameter's spelling would report a rename as removed
+and added. A second pass then offers each remaining request to the templates it
+could be an instance of, because a hand-built collection writes the id in
+(`/pets/42`) - a literal path in the document wins first, which is OpenAPI's own
+precedence. **Ambiguity is refused in both directions**: two requests reducing to
+one shape, or one request that could be two operations, leaves all of them
+unmatched. A wrong identity is worse than none, because `POST /specs/sync`
+applies changes *by* it.
+
+**Errors:** `400` for a missing or empty `collectionId`, a missing `operations`,
+or an operation row the store would refuse. `404` when the collection does not
+exist - not an empty match, since "this document matches none of your requests"
+and "you named a collection that is not there" are different answers.
+
 ### POST /specs/sync
 
 Apply a re-fetched document to the collection bound to it, in **one

@@ -28,7 +28,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { useSpecFileStore } from "@/stores";
-import type { Collection, Request } from "@/types";
+import type { Collection, Request, SpecMatchResponse } from "@/types";
 
 const updateCollection = {
 	mutate: vi.fn(),
@@ -48,6 +48,22 @@ const bindSpec = {
 const syncSpec = {
 	mutate: vi.fn(),
 	isPending: false,
+	isError: false,
+	error: null as Error | null,
+};
+
+/**
+ * What `POST /specs/match` answered (issue #761).
+ *
+ * Set per test rather than computed here: the matching *rule* is the engine's
+ * now and is pinned in `engine/tests/operation_match_test.cpp`, so a second
+ * arrangement of it in this file would be the copy the move deleted. What these
+ * tests own is what the tab does with the answer - the counts it discloses, the
+ * stamps it sends, and which unmatched requests it treats as stale identity.
+ */
+const specMatchQuery = {
+	data: undefined as SpecMatchResponse | undefined,
+	isFetching: false,
 	isError: false,
 	error: null as Error | null,
 };
@@ -76,6 +92,8 @@ vi.mock("@/queries/collections", () => ({
 vi.mock("@/queries/specs", () => ({
 	// The card describes the document rather than reading it (issue #712).
 	useSpecMetaQuery: () => specMetaQuery,
+	// The pairing the engine worked out (issue #761).
+	useSpecMatchQuery: () => specMatchQuery,
 	useBindSpecMutation: () => bindSpec,
 	// The Sync section reads the stored bytes when Check is pressed. Stubbed
 	// like the queries above - what a check does with them is asserted in
@@ -125,6 +143,9 @@ const POSTMAN = JSON.stringify({
 	info: { name: "Team", schema: "https://schema.getpostman.com/json/collection/v2.1.0/" },
 	item: [],
 });
+
+const LIST_PETS = { operationId: "listPets", method: "GET", path: "/pets" };
+const GET_PET = { operationId: "getPet", method: "GET", path: "/pets/{petId}" };
 
 const collection = (openapi?: Collection["openapi"]): Collection =>
 	({
@@ -195,6 +216,10 @@ beforeEach(() => {
 	specMetaQuery.data = undefined;
 	specMetaQuery.isLoading = false;
 	specMetaQuery.isError = false;
+	specMatchQuery.data = undefined;
+	specMatchQuery.isFetching = false;
+	specMatchQuery.isError = false;
+	specMatchQuery.error = null;
 	requestsLoading = false;
 	importFetch.mockReset();
 	requests = [];
@@ -208,6 +233,11 @@ describe("binding a collection that already has requests", () => {
 			request("r1", "{{baseUrl}}/pets"),
 			request("r2", "{{baseUrl}}/health"), // no operation
 		];
+		specMatchQuery.data = {
+			matched: [{ requestId: "r1", operation: LIST_PETS }],
+			unmatchedRequests: ["r2"],
+			unmatchedOperations: [GET_PET],
+		};
 		render(<SpecTab collection={collection()} />);
 
 		await pickFile("petstore.json", OPENAPI);
@@ -221,6 +251,11 @@ describe("binding a collection that already has requests", () => {
 
 	it("stamps only the matched requests, and remembers where the file is", async () => {
 		requests = [request("r1", "{{baseUrl}}/pets"), request("r2", "{{baseUrl}}/health")];
+		specMatchQuery.data = {
+			matched: [{ requestId: "r1", operation: LIST_PETS }],
+			unmatchedRequests: ["r2"],
+			unmatchedOperations: [GET_PET],
+		};
 		render(<SpecTab collection={collection()} />);
 		await pickFile("petstore.json", OPENAPI);
 
@@ -232,12 +267,9 @@ describe("binding a collection that already has requests", () => {
 		// A file has no URL to re-fetch from, and the engine stores `null` rather
 		// than an empty string for that.
 		expect(payload.sourceUrl).toBeNull();
-		expect(payload.stamps).toEqual([
-			{
-				requestId: "r1",
-				specOperation: { operationId: "listPets", method: "GET", path: "/pets" },
-			},
-		]);
+		// Exactly the pairs the engine returned, in its order - the tab decides
+		// none of them.
+		expect(payload.stamps).toEqual([{ requestId: "r1", specOperation: LIST_PETS }]);
 
 		bindSucceeds();
 		expect(useSpecFileStore.getState().locations.col_1).toEqual({
@@ -269,6 +301,11 @@ describe("binding a collection that already has requests", () => {
 
 	it("sends the fetched URL as the document's origin, and remembers no path", async () => {
 		importFetch.mockResolvedValue({ content: OPENAPI });
+		specMatchQuery.data = {
+			matched: [],
+			unmatchedRequests: [],
+			unmatchedOperations: [LIST_PETS, GET_PET],
+		};
 		render(<SpecTab collection={collection()} />);
 
 		fireEvent.change(screen.getByPlaceholderText(/openapi.json/i), {
@@ -310,6 +347,11 @@ describe("binding a collection that already has requests", () => {
 			// left exactly as it was.
 			request("r3", "{{baseUrl}}/health"),
 		];
+		specMatchQuery.data = {
+			matched: [{ requestId: "r1", operation: LIST_PETS }],
+			unmatchedRequests: ["r2", "r3"],
+			unmatchedOperations: [GET_PET],
+		};
 		render(<SpecTab collection={collection()} />);
 		await pickFile("petstore.json", OPENAPI);
 
@@ -331,6 +373,11 @@ describe("binding a collection that already has requests", () => {
 				path: "/v1/legacy",
 			}),
 		];
+		specMatchQuery.data = {
+			matched: [{ requestId: "r1", operation: LIST_PETS }],
+			unmatchedRequests: ["r2"],
+			unmatchedOperations: [GET_PET],
+		};
 		const { unmount } = render(<SpecTab collection={collection()} />);
 		await pickFile("petstore.json", OPENAPI);
 
@@ -344,9 +391,47 @@ describe("binding a collection that already has requests", () => {
 		// A collection with nothing stale says nothing - a zero here would read as
 		// a warning about a bind that rewrites nothing.
 		requests = [request("r1", "{{baseUrl}}/pets"), request("r3", "{{baseUrl}}/health")];
+		specMatchQuery.data = {
+			matched: [{ requestId: "r1", operation: LIST_PETS }],
+			unmatchedRequests: ["r3"],
+			unmatchedOperations: [GET_PET],
+		};
 		render(<SpecTab collection={collection()} />);
 		await pickFile("petstore.json", OPENAPI);
 		expect(screen.queryByText(/does not have/i)).toBeNull();
+	});
+
+	/*
+	 * The pairing became an engine read in #761, which gave it two states a
+	 * local computation never had. Both are asserted because the failure mode is
+	 * the same one: a bind offered while the counts beside it are unknown or
+	 * wrong stamps identity the user never agreed to.
+	 */
+	it("says the match is in flight rather than offering a bind with no counts", async () => {
+		requests = [request("r1", "{{baseUrl}}/pets")];
+		specMatchQuery.isFetching = true;
+		render(<SpecTab collection={collection()} />);
+
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [new File([OPENAPI], "petstore.json")] } });
+
+		await waitFor(() => expect(screen.getByText(/Matching this document/i)).toBeTruthy());
+		expect(screen.queryByRole("button", { name: /bind this spec/i })).toBeNull();
+	});
+
+	it("names a match that failed and offers no bind", async () => {
+		requests = [request("r1", "{{baseUrl}}/pets")];
+		specMatchQuery.isError = true;
+		specMatchQuery.error = new Error("Engine is not running");
+		render(<SpecTab collection={collection()} />);
+
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [new File([OPENAPI], "petstore.json")] } });
+
+		await waitFor(() => expect(screen.getByText(/Engine is not running/)).toBeTruthy());
+		// No fallback to a local match: a bind stamps identity, and identity
+		// worked out by a second implementation is what this move ended.
+		expect(screen.queryByRole("button", { name: /bind this spec/i })).toBeNull();
 	});
 
 	it("refuses a document that is not a spec, by name, and offers no bind", async () => {

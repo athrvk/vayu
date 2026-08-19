@@ -523,6 +523,20 @@ std::optional<std::string>
 read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, size_t schema_cap);
 
 /**
+ * Every collection at or beneath @p root, from one read of the table.
+ *
+ * One walk for the two routes that answer for a collection's whole contract -
+ * `POST /specs/sync`, which refuses to touch anything outside it, and
+ * `POST /specs/match`, which has to gather the requests inside it. An OpenAPI
+ * import binds the root and files its requests under one sub-collection per
+ * tag, so "the collection" means the subtree to both of them, and two walks
+ * would be two chances to disagree about where a contract stops. Defined in
+ * spec_sync.cpp.
+ */
+std::unordered_set<std::string>
+collection_subtree_ids (const std::vector<vayu::db::Collection>& all, const std::string& root);
+
+/**
  * What a design-mode response should be checked against (issue #628).
  *
  * `bound == false` is the one state that means **no verdict node at all**: the
@@ -847,6 +861,7 @@ void register_request_routes (RouteContext& ctx);
 void register_request_example_routes (RouteContext& ctx);
 void register_spec_routes (RouteContext& ctx);
 void register_spec_sync_routes (RouteContext& ctx);
+void register_spec_match_routes (RouteContext& ctx);
 void register_reorder_routes (RouteContext& ctx);
 void register_environment_routes (RouteContext& ctx);
 void register_client_certificate_routes (RouteContext& ctx);

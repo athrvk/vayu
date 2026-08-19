@@ -633,7 +633,7 @@ const std::string& body) const {
     }
 
     // Identity resolution, `operationId` first and `METHOD path` second - the
-    // rule `operation-match.ts` applies when binding and `OperationIndex`
+    // rule `core/operation_match.hpp` applies when binding and `OperationIndex`
     // applies when counting coverage, stated once more here because all three
     // must answer a rename the same way.
     std::optional<size_t> at;

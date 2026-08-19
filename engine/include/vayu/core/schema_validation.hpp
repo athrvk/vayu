@@ -216,7 +216,8 @@ class ResponseSchemaIndex {
      *
      * @param spec_operation The stored `requests.spec_operation` text - the
      *        identity resolution is `operationId` first, `METHOD path` second,
-     *        the rule `operation-match.ts` and `OperationIndex` both state.
+     *        the rule `core/operation_match.hpp` and `OperationIndex` both
+     *        state.
      * @param status_code    `0` for a transport error, which is `NoResponse`
      *        rather than a status nothing declares.
      * @param content_type   The response's `Content-Type` header, parameters

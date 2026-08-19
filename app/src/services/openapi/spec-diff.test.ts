@@ -322,7 +322,7 @@ describe("diffSpec", () => {
 	it("treats a renamed path parameter as the same endpoint", () => {
 		// Neither side declares an operationId, so only the path can carry the
 		// identity - and `{petId}` -> `{id}` is the same position on the server,
-		// which is the rule `matchOperations` already binds by.
+		// which is the rule the engine's matcher already binds by.
 		const bound = doc({ "/pets/{petId}": { get: { summary: "Get a pet" } } });
 		const next = doc({ "/pets/{id}": { get: { summary: "Get a pet" } } });
 

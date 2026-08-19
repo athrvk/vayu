@@ -1,0 +1,156 @@
+{
+  "description": "Cross-language conformance for the path shapes a request URL and an OpenAPI path reduce to (issue #638, moved engine-side by #761). The engine owns operation matching now; the renderer still reduces the same shapes for the spec diff (services/openapi/spec-diff.ts) and the export skeleton (services/exporters/skeleton.ts), so two implementations of one rule exist until those move too. This table is what keeps them honest: engine/tests/operation_match_test.cpp and app/src/services/openapi/operation-shape.conformance.test.ts both read it, and a divergence fails ctest or vitest rather than reaching a user as a bind that matches nothing.",
+  "readers": {
+    "requestUrls": "both - `origin` and `path` (split_request_url / splitRequestUrl); `shape` is engine-only, since the renderer no longer reduces a request URL to a shape (that was the matcher's job)",
+    "specPaths": "both (spec_path_shape / specPathShape)",
+    "shapeKeys": "both (operation_shape_key / operationShapeKey)"
+  },
+  "requestUrls": [
+    {
+      "name": "the import's own spelling: a variable stands in for the whole origin",
+      "url": "{{baseUrl}}/pets",
+      "origin": "{{baseUrl}}",
+      "path": "/pets",
+      "shape": "/pets"
+    },
+    {
+      "name": "an absolute URL",
+      "url": "https://api.example.com/pets",
+      "origin": "https://api.example.com",
+      "path": "/pets",
+      "shape": "/pets"
+    },
+    {
+      "name": "a schemeless host",
+      "url": "api.example.com/pets",
+      "origin": "api.example.com",
+      "path": "/pets",
+      "shape": "/pets"
+    },
+    {
+      "name": "a host with a port",
+      "url": "http://localhost:9876/pets",
+      "origin": "http://localhost:9876",
+      "path": "/pets",
+      "shape": "/pets"
+    },
+    {
+      "name": "the query and the fragment are not part of what a URL addresses",
+      "url": "{{baseUrl}}/pets?limit=10#top",
+      "origin": "{{baseUrl}}",
+      "path": "/pets",
+      "shape": "/pets"
+    },
+    {
+      "name": "both template syntaxes flatten to one placeholder",
+      "url": "{{baseUrl}}/pets/{{petId}}/toys",
+      "origin": "{{baseUrl}}",
+      "path": "/pets/{{petId}}/toys",
+      "shape": "/pets/{}/toys"
+    },
+    {
+      "name": "a trailing slash is not a different endpoint",
+      "url": "{{baseUrl}}/pets/",
+      "origin": "{{baseUrl}}",
+      "path": "/pets/",
+      "shape": "/pets"
+    },
+    {
+      "name": "the root survives the trailing-slash rule",
+      "url": "{{baseUrl}}/",
+      "origin": "{{baseUrl}}",
+      "path": "/",
+      "shape": "/"
+    },
+    {
+      "name": "an origin on its own states no path - not the root",
+      "url": "{{baseUrl}}",
+      "origin": "{{baseUrl}}",
+      "path": null,
+      "shape": null
+    },
+    {
+      "name": "nothing at all",
+      "url": "",
+      "origin": null,
+      "path": null,
+      "shape": null
+    },
+    {
+      "name": "a relative path states no origin, and gains the leading slash",
+      "url": "pets/42",
+      "origin": null,
+      "path": "/pets/42",
+      "shape": "/pets/42"
+    },
+    {
+      "name": "a variable that is only part of the first segment is not the origin",
+      "url": "{{stage}}.example.com/pets",
+      "origin": "{{stage}}.example.com",
+      "path": "/pets",
+      "shape": "/pets"
+    },
+    {
+      "name": "an unclosed brace is text, not a placeholder",
+      "url": "{{baseUrl}}/pets/{petId",
+      "origin": "{{baseUrl}}",
+      "path": "/pets/{petId",
+      "shape": "/pets/{petId"
+    }
+  ],
+  "specPaths": [
+    {
+      "path": "/pets",
+      "shape": "/pets"
+    },
+    {
+      "path": "/pets/{petId}",
+      "shape": "/pets/{}"
+    },
+    {
+      "path": "/pets/{id}",
+      "shape": "/pets/{}"
+    },
+    {
+      "path": "/pets/{petId}/toys/{toyId}",
+      "shape": "/pets/{}/toys/{}"
+    },
+    {
+      "path": "/pets/",
+      "shape": "/pets"
+    },
+    {
+      "path": "/",
+      "shape": "/"
+    },
+    {
+      "path": "/pets/{petId",
+      "shape": "/pets/{petId"
+    },
+    {
+      "path": "/pets/{{a}",
+      "shape": "/pets/{{}"
+    },
+    {
+      "path": "/pets/{{{a}}}",
+      "shape": "/pets/{{}}"
+    }
+  ],
+  "shapeKeys": [
+    {
+      "method": "GET",
+      "pathShape": "/pets/{}",
+      "key": "GET /pets/{}"
+    },
+    {
+      "method": "get",
+      "pathShape": "/pets/{}",
+      "key": "GET /pets/{}"
+    },
+    {
+      "method": "Delete",
+      "pathShape": "/",
+      "key": "DELETE /"
+    }
+  ]
+}

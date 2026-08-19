@@ -28,7 +28,9 @@
  * follows the path. Both changed at once is a `removed` and an `added`, stated
  * as such - there is nothing left to follow, and guessing is how a sync
  * overwrites the wrong request. The path side is compared through
- * `specPathShape`, the same flattening `matchOperations` binds with, so a
+ * `specPathShape`, the same flattening the engine's matcher binds with (one
+ * rule, two implementations until this file moves too - see
+ * `operation-shape.conformance.test.ts`), so a
  * renamed *path parameter* (`{petId}` -> `{id}`) is the same endpoint here too.
  * An id is only followed while it means one thing, though - see {@link lookup}
  * for the two ways a duplicated `operationId` stops it from meaning anything
@@ -247,7 +249,7 @@ function index(entries: readonly SpecRequestDraft[]): OperationIndex {
  * Import no longer stamps a repeated id at all, but a collection imported
  * before that fix still holds two requests claiming one id, and an id two
  * requests claim identifies neither of them. They are followed by path here,
- * which is the same refusal-to-guess `operation-match.ts` binds by.
+ * which is the same refusal-to-guess the engine's matcher binds by.
  */
 function idsMoreThanOneRequestClaims(requests: readonly Request[]): ReadonlySet<string> {
 	const seen = new Set<string>();
