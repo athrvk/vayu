@@ -1127,7 +1127,11 @@ TEST_F (ScenarioRunnerTest, ARunOfAnUnboundCollectionCarriesNoVerdictAnywhere) {
     stamp_spec_operation ("req_ok", json{ { "method", "GET" }, { "path", "/pet" } });
 
     const auto run_id  = start (/*iterations=*/1);
-    const auto context = manager_.get_run (run_id);
+    // get_run(), not get_run_or_retained(): a single-iteration run against a
+    // fast local server can finish and move to retained_runs_ before this
+    // line runs, which made this assertion racy rather than wrong (observed
+    // failing 2/2 on the macOS x64/Rosetta release leg).
+    const auto context = manager_.get_run_or_retained (run_id);
     ASSERT_TRUE (context != nullptr);
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
