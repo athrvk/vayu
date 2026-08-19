@@ -300,12 +300,27 @@ took ~37 min against a ~6 min serial run - the same `-j4` that cut ubuntu from
 3-5 min to 1m15s and macOS from ~4 min to 1m06s. The per-test durations said
 why: a fast band of pure-logic suites, and a slow band that is exactly the
 fixtures which open a scratch `Database`, where concurrent SQLite commits cost
-more than the concurrency returns (the flush barrier `synchronous=FULL` issues
-per commit, and the 25-250ms retry sleeps `os_win.c` answers a sharing violation
-with). Moving the scratch directories between volumes was tried and made no
-difference, and Windows Defender is not a factor - GitHub's hosted Windows
-images ship with real-time monitoring disabled - so do not re-litigate either
-without new measurements.
+more than the concurrency returns (the 25-250ms retry sleeps `os_win.c` answers
+a sharing violation with, and - until #838 - a genuine `synchronous=FULL` flush
+barrier, though not where this paragraph used to put it; see below). Moving the
+scratch directories between volumes was tried and made no difference, and
+Windows Defender is not a factor - GitHub's hosted Windows images ship with
+real-time monitoring disabled - so do not re-litigate either without new
+measurements.
+
+**Where the flush barrier actually was (#838).** This section used to name
+"the flush barrier `synchronous=FULL` issues per commit" as the cost, and that
+was wrong about the steady state: `dbSynchronous` defaults to **Off**
+(`constants::database::SYNCHRONOUS` is `0`), so a committed result has never
+carried an fsync. What did carry one was everything a `Database` does *before*
+`init` applies that setting - two `sync_schema` passes from the constructor and
+a config seed that wrote its sixty-odd rows as sixty-odd separate transactions -
+all of it on SQLite's own defaults, a rollback journal at `synchronous=FULL`.
+Per process, once; and the suite is one process per test. So the barrier was
+real, it was paid at open rather than per commit, and it was the engine paying
+for durability its own configuration says it does not want. #838 applies the
+engine's journal mode and `synchronous` to the first connection the constructor
+opens, and makes the seed one transaction.
 
 So the Windows presets run `-j4` with those tests holding a shared CTest
 `RESOURCE_LOCK`: no two of them run at once, while everything else runs 4-wide
@@ -321,13 +336,29 @@ contends rather than breaks.
 
 Measured locally on a 4-core box (Debug, 2070 tests, green in all four runs):
 299.6s serial, 84.8s at `-j4`, 58.6s at `-j8`, and 243.7s at `-j4` with the lock
-forced on - the last being the model Windows runs. That ratio is the honest
+forced on - the last being the model Windows runs. That ratio was the honest
 ceiling of this approach: the locked group is 817 of the 2070 tests but **81% of
 the serial wall**, because the route and load fixtures that dominate the suite's
 duration all open a database. The six fixtures the earlier analysis measured on
 Windows (197 tests, 57.2s, 19% of the wall here - within a point of the Windows
 figures, which is what makes this box a usable proxy for the *shape* of the
 suite) are only the visible tip of that group.
+
+**What #838 took off that group**, measured on the same class of box (Debug,
+`ctest -j1` over the locked filter only, all green):
+
+| build | locked-group serial wall |
+|---|---:|
+| before | 281.5s (820 tests) |
+| config seed in one transaction | 170.8s (822 tests) |
+| plus the pragmas on the first connection | **146.0s** (823 tests) |
+
+So the group's serial time - the floor the whole hybrid model sits on - is a
+little under half what it was, and the seed is the larger of the two halves.
+Note what this does *not* change: the group is still locked on Windows, because
+the lock's justification is the `-j4` blow-up and only a Windows run can say
+whether a cheaper group survives overlapping. Do not shrink
+`vayu_scratch_database_suites` on the strength of the table above.
 
 **What CI measured on the hybrid model: 5m27s and 4m50s** on two runs of the
 same tree (32249239500 and 32252015024), 2071 tests, 0 failures, 9 skipped. Both
@@ -336,9 +367,10 @@ speedup** - and with a baseline that noisy, two samples could not show one eithe
 way. What they do establish is that the mechanism works: the same `-j4` that took
 ~37 min without the lock now finishes in the time serial used to take, which is
 what the 81% number predicts and the reason to hold the expectation there rather
-than at the ~2.5 min this was first scoped for. Getting a real speedup means
-making the database tests cheaper to run concurrently, which is issue #838; treat
-that as the open work, not this paragraph as a win.
+than at the ~2.5 min this was first scoped for. Getting a real speedup meant
+making the database tests cheaper, which is issue #838 and the table above; what
+that buys the Windows leg specifically is whatever its first CI run after #838
+records on that issue.
 
 Isolation is the **default** on every platform now, so a hand-run `ctest -j` is
 safe wherever it happens; the Windows presets used to set

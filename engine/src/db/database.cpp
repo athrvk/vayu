@@ -584,6 +584,34 @@ struct Database::Impl {
                 sqlite3_free (err_msg);
             }
         };
+
+        // Durability, applied here rather than in `Database::init` - which is
+        // where it used to be applied *only* (issue #838).
+        //
+        // Everything before `init` runs on whatever SQLite defaults to, and
+        // SQLite defaults to a rollback journal at `synchronous=FULL`. That
+        // covered the two `sync_schema` passes the constructor makes and the
+        // ~66 separate commits `seed_default_config` used to write, so every
+        // database this engine has ever opened paid a full fsync barrier per
+        // statement for the whole of its startup, at settings its own
+        // `dbSynchronous` entry says should be `OFF`. Nothing chose that; it
+        // was the gap between opening the file and reading the row that says
+        // how to open it.
+        //
+        // The compile-time constant is used because the configured value lives
+        // in a table this connection has not created yet. `init` re-applies
+        // whatever `dbSynchronous` holds once it can read it, so a user who
+        // raised the setting still gets it for the process's whole working
+        // life - only the schema sync and the seed run at the default, and
+        // the constructor takes a `.bak` copy of the previous file before
+        // either of them touches it.
+        //
+        // Set through `storage.pragma` rather than the callback above because
+        // sqlite_orm remembers these two and re-applies them to every
+        // connection it opens - which is exactly why `cache_size`, which it
+        // does not remember, is in the callback instead.
+        storage.pragma.journal_mode (journal_mode::WAL);
+        storage.pragma.synchronous (vayu::core::constants::database::SYNCHRONOUS);
     }
 };
 
@@ -721,8 +749,10 @@ void Database::init () {
     // Idempotent, so this stays rather than needing a one-shot migration flag.
     impl_->storage.drop_table_if_exists ("metrics");
 
-    // WAL mode for better concurrent read/write performance
-    impl_->storage.pragma.journal_mode (journal_mode::WAL);
+    // WAL mode and the default `synchronous` are set by `Impl`'s constructor,
+    // before the first `sync_schema` - see the note there. They are deliberately
+    // not repeated here: two statements of one fact drift, and this one used to
+    // read as though the connection had been on a rollback journal until now.
 
     // Seed default configuration values if empty (must be before reading config)
     seed_default_config ();
@@ -748,10 +778,13 @@ void Database::init () {
     get_config_int ("dbBusyTimeout", vayu::core::constants::database::BUSY_TIMEOUT_MS);
     impl_->storage.pragma.busy_timeout (busy_timeout);
 
+    // Both values are read back from the connection rather than echoed from the
+    // config row: what the engine asked for and what SQLite holds are two
+    // different statements, and only the second one is worth logging.
     vayu::utils::log_debug ("Database initialized with WAL mode (cache=" +
     std::to_string (applied_cache_size_bytes () / 1024) + "KB, " +
     "busy_timeout=" + std::to_string (busy_timeout) + "ms, " +
-    "synchronous=" + std::to_string (synchronous) + ")");
+    "synchronous=" + std::to_string (applied_synchronous ()) + ")");
 
     // Close out runs abandoned by a previous process before pruning, so an
     // orphan becomes a terminal (and therefore prunable) row in the same
@@ -2156,6 +2189,13 @@ int Database::applied_cache_size_bytes () const {
     return impl_->applied_cache_size_bytes.load ();
 }
 
+int Database::applied_synchronous () const {
+    // Unlike the cache size above this is a query, not a cached atomic, so it
+    // takes the mutex the rest of the storage access does.
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.pragma.synchronous ();
+}
+
 // Type-safe config getters (replaces ConfigManager)
 int Database::get_config_int (const std::string& key, int default_value) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
@@ -2247,6 +2287,23 @@ std::string db_synchronous_options_json () {
 
 void Database::seed_default_config () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+
+    // One transaction for the whole seed, for two reasons that happen to agree
+    // (issue #838).
+    //
+    // Correctness: this writes upwards of sixty rows - thirteen deletions of
+    // retired keys and one upsert per live entry - and each was its own
+    // implicit transaction, so a throw partway through left the config table
+    // half-seeded. The next start repaired it (a missing key is re-seeded, an
+    // existing one keeps the user's value), but "repaired on the next start"
+    // is not the same promise as "never observed half-written", and the
+    // config route can read this table while startup is still writing it.
+    //
+    // Cost: sixty-odd commits became one. On a scratch database that is the
+    // difference between sixty WAL commits per test process and a single one,
+    // which is what makes this show up in a test-suite wall time at all. The
+    // guard rolls back if anything below throws; `commit` is at the end.
+    auto seed_transaction = impl_->storage.transaction_guard ();
 
     // Retired settings: keys nothing reads any more. Delete any row left behind
     // by an older version so the Settings UI (which renders engine entries
@@ -3105,6 +3162,9 @@ void Database::seed_default_config () {
     "65536",   // 64KB
     "1048576", // 1MB
     std::nullopt, now }))));
+
+    seed_transaction.commit ();
+
     if (existing.empty ()) {
         vayu::utils::log_info ("Seeded default configuration values");
     } else {

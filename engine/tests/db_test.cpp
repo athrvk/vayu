@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <set>
 #include <string>
 #include <utility>
@@ -390,6 +391,86 @@ TEST_F (DatabaseTest, CacheSizeConfigReachesTheConnection) {
     Database reopened (TEST_DB_PATH);
     reopened.init ();
     EXPECT_EQ (reopened.applied_cache_size_bytes (), kConfigured);
+}
+
+// Issue #838. Everything the constructor does - two `sync_schema` passes and,
+// through `init`, a sixty-row config seed - used to run on SQLite's own
+// defaults, because the engine applied WAL and `synchronous` only after all of
+// it. The assertions are deliberately made *before* `init` is called: that is
+// the window that was unguarded, and after `init` both settings would be in
+// force either way, so a test written there would pass against the bug.
+TEST_F (DatabaseTest, TheFirstConnectionCarriesTheEnginesDurabilitySettings) {
+    Database db (TEST_DB_PATH);
+
+    EXPECT_EQ (db.applied_synchronous (), vayu::core::constants::database::SYNCHRONOUS)
+    << "the schema sync ran at SQLite's default instead of the engine's";
+
+    // Journal mode is read off the database header rather than from a `-wal`
+    // sidecar: SQLite removes the sidecars when the last connection closes, and
+    // sqlite_orm holds none open between statements, so by the time the
+    // constructor returns there is nothing beside the file to look at. Byte 18
+    // of every SQLite file is the write format version - 1 for a rollback
+    // journal, 2 for WAL - and it persists, which is the point of the check.
+    std::ifstream header (TEST_DB_PATH, std::ios::binary);
+    ASSERT_TRUE (header.is_open ());
+    char format[20] = {};
+    ASSERT_TRUE (header.read (format, sizeof (format)))
+    << "a database this engine created is longer than its own header";
+    EXPECT_EQ (static_cast<int> (format[18]), 2)
+    << "the schema was written under a rollback journal, before init() set WAL";
+}
+
+// The other half of the same change: `init` must still hand the *configured*
+// level to the connection, so raising `dbSynchronous` is not quietly undone by
+// the default the constructor now applies. Reopened, because the entry is
+// restart-required - the same shape as CacheSizeConfigReachesTheConnection.
+TEST_F (DatabaseTest, SynchronousConfigStillWinsOverTheConstructorDefault) {
+    constexpr int kConfigured = 2; // FULL
+    static_assert (kConfigured != vayu::core::constants::database::SYNCHRONOUS,
+    "the test value must differ from the default the constructor applies");
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        auto entry = db.get_config_entry ("dbSynchronous");
+        ASSERT_TRUE (entry.has_value ());
+        entry->value = std::to_string (kConfigured);
+        db.save_config_entry (*entry);
+    }
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    EXPECT_EQ (reopened.applied_synchronous (), kConfigured);
+}
+
+// The seed is one transaction now (issue #838) rather than sixty-odd implicit
+// ones. What that must not change is what a re-seed *means*, which is the
+// regression a transaction wrapper can plausibly introduce: same rows, user
+// values kept, metadata refreshed. Proving the rollback half would need a
+// mid-seed failure, and this suite deliberately builds no fault injection for
+// SQLite (see the note in `db_concurrency_test.cpp`), so that half is left to
+// the shape of the code rather than claimed here.
+TEST_F (DatabaseTest, ASeedInsideOneTransactionStillPreservesUserValues) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    const size_t seeded = db.get_all_config_entries ().size ();
+    ASSERT_GT (seeded, 40u)
+    << "the seed is the many-row write this test is about";
+
+    auto entry = db.get_config_entry ("dbBusyTimeout");
+    ASSERT_TRUE (entry.has_value ());
+    entry->value = "12345";
+    db.save_config_entry (*entry);
+
+    db.seed_default_config ();
+
+    EXPECT_EQ (db.get_all_config_entries ().size (), seeded)
+    << "a re-seed neither adds nor drops rows";
+    auto preserved = db.get_config_entry ("dbBusyTimeout");
+    ASSERT_TRUE (preserved.has_value ());
+    EXPECT_EQ (preserved->value, "12345")
+    << "the seed keeps a user's value and only refreshes metadata";
 }
 
 // The "options" column is new (Task 4); an existing on-disk database predates
