@@ -306,6 +306,7 @@ The preload script (`electron/preload.ts`) exposes a minimal, context-isolated A
 - **Context Isolation**: Enabled in Electron (renderer cannot access Node.js APIs)
 - **No Node Integration**: Renderer runs in isolated context
 - **Preload Script**: Minimal IPC bridge through `contextBridge.exposeInMainWorld()`
+- **Window Navigation**: The main window refuses any navigation that is not the app's own document and denies `window.open` (`electron/window-navigation.ts`). The preload re-runs on whatever the window navigates to, so this is what keeps `window.electronAPI` off a third-party origin. The app's own document is the entry `file:` URL in production and the dev server's origin in development, where a Vite full reload is a real navigation. Outbound links go to the user's browser through the scheme-validated `openExternalUrl` IPC instead. There is no CSP
 - **Local Communication**: Engine runs on localhost only (127.0.0.1:9876)
 
 ## Performance Optimizations

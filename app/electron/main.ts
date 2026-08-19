@@ -7,7 +7,7 @@
 
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Menu, shell } from "electron";
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { EngineSidecar } from "./sidecar.js";
 import { resolveAppPaths } from "./app-paths.js";
 import { readDataFile } from "./data-file.js";
@@ -16,6 +16,7 @@ import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
 import { installQuitOnSignal } from "./quit-signals.js";
+import { installWindowNavigationGuard } from "./window-navigation.js";
 import { createSaveFlusher } from "./save-flush.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
@@ -263,11 +264,21 @@ function createWindow() {
 		mainWindow?.show();
 	});
 
+	// The preload re-runs on whatever this window navigates to, so a navigation
+	// off the app hands `window.electronAPI` to that origin. Installed before the
+	// load, so no navigation can land ahead of the guard. See
+	// window-navigation.ts.
+	const rendererEntry = path.join(__dirname, "../dist/index.html");
+	installWindowNavigationGuard(
+		mainWindow.webContents,
+		isDev ? DEV_SERVER_URL : pathToFileURL(rendererEntry).toString()
+	);
+
 	if (isDev) {
 		mainWindow.loadURL(DEV_SERVER_URL);
 		// mainWindow.webContents.openDevTools();
 	} else {
-		mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
+		mainWindow.loadFile(rendererEntry);
 	}
 
 	mainWindow.on("page-title-updated", (event) => {

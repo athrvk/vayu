@@ -1450,14 +1450,19 @@ beside a plain textarea.
 
 **Two rules are load-bearing, not stylistic:**
 
-1. **`MarkdownView` never emits a navigating anchor.** The main window has no
-   `will-navigate` handler, no `setWindowOpenHandler` and no CSP, and the
-   preload re-runs on the new origin - so a clicked `<a href>` would hand
-   `window.electronAPI` to whatever site it landed on. Descriptions arrive from
-   imported Postman / Insomnia / OpenAPI files, which are third-party documents.
-   Links therefore render as `<button>`, with no `href` in the DOM, and open via
-   the scheme-validated `openExternalUrl` IPC. `remark-gfm` autolinks bare URLs,
-   so that override covers those too. Guarded by `markdown-view.test.tsx`.
+1. **`MarkdownView` never emits a navigating anchor.** The preload re-runs on
+   the new origin, so a clicked `<a href>` would hand `window.electronAPI` to
+   whatever site it landed on. Descriptions arrive from imported Postman /
+   Insomnia / OpenAPI files, which are third-party documents. Links therefore
+   render as `<button>`, with no `href` in the DOM, and open via the
+   scheme-validated `openExternalUrl` IPC. `remark-gfm` autolinks bare URLs, so
+   that override covers those too. Guarded by `markdown-view.test.tsx`.
+
+   Underneath it, `electron/window-navigation.ts` makes the main window refuse a
+   navigation that is not the app's own document and deny `window.open`; there
+   is still no CSP. Keep both - the window guard turns an escaped link into a
+   dead one, and this override is what makes it reach the user's browser
+   instead.
 2. **`react-markdown` with the default `urlTransform`.** It builds React
    elements from an AST, so there is no `dangerouslySetInnerHTML` and no
    sanitiser to forget. Raw HTML is inert because `rehype-raw` is deliberately
