@@ -53,6 +53,45 @@
 
 namespace vayu::http::routes {
 
+/**
+ * Every collection at or beneath @p root, from one read of the table.
+ *
+ * A walk rather than a repeated `parent_id` query because the answer is needed
+ * for every item in the payload and the collections table is the small,
+ * sidebar-sized one - the same reasoning `get_collections_bound_to_spec`
+ * scans on. A cycle among stored rows cannot loop it: `seen` gates the descent.
+ *
+ * Shared with `POST /specs/match` (declared in routes.hpp), which has to gather
+ * the same subtree for the same reason a sync refuses to leave it: a
+ * spec-bound root usually owns no requests directly, so anything that answers
+ * for a collection's contract has to mean the subtree by "the collection".
+ */
+std::unordered_set<std::string>
+collection_subtree_ids (const std::vector<vayu::db::Collection>& all, const std::string& root) {
+    std::unordered_map<std::string, std::vector<std::string>> children;
+    for (const auto& col : all) {
+        if (col.parent_id && !col.parent_id->empty ()) {
+            children[*col.parent_id].push_back (col.id);
+        }
+    }
+    std::unordered_set<std::string> seen{ root };
+    std::vector<std::string> stack{ root };
+    while (!stack.empty ()) {
+        const std::string cursor = stack.back ();
+        stack.pop_back ();
+        auto kids = children.find (cursor);
+        if (kids == children.end ()) {
+            continue;
+        }
+        for (const auto& child : kids->second) {
+            if (seen.insert (child).second) {
+                stack.push_back (child);
+            }
+        }
+    }
+    return seen;
+}
+
 namespace {
 
 /**
@@ -112,40 +151,6 @@ apply_item_fields (Apply apply, const char* kind, const std::string& item) {
         return err;
     }
     return std::nullopt;
-}
-
-/**
- * Every collection at or beneath @p root, from one read of the table.
- *
- * A walk rather than a repeated `parent_id` query because the answer is needed
- * for every item in the payload and the collections table is the small,
- * sidebar-sized one - the same reasoning `get_collections_bound_to_spec`
- * scans on. A cycle among stored rows cannot loop it: `seen` gates the descent.
- */
-std::unordered_set<std::string>
-subtree_ids (const std::vector<vayu::db::Collection>& all, const std::string& root) {
-    std::unordered_map<std::string, std::vector<std::string>> children;
-    for (const auto& col : all) {
-        if (col.parent_id && !col.parent_id->empty ()) {
-            children[*col.parent_id].push_back (col.id);
-        }
-    }
-    std::unordered_set<std::string> seen{ root };
-    std::vector<std::string> stack{ root };
-    while (!stack.empty ()) {
-        const std::string cursor = stack.back ();
-        stack.pop_back ();
-        auto kids = children.find (cursor);
-        if (kids == children.end ()) {
-            continue;
-        }
-        for (const auto& child : kids->second) {
-            if (seen.insert (child).second) {
-                stack.push_back (child);
-            }
-        }
-    }
-    return seen;
 }
 
 /** The `specId` a collection's binding names, or "" when it is bound to nothing. */
@@ -426,7 +431,7 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             "' is not bound to a spec; bind it before syncing");
             return;
         }
-        const auto subtree = subtree_ids (stored_collections, collection_id);
+        const auto subtree = collection_subtree_ids (stored_collections, collection_id);
 
         const size_t cap = spec_size_cap (db);
         if (content.size () > cap) {

@@ -338,7 +338,18 @@ apiService.createSpec(data): Promise<SpecDocument>       // POST /specs
 apiService.getSpec(id): Promise<SpecDocument>            // GET  /specs/:id
 apiService.getSpecMeta(id): Promise<SpecDocumentMeta>    // GET  /specs/:id/meta
 apiService.syncSpec(payload): Promise<SpecSyncResponse>  // POST /specs/sync
+apiService.matchSpecOperations(payload)                  // POST /specs/match
 ```
+
+`matchSpecOperations` is a **read** (issue #761): it pairs the requests in a
+collection's subtree with the operations a document declares and writes nothing,
+which is what lets the Spec tab show the counts before the user commits to a
+bind. The pairing rule lives in the engine (`core/operation_match.hpp`) rather
+than in the renderer, so binding an existing collection is reachable from
+anything that is not the Spec tab - an agent over MCP first among them. The
+payload names the collection and sends the operations; it does **not** send the
+requests, because an OpenAPI import files them under tag sub-collections and the
+engine gathers the whole subtree itself.
 
 Every write that stores a document carries the two indexes the parsers extract
 beside it - `operations` (#629) and `responseSchemas` (#628) - and all three

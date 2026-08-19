@@ -63,6 +63,11 @@ export const API_ENDPOINTS = {
 	// the new document, the moved binding and the created/updated/deleted
 	// requests in one engine transaction.
 	SPEC_SYNC: `/specs/sync`,
+	// Which request of a collection is which operation of a document (issue
+	// #761): the matcher moved engine-side, so binding an existing collection
+	// asks for the pairing rather than working it out here. Reads only - the
+	// tab shows the counts before the user commits to the bind.
+	SPEC_MATCH: `/specs/match`,
 
 	// Batch reorder for both entity kinds (issue #365). One drop is one call and
 	// one engine transaction; a reorder expressed as N sibling PUTs is neither.

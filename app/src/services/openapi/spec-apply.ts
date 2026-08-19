@@ -32,8 +32,8 @@
  * not `method`.** An applied change writes `specOperation` whether or not
  * anything was ticked: an operation *is* its method and path template, so a
  * request that recorded the old identity after a rename would be diffed against
- * the wrong operation next time - the exact failure `operation-match.ts` warns
- * about. `request.method` used to ride along on that reasoning and does not
+ * the wrong operation next time - the exact failure the engine's matcher
+ * (`core/operation_match.hpp`) warns about. `request.method` used to ride along on that reasoning and does not
  * anymore (issue #717): it is what the request *sends*, protects no lookup, and
  * writing it unconditionally silently reverted a user's `GET` -> `HEAD` edit on
  * any applied change. It is now a compared, flaggable, tickable `SpecField`
