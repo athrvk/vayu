@@ -12,6 +12,8 @@
  * @brief HTTP client using libcurl
  */
 
+#include <curl/curl.h>
+
 #include <memory>
 
 #include "vayu/core/constants.hpp"
@@ -146,7 +148,42 @@ class Client {
 };
 
 /**
+ * @brief Select OpenSSL as this process's TLS backend, before curl is
+ *        initialized (issue #851).
+ *
+ * Returns libcurl's own verdict: `CURLSSLSET_OK` when OpenSSL is now the
+ * backend every transfer will use, `CURLSSLSET_UNKNOWN_BACKEND` for a build
+ * that has no OpenSSL to select, and `CURLSSLSET_TOO_LATE` when curl was
+ * already initialized - which would mean a caller reached curl before
+ * `global_init`, and the selection below never took.
+ *
+ * **Why this exists rather than the manifest alone.** `engine/vcpkg.json` asks
+ * for `curl` with `default-features: false` and an explicit `openssl`, which
+ * should be the whole story - but the port's `http2` feature *itself* depends
+ * on `curl[ssl]`, and the engine requires `http2`. On Windows `ssl` resolves to
+ * Schannel, so the shipped libcurl is a **MultiSSL** build carrying both
+ * backends however the manifest is written (#858 tracks getting it down to
+ * one).
+ *
+ * On such a build libcurl picks the backend itself, and `multissl_setup`
+ * consults the **`CURL_SSL_BACKEND` environment variable** before falling back
+ * to the first compiled-in one. So an environment naming `schannel` - a
+ * corporate login script, a leftover shell export - would silently move every
+ * transfer onto the backend #851 exists to get off: mTLS stops working (#842)
+ * and the trust model changes, with every document here still describing
+ * OpenSSL. Naming the backend explicitly is what closes that, because
+ * `multissl_setup` reads the environment only when no caller has chosen.
+ *
+ * Idempotent, and deliberately separate from `global_init` so the ordering it
+ * depends on is one call a test can assert rather than a comment.
+ */
+CURLsslset pin_tls_backend ();
+
+/**
  * @brief Initialize curl globally (call once at startup)
+ *
+ * Pins the TLS backend first - see `pin_tls_backend`, which must run before
+ * curl is initialized to have any effect.
  */
 void global_init ();
 

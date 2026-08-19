@@ -135,7 +135,7 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 
 | Library | Purpose |
 |---------|---------|
-| curl | HTTP client library - built with `default-features: false` and an explicit `openssl` (plus `http2`, `non-http`), so all three platforms verify with the same TLS backend. Dropping `default-features` brings the port's `ssl` feature back, which on Windows adds Schannel *beside* OpenSSL - a MultiSSL build, which [#851](https://github.com/athrvk/vayu/issues/851) exists to avoid and `TlsBackend.IsTheBackendEveryTrustStatementHereAssumes` fails on |
+| curl | HTTP client library - built with `default-features: false` and an explicit `openssl` (plus `http2`, `non-http`), so every platform *verifies* with OpenSSL ([#851](https://github.com/athrvk/vayu/issues/851)). It does not make Windows a single-backend build: the port's `http2` feature itself depends on `curl[ssl]`, which resolves to Schannel there, so the Windows libcurl is MultiSSL and the engine names its backend at startup instead (`pin_tls_backend()`). Keep the explicit `openssl` regardless - without it there is no OpenSSL to name. See [#858](https://github.com/athrvk/vayu/issues/858) |
 | libsodium | SHA-256, HMAC-SHA256, base64 and hex (PKCE, Basic/OAuth credentials, `pm.crypto`) |
 | nlohmann-json | JSON parsing/serialization |
 | valijson | JSON Schema validation of responses against a bound OpenAPI document |

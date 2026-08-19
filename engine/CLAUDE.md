@@ -258,16 +258,25 @@ Three things worth knowing before you design around them:
   `customCaCertificates` setting beside the database and **extends** the
   platform's trust rather than replacing it: on an OpenSSL build CAINFO *is*
   the whole store, so the file is the system anchors plus the user's.
-  **There is one backend now, not two or three** (#851): `engine/vcpkg.json`
-  pins curl's `openssl` feature with `default-features: false`, which is
-  load-bearing - without it the port's default `ssl` feature keeps
-  `CURL_USE_SCHANNEL=ON` on Windows and you get a *MultiSSL* build carrying
-  both, where the backend a transfer uses is whichever libcurl picked. Six
-  statements across the engine and the docs said macOS was on Apple SecTrust
-  until #818, and none of them had been read off a build - so the *backend
-  itself* is asserted per leg, by name **and by count**
-  (`TlsBackend.IsTheBackendEveryTrustStatementHereAssumes`; the count via
-  `curl_global_sslset`, since a MultiSSL build still reports "OpenSSL" first).
+  **Every leg verifies with OpenSSL now** (#851): `engine/vcpkg.json` pins
+  curl's `openssl` feature with `default-features: false`. **That does not make
+  Windows a single-backend build, and believing it does is the trap #851 fell
+  into** - the port's `http2` feature *itself* depends on `curl[ssl]`, and the
+  engine requires `http2`, so `ssl` is in the resolved feature set however the
+  manifest is written; on Windows it resolves to Schannel and the shipped
+  libcurl is *MultiSSL*. Reading the port file said otherwise; the first CI run
+  said `openssl, schannel`. **So the engine names its backend rather than
+  inheriting one**: `pin_tls_backend()` calls `curl_global_sslset` before
+  `curl_global_init` (`http/client.cpp`), because on a MultiSSL build
+  `multissl_setup` reads **`CURL_SSL_BACKEND` from the environment** before
+  falling back to the first compiled-in backend - so a stray export would put
+  every transfer on Schannel, silently, and mTLS would stop working (#842) with
+  every doc here still saying OpenSSL. Getting the *build* down to one backend
+  needs a triplet or an overlay port and is #858. Six statements across the
+  engine and the docs said macOS was on Apple SecTrust until #818, and none of
+  them had been read off a build - so the backend is asserted per leg, by name
+  **and by whether this process actually selected it**
+  (`TlsBackend.IsTheBackendEveryTrustStatementHereAssumes`).
   **Windows is the leg with no bundle file**: it ships its anchors in a
   certificate store, so `system_ca_bundle_path()` finds nothing, the
   materialized file holds the paste alone, and `CURLSSLOPT_NATIVE_CA` is set

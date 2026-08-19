@@ -565,13 +565,27 @@ TEST (TlsBackend, IsTheBackendEveryTrustStatementHereAssumes) {
        "OpenSSL's since #851, but this build verifies with '"
     << backend << "'";
 
-    // And *only* that one. Dropping `default-features` from the curl entry
-    // brings the port's `ssl` feature back, which on Windows adds Schannel
-    // beside OpenSSL rather than replacing it - a MultiSSL build, where
-    // `ssl_version` still opens with "OpenSSL" and the backend a transfer
-    // actually uses is whichever libcurl picked. Every statement above would
-    // read as green while half the requests went through a backend #851
-    // removed on purpose, so the count is asserted rather than the name alone.
+    // And that it is OpenSSL *because the engine said so*, not because libcurl
+    // happened to pick it.
+    //
+    // The manifest cannot make this a single-backend build. `engine/vcpkg.json`
+    // asks for `curl` with `default-features: false` and an explicit `openssl`,
+    // which reads like it should - but the port's own `http2` feature depends
+    // on `curl[ssl]`, and the engine requires `http2`. On Windows `ssl`
+    // resolves to Schannel, so the shipped libcurl is MultiSSL there however
+    // the manifest is written; the first CI run of #851 is what established
+    // that, against an assertion here that expected one backend and found
+    // `openssl, schannel` (#858 tracks getting the build down to one).
+    //
+    // On a MultiSSL build libcurl chooses, and `multissl_setup` reads
+    // **`CURL_SSL_BACKEND` from the environment** before falling back to the
+    // first compiled-in backend. That is the failure this assertion exists for
+    // now: an environment naming `schannel` would move every transfer onto the
+    // backend #851 exists to get off, silently, with `mutual_tls_test` red for
+    // a reason pointing at this engine rather than at a shell export. The
+    // engine names the backend in `pin_tls_backend()` before curl initializes,
+    // which is what takes the choice away from the environment - so the
+    // *selection* is asserted, and the compiled-in list only reported.
     const curl_ssl_backend** available = nullptr;
     curl_global_sslset (CURLSSLBACKEND_NONE, nullptr, &available);
     ASSERT_NE (available, nullptr)
@@ -580,11 +594,14 @@ TEST (TlsBackend, IsTheBackendEveryTrustStatementHereAssumes) {
     for (int i = 0; available[i] != nullptr; ++i) {
         compiled_in.emplace_back (available[i]->name != nullptr ? available[i]->name : "unnamed");
     }
-    EXPECT_EQ (compiled_in.size (), 1u)
-    << "this is a MultiSSL build carrying " << compiled_in.size ()
-    << " backends (" << join_names (compiled_in)
-    << ") - #851 pins exactly one, so the curl entry in engine/vcpkg.json has "
-       "lost its `default-features: false`";
+    EXPECT_EQ (vayu::http::pin_tls_backend (), CURLSSLSET_OK)
+    << "this process never selected its TLS backend, so on the MultiSSL build "
+       "Windows ships (compiled in: "
+    << join_names (compiled_in)
+    << ") the environment's CURL_SSL_BACKEND or libcurl's own default is "
+       "choosing it - and Schannel cannot complete a client-certificate "
+       "handshake at all (#842). Check that global_init() still calls "
+       "pin_tls_backend() before curl_global_init().";
 }
 
 TEST (TlsBackend, FindsTheSystemAnchorsTheMergeExtends) {

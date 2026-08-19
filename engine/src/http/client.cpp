@@ -641,7 +641,39 @@ std::string Client::last_error () const {
 // Global Functions
 // ============================================================================
 
+CURLsslset pin_tls_backend () {
+    // Cached rather than repeated: libcurl answers `CURLSSLSET_TOO_LATE` to
+    // every call after the first, and the fixtures call `global_init` again
+    // per suite - so a second call would report a failure that is really just
+    // "already done". The first call's verdict is the one that describes this
+    // process, which is what `TlsBackend` asserts.
+    static const CURLsslset selected = [] {
+        const CURLsslset result =
+        curl_global_sslset (CURLSSLBACKEND_OPENSSL, nullptr, nullptr);
+        if (result != CURLSSLSET_OK) {
+            // Not fatal here - the daemon still serves, and http:// work is
+            // unaffected - but every TLS statement this engine makes is now
+            // about a backend it did not choose, so it is said once and loudly
+            // rather than discovered by a user whose mTLS stopped working.
+            const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
+            vayu::utils::log_error (
+            "Could not select the OpenSSL TLS backend (curl_global_sslset returned " +
+            std::to_string (static_cast<int> (result)) + "); this build verifies with '" +
+            std::string (info != nullptr && info->ssl_version != nullptr ? info->ssl_version : "unknown") +
+            "'. On a MultiSSL build that means CURL_SSL_BACKEND in the "
+            "environment, or libcurl's own default, is choosing instead - and "
+            "client certificates do not work on Schannel (issue #842).");
+        }
+        return result;
+    }();
+    return selected;
+}
+
 void global_init () {
+    // Before `curl_global_init`, not beside it: `curl_global_sslset` answers
+    // `CURLSSLSET_TOO_LATE` once curl has initialized, and a backend chosen
+    // too late is not chosen at all.
+    pin_tls_backend ();
     curl_global_init (CURL_GLOBAL_ALL);
 }
 

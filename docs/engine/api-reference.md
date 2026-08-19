@@ -686,14 +686,20 @@ backend, and each is stated rather than assumed:
 | Platform | Backend | What the bundle does |
 |----------|---------|----------------------|
 | Linux | OpenSSL (default paths + `CURL_CA_FALLBACK`) | `CURLOPT_CAINFO` **replaces** the default bundle, so the materialized file is the platform's own anchors **concatenated with** the pasted ones. The system bundle is located the way curl locates it: `CURL_CA_BUNDLE` / `SSL_CERT_FILE`, then libcurl's compiled-in `cainfo`, then the standard distribution paths. |
-| macOS | OpenSSL | Same as Linux, not the OS store this table claimed until issue #818: the `curl` port takes its `openssl` feature on everything but Windows, so the anchors are read from `/etc/ssl/cert.pem` and merged into the materialized file. |
-| Windows | OpenSSL (issue #851; Schannel before it) | The anchors live in the certificate store and Windows ships no PEM bundle to merge with, so the materialized file holds the pasted certificates alone and `CURLSSLOPT_NATIVE_CA` - set on **every** Windows handle, pasted CA or not - loads the store beside it. A machine that exports `CURL_CA_BUNDLE` puts a file back in reach and the merge runs there as it does on Linux. |
+| macOS | OpenSSL | Same as Linux, not the OS store this table claimed until issue #818, and the anchors are read from `/etc/ssl/cert.pem` and merged into the materialized file. |
+| Windows | OpenSSL, selected explicitly (issue #851; Schannel before it) | The anchors live in the certificate store and Windows ships no PEM bundle to merge with, so the materialized file holds the pasted certificates alone and `CURLSSLOPT_NATIVE_CA` - set on **every** Windows handle, pasted CA or not - loads the store beside it. A machine that exports `CURL_CA_BUNDLE` puts a file back in reach and the merge runs there as it does on Linux. |
 
 Three things make that table checkable rather than a claim. The backend column
-itself is asserted on each CI platform - both its *name* and that there is only
-one of it, since a MultiSSL build would leave half the transfers on a backend
-the rows do not describe - so it is read off the build rather than out of a port
-file, the mistake that left the macOS row wrong until issue #818.
+itself is asserted on each CI platform - both its *name* and that this process
+**selected** it rather than inheriting whatever libcurl chose - so it is read
+off the build rather than out of a port file, the mistake that left the macOS
+row wrong until issue #818. The selection is not a formality on Windows: the
+`curl` port's `http2` feature depends on `curl[ssl]`, which resolves to Schannel
+there, so that libcurl carries both backends and picks between them by reading
+`CURL_SSL_BACKEND` from the environment. The engine names OpenSSL before curl
+initializes, which is what stops a stray environment variable from moving every
+request onto a backend where client certificates do not work at all. Issue #858
+tracks getting Schannel out of the build entirely.
 `CURLOPT_CAINFO` is the one transport option a backend can refuse outright, so
 the engine checks the return code and logs an error naming the backend if it
 ever does - and the test suite asserts on every CI platform that this build's
