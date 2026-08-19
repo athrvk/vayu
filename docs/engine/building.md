@@ -274,9 +274,9 @@ ctest -V
 ./vayu_tests
 ```
 
-The Linux and macOS **test presets** run the suite multi-process (`ctest -j8`,
-wired once into the hidden `test-base` test preset in
-`engine/CMakePresets.json`); a bare `ctest` or `./vayu_tests` runs serially.
+Every **test preset** runs the suite multi-process (`ctest -j8`, wired once into
+the hidden `test-base` test preset in `engine/CMakePresets.json`, which the
+Windows presets narrow to `-j4`); a bare `ctest` or `./vayu_tests` runs serially.
 Parallelism is safe because the test binary enters a private per-process scratch
 directory before running, so the relative `test_*.db` files fixtures open never
 collide between concurrently scheduled tests (see `engine/tests/main.cpp` and
@@ -295,19 +295,55 @@ runner is noisier than an idle machine, with the wall-clock-budget tests
 guess - and widening a timing budget to afford a bigger number is not on the
 table.
 
-**The Windows presets run serially, on purpose.** At `-j4` the Windows CI leg
-took ~37 min against a ~6 min serial run. The per-test durations say why: they
-split into a fast band (pure-logic suites) and a slow band that is exactly the
-fixtures which open a scratch `Database` - concurrent SQLite file I/O costs more
-there than the concurrency returns. The same `-j4` cut ubuntu from 3-5 min to
-1m15s and macOS from ~4 min to 1m06s, so the job count is per-OS rather than
-one number. Moving the scratch directories between volumes was tried and made no
-difference, so do not re-litigate that part without new measurements.
+**On Windows the database tests never overlap each other.** A plain `-j4` there
+took ~37 min against a ~6 min serial run - the same `-j4` that cut ubuntu from
+3-5 min to 1m15s and macOS from ~4 min to 1m06s. The per-test durations said
+why: a fast band of pure-logic suites, and a slow band that is exactly the
+fixtures which open a scratch `Database`, where concurrent SQLite commits cost
+more than the concurrency returns (the flush barrier `synchronous=FULL` issues
+per commit, and the 25-250ms retry sleeps `os_win.c` answers a sharing violation
+with). Moving the scratch directories between volumes was tried and made no
+difference, and Windows Defender is not a factor - GitHub's hosted Windows
+images ship with real-time monitoring disabled - so do not re-litigate either
+without new measurements.
 
-Because a serial run has nothing to isolate from, the Windows presets also set
-`VAYU_TEST_NO_SCRATCH_ISOLATION`, which skips the scratch directory entirely.
-Isolation is the **default** everywhere else - including a hand-run
-`ctest -j` on Windows, which is still safe.
+So the Windows presets run `-j4` with those tests holding a shared CTest
+`RESOURCE_LOCK`: no two of them run at once, while everything else runs 4-wide
+beside them. The locked suites are listed in `engine/CMakeLists.txt`
+(`vayu_scratch_database_suites`), which discovers the binary twice - once with a
+gtest filter matching them, once with its negation - so the two halves partition
+the suite exactly. Two configure-time guards keep the list honest: a name that
+matches no test fails the configure, and so does a `tests/*_test.cpp` that
+includes `temp_database.hpp` but contributes no locked suite. **The list is a
+performance statement, not a correctness one** - `ctest -j` is safe on any
+platform through the scratch directories alone, so a suite missing from it
+contends rather than breaks.
+
+Measured locally on a 4-core box (Debug, 2070 tests, green in all four runs):
+299.6s serial, 84.8s at `-j4`, 58.6s at `-j8`, and 243.7s at `-j4` with the lock
+forced on - the last being the model Windows runs. That ratio is the honest
+ceiling of this approach: the locked group is 817 of the 2070 tests but **81% of
+the serial wall**, because the route and load fixtures that dominate the suite's
+duration all open a database. The six fixtures the earlier analysis measured on
+Windows (197 tests, 57.2s, 19% of the wall here - within a point of the Windows
+figures, which is what makes this box a usable proxy for the *shape* of the
+suite) are only the visible tip of that group.
+
+**What CI measured on the hybrid model: 5m27s and 4m50s** on two runs of the
+same tree (32249239500 and 32252015024), 2071 tests, 0 failures, 9 skipped. Both
+sit inside the 4m40s-6m38s band the serial legs spanned, so **this is not a
+speedup** - and with a baseline that noisy, two samples could not show one either
+way. What they do establish is that the mechanism works: the same `-j4` that took
+~37 min without the lock now finishes in the time serial used to take, which is
+what the 81% number predicts and the reason to hold the expectation there rather
+than at the ~2.5 min this was first scoped for. Getting a real speedup means
+making the database tests cheaper to run concurrently, which is issue #838; treat
+that as the open work, not this paragraph as a win.
+
+Isolation is the **default** on every platform now, so a hand-run `ctest -j` is
+safe wherever it happens; the Windows presets used to set
+`VAYU_TEST_NO_SCRATCH_ISOLATION` (which skips the scratch directory entirely)
+because a serial run has nothing to isolate from, and no preset sets it today.
 
 **Do not "improve" the job count to `"jobs": 0`.** Only CMake 3.29+ reads 0 as
 "one job per processor"; this project's floor is 3.25, where `ctest -j 0`

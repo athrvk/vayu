@@ -688,15 +688,156 @@ if(VAYU_BUILD_TESTS)
     # way vayu-engine is.
     vayu_embed_windows_manifest(vayu_tests)
 
+    # The suite is discovered in two halves so the tests that open a scratch
+    # `Database` can carry a CTest RESOURCE_LOCK the rest does not (#805
+    # phase 5). CTest never runs two tests holding the same lock at once, so no
+    # two database tests overlap while everything else runs `-j` beside them.
+    #
+    # Only Windows takes the lock. `ctest -j` is *correct* on every platform
+    # already - each test process owns a private scratch directory, see
+    # `tests/temp_database.hpp` - and what differs is the price of concurrent
+    # SQLite commits. On Windows a plain `-j4` measured ~37 min against a ~6 min
+    # serial run (#808), which is the cost this lock removes; the same `-j4`
+    # cuts ubuntu from 3-5 min to 1m15s, so locking the group there would only
+    # slow down a platform that has no such problem.
+    #
+    # The list is a performance statement, not a correctness one. A database
+    # suite missing from it still passes - it just contends - and a suite listed
+    # here that opens no database only gives up its own concurrency. So the
+    # guards below check the two things that can be checked exactly and cheaply
+    # (a name matching no test at all, and a database-using file no name here
+    # represents) rather than parsing C++ for what constructs a `Database`.
+    #
+    # The list was derived by tracing: every suite run alone under `strace` that
+    # opened a `*.db` file, which agreed with a source read everywhere but one
+    # false positive. Re-derive it the same way rather than by eye.
+    set(vayu_scratch_database_suites
+        AuthRefreshTuningTest
+        ClientCertificateDbTest
+        CollectMetrics
+        CollectionsRouteTest
+        ConfigRouteTest
+        CustomCaVerificationTest
+        DatabaseConcurrencyTest
+        DatabaseTest
+        DeleteRunTest
+        ErrorShapeRouteTest
+        ExamplesRouteTest
+        GlobalsRouteTest
+        ImportApplyRouteTest
+        InboxListenerTest
+        InboxStorageTest
+        LoadReplayEventsTest
+        LoadScriptScopesTest
+        LoadStrategyTest
+        MidRunRefreshTest
+        MockIssuerTest
+        MockServerTest
+        MonitorLimitsTest
+        MonitorRunTest
+        MutualTlsTest
+        OAuthAuthorizeTest
+        OAuthClientTest
+        OAuthRouteTest
+        PersistScriptVariablesTest
+        PlanAuthRefreshTest
+        RecordDesignResultTest
+        RelayTest
+        ReorderRouteTest
+        RequestComposerTest
+        RequestsRouteTest
+        ResourceWriteRouteTest
+        ResponseCaptureTest
+        RunShutdownTest
+        RunStopAccountingTest
+        RunsRouteTest
+        ScenarioLoadTest
+        ScenarioPlanTest
+        ScenarioRunnerTest
+        ScratchDatabaseCleanup
+        ScriptRequestNameTest
+        ScriptVariableScopesTest
+        SpecSyncRouteTest
+        SpecsRouteTest
+        SseLimitsTest
+        SseServerShutdownTest
+        StatsRouteTest
+        StreamExecuteTest
+        StreamedSampleRouteTest
+        TransportPolicyDbTest
+        TreeOrderTest
+    )
+
+    # Both guards read the same scan: every test macro in this suite sits at the
+    # start of a line, so which suites exist, and which file declares them, can
+    # be read off without compiling anything.
+    set(vayu_declared_test_suites "")
+    set(vayu_unrepresented_database_files "")
+    foreach(test_file IN LISTS vayu_test_files_on_disk)
+        file(STRINGS "${test_file}" vayu_test_macro_lines REGEX "^TEST(_F|_P)?[ \t]*\\(")
+        set(vayu_file_test_suites "")
+        foreach(macro_line IN LISTS vayu_test_macro_lines)
+            string(REGEX REPLACE "^TEST(_F|_P)?[ \t]*\\([ \t]*([A-Za-z0-9_]+).*$" "\\2"
+                vayu_file_test_suite "${macro_line}")
+            list(APPEND vayu_file_test_suites "${vayu_file_test_suite}")
+        endforeach()
+        list(APPEND vayu_declared_test_suites ${vayu_file_test_suites})
+
+        # Guard two: a test file that opens scratch databases and contributes no
+        # locked suite is a whole file's worth of contention nobody decided on -
+        # the shape a new `*_route_test.cpp` arrives in.
+        file(STRINGS "${test_file}" vayu_temp_database_include REGEX "temp_database\\.hpp")
+        if(vayu_temp_database_include)
+            set(vayu_file_is_represented FALSE)
+            foreach(suite IN LISTS vayu_file_test_suites)
+                if(suite IN_LIST vayu_scratch_database_suites)
+                    set(vayu_file_is_represented TRUE)
+                    break()
+                endif()
+            endforeach()
+            if(NOT vayu_file_is_represented)
+                file(RELATIVE_PATH vayu_relative_test_file
+                    "${CMAKE_CURRENT_SOURCE_DIR}" "${test_file}")
+                list(APPEND vayu_unrepresented_database_files "${vayu_relative_test_file}")
+            endif()
+        endif()
+    endforeach()
+    if(NOT vayu_declared_test_suites)
+        message(FATAL_ERROR
+            "Found no TEST/TEST_F declarations under ${CMAKE_CURRENT_SOURCE_DIR}/tests - "
+            "the scratch-database guards are scanning the wrong place and would "
+            "pass no matter which suite was missing.")
+    endif()
+    # Guard one: a name above that matches no test locks nothing and says so
+    # nowhere - a rename would quietly return that suite to contending.
+    foreach(suite IN LISTS vayu_scratch_database_suites)
+        if(NOT suite IN_LIST vayu_declared_test_suites)
+            message(FATAL_ERROR
+                "vayu_scratch_database_suites names '${suite}', which no test declares. "
+                "It locks nothing: on Windows that suite would run concurrently with "
+                "the other database tests again. Fix the name or drop it.")
+        endif()
+    endforeach()
+    if(vayu_unrepresented_database_files)
+        string(REPLACE ";" "\n  " vayu_unrepresented_database_files
+            "${vayu_unrepresented_database_files}")
+        message(FATAL_ERROR
+            "These test files include temp_database.hpp but contribute no suite to "
+            "vayu_scratch_database_suites, so their database tests would run "
+            "concurrently with every other one on Windows:\n  "
+            "${vayu_unrepresented_database_files}\n"
+            "Add the suites that open a Database to the list in engine/CMakeLists.txt.")
+    endif()
+
     # Discover tests for CTest. A per-test TIMEOUT acts as a safety net so a
     # deadlock (e.g. a thread-pool teardown hang) is reported as a failure
     # instead of blocking the suite indefinitely; healthy tests finish in <10s.
     #
     # DISCOVERY_TIMEOUT bounds something else entirely, and the two are easy to
     # confuse: `PROPERTIES TIMEOUT` is handed to CTest for each discovered test,
-    # while DISCOVERY_TIMEOUT caps the single `--gtest_list_tests` run that
-    # *finds* them at build time. It is not covered by the property above and
-    # defaults to **5 seconds**.
+    # while DISCOVERY_TIMEOUT caps each `--gtest_list_tests` run that *finds*
+    # them at build time (one per call below). It is not covered by the property
+    # above and defaults to **5 seconds**.
     #
     # Five seconds is not enough for the macOS x64 half of the release build.
     # That binary is cross-compiled for x86_64 and runs under Rosetta on the
@@ -721,8 +862,29 @@ if(VAYU_BUILD_TESTS)
     # what we just paid. Set globally rather than per-preset: one number is
     # easier to trust than a platform conditional, and no healthy configuration
     # comes close to it.
+
+    # One filter, used positive and negated, so the two halves partition the
+    # suite exactly however the list changes - no test is discovered twice and
+    # none is lost. Both halves are discovered on every platform (only the
+    # property differs) so a broken partition shows up as a changed test count
+    # everywhere rather than on Windows alone.
+    set(vayu_scratch_database_patterns ${vayu_scratch_database_suites})
+    list(TRANSFORM vayu_scratch_database_patterns APPEND ".*")
+    list(JOIN vayu_scratch_database_patterns ":" vayu_scratch_database_filter)
+
+    set(vayu_scratch_database_properties TIMEOUT 60)
+    if(WIN32)
+        list(APPEND vayu_scratch_database_properties RESOURCE_LOCK vayu_scratch_database)
+    endif()
+
     include(GoogleTest)
     gtest_discover_tests(vayu_tests
+        TEST_FILTER "${vayu_scratch_database_filter}"
+        DISCOVERY_TIMEOUT 150
+        PROPERTIES ${vayu_scratch_database_properties}
+    )
+    gtest_discover_tests(vayu_tests
+        TEST_FILTER "-${vayu_scratch_database_filter}"
         DISCOVERY_TIMEOUT 150
         PROPERTIES TIMEOUT 60
     )
