@@ -15,6 +15,7 @@ import type {
 	ResponseValidation,
 	ScenarioStepEvent,
 	StepOutcome,
+	StepTestTally,
 } from "@/types";
 
 /** Raw camelCase metrics blob as emitted by the engine SSE stream. */
@@ -102,7 +103,26 @@ export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 		...(e.validation && typeof e.validation === "object"
 			? { validation: e.validation as ResponseValidation }
 			: {}),
+		// The assertion tally (issue #724). Narrowed field by field where the
+		// verdict above is passed through, because it is two numbers rather
+		// than a node with its own reader: both must be numbers or the chip
+		// would render `NaN passed`, and a half-read tally is worse than none.
+		...(parseTestTally(e.tests) ?? {}),
 	};
+}
+
+/**
+ * The `tests` node of a `step` frame, as `{ tests }` to spread, or `null`.
+ *
+ * Absent stays absent - a step whose script asserted nothing carries no node,
+ * and inventing `{ passed: 0, failed: 0 }` for it would put "0 tests passed"
+ * on every step of every scriptless run.
+ */
+function parseTestTally(raw: unknown): { tests: StepTestTally } | null {
+	if (typeof raw !== "object" || raw === null) return null;
+	const { passed, failed } = raw as Record<string, unknown>;
+	if (typeof passed !== "number" || typeof failed !== "number") return null;
+	return { tests: { passed, failed } };
 }
 
 /**

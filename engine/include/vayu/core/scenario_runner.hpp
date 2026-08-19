@@ -58,6 +58,24 @@ enum class StepOutcome { Passed, Failed, Skipped, Errored };
 
 [[nodiscard]] const char* to_string (StepOutcome outcome);
 
+/**
+ * @brief How many assertions one step's test script made, and how many held.
+ *
+ * The itemized list rides the stored trace's `scripts` node and nothing else -
+ * it is unbounded in the number of `pm.test` calls a script can make, and the
+ * SSE tick ring is a fixed-size buffer every watcher of the run replays. Two
+ * numbers are constant-size, so a step being watched can say "3 passed, 1
+ * failed" as it streams while the list itself waits for the stored row.
+ *
+ * Counted from the **test script alone**, exactly the assertions
+ * `build_script_result_node` serializes, so the live tally and the stored list
+ * count the same things rather than disagreeing by one script's worth.
+ */
+struct StepTestTally {
+    size_t passed = 0;
+    size_t failed = 0;
+};
+
 /** One step execution, on its way to a `results` row and an SSE event. */
 struct StepRecord {
     size_t iteration  = 0; ///< 0-based, as `pm.info.iteration` reports it.
@@ -88,6 +106,15 @@ struct StepRecord {
      * other step carries a verdict, `checked: false` and a reason included.
      */
     std::optional<ValidationVerdict> validation;
+    /**
+     * What this step's assertions amounted to (issue #724), for the SSE frame.
+     *
+     * Absent - not a pair of zeros - for a step whose test script made no
+     * assertion at all, and for one that never ran a script: "asserted nothing"
+     * and "every assertion held" are different facts, and only the second is a
+     * step that proved something.
+     */
+    std::optional<StepTestTally> tests;
     /// The design-mode trace (`build_result_trace`) plus this step's identity.
     nlohmann::json trace;
 };

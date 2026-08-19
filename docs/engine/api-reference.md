@@ -3749,6 +3749,16 @@ for a run with `data` - `dataRowIndex`, the row that iteration bound. Bodies are
 capped by `maxTraceBodyBytes`; the row count is capped by
 `maxScenarioStoredSteps` as described above.
 
+A step whose scripts said anything additionally carries a **`scripts` node**
+(issue #724) - the same object and the same four keys
+[`POST /execute`](#post-execute) returns and a design send stores, so a step's
+assertions read the same inside a run as they do on a single send. It is the
+only route those results take: a collection run answers `202` long before its
+scripts have run, so nothing about a step is ever returned live. A step whose
+scripts said nothing stores no node at all. The `results.error` summary line
+("3 tests failed - <first name>") is unchanged and stays what the outcome is
+derived from; the node is the list that line summarises.
+
 A step of a collection **bound to an OpenAPI document** additionally carries a
 `validation` node (issue #681) - the same object and the same shape
 [`POST /execute`](#post-execute) returns - saying whether its response matched
@@ -4304,6 +4314,7 @@ event: step
 id: 3
 data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
        "statusCode":200,"latencyMs":42.7,"dataRowIndex":1,
+       "tests":{"passed":2,"failed":0},
        "validation":{"checked":true,"valid":true,"matchedStatus":"200",
                      "matchedContentType":"application/json",
                      "failures":[],"failuresTotal":0}}
@@ -4318,7 +4329,12 @@ data: {"event":"complete","runId":"run_1234567890"}
 and after a reload. `validation` is the step's schema verdict (issue #681) in
 the same shape and on the same terms - absent for a step of an unbound
 collection and for one that sent nothing, and byte-identical to the node its
-stored trace carries, so a watched run and a read-back one agree. A scenario
+stored trace carries, so a watched run and a read-back one agree. `tests` is how
+many of the step's assertions held (issue #724) - two numbers, because the ring
+is fixed-size and a script may make hundreds of them; the list itself rides the
+stored `scripts` node. It counts the **test script's** assertions, exactly the
+ones that node lists, and is absent for a step that asserted none: `0 passed`
+would read as a result. A scenario
 run publishes no `metrics` ticks:
 its work is sequential, so per-tick aggregates would be a rate of one request at
 a time rather than anything about the sequence.

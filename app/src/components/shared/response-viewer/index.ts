@@ -41,6 +41,12 @@ export type { StatusCodeBadgeProps } from "./StatusCodeBadge";
 // receive this one's three-state wording (issue #681).
 export { ValidationChip } from "./ValidationChip";
 export type { ValidationChipProps } from "./ValidationChip";
+// What a step's assertions came to, beside the verdict above and on the same
+// absent-is-not-zero terms (issue #724). Here rather than in the step list
+// because it summarises a *response*, like everything else in this folder, and
+// the live and restored halves of a run must not word it two ways.
+export { TestsChip } from "./TestsChip";
+export type { TestsChipProps } from "./TestsChip";
 
 // Pieces shared by the two response viewers. They are two different shells -
 // seven tabs from live context, three from a stored run - so these are the

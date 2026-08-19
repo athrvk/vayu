@@ -1389,6 +1389,125 @@ TEST (ScenarioSummaryPayload, SchemaVerdictsAreTheirOwnSectionAndAbsentWhenNothi
 
 
 // ============================================================================
+// Per-step script results (issue #724)
+// ============================================================================
+//
+// The runner always ran both scripts and always knew what every assertion came
+// to - it spent that on one summary error line and dropped the rest, so a
+// step's detail could not show the list the same request's single Send shows.
+// Both halves of the delivery are pinned here: the itemized list on the stored
+// row, which is the only route a collection run's results ever take, and the
+// constant-size tally on the frame a live watcher reads.
+
+TEST_F (ScenarioRunnerTest, EveryStepStoresTheAssertionsItsTestScriptMade) {
+    seed_collection ("col_1");
+    // One step whose assertions all hold, one with a failure among them: a
+    // passing step showing no evidence its assertions ran at all is half of
+    // what this fixes, and it is the half a failure-only test would miss.
+    seed_request ("req_pass", 0, "/ok", "", R"(
+        pm.test("status is 200", function () {
+            pm.expect(pm.response.code).to.equal(200);
+        });
+        console.log("asserted the status");
+    )");
+    seed_request ("req_mixed", 1, "/ok", "", R"(
+        pm.test("status is 200", function () {
+            pm.expect(pm.response.code).to.equal(200);
+        });
+        pm.test("body names a pet", function () {
+            pm.expect(pm.response.json().name).to.equal("Rex");
+        });
+    )");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+
+    const auto passed_trace = json::parse (rows[0].trace_data);
+    ASSERT_TRUE (passed_trace.contains ("scripts")) << rows[0].trace_data;
+    const auto& passed_tests = passed_trace["scripts"]["testResults"];
+    ASSERT_EQ (passed_tests.size (), 1u) << passed_trace["scripts"].dump ();
+    EXPECT_EQ (passed_tests[0]["name"].get<std::string> (), "status is 200");
+    EXPECT_TRUE (passed_tests[0]["passed"].get<bool> ());
+    // The whole node, not the assertions alone - it is the one `restore-
+    // response.ts` reads, and a step that logged is a step whose console has
+    // something to show.
+    ASSERT_TRUE (passed_trace["scripts"].contains ("consoleLogs"));
+    EXPECT_EQ (
+    passed_trace["scripts"]["consoleLogs"][0]["source"].get<std::string> (), "test");
+
+    const auto mixed_trace = json::parse (rows[1].trace_data);
+    ASSERT_TRUE (mixed_trace.contains ("scripts")) << rows[1].trace_data;
+    const auto& mixed_tests = mixed_trace["scripts"]["testResults"];
+    ASSERT_EQ (mixed_tests.size (), 2u) << mixed_trace["scripts"].dump ();
+    EXPECT_TRUE (mixed_tests[0]["passed"].get<bool> ());
+    EXPECT_FALSE (mixed_tests[1]["passed"].get<bool> ());
+    EXPECT_EQ (mixed_tests[1]["name"].get<std::string> (), "body names a pet");
+    EXPECT_FALSE (mixed_tests[1]["error"].get<std::string> ().empty ());
+    // The summary line is unchanged and still names the first failure - the
+    // list is what it was always a summary *of*, not a replacement for it.
+    EXPECT_EQ (mixed_trace["outcome"].get<std::string> (), "failed");
+    EXPECT_NE (rows[1].error.find ("body names a pet"), std::string::npos)
+    << rows[1].error;
+}
+
+TEST_F (ScenarioRunnerTest, AStepWhoseScriptsSaidNothingStoresNoNodeAtAll) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    // An empty node would put a Tests pane's worth of nothing on every step of
+    // every scriptless run, which is the state the pane reads as "no results".
+    EXPECT_FALSE (json::parse (rows[0].trace_data).contains ("scripts"))
+    << rows[0].trace_data;
+}
+
+TEST_F (ScenarioRunnerTest, StepFramesCarryTheTallyOnTheSameTermsAsTheStoredList) {
+    seed_collection ("col_1");
+    seed_request ("req_tested", 0, "/ok", "", R"(
+        pm.test("status is 200", function () {
+            pm.expect(pm.response.code).to.equal(200);
+        });
+        pm.test("body names a pet", function () {
+            pm.expect(pm.response.json().name).to.equal("Rex");
+        });
+    )");
+    seed_request ("req_bare", 1, "/ok");
+
+    const auto run_id  = start (/*iterations=*/1);
+    const auto context = manager_.get_run (run_id);
+    ASSERT_TRUE (context != nullptr);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto batch = context->ticks_since (0);
+    ASSERT_EQ (batch.payloads.size (), 2u);
+    const auto frame_of = [] (const std::string& payload) {
+        const auto data_at = payload.find ("data: ");
+        EXPECT_NE (data_at, std::string::npos) << payload;
+        return json::parse (payload.substr (data_at + 6));
+    };
+
+    // Two numbers, not the list: a step is free to make hundreds of assertions
+    // and the tick ring is the fixed-size buffer every watcher replays from.
+    const auto tested = frame_of (batch.payloads[0]);
+    ASSERT_TRUE (tested.contains ("tests")) << batch.payloads[0];
+    EXPECT_EQ (tested["tests"]["passed"].get<size_t> (), 1u);
+    EXPECT_EQ (tested["tests"]["failed"].get<size_t> (), 1u);
+    EXPECT_FALSE (tested["tests"].contains ("testResults")) << tested.dump ();
+
+    // Absent here is absent there: a step that asserted nothing sends no node,
+    // so a live view cannot show a `0/0` the stored row will not back up.
+    EXPECT_FALSE (frame_of (batch.payloads[1]).contains ("tests")) << batch.payloads[1];
+}
+
+
+// ============================================================================
 // Data-driven iterations - pm.iterationData (issue #356, phase 5)
 // ============================================================================
 //
