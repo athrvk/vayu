@@ -14,16 +14,20 @@
  * only reason it never mattered. Rendering it changes that, so four decisions
  * are load-bearing rather than stylistic:
  *
- * **1. No navigating anchors, ever.** `electron/main.ts` sets
- * `contextIsolation: true` and `nodeIntegration: false`, but the main window has
- * no `will-navigate` handler, no `setWindowOpenHandler` and no CSP - the only
- * `setWindowOpenHandler` in the tree is in `oauth.ts`. A clicked `<a href>`
- * would therefore navigate the whole renderer, and the preload re-runs on the
- * new origin, handing `window.electronAPI` to it. So the `a` renderer below
- * emits a `<button>`: no `href` reaches the DOM, and the click goes to the
- * scheme-validated `openExternalUrl` path, which refuses anything that is not
- * http(s). That is a single layer by design, and stays one until #822 puts a
- * `will-navigate` refusal underneath it.
+ * **1. No navigating anchors, ever.** A clicked `<a href>` navigates the whole
+ * renderer, and the preload re-runs on the new origin, handing
+ * `window.electronAPI` to it. So the `a` renderer below emits a `<button>`: no
+ * `href` reaches the DOM, and the click goes to the scheme-validated
+ * `openExternalUrl` path, which refuses anything that is not http(s).
+ *
+ * This is no longer the only layer. #822 put the refusal underneath it that this
+ * note used to say was missing: beside `contextIsolation: true` and
+ * `nodeIntegration: false`, `electron/main.ts` now installs
+ * `electron/window-navigation.ts` on the main window, which refuses a navigation
+ * that is not the app's own document and denies `window.open`. There is still no
+ * CSP. Keep this override anyway - a refused navigation is a link that silently
+ * does nothing, where a button reaches the user's browser, which is what they
+ * meant.
  *
  * **2. `react-markdown`, not `marked`.** It builds React elements from an AST
  * rather than an HTML string, so there is no `dangerouslySetInnerHTML` and no
