@@ -36,12 +36,13 @@
  * one copy too many.
  *
  * **The format is a field, not a guess** (issue #833). A PEM certificate keeps
- * its key in a second file; a PKCS#12 bundle carries both, and is the only
- * shape a Windows build can present at all. So the form asks which one, drops
- * the key picker for a bundle - a card that kept demanding a key file the
- * format does not have is a dead end no engine change fixes - and every row
- * prints what it will present, because the engine may have read the format off
- * the file and the user is the one who can correct it.
+ * its key in a second file; a PKCS#12 bundle carries both. The engine has to be
+ * told which, or libcurl hands a bundle to its PEM parser - and until #851 the
+ * bundle was the only shape a Windows build could present at all. So the form
+ * asks which one, drops the key picker for a bundle - a card that kept
+ * demanding a key file the format does not have is a dead end no engine change
+ * fixes - and every row prints what it will present, because the engine may
+ * have read the format off the file and the user is the one who can correct it.
  */
 
 import { useRef, useState } from "react";
@@ -429,8 +430,8 @@ export function ClientCertificatesCard() {
 								)}
 							</ToggleGroup>
 							<p className="text-xs text-muted-foreground">
-								A PKCS#12 bundle holds the certificate and its key in one file.
-								Windows can only present that form.
+								A PKCS#12 bundle holds the certificate and its key in one file. Both
+								forms work on every platform.
 							</p>
 						</div>
 

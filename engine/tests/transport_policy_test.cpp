@@ -487,11 +487,13 @@ using vayu::tests::tls_backend_name;
 /// rather than adding to one the OS keeps - or nullopt for a backend no
 /// statement in this repo covers.
 ///
-/// The pinned vcpkg baseline's `curl` port offers three TLS features
-/// (`openssl`, `sspi`, `wolfssl`) and nothing else, so the set below is the
-/// set this repo can be built against. A backend outside it is a build nobody
-/// here has reasoned about, and `IsTheBackendEveryTrustStatementHereAssumes`
-/// says so rather than guessing which half it belongs to.
+/// Since #851 `engine/vcpkg.json` pins the `openssl` feature with
+/// `default-features: false`, so every leg this repo ships is the `true` half
+/// and `IsTheBackendEveryTrustStatementHereAssumes` fails a build that is not.
+/// The other rows stay because they are what makes that failure legible: the
+/// classifier still has to answer for a backend somebody reaches by editing
+/// the manifest, and answering `nullopt` for an unclassified one is how a
+/// build nobody here has reasoned about gets named rather than guessed at.
 std::optional<bool> verifies_through_a_bundle_file (std::string_view backend) {
     for (const std::string_view family : { "OpenSSL", "LibreSSL", "BoringSSL", "quictls" }) {
         if (backend.rfind (family, 0) == 0) {
@@ -502,6 +504,19 @@ std::optional<bool> verifies_through_a_bundle_file (std::string_view backend) {
         return false;
     }
     return std::nullopt;
+}
+
+/// The backend list a failure message prints, so a MultiSSL build names the
+/// backend that came back rather than only its count.
+std::string join_names (const std::vector<std::string>& names) {
+    std::string joined;
+    for (const std::string& name : names) {
+        if (!joined.empty ()) {
+            joined += ", ";
+        }
+        joined += name;
+    }
+    return joined;
 }
 
 TEST (TlsBackend, ClassifiesTheBackendsThisRepoCanBeBuiltAgainst) {
@@ -522,12 +537,13 @@ TEST (TlsBackend, ClassifiesTheBackendsThisRepoCanBeBuiltAgainst) {
 TEST (TlsBackend, IsTheBackendEveryTrustStatementHereAssumes) {
     // The fact #818 exists to establish, read off the build instead of
     // reasoned out of a port file. Six statements in this repo used to
-    // describe a three-way spread with macOS on Apple SecTrust; the baseline's
-    // `curl` port maps its default `ssl` feature to `openssl` on
-    // `uwp | !windows` and to `sspi` only on Windows, which makes the spread
-    // two-way. A port file is not a build, so the corrected statements are
-    // pinned here and checked on each CI leg - the whole defect #812 and this
-    // issue share is a claim confident enough that no reader doubts it.
+    // describe a three-way spread with macOS on Apple SecTrust; #818 measured
+    // it as two-way, and #851 closed it to one - `engine/vcpkg.json` pins
+    // `openssl` with `default-features: false`, so every leg verifies with the
+    // same backend and mTLS works on all three. A port file is not a build,
+    // which is why that is asserted here on each CI leg rather than trusted:
+    // the whole defect #812 and #818 share is a claim confident enough that no
+    // reader doubts it.
     const std::string backend = tls_backend_name ();
     ASSERT_FALSE (backend.empty ())
     << "curl_version_info() names no TLS backend, so nothing this repo says "
@@ -540,17 +556,35 @@ TEST (TlsBackend, IsTheBackendEveryTrustStatementHereAssumes) {
        "follows and say so, rather than leaving the docs describing a build "
        "nobody is running";
 
-#ifdef _WIN32
-    EXPECT_FALSE (*bundle_file_backend)
-    << "Windows is documented as the one leg whose anchors live in an OS store, "
-       "but this build verifies with '"
-    << backend << "'";
-#else
     EXPECT_TRUE (*bundle_file_backend)
-    << "every non-Windows leg is documented as verifying through the file "
-       "CURLOPT_CAINFO names, but this build verifies with '"
+    << "every leg is documented as verifying through the file CURLOPT_CAINFO "
+       "names, but this build verifies with '"
     << backend << "'";
-#endif
+    EXPECT_EQ (backend.rfind ("OpenSSL", 0), 0u)
+    << "the trust, revocation and client-identity statements in this repo are "
+       "OpenSSL's since #851, but this build verifies with '"
+    << backend << "'";
+
+    // And *only* that one. Dropping `default-features` from the curl entry
+    // brings the port's `ssl` feature back, which on Windows adds Schannel
+    // beside OpenSSL rather than replacing it - a MultiSSL build, where
+    // `ssl_version` still opens with "OpenSSL" and the backend a transfer
+    // actually uses is whichever libcurl picked. Every statement above would
+    // read as green while half the requests went through a backend #851
+    // removed on purpose, so the count is asserted rather than the name alone.
+    const curl_ssl_backend** available = nullptr;
+    curl_global_sslset (CURLSSLBACKEND_NONE, nullptr, &available);
+    ASSERT_NE (available, nullptr)
+    << "libcurl enumerates no TLS backend at all, so nothing here is checked";
+    std::vector<std::string> compiled_in;
+    for (int i = 0; available[i] != nullptr; ++i) {
+        compiled_in.emplace_back (available[i]->name != nullptr ? available[i]->name : "unnamed");
+    }
+    EXPECT_EQ (compiled_in.size (), 1u)
+    << "this is a MultiSSL build carrying " << compiled_in.size ()
+    << " backends (" << join_names (compiled_in)
+    << ") - #851 pins exactly one, so the curl entry in engine/vcpkg.json has "
+       "lost its `default-features: false`";
 }
 
 TEST (TlsBackend, FindsTheSystemAnchorsTheMergeExtends) {
@@ -569,30 +603,65 @@ TEST (TlsBackend, FindsTheSystemAnchorsTheMergeExtends) {
     ASSERT_FALSE (backend.empty ());
     const std::optional<bool> bundle_file_backend = verifies_through_a_bundle_file (backend);
     ASSERT_TRUE (bundle_file_backend.has_value ()) << backend;
+    ASSERT_TRUE (*bundle_file_backend)
+    << "TLS backend '" << backend << "' does not verify through a bundle file";
 
-    if (!*bundle_file_backend) {
-        // Narrow and loud, the way the revocation skip in
-        // `tls_verification_test.cpp` is: an OS-store backend has no file to
-        // merge with, so there is nothing here to be right or wrong about.
-        GTEST_SKIP () << "TLS backend '" << backend
-                      << "' verifies through an OS store, which is not a file to merge";
+#ifdef _WIN32
+    // The skip that stood here read "this backend verifies through an OS
+    // store, which is not a file to merge". After #851 Windows is an OpenSSL
+    // build like the others and that sentence is false - but the *conclusion*
+    // survives for a different, newly true reason, so it is asserted rather
+    // than carried over: Windows keeps its anchors in the certificate store
+    // and ships no PEM bundle for `system_ca_bundle_path()` to find, so there
+    // is still nothing to merge and `materialize_ca_bundle` writes the user's
+    // paste alone.
+    //
+    // What keeps that additive on this leg is `CURLSSLOPT_NATIVE_CA`, which
+    // `apply_transport_policy` sets unconditionally here. So the file half has
+    // no claim to make and the flag half is what must hold: a build that
+    // refuses the option would leave a Windows user trusting only what they
+    // pasted, and trusting *nothing* before they pasted anything. That is the
+    // same shape of failure this test was written for, so it is the one
+    // checked, and `NativeStoreVerificationTest` covers it on a wire.
+    //
+    // A machine that exports `CURL_CA_BUNDLE` does put a file in reach, and
+    // then the merge runs here exactly as it does elsewhere - so that is
+    // asserted where it applies rather than assumed away.
+    CURL* curl = curl_easy_init ();
+    ASSERT_NE (curl, nullptr);
+    EXPECT_EQ (curl_easy_setopt (curl, CURLOPT_SSL_OPTIONS,
+               static_cast<long> (CURLSSLOPT_NATIVE_CA)),
+    CURLE_OK)
+    << "TLS backend '" << backend
+    << "' refuses CURLSSLOPT_NATIVE_CA, which is the only thing loading the "
+       "Windows certificate store on this build - so this leg trusts nothing "
+       "until a user pastes a CA, and only that CA afterwards";
+    curl_easy_cleanup (curl);
+
+    if (const std::string anchors = system_ca_bundle_pem (); !anchors.empty ()) {
+        EXPECT_NE (anchors.find ("-----BEGIN CERTIFICATE-----"), std::string::npos)
+        << "a system bundle was found on Windows but holds no certificate, so "
+           "the merge would prepend bytes that anchor nothing";
     }
-
+#else
     EXPECT_FALSE (system_ca_bundle_pem ().empty ())
     << "TLS backend '" << backend
     << "' verifies against the file CURLOPT_CAINFO names, but no system bundle "
        "was found - so pasting a CA would replace the platform's anchors "
        "instead of extending them";
+#endif
 }
 
 TEST (TlsBackend, AcceptsACustomCaBundleOnThisPlatform) {
     // The per-platform claim, checked on the platform rather than reasoned
     // about: `CURLOPT_CAINFO` is the one transport option a TLS backend can
-    // refuse outright (`CURLE_NOT_BUILT_IN`), and the CI legs do not all build
-    // against the same backend - OpenSSL on Linux and macOS, Schannel on
-    // Windows. A refusal here means the docs' additive-trust claim is false for
-    // this build, which is a security claim, so it fails the suite rather than
-    // being discovered by a user whose requests all stop verifying.
+    // refuse outright (`CURLE_NOT_BUILT_IN`). Since #851 the CI legs do build
+    // against the same backend, which is a reason to keep this and not to drop
+    // it - the claim is now that a *pin* holds on three platforms, and a leg
+    // whose port resolved elsewhere is exactly what would refuse this option.
+    // A refusal means the docs' additive-trust claim is false for this build,
+    // which is a security claim, so it fails the suite rather than being
+    // discovered by a user whose requests all stop verifying.
     CURL* curl = curl_easy_init ();
     ASSERT_NE (curl, nullptr);
     const CURLcode result =

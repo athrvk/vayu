@@ -31,24 +31,23 @@
  *
  * | Backend | This build | A client identity may arrive as |
  * |---|---|---|
- * | OpenSSL (Linux, macOS) | yes | a PEM certificate + PEM key, or PKCS#12 |
- * | Schannel (Windows) | yes | PKCS#12 (or a certificate-store reference) |
+ * | OpenSSL (Linux, macOS, Windows) | yes | a PEM certificate + PEM key, or PKCS#12 |
+ * | Schannel | no, since #851 | PKCS#12 (or a certificate-store reference) |
  *
  * That set comes from `client_identity_formats()`, so no leg asserts a shape
  * its backend cannot load. A backend nothing here classifies presents an empty
  * set, which `ThisBuildCanPresentAClientIdentityAtAll` fails on rather than
  * letting the suite quietly instantiate nothing.
  *
- * **The Schannel leg still skips these cases, for a different reason than
- * before #833** (issue #842). It is no longer "the engine can only write a PEM
- * pair" - the engine names the format now, and that is asserted on Windows by
- * `ClientCertificateBackend` and the registry suites. It is that *libcurl*
- * cannot complete a client-certificate handshake there: curl 8.21.0's own
- * `docs/KNOWN_BUGS.md` carries two entries for it, and every case below was
- * measured failing at the second `InitializeSecurityContext` with both a
- * legacy-PBE and a PBES2 bundle. The gate is `client_auth_defect()`, which is
- * deliberately separate from the format matrix so that a fixed libcurl deletes
- * one line and this suite runs whole on Windows.
+ * **Every leg runs every case now** (#851). Windows used to skip the wire half
+ * through `client_auth_defect()`: curl 8.21's Schannel client-certificate path
+ * imports the bundle with `PKCS12_NO_PERSIST_KEY` and cannot then use the key,
+ * which curl's own `KNOWN_BUGS` documents (curl 17626, 3145) and which measured
+ * here as a failure at the second `InitializeSecurityContext` with a legacy-PBE
+ * and a PBES2 bundle alike (#842). #851 routes around it by building Windows
+ * against OpenSSL, so the defect is out of the build rather than skipped around
+ * and both formats run on all three legs. A return to Schannel would bring the
+ * skip back with it - closed #842 is the record of what it cost.
  *
  * A certificate-store reference is Schannel's other shape and is out of scope
  * (#833): the registry stores file paths, and a store expression is not a file.
@@ -195,14 +194,6 @@ Response send_through (const TransportPolicy& transport, const std::string& url)
 class MutualTlsTest : public ::testing::TestWithParam<ClientIdentityFormat> {
     protected:
     void SetUp () override {
-        // Not "this backend takes no such file" - it does, and the row that
-        // names it is asserted on every leg. This is libcurl's own defect on
-        // the Schannel client-cert path (#842), so the *handshake* is what
-        // cannot run here, and the day upstream fixes it this skip goes and the
-        // instantiation below runs the p12 half unchanged.
-        if (const std::string why = vayu::tests::client_auth_defect (); !why.empty ()) {
-            GTEST_SKIP () << why;
-        }
         vayu::tests::remove_database_files (path_);
         db_ = std::make_unique<vayu::db::Database> (path_);
         db_->seed_default_config ();
@@ -318,16 +309,6 @@ TEST (MutualTlsBackend, ClassifiesTheBackendsThisRepoCanBeBuiltAgainst) {
     // reason the format is stored - assert the absence, not just the presence.
     EXPECT_TRUE (vayu::tests::client_identity_formats ("GnuTLS/3.8.4").empty ());
     EXPECT_TRUE (vayu::tests::client_identity_formats ("").empty ());
-
-    // The two questions stay apart (#842): which formats a backend reads is a
-    // fact about the backend, whether it can finish a client-auth handshake is
-    // a fact about the libcurl we pin. Schannel answers "PKCS#12" to the first
-    // and "not today" to the second, and a reader who conflated them would
-    // delete the wrong thing when upstream lands a fix.
-    EXPECT_TRUE (vayu::tests::client_auth_defect ("OpenSSL/3.6.3").empty ());
-    EXPECT_FALSE (vayu::tests::client_auth_defect ("Schannel").empty ());
-    EXPECT_NE (vayu::tests::client_auth_defect ("Schannel").find ("#842"), std::string::npos)
-    << "the skip must name where its cause is tracked, or it outlives it";
 }
 
 TEST (MutualTlsBackend, ThisBuildCanPresentAClientIdentityAtAll) {

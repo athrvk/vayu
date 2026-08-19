@@ -31,14 +31,16 @@
  * the exchange.
  *
  * **The CA publishes a CRL, and the leaf says where to find it** (#819). A
- * backend that revocation-checks the chain - curl's Schannel path passes
+ * backend that revocation-checks the chain - curl's Schannel path passed
  * `CERT_CHAIN_REVOCATION_CHECK_CHAIN` - refuses a leaf whose revocation status
  * it cannot determine, with the anchor loaded and the signature good. That is
  * not a verdict about trust, and it made the *positive* half of
  * `tls_verification_test.cpp` unhostable on that backend. So the CA signs an
  * empty CRL, a plain-HTTP listener serves it, and the leaf carries a
- * distribution point naming that listener. The other backends never ask, so
- * nothing about them changes.
+ * distribution point naming that listener. No backend in the build asks any
+ * more (#851 made every leg OpenSSL, which does not revocation-check unless
+ * told to), so this is now insurance rather than a fix - kept because it costs
+ * one listener and is what makes a backend change survivable.
  */
 
 #include <httplib.h>
@@ -218,9 +220,10 @@ struct CertificateAndKey {
      * @brief The certificate and its key in one DER-encoded PKCS#12 bundle,
      *        protected by @p passphrase - empty for a bundle with none.
      *
-     * The shape Schannel takes a client identity in, and the reason a Windows
-     * build could present nothing a user registered before #833. Written as one
-     * file by the caller, where the PEM pair needs two.
+     * One of the two shapes a user's client identity arrives in, and the only
+     * one Schannel took - the reason a Windows build could present nothing a
+     * user registered before #833, back when that was the Windows backend.
+     * Written as one file by the caller, where the PEM pair needs two.
      *
      * **OpenSSL's own defaults, deliberately** - AES-256-CBC under PBES2 with a
      * SHA-256 MAC, which is what `openssl pkcs12 -export` writes today and so
