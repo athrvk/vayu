@@ -29,6 +29,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -281,16 +282,22 @@ class Converter {
 
     nlohmann::ordered_json convert_map (ryml::ConstNodeRef node, size_t depth) {
         nlohmann::ordered_json out = nlohmann::ordered_json::object ();
+        /// Keys this mapping got from a `<<`, which an explicit one may still
+        /// override - the two kinds of "already there" mean opposite things.
+        std::unordered_set<std::string> merged_keys;
         for (ryml::ConstNodeRef child : node.children ()) {
             const std::string key = convert_key (child);
             if (key == "<<") {
-                merge_into (out, child, depth);
+                merge_into (out, merged_keys, child, depth);
                 continue;
             }
-            if (out.contains (key)) {
+            if (out.contains (key) && merged_keys.erase (key) == 0) {
                 // js-yaml refuses this too. A document that declares one key
                 // twice declares nothing definite, and choosing a winner here
-                // would choose a different one than the importer did.
+                // would choose a different one than the importer did. A key the
+                // *merge* put there is not that: overriding a default is what
+                // writing the key next to `<<` means, whichever side of it the
+                // key sits on.
                 throw ReadFailure ("duplicated mapping key \"" + key + "\"");
             }
             out[key] = convert_value (child, depth + 1);
@@ -304,10 +311,13 @@ class Converter {
      * earlier one wins. Both are what "these are the defaults" means, and
      * getting either backwards would silently rewrite an operation.
      */
-    void merge_into (nlohmann::ordered_json& out, ryml::ConstNodeRef child, size_t depth) {
+    void merge_into (nlohmann::ordered_json& out,
+    std::unordered_set<std::string>& merged_keys,
+    ryml::ConstNodeRef child,
+    size_t depth) {
         const nlohmann::ordered_json merged = convert_value (child, depth + 1);
         if (merged.is_object ()) {
-            merge_object (out, merged);
+            merge_object (out, merged_keys, merged);
             return;
         }
         if (merged.is_array ()) {
@@ -315,17 +325,20 @@ class Converter {
                 if (!source.is_object ()) {
                     throw ReadFailure ("a merge key must name a mapping");
                 }
-                merge_object (out, source);
+                merge_object (out, merged_keys, source);
             }
             return;
         }
         throw ReadFailure ("a merge key must name a mapping");
     }
 
-    static void merge_object (nlohmann::ordered_json& out, const nlohmann::ordered_json& source) {
+    static void merge_object (nlohmann::ordered_json& out,
+    std::unordered_set<std::string>& merged_keys,
+    const nlohmann::ordered_json& source) {
         for (auto entry = source.begin (); entry != source.end (); ++entry) {
             if (!out.contains (entry.key ())) {
                 out[entry.key ()] = entry.value ();
+                merged_keys.insert (entry.key ());
             }
         }
     }

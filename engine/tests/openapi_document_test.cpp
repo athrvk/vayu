@@ -166,6 +166,15 @@ TEST (OpenApiDocumentRead, ExpandsAMergeKeyWithTheExplicitKeyWinning) {
     EXPECT_EQ (document["x"]["c"], 3);
 }
 
+TEST (OpenApiDocumentRead, AnExplicitKeyWrittenAfterAMergeStillWins) {
+    // The same rule as the case above, from the other side - and the one that is
+    // easy to get wrong twice over: written after the `<<`, the key is neither a
+    // duplicate to refuse nor a value to leave at the merged default. js-yaml
+    // reads this document as `{a: 5}`.
+    const auto document = read_ok ("base: &b {a: 1}\nx:\n  <<: *b\n  a: 5\n");
+    EXPECT_EQ (document["x"]["a"], 5);
+}
+
 TEST (OpenApiDocumentRead, MergesASequenceOfSourcesEarliestFirst) {
     const auto document = read_ok ("b1: &b1 {a: 1}\nb2: &b2 {a: 2, z: 9}\nx:\n  <<: [*b1, *b2]\n");
     EXPECT_EQ (document["x"]["a"], 1);
