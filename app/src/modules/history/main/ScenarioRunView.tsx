@@ -33,17 +33,24 @@
  * arrive through `useGrowingWindow`, the same growing list the response pane's
  * console output uses, rather than a virtualiser this repo would then have to
  * maintain a scroll map for.
+ *
+ * **Two controls, one predicate** (issue #832). The chips narrow by outcome and
+ * the search box narrows by step name, and `filterSteps` applies both at once -
+ * "the failed executions of `POST /checkout`" is the question neither answers
+ * alone, since a run's failures are spread across a dozen different steps and a
+ * name is repeated once per iteration. One predicate also means one empty
+ * state, which names whichever combination emptied the list.
  */
 
 import { useMemo, useState } from "react";
-import { ListOrdered, Loader2 } from "lucide-react";
+import { ListOrdered, Loader2, Search } from "lucide-react";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { useRunReportQuery } from "@/queries";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { apiService } from "@/services/api";
 import { useScenarioRunStore, useToastStore } from "@/stores";
-import { Badge } from "@/components/ui";
+import { Badge, Input } from "@/components/ui";
 import {
 	ContractCoverage,
 	EmptyState,
@@ -56,6 +63,8 @@ import { cn } from "@/lib/utils";
 import ScenarioStepCard from "./components/ScenarioStepCard";
 import {
 	countOutcomes,
+	emptyStepListReason,
+	filterSteps,
 	outcomeCountsFromReport,
 	stepKey,
 	stepRowsFromReport,
@@ -189,10 +198,35 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	 * remembered one would hide steps from the next reader of it.
 	 */
 	const [outcomeFilter, setOutcomeFilter] = useState<StepOutcome | null>(null);
+
+	/*
+	 * And which step, by name (issue #832).
+	 *
+	 * The outcome chips cannot answer "show me every execution of
+	 * `POST /checkout`" - a 5,000-step run of a 40-request collection is 40
+	 * names repeated 125 times, and the failures a chip narrows to are spread
+	 * across a dozen different steps. Held beside the chip and on the same
+	 * terms: this is a way of looking at the tab, and a remembered one would
+	 * hide steps from whoever opens it next.
+	 */
+	const [query, setQuery] = useState("");
 	const shownSteps = useMemo(
-		() => (outcomeFilter === null ? steps : steps.filter((s) => s.outcome === outcomeFilter)),
-		[steps, outcomeFilter]
+		() => filterSteps(steps, { outcome: outcomeFilter, query }),
+		[steps, outcomeFilter, query]
 	);
+
+	/*
+	 * Both controls narrow one list, so one empty state answers for both and
+	 * names whichever combination emptied it - they are cleared in different
+	 * places, and a reader told "no failed steps" over a list their search
+	 * emptied clears the wrong one. `null` while rows remain, and for a run
+	 * that recorded nothing at all: that is the run's own emptiness, answered
+	 * below by its status.
+	 */
+	const emptyReason =
+		shownSteps.length === 0
+			? emptyStepListReason({ outcome: outcomeFilter, query }, thinned)
+			: null;
 
 	/*
 	 * The rows arrive as the list is scrolled - see the header note. Nothing is
@@ -222,6 +256,28 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 						{scenario.stepsExecuted === 1 ? "" : "s"}
 					</span>
 				)}
+
+				{/* Beside the chips rather than above the list (issue #832): the
+				    two are one predicate, and a control that narrows the same
+				    list from somewhere else reads as narrowing something else.
+				    Full width when the bar wraps, so the field does not end up
+				    a stub on a narrow tab. The placeholder names the field it
+				    matches, because "search" over rows carrying a name, a URL
+				    and a status code otherwise has to be guessed at. */}
+				<div className="relative w-full sm:w-44">
+					<Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+					<Input
+						value={query}
+						onChange={(e) => setQuery(e.target.value)}
+						placeholder="Search step names"
+						aria-label="Search steps by name"
+						// `md:text-xs` as well as `text-xs`: the Input primitive
+						// carries `md:text-sm`, and tailwind-merge keeps a
+						// responsive variant in its own group - so an unqualified
+						// `text-xs` loses to it above 768px.
+						className="h-7 pl-7 text-xs md:text-xs"
+					/>
+				</div>
 
 				{/* All four, always, including the zeros. A summary that hides the
 				    outcomes nobody hit reads differently run to run, and the point
@@ -341,23 +397,21 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 							description="This run stored no step results."
 						/>
 					)
-				) : outcomeFilter !== null && shownSteps.length === 0 ? (
+				) : emptyReason ? (
 					/*
-					 * Filtered to an outcome that no *stored* row has. Not the same
-					 * as "no such steps": thinning keeps every non-passing row and
-					 * drops passes, so a 6,000-step run can report 5,010 passed and
-					 * hold none of them. The chip's number is the run's, this list
-					 * is the store's, and saying which is which is the difference
-					 * between a disclosure and a contradiction.
+					 * Narrowed to nothing by a control, which is not the same as
+					 * "no such steps" in either direction: thinning keeps every
+					 * non-passing row and drops passes, so a 6,000-step run can
+					 * report 5,010 passed and hold none of them - the chip's
+					 * number is the run's and this list is the store's - and a
+					 * search matches the names of the rows that were kept. Saying
+					 * which control is responsible is the difference between a
+					 * disclosure and a contradiction.
 					 */
 					<EmptyState
 						icon={ListOrdered}
-						title={`No ${outcomeFilter} steps in the stored rows`}
-						description={
-							thinned
-								? "This run's step store filled and dropped successes - the chip counts the whole run, this list holds what was kept."
-								: "The chip above counts the whole run; these rows are what it stored."
-						}
+						title={emptyReason.title}
+						description={emptyReason.description}
 					/>
 				) : (
 					<>

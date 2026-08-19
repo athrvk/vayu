@@ -19,6 +19,8 @@ import { describe, it, expect } from "vitest";
 import {
 	appendStepEvent,
 	countOutcomes,
+	emptyStepListReason,
+	filterSteps,
 	outcomeCountsFromReport,
 	stepKey,
 	stepRowsFromReport,
@@ -467,5 +469,104 @@ describe("tallyTests", () => {
 		// result. A run stored before the list existed reads the same way.
 		expect(tallyTests([])).toBeUndefined();
 		expect(tallyTests(undefined)).toBeUndefined();
+	});
+});
+
+describe("filterSteps", () => {
+	function row(name: string, outcome: StepOutcome, stepIndex: number): ScenarioStepRow {
+		return { iteration: 0, stepIndex, name, outcome, statusCode: 200, latencyMs: 1 };
+	}
+
+	const steps: ScenarioStepRow[] = [
+		row("POST /checkout", "failed", 0),
+		row("GET /cart", "passed", 1),
+		row("POST /checkout", "passed", 2),
+		row("GET /orders", "skipped", 3),
+	];
+
+	it("matches a step name case-insensitively, anywhere in it", () => {
+		expect(
+			filterSteps(steps, { outcome: null, query: "checkout" }).map((s) => s.stepIndex)
+		).toEqual([0, 2]);
+		expect(
+			filterSteps(steps, { outcome: null, query: "CHECKOUT" }).map((s) => s.stepIndex)
+		).toEqual([0, 2]);
+	});
+
+	it("applies both controls at once, in either order", () => {
+		// The useful case the outcome chip cannot answer alone: a run's failures
+		// are spread across steps, and this is the one step's.
+		const both = filterSteps(steps, { outcome: "failed", query: "checkout" });
+		expect(both.map((s) => s.stepIndex)).toEqual([0]);
+		// Same predicate whichever the reader reached for first - there is only
+		// one, so this pins that there is no order to get wrong.
+		expect(
+			filterSteps(filterSteps(steps, { outcome: "failed", query: "" }), {
+				outcome: null,
+				query: "checkout",
+			})
+		).toEqual(both);
+	});
+
+	it("ignores a query that is only whitespace", () => {
+		// A field the user cleared to a space is not a filter that matches
+		// nothing - it is a field they cleared.
+		expect(filterSteps(steps, { outcome: null, query: "   " })).toHaveLength(4);
+	});
+
+	it("returns the same array when neither control narrows", () => {
+		// The growing window resets on a changed total, so an untouched view
+		// must hand it the list it already had rather than a copy.
+		expect(filterSteps(steps, { outcome: null, query: "" })).toBe(steps);
+	});
+
+	it("is empty when a name matches nothing", () => {
+		expect(filterSteps(steps, { outcome: null, query: "/refunds" })).toHaveLength(0);
+	});
+});
+
+describe("emptyStepListReason", () => {
+	const thinned = {
+		stepsExecuted: 6_000,
+		stepsStored: 1,
+		stepsDropped: 5_999,
+	};
+
+	it("says nothing while no control is narrowing the list", () => {
+		// An empty list under no filter is the run's own emptiness, and the
+		// view answers that with the run's status instead.
+		expect(emptyStepListReason({ outcome: null, query: "" }, null)).toBeNull();
+		expect(emptyStepListReason({ outcome: null, query: "  " }, null)).toBeNull();
+	});
+
+	it("names the search when the search alone emptied the list", () => {
+		const reason = emptyStepListReason({ outcome: null, query: "checkout" }, null);
+		expect(reason?.title).toBe('No steps matching "checkout"');
+		// What it matched, so a reader whose URL search found nothing knows why.
+		expect(reason?.description).toMatch(/step name/i);
+		expect(reason?.title).not.toMatch(/passed|failed|skipped|errored/);
+	});
+
+	it("names the chip when the chip alone emptied it, and keeps the thinning disclosure", () => {
+		const reason = emptyStepListReason({ outcome: "passed", query: "" }, thinned);
+		expect(reason?.title).toBe("No passed steps in the stored rows");
+		// The chip counts the run and the rows are the store's: without this the
+		// "5999 passed" chip above an empty list is a contradiction.
+		expect(reason?.description).toMatch(/dropped successes/i);
+	});
+
+	it("names both when both are narrowing", () => {
+		const reason = emptyStepListReason({ outcome: "failed", query: "checkout" }, null);
+		expect(reason?.title).toBe('No failed steps matching "checkout"');
+		// Both are named because they are cleared in different places - a reader
+		// told only about the chip clears the wrong control.
+		expect(reason?.description).toMatch(/failed chip/i);
+		expect(reason?.description).toMatch(/search/i);
+	});
+
+	it("trims the query it quotes back", () => {
+		expect(emptyStepListReason({ outcome: null, query: "  cart " }, null)?.title).toBe(
+			'No steps matching "cart"'
+		);
 	});
 });
