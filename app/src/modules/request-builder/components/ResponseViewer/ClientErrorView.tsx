@@ -18,6 +18,7 @@ import {
 	Clock,
 	ShieldX,
 	Link2Off,
+	Route,
 	ServerOff,
 	Lightbulb,
 	type LucideIcon,
@@ -34,14 +35,35 @@ function ErrorIconDisplay({ icon: Icon, className }: ErrorIconDisplayProps) {
 
 /**
  * Error hints for common error codes
+ *
+ * The proxy and TLS hints name the *setting* to go to, not just the condition
+ * (issue #708). Every one of these failures is reported against the endpoint by
+ * libcurl, so a hint that only restates the message sends the reader to debug a
+ * server that was never reached - which is the misdiagnosis the whole
+ * behind-real-networks epic exists to end.
  */
 const ErrorHints: Record<string, string> = {
 	TIMEOUT: "Try increasing the request timeout or check if the server is responding slowly",
 	CONNECTION_FAILED: "Verify the URL and ensure the target server is running",
 	DNS_ERROR: "Check if the domain name is correct and accessible",
-	SSL_ERROR: "The server's SSL certificate may be invalid or expired",
+	SSL_ERROR:
+		"The certificate was not accepted. If this host is behind a TLS-inspecting proxy or an internal authority, paste its certificate into Settings > Network & connectivity > Custom CA Certificates; to skip verification for this one request, turn off Verify SSL in the Settings tab",
+	PROXY_ERROR:
+		"The proxy was the hop that failed, not the endpoint - check Settings > Network & connectivity > Proxy, and whether this proxy needs credentials in its URL",
 	INVALID_URL: "Check the URL format - it should start with http:// or https://",
 	ENGINE_ERROR: "The Vayu engine may not be running. Try restarting the application",
+};
+
+/**
+ * The headline, when the generic one would misdescribe the failure.
+ *
+ * "Could not get a response" is true of a proxy refusal and unhelpful about it:
+ * the reader's next move depends entirely on *which hop* said no, and the
+ * heading is the one line they are guaranteed to read.
+ */
+const ErrorTitles: Record<string, string> = {
+	PROXY_ERROR: "Could not reach the proxy",
+	SSL_ERROR: "Could not establish a secure connection",
 };
 
 /**
@@ -53,6 +75,8 @@ function getErrorIcon(errorCode?: string) {
 			return Clock;
 		case "SSL_ERROR":
 			return ShieldX;
+		case "PROXY_ERROR":
+			return Route;
 		case "INVALID_URL":
 			return Link2Off;
 		case "CONNECTION_FAILED":
@@ -73,6 +97,7 @@ export interface ClientErrorViewProps {
 
 export default function ClientErrorView({ errorCode, errorMessage }: ClientErrorViewProps) {
 	const hint = errorCode ? ErrorHints[errorCode] : undefined;
+	const title = (errorCode ? ErrorTitles[errorCode] : undefined) ?? "Could not get a response";
 	const ErrorIcon = getErrorIcon(errorCode);
 
 	return (
@@ -83,9 +108,7 @@ export default function ClientErrorView({ errorCode, errorMessage }: ClientError
 				</div>
 
 				<div className="space-y-2">
-					<h3 className="text-lg font-semibold text-foreground">
-						Could not get a response
-					</h3>
+					<h3 className="text-lg font-semibold text-foreground">{title}</h3>
 					<p className="text-sm text-muted-foreground">
 						{errorMessage || "The request failed before reaching the server"}
 					</p>

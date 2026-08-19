@@ -268,6 +268,59 @@ TEST_F (TransportPolicyDbTest, ManualWithUnusableUrlResolvesToOff) {
     EXPECT_TRUE (policy.proxy_url.empty ());
 }
 
+// ---------------------------------------------------------------------------
+// `system` - the mode whose URL the app resolves and writes (issue #708)
+// ---------------------------------------------------------------------------
+
+TEST_F (TransportPolicyDbTest, SystemCarriesTheUrlTheAppResolved) {
+    set_config ("proxyMode", "system");
+    set_config ("proxySystemUrl", "http://corp.proxy.example:8080");
+    set_config ("proxyBypass", ".internal.example.com");
+
+    const auto policy = resolve_transport_policy (*db_);
+    EXPECT_EQ (policy.proxy_mode, ProxyMode::System);
+    EXPECT_EQ (policy.proxy_url, "http://corp.proxy.example:8080");
+    EXPECT_EQ (policy.proxy_bypass, ".internal.example.com");
+}
+
+TEST_F (TransportPolicyDbTest, SystemWithNothingResolvedIsNotOff) {
+    // The headless case: no app has ever run to push a value. It must fall back
+    // to the environment pickup rather than to `off` - see ProxyMode::System -
+    // and the mode must stay `system`, or nothing can tell a user why their
+    // requests went direct.
+    set_config ("proxyMode", "system");
+
+    const auto policy = resolve_transport_policy (*db_);
+    EXPECT_EQ (policy.proxy_mode, ProxyMode::System);
+    EXPECT_TRUE (policy.proxy_url.empty ());
+}
+
+TEST_F (TransportPolicyDbTest, SystemWithAnUnusableResolvedUrlFallsBackToTheEnvironment) {
+    // Only reachable from a hand-edited row - POST /config refuses the shape -
+    // or from an OS answer libcurl has no proxy support for. Either way it must
+    // not reach a handle.
+    set_config ("proxyMode", "system");
+    set_config ("proxySystemUrl", "wpad://auto-detect");
+
+    const auto policy = resolve_transport_policy (*db_);
+    EXPECT_EQ (policy.proxy_mode, ProxyMode::System);
+    EXPECT_TRUE (policy.proxy_url.empty ());
+}
+
+TEST_F (TransportPolicyDbTest, TheResolvedUrlIsNotReadOutsideSystemMode) {
+    // The same rule `StoredUrlIsNotReadOutsideManualMode` states for the other
+    // direction: switching away from `system` must stop routing through what it
+    // resolved, and the two URLs must never be confused for each other.
+    set_config ("proxyMode", "manual");
+    set_config ("proxyUrl", "http://typed.example:3128");
+    set_config ("proxySystemUrl", "http://resolved.example:8080");
+
+    EXPECT_EQ (resolve_transport_policy (*db_).proxy_url, "http://typed.example:3128");
+
+    set_config ("proxyMode", "off");
+    EXPECT_TRUE (resolve_transport_policy (*db_).proxy_url.empty ());
+}
+
 TEST_F (TransportPolicyDbTest, UnrecognisedModeFallsBackToTheDefault) {
     set_config ("proxyMode", "sometimes");
     EXPECT_EQ (resolve_transport_policy (*db_).proxy_mode, ProxyMode::Environment);
@@ -768,6 +821,59 @@ TEST (TransportPolicyModes, OffModeIgnoresTheExportedProxy) {
     ASSERT_TRUE (result.is_ok ());
     EXPECT_EQ (result.value ().status_code, 200);
     EXPECT_EQ (proxy.count (), 0u);
+}
+
+TEST (TransportPolicyModes, SystemModeRoutesThroughTheResolvedProxy) {
+    // The app resolved a proxy and wrote it; the bytes have to leave by it,
+    // exactly as under `manual`. Asserted on the wire rather than on the
+    // policy, because "which socket did this leave by" is the only question
+    // the mode exists to answer.
+    MockUpstream upstream;
+    MockProxy proxy;
+    ScopedNoProxy bypass_env ("");
+
+    ClientConfig config;
+    config.transport.proxy_mode = ProxyMode::System;
+    config.transport.proxy_url  = proxy.url ();
+    Client client (config);
+    ASSERT_TRUE (client.send (get_request (upstream.url ("/hello"))).is_ok ());
+
+    EXPECT_EQ (proxy.count (), 1u);
+}
+
+TEST (TransportPolicyModes, SystemModeWithNothingResolvedUsesTheExportedProxy) {
+    // The headless fallback, on the wire. A `system` engine with no app to ask
+    // behaves as `environment` does - not as `off` - and this is the assertion
+    // that would redden if the applier ever wrote an empty CURLOPT_PROXY here,
+    // which is what disables the environment pickup.
+    MockUpstream upstream;
+    MockProxy proxy;
+    ScopedEnv proxy_env ("http_proxy", proxy.url ());
+    ScopedNoProxy bypass_env ("");
+
+    ClientConfig config;
+    config.transport.proxy_mode = ProxyMode::System; // nothing resolved
+    Client client (config);
+    ASSERT_TRUE (client.send (get_request (upstream.url ("/hello"))).is_ok ());
+
+    EXPECT_EQ (proxy.count (), 1u);
+}
+
+TEST (TransportPolicyModes, SystemModeIgnoresInheritedNoProxyOnceResolved) {
+    // With a proxy in force the user's bypass list is the whole rule, the same
+    // way `ManualModeIgnoresInheritedNoProxy` requires - an ambient `no_proxy`
+    // must not quietly exempt half the traffic from a proxy the OS named.
+    MockUpstream upstream;
+    MockProxy proxy;
+    ScopedNoProxy bypass_env ("127.0.0.1");
+
+    ClientConfig config;
+    config.transport.proxy_mode = ProxyMode::System;
+    config.transport.proxy_url  = proxy.url ();
+    Client client (config);
+    ASSERT_TRUE (client.send (get_request (upstream.url ("/hello"))).is_ok ());
+
+    EXPECT_EQ (proxy.count (), 1u);
 }
 
 TEST (TransportPolicyModes, BypassListSkipsTheProxy) {

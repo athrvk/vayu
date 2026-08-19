@@ -44,6 +44,24 @@ enum class ProxyMode {
      * nothing for them and gives the other two something to be distinct from.
      */
     Environment,
+    /**
+     * The proxy the operating system would use, as the app resolved it into
+     * `proxySystemUrl` (issue #708).
+     *
+     * The engine cannot resolve this itself: the OS answer lives behind
+     * Chromium's network stack (and, on Windows and macOS, behind APIs the
+     * daemon has no business linking), while libcurl sees none of it. So the
+     * Electron main process resolves it and writes the answer into that
+     * setting; this mode is what makes the engine read it.
+     *
+     * **An unresolved `system` is `Environment`, not `Off`.** A headless engine
+     * has no app to push it a value, and the environment pickup is the closest
+     * thing to "what this machine would do" that a daemon on its own has - so
+     * an empty `proxySystemUrl` falls back to it rather than sending direct.
+     * Disclosed in the setting's own description, because a fallback nobody
+     * documents is the invisible behaviour #705 exists to end.
+     */
+    System,
     /// The configured `proxyUrl`, for everything the bypass list does not skip.
     Manual,
     /**
@@ -59,7 +77,7 @@ enum class ProxyMode {
 /// builds its options from this rather than from a literal list, so a mode
 /// added here cannot become one the engine understands and `POST /config`
 /// refuses - the same rule `all_http_versions` exists for.
-std::array<ProxyMode, 3> all_proxy_modes ();
+std::array<ProxyMode, 4> all_proxy_modes ();
 
 /// The wire spelling of @p mode, as the `proxyMode` config entry stores it.
 const char* to_string (ProxyMode mode);
@@ -235,7 +253,11 @@ struct TransportPolicy {
      * (`socks5://`, `socks5h://`) and basic proxy auth with no extra columns
      * and no second credential store - epic decision 5 of #704.
      *
-     * Read only in `ProxyMode::Manual`.
+     * Read in `ProxyMode::Manual`, where it is the `proxyUrl` setting, and in
+     * `ProxyMode::System`, where it is whatever the app resolved into
+     * `proxySystemUrl` - **empty there when nothing resolved**, which is the
+     * headless fallback `ProxyMode::System` documents. Empty in the other two
+     * modes, deliberately: a URL no mode reads must not reach a handle.
      */
     std::string proxy_url;
 

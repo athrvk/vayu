@@ -13,7 +13,9 @@
  */
 
 import { useCallback } from "react";
-import { detectCommand, parseCommand } from "@/services/curl/parseCurl";
+import { detectCommand, importCommand } from "@/services/curl/parseCurl";
+import { useToastStore } from "@/stores";
+import { droppedFlagsNotice } from "../../utils/paste-disclosure";
 import { useRequestBuilderContext } from "../../context";
 import VariableInput from "@/components/shared/VariableInput";
 import { useVariableSupport } from "../../hooks/useVariableSupport";
@@ -26,6 +28,7 @@ interface UrlInputProps {
 export default function UrlInput({ className }: UrlInputProps) {
 	const { request, updateField, setRequest } = useRequestBuilderContext();
 	const variables = useVariableSupport();
+	const showToast = useToastStore((s) => s.showToast);
 
 	// Sync params from URL when URL changes directly
 	const handleUrlChange = useCallback(
@@ -52,13 +55,17 @@ export default function UrlInput({ className }: UrlInputProps) {
 			// A multi-line command must never land in the single-line input.
 			e.preventDefault();
 
-			const parsed = parseCommand(text);
-			if (parsed) {
+			const imported = importCommand(text);
+			if (imported) {
 				// Request-shape replacement; identity & scripts are preserved.
-				setRequest(parsed);
+				setRequest(imported.request);
+				// And what it could not carry, said out loud rather than eaten
+				// (issue #708). After the import, never instead of it.
+				const notice = droppedFlagsNotice(imported.dropped);
+				if (notice) showToast(notice);
 			}
 		},
-		[setRequest]
+		[setRequest, showToast]
 	);
 
 	return (

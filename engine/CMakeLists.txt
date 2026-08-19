@@ -457,6 +457,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/scripting.cpp
         src/http/routes/script_types.cpp
         src/http/routes/import.cpp
+        src/http/routes/diagnostics.cpp
         src/http/routes/oauth.cpp
         src/http/routes/oauth_authorize.cpp
         src/http/routes/cookies.cpp
@@ -506,6 +507,7 @@ if(VAYU_BUILD_TESTS)
         tests/metrics_collector_test.cpp
         tests/execution_trace_test.cpp
         tests/import_route_test.cpp
+        tests/diagnostics_route_test.cpp
         tests/import_apply_route_test.cpp
         tests/config_route_test.cpp
         tests/sse_parser_test.cpp
@@ -589,6 +591,7 @@ if(VAYU_BUILD_TESTS)
         tests/schema_validation_test.cpp
         tests/version_isolation_test.cpp
         src/http/routes/import.cpp
+        src/http/routes/diagnostics.cpp
         src/http/routes/compose.cpp
         src/http/routes/config.cpp
         src/http/routes/requests.cpp

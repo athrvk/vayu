@@ -857,6 +857,7 @@ void register_compose_routes (RouteContext& ctx);
 void register_metrics_routes (RouteContext& ctx);
 void register_scripting_routes (RouteContext& ctx);
 void register_import_routes (RouteContext& ctx);
+void register_diagnostics_routes (RouteContext& ctx);
 void register_oauth_routes (RouteContext& ctx);
 void register_cookie_routes (RouteContext& ctx);
 void register_mock_issuer_routes (RouteContext& ctx);

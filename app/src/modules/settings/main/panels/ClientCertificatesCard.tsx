@@ -241,7 +241,11 @@ export function ClientCertificatesCard() {
 		(!needsKeyFile || draft.keyPath.trim() !== "");
 
 	return (
-		<Card>
+		// The anchor a pointer elsewhere in the app aims at - the curl-paste
+		// ledger's `--cert` / `--key` entries (#708) reveal this card the same
+		// way the settings search reveals a config row. Read by
+		// `useRevealedSetting`, which scrolls it into view and outlines it.
+		<Card data-setting-anchor="clientCertificates">
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<KeyRound className="w-5 h-5 text-muted-foreground" />

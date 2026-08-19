@@ -825,12 +825,18 @@ export default function SettingsMain() {
 			{/* Settings Grid */}
 			<div className="flex-1 overflow-auto p-6">
 				<div className="grid gap-4 max-w-3xl mx-auto">
-					{/* Engine state this category owns that is not a config
-					    entry - the client-certificate registry (#707). Above the
-					    entries because it is the thing a user came here to
-					    manage, and it saves itself: the Save bar in the header
-					    belongs to the entries below. */}
-					{categoryConfig?.Card && <categoryConfig.Card />}
+					{/* Engine surfaces this category owns that are not config
+					    entries - the client-certificate registry (#707), the
+					    connection test (#708). Above the entries because they
+					    are what a user came here to manage, and they save
+					    themselves: the Save bar in the header belongs to the
+					    entries below. */}
+					{/* Keyed by index because the list is a module constant: it
+					    never reorders, grows or shrinks at runtime, so there is
+					    no identity for a key to preserve. */}
+					{categoryConfig?.Cards?.map((CategoryCard, index) => (
+						<CategoryCard key={index} />
+					))}
 					{primaryEntries.map(renderEntryCard)}
 
 					{advancedEntries.length > 0 && (

@@ -79,25 +79,28 @@ function renderSettings() {
 	);
 }
 
-describe("an engine category's card", () => {
-	it("is declared on Network & connectivity", () => {
+describe("an engine category's cards", () => {
+	it("are declared on Network & connectivity", () => {
 		const network = ENGINE_SETTINGS_CATEGORIES.find((c) => c.id === "network_performance");
-		expect(network?.Card).toBeDefined();
+		expect(network?.Cards?.length).toBeGreaterThan(0);
 	});
 
-	it("is rendered by the engine settings view, with no config entry present", () => {
-		// No entries at all, so nothing but the declared card can put this on
+	it("are all rendered by the engine settings view, with no config entry present", () => {
+		// No entries at all, so nothing but the declared cards can put these on
 		// screen - a category with entries would leave the source of the text
-		// ambiguous.
+		// ambiguous. Every declared card is asserted rather than the first,
+		// because the list used to be a single component and a second one that
+		// silently never rendered would look exactly like this test passing.
 		renderSettings();
 		expect(screen.getByText("Client certificates")).toBeInTheDocument();
+		expect(screen.getByText("Connection test")).toBeInTheDocument();
 	});
 
-	it("leaves a category that declares none alone", () => {
+	it("leave a category that declares none alone", () => {
 		// The opposite half: the view must not assume every engine category has
 		// one, or every other category throws on an undefined component.
 		const others = ENGINE_SETTINGS_CATEGORIES.filter((c) => c.id !== "network_performance");
 		expect(others.length).toBeGreaterThan(0);
-		expect(others.every((c) => c.Card === undefined)).toBe(true);
+		expect(others.every((c) => c.Cards === undefined)).toBe(true);
 	});
 });
