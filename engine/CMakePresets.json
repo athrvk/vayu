@@ -271,10 +271,7 @@
       "configurePreset": "windows-dev",
       "inherits": ["test-base"],
       "execution": {
-        "jobs": 1
-      },
-      "environment": {
-        "VAYU_TEST_NO_SCRATCH_ISOLATION": "1"
+        "jobs": 4
       }
     },
     {
@@ -283,10 +280,7 @@
       "configurePreset": "windows-prod",
       "inherits": ["test-base"],
       "execution": {
-        "jobs": 1
-      },
-      "environment": {
-        "VAYU_TEST_NO_SCRATCH_ISOLATION": "1"
+        "jobs": 4
       }
     },
     {

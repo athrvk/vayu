@@ -23,12 +23,13 @@ int main (int argc, char** argv) {
     // per-test here.
     //
     // Isolating is the default, so a hand-run `ctest -j` is safe wherever it
-    // happens; `VAYU_TEST_NO_SCRATCH_ISOLATION` opts out, and the Windows test
-    // presets set it because they run serially. Measured on CI, the Windows
-    // ctest leg goes from ~6 min serial to over 30 min at `-j4` - the tests
-    // that open a database each pay seconds, the ones that do not are
-    // untouched - while the same `-j4` cuts ubuntu from 3-5 min to 1m12s and
-    // macOS from ~4 min to 1m50s.
+    // happens; `VAYU_TEST_NO_SCRATCH_ISOLATION` opts out and no preset sets it.
+    // Windows presets used to, because they ran serially: a plain `-j4` there
+    // measured over 30 min against a ~6 min serial run, where the same `-j4`
+    // cut ubuntu from 3-5 min to 1m12s. What costs on Windows is concurrent
+    // SQLite commits, not the directories, so the database tests now share a
+    // CTest RESOURCE_LOCK there and the rest of the suite runs `-j4` beside
+    // them (#805 phase 5, `engine/CMakeLists.txt`).
     const bool isolate = !vayu::tests::scratch_isolation_disabled ();
     const std::filesystem::path scratch =
     isolate ? vayu::tests::enter_process_scratch_dir () : std::filesystem::path{};

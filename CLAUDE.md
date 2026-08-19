@@ -102,11 +102,15 @@ rename or signature change needs a *build*, to prove it still compiles. Only a
 behaviour change needs the covering tests, and the full suite belongs once
 before committing a substantial piece of work, not after every edit.
 
-The engine suite now runs multi-process on Linux and macOS - those test presets
-pass `ctest -j8`, cutting its wall time to roughly a fifth (each ctest test
-runs in its own process under a private scratch directory, so `-j` is safe;
-`ctest -jN` overrides). **The Windows presets stay serial deliberately** -
-parallelism measured ~6x *slower* there; see `docs/engine/building.md`. A
+The engine suite now runs multi-process on every platform - the test presets
+pass `ctest -j8`, cutting its wall time on Linux and macOS to roughly a fifth
+(each ctest test runs in its own process under a private scratch directory, so
+`-j` is safe; `ctest -jN` overrides). **Windows runs `-j4` with the tests that
+open a scratch database sharing a CTest `RESOURCE_LOCK`** - a plain `-j` there
+measured ~6x *slower* than serial, because concurrent SQLite commits cost more
+than the concurrency returns, so those tests never overlap while the rest of the
+suite does. They are 81% of the serial wall, so expect Windows near four fifths
+of its serial time rather than a fifth; see `docs/engine/building.md`. A
 rebuild ~2.5min; the app suite ~90s. Running
 both after retouching a doc comment reads as diligence and is just latency. Ask
 what a failure would even look like before running anything: **if no test could
