@@ -108,6 +108,15 @@ export interface SampledExchangeProps {
 	phases?: readonly ResolvedTimingPhase[];
 	isExpanded: boolean;
 	onToggle: () => void;
+	/**
+	 * Controls beside the summary, outside the toggle - a step's link back to
+	 * its request (issue #730) is the first.
+	 *
+	 * Outside because the summary is one `<button>`: a control nested inside it
+	 * would be invalid markup and would fire the toggle on its way out. A caller
+	 * that passes nothing gets exactly the row it had, one button wide.
+	 */
+	actions?: ReactNode;
 	/** Expanded sections between the error block and the timing tiles. */
 	details?: ReactNode;
 	/** Expanded sections after the timing tiles - headers and body. */
@@ -128,6 +137,7 @@ export function SampledExchange({
 	phases = [],
 	isExpanded,
 	onToggle,
+	actions,
 	details,
 	children,
 	className,
@@ -143,41 +153,53 @@ export function SampledExchange({
 
 	return (
 		<div className={cn("overflow-hidden", className)}>
-			<button
-				type="button"
-				onClick={onToggle}
-				aria-expanded={isExpanded}
-				className="w-full flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
-			>
-				<Chevron className="w-4 h-4 text-muted-foreground shrink-0" />
-
-				<StatusIcon className={cn("w-4 h-4 shrink-0", STATE_TINT[resolved])} />
-
-				<span className="text-xs text-muted-foreground font-mono min-w-8">#{label}</span>
-
-				{title}
-
-				<StatusCodeBadge status={statusCode} statusText={statusText} className="shrink-0" />
-
-				<span
-					className={cn(
-						"text-sm font-mono shrink-0",
-						isSlow && "text-status-stopped-text"
-					)}
+			{/* The summary and its actions share a row without sharing a button.
+			    With no actions this is one full-width button, exactly as before. */}
+			<div className="flex items-stretch">
+				<button
+					type="button"
+					onClick={onToggle}
+					aria-expanded={isExpanded}
+					className="flex-1 min-w-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
 				>
-					{latencyMs.toFixed(1)}ms
-				</span>
+					<Chevron className="w-4 h-4 text-muted-foreground shrink-0" />
 
-				<span className="text-xs text-muted-foreground sm:ml-auto">{timestamp}</span>
+					<StatusIcon className={cn("w-4 h-4 shrink-0", STATE_TINT[resolved])} />
 
-				{/* First clause only - the full message is one click away, and a
-				    multi-line curl error would push the row to three lines. */}
-				{isError && error && (
-					<span className="text-xs text-destructive-text truncate basis-full sm:basis-auto sm:max-w-[200px]">
-						{error.split(":")[0]}
+					<span className="text-xs text-muted-foreground font-mono min-w-8">
+						#{label}
 					</span>
-				)}
-			</button>
+
+					{title}
+
+					<StatusCodeBadge
+						status={statusCode}
+						statusText={statusText}
+						className="shrink-0"
+					/>
+
+					<span
+						className={cn(
+							"text-sm font-mono shrink-0",
+							isSlow && "text-status-stopped-text"
+						)}
+					>
+						{latencyMs.toFixed(1)}ms
+					</span>
+
+					<span className="text-xs text-muted-foreground sm:ml-auto">{timestamp}</span>
+
+					{/* First clause only - the full message is one click away, and a
+					    multi-line curl error would push the row to three lines. */}
+					{isError && error && (
+						<span className="text-xs text-destructive-text truncate basis-full sm:basis-auto sm:max-w-[200px]">
+							{error.split(":")[0]}
+						</span>
+					)}
+				</button>
+
+				{actions && <div className="flex shrink-0 items-center pr-3">{actions}</div>}
+			</div>
 
 			{isExpanded && (
 				<div className="px-4 py-3 bg-muted/30 border-t border-rule space-y-3">

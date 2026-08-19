@@ -24,10 +24,20 @@
  * That preference is also what keeps a re-opened tab honest. A completed run
  * reopened later has no live steps at all and reads entirely from storage -
  * including the disclosure that storage is not the whole run.
+ *
+ * **The list is bounded in cost, not in content** (issue #730).
+ * `maxScenarioStoredSteps` is 5,000, and every one of them used to mount as a
+ * card. Two things keep that usable and neither drops a step: the four count
+ * chips are buttons that filter by outcome - the reader after a failure wants
+ * the failures, and the numbers were already sitting there - and the rows
+ * arrive through `useGrowingWindow`, the same growing list the response pane's
+ * console output uses, rather than a virtualiser this repo would then have to
+ * maintain a scroll map for.
  */
 
 import { useMemo, useState } from "react";
 import { ListOrdered, Loader2 } from "lucide-react";
+import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { useRunReportQuery } from "@/queries";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
@@ -169,6 +179,29 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 		setExpanded((current) => (current === key ? null : key));
 	};
 
+	/*
+	 * Which outcome the list is showing, or all of them (issue #730).
+	 *
+	 * The chips above are the control rather than a filter bar beside them: the
+	 * four numbers a reader already reads to find out that eleven steps failed
+	 * are the same four they then want the list narrowed to. Held here and not
+	 * in the URL or the store - it is a way of looking at this tab, and a
+	 * remembered one would hide steps from the next reader of it.
+	 */
+	const [outcomeFilter, setOutcomeFilter] = useState<StepOutcome | null>(null);
+	const shownSteps = useMemo(
+		() => (outcomeFilter === null ? steps : steps.filter((s) => s.outcome === outcomeFilter)),
+		[steps, outcomeFilter]
+	);
+
+	/*
+	 * The rows arrive as the list is scrolled - see the header note. Nothing is
+	 * withheld: `hasMore` drives a line saying how many are still to come, and
+	 * reaching the sentinel renders the next slice.
+	 */
+	const { visible, sentinelRef, hasMore } = useGrowingWindow(shownSteps.length);
+	const rendered = shownSteps.slice(0, visible);
+
 	return (
 		<div className="flex flex-col h-full overflow-hidden">
 			{/* No run identity here - `HistoryDetail` prints the id, the type and
@@ -192,18 +225,48 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 
 				{/* All four, always, including the zeros. A summary that hides the
 				    outcomes nobody hit reads differently run to run, and the point
-				    of the row is that these are four separate numbers. */}
+				    of the row is that these are four separate numbers.
+
+				    Each is also the filter for its own outcome (issue #730): a
+				    reader who has just read "11 failed" wants those eleven, and
+				    the number is where they read it. Pressing the active one
+				    clears the filter, so the control says what it does and undoes
+				    it in the same place. */}
 				<span className="flex items-center gap-1.5 sm:ml-auto">
-					{STEP_OUTCOMES.map((outcome) => (
-						<Badge
-							key={outcome}
-							variant="chip"
-							className={cn("shrink-0", COUNT_CHIP[outcome])}
-							data-outcome-count={outcome}
-						>
-							{counts[outcome]} {outcome}
-						</Badge>
-					))}
+					{STEP_OUTCOMES.map((outcome) => {
+						const isActive = outcomeFilter === outcome;
+						return (
+							<button
+								key={outcome}
+								type="button"
+								aria-pressed={isActive}
+								aria-label={`Show only ${outcome} steps`}
+								onClick={() =>
+									setOutcomeFilter((current) =>
+										current === outcome ? null : outcome
+									)
+								}
+								/* The ring rather than a tint change: the chip's own
+								   colour is what identifies the outcome, and dimming
+								   or brightening it would make "filtered" read as a
+								   different outcome. */
+								className={cn(
+									"rounded-md transition-opacity",
+									isActive
+										? "ring-2 ring-primary ring-offset-1 ring-offset-panel"
+										: "opacity-90 hover:opacity-100"
+								)}
+							>
+								<Badge
+									variant="chip"
+									className={cn("shrink-0", COUNT_CHIP[outcome])}
+									data-outcome-count={outcome}
+								>
+									{counts[outcome]} {outcome}
+								</Badge>
+							</button>
+						);
+					})}
 				</span>
 
 				{/* Last, and only while the run is live. A terminal run has
@@ -278,17 +341,62 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 							description="This run stored no step results."
 						/>
 					)
+				) : outcomeFilter !== null && shownSteps.length === 0 ? (
+					/*
+					 * Filtered to an outcome that no *stored* row has. Not the same
+					 * as "no such steps": thinning keeps every non-passing row and
+					 * drops passes, so a 6,000-step run can report 5,010 passed and
+					 * hold none of them. The chip's number is the run's, this list
+					 * is the store's, and saying which is which is the difference
+					 * between a disclosure and a contradiction.
+					 */
+					<EmptyState
+						icon={ListOrdered}
+						title={`No ${outcomeFilter} steps in the stored rows`}
+						description={
+							thinned
+								? "This run's step store filled and dropped successes - the chip counts the whole run, this list holds what was kept."
+								: "The chip above counts the whole run; these rows are what it stored."
+						}
+					/>
 				) : (
-					steps.map((step) => (
-						<ScenarioStepCard
-							key={stepKey(step)}
-							step={step}
-							showIteration={showIteration}
-							isExpanded={expanded === stepKey(step)}
-							onToggle={() => toggle(step)}
-							runId={run.id}
-						/>
-					))
+					<>
+						{rendered.map((step) => (
+							/*
+							 * `skip-offscreen` per card, sized for a card rather
+							 * than for a console line: the browser skips layout and
+							 * paint for the ones scrolled past, which is what keeps
+							 * a filled store's list responsive after it has grown.
+							 */
+							<div
+								key={stepKey(step)}
+								className="skip-offscreen [--skip-offscreen-size:3.5rem]"
+							>
+								<ScenarioStepCard
+									step={step}
+									showIteration={showIteration}
+									isExpanded={expanded === stepKey(step)}
+									onToggle={() => toggle(step)}
+									runId={run.id}
+								/>
+							</div>
+						))}
+						{hasMore && (
+							/*
+							 * The sentinel. Reaching it renders the next slice -
+							 * nothing is withheld, it arrives when you get there.
+							 * The count is stated rather than left to be inferred
+							 * from a scrollbar, exactly as the console's is.
+							 */
+							<p
+								ref={sentinelRef}
+								className="px-1 py-2 text-xs text-muted-foreground"
+							>
+								Showing {rendered.length.toLocaleString()} of{" "}
+								{shownSteps.length.toLocaleString()} steps - scroll for more.
+							</p>
+						)}
+					</>
 				)}
 			</div>
 		</div>

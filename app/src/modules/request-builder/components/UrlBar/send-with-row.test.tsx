@@ -33,7 +33,7 @@ import type { RequestBuilderContextValue } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
 import { emptyDrafts } from "../../utils/body-drafts";
 import { TooltipProvider } from "@/components/ui";
-import { useDataFileStore } from "@/stores";
+import { useDataFileStore, useTabsStore } from "@/stores";
 import type { DataContractScope } from "@/types";
 import UrlBar from "./index";
 
@@ -129,6 +129,7 @@ function openPicker() {
 
 beforeEach(() => {
 	useDataFileStore.setState({ locations: {} });
+	useTabsStore.setState({ dataRowTarget: null });
 });
 
 afterEach(() => {
@@ -441,5 +442,157 @@ describe("the remembered row", () => {
 		// above and lose the affordance's whole point.
 		const backOnA = await openRows();
 		expect(backOnA[1].className).toContain("bg-accent");
+	});
+});
+
+/**
+ * Reaching a row the list does not show, and arriving from a failed step
+ * (issue #730).
+ *
+ * The list is the first 20 rows by design - a popover is not the file - so
+ * before this the rows past it were unreachable from here at all, which is
+ * precisely the row a long run's failure names ("iteration 501 · row 501").
+ */
+describe("any row in the file", () => {
+	/** A file of `count` rows, so the browse window is not the whole of it. */
+	const bigCsv = (count: number) =>
+		["id,email", ...Array.from({ length: count }, (_, i) => `${i},user${i}@example.test`)].join(
+			"\n"
+		);
+
+	const numberField = () => screen.getByLabelText(/send with a row by number/i);
+
+	async function openBigPicker(count = 60) {
+		rememberFile();
+		stubReadDataFile(async () => csvBytes(bigCsv(count)));
+		const execute = vi.fn(async () => {});
+		renderBar(execute, CONTRACT, "req_a");
+		openPicker();
+		await screen.findByRole("button", { name: /user0@example\.test/ });
+		return execute;
+	}
+
+	it("sends a row past the browse window, reached by number", async () => {
+		const execute = await openBigPicker();
+
+		fireEvent.change(numberField(), { target: { value: "51" } });
+
+		// Shown as its own row rather than scrolled to: the list is 20 rows and
+		// row 51 is not among them, so there would be nothing to scroll to.
+		const pinned = screen.getByRole("button", { name: /user50@example\.test/ });
+		fireEvent.click(pinned);
+
+		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+		expect(execute).toHaveBeenCalledWith({ id: "50", email: "user50@example.test" });
+	});
+
+	it("sends on Enter, so reaching a row is typing its number", async () => {
+		const execute = await openBigPicker();
+
+		fireEvent.change(numberField(), { target: { value: "44" } });
+		fireEvent.keyDown(numberField(), { key: "Enter" });
+
+		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+		expect(execute).toHaveBeenCalledWith({ id: "43", email: "user43@example.test" });
+	});
+
+	it("refuses a number the file has no row for, naming what it has", async () => {
+		const execute = await openBigPicker(60);
+
+		fireEvent.change(numberField(), { target: { value: "900" } });
+		fireEvent.keyDown(numberField(), { key: "Enter" });
+
+		// Refused rather than clamped to the last row: a send bound to a row the
+		// user did not ask for is worse than no send at all.
+		expect(execute).not.toHaveBeenCalled();
+		expect(screen.getByText(/the file has 60 rows/i)).toBeTruthy();
+		expect(numberField()).toHaveAttribute("aria-invalid", "true");
+	});
+
+	it("refuses an entry that is not a row number", async () => {
+		const execute = await openBigPicker();
+
+		fireEvent.change(numberField(), { target: { value: "4a" } });
+		fireEvent.keyDown(numberField(), { key: "Enter" });
+
+		expect(execute).not.toHaveBeenCalled();
+		expect(screen.getByText(/row numbers are digits/i)).toBeTruthy();
+	});
+
+	it("says the hidden rows are reachable rather than only that they exist", async () => {
+		await openBigPicker();
+		expect(screen.getByText(/reach any of them by number/i)).toBeTruthy();
+	});
+});
+
+describe("arriving from a failed step", () => {
+	const bigCsv = (count: number) =>
+		["id,email", ...Array.from({ length: count }, (_, i) => `${i},user${i}@example.test`)].join(
+			"\n"
+		);
+
+	it("opens the list on the row that step bound, without a click", async () => {
+		rememberFile();
+		stubReadDataFile(async () => csvBytes(bigCsv(600)));
+		const execute = vi.fn(async () => {});
+
+		// What `openRequestWithDataRow` leaves behind for this tab: the request
+		// is already open, and the row is the half `openTab` cannot carry.
+		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 500 } });
+		renderBar(execute, CONTRACT, "req_a");
+
+		// Two clicks from the step card to the repro: the card's, and this one.
+		const row = await screen.findByRole("button", { name: /user500@example\.test/ });
+		fireEvent.click(row);
+
+		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+		expect(execute).toHaveBeenCalledWith({ id: "500", email: "user500@example.test" });
+	});
+
+	it("consumes the target, so a later visit opens on nothing", async () => {
+		rememberFile();
+		stubReadDataFile(async () => csvBytes(bigCsv(30)));
+		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 25 } });
+		renderBar(
+			vi.fn(async () => {}),
+			CONTRACT,
+			"req_a"
+		);
+
+		await screen.findByRole("button", { name: /user25@example\.test/ });
+		expect(useTabsStore.getState().dataRowTarget).toBeNull();
+	});
+
+	it("leaves a target for a different request alone", async () => {
+		rememberFile();
+		stubReadDataFile(async () => csvBytes(bigCsv(30)));
+		useTabsStore.setState({ dataRowTarget: { requestId: "req_b", rowIndex: 4 } });
+		renderBar(
+			vi.fn(async () => {}),
+			CONTRACT,
+			"req_a"
+		);
+
+		// Not this tab's navigation: the list stays shut and the target waits for
+		// the tab it names.
+		expect(screen.queryByLabelText(/send with a row by number/i)).toBeNull();
+		expect(useTabsStore.getState().dataRowTarget).toEqual({
+			requestId: "req_b",
+			rowIndex: 4,
+		});
+	});
+
+	it("clears a target for a request that cannot bind rows at all", () => {
+		// No contract in scope, so there is no picker to open. The target must
+		// still be consumed, or it fires on the next request that has one.
+		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 2 } });
+		renderBar(
+			vi.fn(async () => {}),
+			undefined,
+			"req_a"
+		);
+
+		expect(caret()).toBeNull();
+		expect(useTabsStore.getState().dataRowTarget).toBeNull();
 	});
 });

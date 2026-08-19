@@ -153,6 +153,52 @@ describe("appendStepEvent", () => {
 		expect(steps).toHaveLength(1);
 		expect(steps[0].outcome).toBe("failed");
 	});
+
+	/*
+	 * The placement is a binary search over a list that is sorted by
+	 * construction, rather than a sort per event (issue #730). These three are
+	 * its edges: the ordinary append, an insertion before everything, and a
+	 * replay deep inside - the case a search that only ever looked at the tail
+	 * would answer "new row" to, doubling it.
+	 */
+	describe("placing a row without re-sorting the list", () => {
+		const many = (count: number) => {
+			let steps: ScenarioStepRow[] = [];
+			for (let i = 0; i < count; i += 1) steps = appendStepEvent(steps, event(0, i));
+			return steps;
+		};
+
+		it("keeps a long run in plan order as it streams", () => {
+			const steps = many(200);
+			expect(steps.map((s) => s.stepIndex)).toEqual([...Array(200).keys()]);
+		});
+
+		it("seats a row that belongs before every one already there", () => {
+			let steps = many(50);
+			steps = appendStepEvent(steps, event(0, 0, "failed", { name: "resumed" }));
+
+			// Replaced in place, not prepended as a 51st row.
+			expect(steps).toHaveLength(50);
+			expect(steps[0].name).toBe("resumed");
+		});
+
+		it("finds a replay in the middle of a long list rather than doubling it", () => {
+			let steps = many(200);
+			steps = appendStepEvent(steps, event(0, 97, "failed"));
+
+			expect(steps).toHaveLength(200);
+			expect(steps[97].outcome).toBe("failed");
+			expect(steps.map((s) => s.stepIndex)).toEqual([...Array(200).keys()]);
+		});
+
+		it("inserts an out-of-order arrival mid-list, in its own place", () => {
+			let steps: ScenarioStepRow[] = [];
+			for (const index of [0, 1, 4, 5]) steps = appendStepEvent(steps, event(0, index));
+			steps = appendStepEvent(steps, event(0, 3));
+
+			expect(steps.map(stepKey)).toEqual(["0:0", "0:1", "0:3", "0:4", "0:5"]);
+		});
+	});
 });
 
 describe("countOutcomes", () => {
@@ -278,6 +324,24 @@ describe("stepRowsFromReport", () => {
 
 		expect(rows[0].dataRowIndex).toBe(0);
 		expect(rows[1].dataRowIndex).toBeUndefined();
+	});
+
+	it("carries the request the step ran, which is the way back to it", () => {
+		// The engine has always stamped it and no renderer read it (issue #730):
+		// without this the card has nothing to link to, and a failed step is a
+		// dead end.
+		const rows = stepRowsFromReport(report({ results: [storedStep(0, 2)] }));
+
+		expect(rows[0].requestId).toBe("req_2");
+	});
+
+	it("leaves the request absent on a row stored before the runner stamped one", () => {
+		const row = storedStep(0, 0);
+		delete row.trace!.requestId;
+
+		// Absent rather than "" - the card offers no link at all rather than one
+		// that would open nothing.
+		expect(stepRowsFromReport(report({ results: [row] }))[0].requestId).toBeUndefined();
 	});
 
 	it("sorts stored rows into plan order", () => {

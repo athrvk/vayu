@@ -62,6 +62,18 @@ export interface ScenarioStepRow {
 	 */
 	dataRowIndex?: number;
 	/**
+	 * The stored request this step executed, so a step that failed has a way
+	 * back to the request that sent it (issue #730).
+	 *
+	 * **Stored rows only.** `stamp_step_identity` writes it onto the trace, and
+	 * the live `step` frame does not carry it - `build_step_payload` sends
+	 * identity, outcome and timing and nothing that would let the frame grow
+	 * per step. So a row being watched has no link until the run ends and its
+	 * rows are written, which is the same moment its exchange appears, and the
+	 * card says so in one place rather than two.
+	 */
+	requestId?: string;
+	/**
 	 * What the contract says about this step's response (issue #681), on a row
 	 * that has no stored result yet.
 	 *
@@ -126,6 +138,29 @@ function byPlanOrder(a: ScenarioStepRow, b: ScenarioStepRow): number {
 }
 
 /**
+ * The first index of a plan-ordered list whose row does not sort before `row` -
+ * where `row` belongs, and where its own earlier copy would be.
+ *
+ * A binary search rather than a re-sort and a scan (issue #730): the list is
+ * sorted by construction, so sorting per arriving event re-establishes an
+ * invariant that was never lost, and it did so on every one of a 5,000-step
+ * run's events. The ordinary case is an append, which the first comparison
+ * below answers; a gap-resume that lands out of order still finds its seat
+ * rather than sitting at the end.
+ */
+function planOrderIndex(steps: readonly ScenarioStepRow[], row: ScenarioStepRow): number {
+	if (steps.length === 0 || byPlanOrder(row, steps[steps.length - 1]) > 0) return steps.length;
+	let low = 0;
+	let high = steps.length;
+	while (low < high) {
+		const mid = (low + high) >>> 1;
+		if (byPlanOrder(steps[mid], row) < 0) low = mid + 1;
+		else high = mid;
+	}
+	return low;
+}
+
+/**
  * Fold a `step` event into the live list.
  *
  * Returns the same array reference when nothing changed, so a replayed event
@@ -138,9 +173,16 @@ export function appendStepEvent(
 	steps: readonly ScenarioStepRow[],
 	event: ScenarioStepEvent
 ): ScenarioStepRow[] {
-	const key = stepKey(event);
-	const existing = steps.findIndex((s) => stepKey(s) === key);
 	const row: ScenarioStepRow = { ...event };
+	/*
+	 * One search answers both questions - "is this a replay?" and "where does a
+	 * new row go?" - because plan order *is* the identity order: two rows sort
+	 * equal exactly when `stepKey` would match. The scan this replaces walked
+	 * the whole list per event, which on a long run is the same cost as the
+	 * sort below it.
+	 */
+	const at = planOrderIndex(steps, row);
+	const existing = at < steps.length && byPlanOrder(steps[at], row) === 0 ? at : -1;
 
 	if (existing !== -1) {
 		const current = steps[existing];
@@ -157,10 +199,13 @@ export function appendStepEvent(
 		return next;
 	}
 
-	// Sorted on insert rather than on render: events arrive in plan order in the
-	// ordinary case, so this is an append, and a gap-resume that lands one out of
-	// order still shows the sequence the run executed.
-	return [...steps, row].sort(byPlanOrder);
+	// Placed on insert rather than sorted on render: events arrive in plan order
+	// in the ordinary case, so this is an append, and a gap-resume that lands one
+	// out of order still shows the sequence the run executed.
+	if (at === steps.length) return [...steps, row];
+	const next = [...steps];
+	next.splice(at, 0, row);
+	return next;
 }
 
 /**
@@ -178,6 +223,10 @@ function stepRowFromResult(result: RunResultSample): ScenarioStepRow | null {
 		iteration: trace.iteration,
 		stepIndex: trace.stepIndex,
 		dataRowIndex: trace.dataRowIndex,
+		// The one thing the trace carried that nothing read (issue #730). A row
+		// written before the runner stamped it has none, and the card offers no
+		// link rather than one to an empty id.
+		requestId: trace.requestId,
 		name: trace.stepName ?? `Step ${trace.stepIndex + 1}`,
 		// An unstamped row predates the outcome and cannot be called passed -
 		// "errored" is the honest reading of "this step ran and said nothing".
