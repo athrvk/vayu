@@ -25,10 +25,27 @@
  * all reads as a bug in the app rather than as a step whose exchange has not
  * been written yet, which is what it is: the engine batches every step row to
  * SQLite when the run ends.
+ *
+ * ## The way back to the request (issue #730)
+ *
+ * A step that failed used to be a dead end: the trace named the request it came
+ * from and nothing read it, so reproducing "iteration 501 row 501 failed" meant
+ * finding the request in the tree by name and then discovering the row was out
+ * of the picker's reach. The action beside the summary is that path - it opens
+ * the request and hands the builder the row this iteration bound, so the repro
+ * is the step's own action and then one click on the row.
+ *
+ * It is absent, not disabled, on a row that has no `requestId`: a live row
+ * (the `step` frame carries no request id) and a row written before the runner
+ * stamped one. A control offering to open a request the row cannot name would
+ * be a promise this card cannot keep.
  */
 
-import { Badge } from "@/components/ui";
+import { ExternalLink } from "lucide-react";
+
+import { Badge, Button } from "@/components/ui";
 import { Callout } from "@/components/shared";
+import { useTabsStore } from "@/stores";
 import {
 	SampledExchange,
 	TestsChip,
@@ -84,6 +101,9 @@ export default function ScenarioStepCard({
 	onToggle,
 	runId,
 }: ScenarioStepCardProps) {
+	const openTab = useTabsStore((s) => s.openTab);
+	const openRequestWithDataRow = useTabsStore((s) => s.openRequestWithDataRow);
+
 	const response = step.result ? responseFromRunResult(step.result, runId) : null;
 	const phases = phasesFromTrace(step.result?.trace);
 
@@ -118,6 +138,26 @@ export default function ScenarioStepCard({
 		.filter(Boolean)
 		.join(" · ");
 
+	/*
+	 * The row's own number is carried only when the run bound one, and only when
+	 * it is a row. A step of a collection with no data set has nothing to select
+	 * - pointing the picker at row 0 there would select a row out of a file the
+	 * run never read - and a stored index that is not a whole row is a malformed
+	 * trace, which `openRequestWithDataRow` refuses outright. The link stays,
+	 * without the row: the request is still where the reader was going.
+	 */
+	const requestId = step.requestId;
+	const rowIndex =
+		typeof step.dataRowIndex === "number" &&
+		Number.isInteger(step.dataRowIndex) &&
+		step.dataRowIndex >= 0
+			? step.dataRowIndex
+			: undefined;
+	const openRequest = (id: string) => {
+		if (rowIndex === undefined) openTab({ type: "request", entityId: id });
+		else openRequestWithDataRow(id, rowIndex);
+	};
+
 	return (
 		<SampledExchange
 			label={step.stepIndex + 1}
@@ -145,6 +185,28 @@ export default function ScenarioStepCard({
 					 */}
 					{tests && <TestsChip tests={tests} className="shrink-0" />}
 				</span>
+			}
+			actions={
+				requestId ? (
+					<Button
+						variant="ghost"
+						size="sm"
+						className="h-8 gap-1.5 px-2 text-xs"
+						onClick={() => openRequest(requestId)}
+						aria-label={
+							rowIndex === undefined
+								? `Open the request ${step.name} ran`
+								: `Open the request ${step.name} ran, with row ${rowIndex + 1} selected`
+						}
+					>
+						<ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
+						{/* The row number is the information, so it is on the
+						    control rather than only in its name - this is the row
+						    the repro has to bind, and the picker it opens is where
+						    finding it by hand was the dead end. */}
+						{rowIndex === undefined ? "Open request" : `Repro row ${rowIndex + 1}`}
+					</Button>
+				) : undefined
 			}
 			state={OUTCOME_STATE[step.outcome]}
 			statusCode={step.statusCode}

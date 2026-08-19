@@ -1157,11 +1157,19 @@
 	 * `auto` keyword means "remember the real height once measured", so a wrapped
 	 * line settles after its first appearance instead of re-estimating forever.
 	 *
+	 * The estimate is a variable because the rows that need this are not one
+	 * size: a console line is ~1.25rem and a collection run's step card - up to
+	 * `maxScenarioStoredSteps` of them, issue #730 - is nearer 3.5rem. Only the
+	 * pre-measurement guess differs, so a caller that sets
+	 * `--skip-offscreen-size` gets a scrollbar that starts out roughly right
+	 * instead of one that lurches on the first scroll. One utility rather than
+	 * two, so a fix to the technique reaches both.
+	 *
 	 * Chromium-only, which is fine: this ships in Electron.
 	 */
 	.skip-offscreen {
 		content-visibility: auto;
-		contain-intrinsic-size: auto 1.25rem;
+		contain-intrinsic-size: auto var(--skip-offscreen-size, 1.25rem);
 	}
 
 	.font-code {

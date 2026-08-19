@@ -442,3 +442,54 @@ describe("opening a singleton that is already open", () => {
 		expect(openTabs[0].entityId).toBeNull();
 	});
 });
+
+describe("openRequestWithDataRow", () => {
+	beforeEach(() => {
+		useTabsStore.setState({ dataRowTarget: null });
+	});
+
+	it("opens the request and hands the builder the row to select", () => {
+		useTabsStore.getState().openRequestWithDataRow("req_a", 500);
+
+		const { openTabs, activeTabId, dataRowTarget } = useTabsStore.getState();
+		expect(openTabs).toHaveLength(1);
+		expect(openTabs[0]).toMatchObject({ type: "request", entityId: "req_a" });
+		expect(activeTabId).toBe(openTabs[0].id);
+		// The row is the half `openTab` cannot carry - without it the repro
+		// lands on the request and the reader is back to hunting for row 501.
+		expect(dataRowTarget).toEqual({ requestId: "req_a", rowIndex: 500 });
+	});
+
+	it("focuses a request tab that is already open, still carrying the row", () => {
+		useTabsStore.getState().openTab({ type: "request", entityId: "req_a" });
+		useTabsStore.getState().openTab({ type: "request", entityId: "req_b" });
+
+		useTabsStore.getState().openRequestWithDataRow("req_a", 3);
+
+		const { openTabs, activeTabId, dataRowTarget } = useTabsStore.getState();
+		expect(openTabs).toHaveLength(2);
+		expect(openTabs.find((t) => t.id === activeTabId)?.entityId).toBe("req_a");
+		expect(dataRowTarget).toEqual({ requestId: "req_a", rowIndex: 3 });
+	});
+
+	it("refuses a row index that is not a row, rather than storing it", () => {
+		// Loudly: a picker asked to select row -1 opens on nothing, which is
+		// indistinguishable from a file that failed to read.
+		expect(() => useTabsStore.getState().openRequestWithDataRow("req_a", -1)).toThrow(
+			RangeError
+		);
+		expect(() => useTabsStore.getState().openRequestWithDataRow("req_a", 1.5)).toThrow(
+			RangeError
+		);
+
+		expect(useTabsStore.getState().dataRowTarget).toBeNull();
+		expect(useTabsStore.getState().openTabs).toHaveLength(0);
+	});
+
+	it("is consumed once, so a later visit does not re-open on an old choice", () => {
+		useTabsStore.getState().openRequestWithDataRow("req_a", 2);
+		useTabsStore.getState().clearDataRowTarget();
+
+		expect(useTabsStore.getState().dataRowTarget).toBeNull();
+	});
+});

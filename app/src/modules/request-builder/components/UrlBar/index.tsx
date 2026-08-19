@@ -46,7 +46,7 @@
  * live run is the one thing here that a static colour cannot say.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useRequestBuilderContext } from "../../context";
 import { useSendWithRow } from "../../hooks/useSendWithRow";
@@ -138,6 +138,39 @@ export default function UrlBar() {
 	const rememberRowIndex = (index: number) =>
 		setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index }));
 
+	/*
+	 * A step of a collection run pointed here (issue #730): "Repro row 501"
+	 * opened this request, and the row it bound travels in the tabs store
+	 * because `openTab` can only name a request. Acting on it is selecting that
+	 * row and showing the list on it - the failing step is then one click from
+	 * being sent again, which is the dead end the issue is about.
+	 *
+	 * Consumed once, exactly as `specTabTarget` is: the target has to survive
+	 * this tab being opened for the first time, and a later visit to the same
+	 * request must not re-open the list on a choice made ten minutes ago.
+	 * Cleared whether or not this request can bind rows at all - a request
+	 * outside a data-driven collection has no picker, and a target left
+	 * standing would fire on the next one that does.
+	 */
+	const [rowMenuOpen, setRowMenuOpen] = useState(false);
+	const dataRowTarget = useTabsStore((s) => s.dataRowTarget);
+	const clearDataRowTarget = useTabsStore((s) => s.clearDataRowTarget);
+	// The same condition the caret is rendered on (`showRowCaret` below): while a
+	// stream is open Send is Stop and there is no picker to show.
+	const canBindRows = rows.available && !isStreaming;
+	useEffect(() => {
+		if (!dataRowTarget || dataRowTarget.requestId !== request.id) return;
+		/* eslint-disable-next-line react-hooks/set-state-in-effect -- the target
+		   is state handed over from a navigation, not derived from a prop: it
+		   arrives before this tab renders and is consumed once. */
+		setRowIndexByRequest((previous) => ({
+			...previous,
+			[dataRowTarget.requestId]: dataRowTarget.rowIndex,
+		}));
+		if (canBindRows) setRowMenuOpen(true);
+		clearDataRowTarget();
+	}, [dataRowTarget, request.id, canBindRows, clearDataRowTarget]);
+
 	const canExecute = !isExecuting && request.url.trim().length > 0;
 	const viewRunningTest = () => openTab({ type: "dashboard", entityId: null });
 
@@ -154,7 +187,7 @@ export default function UrlBar() {
 	 * Send when it is present, so the rule is "Send is alone" rather than "there
 	 * is no Load Test".
 	 */
-	const showRowCaret = rows.available && !isStreaming;
+	const showRowCaret = canBindRows;
 	const sendAlone = !canStartLoadTest && !showRowCaret;
 
 	return (
@@ -278,6 +311,8 @@ export default function UrlBar() {
 						lastInGroup={!canStartLoadTest}
 						lastRowIndex={lastRowIndex}
 						onRowIndexChange={rememberRowIndex}
+						open={rowMenuOpen}
+						onOpenChange={setRowMenuOpen}
 					/>
 				)}
 

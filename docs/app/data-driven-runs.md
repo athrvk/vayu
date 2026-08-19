@@ -303,8 +303,8 @@ pre-request script that reads `pm.iterationData`, or a URL carrying
 the step out of the result - a run per line of script.
 
 With a contract declared and its file still in place, the request builder grows
-a **caret beside Send**. It lists the first rows of the file; pick one and the
-request is sent bound to it:
+a **caret beside Send**. It lists the first 20 rows of the file, and takes any
+row in it by number; pick one and the request is sent bound to it:
 
 - every `{{data.column}}` in the URL, headers and body is substituted from that
   row, exactly as a run's iteration would substitute it;
@@ -334,6 +334,20 @@ rather than written into the request, so no row can reach it, under either
 Send-with-row or a collection run. A `{{data.*}}` in an OAuth 2.0 config is
 refused by name rather than sent wrong - use a static credential there, or move
 the token into the request itself.
+
+**Any row, by number.** The list is 20 rows because a popover is not the file,
+and the row a long run failed on - "iteration 501 · row 501" - is never among
+them. So the **Row number** field above the list takes any index the file has:
+typing one shows that row and selects it, and Enter sends with it. A number the
+file has no row for is refused by name ("the file has 500 rows") rather than
+clamped to the last one, because binding a row you did not ask for is worse than
+binding none.
+
+**From a failed step.** A collection run's step card carries **Repro row N**,
+which opens the request that step ran with that row already selected and this
+list open on it (issue #730) - so reproducing a failure is the step's own action
+and one click on the row, rather than finding the request in the tree by name
+and then discovering its row is out of the list's reach.
 
 The rows read for the picker are held for that send and nothing more. The send
 itself is stored like any other design send, bound values included - see

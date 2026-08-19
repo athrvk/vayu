@@ -57,6 +57,7 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   activeTabId: string | null
   tabFocusedAt: Record<string, number>   // Tab id -> when it was last focused (epoch ms)
   specTabTarget: string | null           // Collection whose Spec tab something pointed at
+  dataRowTarget: { requestId, rowIndex } | null  // Request a repro pointed at, and the row
 }
 ```
 
@@ -95,6 +96,17 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   opening for the first time and never fires twice. Session-scoped like
   `tabFocusedAt` - a persisted copy would jump the user to Spec on the next
   launch for a choice they made yesterday
+- Pointing *into* a request the same way: `dataRowTarget` carries the data row a
+  navigation meant, because `openTab` can only name a request and which row
+  Send-with-row binds is state the UrlBar holds. A failed step of a collection
+  run sets it through `openRequestWithDataRow` (issue #730) - "reproduce this
+  step" means its request *and* the row that iteration bound - and the UrlBar
+  selects the row, opens the picker on it and clears the target, whether or not
+  the request can bind rows at all: a target left standing would fire on the
+  next request that can. Session-scoped like `specTabTarget`, and doubly so -
+  it points into a data file whose rows are deliberately never persisted, so a
+  remembered index would name a different row in a file that has since changed.
+  A non-integer or negative index throws rather than being stored
 - Persistence: `vayu.tabs` (v1), with a pass-through `migrate`. zustand discards
   a payload whose *stamped* version differs from the store's when no `migrate`
   is supplied, so the stub is where the next bump goes; it also refuses a
@@ -106,6 +118,7 @@ const { openTab, closeTab, focusTab, closeTabsForEntities } = useTabsStore();
 openTab({ type: "request", entityId: "req-123" });
 closeTabsForEntities(["req-123"]); // after a delete: closes tabs, drops responses
 openCollectionSpecTab("col-123"); // opens the collection, on its Spec tab
+openRequestWithDataRow("req-123", 500); // opens the request, on row 501 of its data file
 ```
 
 #### `layout-store.ts` - Drawer, Context Bar, & Split Ratio

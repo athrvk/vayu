@@ -79,12 +79,39 @@ interface TabsState {
 	 * tab on the next launch for a choice they made yesterday.
 	 */
 	specTabTarget: string | null;
+	/**
+	 * A request something outside the builder has pointed at a data row of, or
+	 * `null` (issue #730).
+	 *
+	 * The same shape of navigation as `specTabTarget` and for the same reason:
+	 * `openTab` can only name a request, and which row a Send should bind is
+	 * state the UrlBar holds. A failed step of a collection run is the one
+	 * caller today - "reproduce this step" means its request *and* the row that
+	 * iteration bound, and the second half has nowhere else to travel.
+	 *
+	 * Session-scoped (absent from `partialize`): it is one navigation in
+	 * flight, and it points into a data file whose rows are deliberately never
+	 * persisted - a remembered index would name a different row in a file that
+	 * has since changed.
+	 */
+	dataRowTarget: { requestId: string; rowIndex: number } | null;
 
 	openTab: (tab: Omit<Tab, "id">) => void;
 	/** Show a collection, on its Spec tab - see `specTabTarget`. */
 	openCollectionSpecTab: (collectionId: string) => void;
 	/** Consume `specTabTarget`, once the collection screen has acted on it. */
 	clearSpecTabTarget: () => void;
+	/**
+	 * Show a request, with one row of its collection's data file selected for
+	 * Send-with-row - see `dataRowTarget`.
+	 *
+	 * A negative or non-integer index is refused rather than stored: it can only
+	 * come from a malformed trace, and a picker asked to select row -1 would
+	 * open on nothing with no way to tell that from a file that failed to read.
+	 */
+	openRequestWithDataRow: (requestId: string, rowIndex: number) => void;
+	/** Consume `dataRowTarget`, once the request builder has acted on it. */
+	clearDataRowTarget: () => void;
 	closeTab: (tabId: string) => void;
 	/**
 	 * Close every tab bound to one of the given entity ids (e.g. after deletion).
@@ -227,6 +254,7 @@ export const useTabsStore = create<TabsState>()(
 			activeTabId: null,
 			tabFocusedAt: {},
 			specTabTarget: null,
+			dataRowTarget: null,
 
 			openTab: (tabDef) => {
 				const { openTabs, activeTabId, tabFocusedAt } = get();
@@ -291,6 +319,21 @@ export const useTabsStore = create<TabsState>()(
 			},
 
 			clearSpecTabTarget: () => set({ specTabTarget: null }),
+
+			// Target first, tab second, for the reason `openCollectionSpecTab`
+			// sets its own: opening focuses the builder, which reads the target on
+			// that same render.
+			openRequestWithDataRow: (requestId, rowIndex) => {
+				if (!Number.isInteger(rowIndex) || rowIndex < 0) {
+					throw new RangeError(
+						`Cannot open a request at data row ${rowIndex} - a row index is a non-negative integer.`
+					);
+				}
+				set({ dataRowTarget: { requestId, rowIndex } });
+				get().openTab({ type: "request", entityId: requestId });
+			},
+
+			clearDataRowTarget: () => set({ dataRowTarget: null }),
 
 			closeTab: (tabId) => {
 				const { openTabs, activeTabId } = get();
