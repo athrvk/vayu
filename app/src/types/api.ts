@@ -774,6 +774,13 @@ export interface ClearCookiesResponse {
  * which is the only thing the card has to render. Sending it back would put a
  * secret into every screenshot of the Settings panel.
  */
+/**
+ * What the certificate file holds (issue #833). `pem` keeps the key in a second
+ * file; `p12` is a PKCS#12 bundle carrying both, and the only shape a Schannel
+ * (Windows) build can present at all.
+ */
+export type ClientCertificateFormat = "pem" | "p12";
+
 export interface ClientCertificate {
 	id: string;
 	/** Lower-cased hostname, no scheme or port - the engine stores it this way. */
@@ -781,7 +788,9 @@ export interface ClientCertificate {
 	/** The port this entry is specific to, or null when it answers on every one. */
 	port: number | null;
 	certPath: string;
+	/** `""` for a `p12` entry, which carries its own key and stores no path. */
 	keyPath: string;
+	certFormat: ClientCertificateFormat;
 	hasPassphrase: boolean;
 	createdAt: number;
 	updatedAt: number;
@@ -796,7 +805,15 @@ export interface ClientCertificateInput {
 	host: string;
 	port: number | null;
 	certPath: string;
-	keyPath: string;
+	/**
+	 * Absent lets the engine read the format off the file, which is what a
+	 * caller that has no opinion should do. Naming it is checked against those
+	 * same bytes, so a wrong value is a `400` rather than a handshake failure
+	 * later.
+	 */
+	certFormat?: ClientCertificateFormat;
+	/** `null` clears a stored path - how an entry moves from `pem` to `p12`. */
+	keyPath: string | null;
 	passphrase?: string | null;
 }
 

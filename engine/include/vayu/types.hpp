@@ -1432,8 +1432,14 @@ struct ClientCertificate {
     // ALTER-friendly default, so nothing pushes this towards a sentinel.
     std::optional<int> port;
     std::string cert_path;
-    std::string key_path;
-    std::string passphrase; // "" = the key has none
+    std::string key_path; // "" for a PKCS#12 entry, which carries its own key
+    // What `cert_path` holds: `pem` or `p12` (issue #833). Stored rather than
+    // sniffed per transfer - the applier runs on every handle of every load
+    // run, and a format nothing recorded is one the Settings card cannot print.
+    // Held as its wire spelling, like `requests.http_version`, so the column
+    // survives a reorder of `vayu::http::ClientCertFormat`.
+    std::string cert_format = "pem";
+    std::string passphrase; // "" = the key has none; a PKCS#12 import password too
     int64_t created_at = 0;
     int64_t updated_at = 0;
 };

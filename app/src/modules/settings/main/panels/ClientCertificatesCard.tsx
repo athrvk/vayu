@@ -26,6 +26,14 @@
  * database. The passphrase is the exception: it is stored (plaintext, the
  * repo's existing credential precedent) and, once stored, never sent back -
  * which is why an entry that has one shows a badge and not a value.
+ *
+ * **The format is a field, not a guess** (issue #833). A PEM certificate keeps
+ * its key in a second file; a PKCS#12 bundle carries both, and is the only
+ * shape a Windows build can present at all. So the form asks which one, drops
+ * the key picker for a bundle - a card that kept demanding a key file the
+ * format does not have is a dead end no engine change fixes - and every row
+ * prints what it will present, because the engine may have read the format off
+ * the file and the user is the one who can correct it.
  */
 
 import { useRef, useState } from "react";
@@ -42,6 +50,8 @@ import {
 	Input,
 	Label,
 	SecretInput,
+	ToggleGroup,
+	ToggleGroupItem,
 } from "@/components/ui";
 import {
 	useClientCertificatesQuery,
@@ -49,7 +59,7 @@ import {
 	useDeleteClientCertificateMutation,
 } from "@/queries";
 import { useToastStore } from "@/stores";
-import type { ClientCertificate } from "@/types";
+import type { ClientCertificate, ClientCertificateFormat } from "@/types";
 import { fileBaseName } from "@/lib/file-path";
 
 /** What an entry is called: the same `host` / `host:port` the engine traces. */
@@ -57,8 +67,56 @@ function targetLabel(certificate: ClientCertificate): string {
 	return certificate.port === null ? certificate.host : `${certificate.host}:${certificate.port}`;
 }
 
+/**
+ * What each format is called on screen, and which files it needs. One table,
+ * because the segmented control, the row badge and the pickers all describe the
+ * same choice and three copies would be three things to keep in step.
+ *
+ * `accept` is a hint to the file dialog, never a rule: the engine reads the
+ * format off the file's own bytes and refuses a contradiction, so an oddly
+ * named certificate is still registrable by typing its path.
+ */
+const FORMATS: Record<
+	ClientCertificateFormat,
+	{ label: string; badge: string; accept: string; needsKeyFile: boolean }
+> = {
+	pem: {
+		label: "PEM + key file",
+		badge: "PEM",
+		accept: ".pem,.crt,.cer",
+		needsKeyFile: true,
+	},
+	p12: {
+		label: "PKCS#12 bundle",
+		badge: "PKCS#12",
+		accept: ".p12,.pfx",
+		needsKeyFile: false,
+	},
+};
+
+/**
+ * What a stored format is called on a row, falling back to the value itself.
+ *
+ * The engine refuses to *store* a format it does not know, so this only ever
+ * fires for a row hand-edited around the routes - which the engine still lists
+ * (it drops such a row from the transport policy and logs it, rather than
+ * hiding it). Indexing straight into the table there would throw on the lookup
+ * and take the whole Settings screen down over one bad row, instead of showing
+ * the user which row to fix.
+ */
+function formatBadge(certFormat: string): string {
+	return FORMATS[certFormat as ClientCertificateFormat]?.badge ?? certFormat;
+}
+
 /** The empty draft, and what "Cancel" restores. */
-const EMPTY_DRAFT = { host: "", port: "", certPath: "", keyPath: "", passphrase: "" };
+const EMPTY_DRAFT = {
+	host: "",
+	port: "",
+	certPath: "",
+	keyPath: "",
+	passphrase: "",
+	certFormat: "pem" as ClientCertificateFormat,
+};
 
 /**
  * A file the user picks, reduced to its absolute path.
@@ -136,6 +194,8 @@ export function ClientCertificatesCard() {
 		setDraft(EMPTY_DRAFT);
 	};
 
+	const needsKeyFile = FORMATS[draft.certFormat].needsKeyFile;
+
 	const submit = async () => {
 		try {
 			await createCertificate.mutateAsync({
@@ -145,7 +205,11 @@ export function ClientCertificatesCard() {
 				// nothing rather than a 400 the user has to decode.
 				port: draft.port.trim() === "" ? null : Number(draft.port.trim()),
 				certPath: draft.certPath.trim(),
-				keyPath: draft.keyPath.trim(),
+				certFormat: draft.certFormat,
+				// A bundle carries its own key, and the engine refuses a row
+				// that names one - so this is null rather than a path the form
+				// happens to still hold from before the format was switched.
+				keyPath: needsKeyFile ? draft.keyPath.trim() : null,
 				passphrase: draft.passphrase === "" ? undefined : draft.passphrase,
 			});
 			showToast(`Client certificate registered for ${draft.host.trim()}`, "success");
@@ -172,7 +236,9 @@ export function ClientCertificatesCard() {
 	};
 
 	const canSubmit =
-		draft.host.trim() !== "" && draft.certPath.trim() !== "" && draft.keyPath.trim() !== "";
+		draft.host.trim() !== "" &&
+		draft.certPath.trim() !== "" &&
+		(!needsKeyFile || draft.keyPath.trim() !== "");
 
 	return (
 		<Card>
@@ -212,6 +278,13 @@ export function ClientCertificatesCard() {
 												Every port
 											</Badge>
 										)}
+										{/* Printed for every row, not only the
+										    unusual one: the engine may have read
+										    this off the file, and what will be
+										    presented is the fact worth showing. */}
+										<Badge variant="chip" className="text-muted-foreground">
+											{formatBadge(certificate.certFormat)}
+										</Badge>
 										{certificate.hasPassphrase && (
 											<Badge variant="chip" className="text-muted-foreground">
 												Passphrase set
@@ -225,9 +298,14 @@ export function ClientCertificatesCard() {
 										<span title={certificate.certPath}>
 											{fileBaseName(certificate.certPath)}
 										</span>
-										<span title={certificate.keyPath}>
-											{fileBaseName(certificate.keyPath)}
-										</span>
+										{/* A bundle stores no key path, so there is no
+									    second name to print - an empty span would
+									    read as a file whose name went missing. */}
+										{certificate.keyPath !== "" && (
+											<span title={certificate.keyPath}>
+												{fileBaseName(certificate.keyPath)}
+											</span>
+										)}
 									</div>
 								</div>
 								<Button
@@ -274,24 +352,62 @@ export function ClientCertificatesCard() {
 							</div>
 						</div>
 
+						<div className="space-y-1.5">
+							<Label>Format</Label>
+							<ToggleGroup
+								size="sm"
+								aria-label="Certificate format"
+								value={draft.certFormat}
+								// Radix clears the value when the active segment is
+								// pressed again; a format has no "off".
+								onValueChange={(next) =>
+									next &&
+									setDraft((d) => ({
+										...d,
+										certFormat: next as ClientCertificateFormat,
+									}))
+								}
+							>
+								{(Object.keys(FORMATS) as ClientCertificateFormat[]).map(
+									(format) => (
+										<ToggleGroupItem key={format} value={format}>
+											{FORMATS[format].label}
+										</ToggleGroupItem>
+									)
+								)}
+							</ToggleGroup>
+							<p className="text-xs text-muted-foreground">
+								A PKCS#12 bundle holds the certificate and its key in one file.
+								Windows can only present that form.
+							</p>
+						</div>
+
 						<PathPicker
 							id="client-cert-path"
 							label="Certificate file"
 							value={draft.certPath}
-							accept=".pem,.crt,.cer,.p12,.pfx"
+							accept={FORMATS[draft.certFormat].accept}
 							onPick={(path) => setDraft((d) => ({ ...d, certPath: path }))}
 						/>
-						<PathPicker
-							id="client-cert-key-path"
-							label="Private key file"
-							value={draft.keyPath}
-							accept=".pem,.key"
-							onPick={(path) => setDraft((d) => ({ ...d, keyPath: path }))}
-						/>
+						{/* Absent for a bundle rather than disabled: the engine
+						    refuses a PKCS#12 entry that names a key file, so a
+						    greyed-out field would be asking for something that
+						    can never be sent. */}
+						{needsKeyFile && (
+							<PathPicker
+								id="client-cert-key-path"
+								label="Private key file"
+								value={draft.keyPath}
+								accept=".pem,.key"
+								onPick={(path) => setDraft((d) => ({ ...d, keyPath: path }))}
+							/>
+						)}
 
 						<div className="space-y-1.5">
 							<Label htmlFor="client-cert-passphrase">
-								Key passphrase (optional)
+								{needsKeyFile
+									? "Key passphrase (optional)"
+									: "Bundle password (optional)"}
 							</Label>
 							<SecretInput
 								value={draft.passphrase}

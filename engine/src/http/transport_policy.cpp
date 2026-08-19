@@ -295,8 +295,63 @@ std::string client_cert_label (const ClientCertRule& rule) {
     return rule.port ? rule.host + ":" + std::to_string (*rule.port) : rule.host;
 }
 
+std::array<ClientCertFormat, 2> all_client_cert_formats () {
+    return { ClientCertFormat::Pem, ClientCertFormat::Pkcs12 };
+}
+
+const char* to_string (ClientCertFormat format) {
+    switch (format) {
+    case ClientCertFormat::Pem: return "pem";
+    case ClientCertFormat::Pkcs12: return "p12";
+    }
+    return "pem";
+}
+
+const char* curl_ssl_cert_type (ClientCertFormat format) {
+    switch (format) {
+    case ClientCertFormat::Pem: return "PEM";
+    case ClientCertFormat::Pkcs12: return "P12";
+    }
+    return "PEM";
+}
+
+std::optional<ClientCertFormat> client_cert_format_from_string (std::string_view value) {
+    for (const auto format : all_client_cert_formats ()) {
+        if (value == to_string (format)) {
+            return format;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<ClientCertFormat> sniff_client_cert_format (std::string_view path) {
+    std::ifstream file{ std::string (path), std::ios::binary };
+    if (!file) {
+        return std::nullopt;
+    }
+    // Enough to clear the "Bag Attributes" preamble `openssl pkcs12` writes
+    // ahead of a PEM block, and small enough that a wrong path costs one page.
+    std::array<char, 4096> head{};
+    file.read (head.data (), static_cast<std::streamsize> (head.size ()));
+    const std::string_view leading (head.data (), static_cast<std::size_t> (file.gcount ()));
+    if (leading.empty ()) {
+        return std::nullopt;
+    }
+    // The PEM marker is looked for first because a PEM file is text and the
+    // ASN.1 tag below is also the ASCII digit '0' - a rule the other way round
+    // would classify a text file starting with a zero as a PKCS#12 bundle.
+    if (leading.find ("-----BEGIN") != std::string_view::npos) {
+        return ClientCertFormat::Pem;
+    }
+    if (static_cast<unsigned char> (leading.front ()) == 0x30) {
+        return ClientCertFormat::Pkcs12;
+    }
+    return std::nullopt;
+}
+
 std::optional<std::string> client_cert_rejection (std::string_view host,
 const std::optional<int>& port,
+ClientCertFormat format,
 std::string_view cert_path,
 std::string_view key_path) {
     if (host.empty () || is_blank (host)) {
@@ -331,12 +386,29 @@ std::string_view key_path) {
         return "port " + std::to_string (*port) + " is outside 1..65535";
     }
 
+    // A PKCS#12 bundle carries its own key, so a key path on such a row is a
+    // field nothing would ever read - refused rather than stored and ignored,
+    // because a card that keeps asking for a key file the format does not have
+    // is a dead end (#833). Clearing it is `keyPath: null` on the update.
+    if (format == ClientCertFormat::Pkcs12 && !key_path.empty () && !is_blank (key_path)) {
+        return std::string ("a PKCS#12 entry names no key file - the bundle carries the key, "
+                            "so clear the key file or register the certificate as PEM");
+    }
+
     // Both files are checked *here*, at the moment the user can still fix the
     // path, rather than at handshake time where curl reports
     // `CURLE_SSL_CERTPROBLEM` against the endpoint and says nothing about which
-    // setting named a file that is not there.
-    for (const auto& [label, path] : { std::pair{ "certificate file", cert_path },
-             std::pair{ "key file", key_path } }) {
+    // setting named a file that is not there. A PKCS#12 row has one file to
+    // check, which is the whole difference the format makes here.
+    std::vector<std::pair<const char*, std::string_view>> files{ { "certificate file", cert_path } };
+    if (format == ClientCertFormat::Pem) {
+        if (key_path.empty () || is_blank (key_path)) {
+            return std::string ("key file is empty - a PEM certificate keeps its key in a "
+                                "second file (only a PKCS#12 bundle carries its own)");
+        }
+        files.emplace_back ("key file", key_path);
+    }
+    for (const auto& [label, path] : files) {
         if (path.empty () || is_blank (path)) {
             return std::string (label) + " is empty";
         }
@@ -349,6 +421,19 @@ std::string_view key_path) {
         if (!probe) {
             return std::string (label) + " '" + std::string (path) + "' cannot be opened";
         }
+    }
+
+    // The declared format against the file's own bytes. Only a *contradiction*
+    // is refused: a file this engine cannot classify (a DER certificate, an
+    // encoding nobody here has seen) is left for the backend to judge, the same
+    // shallowness `ca_pem_rejection` is written with. What this catches is the
+    // mistake that otherwise surfaces as libcurl's own parse error against the
+    // endpoint - a `.p12` registered as a PEM pair, or the reverse.
+    if (const auto actual = sniff_client_cert_format (cert_path);
+        actual && *actual != format) {
+        return "certificate file '" + std::string (cert_path) + "' is " +
+        std::string (to_string (*actual)) + ", but the entry declares " +
+        std::string (to_string (format));
     }
 
     return std::nullopt;
@@ -424,8 +509,20 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
     // The client-certificate registry (issue #707), read whole because a policy
     // serves every host a run may reach - see TransportPolicy::client_certificates.
     for (const auto& row : db.get_client_certificates ()) {
+        // A spelling the route would have refused, so only a hand-edited row
+        // reaches it. Dropped with its own line rather than defaulted to PEM:
+        // presenting the wrong shape is a handshake failure against the
+        // endpoint, and "which format" is not a thing to guess on the user's
+        // behalf.
+        const auto format = client_cert_format_from_string (row.cert_format);
+        if (!format) {
+            vayu::utils::log_error ("Client certificate '" + row.id + "' for host '" + row.host +
+            "' declares an unknown format '" + row.cert_format +
+            "'; requests to that host will be sent without it");
+            continue;
+        }
         if (const auto rejection =
-            client_cert_rejection (row.host, row.port, row.cert_path, row.key_path)) {
+            client_cert_rejection (row.host, row.port, *format, row.cert_path, row.key_path)) {
             // The routes refuse this shape, so only a hand-edited row or a file
             // that has moved since it was registered reaches here. Named rather
             // than swallowed, and named *now*: the alternative is a handshake
@@ -442,6 +539,7 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
         rule.cert_path  = row.cert_path;
         rule.key_path   = row.key_path;
         rule.passphrase = row.passphrase;
+        rule.format     = *format;
         policy.client_certificates.push_back (std::move (rule));
     }
 

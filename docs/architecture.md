@@ -287,7 +287,8 @@ Variables are resolved with priority: **Environment > Collection > Global**
   `Proxy-Authorization` header from the URL, and that header is on the
   redaction list, so credentials never reach a stored trace or a debug log.
 - **Client-certificate keys**: never stored. The `client_certificates` table
-  holds the *paths* of the certificate and key files and the engine opens them
+  holds the *paths* of the certificate and key files - one path where the
+  certificate is a PKCS#12 bundle carrying both - and the engine opens them
   at send time. The key's passphrase is the one part that is stored, plaintext,
   on the same precedent as every other credential above - and the API never
   echoes it back, answering `hasPassphrase` instead.

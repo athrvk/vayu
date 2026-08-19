@@ -574,7 +574,14 @@ Json serialize (const vayu::db::ClientCertificate& certificate) {
         json["port"] = nullptr;
     }
     json["certPath"] = certificate.cert_path;
-    json["keyPath"]  = certificate.key_path;
+    // `""`, not null, for a PKCS#12 entry: the field is a path the row does not
+    // have rather than a value withheld, and the card renders the empty string
+    // as "no key file" without a second case for absence.
+    json["keyPath"] = certificate.key_path;
+    // What the certificate file is read as (issue #833). Echoed because the
+    // card prints it per row - a format stored and never shown would be a
+    // guess the user cannot correct.
+    json["certFormat"] = certificate.cert_format;
     // Whether the key has a passphrase, never the passphrase - see the header.
     json["hasPassphrase"] = !certificate.passphrase.empty ();
     json["createdAt"]     = certificate.created_at;

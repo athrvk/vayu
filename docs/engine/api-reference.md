@@ -2083,17 +2083,46 @@ A cert-authenticated exchange says so. `POST /execute` returns
 trace carries the same value under the same name, so a restored response names
 the entry a live one named.
 
-**A registered pair goes out as PEM.** The engine writes the two paths and no
-certificate *type*, so libcurl reads them in its default format - a PEM
-certificate and a PEM key, optionally encrypted under the stored passphrase.
-That is what every OpenSSL-backed build takes, which is Linux and macOS, and
-the handshake is asserted on a wire there (a design send, an SSE stream, a load
-run and a `pm.sendRequest` against a listener that demands a client
-certificate). **Windows cannot present one yet**: that build is Schannel-backed
-and wants a PKCS#12 file or a certificate-store reference, neither of which
-libcurl will read without being told the type. Issue #833 tracks giving a row
-its format; until it lands, an entry registered on Windows fails at handshake
-time with libcurl's own error.
+**The row says what format its certificate is in, and the engine tells libcurl
+so.** `certFormat` is `pem` - a PEM certificate with its key in a second file -
+or `p12`, a PKCS#12 bundle carrying both, and it becomes `CURLOPT_SSLCERTTYPE`
+on every transfer. Which formats work is a property of the build's TLS backend:
+
+| Backend | Builds | Presents |
+|---------|--------|----------|
+| OpenSSL | Linux, macOS | `pem` and `p12` |
+| Schannel | Windows | `p12` only |
+
+A `pem` entry on Windows fails at handshake time with libcurl's own error -
+that backend takes no PEM pair at all, which before issue #833 (when the engine
+named no type) meant a Windows build could present nothing a user registered.
+
+**On Windows, mutual TLS does not work today, and that is upstream** (issue
+#842). The engine stores the format and hands libcurl the right type, but
+curl's Schannel client-certificate path cannot complete the handshake: it
+imports the bundle with `PKCS12_NO_PERSIST_KEY` and the key that yields is one
+Schannel's credential path cannot use, so the transfer fails with
+`SEC_E_INTERNAL_ERROR ... The Local Security Authority cannot be contacted`.
+curl 8.21.0 - the pinned baseline - documents this in its own `KNOWN_BUGS`
+(curl issues 17626 and 3145). Nothing in Vayu's configuration changes it.
+
+On the OpenSSL legs both formats are asserted on a wire (a design send, an SSE
+stream, a load run and a `pm.sendRequest` against a listener that demands a
+client certificate).
+
+**A PKCS#12 entry names no key file**, because the bundle carries the key: a row
+that names one is a `400` rather than a stored path nothing would read, and
+`keyPath` comes back `""`. The `passphrase` field covers both formats - libcurl
+reads it as the PEM key's passphrase and as the bundle's import password.
+
+**The format is checked against the file, and defaulted from it.** Leave
+`certFormat` out and the engine reads the first bytes of `certPath` - a PEM
+marker or the ASN.1 `SEQUENCE` a DER bundle opens with - and stores what it
+found, falling back to `pem` for a file it cannot classify. Name it and it is
+kept, but a *contradiction* (a bundle registered as `pem`, or the reverse) is a
+`400`: the alternative is libcurl's parse error against the endpoint, which is
+the misdiagnosis this registry exists to end. A file the engine cannot classify
+is left for the backend to judge rather than refused here.
 
 ### GET /client-certificates
 
@@ -2108,6 +2137,7 @@ Every registered entry.
     "port": 8443,
     "certPath": "/home/ada/certs/client.pem",
     "keyPath": "/home/ada/certs/client.key",
+    "certFormat": "pem",
     "hasPassphrase": true,
     "createdAt": 1767225600000,
     "updatedAt": 1767225600000
@@ -2116,7 +2146,7 @@ Every registered entry.
 ```
 
 `port` is `null` - not `0` and not omitted - for an entry that answers on every
-port.
+port. `keyPath` is `""` for a `p12` entry, which stores no key path at all.
 
 ### POST /client-certificates
 
@@ -2131,14 +2161,15 @@ id](#the-engine-owns-every-id)).
 | `host` | yes | Hostname, no scheme, port or path. Stored lower-cased. |
 | `port` | no | The port this entry is specific to; `null` or absent means every port. |
 | `certPath` | yes | Path to the certificate file. Must be readable now. |
-| `keyPath` | yes | Path to the private key file. Must be readable now. |
-| `passphrase` | no | The key's passphrase. Write-only. |
+| `certFormat` | no | `pem` or `p12`. Absent or `null` reads it off `certPath`, falling back to `pem`. |
+| `keyPath` | for `pem` | Path to the private key file. Must be readable now, and must be **absent** for `p12`. |
+| `passphrase` | no | The key's passphrase, or a PKCS#12 bundle's import password. Write-only. |
 
 **Errors:**
 
 | Status | When |
 |--------|------|
-| `400` | A host that could never match (carries a scheme, a path, a port, or brackets), a port outside `1..65535`, a non-integer `port`, a missing `host` / `certPath` / `keyPath`, a file that is not readable, or a body `id`. |
+| `400` | A host that could never match (carries a scheme, a path, a port, or brackets), a port outside `1..65535`, a non-integer `port`, a missing `host` / `certPath`, a `pem` entry with no `keyPath`, a `p12` entry that names one, a `certFormat` outside `pem` / `p12`, a `certFormat` the file's own bytes contradict, a file that is not readable, or a body `id`. |
 | `409` | Another entry already claims this `host` + `port`. Two rows for one target would make the certificate presented depend on row order, so the second is refused with the id of the first rather than silently shadowing it. |
 
 ### PUT /client-certificates/:id
@@ -2146,10 +2177,15 @@ id](#the-engine-owns-every-id)).
 Update an entry. **Update only** - a missing id is a `404`, never a silent
 create. Merge-patch under the [null-vs-absent
 rule](#the-null-vs-absent-rule): an absent field keeps its value, `port: null`
-widens the entry to every port, and `passphrase: null` clears a stored one.
+widens the entry to every port, `passphrase: null` clears a stored one, and
+`keyPath: null` clears the key path - which is how an entry moves from `pem` to
+`p12`, since a bundle may not name one. `certFormat: null` re-reads the format
+off `certPath`.
 
 Validation runs on the **merged** row, not on the body, so a `PUT` that moves
-only `keyPath` still proves the pair works together.
+only `keyPath` still proves the pair works together - and a `PUT` that names
+`certFormat: "p12"` without clearing `keyPath` is a `400`, because the merged
+row would be a bundle naming a key file.
 
 ### DELETE /client-certificates/:id
 

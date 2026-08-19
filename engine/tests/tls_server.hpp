@@ -51,6 +51,7 @@
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
+#include <openssl/pkcs12.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
@@ -90,12 +91,18 @@ struct Asn1TimeDeleter {
         ASN1_TIME_free (value);
     }
 };
+struct Pkcs12Deleter {
+    void operator() (PKCS12* value) const noexcept {
+        PKCS12_free (value);
+    }
+};
 
 using X509Ptr     = std::unique_ptr<X509, X509Deleter>;
 using KeyPtr      = std::unique_ptr<EVP_PKEY, KeyDeleter>;
 using BioPtr      = std::unique_ptr<BIO, BioDeleter>;
 using CrlPtr      = std::unique_ptr<X509_CRL, CrlDeleter>;
 using Asn1TimePtr = std::unique_ptr<ASN1_TIME, Asn1TimeDeleter>;
+using Pkcs12Ptr   = std::unique_ptr<PKCS12, Pkcs12Deleter>;
 
 /// Fail the way a fixture should: loudly, naming OpenSSL's own reason. A
 /// silently degraded fixture would leave the tests below asserting nothing.
@@ -133,6 +140,14 @@ inline std::string to_pem (EVP_PKEY* key) {
         fail ("could not serialize a private key to PEM");
     }
     return read_bio (bio, "a private key");
+}
+
+inline std::string to_der (PKCS12* bundle) {
+    BioPtr bio (BIO_new (BIO_s_mem ()));
+    if (!bio || i2d_PKCS12_bio (bio.get (), bundle) != 1) {
+        fail ("could not serialize a PKCS#12 bundle to DER");
+    }
+    return read_bio (bio, "a PKCS#12 bundle");
 }
 
 inline std::string to_der (X509_CRL* crl) {
@@ -197,6 +212,40 @@ struct CertificateAndKey {
             tls_detail::fail ("could not serialize an encrypted private key");
         }
         return tls_detail::read_bio (bio, "an encrypted private key");
+    }
+
+    /**
+     * @brief The certificate and its key in one DER-encoded PKCS#12 bundle,
+     *        protected by @p passphrase - empty for a bundle with none.
+     *
+     * The shape Schannel takes a client identity in, and the reason a Windows
+     * build could present nothing a user registered before #833. Written as one
+     * file by the caller, where the PEM pair needs two.
+     *
+     * **OpenSSL's own defaults, deliberately** - AES-256-CBC under PBES2 with a
+     * SHA-256 MAC, which is what `openssl pkcs12 -export` writes today and so
+     * what a user's bundle looks like. The first cut of this fixture reached
+     * for SHA-1 + 3DES instead, reasoning that the oldest algorithms are the
+     * widest supported; the Windows leg answered that, and the answer is the
+     * other way round. Every p12 case there failed with
+     * `SEC_E_INTERNAL_ERROR ... The Local Security Authority cannot be
+     * contacted` on the second `InitializeSecurityContext` - Schannel having
+     * the certificate but no usable private key. A legacy-PBE bundle imports
+     * its key into the old CAPI provider, and curl imports with
+     * `PKCS12_NO_PERSIST_KEY`, so the ephemeral handle that combination yields
+     * is one Schannel cannot use for the handshake. A PBES2 bundle goes to CNG
+     * and works.
+     */
+    std::string pkcs12 (const std::string& passphrase = {}) const {
+        // 0 / 0 is "the library's default algorithm", read at build time rather
+        // than pinned here: the point is to be what today's OpenSSL emits, and
+        // a hardcoded NID would freeze this at what today happens to mean.
+        tls_detail::Pkcs12Ptr bundle (PKCS12_create (passphrase.c_str (), "vayu-test-client",
+        key.get (), certificate.get (), nullptr, 0, 0, 0, 0, 0));
+        if (!bundle) {
+            tls_detail::fail ("could not build a PKCS#12 bundle");
+        }
+        return tls_detail::to_der (bundle.get ());
     }
 
     /**
