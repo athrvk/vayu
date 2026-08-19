@@ -34,6 +34,17 @@ does, without naming it), start the file with:
 
 Forgetting it fails loudly (`document is not defined`), never silently.
 
+**A render-heavy test asserts a wall clock it never wrote.** `vitest.config.ts`
+sets no `testTimeout`, so every case gets the default 5s - fine for the suite,
+a hidden performance budget for the handful that build thousands of rows and
+render them. The 5,000-step `ScenarioRunView` cases cost ~1.1s idle (~2.8s for
+the one that renders twice) and crossed 5s whenever the four cores were shared
+with an engine build, failing a run over machine load rather than over the code
+(#846). Give such a case an explicit `it(name, { timeout: N }, fn)` **with the
+measured cost and the multiplier in a comment**, so the next person under load
+does not raise it by reflex - and do not raise the global default, which would
+slow every genuinely hung test's failure to the new bound.
+
 **A source scan cannot see a class that arrives in a variable.** The badge-hover
 guard scanned for `<Badge className="bg-…">` and missed both real instances,
 because each got its background from a `statusColor` / `config.tint` binding;

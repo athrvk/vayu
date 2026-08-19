@@ -312,8 +312,27 @@ describe("the count chips as the filter", () => {
 	});
 });
 
+/**
+ * What a case that renders the 5,000-step fixture is allowed to take (#846).
+ *
+ * The three cases carrying this assert *windowing* - what is mounted, and what
+ * the "still to come" line counts. None of them asserts a duration, but
+ * vitest's default `testTimeout` of 5s quietly does: building 5,000 rows and
+ * rendering the window costs ~1.1s on an idle 4-core box, and ~2.8s for the
+ * case that pays the render twice by clicking a chip. Share those cores with
+ * anything else - an engine build, another job on the same CI runner - and the
+ * whole suite runs ~1.7x slower, which puts that case past 5s and fails the
+ * run over machine load rather than over the code.
+ *
+ * 20s is ~7x the measured worst case: far enough that contention cannot reach
+ * it, close enough that a genuinely hung render still fails in seconds. Raise
+ * the *fixture* if the storage cap changes; do not raise this number because a
+ * run went red - a case that needs more than 20s here has stopped windowing.
+ */
+const RENDERS_THE_CAP = { timeout: 20_000 };
+
 describe("a run at the storage cap", () => {
-	it("does not mount 5,000 cards to show the first screen of them", () => {
+	it("does not mount 5,000 cards to show the first screen of them", RENDERS_THE_CAP, () => {
 		reportQuery.data = report({
 			results: Array.from({ length: 5_000 }, (_, i) => storedStep(i, 0, "passed")),
 		});
@@ -329,18 +348,22 @@ describe("a run at the storage cap", () => {
 		expect(screen.getByText(/showing 200 of 5,000 steps/i)).toBeTruthy();
 	});
 
-	it("counts the filtered list, not the whole one, in what is still to come", () => {
-		reportQuery.data = report({
-			results: Array.from({ length: 5_000 }, (_, i) =>
-				storedStep(i, 0, i % 10 === 0 ? "failed" : "passed")
-			),
-		});
-		render(<ScenarioRunView run={RUN} />);
+	it(
+		"counts the filtered list, not the whole one, in what is still to come",
+		RENDERS_THE_CAP,
+		() => {
+			reportQuery.data = report({
+				results: Array.from({ length: 5_000 }, (_, i) =>
+					storedStep(i, 0, i % 10 === 0 ? "failed" : "passed")
+				),
+			});
+			render(<ScenarioRunView run={RUN} />);
 
-		fireEvent.click(chip("failed"));
+			fireEvent.click(chip("failed"));
 
-		expect(screen.getByText(/showing 200 of 500 steps/i)).toBeTruthy();
-	});
+			expect(screen.getByText(/showing 200 of 500 steps/i)).toBeTruthy();
+		}
+	);
 });
 
 describe("searching the step list by name", () => {
@@ -446,7 +469,9 @@ describe("searching the step list by name", () => {
 		expect(screen.getByText(/no steps recorded/i)).toBeTruthy();
 	});
 
-	it("restarts the growing window when a search narrows the list", () => {
+	// The third case rendering the 5,000-step fixture, so it carries the same
+	// timeout for the same reason.
+	it("restarts the growing window when a search narrows the list", RENDERS_THE_CAP, () => {
 		reportQuery.data = report({
 			results: Array.from({ length: 5_000 }, (_, i) =>
 				storedStep(i, 0, "passed", { name: i % 10 === 0 ? "POST /checkout" : "GET /cart" })
