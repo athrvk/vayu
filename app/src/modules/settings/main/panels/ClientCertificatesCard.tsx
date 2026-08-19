@@ -94,6 +94,20 @@ const FORMATS: Record<
 	},
 };
 
+/**
+ * What a stored format is called on a row, falling back to the value itself.
+ *
+ * The engine refuses to *store* a format it does not know, so this only ever
+ * fires for a row hand-edited around the routes - which the engine still lists
+ * (it drops such a row from the transport policy and logs it, rather than
+ * hiding it). Indexing straight into the table there would throw on the lookup
+ * and take the whole Settings screen down over one bad row, instead of showing
+ * the user which row to fix.
+ */
+function formatBadge(certFormat: string): string {
+	return FORMATS[certFormat as ClientCertificateFormat]?.badge ?? certFormat;
+}
+
 /** The empty draft, and what "Cancel" restores. */
 const EMPTY_DRAFT = {
 	host: "",
@@ -269,7 +283,7 @@ export function ClientCertificatesCard() {
 										    this off the file, and what will be
 										    presented is the fact worth showing. */}
 										<Badge variant="chip" className="text-muted-foreground">
-											{FORMATS[certificate.certFormat].badge}
+											{formatBadge(certificate.certFormat)}
 										</Badge>
 										{certificate.hasPassphrase && (
 											<Badge variant="chip" className="text-muted-foreground">

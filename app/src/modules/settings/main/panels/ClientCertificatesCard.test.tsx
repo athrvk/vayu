@@ -224,6 +224,20 @@ describe("ClientCertificatesCard", () => {
 		);
 	});
 
+	it("shows a format it does not recognise rather than taking the card down", () => {
+		// A row hand-edited around the routes: the engine refuses to store this
+		// and still lists it. Indexing straight into the format table would
+		// throw and blank the whole Settings screen over one bad row.
+		queryResult = {
+			data: [{ ...certificates[0], certFormat: "pkcs12" as never }],
+			isError: false,
+		};
+		renderCard();
+
+		expect(screen.getByText("api.example.com:8443")).toBeInTheDocument();
+		expect(screen.getByText("pkcs12")).toBeInTheDocument();
+	});
+
 	it("says the engine did not answer rather than showing an empty registry", () => {
 		queryResult = { data: undefined, isError: true };
 		renderCard();
