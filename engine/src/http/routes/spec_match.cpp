@@ -24,9 +24,11 @@
  *   a set that silently excludes almost all of them, and the counts it then
  *   showed the user would be wrong rather than empty.
  * - **What an operation index may be.** The `operations` it is handed go
- *   through `validate_operations_index`, the same validator `POST /specs`
- *   applies to the index it stores, so a payload the store would refuse cannot
- *   first be matched against and reported on.
+ *   through `validate_operations_index`, so a set the store would refuse cannot
+ *   first be matched against and reported on. They are sent here, unlike on
+ *   `POST /specs` - which reads them off the document it stores (issue #853) -
+ *   because this route matches against a document that has not been stored yet,
+ *   which is the whole point of a bind preview.
  *
  * It writes nothing and stores nothing: the caller sees the counts, and the
  * writes a bind performs are still `POST /specs` plus the collection and
