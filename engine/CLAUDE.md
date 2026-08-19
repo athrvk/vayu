@@ -59,6 +59,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/requests/:id/examples` | A request's saved example responses (issue #481), in stored order |
 | POST | `/specs` | Store an OpenAPI document (issue #637); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (issue #712) |
 | POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (issue #655) - new document, moved binding and the created/updated/deleted requests in one transaction |
+| POST | `/specs/match` | Which request of a collection's subtree is which operation of a document (issue #761) - reads only, nothing stored or stamped |
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only** - 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch) - 404 on a missing id |
 
@@ -187,6 +188,24 @@ Three things worth knowing before you design around them:
   replaces only `origin="import"` examples. `Database::spec_sync_apply` is its
   transaction, a sibling of `import_apply` and `apply_reorder` for the same
   reason those two are separate.
+  **Which request is which operation is the engine's answer** (#761,
+  `POST /specs/match` over `core/operation_match.hpp`). Binding a collection
+  that already exists has to pair two independent lists, and it does it by
+  structure - both sides reduced to a path shape, with the origin, query and
+  fragment dropped and every placeholder (`{{petId}}`, `{petId}`) flattened to
+  `{}`, so a renamed path parameter is still the same endpoint. Ambiguity is
+  refused in both directions rather than guessed at, because the sync applies
+  changes *by* identity and a wrong one is worse than none. It moved out of the
+  renderer so an agent over MCP can bind the same way rather than through a
+  second copy of that rule; the renderer still reduces the same shapes for the
+  spec diff and the export skeleton, and
+  `tests/fixtures/operation-shape-conformance.json` is the table both languages
+  read until those move too. The route reads the **subtree** of the collection
+  it is given - an import binds the root and files requests under tag
+  sub-collections - through the same `collection_subtree_ids` walk
+  `POST /specs/sync` bounds itself by. It still parses no OpenAPI: the caller
+  hands it the identities the document declares, the same rows it stores as the
+  `operations` index.
   **Responses are validated against what the document declares** (#628):
   `spec_documents.response_schemas` holds an app-extracted index (schemas as
   written, plus one shared `refRoots` their `$ref`s resolve through), and

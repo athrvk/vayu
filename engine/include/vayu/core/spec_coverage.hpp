@@ -120,7 +120,7 @@ match_status_pattern (const std::vector<std::string>& patterns, int status);
 /**
  * @brief Resolve an executed request's stamped identity to a declared operation.
  *
- * `operationId` first, `METHOD path` second - the rule `operation-match.ts`
+ * `operationId` first, `METHOD path` second - the rule `operation_match.hpp`
  * already applies when binding, stated once on each side because both sides must
  * answer a rename the same way. `std::nullopt` means the run exercised something
  * the document does not declare, which the tally counts as its own finding

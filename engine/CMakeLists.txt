@@ -288,6 +288,7 @@ add_library(vayu_core STATIC
     src/core/scenario_load.cpp
     src/core/scenario_plan.cpp
     src/core/scenario_runner.cpp
+    src/core/operation_match.cpp
     src/core/spec_binding.cpp
     src/core/spec_coverage.cpp
     src/core/schema_validation.cpp
@@ -446,6 +447,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/examples.cpp
         src/http/routes/specs.cpp
         src/http/routes/spec_sync.cpp
+        src/http/routes/spec_match.cpp
         src/http/routes/reorder.cpp
         src/http/routes/environments.cpp
         src/http/routes/client_certificates.cpp
@@ -587,6 +589,8 @@ if(VAYU_BUILD_TESTS)
         tests/tree_order_test.cpp
         tests/reorder_route_test.cpp
         tests/spec_sync_route_test.cpp
+        tests/spec_match_route_test.cpp
+        tests/operation_match_test.cpp
         tests/spec_coverage_test.cpp
         tests/schema_validation_test.cpp
         tests/version_isolation_test.cpp
@@ -598,6 +602,7 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/examples.cpp
         src/http/routes/specs.cpp
         src/http/routes/spec_sync.cpp
+        src/http/routes/spec_match.cpp
         src/http/routes/reorder.cpp
         src/http/routes/runs.cpp
         src/http/routes/collections.cpp
@@ -760,6 +765,7 @@ if(VAYU_BUILD_TESTS)
         ScratchDatabaseCleanup
         ScriptRequestNameTest
         ScriptVariableScopesTest
+        SpecMatchRouteTest
         SpecSyncRouteTest
         SpecsRouteTest
         SseLimitsTest

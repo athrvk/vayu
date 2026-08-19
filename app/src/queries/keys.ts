@@ -151,6 +151,18 @@ export const queryKeys = {
 		// two caches is safe precisely because both are immutable - a changed
 		// document is a new id.
 		meta: (id: string) => [...queryKeys.specs.all, "meta", id] as const,
+		/**
+		 * One match of a collection's requests against a document's operations
+		 * (issue #761).
+		 *
+		 * Keyed by a fingerprint of **both** inputs rather than by a document id,
+		 * because the document being matched has not been stored yet - the Spec
+		 * tab asks before the user commits to the bind. With both inputs in the
+		 * key the answer cannot go stale under it, which is what lets this be
+		 * cached indefinitely like the immutable document reads above.
+		 */
+		match: (collectionId: string, fingerprint: string) =>
+			[...queryKeys.specs.all, "match", collectionId, fingerprint] as const,
 	},
 
 	// Environments

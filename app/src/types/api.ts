@@ -1340,6 +1340,33 @@ export interface SpecSyncUpdate {
 	examples?: ImportApplyExample[];
 }
 
+/**
+ * What `POST /specs/match` is asked (issue #761): a collection, and the
+ * operations a document declares.
+ *
+ * The requests are *not* sent. The engine gathers the collection's whole
+ * subtree itself, because an OpenAPI import binds the root and files every
+ * request under a tag sub-collection - a caller that sent "the collection's
+ * requests" would be matching against a set that excludes almost all of them.
+ */
+export interface SpecMatchRequest {
+	collectionId: string;
+	/** The identities the document declares - the `operations` index's rows. */
+	operations: SpecOperation[];
+}
+
+export interface SpecMatchResponse {
+	/** The requests that resolved to exactly one operation, and it to them. */
+	matched: { requestId: string; operation: SpecOperation }[];
+	/** Request ids left over - no operation, or an ambiguous shape. */
+	unmatchedRequests: string[];
+	/**
+	 * Operations no request claimed. These become new requests in a sync
+	 * (#627), never in a bind - which creates and deletes nothing.
+	 */
+	unmatchedOperations: SpecOperation[];
+}
+
 export interface SpecSyncRequest {
 	/** The bound collection. Nothing outside its subtree is written. */
 	collectionId: string;

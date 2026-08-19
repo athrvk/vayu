@@ -65,6 +65,8 @@ import type {
 	ImportApplyRequest,
 	ImportApplyResponse,
 	CreateSpecRequest,
+	SpecMatchRequest,
+	SpecMatchResponse,
 	SpecSyncRequest,
 	SpecSyncResponse,
 	SpecDocument,
@@ -268,6 +270,20 @@ export const apiService = {
 	 */
 	async getSpecMeta(id: string): Promise<SpecDocumentMeta> {
 		return await httpClient.get<SpecDocumentMeta>(API_ENDPOINTS.SPEC_META(id));
+	},
+
+	/**
+	 * Which request of a collection is which operation of a document (issue
+	 * #761).
+	 *
+	 * Reads only: the tab asks this about a document the user has not decided to
+	 * bind, so nothing is stored, stamped or created. The matching rule itself is
+	 * the engine's (`core/operation_match.hpp`) - it moved there so that
+	 * everything which is not the Spec tab, an agent over MCP first among them,
+	 * can bind a collection the same way rather than through a second copy of it.
+	 */
+	async matchSpecOperations(payload: SpecMatchRequest): Promise<SpecMatchResponse> {
+		return await httpClient.post<SpecMatchResponse>(API_ENDPOINTS.SPEC_MATCH, payload);
 	},
 
 	/**

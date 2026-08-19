@@ -1302,6 +1302,17 @@ which is also why both carry `staleTime: Infinity`. The Spec tab's card reads
 meta; export, the import dialog's bound-spec match and the Sync section's Check
 read the full document, each on the action that needs it.
 
+`specs.match(collectionId, fingerprint)` is the third of that family and the one
+that names no document (issue #761): the pairing of a collection's requests
+against a picked document's operations, answered by `POST /specs/match` since
+the matcher moved engine-side. There is no id to key it by - the document has
+not been stored, because the tab asks before the user commits to the bind - so
+the key carries a fingerprint of **both** inputs, exactly the fields the matcher
+reads off them (a request's id, method and URL; an operation's identity). That
+is what makes its `staleTime: Infinity` honest: an answer cannot go stale while
+both inputs are pinned in its key, and either of them changing is a different
+key rather than a stale entry under this one.
+
 **Automatic Invalidation:**
 - Mutations automatically invalidate related queries (e.g., creating a request invalidates the collection's request list)
 - Some mutations use optimistic updates and cache updates for instant UI feedback
