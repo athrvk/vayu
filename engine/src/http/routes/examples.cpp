@@ -283,6 +283,18 @@ const nlohmann::json& json) {
 
 /**
  * Testable core of DELETE /requests/:id/examples/:exampleId.
+ *
+ * **An imported example is tombstoned rather than removed** (issue #722). A
+ * spec sync replaces every `origin="import"` row of a request it applies any
+ * change to, so a removed row came back on the next rename-only sync and the
+ * delete this route performs was not a decision that lasted. Keeping the row
+ * as a tombstone (`suppressed`) is what records the decision - the sync reads
+ * them and leaves that status alone.
+ *
+ * A user's own example is still removed outright: nothing re-creates one, so
+ * there is no intent to remember and a hidden row would be a leak with no
+ * reader. Either way the answer is the same, because from the caller's side it
+ * is: the example is gone from every read.
  */
 std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
@@ -295,7 +307,11 @@ const std::string& example_id) {
         return *err;
     }
 
-    db.delete_request_example (example_id);
+    if (x.origin == vayu::core::constants::request_example::ORIGIN_IMPORT) {
+        db.suppress_request_example (example_id, now_ms ());
+    } else {
+        db.delete_request_example (example_id);
+    }
     return { 200,
         nlohmann::json{ { "message", "Example deleted successfully" }, { "id", example_id } } };
 }

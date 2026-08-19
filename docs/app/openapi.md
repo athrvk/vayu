@@ -348,7 +348,16 @@ by what the document now documents.
 
 - Examples you saved from a live response are **never** replaced. The engine
   records who wrote each one (`origin`), and only the imported ones are in
-  scope.
+  scope. The Examples panel marks the imported rows with an **Imported** chip,
+  so which rows a sync owns is visible where they are managed.
+- **An imported example you deleted stays deleted.** A sync refreshes examples
+  whenever it applies *any* change to a request - a rename is enough - so
+  before this the next sync silently brought a deleted one back. The engine now
+  records the deletion and the refresh skips that response status; re-importing
+  the document is the one thing that brings it back, and the delete dialog says
+  so. What is remembered is the **status**, not the example's name, because a
+  name carries the document's response description and changes when the
+  document rewords it.
 - The order is preserved where it can be: your saved examples never move, and a
   refreshed example never jumps ahead of one that was already in front of it.
   This matters because a mock server answers with the *first* example.

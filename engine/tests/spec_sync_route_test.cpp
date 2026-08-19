@@ -15,6 +15,9 @@
  *    replaced and `origin="user"` rows are not, and the replacements never jump
  *    ahead of a user row that was already in front of them - "the first example"
  *    is what a mock server answers with, so the order is a contract.
+ *  - **So does deleting an imported one.** A refresh writes the document's
+ *    examples back for every status except one the user removed (issue #722) -
+ *    without that, any later sync of any field undid the delete.
  *  - **The binding moves with the rows.** After a sync the collection names the
  *    document that was just applied, or - if anything failed - the one it named
  *    before.
@@ -54,6 +57,11 @@ const std::string& id,
 const nlohmann::json& json);
 std::pair<int, nlohmann::json>
 create_request_response (vayu::db::Database& db, const nlohmann::json& json);
+// Defined in examples.cpp - the delete an imported example goes through, which
+// is what records the intent a refresh must respect (issue #722).
+std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id);
 // Defined in runs.cpp - the reader that must not resolve coverage from the
 // collection's binding as it stands now.
 std::pair<int, nlohmann::json>
@@ -135,12 +143,15 @@ class SpecSyncRouteTest : public ::testing::Test {
     }
 
     /** One example row on @p request_id, written straight to the store. */
-    std::string seed_example (const std::string& request_id, const std::string& origin, int order) {
+    std::string seed_example (const std::string& request_id,
+    const std::string& origin,
+    int order,
+    int status = 200) {
         vayu::db::RequestExample x;
         x.id           = "exa_" + origin + "_" + std::to_string (order);
         x.request_id   = request_id;
         x.name         = origin + " " + std::to_string (order);
-        x.status       = 200;
+        x.status       = status;
         x.headers      = "[]";
         x.body         = "{}";
         x.content_type = "application/json";
@@ -423,6 +434,60 @@ TEST_F (SpecSyncRouteTest, AnAbsentExampleListLeavesEveryExampleAlone) {
     body (json{ { "update", json::array ({ json{ { "id", request }, { "name", "renamed" } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
     EXPECT_EQ (db_->get_request_examples (request).size (), 1u);
+}
+
+// Issue #722. The refresh replaces every imported row of a request an apply
+// touches, so before this a rename-only sync re-created an example the user had
+// deleted - and the delete meant nothing. Deleting one leaves a tombstone and
+// the refresh skips that status. Mutation check: drop the
+// `suppressed_statuses` skip in `build_example_rows` and the deleted 404 comes
+// back, reddening both size assertions.
+TEST_F (SpecSyncRouteTest, ADeletedImportedExampleIsNotWrittenBackByALaterSync) {
+    const std::string request = create_request (root_);
+    seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 200);
+    const std::string unwanted =
+    seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 1, 404);
+
+    auto [deleted, delete_body] =
+    routes::delete_request_example_response (*db_, request, unwanted);
+    ASSERT_EQ (deleted, 200) << delete_body.dump ();
+
+    // The payload a rename-only tick sends: every documented example, because
+    // the diff does not compare them (#654) and the app attaches the lot.
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "update",
+        json::array ({ json{ { "id", request }, { "name", "renamed" },
+            { "examples",
+                json::array ({ json{ { "name", "200 - A user" }, { "status", 200 } },
+                    json{ { "name", "404 - Not found" }, { "status", 404 } } }) } } }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    auto rows = db_->get_request_examples (request);
+    ASSERT_EQ (rows.size (), 1u) << "the deleted 404 example came back";
+    EXPECT_EQ (rows[0].status, 200);
+    // The status the user kept still refreshes from the document - a tombstone
+    // suppresses its own status and nothing else.
+    EXPECT_EQ (rows[0].name, "200 - A user");
+    EXPECT_EQ (rows[0].order, 0);
+}
+
+// The identity a tombstone records is the *status*, not the name: an example's
+// name carries the document's response description, which a later revision may
+// reword - and a name-keyed tombstone would then miss, resurrecting exactly
+// what this fix makes durable (issue #722).
+TEST_F (SpecSyncRouteTest, ARewordedDescriptionDoesNotBringADeletedExampleBack) {
+    const std::string request = create_request (root_);
+    const std::string unwanted =
+    seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 404);
+    ASSERT_EQ (routes::delete_request_example_response (*db_, request, unwanted).first, 200);
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "update",
+        json::array ({ json{ { "id", request },
+            { "examples", json::array ({ json{ { "name", "404 - No such user any more" },
+                { "status", 404 } } }) } } }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_TRUE (db_->get_request_examples (request).empty ());
 }
 
 TEST_F (SpecSyncRouteTest, RefusesAnExampleThatClaimsToBeTheUsers) {

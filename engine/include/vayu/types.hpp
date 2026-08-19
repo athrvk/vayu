@@ -1038,6 +1038,31 @@ struct RequestExample {
      * that ever had a partial one.
      */
     bool body_truncated = false;
+    /**
+     * A tombstone: the row is an imported example the user deleted (issue
+     * #722).
+     *
+     * Deleting an `origin="import"` example used to remove the row and record
+     * nothing, while a spec sync replaces every imported row of a request it
+     * applies *any* change to - so the next rename-only sync brought the
+     * deleted example back. The intent has to survive somewhere, and the row
+     * that held it is the one thing that already carries the identity: this
+     * flag keeps it as a marker of "the document's example for this status is
+     * not wanted here" and `refresh_examples` skips that status.
+     *
+     * A suppressed row is not an example any more. `get_request_example(s)`
+     * and `count_request_examples` filter it out, so every reader - the list
+     * route, the mock server, the export - behaves exactly as though the
+     * delete had removed it, and only the sync's own accessor
+     * (`get_suppressed_request_examples`) can see it. `body`, `headers` and
+     * `content_type` are cleared when the flag goes on: nothing serves a
+     * tombstone, so keeping a response body against a deleted row would retain
+     * bytes for a reader that does not exist.
+     *
+     * `false` for every row that predates the column, which is what they all
+     * are - a row a delete had reached was gone.
+     */
+    bool suppressed = false;
     int64_t created_at;
     int64_t updated_at;
 };

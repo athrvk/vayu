@@ -422,17 +422,56 @@ TEST_F (ExamplesRouteTest, UpdateRejectsMismatchedBodyId) {
 // Delete and the cascades
 // ---------------------------------------------------------------------------
 
-TEST_F (ExamplesRouteTest, DeleteRemovesTheRow) {
-    const std::string id = create_example ("req_1", json{ { "name", "x" } });
+TEST_F (ExamplesRouteTest, DeleteRemovesAUserSavedRowOutright) {
+    const std::string id =
+    create_example ("req_1", json{ { "name", "x" }, { "origin", "user" } });
 
     auto [status, body] = routes::delete_request_example_response (*db_, "req_1", id);
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["id"], id);
     EXPECT_FALSE (db_->get_request_example (id).has_value ());
+    // Nothing can re-create a saved response, so there is no intent to record
+    // and no tombstone to leave behind (issue #722).
+    EXPECT_TRUE (db_->get_suppressed_request_examples ("req_1").empty ());
 
     // A second delete is a 404 rather than a silent success.
     auto [again, _] = routes::delete_request_example_response (*db_, "req_1", id);
     EXPECT_EQ (again, 404);
+}
+
+// Issue #722. The row stays as a tombstone so a later spec sync knows not to
+// write the status back - and every read has to behave as though it were gone,
+// or a delete that "worked" would still be visible in the panel and served by a
+// mock. Mutation check: delete the origin branch in
+// `delete_request_example_response` and the tombstone assertion reddens; drop
+// the `suppressed` filter from either `Database` read and the first three do.
+TEST_F (ExamplesRouteTest, DeletingAnImportedExampleLeavesATombstoneNoReadCanSee) {
+    const std::string id = create_example ("req_1",
+    json{ { "name", "404 - Not found" }, { "status", 404 }, { "body", R"({"error":"gone"})" },
+    { "contentType", "application/json" } });
+
+    auto [status, body] = routes::delete_request_example_response (*db_, "req_1", id);
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    auto [list_status, listed] = routes::list_request_examples_response (*db_, "req_1");
+    ASSERT_EQ (list_status, 200);
+    EXPECT_TRUE (listed.empty ());
+    EXPECT_FALSE (db_->get_request_example (id).has_value ());
+    EXPECT_EQ (db_->count_request_examples ("req_1"), 0);
+
+    // An update cannot bring it back by writing over the tombstone.
+    auto [update_status, _] =
+    routes::update_request_example_response (*db_, "req_1", id, json{ { "name", "back" } });
+    EXPECT_EQ (update_status, 404);
+
+    // What is kept is the status - the identity a sync matches on - and not the
+    // body, which no reader of a deleted example ever wants.
+    const auto tombstones = db_->get_suppressed_request_examples ("req_1");
+    ASSERT_EQ (tombstones.size (), 1u);
+    EXPECT_EQ (tombstones[0].id, id);
+    EXPECT_EQ (tombstones[0].status, 404);
+    EXPECT_TRUE (tombstones[0].body.empty ());
+    EXPECT_TRUE (tombstones[0].content_type.empty ());
 }
 
 // Without the cascade these rows survive their owner: every read is by request
@@ -442,9 +481,17 @@ TEST_F (ExamplesRouteTest, DeletingTheRequestDeletesItsExamples) {
     const std::string mine = create_example ("req_1", json{ { "name", "mine" } });
     const std::string theirs = create_example ("req_2", json{ { "name", "theirs" } });
 
+    // A tombstone is a row like any other, so the cascade has to take it too -
+    // otherwise a deleted imported example outlives the request it answered
+    // (issue #722).
+    const std::string tombstoned = create_example ("req_1", json{ { "name", "deleted" } });
+    routes::delete_request_example_response (*db_, "req_1", tombstoned);
+    ASSERT_EQ (db_->get_suppressed_request_examples ("req_1").size (), 1u);
+
     db_->delete_request ("req_1");
 
     EXPECT_FALSE (db_->get_request_example (mine).has_value ());
+    EXPECT_TRUE (db_->get_suppressed_request_examples ("req_1").empty ());
     // The sibling request's examples are untouched.
     EXPECT_TRUE (db_->get_request_example (theirs).has_value ());
 }

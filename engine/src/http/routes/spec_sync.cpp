@@ -43,6 +43,7 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -195,6 +196,12 @@ std::string& temp_id_out) {
  * writes what the document says, and a payload that could claim `user` could
  * manufacture rows the *next* sync then refuses to replace - quietly turning
  * the protection this route exists to provide into a leak.
+ *
+ * @param suppressed_statuses the statuses this request holds a tombstone for
+ * (issue #722) - the document's example for one of them is validated like any
+ * other and then dropped, because the user deleted it and a sync that wrote it
+ * back would make that delete a suggestion. Empty on the create path: a
+ * request being created now has nothing behind it to have deleted.
  */
 std::optional<std::pair<int, nlohmann::json>> build_example_rows (const nlohmann::json& item,
 const std::string& request_id,
@@ -202,7 +209,8 @@ const std::string& owner,
 int base_order,
 int64_t now,
 std::vector<vayu::db::RequestExample>& out,
-size_t surviving) {
+size_t surviving,
+const std::unordered_set<int>& suppressed_statuses = {}) {
     if (!item.contains ("examples") || item["examples"].is_null ()) {
         return std::nullopt;
     }
@@ -210,13 +218,10 @@ size_t surviving) {
         return item_error (400, "Invalid 'examples': must be an array", owner);
     }
     const auto& examples = item["examples"];
-    if (examples.size () + surviving > vayu::core::constants::request_example::MAX_PER_REQUEST) {
-        return item_error (400,
-        "Too many examples: " + std::to_string (examples.size () + surviving) +
-        " exceeds the limit of " +
-        std::to_string (vayu::core::constants::request_example::MAX_PER_REQUEST) + " per request",
-        owner);
-    }
+    // Against what will be written rather than what was offered: a tombstoned
+    // example never lands, so counting it here would refuse a sync that fits.
+    std::vector<vayu::db::RequestExample> rows;
+    rows.reserve (examples.size ());
 
     for (size_t i = 0; i < examples.size (); ++i) {
         const auto& example = examples[i];
@@ -245,11 +250,27 @@ size_t surviving) {
             "example", owner)) {
             return err;
         }
+        // Validated first and dropped second, so a malformed example the user
+        // happens to have deleted is still a 400 rather than a silent skip.
+        if (suppressed_statuses.contains (x.status)) {
+            continue;
+        }
         // Document order from the block this refresh occupies - see
-        // `refresh_examples` for what decides where the block starts.
-        x.order = base_order + static_cast<int> (i);
-        out.push_back (std::move (x));
+        // `refresh_examples` for what decides where the block starts. Counted
+        // over what is kept, so a dropped example leaves no hole in the block.
+        x.order = base_order + static_cast<int> (rows.size ());
+        rows.push_back (std::move (x));
     }
+
+    if (rows.size () + surviving > vayu::core::constants::request_example::MAX_PER_REQUEST) {
+        return item_error (400,
+        "Too many examples: " + std::to_string (rows.size () + surviving) +
+        " exceeds the limit of " +
+        std::to_string (vayu::core::constants::request_example::MAX_PER_REQUEST) + " per request",
+        owner);
+    }
+    out.insert (out.end (), std::make_move_iterator (rows.begin ()),
+    std::make_move_iterator (rows.end ()));
     return std::nullopt;
 }
 
@@ -262,15 +283,34 @@ size_t surviving) {
  * was already ahead of it.** The imported rows are dropped and the new ones
  * take a consecutive block starting where the lowest of them sat; a request
  * whose examples were all user-saved gets the block after the last of them.
+ *
+ * **A deleted imported example is not written back** (issue #722). Deleting one
+ * leaves a tombstone rather than nothing, and the statuses those name are the
+ * one thing a refresh must not restore - otherwise any later sync of any field
+ * re-creates what the user removed, and the delete meant nothing.
  */
 struct ExampleRefresh {
     std::vector<std::string> replaced; ///< Imported row ids, to delete.
     int base_order = 0;                ///< Where the replacement block starts.
     size_t surviving = 0;              ///< User rows, which stay exactly as they are.
+    /**
+     * Statuses the user deleted, from this request's tombstones.
+     *
+     * The status is the identity, not the name: an imported example is the
+     * document's account of one response code, while its name carries the
+     * response *description* (`"404 - Not found"`) and moves whenever the
+     * document rewords it - so a name-keyed tombstone would resurrect the
+     * example on the first reworded description, which is the defect itself.
+     */
+    std::unordered_set<int> suppressed_statuses;
 };
 
-ExampleRefresh refresh_examples (const std::vector<vayu::db::RequestExample>& stored) {
+ExampleRefresh refresh_examples (const std::vector<vayu::db::RequestExample>& stored,
+const std::vector<vayu::db::RequestExample>& tombstones) {
     ExampleRefresh plan;
+    for (const auto& row : tombstones) {
+        plan.suppressed_statuses.insert (row.status);
+    }
     std::optional<int> lowest_import;
     int highest = -1;
     for (const auto& row : stored) {
@@ -609,11 +649,12 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             }
 
             if (item.contains ("examples") && !item["examples"].is_null ()) {
-                const auto plan = refresh_examples (db.get_request_examples (id));
+                const auto plan = refresh_examples (db.get_request_examples (id),
+                db.get_suppressed_request_examples (id));
                 batch.deleted_examples.insert (batch.deleted_examples.end (),
                 plan.replaced.begin (), plan.replaced.end ());
                 if (auto err = build_example_rows (item, id, id, plan.base_order, now,
-                    batch.examples, plan.surviving)) {
+                    batch.examples, plan.surviving, plan.suppressed_statuses)) {
                     result = *err;
                     return;
                 }
@@ -682,8 +723,8 @@ void register_spec_sync_routes (RouteContext& ctx) {
      * optional `parentId` inside the synced subtree), create (requests, each
      * with a `tempId` and either `collectionId` or `collectionTempId`, and
      * optional `examples`), update (requests by `id`, merge-patch, with
-     * optional `examples` which replace the imported ones and never the saved
-     * ones), delete (request ids).
+     * optional `examples` which replace the imported ones, never the saved
+     * ones, and never a status the user deleted), delete (request ids).
      * Returns: 200 `{idMap, specId, specHash, syncedAt, created, updated,
      * deleted}`; 400 (with `error.item`) for a payload this cannot apply, 404
      * for an unknown collection, 409 when a row the diff was computed against

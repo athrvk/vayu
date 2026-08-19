@@ -107,7 +107,15 @@ Three things worth knowing before you design around them:
   wrote, `user` for what the app saved from a live response - defaulting to
   `import`, and a `400` on anything else. It is stored so the OpenAPI spec sync
   (`POST /specs/sync`, #655) can replace the first kind without touching the
-  second; nothing else about a row says where it came from.
+  second; nothing else about a row says where it came from. **Deleting an
+  imported example keeps the row as a tombstone** (`suppressed`, #722), because
+  the refresh rewrites a request's imported rows on any applied change and so
+  a plain delete lasted only until the next sync of any field. Every read
+  filters tombstones out - `get_request_examples` and `get_request_example`, so
+  the list route, a mock server and an export all behave as though the row were
+  gone - and `get_suppressed_request_examples` is the single read that sees
+  them, for the refresh. It matches on the response **status**, which is what a
+  document's example keeps when its description is reworded.
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
   to load a restored request tab or a design-run copy on cold start - one round
   trip, not the old scan of every collection's list. A `404` means the request

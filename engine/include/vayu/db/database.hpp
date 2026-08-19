@@ -148,12 +148,21 @@ class Database {
     // an example only means anything next to the request it answers.
 
     void save_request_example (const RequestExample& e);
+    /// A suppressed row reads as absent - see the definition (issue #722).
     std::optional<RequestExample> get_request_example (const std::string& id);
     /// Oldest first (created_at, then id) - the order a mock server resolves
     /// "the first example" in, so it is a contract rather than a detail.
+    /// Excludes tombstones, so a deleted imported example is gone to every
+    /// reader (issue #722).
     std::vector<RequestExample> get_request_examples (const std::string& request_id);
+    /// The tombstones only - deleted imported examples, which exist so a spec
+    /// sync does not write back what the user removed (issue #722).
+    std::vector<RequestExample> get_suppressed_request_examples (const std::string& request_id);
     int64_t count_request_examples (const std::string& request_id);
     void delete_request_example (const std::string& id);
+    /// Keeps an imported example's row as a tombstone instead of removing it
+    /// (issue #722). `now` is the caller's clock, as every other write here.
+    void suppress_request_example (const std::string& id, int64_t now);
 
     // OpenAPI documents (issue #637). Bound by collections rather than owned by
     // one, so nothing here cascades: `delete_spec_document` is only ever reached
