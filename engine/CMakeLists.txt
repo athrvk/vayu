@@ -361,6 +361,22 @@ if(QUICKJS_FOUND)
 endif()
 
 # ============================================================================
+# Precompiled Header
+# ============================================================================
+
+# nlohmann/json.hpp is included in over half the engine's translation units
+# (93 of 174 .cpp files) and is expensive to parse on every one of them -
+# heavy template metaprogramming that gains nothing from being reparsed
+# identically each time. httplib.h (24 files) is the same shape of cost.
+# Precompiling both once on vayu_core and having every target that links it
+# reuse that PCH (REUSE_FROM) means the parse happens once per platform
+# instead of once per target.
+target_precompile_headers(vayu_core PRIVATE
+    <nlohmann/json.hpp>
+    <httplib.h>
+)
+
+# ============================================================================
 # CLI Executable
 # ============================================================================
 
@@ -372,7 +388,7 @@ if(VAYU_BUILD_CLI)
     target_include_directories(vayu-cli PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
-    
+
     target_link_libraries(vayu-cli PRIVATE
         vayu_core
         httplib::httplib
@@ -381,6 +397,7 @@ if(VAYU_BUILD_CLI)
         vayu_warnings
         vayu_sanitizers
     )
+    target_precompile_headers(vayu-cli REUSE_FROM vayu_core)
 
     # Not optional on Windows - see vayu_embed_windows_manifest above.
     vayu_embed_windows_manifest(vayu-cli)
@@ -430,6 +447,7 @@ if(VAYU_BUILD_ENGINE)
         vayu_warnings
         vayu_sanitizers
     )
+    target_precompile_headers(vayu-engine REUSE_FROM vayu_core)
 
     # Not optional on Windows - see vayu_embed_windows_manifest above. This is
     # the binary the installer ships, so .github/check-windows-deps.py verifies
@@ -631,6 +649,7 @@ if(VAYU_BUILD_TESTS)
         vayu_warnings
         vayu_sanitizers
     )
+    target_precompile_headers(vayu_tests REUSE_FROM vayu_core)
 
     # The test binary needs the manifest for two reasons: any test that opens a
     # TLS connection would otherwise run without ALPN, and `WindowsOsVersionShim`
