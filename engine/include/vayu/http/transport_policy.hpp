@@ -249,10 +249,16 @@ std::optional<std::string> ca_pem_rejection (std::string_view pem);
  * @brief The trust anchors this platform verifies with today, as PEM text.
  *
  * Empty when they cannot be read as a file - which is the normal case on
- * Windows (Schannel) and macOS (Apple SecTrust), where the anchors live in an
- * OS store rather than a bundle. Exposed for the tests and for the per-platform
- * disclosure in the docs; production code reaches it through
- * `resolve_transport_policy`.
+ * Windows, where Schannel keeps the anchors in an OS store rather than a
+ * bundle. Every other leg is OpenSSL-backed at the pinned vcpkg baseline -
+ * macOS included, which this comment denied until #818 - so it normally
+ * returns *content* there, and the merge in `resolve_transport_policy` is
+ * doing real work rather than the no-op that reading implied.
+ * `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts exactly that on
+ * every such leg, because a bundle-verifying build that finds nothing here
+ * would narrow the user's trust to their own paste. Exposed for the tests and
+ * for the per-platform disclosure in the docs; production code reaches it
+ * through `resolve_transport_policy`.
  */
 std::string system_ca_bundle_pem ();
 
