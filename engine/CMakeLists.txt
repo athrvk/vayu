@@ -361,6 +361,45 @@ if(QUICKJS_FOUND)
 endif()
 
 # ============================================================================
+# Precompiled Header
+# ============================================================================
+
+# nlohmann/json.hpp is included in over half the engine's translation units
+# (93 of 174 .cpp files) and is expensive to parse on every one of them -
+# heavy template metaprogramming that gains nothing from being reparsed
+# identically each time. Each target below precompiles it independently
+# (paying that parse cost once per target rather than once per TU) rather
+# than sharing one PCH via REUSE_FROM: REUSE_FROM requires every reusing
+# target's compiler invocation to match the PCH-owning target's exactly -
+# same macros, same linked libraries - and vayu_core is not: it does not
+# link httplib::httplib (only vayu-cli/vayu-engine/vayu_tests do, so a
+# shared PCH would compile httplib.h without vcpkg's CPPHTTPLIB_OPENSSL_SUPPORT
+# and silently drop httplib::SSLServer for every consumer), and its Windows
+# CRT/NOMINMAX defines are PRIVATE, so MSVC's own /Yu macro-parity check
+# (C4651, fatal under /WX) rejects reuse from vayu-cli/vayu-engine outright.
+# httplib.h itself (24 files) is left out of the PCH for the same reason -
+# it is not something vayu_core's own compile settings actually cover.
+#
+# NOT MSVC, not NOT WIN32 - the exclusion is about the compiler's /Yu
+# interacting with sccache, not the platform (a clang-cl build would not
+# have this problem). sccache logged the large majority of Windows compile
+# requests (200 of 257 in the measured run) as non-cacheable because of the
+# /Fp flag, identical in a cold run and the run right after it - so the
+# "warm" run (19m21s) was slower than the cold one (18m06s), both far worse
+# than the no-PCH warm baseline (~2m). This is not a CI win on ubuntu/macOS
+# either, in the steady state #700's cache warming already produces: their
+# PCH-warm numbers are a wash against their own no-PCH warm baseline, and
+# macOS is a little slower (recurring PCH-creation cache misses each run).
+# Full measurements and the warm-vs-warm comparison that corrected the
+# original cold-vs-warm framing are on
+# https://github.com/athrvk/vayu/issues/805. Whatever value this PCH has is
+# in regimes CI's steady state does not exercise - a cold cache, or a local
+# build without sccache - not the PR pipeline itself.
+if(NOT MSVC)
+    target_precompile_headers(vayu_core PRIVATE <nlohmann/json.hpp>)
+endif()
+
+# ============================================================================
 # CLI Executable
 # ============================================================================
 
@@ -372,7 +411,7 @@ if(VAYU_BUILD_CLI)
     target_include_directories(vayu-cli PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
-    
+
     target_link_libraries(vayu-cli PRIVATE
         vayu_core
         httplib::httplib
@@ -381,6 +420,9 @@ if(VAYU_BUILD_CLI)
         vayu_warnings
         vayu_sanitizers
     )
+    if(NOT MSVC)
+        target_precompile_headers(vayu-cli PRIVATE <nlohmann/json.hpp>)
+    endif()
 
     # Not optional on Windows - see vayu_embed_windows_manifest above.
     vayu_embed_windows_manifest(vayu-cli)
@@ -430,6 +472,9 @@ if(VAYU_BUILD_ENGINE)
         vayu_warnings
         vayu_sanitizers
     )
+    if(NOT MSVC)
+        target_precompile_headers(vayu-engine PRIVATE <nlohmann/json.hpp>)
+    endif()
 
     # Not optional on Windows - see vayu_embed_windows_manifest above. This is
     # the binary the installer ships, so .github/check-windows-deps.py verifies
@@ -631,6 +676,9 @@ if(VAYU_BUILD_TESTS)
         vayu_warnings
         vayu_sanitizers
     )
+    if(NOT MSVC)
+        target_precompile_headers(vayu_tests PRIVATE <nlohmann/json.hpp>)
+    endif()
 
     # The test binary needs the manifest for two reasons: any test that opens a
     # TLS connection would otherwise run without ALPN, and `WindowsOsVersionShim`
