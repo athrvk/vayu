@@ -1448,7 +1448,7 @@ click-to-edit field used by the request **Info** tab and by
 before this existed - the collection one even advertised "Markdown supported"
 beside a plain textarea.
 
-**Two rules are load-bearing, not stylistic:**
+**Three rules are load-bearing, not stylistic:**
 
 1. **`MarkdownView` never emits a navigating anchor.** The main window has no
    `will-navigate` handler, no `setWindowOpenHandler` and no CSP, and the
@@ -1458,11 +1458,25 @@ beside a plain textarea.
    Links therefore render as `<button>`, with no `href` in the DOM, and open via
    the scheme-validated `openExternalUrl` IPC. `remark-gfm` autolinks bare URLs,
    so that override covers those too. Guarded by `markdown-view.test.tsx`.
+   This is a single layer by design; #822 tracks the `will-navigate` refusal
+   that would sit under it.
 2. **`react-markdown` with the default `urlTransform`.** It builds React
    elements from an AST, so there is no `dangerouslySetInnerHTML` and no
-   sanitiser to forget. Raw HTML is inert because `rehype-raw` is deliberately
-   not installed. Overriding `urlTransform` disables the built-in URL sanitising
-   (there is a published advisory for exactly that), so it stays on the default.
+   sanitiser to forget. Overriding `urlTransform` disables the built-in URL
+   sanitising (there is a published advisory for exactly that), so it stays on
+   the default.
+3. **Raw HTML renders, and `rehype-sanitize` runs immediately after
+   `rehype-raw`.** `rehype-raw` used to be deliberately absent, which made raw
+   HTML inert - fine until Stripe's official OpenAPI document turned out to
+   write every operation description as HTML (`<p>Retrieves…</p>`), which is
+   spec-legal and was on screen as literal text. The order is the rule: sanitise
+   before the raw HTML is parsed and it sanitises a tree the payload is not in
+   yet. The schema is derived from the component's own element allow-list, keeps
+   `href` on an anchor and **no other attribute** (`class` least of all - the
+   cheap attack is `<p class="fixed inset-0 z-50">`, not a script), passes
+   http(s) only, and strips `script` and `style` whole rather than unwrapping
+   their text onto the screen. Guarded by the benign and hostile blocks in
+   `markdown-view.test.tsx`, which are also what pin the plugin order.
 
 `MarkdownEditor`'s rule is **focus, not dirtiness**: rendered while unfocused,
 source the moment you click in. The caret goes to the end - mapping a rendered
