@@ -65,12 +65,15 @@ export interface ScenarioStepRow {
 	 * The stored request this step executed, so a step that failed has a way
 	 * back to the request that sent it (issue #730).
 	 *
-	 * **Stored rows only.** `stamp_step_identity` writes it onto the trace, and
-	 * the live `step` frame does not carry it - `build_step_payload` sends
-	 * identity, outcome and timing and nothing that would let the frame grow
-	 * per step. So a row being watched has no link until the run ends and its
-	 * rows are written, which is the same moment its exchange appears, and the
-	 * card says so in one place rather than two.
+	 * **Both sources carry it** (issue #831): `stamp_step_identity` writes it
+	 * onto the stored trace and `build_step_payload` sends it on the live
+	 * frame, so a step does not gain its link when the run ends - one id is
+	 * constant-size, which is what lets the frame carry it where the assertion
+	 * list stays on the stored row.
+	 *
+	 * Absent for a step whose plan entry names no stored request, and for a row
+	 * stored before the runner stamped one; the card offers no link rather than
+	 * one to an empty id.
 	 */
 	requestId?: string;
 	/**

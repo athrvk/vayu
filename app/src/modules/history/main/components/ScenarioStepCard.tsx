@@ -35,8 +35,13 @@
  * the request and hands the builder the row this iteration bound, so the repro
  * is the step's own action and then one click on the row.
  *
- * It is absent, not disabled, on a row that has no `requestId`: a live row
- * (the `step` frame carries no request id) and a row written before the runner
+ * It is on a live row too (issue #831): the `step` frame names the request, so
+ * the reader watching iteration 12 of 500 fail can go straight to it instead of
+ * waiting the run out. The expansion below is still the thing that arrives
+ * later - a live row has no stored exchange.
+ *
+ * It is absent, not disabled, on a row that has no `requestId`: a step whose
+ * plan entry names no stored request, and a row written before the runner
  * stamped one. A control offering to open a request the row cannot name would
  * be a promise this card cannot keep.
  */

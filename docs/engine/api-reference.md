@@ -4374,6 +4374,7 @@ event: step
 id: 3
 data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
        "statusCode":200,"latencyMs":42.7,"dataRowIndex":1,
+       "requestId":"req_abc123",
        "tests":{"passed":2,"failed":0},
        "validation":{"checked":true,"valid":true,"matchedStatus":"200",
                      "matchedContentType":"application/json",
@@ -4394,7 +4395,13 @@ many of the step's assertions held (issue #724) - two numbers, because the ring
 is fixed-size and a script may make hundreds of them; the list itself rides the
 stored `scripts` node. It counts the **test script's** assertions, exactly the
 ones that node lists, and is absent for a step that asserted none: `0 passed`
-would read as a result. A scenario
+would read as a result. `requestId` names the stored request the step ran
+(issue #831) - the same id `stamp_step_identity` writes onto the stored trace,
+so a step read live and the same step read back from the report name one
+request, and a client watching a run can offer the way back to it before the
+rows are written. One id is constant-size, which is why it rides the frame where
+the assertion list does not; absent when the plan step names no stored request,
+because an empty id is not a request. A scenario
 run publishes no `metrics` ticks:
 its work is sequential, so per-tick aggregates would be a rate of one request at
 a time rather than anything about the sequence.

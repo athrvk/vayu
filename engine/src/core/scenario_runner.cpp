@@ -342,6 +342,16 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
     if (record.validation) {
         data["validation"] = build_validation_payload (*record.validation);
     }
+    // The stored request this step ran (issue #831), so a step of a run being
+    // *watched* has the same way back to its request that a stored one does -
+    // the moment that link is worth most is the failure the reader is watching
+    // arrive, not the report written after it. One id is constant-size, which
+    // is what keeps it inside the ring rule the tally below states. Absent
+    // when the plan step names no stored request, on the same terms as
+    // everything else here: an empty id is not a link.
+    if (!record.request_id.empty ()) {
+        data["requestId"] = record.request_id;
+    }
     // The assertions, as two numbers (issue #724). The list itself is on the
     // stored row: a frame carries what is constant-size, so a step that made
     // 400 assertions cannot push the rest of the run out of the tick ring.

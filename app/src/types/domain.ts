@@ -844,6 +844,17 @@ export interface ScenarioStepEvent {
 	 */
 	dataRowIndex?: number;
 	/**
+	 * The stored request this step ran (issue #831), the same id
+	 * `stamp_step_identity` writes onto the stored trace - so the way back to a
+	 * step's request exists while the run streams, which is when a step that has
+	 * just failed is being read.
+	 *
+	 * Absent for a step whose plan entry names no stored request; the frame
+	 * sends no key rather than an empty id, and absent means the card offers no
+	 * link at all.
+	 */
+	requestId?: string;
+	/**
 	 * What the contract says about this step's response (issue #681), the same
 	 * object the stored trace carries - so a step watched live and the same step
 	 * read back from the report show one verdict, not two derivations of it.
