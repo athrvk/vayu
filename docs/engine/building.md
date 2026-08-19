@@ -139,7 +139,7 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 | libsodium | SHA-256, HMAC-SHA256, base64 and hex (PKCE, Basic/OAuth credentials, `pm.crypto`) |
 | nlohmann-json | JSON parsing/serialization |
 | valijson | JSON Schema validation of responses against a bound OpenAPI document |
-| cpp-httplib | HTTP server library |
+| cpp-httplib | HTTP server library - built with the `openssl` feature, which the test suite's HTTPS listener needs (custom-CA verification is asserted on a real handshake, not reasoned about) |
 | sqlite3 | Embedded database |
 | sqlite-orm | C++ ORM for SQLite |
 | gtest | Unit testing framework |
@@ -397,8 +397,8 @@ Set `VCPKG_ROOT` environment variable or install vcpkg in a standard location.
 
 ### Linker Errors
 
-- Ensure all vcpkg dependencies are installed: `vcpkg install curl[http2] libsodium nlohmann-json valijson cpp-httplib sqlite3 sqlite-orm gtest`
-  (the `http2` feature is required - without it libcurl is built without nghttp2 and the HTTP/2 support test fails)
+- Ensure all vcpkg dependencies are installed: `vcpkg install curl[http2] libsodium nlohmann-json valijson cpp-httplib[openssl] sqlite3 sqlite-orm gtest`
+  (the `http2` feature is required - without it libcurl is built without nghttp2 and the HTTP/2 support test fails; the `openssl` feature is required for the same reason one step further along - without it `httplib::SSLServer` does not exist and the TLS-verification tests do not compile)
 - On Windows, ensure Visual Studio C++ tools are installed
 
 ### Build Script Issues
