@@ -222,16 +222,26 @@ struct CertificateAndKey {
      * build could present nothing a user registered before #833. Written as one
      * file by the caller, where the PEM pair needs two.
      *
-     * **Deliberately old algorithms** (SHA-1 + 3DES for both the key and the
-     * certificate bag, rather than OpenSSL 3's AES-256 defaults). What is under
-     * test is whether the *engine* names the format, not which ciphers a
-     * platform's PKCS#12 reader has retired, and the widest-supported pair is
-     * the one that keeps a red here meaning the former.
+     * **OpenSSL's own defaults, deliberately** - AES-256-CBC under PBES2 with a
+     * SHA-256 MAC, which is what `openssl pkcs12 -export` writes today and so
+     * what a user's bundle looks like. The first cut of this fixture reached
+     * for SHA-1 + 3DES instead, reasoning that the oldest algorithms are the
+     * widest supported; the Windows leg answered that, and the answer is the
+     * other way round. Every p12 case there failed with
+     * `SEC_E_INTERNAL_ERROR ... The Local Security Authority cannot be
+     * contacted` on the second `InitializeSecurityContext` - Schannel having
+     * the certificate but no usable private key. A legacy-PBE bundle imports
+     * its key into the old CAPI provider, and curl imports with
+     * `PKCS12_NO_PERSIST_KEY`, so the ephemeral handle that combination yields
+     * is one Schannel cannot use for the handshake. A PBES2 bundle goes to CNG
+     * and works.
      */
     std::string pkcs12 (const std::string& passphrase = {}) const {
+        // 0 / 0 is "the library's default algorithm", read at build time rather
+        // than pinned here: the point is to be what today's OpenSSL emits, and
+        // a hardcoded NID would freeze this at what today happens to mean.
         tls_detail::Pkcs12Ptr bundle (PKCS12_create (passphrase.c_str (), "vayu-test-client",
-        key.get (), certificate.get (), nullptr, NID_pbe_WithSHA1And3_Key_TripleDES_CBC,
-        NID_pbe_WithSHA1And3_Key_TripleDES_CBC, 0, 0, 0));
+        key.get (), certificate.get (), nullptr, 0, 0, 0, 0, 0));
         if (!bundle) {
             tls_detail::fail ("could not build a PKCS#12 bundle");
         }

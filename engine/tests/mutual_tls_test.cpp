@@ -432,8 +432,22 @@ TEST_P (MutualTlsTest, ALoadRunPresentsTheCertificate) {
     const auto batch = loop.execute_batch (requests);
     loop.stop ();
 
+    // The counters alone prove nothing about TLS, and this test believed they
+    // did until the Windows leg reported it green while every sibling case
+    // failed the handshake: `execute_batch` counts a `Result` that is *ok*, and
+    // a refused handshake is an ok Result carrying an `error_code` - the error
+    // arm is reserved for a request that could not be attempted at all. So the
+    // assertion is on each response.
+    ASSERT_EQ (batch.responses.size (), 3u);
     EXPECT_EQ (batch.successful, 3u);
     EXPECT_EQ (batch.failed, 0u);
+    for (const auto& result : batch.responses) {
+        ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+        EXPECT_EQ (result.value ().error_code, ErrorCode::None)
+        << "a pooled transfer did not complete the handshake: "
+        << to_string (result.value ().error_code) << ": " << result.value ().error_message;
+        EXPECT_EQ (result.value ().status_code, 200);
+    }
 }
 
 TEST_P (MutualTlsTest, PmSendRequestPresentsTheCertificate) {
