@@ -1082,9 +1082,11 @@ TEST (ClientCertificatePaths, ALoadRunCarriesTheRegistryAndStillTransfers) {
 TEST (ClientCertificateBackend, TakesTheCertificateOptionsOnThisPlatform) {
     // The per-platform claim, checked on the platform rather than reasoned
     // about - the shape `TlsBackend.AcceptsACustomCaBundleOnThisPlatform` set.
-    // The three CI legs build against three TLS backends, and a backend that
-    // refuses one of these options outright would leave every mTLS request
-    // going out with no certificate and nothing anywhere saying so.
+    // Since #851 the three CI legs build against the same TLS backend, which
+    // is a reason to keep this and not to drop it: the claim is now that a
+    // *pin* holds on three platforms, and a leg whose port resolved elsewhere
+    // is exactly what would refuse one of these options - leaving every mTLS
+    // request going out with no certificate and nothing anywhere saying so.
     CURL* curl = curl_easy_init ();
     ASSERT_NE (curl, nullptr);
     const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);

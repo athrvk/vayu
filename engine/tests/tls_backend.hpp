@@ -44,9 +44,12 @@ enum class ClientIdentityFormat {
  *
  * Empty for a backend no statement in this repo covers, and that emptiness is
  * asserted rather than defaulted away: guessing a format for an unknown backend
- * would leave a leg testing a shape it cannot present. The families are the
- * ones the pinned vcpkg baseline's `curl` port can be built against, the same
- * set `verifies_through_a_bundle_file` in `transport_policy_test.cpp` covers.
+ * would leave a leg testing a shape it cannot present. Since #851 every leg
+ * this repo ships answers the first row - `engine/vcpkg.json` pins `openssl`
+ * with `default-features: false`, and `TlsBackend` fails a build that resolved
+ * anywhere else - so the Schannel row is what a manifest edit would land on,
+ * kept for the same reason the classifier in `transport_policy_test.cpp` keeps
+ * its own: a build nobody here reasoned about must be named, not guessed at.
  *
  * A certificate-store reference is Schannel's second shape and is deliberately
  * absent: it is not a file, so nothing in the registry can name one.
@@ -66,42 +69,6 @@ inline std::vector<ClientIdentityFormat> client_identity_formats (std::string_vi
 /// What this build can present, read off `curl_version_info()`.
 inline std::vector<ClientIdentityFormat> client_identity_formats () {
     return client_identity_formats (tls_backend_name ());
-}
-
-/**
- * Why @p backend cannot complete a client-certificate handshake *at all* today,
- * or empty when it can (issue #842).
- *
- * Separate from the format matrix above, and the distinction is the whole
- * point: what a backend accepts as a *file* is a stable fact about the backend,
- * while this is a defect in the libcurl we happen to pin. Folding the two
- * together would say "Schannel takes no client identity", which is false and
- * would be the wrong thing to delete when upstream lands a fix.
- *
- * curl 8.21.0 - the pinned baseline - carries two entries in its own
- * `docs/KNOWN_BUGS.md` for this, one of them naming the exact call at
- * `lib/vtls/schannel.c:488`. Measured here as every wire case failing at the
- * second `InitializeSecurityContext`; the evidence is on #842.
- */
-inline std::string client_auth_defect (std::string_view backend) {
-    if (backend.rfind ("Schannel", 0) != 0) {
-        return {};
-    }
-    return "TLS backend '" + std::string (backend) +
-    "' cannot complete a client-certificate handshake with a certificate read "
-    "from a file: curl imports it with PKCS12_NO_PERSIST_KEY, and the key that "
-    "yields is one Schannel's credential path cannot use - measured as "
-    "'SEC_E_INTERNAL_ERROR ... The Local Security Authority cannot be "
-    "contacted' on every driver, with both a legacy-PBE and a PBES2 bundle. "
-    "Documented upstream in curl 8.21.0's own KNOWN_BUGS (curl issues 17626 "
-    "and 3145). The engine still names the format - that half is asserted on "
-    "this leg by ClientCertificateBackend and the registry suites. Tracked in "
-    "#842; delete this skip with it, not before.";
-}
-
-/// The defect this build carries, if any.
-inline std::string client_auth_defect () {
-    return client_auth_defect (tls_backend_name ());
 }
 
 /// The name a test parameter prints as, and the `certFormat` the registry

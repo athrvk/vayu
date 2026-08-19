@@ -605,16 +605,34 @@ const std::string& url) {
         });
     }
 
-    // With a bundle in force, ask the backend to keep consulting the operating
-    // system's own store as well. On an OpenSSL build CAINFO *replaces* the
-    // default bundle, which is why the materialized file already carries the
-    // system anchors; this is the same guarantee said the other way for the
-    // backends that can honour it, and a no-op where they cannot. Written in
-    // both directions - the default `0` when no bundle is set - because a
-    // reused handle would otherwise keep a flag the current policy never asked
-    // for, the rule every option here follows.
-    curl_easy_setopt (curl, CURLOPT_SSL_OPTIONS,
-    policy.ca_bundle_path.empty () ? 0L : static_cast<long> (CURLSSLOPT_NATIVE_CA));
+    // Ask the backend to consult the operating system's own store as well. On
+    // an OpenSSL build CAINFO *replaces* the default bundle, which is why the
+    // materialized file already carries the system anchors on the platforms
+    // that keep them in a file.
+    //
+    // Windows is the platform that does not, and since #851 it is an OpenSSL
+    // build like the others - so the flag is unconditional there, not only
+    // when a bundle is in force. An OpenSSL build on Windows has no CA file to
+    // fall back to: `curl_version_info()->cainfo` names a path from the
+    // machine the port was built on, which does not exist on the user's, so a
+    // Windows handle without this flag and without a paste trusts *nothing*
+    // and every HTTPS request fails verification. With it, #706's additive
+    // rule reads "the native store plus whatever the user pasted" on Windows
+    // too - the store supplying the anchors the merged file does elsewhere.
+    //
+    // Written in both directions - the default `0` where no bundle is set and
+    // the native store is not the anchor source - because a reused handle
+    // would otherwise keep a flag the current policy never asked for, the rule
+    // every option here follows.
+    long ssl_options = 0L;
+#ifdef _WIN32
+    ssl_options |= static_cast<long> (CURLSSLOPT_NATIVE_CA);
+#else
+    if (!policy.ca_bundle_path.empty ()) {
+        ssl_options |= static_cast<long> (CURLSSLOPT_NATIVE_CA);
+    }
+#endif
+    curl_easy_setopt (curl, CURLOPT_SSL_OPTIONS, ssl_options);
 
     switch (policy.proxy_mode) {
     case ProxyMode::Environment:
@@ -708,10 +726,11 @@ const std::string& url) {
     curl_easy_setopt (curl, CURLOPT_SSLCERT,
     matched != nullptr ? matched->cert_path.c_str () : static_cast<const char*> (nullptr));
     // What that file is (issue #833). Without it libcurl reads whatever is
-    // there as PEM, which is why a Schannel build - the one backend that takes
-    // no PEM pair at all - could present nothing a user registered. Written on
-    // every handle for the same reason as the path beside it, and null on no
-    // match so a pooled handle cannot keep the type a previous transfer set.
+    // there as PEM, so a registered `p12` bundle would be handed to the wrong
+    // parser - and on a Schannel build, which took no PEM pair at all, that
+    // meant presenting nothing a user registered. Written on every handle for
+    // the same reason as the path beside it, and null on no match so a pooled
+    // handle cannot keep the type a previous transfer set.
     curl_easy_setopt (curl, CURLOPT_SSLCERTTYPE,
     matched != nullptr ? curl_ssl_cert_type (matched->format) :
                          static_cast<const char*> (nullptr));

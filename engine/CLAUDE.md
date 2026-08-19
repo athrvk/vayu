@@ -300,17 +300,40 @@ Three things worth knowing before you design around them:
   way, empty included. That bundle is materialized from the
   `customCaCertificates` setting beside the database and **extends** the
   platform's trust rather than replacing it: on an OpenSSL build CAINFO *is*
-  the whole store, so the file is the system anchors plus the user's, while
-  Schannel keeps its OS store. **The spread is two-way, not three** - the
-  pinned baseline's `curl` port takes `openssl` on `uwp | !windows` and `sspi`
-  only on Windows, so macOS is OpenSSL-backed like Linux and the merge does
-  real work there. Six statements across the engine and the docs said macOS
-  was on Apple SecTrust until #818, and none of them had been read off a
-  build - so the *backend itself* is now asserted per leg
-  (`TlsBackend.IsTheBackendEveryTrustStatementHereAssumes`), and a
-  bundle-verifying leg that cannot find the system anchors to merge with fails
-  the suite (`TlsBackend.FindsTheSystemAnchorsTheMergeExtends`), because that
-  is the shape in which this being wrong costs a user their trust store.
+  the whole store, so the file is the system anchors plus the user's.
+  **Every leg verifies with OpenSSL now** (#851): `engine/vcpkg.json` pins
+  curl's `openssl` feature with `default-features: false`. **That does not make
+  Windows a single-backend build, and believing it does is the trap #851 fell
+  into** - the port's `http2` feature *itself* depends on `curl[ssl]`, and the
+  engine requires `http2`, so `ssl` is in the resolved feature set however the
+  manifest is written; on Windows it resolves to Schannel and the shipped
+  libcurl is *MultiSSL*. Reading the port file said otherwise; the first CI run
+  said `openssl, schannel`. **So the engine names its backend rather than
+  inheriting one**: `pin_tls_backend()` calls `curl_global_sslset` before
+  `curl_global_init` (`http/client.cpp`), because on a MultiSSL build
+  `multissl_setup` reads **`CURL_SSL_BACKEND` from the environment** before
+  falling back to the first compiled-in backend - so a stray export would put
+  every transfer on Schannel, silently, and mTLS would stop working (#842) with
+  every doc here still saying OpenSSL. Getting the *build* down to one backend
+  needs a triplet or an overlay port and is #858. Six statements across the
+  engine and the docs said macOS was on Apple SecTrust until #818, and none of
+  them had been read off a build - so the backend is asserted per leg, by name
+  **and by whether this process actually selected it**
+  (`TlsBackend.IsTheBackendEveryTrustStatementHereAssumes`).
+  **Windows is the leg with no bundle file**: it ships its anchors in a
+  certificate store, so `system_ca_bundle_path()` finds nothing, the
+  materialized file holds the paste alone, and `CURLSSLOPT_NATIVE_CA` is set
+  **unconditionally** there rather than only when a bundle is in force - an
+  OpenSSL build on Windows whose handle lacks that flag and whose user has
+  pasted nothing trusts *nothing at all*. One promise, two mechanisms, and
+  `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts whichever applies
+  to the leg, because that is the shape in which this being wrong costs a user
+  their trust store. What no unit test can reach - that the *platform's* own
+  anchors still verify a real certificate - is `NativeStoreVerificationTest`
+  (`tests/tls_verification_test.cpp`): a public host with nothing pasted, and
+  the same host still verifying once an unrelated CA is. It skips on a closed
+  network and **fails on an SslError**, which is the asymmetry that makes it
+  worth having.
   The additive claim itself is checked on
   each CI platform rather than reasoned about, because a wrong claim here is a
   security claim - by **two** tests answering two different questions, and the
@@ -327,10 +350,11 @@ Three things worth knowing before you design around them:
   a bundle read and ignored - and still verifies when a second anchor is added
   beside it, which is the additive rule observed rather than asserted. That
   listener is why `cpp-httplib` carries the `openssl` feature in
-  `engine/vcpkg.json`. **The two backends do not answer this the same way, and
-  the wire is how we found out.** Where curl revocation-checks the chain itself
-  - the Schannel path does, passing `CERT_CHAIN_REVOCATION_CHECK_CHAIN` unless
-  told not to - a certificate authority minted for one test run was refused for
+  `engine/vcpkg.json`. **Two backends did not answer this the same way, and
+  the wire is how we found out** - kept here because #851 removed the second
+  backend, not the lesson. Where curl revocation-checks the chain itself - the
+  Schannel path did, passing `CERT_CHAIN_REVOCATION_CHECK_CHAIN` unless told
+  not to - a certificate authority minted for one test run was refused for
   publishing no CRL, with the anchor loaded and the signature good, and the two
   *positive* cases skipped there. **The fixture publishes one now** (#819): the
   CA signs an empty CRL, a plain-HTTP `CrlServer` serves it, and the leaf names
@@ -380,8 +404,7 @@ Three things worth knowing before you design around them:
   *not* on the load path: it is a per-transfer string for a fact that is
   constant for the run. **The row says what format its certificate is in**
   (`cert_format`, #833): the applier writes `CURLOPT_SSLCERTTYPE` from it, so a
-  `p12` bundle goes out as one and the Schannel build - which takes no PEM pair
-  at all and could therefore present *nothing* a user registered - works. A
+  `p12` bundle goes out as one rather than being handed to the PEM parser. A
   PKCS#12 row stores no `key_path` (the bundle carries the key) and one
   `passphrase` column serves both, since libcurl reads it as the import
   password too. The format is **stored, not sniffed per transfer**, defaulted at
@@ -390,15 +413,16 @@ Three things worth knowing before you design around them:
   only a contradiction is an error, a file we cannot classify is the backend's
   to judge. `tests/mutual_tls_test.cpp` runs every driver case once per format
   the leg's backend accepts (`client_identity_formats()`).
-  **mTLS still does not work on Windows, and the reason is now upstream rather
-  than ours** (#842): curl 8.21's Schannel client-cert path imports the bundle
-  with `PKCS12_NO_PERSIST_KEY` and cannot then use the key, which curl's own
-  `KNOWN_BUGS` documents (curl 17626, 3145) and which measures here as
+  **mTLS works on all three platforms since #851, and both formats run on every
+  leg with no skip.** It did not before, for a reason that was never ours
+  (#842): curl 8.21's Schannel client-cert path imports the bundle with
+  `PKCS12_NO_PERSIST_KEY` and cannot then use the key, which curl's own
+  `KNOWN_BUGS` documents (curl 17626, 3145) and which measured here as
   `SEC_E_INTERNAL_ERROR` on every driver, with a legacy-PBE and a PBES2 bundle
-  alike. So the wire cases skip on that leg through `client_auth_defect()` -
-  kept deliberately separate from the format matrix, so a fixed libcurl deletes
-  one line - while what the engine itself does (the stored format, the option,
-  the registry rules) is asserted on Windows like everywhere else.
+  alike. The wire cases skipped on that leg through `client_auth_defect()`;
+  #851 deleted the helper and the skip by taking Schannel out of the build.
+  **Anything proposing a return to Schannel reads closed #842 first** - the
+  defect is still open upstream, and the skip comes back with it.
 
 ## Request composition (engine-owned - POST /compose)
 

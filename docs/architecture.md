@@ -261,12 +261,17 @@ host, never on the proxy.
 The same policy carries **who the engine trusts**. `customCaCertificates` holds
 pasted PEM anchors, materialized as a bundle beside the database and added to
 the platform's own trust rather than replacing it, so a TLS-inspecting proxy or
-an internal authority is verifiable on every one of those paths at once. Per
-request, the Settings tab's *Verify TLS certificate* row turns verification off
-for one endpoint - stored, sent on every send and load test, and painted as a
-warning while it is off. See
+an internal authority is verifiable on every one of those paths at once. All
+three platforms verify with **one TLS backend** - OpenSSL, pinned in
+`engine/vcpkg.json` and asserted per CI leg - so *additive* means one of two
+things depending on where the platform keeps its anchors: Linux and macOS read
+their bundle from disk and the materialized file is that plus the paste, while
+Windows keeps its in the certificate store and the engine loads it with
+`CURLSSLOPT_NATIVE_CA` beside the bundle. Per request, the Settings tab's
+*Verify TLS certificate* row turns verification off for one endpoint - stored,
+sent on every send and load test, and painted as a warning while it is off. See
 [TLS trust settings](engine/api-reference.md#tls-trust-settings) for the
-per-backend behaviour on each platform.
+per-platform detail, including what the Windows store does not supply.
 
 It also carries **what the engine proves it is**. An mTLS endpoint asks the
 client for a certificate, and a certificate belongs to the host being called

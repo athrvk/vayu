@@ -94,14 +94,15 @@ bool os_at_least (DWORD major, DWORD minor, bool use_rtl) {
 } // namespace
 
 /**
- * On Windows, HTTP/2 lives or dies by this process's *reported* OS version.
+ * On Windows, HTTP/2 used to live or die by this process's *reported* OS
+ * version, and this is what keeps that from silently coming back.
  *
  * curl's Schannel backend enables ALPN only when the OS is at least Windows 8.1
  * (`s_win_has_alpn`, lib/vtls/schannel.c), and without ALPN a TLS connection
  * can never be anything but HTTP/1.1. That check prefers ntdll's
  * RtlVerifyVersionInfo, but resolves the pointer to it in Curl_win32_init(),
  * which libcurl's global_init() runs *after* Curl_ssl_init() - so the one call
- * that decides ALPN for the process falls back to VerifyVersionInfoW, which
+ * that decided ALPN for the process fell back to VerifyVersionInfoW, which
  * reports Windows 8 (6.2) to any unmanifested process. 6.2 < 6.3, ALPN off,
  * HTTP/2 gone - silently, with a 200 and an httpVersion of "HTTP/1.1".
  *
@@ -109,6 +110,14 @@ bool os_at_least (DWORD major, DWORD minor, bool use_rtl) {
  * lied to about it": the shimmed and unshimmed answers must agree. That holds
  * only while engine/res/vayu-windows.manifest is embedded in the binary, which
  * is what this actually guards.
+ *
+ * **Since #851 this build verifies with OpenSSL on Windows**, whose ALPN is not
+ * gated on an OS version at all - so the chain above no longer runs and HTTP/2
+ * here does not depend on the manifest. The assertion stays because it is what
+ * makes a return to Schannel safe: the failure it catches is invisible, and a
+ * backend change that silently re-armed it would ship an HTTP/1.1-only Windows
+ * build reporting success. Whether the manifest is still earning its place for
+ * any *other* reason is #856, not a deletion to make in passing.
  *
  * Scope: this proves it for vayu_tests. The binary that matters is
  * vayu-engine.exe, and no gtest can inspect a different executable - that half
@@ -121,9 +130,9 @@ TEST (HttpVersionSupport, WindowsOsVersionIsNotShimmed) {
     const bool truth  = os_at_least (6, 3, /*use_rtl=*/true);
     const bool shimmed = os_at_least (6, 3, /*use_rtl=*/false);
 
-    ASSERT_TRUE (truth) << "ntdll reports this OS as older than Windows 8.1. "
-                           "curl's Schannel backend does not do ALPN there, so "
-                           "HTTP/2 is genuinely unavailable - not a build defect.";
+    ASSERT_TRUE (truth) << "ntdll reports this OS as older than Windows 8.1, so "
+                           "the shim below has nothing to hide and this test can "
+                           "say nothing about the manifest - not a build defect.";
 
     EXPECT_TRUE (shimmed)
     << "This process is being version-shimmed: Windows tells it the OS is 6.2 "
@@ -138,9 +147,10 @@ TEST (HttpVersionSupport, WindowsOsVersionIsNotShimmed) {
 
 #else
 
-// No non-Windows counterpart on purpose. ALPN on OpenSSL (Linux) and
-// Secure Transport / LibreSSL (macOS) is not gated on an OS version check, so
-// there is no equivalent way for it to switch itself off - the nghttp2 gate
-// above is the whole precondition there.
+// No non-Windows counterpart on purpose. Linux and macOS are both OpenSSL
+// builds (#818 - this comment claimed Secure Transport for macOS until then),
+// and OpenSSL's ALPN is not gated on an OS version check, so there is no
+// equivalent way for it to switch itself off - the nghttp2 gate above is the
+// whole precondition there.
 
 #endif // _WIN32

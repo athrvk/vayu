@@ -30,14 +30,12 @@ native C++ load engine in the same app.
 | **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | Yes |
 | **Open source** | Yes (dual-license) | Partial |
 
-\* **Two asterisks that row has earned.** Client certificates are proven on a
-wire on Linux and macOS; **on Windows an mTLS handshake does not complete
-yet** - an upstream libcurl defect carried in curl's own `KNOWN_BUGS`, not a
-setting you can fix, with the backend change that resolves it approved and
-queued. And `system` proxy mode resolves a PAC script **once**, against a probe
-URL, applying that one answer engine-wide rather than per URL; a headless
-engine with nothing resolved falls back to environment-variable pickup rather
-than to no proxy. Detail:
+\* **One asterisk that row has earned.** `system` proxy mode resolves a PAC
+script **once**, against a probe URL, applying that one answer engine-wide
+rather than per URL; a headless engine with nothing resolved falls back to
+environment-variable pickup rather than to no proxy. Client certificates carry
+no qualification any more - they are proven on a wire on all three platforms,
+in both PEM-pair and PKCS#12 form. Detail:
 [proxy settings](../engine/api-reference.md#proxy-settings),
 [TLS trust](../engine/api-reference.md#tls-trust-settings) and
 [client certificates](../engine/api-reference.md#client-certificates).

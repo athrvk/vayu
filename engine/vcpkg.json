@@ -6,8 +6,11 @@
   "dependencies": [
     {
       "name": "curl",
+      "default-features": false,
       "features": [
-        "http2"
+        "http2",
+        "non-http",
+        "openssl"
       ]
     },
     "libsodium",

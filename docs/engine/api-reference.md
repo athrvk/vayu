@@ -683,27 +683,55 @@ points `CURLOPT_CAINFO` at it, rewriting the file only when the setting's
 content changes. **Native trust is preserved** - the mechanism differs by TLS
 backend, and each is stated rather than assumed:
 
-| Platform | Backend at the pinned vcpkg baseline | What the bundle does |
-|----------|--------------------------------------|----------------------|
+| Platform | Backend | What the bundle does |
+|----------|---------|----------------------|
 | Linux | OpenSSL (default paths + `CURL_CA_FALLBACK`) | `CURLOPT_CAINFO` **replaces** the default bundle, so the materialized file is the platform's own anchors **concatenated with** the pasted ones. The system bundle is located the way curl locates it: `CURL_CA_BUNDLE` / `SSL_CERT_FILE`, then libcurl's compiled-in `cainfo`, then the standard distribution paths. |
-| macOS | OpenSSL | Same as Linux, not the OS store this table claimed until issue #818: the baseline's `curl` port takes its `openssl` feature on everything but Windows, so the anchors are read from `/etc/ssl/cert.pem` and merged into the materialized file. |
-| Windows | Schannel | The certificate store is the backend's own and is not a file to merge, so the bundle holds the pasted certificates alone and the store keeps applying. |
+| macOS | OpenSSL | Same as Linux, not the OS store this table claimed until issue #818, and the anchors are read from `/etc/ssl/cert.pem` and merged into the materialized file. |
+| Windows | OpenSSL, selected explicitly (issue #851; Schannel before it) | The anchors live in the certificate store and Windows ships no PEM bundle to merge with, so the materialized file holds the pasted certificates alone and `CURLSSLOPT_NATIVE_CA` - set on **every** Windows handle, pasted CA or not - loads the store beside it. A machine that exports `CURL_CA_BUNDLE` puts a file back in reach and the merge runs there as it does on Linux. |
 
 Three things make that table checkable rather than a claim. The backend column
-itself is asserted on each CI platform, so the rows are read off the build
-rather than out of a port file - the mistake that left the macOS row wrong
-until issue #818. `CURLOPT_CAINFO` is the one transport option a backend can
-refuse outright, so the engine checks the return code and logs an error naming
-the backend if it ever does - and the test suite asserts on every CI platform
-that this build's backend accepts it. And wherever `CURLOPT_CAINFO` replaces
-the store, the suite asserts the system anchors were actually found, because a
-merge with nothing to merge would narrow trust to the pasted certificate alone
-while this page still promised the opposite.
+itself is asserted on each CI platform - both its *name* and that this process
+**selected** it rather than inheriting whatever libcurl chose - so it is read
+off the build rather than out of a port file, the mistake that left the macOS
+row wrong until issue #818. The selection is not a formality on Windows: the
+`curl` port's `http2` feature depends on `curl[ssl]`, which resolves to Schannel
+there, so that libcurl carries both backends and picks between them by reading
+`CURL_SSL_BACKEND` from the environment. The engine names OpenSSL before curl
+initializes, which is what stops a stray environment variable from moving every
+request onto a backend where client certificates do not work at all. Issue #858
+tracks getting Schannel out of the build entirely.
+`CURLOPT_CAINFO` is the one transport option a backend can refuse outright, so
+the engine checks the return code and logs an error naming the backend if it
+ever does - and the test suite asserts on every CI platform that this build's
+backend accepts it. And where the anchors come from a file, the suite asserts
+they were actually found; where they come from the store, that the build accepts
+the flag that loads it. Either way a merge with nothing to merge would narrow
+trust to the pasted certificate alone while this page still promised the
+opposite, so `NativeStoreVerificationTest` closes it on a wire: a public
+certificate has to verify with nothing pasted, and go on verifying once an
+unrelated CA is.
 
-Where a bundle is in force the engine also sets `CURLSSLOPT_NATIVE_CA`, which
-asks the backends that implement it to keep consulting the OS store; it is a
-no-op on the rest, and on Linux and macOS the merge above is what carries the
+`CURLSSLOPT_NATIVE_CA` asks the backend to keep consulting the OS store. It is
+set unconditionally on Windows, where it is the anchor source; elsewhere it is
+set whenever a bundle is in force, and the merge above is what carries the
 guarantee.
+
+**What the Windows certificate store does not give you.** OpenSSL reads it
+through the Windows crypto API rather than being the OS verifier, so three
+things Schannel did on its own do not happen:
+
+- **Root certificates only.** Intermediates cached in the store are not
+  supplied to the chain builder (curl 12155), so a server that does not send
+  its full chain can fail on Windows where it verified before. Pasting the
+  intermediate into `customCaCertificates` fixes it.
+- **No on-demand root fetch.** Windows can download a missing trusted root
+  when Schannel asks for one; nothing here asks, so only roots already in the
+  store count.
+- **No revocation through the store.** Schannel passed
+  `CERT_CHAIN_REVOCATION_CHECK_CHAIN`; OpenSSL does not revocation-check the
+  chain unless told to, and the engine does not tell it to on any platform - so
+  Windows now behaves like Linux and macOS here rather than being the strict
+  one.
 
 A certificate that still fails to verify fails at handshake time with libcurl's
 own `SSL_ERROR` - the validation on the way in is about the *shape* of the
@@ -2212,25 +2240,29 @@ on every transfer. Which formats work is a property of the build's TLS backend:
 
 | Backend | Builds | Presents |
 |---------|--------|----------|
-| OpenSSL | Linux, macOS | `pem` and `p12` |
-| Schannel | Windows | `p12` only |
+| OpenSSL | Linux, macOS, Windows | `pem` and `p12` |
+| Schannel | none since issue #851 | `p12` only |
 
-A `pem` entry on Windows fails at handshake time with libcurl's own error -
-that backend takes no PEM pair at all, which before issue #833 (when the engine
+**Mutual TLS works on all three platforms** as of issue #851. It did not before:
+Windows built against Schannel, and curl's Schannel client-certificate path
+cannot complete the handshake - it imports the bundle with
+`PKCS12_NO_PERSIST_KEY` and the key that yields is one Schannel's credential
+path cannot use, so the transfer failed with `SEC_E_INTERNAL_ERROR ... The Local
+Security Authority cannot be contacted` (issue #842). Nothing in Vayu's
+configuration changed that, so #851 changed the backend instead.
+
+**Before moving any leg back to Schannel, read closed issue #842.** The defect
+above is still open upstream: curl 8.21.0 carries **two** entries for it in its
+own `KNOWN_BUGS` (curl issues 17626 and 3145), one of them naming the exact
+call, and #842 is the measurement record - every driver, with a legacy-PBE and a
+PBES2 bundle alike. A change that returns to Schannel has to re-instate the wire
+skip #851 deleted. Schannel also takes no PEM pair at all, so a `pem` entry
+would fail at handshake time again, which before issue #833 (when the engine
 named no type) meant a Windows build could present nothing a user registered.
 
-**On Windows, mutual TLS does not work today, and that is upstream** (issue
-#842). The engine stores the format and hands libcurl the right type, but
-curl's Schannel client-certificate path cannot complete the handshake: it
-imports the bundle with `PKCS12_NO_PERSIST_KEY` and the key that yields is one
-Schannel's credential path cannot use, so the transfer fails with
-`SEC_E_INTERNAL_ERROR ... The Local Security Authority cannot be contacted`.
-curl 8.21.0 - the pinned baseline - documents this in its own `KNOWN_BUGS`
-(curl issues 17626 and 3145). Nothing in Vayu's configuration changes it.
-
-On the OpenSSL legs both formats are asserted on a wire (a design send, an SSE
-stream, a load run and a `pm.sendRequest` against a listener that demands a
-client certificate).
+Both formats are asserted on a wire on every leg (a design send, an SSE stream,
+a load run and a `pm.sendRequest` against a listener that demands a client
+certificate).
 
 **A PKCS#12 entry names no key file**, because the bundle carries the key: a row
 that names one is a `400` rather than a stored path nothing would read, and
