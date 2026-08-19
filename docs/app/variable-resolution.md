@@ -116,7 +116,12 @@ a row whose whole job is to say whether a name resolves.
 
 The **audit** in the Data tab is the same comparison in the other direction -
 the declared columns against the tokens the collection's requests actually
-carry. See
+carry.
+
+Every surface that acts on a contract resolves it this way, including the **Run
+dialog**: running a sub-collection under a declaring parent offers the parent's
+declared file as the pre-fill and diffs the chosen file against the parent's
+columns, the same answer Send-with-row and the token painter give. See
 [COMPONENTS.md](COMPONENTS.md#shared-variable-input-componentssharedvariableinput)
 for the paint and
 [Data-Driven Runs](data-driven-runs.md) for the file itself.

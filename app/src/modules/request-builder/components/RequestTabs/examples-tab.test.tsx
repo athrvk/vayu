@@ -70,6 +70,7 @@ const example = (over: Partial<RequestExample> = {}): RequestExample => ({
 	headers: [{ key: "Content-Type", value: "application/json", enabled: true }],
 	body: '{"id":1}',
 	contentType: "application/json",
+	origin: "import",
 	...over,
 });
 
@@ -149,6 +150,36 @@ describe("Examples tab", () => {
 	});
 
 	/*
+	 * Where a row came from (issue #722). The engine has recorded `origin` since
+	 * #588 and a spec sync acts on the two kinds differently - it rewrites a
+	 * request's imported examples on any applied change and never touches a
+	 * saved one - so a list that shows neither leaves the user unable to predict
+	 * which rows the next sync owns.
+	 */
+	describe("the origin chip", () => {
+		it("marks an imported row and leaves a saved one unmarked", async () => {
+			listRequestExamples.mockResolvedValue([
+				example({ origin: "import" }),
+				example({ id: "exa_2", name: "Kept from a send", origin: "user" }),
+			]);
+			renderExamplesTab({ id: "req_1" });
+
+			// One chip, on the imported row rather than merely somewhere on the
+			// page - the whole point is which row it names.
+			const chips = await screen.findAllByText("Imported");
+			expect(chips).toHaveLength(1);
+			// By the expanders, in list order: a name query matches the delete
+			// button beside each row as well, which is why the tests above reach
+			// for `expanded` too.
+			const [imported, saved] = screen.getAllByRole("button", { expanded: false });
+			expect(imported.textContent).toContain("200 OK");
+			expect(imported.textContent).toContain("Imported");
+			expect(saved.textContent).toContain("Kept from a send");
+			expect(saved.textContent).not.toContain("Imported");
+		});
+	});
+
+	/*
 	 * Delete (issue #588). It landed with save-as-example because an example you
 	 * can create and never remove is the #553 zombie shape at a smaller scale -
 	 * and because a row a mock server answers with is not one to remove on a
@@ -170,6 +201,32 @@ describe("Examples tab", () => {
 			await waitFor(() =>
 				expect(deleteRequestExample).toHaveBeenCalledWith("req_1", "exa_1")
 			);
+		});
+
+		/*
+		 * The dialog used to promise "nothing here can bring it back" for every
+		 * row, which was false for an imported one: the next sync of any field
+		 * re-created it (issue #722). The engine keeps the delete now, so the
+		 * promise holds - and the copy says which way each kind of row can still
+		 * come back rather than asserting it cannot.
+		 */
+		it("tells an imported row what a sync and a re-import each do about it", async () => {
+			listRequestExamples.mockResolvedValue([example({ origin: "import" })]);
+			renderExamplesTab({ id: "req_1" });
+
+			fireEvent.click(await screen.findByRole("button", { name: /delete example 200 OK/i }));
+			expect(screen.getByText(/will not bring it back/i)).toBeTruthy();
+			expect(screen.getByText(/re-importing the document will/i)).toBeTruthy();
+			expect(screen.queryByText(/Nothing here can bring it back/i)).toBeNull();
+		});
+
+		it("tells a saved row that nothing brings it back", async () => {
+			listRequestExamples.mockResolvedValue([example({ origin: "user" })]);
+			renderExamplesTab({ id: "req_1" });
+
+			fireEvent.click(await screen.findByRole("button", { name: /delete example 200 OK/i }));
+			expect(screen.getByText(/Nothing here can bring it back/i)).toBeTruthy();
+			expect(screen.queryByText(/re-importing the document/i)).toBeNull();
 		});
 
 		it("keeps the row and names the refusal when the engine says no", async () => {

@@ -641,9 +641,8 @@ export interface Request {
  * A saved example response stored against a request (issue #481).
  *
  * What an importer found next to the request - Postman's saved responses, an
- * OpenAPI operation's documented ones - and, once the mock server lands, the
- * response it serves. Read-only in the app today: examples are created by
- * import, so the request builder lists them and nothing writes one.
+ * OpenAPI operation's documented ones - what the user kept from a live response
+ * (issue #588), and what a mock server for the collection answers with.
  *
  * The engine's row carries `order` and timestamps too. They are absent here on
  * purpose: the list arrives already in `order`, and no surface displays either,
@@ -659,6 +658,18 @@ export interface RequestExample {
 	body: string;
 	/** `""` when the source stated no media type - not a guess. */
 	contentType: string;
+	/**
+	 * Who wrote this row: `import` for what an importer or a spec sync produced,
+	 * `user` for what was saved from a live response (issues #588, #722).
+	 *
+	 * Typed here because the panel reads it, and it had to be: the two kinds
+	 * behave differently and the difference was invisible. A sync rewrites the
+	 * imported rows of every request it touches, so an imported example is the
+	 * document's to change and a saved one is not - and what deleting one means
+	 * differs with it. Always present: the engine has recorded an origin on
+	 * every row since #588 and defaults the column to `import`.
+	 */
+	origin: "import" | "user";
 	/**
 	 * True when `body` is only the first slice of the response this was saved
 	 * from (issue #659).
@@ -1499,13 +1510,28 @@ export interface TestResult {
 	name: string;
 	passed: boolean;
 	error?: string;
+	/**
+	 * Which script called `pm.test` (issue #810).
+	 *
+	 * Optional because a trace stored - or an engine sidecar answering - before
+	 * that issue listed the post-request script's assertions and nothing else,
+	 * so an absent source is a `"test"` one rather than an unknown phase. A
+	 * pre-request assertion used to fail its scenario step and appear in no
+	 * list; it is listed now, and the phase is what keeps "asserted before the
+	 * request went out" from reading as an assertion about the response.
+	 */
+	source?: ScriptSource;
 }
 
 /** Which `console.*` method a script line came from. Engine spellings. */
 export type ConsoleLevel = "log" | "info" | "warn" | "error";
 
-/** Which of a request's two scripts wrote a line. */
-export type ConsoleLogSource = "pre" | "test";
+/**
+ * Which of a request's two scripts produced something - a console line, or an
+ * assertion. One type rather than one per payload: it is the same pair of
+ * scripts, and the engine spells them these two ways everywhere.
+ */
+export type ScriptSource = "pre" | "test";
 
 /**
  * One line of script console output.
@@ -1516,7 +1542,7 @@ export type ConsoleLogSource = "pre" | "test";
  * tab drew `console.error` exactly like `console.log`. Both are fields now.
  */
 export interface ConsoleLogEntry {
-	source: ConsoleLogSource;
+	source: ScriptSource;
 	level: ConsoleLevel;
 	message: string;
 }

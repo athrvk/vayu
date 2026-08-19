@@ -120,26 +120,30 @@ std::string& error) {
 }
 
 /**
- * What the test script's assertions came to, or `std::nullopt` for a step that
- * made none (issue #724).
+ * What this step's assertions came to, or `std::nullopt` for a step that made
+ * none (issue #724).
  *
- * The test script alone, because that is what `build_script_result_node`
- * serializes onto the trace - a tally counting a pre-request script's
- * assertions would name a number the step's own list cannot account for. That
- * the node drops those assertions while `describe_failed_tests` counts them is
- * a separate gap - issue #810 - rather than something to paper over here.
+ * Both scripts, because that is what `build_script_result_node` serializes onto
+ * the trace (issue #810) - the tally and the stored list count the same things,
+ * so a step does not change its numbers when its row arrives. It also counts
+ * what `describe_failed_tests` already fails the step on, which is what the two
+ * disagreed about: a step could be `failed` by an assertion its own tally said
+ * nothing about.
  */
-std::optional<StepTestTally> tally_tests (const vayu::ScriptResult& post_script_result) {
-    if (post_script_result.tests.empty ()) {
-        return std::nullopt;
-    }
+std::optional<StepTestTally> tally_tests (const vayu::ScriptResult& pre_script_result,
+const vayu::ScriptResult& post_script_result) {
     StepTestTally tally;
-    for (const auto& test : post_script_result.tests) {
-        if (test.passed) {
-            ++tally.passed;
-        } else {
-            ++tally.failed;
+    for (const auto* result : { &pre_script_result, &post_script_result }) {
+        for (const auto& test : result->tests) {
+            if (test.passed) {
+                ++tally.passed;
+            } else {
+                ++tally.failed;
+            }
         }
+    }
+    if (tally.passed == 0 && tally.failed == 0) {
+        return std::nullopt;
     }
     return tally;
 }
@@ -632,7 +636,8 @@ RunManager& manager) {
                 // The assertions this step made (issue #724), for the frame a
                 // live watcher reads. A step whose row could not bind ran no
                 // script and gets no tally - `exchange` is the default one.
-                record.tests = tally_tests (exchange.post_script_result);
+                record.tests =
+                tally_tests (exchange.pre_script_result, exchange.post_script_result);
 
                 // What the contract says about what came back (issue #681).
                 // Only for a step that sent: a skipped step and one whose data

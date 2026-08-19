@@ -59,7 +59,7 @@ enum class StepOutcome { Passed, Failed, Skipped, Errored };
 [[nodiscard]] const char* to_string (StepOutcome outcome);
 
 /**
- * @brief How many assertions one step's test script made, and how many held.
+ * @brief How many assertions one step's scripts made, and how many held.
  *
  * The itemized list rides the stored trace's `scripts` node and nothing else -
  * it is unbounded in the number of `pm.test` calls a script can make, and the
@@ -67,9 +67,11 @@ enum class StepOutcome { Passed, Failed, Skipped, Errored };
  * numbers are constant-size, so a step being watched can say "3 passed, 1
  * failed" as it streams while the list itself waits for the stored row.
  *
- * Counted from the **test script alone**, exactly the assertions
- * `build_script_result_node` serializes, so the live tally and the stored list
- * count the same things rather than disagreeing by one script's worth.
+ * Counted from **both scripts**, exactly the assertions
+ * `build_script_result_node` serializes (issue #810), so the live tally and the
+ * stored list count the same things rather than disagreeing by one script's
+ * worth - which they did while the node listed the post-request script alone
+ * and `describe_failed_tests` failed steps on either.
  */
 struct StepTestTally {
     size_t passed = 0;

@@ -31,6 +31,7 @@ import type {
 	ResolvedVariable,
 	ResponseTiming,
 	ScriptPart,
+	TestResult,
 	StreamEndReason,
 	StreamEvent,
 	VariableOrigin,
@@ -275,7 +276,13 @@ export interface ResponseState {
 	errorMessage?: string;
 	/** A `string` is the pre-structured engine shape - see `parse-logs.ts`. */
 	consoleLogs?: Array<ConsoleLogEntry | string>;
-	testResults?: Array<{ name: string; passed: boolean; error?: string }>;
+	/**
+	 * Every assertion the request's two scripts made, in execution order, each
+	 * naming its script (issue #810). The engine's own shape, shared with the
+	 * stored trace's `scripts` node rather than restated here - a second copy of
+	 * a shape is a second place a field can go missing.
+	 */
+	testResults?: TestResult[];
 	preScriptError?: string;
 	postScriptError?: string;
 	/**

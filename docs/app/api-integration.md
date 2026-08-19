@@ -164,10 +164,13 @@ list key rather than splicing a row in, since the engine decides the id, the
 `order` an append lands on and the stored shape of the row.
 
 A saved example is written with **`origin: "user"`**, and an imported one keeps
-the engine's `"import"` default. That field is write-only from here - nothing in
-the app reads it back and `RequestExample` does not claim it - because its
-reader is the OpenAPI spec sync (#627), which may replace the examples a
-document produced and must never touch one a person saved. The rest of the
+the engine's `"import"` default. Its first reader is the OpenAPI spec sync
+(#627), which may replace the examples a document produced and must never touch
+one a person saved - and since #722 the panel reads it too: `RequestExample`
+claims the field, an imported row carries an **Imported** chip, and the delete
+dialog says what can still bring that kind of row back. The asymmetry the field
+encodes is a fact about the list, so leaving it invisible made which rows the
+next sync would replace unpredictable. The rest of the
 payload is the importers' own mapping, `contentType` included (the response's
 Content-Type header verbatim, `""` when it stated none), so an app-saved example
 and an imported one are served identically. No `order` is ever sent: the engine
@@ -176,9 +179,9 @@ example.
 
 No transformer, unlike a request row: an example carries no timestamp the app
 renders and no column that predates a schema change, so the wire shape *is* the
-domain shape - minus the `order`, `origin` and timestamps the `RequestExample`
-type deliberately does not claim, since the list arrives already ordered and no
-surface displays any of them. The stored order is the contract, not a suggestion: a mock
+domain shape - minus the `order` and timestamps the `RequestExample` type
+deliberately does not claim, since the list arrives already ordered and no
+surface displays either. The stored order is the contract, not a suggestion: a mock
 server answers with the first example of a matched request, so the panel renders
 the list as received rather than re-sorting it.
 
@@ -948,7 +951,8 @@ forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
   clientCertificate: "",
   timing: { total: 150, dns: 10, connect: 20, ... },
   testResults: [
-    { name: "Status 200", passed: true }
+    { name: "Token was issued", passed: true, source: "pre" },
+    { name: "Status 200", passed: true, source: "test" }
   ],
   consoleLogs: [
     { source: "pre", level: "log", message: "Pre-request" },
@@ -956,6 +960,12 @@ forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
   ]
 }
 ```
+
+`testResults` entries name the script that asserted them, in execution order:
+`pm.test` runs in a pre-request script too, and the Tests pane groups the list
+by `source` so an assertion made before the request went out does not read as
+one about the response (issue #810). An entry restored from a trace written
+before that carries no `source`, and is read as the test script's.
 
 `consoleLogs` entries name the script that wrote them and the `console.*` level
 that was called. A bare `string` is the pre-structured shape an older engine

@@ -55,6 +55,8 @@ function example(overrides: Partial<RequestExample> = {}): RequestExample {
 		headers: [{ key: "Content-Type", value: "application/json", enabled: true }],
 		body: '{"id":1}',
 		contentType: "application/json",
+		// A truncated body can only come from a save: import copies whole ones.
+		origin: "user",
 		...overrides,
 	};
 }

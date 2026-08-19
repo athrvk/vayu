@@ -107,7 +107,15 @@ Three things worth knowing before you design around them:
   wrote, `user` for what the app saved from a live response - defaulting to
   `import`, and a `400` on anything else. It is stored so the OpenAPI spec sync
   (`POST /specs/sync`, #655) can replace the first kind without touching the
-  second; nothing else about a row says where it came from.
+  second; nothing else about a row says where it came from. **Deleting an
+  imported example keeps the row as a tombstone** (`suppressed`, #722), because
+  the refresh rewrites a request's imported rows on any applied change and so
+  a plain delete lasted only until the next sync of any field. Every read
+  filters tombstones out - `get_request_examples` and `get_request_example`, so
+  the list route, a mock server and an export all behave as though the row were
+  gone - and `get_suppressed_request_examples` is the single read that sees
+  them, for the refresh. It matches on the response **status**, which is what a
+  document's example keeps when its description is reworded.
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
   to load a restored request tab or a design-run copy on cold start - one round
   trip, not the old scan of every collection's list. A `404` means the request
@@ -244,9 +252,34 @@ Three things worth knowing before you design around them:
   `customCaCertificates` setting beside the database and **extends** the
   platform's trust rather than replacing it: on an OpenSSL build CAINFO *is*
   the whole store, so the file is the system anchors plus the user's, while
-  Schannel and Apple SecTrust keep their OS store. The per-backend claim is
-  tested on each CI platform (`TlsBackend.AcceptsACustomCaBundleOnThisPlatform`)
-  rather than reasoned about, because a wrong claim here is a security claim. A proxy-hop failure is **`ErrorCode::ProxyError`**, distinct from
+  Schannel and Apple SecTrust keep their OS store. That claim is checked on
+  each CI platform rather than reasoned about, because a wrong claim here is a
+  security claim - by **two** tests answering two different questions, and the
+  distinction matters because for a while only the first existed and the docs
+  read as though it covered both (#812).
+  `TlsBackend.AcceptsACustomCaBundleOnThisPlatform` asks the narrow one:
+  whether this build's backend refuses `CURLOPT_CAINFO` outright
+  (`CURLE_NOT_BUILT_IN`). It stands up no server and verifies nothing.
+  `CustomCaVerificationTest` (`tests/tls_verification_test.cpp`) asks the one a
+  user cares about, on a wire: an in-process HTTPS listener holds a certificate
+  a per-run CA signed (`tests/tls_server.hpp`), and the send verifies once that
+  CA is pasted into `customCaCertificates`, fails before it is, fails against a
+  CA that signed nothing here - the case that separates real verification from
+  a bundle read and ignored - and still verifies when a second anchor is added
+  beside it, which is the additive rule observed rather than asserted. That
+  listener is why `cpp-httplib` carries the `openssl` feature in
+  `engine/vcpkg.json`. **The two backends do not answer this the same way, and
+  the wire is how we found out.** Where curl revocation-checks the chain itself
+  - the Schannel path does, passing `CERT_CHAIN_REVOCATION_CHECK_CHAIN` unless
+  told not to - a certificate authority minted for one test run is refused for
+  publishing no CRL, with the anchor loaded and the signature good. So the two
+  *positive* cases skip there, loudly and only on an error text naming
+  revocation, and #819 carries both halves of that: a fixture that serves a CRL,
+  and the user-facing question it exposes (someone pasting an internal CA with
+  no reachable distribution point gets the same refusal, and no doc says so).
+  The negative cases are asserted on every platform. Still structural, not on a
+  wire: the *client* certificate's handshake, tracked by #802.
+  A proxy-hop failure is **`ErrorCode::ProxyError`**, distinct from
   the target's `ConnectionFailed` - and `curl_to_error` now takes the handle,
   because a 407 answered to a CONNECT is a plain `CURLE_RECV_ERROR` and only
   `CURLINFO_HTTP_CONNECTCODE` remembers a proxy said no.

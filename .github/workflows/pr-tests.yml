@@ -26,6 +26,20 @@ name: PR CI - run tests
 # paying for a full three-platform C++ build that could not be affected by the
 # diff. Split, an app-only pull request reports in roughly four minutes and an
 # engine-only one stops paying for three Node installs.
+#
+# The same argument, applied a second time to what was left (#805 phase 3). The
+# app job had grown back to 9m03s-9m12s on Windows against 6m03s-6m50s
+# elsewhere, and the shape was the same one: work that could not fail
+# differently sitting in front of, or beside, the work that could.
+#
+#   app windows  9m03s   one unsharded vitest run, 7m35s-7m58s of it
+#   app ubuntu   6m03s   lint 39s + format 13s + type-check 22s, then vitest
+#
+# So the platform-independent checks moved out to `quality`, which runs beside
+# the suites rather than ahead of one of them, and the Windows leg is two
+# vitest shards on two runners. Both are wall-clock changes only - the same
+# checks run on the same code, and `ci-gate` proves the shards between them ran
+# every file the suite contains.
 on:
   pull_request:
     branches:
@@ -143,8 +157,66 @@ jobs:
               - 'scripts/test/pre-commit_test.sh'
               - '.github/workflows/pr-tests.yml'
 
+  # Lint, formatting and type-check are platform-independent, so one runner
+  # answers for all three - they used to run inside the app job, where roughly
+  # 1.2 min of them stood in front of the suite that is the job's whole point,
+  # and the type-check ran a second and third time on runners that could not
+  # answer differently. Out here they run beside the tests instead of ahead of
+  # them (#805 phase 3).
+  #
+  # Nothing platform-specific is lost. `forceConsistentCasingInFileNames` makes
+  # the casing question a *Linux* question, and tsc has no other per-platform
+  # verdict; the matrix below exists for what the suite asserts at runtime, not
+  # for what the compiler says about the same files three times.
+  quality:
+    name: App quality checks
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true'
+    permissions:
+      contents: read
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint frontend
+        working-directory: app
+        run: pnpm lint
+
+      - name: Check frontend formatting
+        working-directory: app
+        run: pnpm format:check
+
+      # Three tsc projects, run concurrently by the script itself. A failing
+      # project still fails the script - `concurrently` defaults to
+      # `--success all` - and unlike the `&&` chain it replaced, all three now
+      # report their errors in one run instead of stopping at the first.
+      - name: Type-check frontend
+        working-directory: app
+        run: pnpm type-check
+
   app:
-    name: App on ${{ matrix.os }}
+    name: App on ${{ matrix.os }}${{ matrix.shard && format(' (shard {0})', matrix.shard) || '' }}
     runs-on: ${{ matrix.os }}
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true'
@@ -153,11 +225,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # All three, even though nothing here compiles. The suite asserts
-        # platform behaviour (`platform.test.ts`, `updater.test.ts`) and the
-        # macOS runner is the only one that has ever caught a regression in the
-        # macOS branch - see the testing section of CLAUDE.md.
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # All three platforms, even though nothing here compiles. The suite
+        # asserts platform behaviour (`platform.test.ts`, `updater.test.ts`) and
+        # the macOS runner is the only one that has ever caught a regression in
+        # the macOS branch - see the testing section of CLAUDE.md.
+        #
+        # Windows is split in two because it is the wall of every app-only pull
+        # request: one unsharded run measured 7m35s-7m58s there against ~5 min
+        # on the other two, for a 9m03s-9m12s job. The suite is already parallel
+        # within a run (`pool: threads`, no worker cap) - the second runner buys
+        # what more threads on one runner cannot. ubuntu and macOS stay
+        # unsharded: they are not the wall, and a second runner each would cost
+        # more than it saves.
+        #
+        # `shard` is the literal vitest argument, so the index and the count
+        # cannot drift apart. Adding a third shard means adding `3/3` here *and*
+        # renumbering the others - the coverage check in `ci-gate` fails loudly
+        # if that is done by halves.
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+          - os: windows-latest
+            shard: 1/2
+          - os: windows-latest
+            shard: 2/2
     # Roughly 4 minutes on the slowest runner; the ceiling is for a cold pnpm
     # store, not for the steady state.
     timeout-minutes: 20
@@ -184,25 +275,61 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
-      # Lint and formatting are platform-independent, so one runner answers for
-      # all three - the matrix exists for the suite's platform assertions.
-      - name: Lint frontend
-        if: matrix.os == 'ubuntu-latest'
-        working-directory: app
-        run: pnpm lint
-
-      - name: Check frontend formatting
-        if: matrix.os == 'ubuntu-latest'
-        working-directory: app
-        run: pnpm format:check
-
-      - name: Type-check frontend
-        working-directory: app
-        run: pnpm type-check
-
+      # One step rather than two `if`-guarded ones, so the unsharded and sharded
+      # invocations cannot drift. The json report is written only where it is
+      # read - by the manifest step below.
       - name: Run frontend tests
         working-directory: app
-        run: pnpm test
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          if [[ -z "$SHARD" ]]; then
+            pnpm test
+          else
+            pnpm test --shard="$SHARD" --reporter=default --reporter=json --outputFile.json=vitest-shard.json
+          fi
+
+      # A sharded suite is green when each shard is green, which is also true of
+      # a shard that ran nothing at all. These two files are what makes the
+      # difference visible: what this shard ran, and what the suite contains.
+      # `ci-gate` unions them across the shards and compares.
+      - name: Record what this shard ran
+        if: matrix.shard
+        id: manifest
+        working-directory: app
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          index="${SHARD%%/*}"
+          node scripts/shard-manifest.mjs vitest-shard.json > "shard-${index}.txt"
+          pnpm exec vitest list --filesOnly | node scripts/shard-manifest.mjs - > "full-suite-${index}.txt"
+          ran=$(wc -l < "shard-${index}.txt")
+          total=$(wc -l < "full-suite-${index}.txt")
+
+          # The manifest script already refuses an empty shard. This is the
+          # other half: a shard that ran *everything* means `--shard` was
+          # accepted and ignored, which reads as a pass while costing twice the
+          # runner time it was meant to save.
+          if [[ "$ran" -ge "$total" ]]; then
+            echo "::error::Shard $SHARD ran $ran of $total files - the shard argument did not take effect"
+            exit 1
+          fi
+
+          echo "artifact=vitest-shard-manifest-${index}" >> "$GITHUB_OUTPUT"
+          echo "- shard \`$SHARD\` ran **$ran** of **$total** test files" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload this shard's manifest
+        if: matrix.shard
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.manifest.outputs.artifact }}
+          path: |
+            app/shard-*.txt
+            app/full-suite-*.txt
+          if-no-files-found: error
+          retention-days: 1
 
   engine:
     name: Engine on ${{ matrix.os }}
@@ -475,9 +602,67 @@ jobs:
     # filter cannot be read as "nothing to test". Without it, a broken `changes`
     # job skips everything, and "skipped" would pass this gate on a change
     # nobody ran.
-    needs: [changes, app, engine, installer, build-script]
+    needs: [changes, quality, app, engine, installer, build-script]
     if: always()
+    # `actions: read` is what lets the download below reach this run's own
+    # artifacts; everything else here reads job results, which need nothing.
+    permissions:
+      contents: read
+      actions: read
     steps:
+      # The shard coverage proof lives here rather than in a job of its own
+      # because this is the only job that already runs after both Windows
+      # shards, and two file downloads add seconds to it instead of a runner
+      # start to the wall clock. It runs before the result check below so that a
+      # suite which was half-run is reported as such even on a run where every
+      # job is green - which is exactly the shape of the failure it guards.
+      - name: Collect the app shard manifests
+        if: needs.app.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: vitest-shard-manifest-*
+          merge-multiple: true
+          path: shard-manifests
+
+      - name: Prove the shards ran the whole suite between them
+        if: needs.app.result == 'success'
+        shell: bash
+        run: |
+          shopt -s nullglob
+          manifests=(shard-manifests/shard-*.txt)
+          suites=(shard-manifests/full-suite-*.txt)
+
+          # One manifest per sharded leg. A count that is not 2 means the matrix
+          # gained or lost a shard without this number following it - the case
+          # where `1/2` and `2/3` coexist and a third of the suite runs nowhere.
+          if [[ ${#manifests[@]} -ne 2 || ${#suites[@]} -ne 2 ]]; then
+            echo "::error::Expected 2 shard manifests, found ${#manifests[@]}"
+            exit 1
+          fi
+
+          # Both shards enumerate the suite from the same commit, so a
+          # disagreement means one of them was looking at a different tree and
+          # the comparison below would prove nothing.
+          if ! diff -u "${suites[0]}" "${suites[1]}"; then
+            echo "::error::The shards disagree about which test files exist"
+            exit 1
+          fi
+
+          duplicated=$(sort "${manifests[@]}" | uniq -d)
+          if [[ -n "$duplicated" ]]; then
+            echo "::error::Shards overlap - these files ran twice:"
+            echo "$duplicated"
+            exit 1
+          fi
+
+          sort -u "${manifests[@]}" > union.txt
+          if ! diff -u union.txt "${suites[0]}"; then
+            echo "::error::The shards did not run every test file (- ran, + expected)"
+            exit 1
+          fi
+
+          echo "- Windows shards covered all **$(wc -l < union.txt)** test files, none twice" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Pass if every job succeeded or was skipped
         run: |
           changes="${{ needs.changes.result }}"
@@ -499,6 +684,7 @@ jobs:
               status=1
             fi
           }
+          check quality   "${{ needs.quality.result }}"
           check app       "${{ needs.app.result }}"
           check engine    "${{ needs.engine.result }}"
           check installer "${{ needs.installer.result }}"

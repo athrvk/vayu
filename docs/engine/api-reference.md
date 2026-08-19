@@ -1203,6 +1203,20 @@ is a `400`).
 
 ### DELETE /requests/:id/examples/:exampleId
 
+**Deleting an imported example is a decision that lasts** (issue #722). A spec
+sync rewrites the `origin: "import"` examples of every request it applies a
+change to, so a removed row used to come back on the next sync of any field -
+even a rename. The engine now keeps the row as a **tombstone** instead: the
+example is gone from every read (the list, a mock server, an export, and a `GET`
+or `PUT` on its id, all `404`), and a later sync leaves that response status
+alone rather than writing the document's example for it back. Re-importing the
+document is a fresh import and does bring it back, which is the only way it
+returns. An `origin: "user"` example is removed outright - nothing re-creates
+one, so there is no intent to keep.
+
+The response is the same either way, because from the caller's side so is the
+outcome:
+
 **Response:**
 ```json
 {
@@ -1482,6 +1496,11 @@ Four rules the payload cannot opt out of:
   first example" is what a mock server answers with. An **absent** `examples`
   leaves every example alone, `[]` removes the imported ones. An explicit
   `origin` on an item is a `400`: a sync writes imported examples by definition.
+  An example whose **status the user deleted** is not written back either
+  (issue #722) - the delete left a tombstone and the refresh skips that status,
+  so a sync of any field cannot undo it. The identity is the status, not the
+  name, because a name carries the document's response description and moves
+  when the document rewords it.
 - **A request cannot be moved here.** `collectionId` inside an `update` item is a
   `400`; use `PUT /requests/:id`.
 
@@ -3036,8 +3055,14 @@ run-shaped way of stating the same field, not a second store.
   },
   "testResults": [
     {
+      "name": "Token was issued",
+      "passed": true,
+      "source": "pre"
+    },
+    {
       "name": "Status is 200",
-      "passed": true
+      "passed": true,
+      "source": "test"
     }
   ],
   "consoleLogs": [
@@ -3068,6 +3093,13 @@ The same object is stored on the design run's `trace_data.validation`, so a
 restored response shows the verdict the live one did rather than recomputing it.
 A streaming send carries none - an event stream is not a document a response
 schema describes.
+
+`testResults` lists **both** scripts' assertions in execution order, each
+naming the script that made it in `source` (`"pre"` / `"test"`, the spellings
+`consoleLogs` uses) - `pm.test` is bound in both phases, and until issue #810 a
+pre-request assertion failed a collection-run step while appearing in no list.
+An entry stored before that carries no `source`; it is a test script's, which is
+all the list held.
 
 **The four script keys are stored the same way** (issue #725). `testResults`,
 `consoleLogs`, `preScriptError` and `postScriptError` are returned in the body

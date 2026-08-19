@@ -34,6 +34,17 @@ pm.test('Test name', function() {
 });
 ```
 
+**Both scripts may assert.** `pm.test` is available in a pre-request script as
+well as a test script - the response is not there yet, but a
+[`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) the script
+just made is, and a token fetch that came back empty is worth catching before
+the request goes out. Every
+assertion is reported with the script that made it: each entry in the response
+body's and the stored trace's `testResults` carries a `source` of `"pre"` or
+`"test"`, the same two spellings `consoleLogs` uses, and the app's Tests pane
+groups the list under the script's name (issue #810). A failing assertion fails
+its collection-run step from either script.
+
 ### pm.expect()
 
 Create Chai-style expectations for assertions.
@@ -304,10 +315,11 @@ was answered `202` when it started, so each step's results reach the app only on
 its stored trace, under the same `scripts` node (issue #724). What a step
 publishes while the run is still going is the count - `tests: {passed, failed}`
 on its [`step` event](api-reference.md#get-runsrunidlive) - because the event
-ring is fixed-size and a script may make hundreds of assertions. Both count the
-**test script's** assertions; a `pm.test` called from a pre-request script fails
-its step and is named in the step's error line, but is not listed - issue #810
-is where that disagreement gets settled.
+ring is fixed-size and a script may make hundreds of assertions. Both count
+**both scripts'** assertions (issue #810), which is what fails the step in the
+first place: a failing `pm.test` ends a step whichever script made it, and the
+list used to hold the test script's alone, so a step could be `failed` and
+named in its error line by an assertion its own Tests list did not contain.
 
 ### Reading response headers
 

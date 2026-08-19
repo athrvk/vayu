@@ -24,6 +24,16 @@
  * `isLoading` covers them: exporting while they load would write a document
  * whose operations document no responses, and the user would have no way to
  * tell that from an API nobody saved a response for.
+ *
+ * **The subtree stops where another document begins** (issue #721). Collections
+ * re-parent freely, so a collection bound to spec B can sit under one bound to
+ * spec A. B's requests carry operation stamps of B, and `patchBoundDocument`
+ * matches a stamp by operationId, then by method+path - names generators hand
+ * out in every document (`listUsers`, `GET /users`) - so without a boundary B's
+ * rows claim A's operations and rewrite them with B's values. The walk therefore
+ * refuses to descend into a collection bound to a *different* document, the same
+ * predicate `collectionsUnderContract` uses to stop at a sub-collection that
+ * declares its own data contract.
  */
 
 import { useCallback, useMemo } from "react";
@@ -49,9 +59,15 @@ export interface OpenApiExportSource {
 
 export function useOpenApiExportSource(collection: Collection): OpenApiExportSource {
 	const { data: collections = [] } = useCollectionsQuery();
+	const exportedSpecId = collection.openapi?.specId;
 	const subtreeIds = useMemo(
-		() => collectSubtreeIds(collection.id, collections),
-		[collection.id, collections]
+		() =>
+			collectSubtreeIds(
+				collection.id,
+				collections,
+				(child) => !bindsAnotherDocument(child, exportedSpecId)
+			),
+		[collection.id, collections, exportedSpecId]
 	);
 	const { requestsByCollection, isLoading: requestsLoading } =
 		useMultipleCollectionRequests(subtreeIds);
@@ -107,4 +123,19 @@ export function useOpenApiExportSource(collection: Collection): OpenApiExportSou
 		isLoading: requestsLoading || exampleQueries.isLoading || (bound && spec.isLoading),
 		specFailed: bound && spec.isError,
 	};
+}
+
+/**
+ * Whether this collection answers to a document other than the one being
+ * exported.
+ *
+ * *Another* document, not *a* document: a descendant bound to the same spec as
+ * the root describes the very operations being patched, and excluding it would
+ * have the export remove them as operations "nothing here claims" - trading a
+ * cross-document rewrite for a silent deletion. A skeleton export (no
+ * `exportedSpecId`) has no document of its own, so every binding below it is
+ * another one.
+ */
+function bindsAnotherDocument(collection: Collection, exportedSpecId: string | undefined): boolean {
+	return hasSpecBinding(collection.openapi) && collection.openapi?.specId !== exportedSpecId;
 }

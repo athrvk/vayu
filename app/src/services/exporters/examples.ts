@@ -44,7 +44,18 @@ export function writeResponseExamples(
 		const response = existing ?? { description: group[0].name || `${status} response` };
 		if (!existing) responses[status] = response;
 
-		const withMediaType = group.filter((example) => {
+		const writable = group.filter((example) => {
+			// A capped body is the first slice of a response, not the response
+			// (#659). Written as an `example` it would be indistinguishable from a
+			// complete one - and a body whose `JSON.parse` fails falls back to the
+			// raw string, so half a document would enter the contract as a quoted
+			// fragment. The response still lands, and the count says the body did
+			// not. Checked before the media type so a truncated body with no
+			// recorded type is counted once, as the loss that actually stopped it.
+			if (example.bodyTruncated) {
+				notes.examplesTruncated += 1;
+				return false;
+			}
 			if (example.contentType) return true;
 			// No honest `content` key exists for a body whose media type nobody
 			// stated. The response still lands - a 204 documents itself - and the
@@ -52,10 +63,10 @@ export function writeResponseExamples(
 			notes.examplesWithoutMediaType += 1;
 			return false;
 		});
-		if (withMediaType.length === 0) continue;
+		if (writable.length === 0) continue;
 
 		const content = childRecord(response, "content");
-		for (const [contentType, mediaGroup] of groupBy(withMediaType, (e) => e.contentType)) {
+		for (const [contentType, mediaGroup] of groupBy(writable, (e) => e.contentType)) {
 			const media = childRecord(content, contentType);
 			const values = mediaGroup.map((example) => exampleValue(example.body));
 			if (options.deriveSchema && media.schema === undefined) {

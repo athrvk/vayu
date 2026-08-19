@@ -206,10 +206,11 @@ pnpm format:check  # Prettier
 pnpm type-check
 ```
 
-The PR workflow runs `pnpm lint` and `pnpm format:check` on the app job, so a
-new `any`, a `react-hooks` violation or an unformatted file fails CI. Where a
-rule genuinely cannot be satisfied, suppress it on the single line with a
-comment saying why - an unexplained `eslint-disable` is treated as a defect.
+The PR workflow runs all three on its `App quality checks` job - one Linux
+runner, in parallel with the test jobs - so a new `any`, a `react-hooks`
+violation, an unformatted file or a type error fails CI. Where a rule genuinely
+cannot be satisfied, suppress it on the single line with a comment saying why -
+an unexplained `eslint-disable` is treated as a defect.
 
 ## Testing
 

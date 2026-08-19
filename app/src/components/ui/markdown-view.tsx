@@ -11,7 +11,7 @@
  * **The content here is not all hand-typed.** Descriptions arrive from imported
  * Postman, Insomnia and OpenAPI files - third-party documents off the internet -
  * and until now Vayu stored that markdown and displayed none of it, which is the
- * only reason it never mattered. Rendering it changes that, so three decisions
+ * only reason it never mattered. Rendering it changes that, so four decisions
  * are load-bearing rather than stylistic:
  *
  * **1. No navigating anchors, ever.** A clicked `<a href>` navigates the whole
@@ -20,19 +20,40 @@
  * `href` reaches the DOM, and the click goes to the scheme-validated
  * `openExternalUrl` path, which refuses anything that is not http(s).
  *
- * This is the layer above, not the only one: since #822 the main window itself
- * refuses a navigation that is not the app's own document and denies
- * `window.open` (`electron/window-navigation.ts`), beside `contextIsolation:
- * true` and `nodeIntegration: false`. There is still no CSP. Keep this override
- * anyway - a refused navigation is a link that silently does nothing, where a
- * button reaches the user's browser, which is what they meant.
+ * This is no longer the only layer. #822 put the refusal underneath it that this
+ * note used to say was missing: beside `contextIsolation: true` and
+ * `nodeIntegration: false`, `electron/main.ts` now installs
+ * `electron/window-navigation.ts` on the main window, which refuses a navigation
+ * that is not the app's own document and denies `window.open`. There is still no
+ * CSP. Keep this override anyway - a refused navigation is a link that silently
+ * does nothing, where a button reaches the user's browser, which is what they
+ * meant.
  *
  * **2. `react-markdown`, not `marked`.** It builds React elements from an AST
  * rather than an HTML string, so there is no `dangerouslySetInnerHTML` and no
- * sanitizer for anyone to forget. Raw HTML in the source is ignored - that needs
- * `rehype-raw`, which is deliberately not installed.
+ * sanitizer for anyone to forget.
  *
- * **3. The default `urlTransform` stays.** Overriding it disables
+ * **3. Raw HTML is rendered, and it is sanitized in the same pipeline.** This
+ * decision changed, and the reason is worth keeping. `rehype-raw` used to be
+ * deliberately absent, which made raw HTML inert - correct while nothing shipped
+ * HTML descriptions. Stripe's official OpenAPI document writes *every* operation
+ * description as HTML (`<p>Retrieves the details of an account.</p>`), which is
+ * spec-legal - OpenAPI `description` fields are CommonMark, and CommonMark
+ * admits inline HTML - so the tags were on screen as literal text. `rehype-raw`
+ * now parses them and **`rehype-sanitize` immediately prunes the result**
+ * against the allow-list below.
+ *
+ * That order is load-bearing, not stylistic: sanitizing before the raw HTML is
+ * parsed sanitizes a tree the payload is not in yet, and every hostile case
+ * below would render. The hostile tests in `markdown-view.test.tsx` are what
+ * hold the order - swap the two plugins and they go red.
+ *
+ * Sanitizing prunes hast *nodes*; react-markdown still emits React elements
+ * from the pruned tree, so decision 2's real property - no HTML string, no
+ * `dangerouslySetInnerHTML` - is unchanged. `allowedElements` below is a second
+ * gate over the same list, applied after the plugins.
+ *
+ * **4. The default `urlTransform` stays.** Overriding it disables
  * react-markdown's own URL sanitising, which has a published advisory against
  * exactly that mistake. `remark-gfm` is on for tables (imported Postman
  * descriptions use them), and it also turns bare URLs into autolinks - the `a`
@@ -42,20 +63,29 @@
 import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { type Options as SanitizeSchema } from "rehype-sanitize";
 import { cn } from "@/lib/utils";
 
 /**
- * Block-level elements a description has any business containing.
+ * Elements a description has any business containing.
  *
  * An allow-list rather than a deny-list: a deny-list has to be updated every
  * time the markdown spec or a plugin grows a node type, and the failure mode of
  * forgetting is that the new one renders.
+ *
+ * `b` and `i` earn their place now that raw HTML is parsed: they are what a
+ * hand-written or generator-emitted description uses where markdown would have
+ * produced the `strong` and `em` already here, and dropping them would unwrap
+ * emphasis a vendor did write.
  */
 const ALLOWED = [
 	"p",
 	"br",
 	"strong",
+	"b",
 	"em",
+	"i",
 	"del",
 	"code",
 	"pre",
@@ -78,6 +108,41 @@ const ALLOWED = [
 	"th",
 	"td",
 ];
+
+/**
+ * What survives sanitisation. Derived from `ALLOWED` rather than re-typed, so
+ * the two gates cannot drift into disagreeing about the same question.
+ *
+ * `href` on an anchor is the only attribute anything below reads, so it is the
+ * only one kept. **`class` in particular is never kept**: a description off the
+ * internet has no business naming this app's stylesheet, and the cheapest
+ * attack on a renderer that keeps it is not a script but
+ * `<p class="fixed inset-0 z-50">` - an invisible sheet over the whole window.
+ *
+ * `protocols` is narrower than the default (which also passes `irc`, `ircs`,
+ * `mailto` and `xmpp`) because a link here can do exactly one thing: go to
+ * `openExternalUrl`, which refuses any scheme but http(s). An `href` that
+ * survives sanitisation only to be refused at the other end is a button that
+ * lies about being clickable.
+ *
+ * Every key left unspecified falls back to `defaultSchema` - `hast-util-sanitize`
+ * merges shallowly (`{...defaultSchema, ...options}`) - so GitHub's clobber
+ * prefix and the required-ancestor map for table parts stay in force instead of
+ * being restated here and drifting.
+ */
+const SANITIZE_SCHEMA: SanitizeSchema = {
+	tagNames: ALLOWED,
+	attributes: { a: ["href"] },
+	protocols: { href: ["http", "https"] },
+	/*
+	 * An element outside `tagNames` is *unwrapped* by default: it goes, its
+	 * children stay. That is right for prose in a `<div>` or a `<span>` and
+	 * wrong where the content is not prose - an unwrapped `<style>` puts its CSS
+	 * on screen as words. The default schema strips `script` for that reason;
+	 * `style` needs saying.
+	 */
+	strip: ["script", "style"],
+};
 
 export interface MarkdownViewProps {
 	children: string;
@@ -127,22 +192,17 @@ export function MarkdownView({ children, className }: MarkdownViewProps) {
 			h4: Heading,
 			h5: Heading,
 			h6: Heading,
-			code: ({
-				children: c,
-				className: cls,
-			}: {
-				children?: React.ReactNode;
-				className?: string;
-			}) => {
-				// react-markdown gives fenced blocks a `language-*` class and inline
-				// code none, which is the only way to tell them apart here.
-				const isBlock = !!cls?.startsWith("language-");
-				return isBlock ? (
-					<code className="font-mono text-xs">{c}</code>
-				) : (
-					<code className="rounded-md bg-muted px-1 py-0.5 font-mono text-xs">{c}</code>
-				);
-			},
+			/*
+			 * Inline code, and only inline code. A fenced block used to be told apart
+			 * by the `language-*` class react-markdown puts on it - which no longer
+			 * survives sanitisation, and never existed on a raw `<pre><code>` a vendor
+			 * pasted in, so that one was already painted as a pill inside its own box.
+			 * Position answers it for both: this paints the pill, and the container
+			 * below flattens it back out for any `code` sitting inside a `pre`.
+			 */
+			code: ({ children: c }: { children?: React.ReactNode }) => (
+				<code className="rounded-md bg-muted px-1 py-0.5 font-mono text-xs">{c}</code>
+			),
 			pre: ({ children: c }: { children?: React.ReactNode }) => (
 				<pre className="overflow-x-auto rounded-md bg-muted p-2.5 text-xs">{c}</pre>
 			),
@@ -172,11 +232,19 @@ export function MarkdownView({ children, className }: MarkdownViewProps) {
 				"[&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5",
 				"[&_blockquote]:border-l-2 [&_blockquote]:border-primary/45 [&_blockquote]:pl-2.5 [&_blockquote]:text-muted-foreground",
 				"[&_hr]:my-3 [&_hr]:border-rule",
+				// Code inside a `pre` is a block, and the `pre` already paints the box
+				// - so the pill the `code` renderer applies is flattened here rather
+				// than decided from a class the sanitiser strips.
+				"[&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0",
 				className
 			)}
 		>
 			<ReactMarkdown
 				remarkPlugins={[remarkGfm]}
+				// Raw first, sanitise immediately after. Reversing these two sanitises
+				// a tree the raw HTML has not been parsed into yet, which is the one
+				// way to have both plugins installed and no protection at all.
+				rehypePlugins={[rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA]]}
 				allowedElements={ALLOWED}
 				unwrapDisallowed
 				// `components` is what replaces anchors with non-navigating buttons.

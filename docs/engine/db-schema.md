@@ -269,6 +269,7 @@ found next to it (Postman's `item.response[]`, an OpenAPI operation's
 | `order`        | INTEGER | Sort order within the request; default 0          |
 | `origin`       | TEXT    | `import` \| `user`; NOT NULL, default `import`     |
 | `body_truncated` | INTEGER | `body` stops short of the captured response; NOT NULL, default `0` |
+| `suppressed`   | INTEGER | A tombstone: an imported example the user deleted; NOT NULL, default `0` |
 | `created_at`   | INTEGER | Unix ms                                           |
 | `updated_at`   | INTEGER | Unix ms                                           |
 
@@ -310,11 +311,29 @@ is answered as though it were complete. The Examples panel is the reader,
 painting a "Partial body" chip; before the column, the fact lived only in the
 example's *name*, which the save dialog invites the user to edit.
 
+**suppressed** (issue #722) marks a row as a tombstone: an `origin="import"`
+example the user deleted. Added the same ALTER-friendly way as the two columns
+above, and `false` is right for every pre-existing row - before it, a delete
+removed the row. It exists because deleting an imported example otherwise
+recorded nothing, while the sync refresh above rewrites every imported row of a
+request it applies *any* change to, so the next rename-only sync re-created what
+the user had removed. The row is kept so the refresh can skip that response
+**status** (the identity a document's example keeps across a reworded
+description, which its `name` does not), and `body`, `headers` and
+`content_type` are cleared when the flag goes on, since nothing serves a
+tombstone. `get_request_example`, `get_request_examples` and
+`count_request_examples` all filter suppressed rows out - so the list route, a
+mock server and an export behave exactly as though the delete had removed it -
+and `get_suppressed_request_examples` is the one read that sees them, for the
+one caller that must. A `user` row is still deleted outright: nothing re-creates
+a saved response, so there is no intent to keep.
+
 **Cascade.** Examples are owned by their request: `DELETE /requests/:id` removes
 them in the same transaction, and the `delete_collection` cascade removes each
 descendant request's examples before the requests themselves. Every read here is
 by `request_id` or by example id, so a row left behind would be unreachable
-rather than merely stale.
+rather than merely stale. A tombstone is a row like any other and goes with the
+same cascades.
 
 **Caps.** A body over `request_example::MAX_BODY_BYTES` (1 MiB) is a `400`, never
 a truncation - a half-body served as if whole is worse than a refused write - and

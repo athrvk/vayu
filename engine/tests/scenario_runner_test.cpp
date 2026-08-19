@@ -1506,6 +1506,71 @@ TEST_F (ScenarioRunnerTest, StepFramesCarryTheTallyOnTheSameTermsAsTheStoredList
     EXPECT_FALSE (frame_of (batch.payloads[1]).contains ("tests")) << batch.payloads[1];
 }
 
+// A pre-request assertion is the step's, on every surface that speaks about the
+// step (issue #810). It already decided the outcome - `describe_failed_tests`
+// has always walked both scripts - while the stored list and the live tally
+// counted the test script alone, so a step could be `failed` by an assertion
+// its own Tests list and its own numbers did not contain.
+TEST_F (ScenarioRunnerTest, APreRequestAssertionIsListedCountedAndNamedTogether) {
+    seed_collection ("col_1");
+    // Both verdicts in the pre-request script: a failure alone would not show
+    // that a passing pre-request assertion is evidence the check ran, which is
+    // the half a step with no failures has nothing else to say.
+    seed_request ("req_pre", 0, "/ok", R"(
+        pm.test("fixture is present", function () {
+            pm.expect(1).to.equal(1);
+        });
+        pm.test("token was issued", function () {
+            pm.expect("none").to.equal("issued");
+        });
+    )",
+    R"(
+        pm.test("status is 200", function () {
+            pm.expect(pm.response.code).to.equal(200);
+        });
+    )");
+
+    const auto run_id  = start (/*iterations=*/1);
+    const auto context = manager_.get_run (run_id);
+    ASSERT_TRUE (context != nullptr);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    const auto trace = json::parse (rows[0].trace_data);
+    ASSERT_TRUE (trace.contains ("scripts")) << rows[0].trace_data;
+    const auto& tests = trace["scripts"]["testResults"];
+    ASSERT_EQ (tests.size (), 3u) << trace["scripts"].dump ();
+
+    // In execution order, each naming the script that made it - "asserted
+    // before the request went out" is a different claim from one about the
+    // response, and the list is where a reader tells them apart.
+    EXPECT_EQ (tests[0]["name"].get<std::string> (), "fixture is present");
+    EXPECT_EQ (tests[0]["source"].get<std::string> (), "pre");
+    EXPECT_TRUE (tests[0]["passed"].get<bool> ());
+    EXPECT_EQ (tests[1]["name"].get<std::string> (), "token was issued");
+    EXPECT_EQ (tests[1]["source"].get<std::string> (), "pre");
+    EXPECT_FALSE (tests[1]["passed"].get<bool> ());
+    EXPECT_EQ (tests[2]["name"].get<std::string> (), "status is 200");
+    EXPECT_EQ (tests[2]["source"].get<std::string> (), "test");
+
+    // The step the list sits beside: failed, named by the assertion that
+    // failed it - the outcome this list could not account for before.
+    EXPECT_EQ (trace["outcome"].get<std::string> (), "failed");
+    EXPECT_NE (rows[0].error.find ("token was issued"), std::string::npos) << rows[0].error;
+
+    // And the live half counts what the stored list holds, so a run being
+    // watched does not renumber itself when its rows arrive.
+    const auto batch = context->ticks_since (0);
+    ASSERT_EQ (batch.payloads.size (), 1u);
+    const auto data_at = batch.payloads[0].find ("data: ");
+    ASSERT_NE (data_at, std::string::npos) << batch.payloads[0];
+    const auto frame = json::parse (batch.payloads[0].substr (data_at + 6));
+    ASSERT_TRUE (frame.contains ("tests")) << batch.payloads[0];
+    EXPECT_EQ (frame["tests"]["passed"].get<size_t> (), 2u);
+    EXPECT_EQ (frame["tests"]["failed"].get<size_t> (), 1u);
+}
+
 
 // ============================================================================
 // Data-driven iterations - pm.iterationData (issue #356, phase 5)

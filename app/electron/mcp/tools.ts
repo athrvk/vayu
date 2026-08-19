@@ -2128,22 +2128,34 @@ const smokeResultSchema = z.object({
 const MAX_TEST_FAILURES_PER_ROW = 10;
 
 /**
- * The post-request script's assertions, flattened for a tool result (#733).
+ * Both scripts' assertions, flattened for a tool result (#733).
  *
  * Rendered `name: message` for the reason the schema failures are: an agent
  * reads this as text. `undefined` means the response carried no test results at
  * all - the one state that must not become `{total: 0, failed: 0}`, which would
  * say the script asserted nothing and everything held, when no script ran.
+ *
+ * A pre-request assertion is labelled (issue #810). The engine lists both
+ * scripts' assertions now, and an assertion made before the request went out
+ * fails for different reasons than one about the response - an agent told only
+ * the name would read every failure as the latter. Nothing labels the
+ * post-request ones: they are what this list has always been.
  */
 function readTestVerdict(
 	resp: Record<string, unknown>
 ): { total: number; failed: number; failures?: string[] } | undefined {
 	if (!Array.isArray(resp.testResults)) return undefined;
-	const tests = resp.testResults as Array<{ name?: unknown; passed?: unknown; error?: unknown }>;
+	const tests = resp.testResults as Array<{
+		name?: unknown;
+		passed?: unknown;
+		error?: unknown;
+		source?: unknown;
+	}>;
 	if (tests.length === 0) return undefined;
 	const failed = tests.filter((t) => t.passed === false);
 	const failures = failed.slice(0, MAX_TEST_FAILURES_PER_ROW).map((t) => {
-		const name = typeof t.name === "string" && t.name ? t.name : "(unnamed test)";
+		const bare = typeof t.name === "string" && t.name ? t.name : "(unnamed test)";
+		const name = t.source === "pre" ? `[pre-request] ${bare}` : bare;
 		const message = typeof t.error === "string" ? t.error.trim() : "";
 		return message ? `${name}: ${message}` : name;
 	});

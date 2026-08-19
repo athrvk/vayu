@@ -285,6 +285,11 @@ inline auto make_storage (const std::string& path) {
     // which is what they all are: import copies whole bodies, and the app's
     // save-as-example is the only writer that ever had a partial one.
     make_column ("body_truncated", &RequestExample::body_truncated, default_value (false)),
+    // A deleted imported example, kept as a tombstone so a later spec sync does
+    // not re-create it (issue #722). NOT NULL + default_value on the same
+    // precedent as the two columns above, and `false` is right for every
+    // pre-existing row: before this column a delete removed the row outright.
+    make_column ("suppressed", &RequestExample::suppressed, default_value (false)),
     make_column ("created_at", &RequestExample::created_at),
     make_column ("updated_at", &RequestExample::updated_at)),
 
@@ -941,9 +946,18 @@ void Database::save_request_example (const RequestExample& e) {
     impl_->storage.replace (e);
 }
 
+/**
+ * One example by id - a tombstoned row reads as gone (issue #722).
+ *
+ * The filter is here rather than in each caller because this is what the
+ * owner check of every `/requests/:id/examples/:exampleId` route reads: a
+ * suppressed row answering 200 would let a `PUT` bring a deleted example back
+ * by writing over its tombstone.
+ */
 std::optional<RequestExample> Database::get_request_example (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    auto rows = impl_->storage.get_all<RequestExample> (where (c (&RequestExample::id) == id));
+    auto rows = impl_->storage.get_all<RequestExample> (
+    where (c (&RequestExample::id) == id and c (&RequestExample::suppressed) == false));
     if (rows.empty ())
         return std::nullopt;
     return rows.front ();
@@ -957,21 +971,64 @@ std::vector<RequestExample> Database::get_request_examples (const std::string& r
     // has to lead, because a bulk import writes every example of one request in
     // the same millisecond - on `created_at` alone they all tie and the id
     // tiebreak returns the author's list shuffled.
+    // Tombstoned rows are excluded here and not by the callers, so a deleted
+    // imported example is invisible to the list route, the mock server and the
+    // export alike (issue #722).
     return impl_->storage.get_all<RequestExample> (
-    where (c (&RequestExample::request_id) == request_id),
+    where (c (&RequestExample::request_id) == request_id and c (&RequestExample::suppressed) == false),
     multi_order_by (order_by (&RequestExample::order),
     order_by (&RequestExample::created_at), order_by (&RequestExample::id)));
 }
 
+/**
+ * The request's tombstones - deleted imported examples (issue #722).
+ *
+ * The one read that sees suppressed rows, and it exists for one caller: the
+ * spec sync's `refresh_examples`, which has to know which statuses the user
+ * removed before writing the document's examples back.
+ */
+std::vector<RequestExample>
+Database::get_suppressed_request_examples (const std::string& request_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<RequestExample> (
+    where (c (&RequestExample::request_id) == request_id and c (&RequestExample::suppressed) == true));
+}
+
 int64_t Database::count_request_examples (const std::string& request_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.count<RequestExample> (where (c (&RequestExample::request_id) == request_id));
+    // Tombstones do not count against `MAX_PER_REQUEST`: a user who deletes an
+    // imported example has fewer examples, not the same number with one hidden.
+    return impl_->storage.count<RequestExample> (
+    where (c (&RequestExample::request_id) == request_id and c (&RequestExample::suppressed) == false));
 }
 
 void Database::delete_request_example (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("Deleting request example: id=" + id);
     impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
+}
+
+/**
+ * Turns an imported example into a tombstone (issue #722).
+ *
+ * The row stays so a later sync knows the status was removed on purpose; what
+ * it held does not, because nothing reads a suppressed row's body.
+ */
+void Database::suppress_request_example (const std::string& id, int64_t now) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("Suppressing imported request example: id=" + id);
+    auto rows = impl_->storage.get_all<RequestExample> (where (c (&RequestExample::id) == id));
+    if (rows.empty ()) {
+        return;
+    }
+    RequestExample row  = rows.front ();
+    row.suppressed      = true;
+    row.body            = "";
+    row.headers         = "";
+    row.content_type    = "";
+    row.body_truncated  = false;
+    row.updated_at      = now;
+    impl_->storage.replace (row);
 }
 
 // ============================================================================

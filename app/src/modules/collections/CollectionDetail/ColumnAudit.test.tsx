@@ -39,7 +39,12 @@ vi.mock("@/queries", () => ({
 
 const { default: ColumnAudit } = await import("./ColumnAudit");
 
-function collection(id: string, parentId?: string, columns?: string[]): Collection {
+function collection(
+	id: string,
+	parentId?: string,
+	columns?: string[],
+	overrides: Partial<Collection> = {}
+): Collection {
 	return {
 		id,
 		name: `Collection ${id}`,
@@ -53,10 +58,11 @@ function collection(id: string, parentId?: string, columns?: string[]): Collecti
 		dataSchema: columns ? { columns } : {},
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
+		...overrides,
 	} as Collection;
 }
 
-function request(url: string): Request {
+function request(url: string, overrides: Partial<Request> = {}): Request {
 	return {
 		id: `req_${url}`,
 		collectionId: "",
@@ -79,6 +85,7 @@ function request(url: string): Request {
 		order: 0,
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
+		...overrides,
 	} as Request;
 }
 
@@ -128,6 +135,79 @@ describe("which requests the audit reads", () => {
 
 		expect(bucket("Declared and referenced")).toEqual(["id"]);
 		expect(bucket("Declared but not referenced")).toEqual(["email"]);
+	});
+});
+
+/*
+ * What a request *sends* rather than what it holds (issue #729).
+ *
+ * Two surfaces the audit used to read off the stored row, while a run resolves
+ * both through the collection chain: the auth an `inherit` request presents,
+ * and the scripts the chain runs around every step. Each miss printed "declared
+ * but not referenced" beside a column every iteration binds.
+ */
+describe("what the run actually resolves", () => {
+	it("counts the columns bound into auth a request inherits", () => {
+		// The #591 flagship: the credentials live on the collection, the requests
+		// inherit, and a row supplies the pair per iteration.
+		const root = collection("root", undefined, ["user", "password"], {
+			auth: { mode: "basic", username: "{{data.user}}", password: "{{data.password}}" },
+		});
+		setTree([root], { root: [request("https://x/users")] });
+
+		render(<ColumnAudit collection={root} />);
+
+		expect(bucket("Declared and referenced")).toEqual(["user", "password"]);
+		expect(bucket("Declared but not referenced")).toEqual([]);
+	});
+
+	it("counts the credentials a request configures for itself", () => {
+		const root = collection("root", undefined, ["token"]);
+		setTree([root], {
+			root: [
+				request("https://x/users", {
+					auth: { mode: "bearer", token: "{{data.token}}" },
+				}),
+			],
+		});
+
+		render(<ColumnAudit collection={root} />);
+
+		expect(bucket("Declared and referenced")).toEqual(["token"]);
+	});
+
+	it("leaves a column alone when an ancestor's script is the only thing naming it", () => {
+		// The chain's scripts run for every step, so a `get("plan")` written once
+		// on a parent is evidence - best-effort evidence, so it moves the verdict
+		// only in the direction that does not get a working column deleted.
+		const root = collection("root", undefined, ["plan"], {
+			preRequestScript: 'pm.iterationData.get("plan");',
+		});
+		setTree([root, collection("child", "root")], { root: [], child: [request("https://x/a")] });
+
+		render(<ColumnAudit collection={root} />);
+
+		expect(bucket("Declared but not referenced")).toEqual([]);
+		expect(screen.getByText(/Scripts also name plan/)).toBeTruthy();
+	});
+
+	it("does not count a token in an inherited OAuth 2.0 config", () => {
+		// Refused at plan time rather than bound - the panel must not promise it.
+		const root = collection("root", undefined, ["clientId"], {
+			auth: {
+				mode: "oauth2",
+				config: {
+					grantType: "client_credentials",
+					accessTokenUrl: "https://auth.example.com/token",
+					clientId: "{{data.clientId}}",
+				},
+			},
+		});
+		setTree([root], { root: [request("https://x/users")] });
+
+		render(<ColumnAudit collection={root} />);
+
+		expect(bucket("Declared but not referenced")).toEqual(["clientId"]);
 	});
 });
 

@@ -438,7 +438,7 @@ A live run can be **stopped** from this tab (`StopRunButton`, below), which matt
 
 For a step of a **spec-bound** collection the row also carries the shared `ValidationChip` beside its outcome chip, and the expansion renders the same `SchemaValidation` section the response pane's Tests tab does (issue #681) - both shared rather than re-laid-out here, so the three-state wording and the unevaluated-keyword disclosure cannot drift between the two surfaces. It sits *beside* the outcome and never inside it: with `failOnSchemaError` off, a step can pass every assertion while its response contradicts the contract, and those are two facts. A step of an unbound collection, or one that sent nothing, renders neither - `step.validation` is absent, and absent is never drawn as "checked, and fine".
 
-The row carries its **assertions** the same way (issue #724): the shared `TestsChip` beside the verdict, and the expansion renders the response pane's own `TestResults` list from the stored trace's `scripts` node - the run computed every `pm.test` result and kept only a one-line summary of it, so a step's detail showed nothing where the same request's single Send showed a full Tests tab. The tally is the only half a *live* step has, because a collection run is answered `202` and its steps are viewed entirely through their stored rows; the list arrives when the run ends. The stored list wins the moment there is one, tallied by `tallyTests` in `scenario-steps.ts`, so a row does not change its numbers when its stored copy lands.
+The row carries its **assertions** the same way (issue #724): the shared `TestsChip` beside the verdict, and the expansion renders the response pane's own `TestResults` list from the stored trace's `scripts` node - the run computed every `pm.test` result and kept only a one-line summary of it, so a step's detail showed nothing where the same request's single Send showed a full Tests tab. The tally is the only half a *live* step has, because a collection run is answered `202` and its steps are viewed entirely through their stored rows; the list arrives when the run ends. The stored list wins the moment there is one, tallied by `tallyTests` in `scenario-steps.ts`, so a row does not change its numbers when its stored copy lands. Both count both scripts' assertions (issue #810) - a failing `pm.test` fails its step whichever script made it - and the list is grouped under the script's name, so an assertion made before the request went out does not read as one about the response.
 
 The entry point is `modules/collections/RunCollectionDialog.tsx`, opened from a collection row's ⋯ menu. Five options - Recursive, Iterations, a data file, Load test, and Fail steps on schema errors (issue #720, the renderer's only writer of the engine's `failOnSchemaError` - MCP's `run_collection` is the other, issue #766 - hidden in load mode because only the design-mode runner can honour it) - because the scenario **is** the folder: the sequence is the tree's own ordering, and a step list authored here would be a second source of truth for it. Invalid iterations are refused in the dialog; the engine's own rejection (which names the step that would not compose) is shown in place rather than as a toast that scrolls away.
 
@@ -1448,26 +1448,38 @@ click-to-edit field used by the request **Info** tab and by
 before this existed - the collection one even advertised "Markdown supported"
 beside a plain textarea.
 
-**Two rules are load-bearing, not stylistic:**
+**Three rules are load-bearing, not stylistic:**
 
-1. **`MarkdownView` never emits a navigating anchor.** The preload re-runs on
-   the new origin, so a clicked `<a href>` would hand `window.electronAPI` to
+1. **`MarkdownView` never emits a navigating anchor.** The preload re-runs on the
+   new origin, so a clicked `<a href>` would hand `window.electronAPI` to
    whatever site it landed on. Descriptions arrive from imported Postman /
    Insomnia / OpenAPI files, which are third-party documents. Links therefore
    render as `<button>`, with no `href` in the DOM, and open via the
    scheme-validated `openExternalUrl` IPC. `remark-gfm` autolinks bare URLs, so
    that override covers those too. Guarded by `markdown-view.test.tsx`.
 
-   Underneath it, `electron/window-navigation.ts` makes the main window refuse a
-   navigation that is not the app's own document and deny `window.open`; there
-   is still no CSP. Keep both - the window guard turns an escaped link into a
-   dead one, and this override is what makes it reach the user's browser
-   instead.
+   This is no longer a single layer: #822 landed the refusal underneath it, so
+   `electron/window-navigation.ts` makes the main window refuse a navigation that
+   is not the app's own document and deny `window.open`. There is still no CSP.
+   Keep both - the window guard turns an escaped link into a dead one, and this
+   override is what makes it reach the user's browser instead.
 2. **`react-markdown` with the default `urlTransform`.** It builds React
    elements from an AST, so there is no `dangerouslySetInnerHTML` and no
-   sanitiser to forget. Raw HTML is inert because `rehype-raw` is deliberately
-   not installed. Overriding `urlTransform` disables the built-in URL sanitising
-   (there is a published advisory for exactly that), so it stays on the default.
+   sanitiser to forget. Overriding `urlTransform` disables the built-in URL
+   sanitising (there is a published advisory for exactly that), so it stays on
+   the default.
+3. **Raw HTML renders, and `rehype-sanitize` runs immediately after
+   `rehype-raw`.** `rehype-raw` used to be deliberately absent, which made raw
+   HTML inert - fine until Stripe's official OpenAPI document turned out to
+   write every operation description as HTML (`<p>Retrieves…</p>`), which is
+   spec-legal and was on screen as literal text. The order is the rule: sanitise
+   before the raw HTML is parsed and it sanitises a tree the payload is not in
+   yet. The schema is derived from the component's own element allow-list, keeps
+   `href` on an anchor and **no other attribute** (`class` least of all - the
+   cheap attack is `<p class="fixed inset-0 z-50">`, not a script), passes
+   http(s) only, and strips `script` and `style` whole rather than unwrapping
+   their text onto the screen. Guarded by the benign and hostile blocks in
+   `markdown-view.test.tsx`, which are also what pin the plugin order.
 
 `MarkdownEditor`'s rule is **focus, not dirtiness**: rendered while unfocused,
 source the moment you click in. The caret goes to the end - mapping a rendered

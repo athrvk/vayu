@@ -21,9 +21,9 @@
  * everything as anyway.
  */
 
-import type { ConsoleLevel, ConsoleLogEntry, ConsoleLogSource } from "@/types";
+import type { ConsoleLevel, ConsoleLogEntry, ScriptSource } from "@/types";
 
-export type LogSource = ConsoleLogSource;
+export type LogSource = ScriptSource;
 
 export interface ParsedLog {
 	source: LogSource;

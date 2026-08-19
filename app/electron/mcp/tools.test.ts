@@ -2488,6 +2488,50 @@ describe("run_collection_smoke", () => {
 	});
 
 	/**
+	 * A pre-request assertion fails for different reasons than one about the
+	 * response - a token fetch that did not return one, a fixture that is not
+	 * there - and the engine lists both phases since #810. An agent handed the
+	 * name alone would read every failure as the latter and go looking at the
+	 * response.
+	 */
+	test("a failing pre-request assertion says it was made before the request", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "logs in first" }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+			executeRequest: vi.fn().mockResolvedValue({
+				status: 200,
+				testResults: [
+					{
+						name: "token was issued",
+						passed: false,
+						error: "expected 401 to equal 200",
+						source: "pre",
+					},
+					{ name: "status is 200", passed: false, error: "nope", source: "test" },
+				],
+			}),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const summary = res.structuredContent as {
+			results: Array<{ tests?: { total: number; failed: number; failures?: string[] } }>;
+		};
+
+		expect(summary.results[0].tests).toMatchObject({ total: 2, failed: 2 });
+		// Only the pre-request one is labelled: the post-request assertions are
+		// what this list has always been.
+		expect(summary.results[0].tests?.failures).toEqual([
+			"[pre-request] token was issued: expected 401 to equal 200",
+			"status is 200: nope",
+		]);
+	});
+
+	/**
 	 * Nothing caps `testResults` upstream, so a script writing hundreds of
 	 * failing assertions would otherwise put all of them on one row of a matrix
 	 * that already carries a row per request. `failed` stays the true count, so
