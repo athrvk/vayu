@@ -382,18 +382,19 @@ endif()
 #
 # NOT MSVC, not NOT WIN32 - the exclusion is about the compiler's /Yu
 # interacting with sccache, not the platform (a clang-cl build would not
-# have this problem). Measured on two consecutive windows-latest CI runs
-# with the PCH on: only 48 of 222 build steps ever reached sccache as a
-# tracked request, unchanged between a cold run and a run immediately
-# after it (so warm on every other platform) - the second run reported
-# 100% hits on that same static 48 and was *slower* overall (19m21s)
-# than the first (18m06s), which was itself slower than the pre-PCH
-# baseline (8m07s at 79.6% hits). sccache is not caching the /Yu-bearing
-# compiles on MSVC; it appears to pass most of them straight to the real
-# compiler, uncached, every single run. ubuntu and macOS do not have
-# this problem - both went from a cold ~232-request run to a warm one
-# at 97-99% hits and roughly 6x-15x faster. Revisit if a future sccache
-# release fixes MSVC PCH support; do not re-enable without re-measuring.
+# have this problem). sccache logged the large majority of Windows compile
+# requests (200 of 257 in the measured run) as non-cacheable because of the
+# /Fp flag, identical in a cold run and the run right after it - so the
+# "warm" run (19m21s) was slower than the cold one (18m06s), both far worse
+# than the no-PCH warm baseline (~2m). This is not a CI win on ubuntu/macOS
+# either, in the steady state #700's cache warming already produces: their
+# PCH-warm numbers are a wash against their own no-PCH warm baseline, and
+# macOS is a little slower (recurring PCH-creation cache misses each run).
+# Full measurements and the warm-vs-warm comparison that corrected the
+# original cold-vs-warm framing are on
+# https://github.com/athrvk/vayu/issues/805. Whatever value this PCH has is
+# in regimes CI's steady state does not exercise - a cold cache, or a local
+# build without sccache - not the PR pipeline itself.
 if(NOT MSVC)
     target_precompile_headers(vayu_core PRIVATE <nlohmann/json.hpp>)
 endif()
