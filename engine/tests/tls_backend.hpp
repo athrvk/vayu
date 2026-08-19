@@ -68,6 +68,42 @@ inline std::vector<ClientIdentityFormat> client_identity_formats () {
     return client_identity_formats (tls_backend_name ());
 }
 
+/**
+ * Why @p backend cannot complete a client-certificate handshake *at all* today,
+ * or empty when it can (issue #842).
+ *
+ * Separate from the format matrix above, and the distinction is the whole
+ * point: what a backend accepts as a *file* is a stable fact about the backend,
+ * while this is a defect in the libcurl we happen to pin. Folding the two
+ * together would say "Schannel takes no client identity", which is false and
+ * would be the wrong thing to delete when upstream lands a fix.
+ *
+ * curl 8.21.0 - the pinned baseline - carries two entries in its own
+ * `docs/KNOWN_BUGS.md` for this, one of them naming the exact call at
+ * `lib/vtls/schannel.c:488`. Measured here as every wire case failing at the
+ * second `InitializeSecurityContext`; the evidence is on #842.
+ */
+inline std::string client_auth_defect (std::string_view backend) {
+    if (backend.rfind ("Schannel", 0) != 0) {
+        return {};
+    }
+    return "TLS backend '" + std::string (backend) +
+    "' cannot complete a client-certificate handshake with a certificate read "
+    "from a file: curl imports it with PKCS12_NO_PERSIST_KEY, and the key that "
+    "yields is one Schannel's credential path cannot use - measured as "
+    "'SEC_E_INTERNAL_ERROR ... The Local Security Authority cannot be "
+    "contacted' on every driver, with both a legacy-PBE and a PBES2 bundle. "
+    "Documented upstream in curl 8.21.0's own KNOWN_BUGS (curl issues 17626 "
+    "and 3145). The engine still names the format - that half is asserted on "
+    "this leg by ClientCertificateBackend and the registry suites. Tracked in "
+    "#842; delete this skip with it, not before.";
+}
+
+/// The defect this build carries, if any.
+inline std::string client_auth_defect () {
+    return client_auth_defect (tls_backend_name ());
+}
+
 /// The name a test parameter prints as, and the `certFormat` the registry
 /// stores - one spelling, so a failure names the row a reader would look for.
 inline std::string client_identity_format_name (ClientIdentityFormat format) {

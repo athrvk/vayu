@@ -335,8 +335,16 @@ Three things worth knowing before you design around them:
   contradict it - a check that is deliberately shallow, like `ca_pem_rejection`:
   only a contradiction is an error, a file we cannot classify is the backend's
   to judge. `tests/mutual_tls_test.cpp` runs every driver case once per format
-  the leg's backend accepts (`client_identity_formats()`), so Windows now proves
-  the PKCS#12 half on a wire instead of skipping.
+  the leg's backend accepts (`client_identity_formats()`).
+  **mTLS still does not work on Windows, and the reason is now upstream rather
+  than ours** (#842): curl 8.21's Schannel client-cert path imports the bundle
+  with `PKCS12_NO_PERSIST_KEY` and cannot then use the key, which curl's own
+  `KNOWN_BUGS` documents (curl 17626, 3145) and which measures here as
+  `SEC_E_INTERNAL_ERROR` on every driver, with a legacy-PBE and a PBES2 bundle
+  alike. So the wire cases skip on that leg through `client_auth_defect()` -
+  kept deliberately separate from the format matrix, so a fixed libcurl deletes
+  one line - while what the engine itself does (the stored format, the option,
+  the registry rules) is asserted on Windows like everywhere else.
 
 ## Request composition (engine-owned - POST /compose)
 

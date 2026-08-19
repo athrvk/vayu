@@ -2096,9 +2096,19 @@ on every transfer. Which formats work is a property of the build's TLS backend:
 A `pem` entry on Windows fails at handshake time with libcurl's own error -
 that backend takes no PEM pair at all, which before issue #833 (when the engine
 named no type) meant a Windows build could present nothing a user registered.
-Both formats are asserted on a wire on every leg the backend accepts them (a
-design send, an SSE stream, a load run and a `pm.sendRequest` against a listener
-that demands a client certificate).
+
+**On Windows, mutual TLS does not work today, and that is upstream** (issue
+#842). The engine stores the format and hands libcurl the right type, but
+curl's Schannel client-certificate path cannot complete the handshake: it
+imports the bundle with `PKCS12_NO_PERSIST_KEY` and the key that yields is one
+Schannel's credential path cannot use, so the transfer fails with
+`SEC_E_INTERNAL_ERROR ... The Local Security Authority cannot be contacted`.
+curl 8.21.0 - the pinned baseline - documents this in its own `KNOWN_BUGS`
+(curl issues 17626 and 3145). Nothing in Vayu's configuration changes it.
+
+On the OpenSSL legs both formats are asserted on a wire (a design send, an SSE
+stream, a load run and a `pm.sendRequest` against a listener that demands a
+client certificate).
 
 **A PKCS#12 entry names no key file**, because the bundle carries the key: a row
 that names one is a `400` rather than a stored path nothing would read, and
