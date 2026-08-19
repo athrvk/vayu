@@ -379,7 +379,24 @@ endif()
 # (C4651, fatal under /WX) rejects reuse from vayu-cli/vayu-engine outright.
 # httplib.h itself (24 files) is left out of the PCH for the same reason -
 # it is not something vayu_core's own compile settings actually cover.
-target_precompile_headers(vayu_core PRIVATE <nlohmann/json.hpp>)
+#
+# NOT MSVC, not NOT WIN32 - the exclusion is about the compiler's /Yu
+# interacting with sccache, not the platform (a clang-cl build would not
+# have this problem). Measured on two consecutive windows-latest CI runs
+# with the PCH on: only 48 of 222 build steps ever reached sccache as a
+# tracked request, unchanged between a cold run and a run immediately
+# after it (so warm on every other platform) - the second run reported
+# 100% hits on that same static 48 and was *slower* overall (19m21s)
+# than the first (18m06s), which was itself slower than the pre-PCH
+# baseline (8m07s at 79.6% hits). sccache is not caching the /Yu-bearing
+# compiles on MSVC; it appears to pass most of them straight to the real
+# compiler, uncached, every single run. ubuntu and macOS do not have
+# this problem - both went from a cold ~232-request run to a warm one
+# at 97-99% hits and roughly 6x-15x faster. Revisit if a future sccache
+# release fixes MSVC PCH support; do not re-enable without re-measuring.
+if(NOT MSVC)
+    target_precompile_headers(vayu_core PRIVATE <nlohmann/json.hpp>)
+endif()
 
 # ============================================================================
 # CLI Executable
@@ -402,7 +419,9 @@ if(VAYU_BUILD_CLI)
         vayu_warnings
         vayu_sanitizers
     )
-    target_precompile_headers(vayu-cli PRIVATE <nlohmann/json.hpp>)
+    if(NOT MSVC)
+        target_precompile_headers(vayu-cli PRIVATE <nlohmann/json.hpp>)
+    endif()
 
     # Not optional on Windows - see vayu_embed_windows_manifest above.
     vayu_embed_windows_manifest(vayu-cli)
@@ -452,7 +471,9 @@ if(VAYU_BUILD_ENGINE)
         vayu_warnings
         vayu_sanitizers
     )
-    target_precompile_headers(vayu-engine PRIVATE <nlohmann/json.hpp>)
+    if(NOT MSVC)
+        target_precompile_headers(vayu-engine PRIVATE <nlohmann/json.hpp>)
+    endif()
 
     # Not optional on Windows - see vayu_embed_windows_manifest above. This is
     # the binary the installer ships, so .github/check-windows-deps.py verifies
@@ -654,7 +675,9 @@ if(VAYU_BUILD_TESTS)
         vayu_warnings
         vayu_sanitizers
     )
-    target_precompile_headers(vayu_tests PRIVATE <nlohmann/json.hpp>)
+    if(NOT MSVC)
+        target_precompile_headers(vayu_tests PRIVATE <nlohmann/json.hpp>)
+    endif()
 
     # The test binary needs the manifest for two reasons: any test that opens a
     # TLS connection would otherwise run without ALPN, and `WindowsOsVersionShim`
