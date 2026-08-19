@@ -362,6 +362,10 @@ The project uses GitHub Actions for automated builds:
 - **PR Tests**: `.github/workflows/pr-tests.yml`
   - Runs on every pull request
   - Tests engine and frontend on Linux/Windows/macOS
+  - Lint, formatting and type-check run once, on their own Linux job, rather
+    than in front of a suite they cannot affect
+  - The Windows frontend suite runs as two vitest shards on two runners; the
+    `CI gate` job proves they covered every test file between them
 
 - **Release Build**: `.github/workflows/release.yml`
   - Triggers on version tags (`v*`)

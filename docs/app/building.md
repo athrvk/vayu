@@ -83,7 +83,7 @@ app/
 | `pnpm electron:watch` | Watch Electron code for changes |
 | `pnpm electron:build` | Full production build (compile + build + package) |
 | `pnpm electron:pack` | Package Electron app (requires build first) |
-| `pnpm type-check` | TypeScript type checking (renderer, main process, and the Electron tests) |
+| `pnpm type-check` | TypeScript type checking (renderer, main process, and the Electron tests - the three projects run concurrently, and a failure in any of them fails the script) |
 | `pnpm lint` | Run ESLint |
 
 ## Development Workflow
