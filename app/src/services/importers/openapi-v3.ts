@@ -6,7 +6,6 @@
  */
 
 import type {
-	DeclaredOperation,
 	DeclaredResponseSchema,
 	SpecOperation,
 	HttpMethod,
@@ -30,7 +29,6 @@ import { mapOpenApiV3OAuth2 } from "./oauth2-import";
 import {
 	createRefResolver,
 	declaredParamRow,
-	declaredResponsesOf,
 	deref,
 	exampleBodyText,
 	findJsonMediaType,
@@ -100,11 +98,6 @@ export class OpenApiV3Parser implements ImportParser {
 		// (issue #715), which needs the memory of every id already stamped.
 		const identify = createOperationIdentifier(tally);
 		let requestCount = 0;
-		// The declared-operation index stored beside the document (issue #629).
-		// Built in this same walk rather than by a second pass over `paths`: a
-		// reader that disagreed with this one about what the document declares
-		// would make coverage disagree with the requests it counts.
-		const declaredOperations: DeclaredOperation[] = [];
 		// The response schemas stored beside the document (issue #628), gathered
 		// in the same walk and for the same reason: a second pass could disagree
 		// with this one about which operation declares what.
@@ -128,10 +121,6 @@ export class OpenApiV3Parser implements ImportParser {
 				requestCount += 1;
 				const identity = identify(method, path, op.operationId);
 				if (identity) {
-					declaredOperations.push({
-						...identity,
-						responses: declaredResponsesOf(op.responses),
-					});
 					schemaOperations.push({
 						identity,
 						responses: responseSchemasV3(op, resolveRef),
@@ -165,17 +154,15 @@ export class OpenApiV3Parser implements ImportParser {
 			// collection to it in the same atomic call (issue #637). `raw` and not
 			// a re-serialization: the engine hashes the bytes it stores, and a
 			// sync compares against that hash.
-			// `operations` beside it, so a run of this collection can report what
-			// of the contract it covered without the engine parsing the document
-			// (issue #629). Absent when the document declared none, which stores
-			// as "no index" rather than as an empty contract.
-			// `responseSchemas` likewise (issue #628), so a response can be checked
+			// The declared-operation index (issue #629) is *not* beside it: the
+			// engine reads the document and derives that itself (issue #853), so
+			// one reader answers what a document declares.
+			// `responseSchemas` is (issue #628), so a response can be checked
 			// against what the document declared for it. Absent when nothing
 			// declared a schema, which stores as "no index" rather than as a
 			// contract that permits everything.
 			spec: {
 				content: raw,
-				...(declaredOperations.length > 0 ? { operations: declaredOperations } : {}),
 				...(responseSchemas ? { responseSchemas } : {}),
 			},
 		};

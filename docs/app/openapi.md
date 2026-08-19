@@ -25,7 +25,7 @@ a document.
 | The document itself | Engine, one row in `spec_documents`, hashed on write | Yes |
 | The binding (`specId`, `specHash`, `syncedAt`) | Engine, on the collection | Yes |
 | The operation each request is | Engine, on the request | Yes |
-| What the document declares (the operation index) | Engine, `spec_documents.operations` | Yes |
+| What the document declares (the operation index) | Engine, `spec_documents.operations` - read off the document by the engine when it stores it | Yes |
 | The URL it was fetched from | Engine, `spec_documents.source_url` | Yes |
 | A picked file's path on disk | This machine only, renderer storage | No |
 
@@ -577,7 +577,8 @@ Absent, never zeros, in each of these cases:
   above it.
 - The run was a single request rather than a collection run.
 - The bound document has **no operation index** - it was stored before this
-  existed. Re-bind or sync the collection and its next run reports coverage.
+  existed, or it declares no operation at all (a stored file that is not a
+  contract). Re-bind or sync the collection and its next run reports coverage.
 
 A run that was never judged against a contract did not cover none of it, and the
 report spells the two differently.

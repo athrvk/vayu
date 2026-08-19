@@ -79,7 +79,20 @@ namespace routes = vayu::http::routes;
 /** A minimal but real OpenAPI 3.1 document - the text is stored verbatim. */
 constexpr const char* PETSTORE =
 R"({"openapi":"3.1.0","info":{"title":"Pets","version":"1.0.0"},)"
-R"("paths":{"/pets":{"get":{"operationId":"listPets"}}}})";
+R"("paths":{"/pets":{"get":{"operationId":"listPets","responses":{"200":{}}}}}})";
+
+/// What the engine reads off {@link PETSTORE} (issue #853). Named once because
+/// several cases assert it: the index is no longer something a caller sends, so
+/// the document *is* the input and this is the whole of the output.
+const json PETSTORE_INDEX = json::array ({ json{ { "operationId", "listPets" },
+{ "method", "GET" }, { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
+
+/// A document Vayu stores happily and reads as declaring nothing - a Postman
+/// export is a perfectly good file that is not a contract. Its column stays
+/// empty, which is "no index" rather than "an empty contract".
+constexpr const char* NOT_A_SPEC =
+R"({"info":{"name":"Team","schema":"https://schema.getpostman.com/json/collection/v2.1.0/"},)"
+R"("item":[{"name":"Ping"}]})";
 
 class SpecsRouteTest : public ::testing::Test {
     protected:
@@ -226,12 +239,10 @@ TEST_F (SpecsRouteTest, ReadsBackTheStoredDocumentAndAnswers404ForAMissingOne) {
 }
 
 TEST_F (SpecsRouteTest, SpecMetaCarriesTheSameValuesAsTheFullDocumentWithoutTheHeavyFields) {
-    // A document with *both* app-extracted indexes, because they are the two
-    // fields that make a "metadata" read expensive if they ride along: they are
-    // extracted from the document and grow with it.
-    const json operations =
-    json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" },
-    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
+    // A document carrying *both* indexes, because they are the two fields that
+    // make a "metadata" read expensive if they ride along: both describe the
+    // document and grow with it. The operation index is the engine's own,
+    // derived from the document (issue #853); the schema index is supplied.
     const json response_schemas = { { "refRoots", json::object () },
         { "operations",
         json::array ({ json{ { "method", "GET" }, { "path", "/pets" },
@@ -240,7 +251,7 @@ TEST_F (SpecsRouteTest, SpecMetaCarriesTheSameValuesAsTheFullDocumentWithoutTheH
         { "schema", json{ { "type", "array" } } } } }) } } }) } };
     auto [create_status, created] = routes::create_spec_document_response (*db_,
     json{ { "content", PETSTORE }, { "sourceUrl", "https://example.test/openapi.json" },
-    { "operations", operations }, { "responseSchemas", response_schemas } });
+    { "responseSchemas", response_schemas } });
     ASSERT_EQ (create_status, 200) << created.dump ();
     const std::string id = created.value ("id", std::string{});
 
@@ -642,9 +653,9 @@ TEST_F (SpecsRouteTest, ImportMayBindASpecThatIsAlreadyStored) {
  * every imported collection (issue #709). This asserts the join.
  */
 TEST_F (SpecsRouteTest, AnImportedCollectionIsPlannedAgainstItsContract) {
-    const json operations =
-    json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" },
-    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
+    // The operation index is not in the payload: the engine derives it from the
+    // document this import stores (issue #853), on this path exactly as on the
+    // single-document one.
     const json response_schemas = { { "refRoots", json::object () },
         { "operations",
         json::array ({ json{ { "method", "GET" }, { "path", "/pets" },
@@ -653,7 +664,7 @@ TEST_F (SpecsRouteTest, AnImportedCollectionIsPlannedAgainstItsContract) {
         { "schema", json{ { "type", "array" } } } } }) } } }) } };
 
     json payload = { { "specs",
-                     { { { "tempId", "s1" }, { "content", PETSTORE }, { "operations", operations },
+                     { { { "tempId", "s1" }, { "content", PETSTORE },
                      { "responseSchemas", response_schemas } } } },
         { "collections",
         { { { "tempId", "c1" }, { "name", "Pets" }, { "openapi", { { "specTempId", "s1" } } } } } },
@@ -813,61 +824,73 @@ TEST_F (SpecsRouteTest, TheStampRecordsWhatTheRunWasPlannedAgainstNotTheLatestBi
 // The declared-operation index (issue #629) - stored, refused, and pinned
 // ---------------------------------------------------------------------------
 
-TEST_F (SpecsRouteTest, AStoredIndexComesBackAsTheArrayItWasWritten) {
-    const json index = json::array ({ { { "operationId", "listPets" }, { "method", "GET" },
-    { "path", "/pets" }, { "responses", json::array ({ "200", "default" }) } } });
-    auto [status, body] = routes::create_spec_document_response (*db_,
-    json{ { "content", PETSTORE }, { "operations", index } });
+TEST_F (SpecsRouteTest, AStoredDocumentsIndexIsTheOneTheEngineReadOffIt) {
+    // The write takes no index at all: `create_spec_document_response` reads the
+    // document it is storing and derives one (issue #853), the way it hashes the
+    // bytes rather than taking a caller's word for them.
+    auto [status, body] =
+    routes::create_spec_document_response (*db_, json{ { "content", PETSTORE } });
     ASSERT_EQ (status, 200) << body.dump ();
 
     auto [read_status, read] =
     routes::get_spec_document_response (*db_, body.value ("id", std::string{}));
     ASSERT_EQ (read_status, 200) << read.dump ();
-    EXPECT_EQ (read["operations"], index);
+    EXPECT_EQ (read["operations"], PETSTORE_INDEX);
+}
+
+TEST_F (SpecsRouteTest, ADocumentThatCannotBeReadIsRefusedRatherThanStoredUnreadable) {
+    // Storing it would leave a row every later reader - coverage, the sync, an
+    // export - can do nothing with, and none of them is a place to find out.
+    auto [status, body] = routes::create_spec_document_response (*db_,
+    json{ { "content", "openapi: [3.1.0\npaths: {\n" } });
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("content"), std::string::npos)
+    << body.dump ();
 }
 
 TEST_F (SpecsRouteTest, ADocumentWithNoIndexReadsBackNullRatherThanAnEmptyContract) {
-    auto [read_status, read] = routes::get_spec_document_response (*db_, store_spec ());
+    auto [read_status, read] = routes::get_spec_document_response (*db_, store_spec (NOT_A_SPEC));
     ASSERT_EQ (read_status, 200) << read.dump ();
     // Null, not `[]`: "stored before coverage existed" and "declares nothing"
     // are different answers, and only the first leaves the report's block out.
     EXPECT_TRUE (read["operations"].is_null ()) << read.dump ();
 }
 
-TEST_F (SpecsRouteTest, AMalformedIndexIsRefusedAtTheWriteOnEveryPathThatStoresOne) {
-    const json bad = json::array ({ { { "method", "GET" } } }); // no `path`
+TEST_F (SpecsRouteTest, ACallerSuppliedIndexIsRefusedOnEveryPathThatStoresOne) {
+    // It is the engine's to compute (issue #853). Refused rather than ignored,
+    // for the reason a supplied `hash` is: silently dropping it would leave a
+    // caller believing the document declares what it said it declares.
+    const json index = json::array ({ { { "method", "GET" }, { "path", "/pets" } } });
 
     auto [status, body] = routes::create_spec_document_response (*db_,
-    json{ { "content", PETSTORE }, { "operations", bad } });
+    json{ { "content", PETSTORE }, { "operations", index } });
     EXPECT_EQ (status, 400) << body.dump ();
 
     auto [import_status, import_body] = routes::import_apply_response (*db_,
     json{ { "specs", { { { "tempId", "s1" }, { "content", PETSTORE },
-                          { "operations", bad } } } } });
+                          { "operations", index } } } } });
     EXPECT_EQ (import_status, 400) << import_body.dump ();
     // Nothing persisted by the refused bulk write, the transaction's own rule.
     EXPECT_TRUE (db_->get_collections ().empty ());
 }
 
-TEST_F (SpecsRouteTest, ImportStoresTheIndexBesideTheDocumentItDescribes) {
-    const json index = json::array ({ { { "method", "GET" }, { "path", "/pets" },
-    { "responses", json::array ({ "200" }) } } });
+TEST_F (SpecsRouteTest, ImportDerivesTheIndexBesideTheDocumentItDescribes) {
+    // The bulk path reads the document too - one helper for all three writers,
+    // so a document imported and the same document stored on its own cannot end
+    // up describing different contracts.
     auto [status, body] = routes::import_apply_response (*db_,
-    json{ { "specs", { { { "tempId", "s1" }, { "content", PETSTORE },
-                          { "operations", index } } } } });
+    json{ { "specs", { { { "tempId", "s1" }, { "content", PETSTORE } } } } });
     ASSERT_EQ (status, 200) << body.dump ();
 
     const auto spec_id = body["idMap"]["s1"].get<std::string> ();
     auto [read_status, read] = routes::get_spec_document_response (*db_, spec_id);
     ASSERT_EQ (read_status, 200) << read.dump ();
-    EXPECT_EQ (read["operations"], index);
+    EXPECT_EQ (read["operations"], PETSTORE_INDEX);
 }
 
 TEST_F (SpecsRouteTest, AResolvedPlanCarriesTheBoundDocumentsOperations) {
-    const json index = json::array ({ { { "operationId", "listPets" }, { "method", "GET" },
-    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
-    auto [status, stored] = routes::create_spec_document_response (*db_,
-    json{ { "content", PETSTORE }, { "operations", index } });
+    auto [status, stored] =
+    routes::create_spec_document_response (*db_, json{ { "content", PETSTORE } });
     ASSERT_EQ (status, 200) << stored.dump ();
     const std::string spec_id = stored.value ("id", std::string{});
     const std::string col_id  = create_collection (json{ { "name", "Pets" },
@@ -894,10 +917,8 @@ TEST_F (SpecsRouteTest, ABindingWhoseHashHasMovedIsNotMeasuredRatherThanMismeasu
     // disagrees means the collection is pointing at bytes it was never synced
     // to, and reporting coverage against those would attribute a contract to a
     // run that was planned against a different one.
-    const json index = json::array ({ { { "operationId", "listPets" }, { "method", "GET" },
-    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
-    auto [status, stored] = routes::create_spec_document_response (*db_,
-    json{ { "content", PETSTORE }, { "operations", index } });
+    auto [status, stored] =
+    routes::create_spec_document_response (*db_, json{ { "content", PETSTORE } });
     ASSERT_EQ (status, 200) << stored.dump ();
     const std::string col_id = create_collection (json{ { "name", "Pets" },
     { "openapi", { { "specId", stored.value ("id", std::string{}) },
@@ -949,9 +970,6 @@ TEST_F (SpecsRouteTest, ATagSubCollectionRunIsMeasuredAgainstTheRootsContract) {
     // created, the requests are one level down, and running that tag folder used
     // to resolve `{}` - no coverage, no schema validation, and an absent block
     // is indistinguishable from "never bound".
-    const json operations =
-    json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" },
-    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
     const json response_schemas = { { "refRoots", json::object () },
         { "operations",
         json::array ({ json{ { "method", "GET" }, { "path", "/pets" },
@@ -959,8 +977,7 @@ TEST_F (SpecsRouteTest, ATagSubCollectionRunIsMeasuredAgainstTheRootsContract) {
         json::array ({ json{ { "status", "200" }, { "contentType", "application/json" },
         { "schema", json{ { "type", "array" } } } } }) } } }) } };
     auto [status, stored] = routes::create_spec_document_response (*db_,
-    json{ { "content", PETSTORE }, { "operations", operations },
-    { "responseSchemas", response_schemas } });
+    json{ { "content", PETSTORE }, { "responseSchemas", response_schemas } });
     ASSERT_EQ (status, 200) << stored.dump ();
     const std::string spec_id = stored.value ("id", std::string{});
     const std::string hash    = routes::spec_content_hash (PETSTORE);
@@ -1020,11 +1037,8 @@ TEST_F (SpecsRouteTest, TheDesignPathAndTheScenarioPathResolveOneBinding) {
     // deliberately stale: picking the root instead would resolve *cleanly*, so
     // an agreeing pair of "unmeasurable" verdicts can only come from both paths
     // having chosen the same - nearer - binding.
-    const json operations =
-    json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" },
-    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
-    auto [status, stored] = routes::create_spec_document_response (*db_,
-    json{ { "content", PETSTORE }, { "operations", operations } });
+    auto [status, stored] =
+    routes::create_spec_document_response (*db_, json{ { "content", PETSTORE } });
     ASSERT_EQ (status, 200) << stored.dump ();
     const std::string root_spec = stored.value ("id", std::string{});
 
@@ -1068,10 +1082,10 @@ TEST_F (SpecsRouteTest, TheDesignPathAndTheScenarioPathResolveOneBinding) {
        "request disagree about what it is measured against";
 }
 
-TEST_F (SpecsRouteTest, ADocumentStoredWithoutAnIndexReportsNoCoverageRatherThanZero) {
+TEST_F (SpecsRouteTest, ADocumentThatDeclaresNoOperationReportsNoCoverageRatherThanZero) {
     const std::string col_id = create_collection (json{ { "name", "Pets" },
-    { "openapi", { { "specId", store_spec () },
-    { "specHash", routes::spec_content_hash (PETSTORE) } } } });
+    { "openapi", { { "specId", store_spec (NOT_A_SPEC) },
+    { "specHash", routes::spec_content_hash (NOT_A_SPEC) } } } });
     create_request (col_id);
 
     auto resolved = resolve (col_id);

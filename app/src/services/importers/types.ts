@@ -10,7 +10,6 @@ import type {
 	KeyValueEntry,
 	RequestBody,
 	RequestAuth,
-	DeclaredOperation,
 	ResponseSchemaIndex,
 	SpecOperation,
 	VariableValue,
@@ -242,20 +241,12 @@ export interface SpecDraft {
 	/** Set only for a URL-sourced import - a file or a paste has no URL to re-fetch. */
 	sourceUrl?: string;
 	/**
-	 * What the document declares, extracted while it was being parsed and stored
-	 * beside it (issue #629), so a run of the bound collection can report which
-	 * operations it exercised and which declared responses it saw.
-	 *
-	 * Written here rather than derived engine-side because the engine does not
-	 * parse OpenAPI - see `DeclaredOperation` for the whole of that reasoning.
-	 * Absent for a document no parser here produced, which the engine stores as
-	 * "no index" and reports as coverage not measured.
-	 */
-	operations?: DeclaredOperation[];
-	/**
 	 * The response schemas the document declares (issue #628), extracted in the
-	 * same parse, so the engine can check a response against its contract
-	 * without reading OpenAPI. Absent when nothing declared one - which the
+	 * parse, so the engine can check a response against its contract without
+	 * translating 3.0's dialect itself. The *operation* index beside it is no
+	 * longer written here: the engine reads the document and derives it (issue
+	 * #853), so one reader answers what a document declares. Absent when nothing
+	 * declared a schema - which the
 	 * engine stores as "no index" and reports as `checked: false`, never as a
 	 * body that passed.
 	 */

@@ -20,7 +20,7 @@
  * existing collection deliberately creates no requests (that is sync, #627).
  */
 
-import type { DeclaredOperation, ResponseSchemaIndex, SpecOperation } from "@/types";
+import type { ResponseSchemaIndex, SpecOperation } from "@/types";
 import { parseImport } from "@/services/importers/factory";
 import type { CollectionDraft, RequestDraft } from "@/services/importers/types";
 
@@ -61,19 +61,9 @@ export interface ReadSpecResult {
 	/** Every operation the document declares, in document order. */
 	operations: SpecOperation[];
 	/**
-	 * The same operations with the status patterns each declares (issue #629) -
-	 * the index stored beside the document so a run of the bound collection can
-	 * report which of the contract it covered.
-	 *
-	 * Taken off the parse rather than walked for here, like `operations` above:
-	 * an index that disagreed with the identities beside it would make coverage
-	 * disagree with the requests it counts. Empty for a document that declares
-	 * no operation with a usable identity.
-	 */
-	declaredOperations: DeclaredOperation[];
-	/**
-	 * The response schemas the document declares (issue #628), off the same
-	 * parse for the same reason. `undefined` for a document that declares none,
+	 * The response schemas the document declares (issue #628), taken off the
+	 * parse rather than walked for a second time. `undefined` for a document
+	 * that declares none,
 	 * which is stored as "no index" - a response of it reports that it was not
 	 * checked, never that it passed.
 	 */
@@ -115,7 +105,6 @@ export function readSpecOperations(raw: string): ReadSpecResult {
 		// wants identities and a reader that wants drafts cannot disagree about
 		// what the document declares.
 		operations: requests.map((r) => r.operation),
-		declaredOperations: root.spec.operations ?? [],
 		...(root.spec.responseSchemas ? { responseSchemas: root.spec.responseSchemas } : {}),
 		format: result.meta.format,
 		title: root.name,

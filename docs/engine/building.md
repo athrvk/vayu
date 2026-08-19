@@ -139,6 +139,7 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 | libsodium | SHA-256, HMAC-SHA256, base64 and hex (PKCE, Basic/OAuth credentials, `pm.crypto`) |
 | nlohmann-json | JSON parsing/serialization |
 | valijson | JSON Schema validation of responses against a bound OpenAPI document |
+| ryml (rapidyaml) | Reading a stored OpenAPI document, which is YAML as often as JSON (issue #853). Chosen over yaml-cpp and fkYAML by measurement: it is the only one of the three that reproduces js-yaml's reading of the same bytes on the corpus - yaml-cpp discards quoting (the string `"2.0"` comes back as the number 2.0, and `swagger: "2.0"` is what Swagger detection turns on) and fkYAML sorts mapping keys, losing the document order a coverage block prints. It is also 4-27x faster there, at a comparable binary cost. Pulls `c4core` with it. Only `engine/src/core/openapi_document.cpp` includes it |
 | cpp-httplib | HTTP server library - built with the `openssl` feature, which the test suite's HTTPS listener needs (custom-CA verification is asserted on a real handshake, not reasoned about) |
 | sqlite3 | Embedded database |
 | sqlite-orm | C++ ORM for SQLite |
@@ -479,7 +480,7 @@ Set `VCPKG_ROOT` environment variable or install vcpkg in a standard location.
 
 ### Linker Errors
 
-- Ensure all vcpkg dependencies are installed: `vcpkg install curl[http2] libsodium nlohmann-json valijson cpp-httplib[openssl] sqlite3 sqlite-orm gtest`
+- Ensure all vcpkg dependencies are installed: `vcpkg install curl[http2] libsodium nlohmann-json ryml valijson cpp-httplib[openssl] sqlite3 sqlite-orm gtest`
   (the `http2` feature is required - without it libcurl is built without nghttp2 and the HTTP/2 support test fails; the `openssl` feature is required for the same reason one step further along - without it `httplib::SSLServer` does not exist and the TLS-verification tests do not compile)
 - On Windows, ensure Visual Studio C++ tools are installed
 

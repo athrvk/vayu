@@ -72,14 +72,19 @@ namespace {
 
 namespace routes = vayu::http::routes;
 
+// Both documents declare their responses, because the engine reads the index
+// off the document now (issue #853) - what a run measures against is these
+// bytes, not something a caller sent beside them.
 constexpr const char* BOUND_DOC =
 R"({"openapi":"3.1.0","info":{"title":"Pets","version":"1.0.0"},)"
-R"("paths":{"/pets":{"get":{"operationId":"listPets"}}}})";
+R"("paths":{"/pets":{"get":{"operationId":"listPets",)"
+R"("responses":{"200":{},"404":{}}}}}})";
 
 constexpr const char* FETCHED_DOC =
 R"({"openapi":"3.1.0","info":{"title":"Pets","version":"1.1.0"},)"
-R"("paths":{"/pets":{"get":{"operationId":"listPets"}},)"
-R"("/owners":{"get":{"operationId":"listOwners"}}}})";
+R"("paths":{"/pets":{"get":{"operationId":"listPets",)"
+R"("responses":{"200":{},"404":{}}}},)"
+R"("/owners":{"get":{"operationId":"listOwners","responses":{"200":{}}}}}})";
 
 class SpecSyncRouteTest : public ::testing::Test {
     protected:
@@ -583,11 +588,8 @@ TEST_F (SpecSyncRouteTest, ASyncLeavesAnOlderRunsStoredCoverageAlone) {
     // A document that declares one operation, bound with the hash the engine
     // computed for it - the agreement the plan requires before it will read an
     // index at all.
-    const json v1_index =
-    json::array ({ { { "operationId", "listPets" }, { "method", "GET" },
-    { "path", "/pets" }, { "responses", json::array ({ "200", "404" }) } } });
-    auto [stored_status, stored] = routes::create_spec_document_response (
-    *db_, json{ { "content", BOUND_DOC }, { "operations", v1_index } });
+    auto [stored_status, stored] =
+    routes::create_spec_document_response (*db_, json{ { "content", BOUND_DOC } });
     ASSERT_EQ (stored_status, 200) << stored.dump ();
     const std::string v1_id   = stored.value ("id", std::string{});
     const std::string v1_hash = stored.value ("hash", std::string{});
@@ -648,14 +650,10 @@ TEST_F (SpecSyncRouteTest, ASyncLeavesAnOlderRunsStoredCoverageAlone) {
     const json coverage_before = before["coverage"];
 
     // The contract moves: a second operation, a second document, a new binding.
-    const json v2_index = json::array (
-    { { { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" },
-      { "responses", json::array ({ "200", "404" }) } },
-    { { "operationId", "listOwners" }, { "method", "GET" },
-    { "path", "/owners" }, { "responses", json::array ({ "200" }) } } });
+    // The index moves with it because the sync stores a new document and the
+    // engine reads that one (issue #853) - nothing is carried from the check.
     auto [sync_status, synced] = routes::spec_sync_response (*db_,
-    json{ { "collectionId", root_ },
-    { "spec", json{ { "content", FETCHED_DOC }, { "operations", v2_index } } } });
+    json{ { "collectionId", root_ }, { "spec", json{ { "content", FETCHED_DOC } } } });
     ASSERT_EQ (sync_status, 200) << synced.dump ();
     ASSERT_NE (binding ()["specId"].get<std::string> (), v1_id)
     << "the sync has to have actually moved the binding, or this proves "

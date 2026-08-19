@@ -1147,16 +1147,12 @@ export interface ImportApplySpec {
 	/** Absent when the document did not come from a URL (a file or a paste). */
 	sourceUrl?: string;
 	/**
-	 * What the document declares (issue #629), stored beside it so a run of the
-	 * imported collection can report its contract coverage. Absent for a document
-	 * the parsers produced no index for.
-	 */
-	operations?: DeclaredOperation[];
-	/**
 	 * The response schemas the document declares (issue #628), stored beside it
 	 * so a response can be checked against its contract. Absent for a document
 	 * that declares none, which the engine stores as "no index" - a response of
-	 * it reports that nothing checked it, never that it passed.
+	 * it reports that nothing checked it, never that it passed. The
+	 * declared-operation index (issue #629) is derived engine-side from the
+	 * document itself (issue #853), so it is not sent here either.
 	 */
 	responseSchemas?: ResponseSchemaIndex;
 }
@@ -1280,17 +1276,14 @@ export interface CreateSpecRequest {
 	content: string;
 	sourceUrl?: string | null;
 	/**
-	 * What the document declares, extracted by whichever parser read it
-	 * (issue #629). Omitted for a document nothing here parsed, which the engine
-	 * stores as "no index"; a run of the bound collection then reports no
-	 * coverage rather than an empty contract.
-	 */
-	operations?: DeclaredOperation[];
-	/**
-	 * The response schemas the document declares (issue #628), stored beside it
-	 * so a response can be checked against its contract. Absent for a document
-	 * that declares none, which the engine stores as "no index" - a response of
-	 * it reports that nothing checked it, never that it passed.
+	 * The declared-operation index (issue #629) is **not** a field here: the
+	 * engine reads the document it is storing and derives it (issue #853), the
+	 * way it computes the hash, and sending one is a `400`.
+	 *
+	 * The response schemas the document declares (issue #628) still are, stored
+	 * beside it so a response can be checked against its contract. Absent for a
+	 * document that declares none, which the engine stores as "no index" - a
+	 * response of it reports that nothing checked it, never that it passed.
 	 */
 	responseSchemas?: ResponseSchemaIndex;
 }
@@ -1373,13 +1366,13 @@ export interface SpecSyncRequest {
 		content: string;
 		sourceUrl?: string | null;
 		/**
-		 * The re-fetched document's declared-operation index (issue #629). Sent
-		 * on every sync for the same reason the content is: the new document is
-		 * a new row, and a sync that omitted it would silently turn coverage off
-		 * for a collection that had it.
+		 * The re-fetched document's response schema index (issue #628). Sent on
+		 * every sync for the same reason the content is: the new document is a
+		 * new row, and a sync that omitted it would silently turn validation off
+		 * for a collection that had it. The declared-operation index (issue
+		 * #629) needs no carrying - the engine derives it from the document this
+		 * sync stores (issue #853).
 		 */
-		operations?: DeclaredOperation[];
-		/** The same, for the response schema index (issue #628). */
 		responseSchemas?: ResponseSchemaIndex;
 	};
 	collections: SpecSyncCollection[];

@@ -61,7 +61,7 @@ using Json = nlohmann::json;
  *
  * What `GET /specs/:id/meta` answers: the fields describing the document -
  * where it came from, when, its hash and how many bytes it is - with `content`
- * and both app-extracted indexes left out entirely rather than emptied, because
+ * and both stored indexes left out entirely rather than emptied, because
  * an empty index is a document that declares nothing and this is a document
  * whose index was not read.
  */

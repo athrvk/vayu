@@ -1100,19 +1100,21 @@ struct SpecDocument {
      */
     std::string hash;
     /**
-     * The operations this document declares, extracted by the app when it stored
-     * the document (issue #629): a JSON array of
+     * The operations this document declares (issue #629): a JSON array of
      * `{operationId?, method, path, responses[]}`, in document order.
      *
-     * Supplied rather than derived because **the engine does not parse OpenAPI**
-     * - the division of labour #625 decided. `content` above is the bytes the
-     * app imported, which are YAML as often as JSON, and a C++ reader of them
-     * would be a second opinion about what a document declares.
+     * **Derived by the engine from `content`, never supplied** (issue #853):
+     * `core::derive_operations_index` reads the document as it is stored, the
+     * way `hash` is computed rather than taken, and a write carrying an
+     * `operations` field is a `400`. One reader answers what a document
+     * declares - which is the rule #625 decided; #761's phase B moved which
+     * side of the wire it lives on.
      *
      * `""` means no index: a document stored before this column existed, or one
-     * written by a client that sends none. A run of such a document reports **no
-     * coverage block at all** rather than zero of zero operations covered -
-     * "not measured" and "measured nothing" are different answers.
+     * that declares no operation at all (a stored file that is not a contract).
+     * A run of such a document reports **no coverage block at all** rather than
+     * zero of zero operations covered - "not measured" and "measured nothing"
+     * are different answers.
      */
     std::string operations;
     /**

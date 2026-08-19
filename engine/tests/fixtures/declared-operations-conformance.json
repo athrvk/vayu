@@ -1,0 +1,109 @@
+{
+  "description": "Cross-language conformance for what an OpenAPI document declares (issues #629, #715, moved engine-side by #853). The engine derives the stored `operations` index by reading the document (core/openapi_document.cpp); the renderer's import parsers stamp each request's own `specOperation` from the same bytes. Coverage matches one against the other - `OperationIndex::resolve` follows `operationId` first and `METHOD path` second - so a disagreement between the two readers does not fail loudly, it credits the wrong operation. This table is what keeps them honest: engine/tests/openapi_document_test.cpp and app/src/services/openapi/declared-operations.conformance.test.ts both read it.",
+  "readers": {
+    "engine": "the whole row, in document order - `declared_operations_of` produces the stored index, `responses` included",
+    "app": "the identity only (`operationId`, `method`, `path`), from `readSpecOperations().operations`, compared as a set: the renderer walks its own collection tree (root requests, then tag folders), so its order is the tree's rather than the document's. `responses` has no renderer reader at all any more - only the engine writes the index."
+  },
+  "cases": [
+    {
+      "name": "a 3.0 document: every method under every path, in document order",
+      "document": "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"Pets API\"},\"servers\":[{\"url\":\"https://api.example.com\"}],\"paths\":{\"/pets\":{\"get\":{\"operationId\":\"listPets\",\"tags\":[\"pets\"],\"summary\":\"List pets\",\"responses\":{\"200\":{\"description\":\"ok\"}}},\"post\":{\"summary\":\"Create a pet\",\"tags\":[\"pets\"],\"responses\":{\"201\":{\"description\":\"made\"}}}},\"/pets/{petId}\":{\"get\":{\"operationId\":\"getPet\",\"summary\":\"One pet\",\"responses\":{\"200\":{\"description\":\"ok\"},\"404\":{\"description\":\"gone\"}}}}}}",
+      "operations": [
+        { "operationId": "listPets", "method": "GET", "path": "/pets", "responses": ["200"] },
+        { "method": "POST", "path": "/pets", "responses": ["201"] },
+        {
+          "operationId": "getPet",
+          "method": "GET",
+          "path": "/pets/{petId}",
+          "responses": ["200", "404"]
+        }
+      ]
+    },
+    {
+      "name": "status patterns verbatim - a range and `default` are their own promises",
+      "document": "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"Pets API\"},\"paths\":{\"/pets\":{\"get\":{\"operationId\":\"listPets\",\"responses\":{\"200\":{},\"4XX\":{},\"default\":{}}}}}}",
+      "operations": [
+        {
+          "operationId": "listPets",
+          "method": "GET",
+          "path": "/pets",
+          "responses": ["200", "4XX", "default"]
+        }
+      ]
+    },
+    {
+      "name": "a repeated operationId is kept on its first declaration only (issue #715)",
+      "document": "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"Dupes\"},\"paths\":{\"/a\":{\"get\":{\"operationId\":\"list\",\"summary\":\"List A\",\"responses\":{\"200\":{}}}},\"/b\":{\"post\":{\"operationId\":\"list\",\"summary\":\"Create B\",\"responses\":{\"201\":{}}}}}}",
+      "operations": [
+        { "operationId": "list", "method": "GET", "path": "/a", "responses": ["200"] },
+        { "method": "POST", "path": "/b", "responses": ["201"] }
+      ]
+    },
+    {
+      "name": "a Swagger 2.0 document, by the same rules",
+      "document": "{\"swagger\":\"2.0\",\"info\":{\"title\":\"Pets API\"},\"host\":\"api.example.com\",\"basePath\":\"/v1\",\"paths\":{\"/pets/{petId}\":{\"get\":{\"operationId\":\"getPet\",\"responses\":{\"200\":{},\"404\":{}}},\"delete\":{\"responses\":{\"204\":{}}}}}}",
+      "operations": [
+        {
+          "operationId": "getPet",
+          "method": "GET",
+          "path": "/pets/{petId}",
+          "responses": ["200", "404"]
+        },
+        { "method": "DELETE", "path": "/pets/{petId}", "responses": ["204"] }
+      ]
+    },
+    {
+      "name": "a path key that is not a path declares no operation - the request imports without an identity",
+      "document": "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"Odd\"},\"paths\":{\"pets\":{\"get\":{\"operationId\":\"listPets\",\"responses\":{\"200\":{}}}},\"/ok\":{\"get\":{\"operationId\":\"ok\",\"responses\":{\"200\":{}}}}}}",
+      "operations": [
+        { "operationId": "ok", "method": "GET", "path": "/ok", "responses": ["200"] }
+      ]
+    },
+    {
+      "name": "a $ref'd path item is followed one hop - what a bundler emits when it hoists a shared one",
+      "document": "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"Hoisted\"},\"paths\":{\"/shared\":{\"$ref\":\"#/components/pathItems/Shared\"}},\"components\":{\"pathItems\":{\"Shared\":{\"get\":{\"operationId\":\"sharedGet\",\"responses\":{\"200\":{}}}}}}}",
+      "operations": [
+        { "operationId": "sharedGet", "method": "GET", "path": "/shared", "responses": ["200"] }
+      ]
+    },
+    {
+      "name": "`trace` declares nothing - Vayu has no verb for it, so no request can carry that identity",
+      "document": "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"Traced\"},\"paths\":{\"/echo\":{\"trace\":{\"operationId\":\"traceEcho\",\"responses\":{\"200\":{}}},\"get\":{\"operationId\":\"getEcho\",\"responses\":{\"200\":{}}}}}}",
+      "operations": [
+        { "operationId": "getEcho", "method": "GET", "path": "/echo", "responses": ["200"] }
+      ]
+    },
+    {
+      "name": "a YAML document, unquoted status keys and all",
+      "document": "openapi: 3.0.3\ninfo:\n  title: Pets API\npaths:\n  /pets/{petId}:\n    get:\n      operationId: getPet\n      responses:\n        200:\n          description: ok\n        404:\n          description: gone\n  /pets:\n    post:\n      operationId: createPet\n      responses:\n        201: { description: made }\n",
+      "operations": [
+        {
+          "operationId": "getPet",
+          "method": "GET",
+          "path": "/pets/{petId}",
+          "responses": ["200", "404"]
+        },
+        { "operationId": "createPet", "method": "POST", "path": "/pets", "responses": ["201"] }
+      ]
+    },
+    {
+      "name": "a YAML document that shares a response through an anchor",
+      "document": "openapi: 3.0.3\ninfo:\n  title: Anchored\ncomponents:\n  responses:\n    NotFound: &notFound\n      description: Not found\npaths:\n  /pets/{petId}:\n    get:\n      operationId: getPet\n      responses:\n        200:\n          description: ok\n        404: *notFound\n",
+      "operations": [
+        {
+          "operationId": "getPet",
+          "method": "GET",
+          "path": "/pets/{petId}",
+          "responses": ["200", "404"]
+        }
+      ]
+    },
+    {
+      "name": "an operation that declares no responses at all still declares itself",
+      "document": "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"Bare\"},\"paths\":{\"/ping\":{\"head\":{\"operationId\":\"ping\"}}}}",
+      "operations": [
+        { "operationId": "ping", "method": "HEAD", "path": "/ping", "responses": [] }
+      ]
+    }
+  ]
+}
