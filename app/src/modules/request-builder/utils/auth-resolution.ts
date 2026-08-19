@@ -60,6 +60,28 @@ export function resolveInheritedAuth(ancestors: Collection[]): Record<string, un
 	return source ? ({ ...source.auth } as Record<string, unknown>) : undefined;
 }
 
+/**
+ * The concrete auth a request carries once `inherit` has been walked - the same
+ * answer {@link resolveAuthForSend} flattens, before it is flattened.
+ *
+ * Offered beside the record form because a reader that has to look *inside* the
+ * credentials cannot use a `Record<string, unknown>` without re-deriving the
+ * mode: the Data tab's column audit walks the fields a data row binds
+ * (`{{data.user}}` in a basic-auth username), and that walk is typed by mode.
+ * A request whose chain configures nothing resolves to `none`, which is what an
+ * unconfigured request sends anyway.
+ */
+export function resolveEffectiveAuth(
+	auth: RequestAuth,
+	ancestors: Collection[]
+): Exclude<RequestAuth, { mode: "inherit" }> {
+	if (auth.mode !== "inherit") return auth;
+	// `resolveAuthSource` never returns a `none`/`noauth` source - it steps past
+	// the first and stops at the second - so this is the configured auth or
+	// nothing, never a source that says "send nothing" wearing a mode.
+	return resolveAuthSource(ancestors).source?.auth ?? { mode: "none" };
+}
+
 /** Convert a concrete RequestAuth (non-inherit) to the flat record the engine expects. */
 export function authToRecord(
 	auth: Exclude<RequestAuth, { mode: "inherit" }>
@@ -82,5 +104,5 @@ export function resolveAuthForSend(
 	auth: RequestAuth,
 	ancestors: Collection[]
 ): Record<string, unknown> | undefined {
-	return auth.mode === "inherit" ? resolveInheritedAuth(ancestors) : authToRecord(auth);
+	return authToRecord(resolveEffectiveAuth(auth, ancestors));
 }

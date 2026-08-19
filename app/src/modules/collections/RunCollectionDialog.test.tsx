@@ -39,10 +39,19 @@ const startRunState = {
  */
 const configEntries: { key: string; value: string }[] = [];
 
+/**
+ * The collection tree, for the contract walk (issue #729). Empty by default:
+ * the dialog is handed the collection it runs, so a root collection declaring
+ * its own contract resolves without the query having answered - only the
+ * ancestor cases below seed rows.
+ */
+const collections: Collection[] = [];
+
 vi.mock("@/queries", () => ({
 	useStartScenarioRunMutation: () => startRunState,
 	// The picker and the pre-fill both read the caps through `useDataFileLimits`.
 	useConfigQuery: () => ({ data: { entries: configEntries } }),
+	useCollectionsQuery: () => ({ data: collections }),
 }));
 
 const startMonitoring = vi.fn();
@@ -67,6 +76,7 @@ function succeedWith(runId: string) {
 
 beforeEach(() => {
 	configEntries.length = 0;
+	collections.length = 0;
 	mutate.mockClear();
 	startMonitoring.mockClear();
 	startLoadMonitoring.mockClear();
@@ -675,5 +685,87 @@ describe("pre-filling from the declared data file", () => {
 		await waitFor(() => expect(screen.getByText("fresh.csv")).toBeTruthy());
 		// The note was about a file that is no longer the one in play.
 		expect(screen.queryByText(/no longer at/i)).toBeNull();
+	});
+
+	/*
+	 * The contract in scope, not the collection's own row (issue #729).
+	 *
+	 * A sub-collection under a declaring parent binds the parent's rows - the
+	 * nearest-declared-ancestor rule the token painter, the completions and
+	 * `useSendWithRow` all follow, and the one the engine applies at plan time.
+	 * Reading `locations[collection.id]` meant precisely that run got no
+	 * pre-fill and no column diff, while every other surface said it was
+	 * data-driven.
+	 */
+	/** The declaring parent, plus the sub-collection row the dialog is handed. */
+	const parentDeclaring = (columns: string[]) => {
+		collections.push({
+			id: "col_parent",
+			name: "Parent",
+			parentId: null,
+			dataSchema: { columns },
+		} as unknown as Collection);
+		return { ...COLLECTION, parentId: "col_parent" } as Collection;
+	};
+
+	it("pre-fills a sub-collection from the file its declaring ancestor remembers", async () => {
+		const child = parentDeclaring(["user", "id"]);
+		// Picked in the parent's Data tab, which is where the contract lives -
+		// the sub-collection has no entry of its own and never will.
+		useDataFileStore.setState({
+			locations: { col_parent: { path: "/home/u/users.csv", fileName: "users.csv" } },
+		});
+		stubReadDataFile(async () => ({
+			bytes: bytesOf("user,id\nada,1\ngrace,2"),
+			fileName: "users.csv",
+		}));
+
+		render(<RunCollectionDialog collection={child} onOpenChange={vi.fn()} />);
+
+		await waitFor(() => expect(screen.getByText("users.csv")).toBeTruthy());
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario.data).toEqual([
+			{ user: "ada", id: "1" },
+			{ user: "grace", id: "2" },
+		]);
+	});
+
+	it("diffs the pre-filled file against the ancestor's columns", async () => {
+		const child = parentDeclaring(["user", "email"]);
+		useDataFileStore.setState({
+			locations: { col_parent: { path: "/home/u/users.csv", fileName: "users.csv" } },
+		});
+		stubReadDataFile(async () => ({
+			bytes: bytesOf("user,nickname\nada,addy"),
+			fileName: "users.csv",
+		}));
+
+		render(<RunCollectionDialog collection={child} onOpenChange={vi.fn()} />);
+
+		await waitFor(() =>
+			expect(screen.getByText(/missing a declared column: email/i)).toBeTruthy()
+		);
+		expect(screen.getByText(/does not declare: nickname/i)).toBeTruthy();
+	});
+
+	it("stops at a sub-collection that declares a contract of its own", () => {
+		// Nearest *declared* ancestor: a collection with its own columns answers
+		// for itself, and the parent's remembered file is not its file.
+		const child = parentDeclaring(["user"]);
+		useDataFileStore.setState({
+			locations: { col_parent: { path: "/home/u/users.csv", fileName: "users.csv" } },
+		});
+		const read = vi.fn();
+		stubReadDataFile(read);
+
+		render(
+			<RunCollectionDialog
+				collection={{ ...child, dataSchema: { columns: ["sku"] } } as Collection}
+				onOpenChange={vi.fn()}
+			/>
+		);
+
+		expect(read).not.toHaveBeenCalled();
+		expect(screen.getByText(/choose file/i)).toBeTruthy();
 	});
 });

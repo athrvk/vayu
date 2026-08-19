@@ -27,17 +27,49 @@
  * conservative one: a column a script literal names is not reported as
  * unreferenced. Telling someone a column is unused when a script reads it is
  * the worse error, and it is the one that gets a working column deleted.
+ *
+ * **Auth credentials are request fields too** (issue #729). Since #591 a row
+ * binds into the credentials a step sends - the flagship case being a
+ * collection whose contract declares `user` and `password` for a basic-auth
+ * pair - so a walk that stopped at URL, headers and body reported those two
+ * columns as referenced by nothing while every iteration bound them. The
+ * credentials walked here are exactly the ones the engine's
+ * `walk_auth_credentials` visits: a bearer token, both halves of basic auth,
+ * and an api key's name and value. **OAuth 2.0 is deliberately absent from
+ * that set** - its config is the input to a token acquisition that happens once
+ * per plan, so a data token there is refused rather than bound, and counting
+ * one as a reference would report a binding the engine will not perform.
+ *
+ * The auth a request *sends* is not always the auth it *holds*: `inherit`
+ * resolves through the collection chain, which needs collections this module
+ * does not take. So the caller resolves it (`resolveEffectiveAuth`) and passes
+ * the answer, and the type refuses `inherit` rather than silently walking no
+ * credentials for the case that most needs them.
+ *
+ * **Collection scripts run for every step**, root-to-leaf ahead of the
+ * request's own (`compose_script_parts`), so a `pm.iterationData.get("plan")`
+ * written once on a parent collection is scanned here as well - under the same
+ * best-effort label, and moving a verdict in the same conservative direction.
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { dataColumnName } from "@/lib/variable-resolution";
-import type { KeyValueEntry, Request, RequestBody } from "@/types";
+import type { KeyValueEntry, Request, RequestAuth, RequestBody } from "@/types";
 
-/** What the audit needs from a request - `Request` satisfies it structurally. */
+/**
+ * What the audit needs from a request.
+ *
+ * `resolvedAuth` is not `Request["auth"]`: it is the auth the request will
+ * actually send, with `inherit` already walked through the collection chain.
+ * Required, and typed to exclude `inherit`, so a caller holding raw rows has to
+ * resolve rather than accidentally hand over an `inherit` that walks nothing.
+ */
 export type AuditableRequest = Pick<
 	Request,
 	"url" | "params" | "headers" | "body" | "preRequestScript" | "postRequestScript"
->;
+> & {
+	resolvedAuth: Exclude<RequestAuth, { mode: "inherit" }>;
+};
 
 export interface ColumnAudit {
 	/** Declared columns a request field references. */
@@ -63,6 +95,42 @@ export interface ColumnAudit {
  */
 const SCRIPT_COLUMN_PATTERN = /iterationData\s*\??\.\s*(?:get|has)\s*\(\s*(['"`])([^'"`\\]*)\1/g;
 
+/**
+ * The credential strings a data row can bind, per auth mode.
+ *
+ * Mirrors the engine's `walk_auth_credentials` field for field. The switch is
+ * exhaustive on purpose: a mode added to `RequestAuth` without a decision here
+ * is a type error rather than a credential this silently stops walking.
+ */
+function authCredentials(auth: Exclude<RequestAuth, { mode: "inherit" }>): string[] {
+	switch (auth.mode) {
+		case "bearer":
+			return [auth.token];
+		case "basic":
+			return [auth.username, auth.password];
+		case "apikey":
+			return [auth.key, auth.value];
+		case "oauth2":
+			// The config is not a credential the request carries - see the module
+			// comment - so a token in it binds nothing and is not a reference.
+			return [];
+		case "inherit":
+			// Unreachable through a caller that resolved, which is every caller:
+			// `Exclude<RequestAuth, { mode: "inherit" }>` cannot actually remove
+			// this mode, because it shares a union member with `none` and
+			// `noauth` (the same reason `Collection.auth` carries it too). Walking
+			// nothing is the honest answer for an auth whose credentials live
+			// somewhere this function was not given.
+			return [];
+		case "none":
+		case "noauth":
+		case "digest":
+		case "aws":
+		case "ntlm":
+			return [];
+	}
+}
+
 /** Every string a data row can bind in one request, in the binder's own order. */
 function bindableStrings(request: AuditableRequest): string[] {
 	const strings: string[] = [request.url];
@@ -78,6 +146,9 @@ function bindableStrings(request: AuditableRequest): string[] {
 	const body: RequestBody | undefined = request.body;
 	if (body && "content" in body) strings.push(body.content);
 	if (body && "fields" in body) entries(body.fields);
+	// Bound per iteration since #591, and applied (base64, percent-encoding)
+	// only after the bind - so what a token sits in is the credential itself.
+	strings.push(...authCredentials(request.resolvedAuth));
 	return strings;
 }
 
@@ -107,10 +178,16 @@ function scriptColumnsIn(script: string): string[] {
  * appearance for the undeclared one, so the panel reads the way the Data tab
  * above it does. Every list is deduplicated: a column referenced by nine
  * requests is one column.
+ *
+ * @param collectionScripts The pre- and post-request scripts of the collections
+ *        whose chains the audited requests run under. Scanned on the same
+ *        best-effort terms as a request's own scripts, because a run executes
+ *        them for every step.
  */
 export function auditDataColumns(
 	declared: readonly string[],
-	requests: readonly AuditableRequest[]
+	requests: readonly AuditableRequest[],
+	collectionScripts: readonly string[] = []
 ): ColumnAudit {
 	const declaredSet = new Set(declared);
 	const referencedSet = new Set<string>();
@@ -127,6 +204,10 @@ export function auditDataColumns(
 		for (const script of [request.preRequestScript, request.postRequestScript]) {
 			for (const column of scriptColumnsIn(script)) scriptSet.add(column);
 		}
+	}
+
+	for (const script of collectionScripts) {
+		for (const column of scriptColumnsIn(script)) scriptSet.add(column);
 	}
 
 	return {
