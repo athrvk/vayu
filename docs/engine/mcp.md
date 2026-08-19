@@ -165,6 +165,8 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and both collection scripts |
 | `update_collection`    | write    | `GET /collections` (scan, only when variables change) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
+| `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
+| `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept |
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, both scripts - minus file body parts |
 | `update_request`       | write    | `PUT /requests/:id` (merge-patch)            | write toggle; same fields, and only the ones named are written |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
@@ -241,6 +243,23 @@ Notes:
   no such field - every transfer is bounded by the `defaultTimeout` setting
   (`resolve_request_timeout_ms`), which `update_engine_config` changes. Recorded
   here so it is not re-derived as a gap each time the schema is read.
+- **OpenAPI is readable over MCP, not writable** (issue
+  [#761](https://github.com/athrvk/vayu/issues/761), phase A). `get_spec` says
+  what a collection is bound to and `unbind_spec` detaches it; **binding, spec
+  sync, import and export stay app-only.** That is a boundary, not a gap in the
+  tool list: binding is not one write but a match of every saved request against
+  the document's operations, and the matcher, the sync diff and the export
+  assembly are renderer modules the main process cannot import (see
+  `app/tsconfig.node.json`). A bind that skipped the matching would store a
+  document with no operations or response-schema index - so the collection's runs
+  would report no coverage and its responses would go unchecked - and would leave
+  any stamp from a previous document in place, where coverage resolves it by
+  `operationId` and it claims the wrong operation rather than none. Phase B of
+  #761 is the decision about where that logic should live; until it lands, bind a
+  spec in Vayu (Collection → Spec). `unbind_spec` needs none of it, which is why
+  it ships: it writes exactly what the app's Unbind button writes, and leaves the
+  stamps alone for the same reason - re-binding the same document later costs
+  nothing.
 - **`get_run_report` carries contract coverage** for a run of a collection bound
   to an OpenAPI document (issue #629): which of the contract's operations the run
   exercised, which of their declared responses it saw, and any statuses the
@@ -1402,6 +1421,10 @@ builds on the mechanism the spec is deprecating and the payoff is client-depende
   provenance.
 - **`vayu mcp` bin** - package the stdio CLI as a first-class command
   ([#693](https://github.com/athrvk/vayu/issues/693)).
+- **OpenAPI bind / sync / import / export** - phase B of
+  [#761](https://github.com/athrvk/vayu/issues/761), gated on deciding where
+  operation matching, the sync diff and export assembly should live (see the
+  note under [Tools](#tools)).
 - **Live push over HTTP** - stateful sessions (see Design notes).
 - **Hosted MCP for Vayu Cloud** - OAuth-gated, remote.
 
