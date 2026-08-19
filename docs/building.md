@@ -236,8 +236,9 @@ cmake --build --preset macos-prod
 ctest --preset macos-prod
 ```
 
-The Linux and macOS test presets run the suite multi-process (`ctest -j8`); the
-Windows ones run serially on purpose, because parallelism measures far slower
+Every test preset runs the suite multi-process - `ctest -j8` on Linux and macOS,
+`-j4` on Windows, where the tests that open a scratch database are additionally
+held apart from each other because concurrent SQLite commits cost far more
 there. Pass `-jN` to override. See
 [Engine build guide](engine/building.md#running-tests) for the numbers.
 

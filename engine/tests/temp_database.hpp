@@ -28,11 +28,14 @@ namespace vayu::tests {
 /**
  * @brief Whether the per-process scratch directory below has been switched off.
  *
- * Set `VAYU_TEST_NO_SCRATCH_ISOLATION` (to anything) to skip it. The Windows
- * test presets do, because they run the suite serially: with one process there
- * is nothing to isolate from, so the directories would be pure cost - and on
- * Windows that cost is large (see `docs/engine/building.md`). Isolating is the
- * default everywhere else, so a hand-run `ctest -j` is safe on any platform.
+ * Set `VAYU_TEST_NO_SCRATCH_ISOLATION` (to anything) to skip it. **No test
+ * preset sets it any more**: the Windows presets did while they ran the suite
+ * serially - one process has nothing to isolate from - and they run `-j4` since
+ * #805 phase 5, with the database tests held apart by a CTest `RESOURCE_LOCK`
+ * rather than by running the whole suite one test at a time. The opt-out
+ * remains for a deliberately serial run (`ctest -j1`), where the directories
+ * are pure cost, and as the one-line way back to the old behaviour if the
+ * Windows measurement ever turns around again.
  *
  * Presence, not value, so this cannot be got wrong by writing `=0` and meaning
  * "off". MSVC deprecates `std::getenv` in favour of `_dupenv_s` (C4996) and
