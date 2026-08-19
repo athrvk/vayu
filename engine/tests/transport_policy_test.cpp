@@ -594,7 +594,7 @@ TEST (TlsBackend, IsTheBackendEveryTrustStatementHereAssumes) {
     for (int i = 0; available[i] != nullptr; ++i) {
         compiled_in.emplace_back (available[i]->name != nullptr ? available[i]->name : "unnamed");
     }
-    EXPECT_EQ (vayu::http::pin_tls_backend (), CURLSSLSET_OK)
+    EXPECT_EQ (vayu::http::pin_tls_backend (), vayu::http::TlsBackendSelection::Selected)
     << "this process never selected its TLS backend, so on the MultiSSL build "
        "Windows ships (compiled in: "
     << join_names (compiled_in)

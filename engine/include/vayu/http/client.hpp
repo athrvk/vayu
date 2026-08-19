@@ -12,8 +12,6 @@
  * @brief HTTP client using libcurl
  */
 
-#include <curl/curl.h>
-
 #include <memory>
 
 #include "vayu/core/constants.hpp"
@@ -147,15 +145,29 @@ class Client {
     std::unique_ptr<Impl> impl_;
 };
 
+/// What `pin_tls_backend` managed to do, in this engine's terms rather than
+/// libcurl's.
+///
+/// Named here rather than returning `CURLsslset` so this header does not have
+/// to include `curl/curl.h`: on Windows that reaches `windows.h`, whose
+/// `min`/`max` macros break `std::min`/`std::max` in every translation unit
+/// that includes this one. `NOMINMAX` is deliberately PRIVATE to `vayu_core`
+/// (`CMakeLists.txt`), so `vayu-engine` does not get it and `daemon.cpp` is
+/// where that lands - which is exactly how this was found.
+enum class TlsBackendSelection {
+    /// OpenSSL is the backend every transfer will use, because we said so.
+    Selected,
+    /// This build has no OpenSSL to select - so whatever it does verify with,
+    /// nothing this repo documents about trust applies to it.
+    Unavailable,
+    /// curl was already initialized, so the choice was made without us. A
+    /// caller reached curl before `global_init`.
+    TooLate
+};
+
 /**
  * @brief Select OpenSSL as this process's TLS backend, before curl is
  *        initialized (issue #851).
- *
- * Returns libcurl's own verdict: `CURLSSLSET_OK` when OpenSSL is now the
- * backend every transfer will use, `CURLSSLSET_UNKNOWN_BACKEND` for a build
- * that has no OpenSSL to select, and `CURLSSLSET_TOO_LATE` when curl was
- * already initialized - which would mean a caller reached curl before
- * `global_init`, and the selection below never took.
  *
  * **Why this exists rather than the manifest alone.** `engine/vcpkg.json` asks
  * for `curl` with `default-features: false` and an explicit `openssl`, which
@@ -177,7 +189,7 @@ class Client {
  * Idempotent, and deliberately separate from `global_init` so the ordering it
  * depends on is one call a test can assert rather than a comment.
  */
-CURLsslset pin_tls_backend ();
+TlsBackendSelection pin_tls_backend ();
 
 /**
  * @brief Initialize curl globally (call once at startup)

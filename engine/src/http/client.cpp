@@ -641,13 +641,13 @@ std::string Client::last_error () const {
 // Global Functions
 // ============================================================================
 
-CURLsslset pin_tls_backend () {
+TlsBackendSelection pin_tls_backend () {
     // Cached rather than repeated: libcurl answers `CURLSSLSET_TOO_LATE` to
     // every call after the first, and the fixtures call `global_init` again
     // per suite - so a second call would report a failure that is really just
     // "already done". The first call's verdict is the one that describes this
     // process, which is what `TlsBackend` asserts.
-    static const CURLsslset selected = [] {
+    static const TlsBackendSelection selected = [] {
         const CURLsslset result =
         curl_global_sslset (CURLSSLBACKEND_OPENSSL, nullptr, nullptr);
         if (result != CURLSSLSET_OK) {
@@ -664,7 +664,16 @@ CURLsslset pin_tls_backend () {
             "environment, or libcurl's own default, is choosing instead - and "
             "client certificates do not work on Schannel (issue #842).");
         }
-        return result;
+        switch (result) {
+        case CURLSSLSET_OK: return TlsBackendSelection::Selected;
+        case CURLSSLSET_TOO_LATE: return TlsBackendSelection::TooLate;
+        // `NO_BACKENDS` and `UNKNOWN_BACKEND` are one answer here: neither
+        // leaves an OpenSSL for us to name, and the caller's question is
+        // whether this engine chose its backend, not which way it failed to.
+        case CURLSSLSET_UNKNOWN_BACKEND:
+        case CURLSSLSET_NO_BACKENDS: break;
+        }
+        return TlsBackendSelection::Unavailable;
     }();
     return selected;
 }
