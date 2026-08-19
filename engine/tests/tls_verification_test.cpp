@@ -21,17 +21,29 @@
  * "the request succeeded" - so the suite asserts a success, a failure without
  * the setting, and a failure with the *wrong* setting.
  *
- * These run on all three CI platforms deliberately: the trust decision is made
- * by a different backend on each (OpenSSL where curl is built against it,
- * Schannel on Windows), and a claim about trust that holds on one is not a
- * claim about the others. That is not a formality - the backends answered
- * differently the first time this ran. A backend that revocation-checks the
- * chain refuses a CA minted for this run, because a CA minted for this run
- * publishes no CRL, and the *positive* cases below therefore skip there rather
- * than assert. The skip is narrow and loud: it fires only when the backend's
- * own error text names revocation, prints that text, and is tracked by #819;
- * every other refusal, on every platform, still fails. The negative cases have
- * no such carve-out and are asserted everywhere.
+ * All four run on all three CI platforms, and getting there took two rounds.
+ * The trust decision is made by a different backend on each (OpenSSL where curl
+ * is built against it, Schannel on Windows), and a claim about trust that holds
+ * on one is not a claim about the others - which is not a formality, because
+ * the backends answered differently the first time this ran. A backend that
+ * revocation-checks the chain refused a CA minted for this run, since a CA
+ * minted for this run published no CRL, and the two *positive* cases skipped
+ * there rather than assert.
+ *
+ * **The fixture publishes one now** (#819): the CA signs an empty CRL, a
+ * plain-HTTP listener serves it, and the leaf names that listener as its
+ * distribution point. The skip that stood here, and the two helpers behind it,
+ * are gone - on the observation rather than on the theory, since the leg that
+ * skipped went to 2056 run, 2056 passed, 0 skipped (job 95970419762). A refusal
+ * naming revocation is now an ordinary failure on every platform, which is what
+ * it should be: the fixture answers that question, so a backend still asking it
+ * is telling us something.
+ *
+ * `TheFixtureServesACaSignedCrlAtTheLeafsDistributionPoint` is what keeps this
+ * honest on the backends that never ask. Without it the whole CRL apparatus
+ * could rot - unparseable bytes, a wrong signer, a stale window - and every
+ * OpenSSL leg would stay green while the Schannel one went red for a reason
+ * pointing at trust rather than at the fixture.
  */
 
 #include <gtest/gtest.h>
@@ -81,43 +93,6 @@ Response send_through (const TransportPolicy& transport, const std::string& url)
     return result.is_ok () ? result.value () : Response{};
 }
 
-/**
- * @brief Whether the backend refused for want of *revocation* information
- *        rather than for want of trust.
- *
- * The two are different verdicts and only one of them is about this engine.
- * A backend that asks the operating system to revocation-check the chain
- * cannot be satisfied by a certificate authority minted seconds ago: it
- * publishes no CRL, so the answer comes back "unknown" and the chain is
- * refused even though the anchor was loaded and the signature is good. That is
- * what curl's Schannel path does - `Curl_verify_certificate` passes
- * `CERT_CHAIN_REVOCATION_CHECK_CHAIN` unless `CURLSSLOPT_NO_REVOKE` is set,
- * and treats `CERT_TRUST_REVOCATION_STATUS_UNKNOWN` as a failure unless
- * `CURLSSLOPT_REVOKE_BEST_EFFORT` is (`lib/vtls/schannel_verify.c`) - so the
- * *positive* half of this suite cannot be hosted on such a backend until the
- * fixture serves a CRL, which is #819.
- *
- * Matched on the backend's own words rather than on `_WIN32`, deliberately.
- * The property that matters is "this backend demands revocation information",
- * not "this is Windows", and a test that asserts the host platform is exactly
- * what `CLAUDE.md` forbids - it would keep skipping on Windows if the reason
- * changed, and keep failing elsewhere if the reason spread.
- */
-bool refused_for_want_of_revocation (const Response& response) {
-    return response.error_code == ErrorCode::SslError &&
-    response.error_message.find ("revocation") != std::string::npos;
-}
-
-/// What such a skip says. Loudly, in the backend's own words: a guard that
-/// quietly does nothing on one platform is worse than no guard, so this has to
-/// read as "not answered here, and here is why" rather than as a pass.
-std::string revocation_skip_reason (const Response& response) {
-    return "this TLS backend revocation-checks the chain, which a CA minted for"
-           " this run cannot answer for - the anchor is not the thing it"
-           " refused. Tracked by #819. The backend said: " +
-    response.error_message;
-}
-
 class CustomCaVerificationTest : public ::testing::Test {
     protected:
     void SetUp () override {
@@ -161,6 +136,34 @@ class CustomCaVerificationTest : public ::testing::Test {
 
 // ---------------------------------------------------------------------------
 
+TEST_F (CustomCaVerificationTest, TheFixtureServesACaSignedCrlAtTheLeafsDistributionPoint) {
+    // The guard for everything the revocation half of this fixture rests on,
+    // asserted where every backend can see it. A backend that revocation-checks
+    // the chain fetches this document and refuses the handshake if it is not
+    // there, not this CA's, or not current - and the backends that do not ask
+    // would report none of that.
+    TestCertificateAuthority ca;
+    TlsServer server (ca);
+
+    const std::string distribution_point = server.crl_distribution_point_text ();
+    ASSERT_FALSE (distribution_point.empty ())
+    << "the certificate the listener presents carries no crlDistributionPoints "
+       "extension, so no backend will ever fetch the CRL below";
+    EXPECT_NE (distribution_point.find (server.crl_url ()), std::string::npos)
+    << "the leaf points somewhere other than where the CRL is served: " << distribution_point
+    << " vs " << server.crl_url ();
+
+    const auto policy       = resolve_transport_policy (*db_);
+    const Response response = send_through (policy, server.crl_url ());
+    ASSERT_EQ (response.status_code, 200)
+    << "the distribution point answered " << response.status_code << ": "
+    << to_string (response.error_code) << ": " << response.error_message;
+
+    EXPECT_EQ (ca.crl_defect (response.body), "")
+    << "what the distribution point served is not a CRL this CA vouches for, "
+       "so a revocation-checking backend is no better off than before #819";
+}
+
 TEST_F (CustomCaVerificationTest, AHostSignedByTheAddedCaVerifies) {
     TestCertificateAuthority ca;
     TlsServer server (ca);
@@ -172,9 +175,6 @@ TEST_F (CustomCaVerificationTest, AHostSignedByTheAddedCaVerifies) {
        "tested";
 
     const Response response = send_through (policy, server.url ("/hello"));
-    if (refused_for_want_of_revocation (response)) {
-        GTEST_SKIP () << revocation_skip_reason (response);
-    }
     ASSERT_EQ (response.error_code, ErrorCode::None)
     << "verification failed with the CA added: " << to_string (response.error_code)
     << ": " << response.error_message;
@@ -234,9 +234,6 @@ TEST_F (CustomCaVerificationTest, TheAddedCaExtendsTheStoreRatherThanReplacingIt
     ASSERT_FALSE (policy.ca_bundle_path.empty ());
 
     const Response response = send_through (policy, server.url ("/hello"));
-    if (refused_for_want_of_revocation (response)) {
-        GTEST_SKIP () << revocation_skip_reason (response);
-    }
     ASSERT_EQ (response.error_code, ErrorCode::None)
     << "a second anchor cost the first its trust: " << to_string (response.error_code)
     << ": " << response.error_message;
