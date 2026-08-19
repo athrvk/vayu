@@ -32,6 +32,7 @@ import type { LucideIcon } from "lucide-react";
 import { Server, Code, Network, Activity, Database, Radio, Gauge } from "lucide-react";
 import type { EngineSettingsCategory } from "@/types";
 import { ClientCertificatesCard } from "./main/panels/ClientCertificatesCard";
+import { ConnectionTestCard } from "./main/panels/ConnectionTestCard";
 
 export interface EngineSettingsCategoryMeta {
 	id: EngineSettingsCategory;
@@ -40,18 +41,19 @@ export interface EngineSettingsCategoryMeta {
 	description: string;
 	icon: LucideIcon;
 	/**
-	 * A card rendered above this category's config entries, for engine state
-	 * that is *data* rather than a setting - a registry with its own CRUD
-	 * routes, which `GET /config` does not describe and the generic entry
-	 * renderer therefore cannot draw (issue #707).
+	 * Cards rendered above this category's config entries, in order, for engine
+	 * surfaces that are not config entries - a registry with its own CRUD routes
+	 * (issue #707), a diagnostic that sends rather than stores (issue #708).
+	 * `GET /config` describes neither, so the generic entry renderer cannot draw
+	 * them.
 	 *
 	 * Declared here rather than branched on in `SettingsMain`, for the reason
-	 * `app-panels.ts` exists on the client side: the view looks a component up,
-	 * it does not carry a list of category names it treats specially. It saves
-	 * on its own - the Save bar above belongs to the config entries - which is
+	 * `app-panels.ts` exists on the client side: the view looks components up,
+	 * it does not carry a list of category names it treats specially. They save
+	 * on their own - the Save bar above belongs to the config entries - which is
 	 * the same split `CookiesCard` has inside the General panel.
 	 */
-	Card?: ComponentType;
+	Cards?: readonly ComponentType[];
 }
 
 export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] = [
@@ -74,10 +76,12 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		description:
 			"The wire itself: what a new request starts with, how many transfers a worker keeps open, and how long a name resolution is reused",
 		icon: Network,
-		// The client-certificate registry (#707) lands here rather than in a
-		// category of its own: it is one half of how a request leaves this
-		// machine, and the proxy and trust settings it belongs beside are here.
-		Card: ClientCertificatesCard,
+		// The client-certificate registry (#707) and the connection test (#708)
+		// land here rather than in a category of their own: they are how a
+		// request leaves this machine, and the proxy and trust settings they
+		// belong beside are here. The test is last of the two, and above the
+		// entries, because it is the thing you use *after* changing one of them.
+		Cards: [ClientCertificatesCard, ConnectionTestCard],
 	},
 	{
 		id: "services",

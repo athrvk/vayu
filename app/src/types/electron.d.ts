@@ -154,6 +154,18 @@ interface ElectronAPI {
 		refPath: string
 	) => Promise<{ bytes: Uint8Array; fileName: string }>;
 
+	/**
+	 * Re-resolve the operating system's proxy into the engine's
+	 * `proxySystemUrl` setting (issue #708).
+	 *
+	 * Resolves to the proxy URL now in force, `""` when this machine proxies
+	 * nothing, or `null` when the resolution could not be made - which is
+	 * deliberately distinct from `""`, since "no proxy" and "could not ask" must
+	 * not read the same. Writes nothing when the answer has not changed, so a
+	 * caller may be as eager as it likes.
+	 */
+	refreshSystemProxy: () => Promise<string | null>;
+
 	// Before quit flush handler
 	onBeforeQuit: (callback: () => void | Promise<void>) => () => void;
 }

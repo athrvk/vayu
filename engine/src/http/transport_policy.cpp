@@ -212,13 +212,14 @@ const std::filesystem::path& directory) {
 
 } // namespace
 
-std::array<ProxyMode, 3> all_proxy_modes () {
-    return { ProxyMode::Environment, ProxyMode::Manual, ProxyMode::Off };
+std::array<ProxyMode, 4> all_proxy_modes () {
+    return { ProxyMode::Environment, ProxyMode::System, ProxyMode::Manual, ProxyMode::Off };
 }
 
 const char* to_string (ProxyMode mode) {
     switch (mode) {
     case ProxyMode::Environment: return "environment";
+    case ProxyMode::System: return "system";
     case ProxyMode::Manual: return "manual";
     case ProxyMode::Off: return "off";
     }
@@ -228,6 +229,7 @@ const char* to_string (ProxyMode mode) {
 const char* proxy_mode_label (ProxyMode mode) {
     switch (mode) {
     case ProxyMode::Environment: return "From environment";
+    case ProxyMode::System: return "From system";
     case ProxyMode::Manual: return "Manual";
     case ProxyMode::Off: return "None";
     }
@@ -237,6 +239,9 @@ const char* proxy_mode_label (ProxyMode mode) {
 std::optional<ProxyMode> proxy_mode_from_string (std::string_view value) {
     if (value == "environment") {
         return ProxyMode::Environment;
+    }
+    if (value == "system") {
+        return ProxyMode::System;
     }
     if (value == "manual") {
         return ProxyMode::Manual;
@@ -477,6 +482,28 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
     }
 
     policy.proxy_bypass = db.get_config_string ("proxyBypass", "");
+
+    if (policy.proxy_mode == ProxyMode::System) {
+        // What the app resolved from the operating system (issue #708). Empty
+        // is not a failure here - it is the documented headless case, where no
+        // app has ever run to push a value - so it falls through to the
+        // environment pickup rather than to `Off`. See ProxyMode::System.
+        const std::string resolved = db.get_config_string ("proxySystemUrl", "");
+        if (resolved.empty ()) {
+            return policy;
+        }
+        if (const auto rejection = proxy_url_rejection (resolved)) {
+            // Only a hand-edited row or an OS answer in a shape libcurl has no
+            // proxy support for reaches this. Named rather than swallowed, for
+            // the reason the manual arm below is: the alternative is every
+            // request going direct while Settings names a proxy.
+            vayu::utils::log_error ("Config 'proxySystemUrl' is unusable (" + *rejection +
+            "); falling back to the environment for 'system' proxy mode");
+            return policy;
+        }
+        policy.proxy_url = resolved;
+        return policy;
+    }
 
     if (policy.proxy_mode != ProxyMode::Manual) {
         // Left empty deliberately: a stored URL that no mode reads must not

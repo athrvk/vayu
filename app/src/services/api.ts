@@ -57,6 +57,7 @@ import type {
 	ClearCookiesResponse,
 	ClientCertificate,
 	ClientCertificateInput,
+	ConnectionTestResult,
 	GetConfigResponse,
 	UpdateConfigRequest,
 	GlobalsResponse,
@@ -385,6 +386,20 @@ export const apiService = {
 			API_ENDPOINTS.COOKIES,
 			scope === undefined ? undefined : { environmentId: scope.environmentId ?? "" }
 		);
+	},
+
+	/**
+	 * Test how a URL is reached under the current transport policy (issue #708).
+	 *
+	 * A *failed* connection still resolves: the engine answers 200 with the
+	 * outcome, because the test succeeded in answering. Only a malformed
+	 * request throws. No response body comes back - by design, and asserted
+	 * engine-side - so this can never become a second import proxy.
+	 */
+	async testConnection(url: string): Promise<ConnectionTestResult> {
+		return await httpClient.post<ConnectionTestResult>(API_ENDPOINTS.DIAGNOSTICS_CONNECTION, {
+			url,
+		});
 	},
 
 	// Client-certificate registry (issue #707)

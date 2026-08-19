@@ -222,6 +222,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	): Promise<{ bytes: Uint8Array; fileName: string }> =>
 		ipcRenderer.invoke("specFile:read", specPath, refPath),
 
+	// Re-resolve the operating system's proxy and push it to the engine (#708).
+	// The renderer asks for this when it has reason to think the answer moved -
+	// the browser's own `online` event, or a user arriving at the network
+	// settings - and the main process, which owns the only Chromium session
+	// that can answer, does the resolving. Resolves to the proxy URL now in
+	// force, "" for a direct configuration, or null when it could not be asked.
+	refreshSystemProxy: (): Promise<string | null> => ipcRenderer.invoke("proxy:refreshSystem"),
+
 	// Before quit flush handler. ACKs main once the callback settles so quit
 	// can resume immediately instead of waiting out the fallback timeout.
 	onBeforeQuit: (callback: () => void | Promise<void>) => {

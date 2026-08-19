@@ -55,6 +55,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
 | POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
+| POST | `/diagnostics/connection` | One policy-honouring send, reported as which hop answered (issue #708) - outcome only, never a body |
 | GET | `/requests/:id/examples` | A request's saved example responses (issue #481), in stored order |
 | POST | `/specs` | Store an OpenAPI document (issue #637); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (issue #712) |
 | POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (issue #655) - new document, moved binding and the created/updated/deleted requests in one transaction |
@@ -243,7 +244,12 @@ Three things worth knowing before you design around them:
   run-scoped on the load and collection paths, because libcurl only reuses a
   pooled connection when its proxy config matches - and applied by the single
   `detail::apply_transport_policy`, which owns TLS verification and the proxy
-  options for **all three** drivers. Add a transport option there, never to a
+  options for **all three** drivers. A fourth mode, **`system`** (#708), reads
+  `proxySystemUrl` - the one config row the *app* writes, because resolving the
+  OS proxy needs Chromium and the engine has none. Empty there falls back to
+  `environment`, never to `off`: a headless engine has no app to ask, and the
+  environment pickup is the closest thing to "what this machine would do" that
+  a daemon on its own has. Add a transport option there, never to a
   driver: the three had grown their own SSL blocks and only two ever grew a
   proxy block, so SSE silently ignored `CURLOPT_PROXY` for its whole life.
   Every mode writes `CURLOPT_PROXY` rather than skipping it, because handles

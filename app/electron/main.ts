@@ -5,13 +5,28 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Menu, shell } from "electron";
+import {
+	app,
+	BrowserWindow,
+	dialog,
+	ipcMain,
+	nativeTheme,
+	Menu,
+	powerMonitor,
+	session,
+	shell,
+} from "electron";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { EngineSidecar } from "./sidecar.js";
 import { resolveAppPaths } from "./app-paths.js";
 import { readDataFile } from "./data-file.js";
 import { readSpecFile } from "./spec-file.js";
+import {
+	defaultProxyResolutionSystem,
+	refreshSystemProxy,
+	type ProxyResolutionSystem,
+} from "./proxy-resolution.js";
 import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
@@ -835,6 +850,30 @@ function setupIpcHandlers() {
 	ipcMain.handle("specFile:read", async (_event, specPath: unknown, refPath: unknown) => {
 		return await readSpecFile(String(specPath ?? ""), String(refPath ?? ""));
 	});
+
+	// Re-resolve the operating system's proxy and push it to the engine (#708).
+	// The renderer is the second of the two things that can know the network
+	// changed - it holds the `online` event and the settings screen where a
+	// user switches to `system` in the first place - and `refreshSystemProxy`
+	// writes nothing when the answer has not moved, so calling it eagerly is
+	// free. It resolves; it does not read the OS on the renderer's behalf for
+	// any other purpose, so there is no path to name here.
+	ipcMain.handle("proxy:refreshSystem", async () => {
+		return await refreshSystemProxy(proxyResolution());
+	});
+}
+
+/**
+ * The proxy resolver bound to this process's Chromium session.
+ *
+ * Built per call rather than once, because `session.defaultSession` does not
+ * exist until the app is ready and this module is imported long before that.
+ */
+function proxyResolution(): ProxyResolutionSystem {
+	return {
+		...defaultProxyResolutionSystem,
+		resolveProxy: (url: string) => session.defaultSession.resolveProxy(url),
+	};
 }
 
 /**
@@ -918,6 +957,23 @@ app.whenReady().then(async () => {
 	// window at all. MCP is an optional convenience with no UI depending on it,
 	// so it starts after everything the user can see is up and wired.
 	createWindow();
+
+	// Bridge the OS proxy into the engine (#708). *After* the window, and fire
+	// and forget, for the reason the line above states: nothing may sit between
+	// the engine and the window, and this is one more thing that talks to the
+	// engine at startup. It never throws and never blocks on the network - the
+	// resolution is local to Chromium - so the window has its proxy row a
+	// moment later, and the settings screen refreshes it on arrival anyway.
+	void refreshSystemProxy(proxyResolution());
+
+	// Waking on a different network is the common way a laptop's proxy changes
+	// under a running app: home to office, office to VPN. Electron surfaces no
+	// network-change event in the main process, so this is the half that can be
+	// caught here; the renderer's `online` listener catches the other half and
+	// calls the `proxy:refreshSystem` channel.
+	powerMonitor.on("resume", () => {
+		void refreshSystemProxy(proxyResolution());
+	});
 
 	// Start checking for updates once a window exists to receive events. The
 	// updater reads `mainWindow` at send time rather than being handed the window

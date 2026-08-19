@@ -2492,8 +2492,10 @@ void Database::seed_default_config () {
     "How outbound requests reach the network. From environment uses the "
     "http_proxy and https_proxy variables the engine was started with, which "
     "is what a terminal-launched engine already picks up and a desktop launch "
-    "usually has none of. Manual routes everything through the proxy URL "
-    "below. None sends direct, ignoring those variables too.",
+    "usually has none of. From system uses the proxy this computer is "
+    "configured with, which the app resolves and shows below. Manual routes "
+    "everything through the proxy URL below. None sends direct, ignoring those "
+    "variables too.",
     "network_performance",
     vayu::http::to_string (vayu::http::TransportPolicy{}.proxy_mode), std::nullopt,
     std::nullopt, proxy_mode_options_json (), now }));
@@ -2506,6 +2508,30 @@ void Database::seed_default_config () {
     "the URL are sent as basic proxy authentication.",
     "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
 
+    // The resolved system proxy (issue #708). Written by the app's main
+    // process, which is the only part of Vayu that can ask the operating system
+    // - Chromium resolves it, libcurl sees none of it - and read by the engine
+    // only under `proxyMode: system`.
+    //
+    // A visible row rather than a hidden side channel: a proxy the user cannot
+    // see is the failure this epic exists to end, and "system" that silently
+    // resolved to nothing has to be readable as such. It is stored where the
+    // user can edit it, and an edit lasts until the next resolution overwrites
+    // it - said in the description rather than enforced, because a read-only
+    // entry type would be a new concept in the config table for one row.
+    upsert_config (keywords ({ "wpad", "autoconfig", "automatic" }) (
+    ConfigEntry{ "proxySystemUrl", "", "string", "System Proxy (resolved)",
+    "The proxy this computer is configured with, as the app resolved it when "
+    "it started and whenever the network changed. Read only when Proxy is set "
+    "to From system; empty means nothing resolved - a direct configuration, or "
+    "an engine running with no app to ask - and requests then fall back to the "
+    "http_proxy and https_proxy variables. A PAC script is resolved once, "
+    "against a sample URL, and the one answer applies to every request: a "
+    "configuration that returns different proxies for different URLs needs "
+    "Manual instead. Typing a value here works until the next resolution "
+    "replaces it.",
+    "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
+
     upsert_config (keywords ({ "exclude", "whitelist", "intranet" }) (
     ConfigEntry{ "proxyBypass", "", "string", "Proxy Bypass List",
     "Hosts that skip the proxy, comma-separated. A leading dot matches a "
@@ -2513,7 +2539,8 @@ void Database::seed_default_config () {
     "bypasses the proxy for every host. Under Manual this list is the whole "
     "rule, so an empty one means nothing is exempt and any no_proxy the engine "
     "was started with is ignored. Under From environment it overrides that "
-    "variable when set, and defers to it when empty.",
+    "variable when set, and defers to it when empty. Under From system it "
+    "follows whichever of those two that mode resolved to.",
     "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
 
     // Custom trust anchors (issue #706). `text` rather than `string` because

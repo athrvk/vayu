@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { detectCommand, parseCommand } from "./parseCurl";
+import { DROPPED_FLAG_INFO, detectCommand, importCommand, parseCommand } from "./parseCurl";
 
 const kv = (items: Array<{ key: string; value: string }>) =>
 	items.map((i) => expect.objectContaining({ ...i, enabled: true }));
@@ -444,4 +444,96 @@ describe("parseCommand - curl -N is the stream setting", () => {
 		expect(parsed?.bodyMode).toBe("json");
 		expect(parsed?.body).toBe('{"since":1}');
 	});
+});
+
+/**
+ * The disclosure ledger (issue #708).
+ *
+ * curl paste is the one import path that ate what it could not map and said
+ * nothing. What is asserted here is not a list of flags - it is the property
+ * that makes the list maintainable: the ledger is derived from the skip sets,
+ * so a flag that gets *mapped* leaves the ledger on its own.
+ */
+describe("what a paste could not carry", () => {
+	test("names the flags with no home in the request, and where their intent lives", () => {
+		const imported = importCommand(
+			"curl -k -x http://corp:8080 --cert c.pem https://api.example.com/"
+		);
+		const dropped = imported?.dropped ?? [];
+
+		expect(dropped.map((entry) => entry.flag).sort()).toEqual(["--cert", "-x"]);
+		expect(dropped.find((entry) => entry.flag === "-x")?.pointer).toEqual({
+			category: "network_performance",
+			anchor: "proxyUrl",
+			label: "Proxy settings",
+		});
+		expect(dropped.find((entry) => entry.flag === "--cert")?.pointer?.anchor).toBe(
+			"clientCertificates"
+		);
+	});
+
+	test("the import itself is untouched by what it disclosed", () => {
+		// The ledger says what was lost; it must never cost anything that was
+		// not. `-k` in the same command is *mapped*, and stays mapped.
+		const imported = importCommand("curl -k -x http://corp:8080 https://api.example.com/pets");
+
+		expect(imported?.request.url).toBe("https://api.example.com/pets");
+		expect(imported?.request.verifySSL).toBe(false);
+	});
+
+	test("a mapped flag is absent from the ledger", () => {
+		// `-k` is in neither skip set any more (issue #706 mapped it), so it
+		// cannot be disclosed - this is the automatic-drop property stated as a
+		// test. Reverting #706's mapping would put `-k` back in a skip set and
+		// redden this.
+		const imported = importCommand("curl -k https://api.example.com/");
+		expect(imported?.dropped).toEqual([]);
+	});
+
+	test("a command that carried everything discloses nothing", () => {
+		// The common paste. A notice on every one of them is how a disclosure
+		// surface gets learned as noise.
+		const imported = importCommand("curl -H 'X-Key: v' https://api.example.com/");
+		expect(imported?.dropped).toEqual([]);
+	});
+
+	test("the same flag twice is one entry", () => {
+		const imported = importCommand("curl -x http://a:1 -x http://b:2 https://api.example.com/");
+		expect(imported?.dropped).toHaveLength(1);
+	});
+
+	test("a skipped --flag=value does not swallow the URL after it", () => {
+		// The inline form carries its own value, so consuming the next token
+		// ate whatever followed - which is the URL on nearly every real command,
+		// and the whole paste then imported as nothing. Reverting the guard in
+		// the two skip branches reddens both of these.
+		expect(
+			importCommand("curl --proxy=http://corp:8080 https://api.example.com/pets")?.request.url
+		).toBe("https://api.example.com/pets");
+		expect(importCommand("wget --tries=3 https://api.example.com/pets")?.request.url).toBe(
+			"https://api.example.com/pets"
+		);
+	});
+
+	test("wget's own skipped flags are disclosed too", () => {
+		// Two commands, one request shape - so honouring the discipline on one
+		// path and not the other is exactly the drift this parser avoids.
+		const imported = importCommand("wget --tries=3 https://api.example.com/");
+		expect(imported?.dropped.map((entry) => entry.flag)).toEqual(["--tries"]);
+	});
+});
+
+test("every described flag is still one a parser skips", () => {
+	// The other direction of the derivation: an entry left in the description
+	// table after its flag was mapped is unreachable, and unreachable text is
+	// how a table drifts into describing behaviour that no longer exists.
+	// Checked against both commands, because the two disagree about several
+	// short flags (`-T` uploads for curl and times out for wget).
+	for (const flag of Object.keys(DROPPED_FLAG_INFO)) {
+		const seen = [
+			...(importCommand(`curl ${flag} value https://api.example.com/`)?.dropped ?? []),
+			...(importCommand(`wget ${flag} value https://api.example.com/`)?.dropped ?? []),
+		].map((entry) => entry.flag);
+		expect(seen, `${flag} is described but no longer skipped`).toContain(flag);
+	}
 });

@@ -23,7 +23,7 @@
  * literal `@path`.
  */
 
-import type { HttpMethod } from "@/types";
+import type { HttpMethod, SettingsCategory } from "@/types";
 import type { BodyMode, KeyValueItem } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { generateId } from "@/lib/id";
@@ -51,6 +51,122 @@ export type ParsedRequest = Pick<
 
 type CommandKind = "curl" | "wget";
 
+// ============================================================================
+// The disclosure ledger (issue #708)
+// ============================================================================
+
+/**
+ * Where a dropped flag's intent lives in Vayu, if anywhere.
+ *
+ * A settings category and the anchor inside it - the same pair the settings
+ * search and the command palette reveal a row with, so a pointer here opens
+ * exactly what those two open and there is one definition of "go to this
+ * setting" in the app.
+ */
+export interface DisclosurePointer {
+	category: SettingsCategory;
+	/** `data-setting-anchor` of the row or card to highlight. */
+	anchor: string;
+	/** What the destination is called, for the notice's own words. */
+	label: string;
+}
+
+/**
+ * What one pasted command becomes: the request, plus what could not be carried.
+ *
+ * The two travel together because the paste succeeded either way - the import
+ * is never blocked by a flag with no home here - and a caller that takes the
+ * request without ever looking at `dropped` is exactly the silent eating this
+ * ledger exists to end. The structured importers have had this discipline since
+ * #666; curl paste is the one import path that never did.
+ */
+export interface CommandImport {
+	request: ParsedRequest;
+	/** Empty when everything the command asked for was carried over. */
+	dropped: DroppedFlag[];
+}
+
+/** One thing a pasted command asked for that the import could not carry. */
+export interface DroppedFlag {
+	/** The flag as the command wrote it, e.g. `-x` or `--cert`. */
+	flag: string;
+	/** What it asked for, in the app's words rather than curl's. */
+	what: string;
+	/** Where to go to ask for the same thing here, when there is somewhere. */
+	pointer?: DisclosurePointer;
+}
+
+/** The network settings, which is where three of the four homes are. */
+const NETWORK: SettingsCategory = "network_performance";
+
+/**
+ * What each skipped flag asked for, and where that lives here.
+ *
+ * Keyed by flag and consulted only when the parser has *already* decided to
+ * skip one, which is what keeps it from becoming a second source of truth: a
+ * flag mapped tomorrow leaves the skip set, and an entry left behind here is
+ * unreachable rather than wrong. `parseCurl.test.ts` asserts that every key
+ * here is still in a skip set, so "unreachable" fails the suite too.
+ *
+ * Only value-carrying flags are listed, and only those are recorded: a `-s` or
+ * a `--compressed` asked for nothing about the request, and a notice that fired
+ * on every pasted command would be one nobody reads by the third time.
+ */
+export const DROPPED_FLAG_INFO: Record<string, { what: string; pointer?: DisclosurePointer }> = {
+	"-x": {
+		what: "routed the request through a proxy",
+		pointer: { category: NETWORK, anchor: "proxyUrl", label: "Proxy settings" },
+	},
+	"--proxy": {
+		what: "routed the request through a proxy",
+		pointer: { category: NETWORK, anchor: "proxyUrl", label: "Proxy settings" },
+	},
+	"--cacert": {
+		what: "trusted a certificate authority of its own",
+		pointer: {
+			category: NETWORK,
+			anchor: "customCaCertificates",
+			label: "Custom CA Certificates",
+		},
+	},
+	"--cert": {
+		what: "presented a client certificate",
+		pointer: {
+			category: NETWORK,
+			anchor: "clientCertificates",
+			label: "the client-certificate registry",
+		},
+	},
+	"--key": {
+		what: "named a client certificate's private key",
+		pointer: {
+			category: NETWORK,
+			anchor: "clientCertificates",
+			label: "the client-certificate registry",
+		},
+	},
+	"--connect-timeout": { what: "set a connection timeout" },
+	"-m": { what: "set a total request timeout" },
+	"--max-time": { what: "set a total request timeout" },
+	"--retry": { what: "retried on failure" },
+	"--resolve": { what: "pinned a hostname to an address" },
+	// Deliberately vaguer than the others: `-o` is curl's response file and
+	// wget's log file, and one line has to be true of both.
+	"-o": { what: "wrote its output to a file" },
+	"--output": { what: "wrote the response to a file" },
+	"-w": { what: "formatted its own output" },
+	"--write-out": { what: "formatted its own output" },
+	"-O": { what: "wrote the response to a file" },
+	"--output-file": { what: "wrote its log to a file" },
+	"--output-document": { what: "wrote the response to a file" },
+	"-t": { what: "retried on failure" },
+	"--tries": { what: "retried on failure" },
+	"-T": { what: "set a total request timeout" },
+	"--timeout": { what: "set a total request timeout" },
+	"-P": { what: "chose a download directory" },
+	"--directory-prefix": { what: "chose a download directory" },
+};
+
 /** Detect whether pasted text is a curl or wget command. */
 export function detectCommand(text: string): CommandKind | null {
 	const stripped = text.trim().replace(/^[$>]\s+/, "");
@@ -61,11 +177,13 @@ export function detectCommand(text: string): CommandKind | null {
 }
 
 /**
- * Parse a pasted curl/wget command into a request-shape partial.
+ * Parse a pasted curl/wget command into a request-shape partial and the ledger
+ * of what it could not carry.
+ *
  * Returns null when the text isn't a recognized command or parsing fails -
  * never throws to the caller.
  */
-export function parseCommand(text: string): ParsedRequest | null {
+export function importCommand(text: string): CommandImport | null {
 	const kind = detectCommand(text);
 	if (!kind) return null;
 
@@ -74,11 +192,22 @@ export function parseCommand(text: string): ParsedRequest | null {
 		// Drop the leading program name (curl / wget).
 		const args = argv.slice(1);
 		const parsed = kind === "curl" ? parseCurl(args) : parseWget(args);
-		if (!parsed.url) return null;
+		if (!parsed.request.url) return null;
 		return parsed;
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * The request half of `importCommand`, for callers with nothing to disclose to.
+ *
+ * The codegen round-trip test is the honest example: it asks whether a
+ * generated command parses back into the request it came from, and a ledger has
+ * no bearing on that question.
+ */
+export function parseCommand(text: string): ParsedRequest | null {
+	return importCommand(text)?.request ?? null;
 }
 
 // ============================================================================
@@ -99,6 +228,8 @@ interface Builder {
 	bearer: string | null; // curl --oauth2-bearer
 	stream: boolean; // -N / --no-buffer
 	insecure: boolean; // curl -k / --insecure, wget --no-check-certificate
+	/** Flags carrying a value that this parser skipped - see `DroppedFlag`. */
+	dropped: DroppedFlag[];
 }
 
 function newBuilder(): Builder {
@@ -116,7 +247,27 @@ function newBuilder(): Builder {
 		bearer: null,
 		stream: false,
 		insecure: false,
+		dropped: [],
 	};
+}
+
+/**
+ * Record a flag whose value was read off the command line and thrown away.
+ *
+ * Called from the one place a value-carrying flag is skipped, so the ledger is
+ * a *consequence* of the skip sets rather than a second list beside them: a
+ * flag that gets mapped leaves the set, stops reaching here, and disappears
+ * from the ledger with no edit here at all. Deduplicated by flag, because a
+ * command may name the same one twice and one notice per flag is the point.
+ */
+function recordDropped(b: Builder, flag: string): void {
+	if (b.dropped.some((entry) => entry.flag === flag)) return;
+	const info = DROPPED_FLAG_INFO[flag];
+	b.dropped.push({
+		flag,
+		what: info?.what ?? "was not carried over",
+		...(info?.pointer ? { pointer: info.pointer } : {}),
+	});
 }
 
 /** Is the value a file reference whose *contents* we cannot read (`@path`)? */
@@ -215,7 +366,7 @@ function findHeader(b: Builder, name: string): string | undefined {
 	return b.headers.find((h) => h.key.toLowerCase() === lower)?.value;
 }
 
-function resolve(b: Builder): ParsedRequest {
+function resolve(b: Builder): CommandImport {
 	// --- URL + params -------------------------------------------------------
 	let url = b.url;
 	const dataJoined = b.dataParts.join("&");
@@ -309,22 +460,25 @@ function resolve(b: Builder): ParsedRequest {
 	}
 
 	return {
-		method,
-		url,
-		params,
-		headers: toItems(headers),
-		bodyMode,
-		body,
-		formData,
-		urlEncoded,
-		auth,
-		stream: b.stream,
-		// `-k` says "do not verify", so the stored field is its inverse. Mapped
-		// rather than skipped (issue #706): a pasted command that turns
-		// verification off described a host whose certificate does not verify,
-		// and importing it as a verifying request means the paste fails on the
-		// first send for a reason the command already named.
-		verifySSL: !b.insecure,
+		request: {
+			method,
+			url,
+			params,
+			headers: toItems(headers),
+			bodyMode,
+			body,
+			formData,
+			urlEncoded,
+			auth,
+			stream: b.stream,
+			// `-k` says "do not verify", so the stored field is its inverse.
+			// Mapped rather than skipped (issue #706): a pasted command that
+			// turns verification off described a host whose certificate does not
+			// verify, and importing it as a verifying request means the paste
+			// fails on the first send for a reason the command already named.
+			verifySSL: !b.insecure,
+		},
+		dropped: b.dropped,
 	};
 }
 
@@ -402,7 +556,7 @@ const CURL_SKIP_WITH_ARG = new Set([
 	"--resolve",
 ]);
 
-function parseCurl(args: string[]): ParsedRequest {
+function parseCurl(args: string[]): CommandImport {
 	const b = newBuilder();
 
 	for (let i = 0; i < args.length; i++) {
@@ -517,7 +671,14 @@ function parseCurl(args: string[]): ParsedRequest {
 				break;
 			default:
 				if (CURL_SKIP_WITH_ARG.has(flag)) {
-					next(); // consume and ignore its value
+					// Only the separate-token form has a value to consume. The
+					// `--flag=value` form already carries it, and eating the
+					// next token there swallowed whatever followed - usually the
+					// URL, which made `curl --proxy=http://p:8080 <url>` import
+					// as nothing at all. Found by the ledger below, which
+					// disclosed the flag on a paste that then had no URL.
+					if (inlineValue === undefined) next();
+					recordDropped(b, flag);
 				} else if (CURL_NOARG.has(flag)) {
 					// no value
 				} else if (!flag.startsWith("-")) {
@@ -559,7 +720,7 @@ const WGET_SKIP_WITH_ARG = new Set([
 	"--directory-prefix",
 ]);
 
-function parseWget(args: string[]): ParsedRequest {
+function parseWget(args: string[]): CommandImport {
 	const b = newBuilder();
 	let username: string | undefined;
 	let password: string | undefined;
@@ -622,7 +783,10 @@ function parseWget(args: string[]): ParsedRequest {
 				break;
 			default:
 				if (WGET_SKIP_WITH_ARG.has(flag)) {
-					next();
+					// See the curl branch: `--flag=value` carries its own value,
+					// and consuming the next token there ate the URL.
+					if (inlineValue === undefined) next();
+					recordDropped(b, flag);
 				} else if (WGET_NOARG.has(flag)) {
 					// no value
 				} else if (!flag.startsWith("-")) {

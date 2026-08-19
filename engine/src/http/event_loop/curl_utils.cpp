@@ -623,6 +623,16 @@ const std::string& url) {
         // the previous policy set - see the header.
         curl_easy_setopt (curl, CURLOPT_PROXY, static_cast<const char*> (nullptr));
         break;
+    case ProxyMode::System:
+        // What the app resolved from the OS, or - when nothing resolved, which
+        // is every headless run - the same null the environment mode writes.
+        // The resolver has already decided which of those this is; an empty
+        // `proxy_url` under `system` *is* the documented fallback, not a
+        // half-configured state to guess about here (issue #708).
+        curl_easy_setopt (curl, CURLOPT_PROXY,
+        policy.proxy_url.empty () ? static_cast<const char*> (nullptr) :
+                                    policy.proxy_url.c_str ());
+        break;
     case ProxyMode::Manual:
         curl_easy_setopt (curl, CURLOPT_PROXY, policy.proxy_url.c_str ());
         break;
@@ -648,7 +658,22 @@ const std::string& url) {
     // `environment` leaves it null on purpose: that mode *is* "do what the
     // environment says", `no_proxy` included, unless a bypass list overrides
     // it. `off` has no proxy for a list to modify.
+    //
+    // `system` follows whichever of those two it actually resolved to: with a
+    // proxy in force the user's bypass list is the whole rule, exactly as under
+    // `manual`, and with nothing resolved it is the environment mode and must
+    // leave `no_proxy` alone.
     switch (policy.proxy_mode) {
+    case ProxyMode::System:
+        if (!policy.proxy_url.empty () || !policy.proxy_bypass.empty ()) {
+            curl_easy_setopt (curl, CURLOPT_NOPROXY, policy.proxy_bypass.c_str ());
+        } else {
+            // Nothing resolved and nothing exempted: the environment mode's
+            // null, so an inherited `no_proxy` still applies to the proxy this
+            // mode has fallen back to reading from the environment.
+            curl_easy_setopt (curl, CURLOPT_NOPROXY, static_cast<const char*> (nullptr));
+        }
+        break;
     case ProxyMode::Manual:
         curl_easy_setopt (curl, CURLOPT_NOPROXY, policy.proxy_bypass.c_str ());
         break;

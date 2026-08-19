@@ -248,6 +248,18 @@ const std::string& body) {
             }
         }
 
+        // The app writes this one from the operating system's answer (issue
+        // #708), and the same rule applies to it as to a hand-typed `proxyUrl`:
+        // a shape libcurl has no proxy support for would be stored, read under
+        // `system` mode, and fall back to the environment with only a log line
+        // to say so. Empty is not a rejection - it is how the app records "this
+        // machine has no proxy", and clearing it is how `system` goes direct.
+        if (reason.empty () && key == "proxySystemUrl" && !value.empty ()) {
+            if (const auto rejection = vayu::http::proxy_url_rejection (value)) {
+                reason = "'proxySystemUrl' is not usable: " + *rejection;
+            }
+        }
+
         if (!reason.empty ()) {
             errors.push_back (reason);
             continue;

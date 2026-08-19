@@ -234,13 +234,26 @@ Engine (libcurl) ──▶ [proxy, when configured] ──▶ Target API
 - `environment` (default) - libcurl's own `http_proxy` / `https_proxy` /
   `no_proxy` pickup. This is the behaviour a terminal-launched engine already
   had; a desktop launch usually inherits none of those variables.
+- `system` - the proxy this computer is configured with. **The engine cannot
+  resolve that itself**, which is the whole reason this mode has a mechanism
+  rather than a rule: the two networking stacks are disjoint. Chromium resolves
+  the operating system's proxy (and its PAC script) for the Electron shell and
+  reads it on its own; libcurl, which carries every request the user sends, sees
+  none of it. So the main process - the only place both are visible - resolves
+  and writes the answer into the `proxySystemUrl` setting, where this mode reads
+  it, at startup, when the machine wakes, and when the renderer sees the network
+  change. Two limitations follow and are stated where the mode is chosen: a **PAC
+  script is resolved once**, against a probe URL, and the one answer applies
+  engine-wide (per-URL PAC needs `manual`); and a **headless engine** has no app
+  to push it a value, so an empty `proxySystemUrl` falls back to `environment`
+  rather than to `off`.
 - `manual` - the configured `proxyUrl`, written the way curl takes it
   (`scheme://user:password@host:port`, which covers SOCKS and basic proxy
   auth).
 - `off` - no proxy at all, environment variables included.
 
 `proxyBypass` (curl's `NOPROXY` semantics) exempts hosts from the proxy in
-either proxying mode. A failure of the hop itself - an unresolvable proxy host,
+any proxying mode. A failure of the hop itself - an unresolvable proxy host,
 a refused CONNECT - is reported as its own `PROXY_ERROR`, never as the target's
 `CONNECTION_FAILED`. Cookies are unaffected: libcurl matches them on the origin
 host, never on the proxy.
@@ -266,6 +279,17 @@ stored, so the private key stays where the user's own tooling put it; a
 cert-authenticated exchange reports which entry it used, live and from History
 alike. See [Client
 certificates](engine/api-reference.md#client-certificates).
+
+Because all three of those - the hop, the trust and the certificate - fail at
+the *first real request* and libcurl names the endpoint when they do, the same
+Settings screen carries a **connection test**: one policy-honouring send
+(`POST /diagnostics/connection`) whose answer says which hop refused, so a
+wrong proxy URL or a missing corporate CA is caught where it was configured.
+It returns an outcome and never the response body. The other half of the same
+honesty rule is on the way in: pasting a curl command imports what it can and
+**names what it could not** - `-x`, `--cert`, `--cacert` and the rest - with a
+pointer to the setting that owns each intent, rather than silently dropping
+them.
 
 ### Variable Resolution
 

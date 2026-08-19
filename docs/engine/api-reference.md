@@ -600,7 +600,7 @@ governs what a run measures rather than what it keeps:
 
 #### Proxy settings
 
-Three `network_performance` entries decide how **every** outbound request
+Four `network_performance` entries decide how **every** outbound request
 leaves the machine - design sends, load runs, SSE streams, OAuth token
 acquisition, `POST /import/fetch` (which spec re-fetch and `$ref` bundling ride)
 and the monitor scrape alike. They are read at the point of use, so a change
@@ -610,8 +610,9 @@ reuses a pooled connection only when its proxy configuration matches.
 
 | Key | Default | Values | Effect |
 |-----|---------|--------|--------|
-| `proxyMode` | `environment` | `environment`, `manual`, `off` | Where the proxy comes from. `environment` is libcurl's own `http_proxy` / `https_proxy` pickup - what a terminal-launched engine already got, and what a desktop launch usually inherits nothing of. `manual` uses `proxyUrl`. `off` sends direct and **also** disables the environment pickup. |
+| `proxyMode` | `environment` | `environment`, `system`, `manual`, `off` | Where the proxy comes from. `environment` is libcurl's own `http_proxy` / `https_proxy` pickup - what a terminal-launched engine already got, and what a desktop launch usually inherits nothing of. `system` uses `proxySystemUrl`, which the app resolves from the operating system. `manual` uses `proxyUrl`. `off` sends direct and **also** disables the environment pickup. |
 | `proxyUrl` | `""` | curl-shaped URL | The proxy for `manual` mode: `scheme://user:password@host:port`. The scheme selects the kind (`http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`, `socks5t`); a scheme-less `host:port` means `http://`. Credentials in the URL become basic proxy authentication. |
+| `proxySystemUrl` | `""` | curl-shaped URL | The proxy for `system` mode, **written by the app, not typed by the user**. The Electron main process resolves the OS proxy through Chromium and stores the answer here at startup, when the machine wakes, and when the renderer sees the network change. Empty means nothing resolved - see the fallback below. Validated exactly as `proxyUrl` is, under every mode. |
 | `proxyBypass` | `""` | comma-separated hosts | Hosts that skip the proxy, passed to curl's `NOPROXY` verbatim: a leading dot matches a domain and everything under it, a single `*` bypasses everything. |
 
 **`proxyBypass` and an inherited `no_proxy` interact by mode, deliberately.**
@@ -628,7 +629,25 @@ is unset, so:
 - Under **`environment`**, an empty list defers to `no_proxy` - "do what the
   environment says" includes the exemptions it names - and a non-empty one
   overrides it.
+- Under **`system`** it follows whichever of those two the mode resolved to:
+  the `manual` rule once a proxy is in force, the `environment` rule when
+  nothing resolved.
 - Under **`off`** there is no proxy for a bypass list to modify.
+
+**`system` mode has two limitations, and both are disclosed rather than
+hidden.** The engine cannot resolve an OS proxy itself - that answer lives
+behind Chromium's network stack, which libcurl sees none of - so the resolution
+is the app's and this setting is the channel:
+
+- **PAC is resolved once, not per request.** A PAC script answers per URL and
+  the engine cannot call back into Chromium for every transfer, so the app
+  resolves against one probe URL and that answer applies engine-wide. A
+  configuration returning different proxies for different URLs needs `manual`.
+- **A headless engine falls back to `environment`.** With no app running,
+  `proxySystemUrl` is empty and `system` behaves as `environment` does - not as
+  `off`, because the environment pickup is the closest thing to "what this
+  machine would do" that a daemon on its own has. An unusable stored value falls
+  back the same way, with the reason logged.
 
 `POST /config` enforces one cross-field rule these three have and the per-key
 validation cannot express: **`proxyMode: "manual"` requires a usable
@@ -2156,6 +2175,52 @@ only `keyPath` still proves the pair works together.
 Remove an entry; `404` if it does not exist. The certificate and key files
 themselves are never touched - the registry only ever held the way to find
 them.
+
+## Transport diagnostics
+
+### POST /diagnostics/connection
+
+Send one request under the transport policy in force and report **which hop
+answered**. Proxy, custom CAs and the client-certificate registry all fail at
+the first real request otherwise, and libcurl's message there names the
+endpoint rather than the setting - which is how "my API is down" gets filed
+against a proxy that was never configured correctly.
+
+```json
+{ "url": "https://api.example.com/" }
+```
+
+The probe is a `HEAD`, with verification **on** (that is the subject of the
+test), redirects **off** (a redirect would move the test to a host the caller
+never named and report its proxy and certificate as this one's) and a fixed
+10-second deadline.
+
+```json
+{
+  "url": "https://api.example.com/",
+  "outcome": "proxy_failed",
+  "errorCode": "PROXY_ERROR",
+  "detail": "Received HTTP code 407 from proxy after CONNECT",
+  "proxy": { "mode": "manual", "url": "http://corp.example:8080" },
+  "clientCertificate": ""
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `outcome` | `ok`, `proxy_failed`, `tls_failed`, `timed_out` or `failed`. Deliberately coarser than `ErrorCode`: these are the answers that lead a reader to a different setting. |
+| `proxy.mode` | The `proxyMode` in force. Always present. |
+| `proxy.url` | The proxy that was used, **absent when the engine does not know it** - every `environment`-mode test, since libcurl reads those variables itself. Absent means "not the engine's to say", never "no proxy". |
+| `clientCertificate` | The registry entry that answered for this host, `""` when none did. Always present, like `POST /execute`'s. |
+| `status` | The status line. Present only on `ok`. |
+| `errorCode` / `detail` | The engine's `ErrorCode` spelling and libcurl's own message. Absent on `ok`. |
+
+**A failed connection is a `200`.** The test succeeded in answering; only a
+malformed body or a URL that is not `http`/`https` is a `400`.
+
+**It never returns the response body, headers or redirect chain**, and a test
+asserts that. This is a diagnostics surface on the localhost API, not a general
+fetch proxy - that is `POST /import/fetch`, behind its own byte bound.
 
 ## Webhook Inbox
 

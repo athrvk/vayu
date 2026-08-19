@@ -800,6 +800,49 @@ export interface ClientCertificateInput {
 	passphrase?: string | null;
 }
 
+// Transport diagnostics (issue #708)
+
+/**
+ * Which hop answered, and how.
+ *
+ * Coarser than the engine's `ErrorCode` on purpose: the reader is choosing
+ * which setting to point a user at, and these are the outcomes that lead
+ * somewhere different. Everything else is `failed`, carrying the engine's own
+ * message rather than a fourth word that implies a fourth remedy.
+ */
+export type ConnectionTestOutcome = "ok" | "proxy_failed" | "tls_failed" | "timed_out" | "failed";
+
+/**
+ * What `POST /diagnostics/connection` answers with.
+ *
+ * There is no response body here and there must never be one: this is a
+ * diagnostics surface, not a fetch proxy (that is `/import/fetch`, behind its
+ * own byte bound).
+ */
+export interface ConnectionTestResult {
+	url: string;
+	outcome: ConnectionTestOutcome;
+	/** The proxy the test actually went through. */
+	proxy: {
+		/** The `proxyMode` in force - `environment`, `system`, `manual` or `off`. */
+		mode: string;
+		/**
+		 * The proxy URL, absent when the engine does not know it - which is
+		 * every `environment`-mode test, since libcurl reads those variables
+		 * itself. Absent means "not the engine's to say", never "no proxy".
+		 */
+		url?: string;
+	};
+	/** The registry entry that answered for this host, `""` when none did. */
+	clientCertificate: string;
+	/** The status line, present only on `ok`. */
+	status?: number;
+	/** The engine's `ErrorCode` spelling, absent on `ok`. */
+	errorCode?: string;
+	/** libcurl's own message, absent on `ok`. */
+	detail?: string;
+}
+
 // Webhook inbox API (issue #480). An inbox is engine-hosted listener state, so
 // none of these shapes is stored client-side - the surface reads them back.
 

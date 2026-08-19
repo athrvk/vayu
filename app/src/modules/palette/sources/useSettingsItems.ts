@@ -29,20 +29,18 @@ import { useMemo } from "react";
 import { Search } from "lucide-react";
 import { useLayoutStore, useTabsStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
+import { revealSetting } from "@/modules/settings/reveal";
 import { useSettingsIndex } from "@/modules/settings/useSettingsIndex";
 import { searchSettings, type SettingsIndexEntry } from "@/lib/settings-index";
 import { DEEP_GROUP_LIMIT, type PaletteItem } from "../types";
 
 /**
- * Reveal one settings entry - the same two calls in the same order as the
- * sidebar's own result rows and the registry's section commands: select first,
- * then open, so the tab renders the asked-for panel rather than the previous
- * selection for one frame. The anchor is what `useRevealedSetting` scrolls to
- * and outlines.
+ * Reveal one settings entry, through the shared `revealSetting` - the same call
+ * the sidebar's own result rows, the registry's section commands and the
+ * curl-paste ledger's pointers make.
  */
 function reveal(entry: SettingsIndexEntry): void {
-	useSettingsStore.getState().setSelectedCategory(entry.category, entry.anchor);
-	useTabsStore.getState().openTab({ type: "settings", entityId: null });
+	revealSetting(entry.category, entry.anchor);
 }
 
 export function useSettingsItems(query: string): PaletteItem[] {

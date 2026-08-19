@@ -1210,15 +1210,21 @@ retroactively.
 ```json
 [
   {"value": "environment", "label": "From environment"},
+  {"value": "system", "label": "From system"},
   {"value": "manual", "label": "Manual"},
   {"value": "off", "label": "None"}
 ]
 ```
-It sits beside two plain `string` entries, `proxyUrl` and `proxyBypass`, and
-the three are read together as one policy at the point of use - see
-[Proxy settings](api-reference.md#proxy-settings) for the values, the
+It sits beside three plain `string` entries, `proxyUrl`, `proxySystemUrl` and
+`proxyBypass`, and the four are read together as one policy at the point of use
+- see [Proxy settings](api-reference.md#proxy-settings) for the values, the
 cross-field rule `POST /config` enforces over `proxyMode` + `proxyUrl`, and why
 `proxyUrl` holds credentials in plaintext exactly as `oauth_tokens` does.
+`proxySystemUrl` is the one config row the **app** writes rather than the user:
+the Electron main process resolves the operating system's proxy through
+Chromium and stores the answer there for `system` mode to read. It is a visible
+row rather than a hidden channel, because a proxy a user cannot see is the
+failure this whole area exists to end.
 
 **`customCaCertificates`** is the one `text` entry - a multi-line string, which
 is a rendering distinction rather than a value-space one: the app draws a

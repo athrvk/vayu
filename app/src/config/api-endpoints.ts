@@ -167,6 +167,13 @@ export const API_ENDPOINTS = {
 	IMPORT_FETCH: `/import/fetch`,
 	IMPORT_APPLY: `/import/apply`,
 
+	// Transport diagnostics (issue #708). One policy-honouring request whose
+	// outcome says *which hop* failed - the proxy, the TLS handshake, or the
+	// endpoint - so a wrong proxy URL is caught where it is configured rather
+	// than mid-demo. It returns an outcome and never the response body; it is
+	// deliberately not a second IMPORT_FETCH.
+	DIAGNOSTICS_CONNECTION: `/diagnostics/connection`,
+
 	// Webhook inbox (issue #480). The engine hosts the listener; these drive its
 	// lifecycle and read what it captured. START is a verb path rather than a
 	// POST to `/inbox` because an inbox is not a stored resource - it exists for
