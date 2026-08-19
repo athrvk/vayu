@@ -280,13 +280,13 @@ Three things worth knowing before you design around them:
   never asks would report nothing about any of that, so
   `TheFixtureServesACaSignedCrlAtTheLeafsDistributionPoint` asserts on every
   leg that the extension is on the certificate served and that the document
-  behind it parses, is this CA's, and is current. The skip stays until a CI run
-  on a revocation-checking backend shows it unreachable; it fires only on an
-  error text naming revocation, and every other refusal still fails. What #819
-  keeps after that is the user-facing half, which is a decision rather than a
-  fix: someone pasting an internal CA with no reachable distribution point gets
-  the same refusal, and no doc says so. The negative cases are asserted on every
-  platform. Still structural, not on a wire: the *client* certificate's
+  behind it parses, is this CA's, and is current. **All four cases now run
+  everywhere** - the leg that skipped went to 2056 run, 2056 passed, 0 skipped -
+  so the skip and its helpers are gone and a refusal naming revocation is an
+  ordinary failure again. What #819 keeps is the user-facing half, which is a
+  decision rather than a fix: someone pasting an internal CA with no reachable
+  distribution point gets the same refusal, and no doc says so. Still
+  structural, not on a wire: the *client* certificate's
   handshake, tracked by #802 - which should reuse this CRL rather than build a
   second one.
   A proxy-hop failure is **`ErrorCode::ProxyError`**, distinct from
