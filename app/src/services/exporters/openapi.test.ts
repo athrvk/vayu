@@ -78,6 +78,7 @@ function example(overrides: Partial<RequestExample> = {}): RequestExample {
 		headers: [],
 		body: '{"id":"p1","name":"Rex"}',
 		contentType: "application/json",
+		origin: "import",
 		...overrides,
 	};
 }

@@ -6,7 +6,8 @@
  */
 
 /**
- * ExamplesPanel - the request's saved example responses (issues #481, #588).
+ * ExamplesPanel - the request's saved example responses (issues #481, #588,
+ * #722).
  *
  * These are what an importer found next to the request and, until the engine
  * had a table for them, threw away: Postman's saved responses, an OpenAPI
@@ -20,6 +21,15 @@
  * because an example you can create and never remove is the #553 zombie shape
  * at a smaller scale; an editor for a stored example is a separate change, and
  * this is still a viewer until it exists.
+ *
+ * **A row says where it came from, because the two kinds behave differently**
+ * (#722). A spec sync rewrites a request's imported examples whenever it
+ * applies any change to it and never touches a saved one, so which rows the
+ * next sync owns is a fact about the list - and until the chip it was one the
+ * list did not show. Deleting either kind is durable now: the engine records a
+ * deleted imported example rather than only removing it, so this dialog's
+ * promise is true for both, and only the wording of what could still bring one
+ * back differs.
  */
 
 import { useState } from "react";
@@ -96,6 +106,30 @@ function ExampleRow({
 							title="Only the first part of the response was captured. A mock server serves this body as though it were the whole response."
 						>
 							Partial body
+						</Badge>
+					)}
+					{/*
+					 * Where the row came from (issue #722). The engine has
+					 * recorded it since #588 and the two kinds behave
+					 * differently - a sync rewrites the imported rows of a
+					 * request it applies any change to, and never the saved
+					 * ones - so leaving the asymmetry invisible made the list
+					 * unpredictable: nothing on screen said which rows the next
+					 * sync would replace.
+					 *
+					 * Neutral, unlike the amber beside it: this is where a row
+					 * came from, not something to watch out for. The muted
+					 * text-only chip the settings cards use for the same kind
+					 * of fact ("Every port", "Passphrase set") - `chip` paints
+					 * no background, so the colour is the caller's to state.
+					 */}
+					{example.origin === "import" && (
+						<Badge
+							variant="chip"
+							className="shrink-0 text-muted-foreground"
+							title="Written by an import or a spec sync. Applying a later sync to this request refreshes it from the document; an example you save from a response is never replaced."
+						>
+							Imported
 						</Badge>
 					)}
 				</button>
@@ -203,7 +237,14 @@ export default function ExamplesPanel() {
 			{/*
 			 * Confirmed rather than immediate: a mock server answers with the first
 			 * example of a matched route, so removing one can change what the next
-			 * restart serves - and nothing here can bring it back.
+			 * restart serves.
+			 *
+			 * The second sentence differs by origin because what happens next
+			 * does (issue #722). A saved example is simply gone. An imported one
+			 * is gone too - the engine keeps the delete as a tombstone, so no
+			 * later sync writes it back - but re-importing the document is a
+			 * fresh import and does bring it back, which is the one way it can
+			 * return and so the one thing worth saying here.
 			 */}
 			<DeleteConfirmDialog
 				open={!!pendingDelete}
@@ -213,7 +254,10 @@ export default function ExamplesPanel() {
 					<>
 						<span className="font-medium">{pendingDelete?.name}</span> is removed from
 						this request. A mock server for this collection stops answering with it once
-						it is restarted.
+						it is restarted.{" "}
+						{pendingDelete?.origin === "import"
+							? "Syncing this collection with its spec will not bring it back; re-importing the document will."
+							: "Nothing here can bring it back."}
 						{/* The engine's refusal, in the dialog that asked for the delete.
 						    Without it a failed delete looks like nothing happened: the row
 						    is still there and the dialog is still open. */}

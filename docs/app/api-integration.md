@@ -164,10 +164,13 @@ list key rather than splicing a row in, since the engine decides the id, the
 `order` an append lands on and the stored shape of the row.
 
 A saved example is written with **`origin: "user"`**, and an imported one keeps
-the engine's `"import"` default. That field is write-only from here - nothing in
-the app reads it back and `RequestExample` does not claim it - because its
-reader is the OpenAPI spec sync (#627), which may replace the examples a
-document produced and must never touch one a person saved. The rest of the
+the engine's `"import"` default. Its first reader is the OpenAPI spec sync
+(#627), which may replace the examples a document produced and must never touch
+one a person saved - and since #722 the panel reads it too: `RequestExample`
+claims the field, an imported row carries an **Imported** chip, and the delete
+dialog says what can still bring that kind of row back. The asymmetry the field
+encodes is a fact about the list, so leaving it invisible made which rows the
+next sync would replace unpredictable. The rest of the
 payload is the importers' own mapping, `contentType` included (the response's
 Content-Type header verbatim, `""` when it stated none), so an app-saved example
 and an imported one are served identically. No `order` is ever sent: the engine
@@ -176,9 +179,9 @@ example.
 
 No transformer, unlike a request row: an example carries no timestamp the app
 renders and no column that predates a schema change, so the wire shape *is* the
-domain shape - minus the `order`, `origin` and timestamps the `RequestExample`
-type deliberately does not claim, since the list arrives already ordered and no
-surface displays any of them. The stored order is the contract, not a suggestion: a mock
+domain shape - minus the `order` and timestamps the `RequestExample` type
+deliberately does not claim, since the list arrives already ordered and no
+surface displays either. The stored order is the contract, not a suggestion: a mock
 server answers with the first example of a matched request, so the panel renders
 the list as received rather than re-sorting it.
 
