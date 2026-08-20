@@ -374,6 +374,22 @@ export class EngineClient {
 	}
 
 	/**
+	 * Apply a re-fetched document to the collection bound to it
+	 * (`POST /specs/sync`, issue #871).
+	 *
+	 * One transaction for the document, the binding that moves to it, and every
+	 * request created, updated and deleted - a half-applied sync leaves a
+	 * collection bound to a contract its requests do not reflect. The rows are
+	 * not stated here: the payload carries `policy: "safe"` and the engine works
+	 * out which of the drift that covers, because deciding which of a user's
+	 * fields an apply may overwrite is exactly the judgement this side must not
+	 * make a second copy of.
+	 */
+	syncSpec(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/specs/sync", payload, signal);
+	}
+
+	/**
 	 * A collection back out as an OpenAPI document (`POST /specs/export`, issue
 	 * #855) - its own bound document updated, or a skeleton when it binds none.
 	 *

@@ -45,6 +45,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/spec_coverage.hpp"
+#include "vayu/core/spec_diff.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
@@ -434,6 +435,168 @@ const std::vector<vayu::db::RequestExample>& tombstones) {
 }
 
 /**
+ * Where an added operation's request goes, and which folders that needs.
+ *
+ * An import files its operations under one sub-collection per tag, so a sync
+ * that added them to the bound collection itself would reshape a collection
+ * every time it caught up with its contract. A folder is matched by name among
+ * the bound collection's **direct children** - a same-named folder deeper down
+ * is somebody else's - and created at most once per payload however many
+ * operations name it, because two folders called `pets` would both land and the
+ * next sync would have to choose between them.
+ */
+class FolderResolver {
+    public:
+    FolderResolver (std::string root_id, const std::vector<vayu::db::Collection>& collections)
+    : root_id_ (std::move (root_id)) {
+        for (const auto& collection : collections) {
+            if (!collection.parent_id || *collection.parent_id != root_id_) {
+                continue;
+            }
+            existing_.try_emplace (collection.name, collection.id);
+        }
+    }
+
+    /** The owner fields one created request carries - a stored id or a claimed one. */
+    nlohmann::json owner_of (const std::string& folder) {
+        if (folder.empty ()) {
+            return { { "collectionId", root_id_ } };
+        }
+        if (const auto stored = existing_.find (folder); stored != existing_.end ()) {
+            return { { "collectionId", stored->second } };
+        }
+        const auto claimed = claimed_.find (folder);
+        if (claimed != claimed_.end ()) {
+            return { { "collectionTempId", claimed->second } };
+        }
+        const std::string temp = "tmp_col_" + std::to_string (created_.size ());
+        claimed_.emplace (folder, temp);
+        created_.push_back ({ { "tempId", temp }, { "name", folder }, { "parentId", root_id_ } });
+        return { { "collectionTempId", temp } };
+    }
+
+    [[nodiscard]] const nlohmann::json& created () const {
+        return created_;
+    }
+
+    private:
+    std::string root_id_;
+    nlohmann::json created_ = nlohmann::json::array ();
+    std::unordered_map<std::string, std::string> existing_;
+    std::unordered_map<std::string, std::string> claimed_;
+};
+
+/**
+ * The rows a `"safe"` sync writes, as the payload an explicit one would send
+ * (issue #871).
+ *
+ * The *decision* is `core::safe_spec_apply`, shared with the marks
+ * `POST /specs/diff` reports, so a caller that ticks nothing and a caller that
+ * ticks exactly what the diff called safe send the same write. What is here is
+ * only the translation into payload rows - which is deliberate: building the
+ * payload rather than a second write path means everything below (the id
+ * minting, the subtree bounds, the example refresh, the transaction itself) is
+ * the one code path both kinds of caller go through.
+ *
+ * Two rules ride in this translation rather than in the policy, because they are
+ * about what a *write* looks like rather than about what is safe to write:
+ *
+ * - **The identity travels with every applied change**, ticked fields or not. An
+ *   operation is its method and path template, so a request left carrying the
+ *   old identity after the document renamed it would be compared against the
+ *   wrong operation on the next sync.
+ * - **An applied change refreshes that request's imported examples.** The
+ *   comparison does not cover examples, so the rule is stated rather than
+ *   derived: the rows come off the document being stored (issue #869), a saved
+ *   example is never touched, and a status the user deleted is never written
+ *   back.
+ *
+ * The `skipped` key rides back with the rows and is **not** a section: it is
+ * what the policy declined, counted. A sync that reported only what it wrote
+ * would read as "applied the drift" to a caller that cannot see the ticks, and
+ * the whole reason there are ticks is that some of a drift must not be applied.
+ */
+nlohmann::json safe_sync_payload (const std::string& root_id,
+const std::vector<vayu::db::Collection>& collections,
+const SpecComparison& comparison) {
+    const vayu::core::SpecDiff& diff       = comparison.diff;
+    const vayu::core::SafeSpecApply safe   = vayu::core::safe_spec_apply (diff);
+    FolderResolver folders (root_id, collections);
+
+    nlohmann::json create = nlohmann::json::array ();
+    for (size_t i = 0; i < diff.added.size (); ++i) {
+        if (!safe.create[i]) {
+            continue;
+        }
+        const vayu::core::SpecRequestDraft& entry = comparison.fetched[diff.added[i]];
+        // The same builder the diff reports its `draft` with, so the request an
+        // apply creates is the one the preview described. `auth`, the two scripts
+        // and the rest are left to the create defaults, which are what an OpenAPI
+        // import writes for every operation of every document.
+        nlohmann::json item = draft_request_fields_json (entry.draft);
+        item["tempId"]      = "tmp_req_" + std::to_string (create.size ());
+        // Derived here because the engine never derives it from `body`.
+        item["bodyType"]      = entry.draft.body.mode;
+        item["specOperation"] = spec_operation_json (entry.operation);
+        item.update (folders.owner_of (entry.folder));
+        create.push_back (std::move (item));
+    }
+
+    nlohmann::json update = nlohmann::json::array ();
+    for (size_t i = 0; i < diff.changed.size (); ++i) {
+        if (!safe.update[i].apply) {
+            continue;
+        }
+        const vayu::core::ChangedRequest& changed = diff.changed[i];
+        const vayu::core::SpecRequestDraft& entry = comparison.fetched[changed.draft];
+        const nlohmann::json fields               = draft_request_fields_json (entry.draft);
+
+        nlohmann::json item{ { "id", comparison.requests[changed.request].id },
+            { "specOperation", spec_operation_json (entry.operation) }, { "examples", true } };
+        for (const vayu::core::SpecField field : safe.update[i].fields) {
+            const std::string key (vayu::core::spec_field_name (field));
+            item[key] = fields.at (key);
+            if (field == vayu::core::SpecField::Body) {
+                item["bodyType"] = entry.draft.body.mode;
+            }
+        }
+        update.push_back (std::move (item));
+    }
+
+    // Read from the policy rather than written as an empty list: "a safe apply
+    // deletes nothing" is a rule with one author, and a route that spelled it
+    // here would be a second one.
+    nlohmann::json remove = nlohmann::json::array ();
+    size_t kept = 0;
+    for (size_t i = 0; i < diff.removed.size (); ++i) {
+        if (safe.remove[i]) {
+            remove.push_back (comparison.requests[diff.removed[i]].id);
+        } else {
+            kept += 1;
+        }
+    }
+
+    size_t offered_fields = 0;
+    size_t written_fields = 0;
+    size_t left_alone     = 0;
+    for (size_t i = 0; i < diff.changed.size (); ++i) {
+        offered_fields += diff.changed[i].fields.size ();
+        written_fields += safe.update[i].fields.size ();
+        if (!safe.update[i].apply) {
+            left_alone += 1;
+        }
+    }
+
+    return { { "collections", folders.created () }, { "create", std::move (create) },
+        { "update", std::move (update) }, { "delete", std::move (remove) },
+        { "skipped",
+        nlohmann::json{ { "requests", left_alone },
+            // Every field the document moved that this apply does not write -
+            // whether its request was left alone whole or applied around it.
+            { "fields", offered_fields - written_fields }, { "deletions", kept } } } };
+}
+
+/**
  * One payload's temp-id namespace.
  *
  * Flat across the two sections that claim into it, for `/import/apply`'s
@@ -487,6 +650,40 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         return body_error ("Invalid 'spec.content': an empty document is not a spec");
     }
 
+    /*
+     * `policy` is the alternative to stating rows (issue #871): the caller says
+     * *apply the safe ticks* and the engine works out which they are, from the
+     * same `core::safe_spec_apply` whose answer `POST /specs/diff` reports per
+     * entry. It exists because those rules - never overwrite a field somebody
+     * edited, never delete, leave a request nothing can be told apart about
+     * alone - used to live in the renderer alone, which put every apply out of
+     * reach of anything that is not the Spec tab and made any second caller a
+     * second opinion about which of a user's fields a sync may destroy.
+     *
+     * Mutually exclusive with the row sections rather than merged with them: a
+     * payload that stated both would be two answers to one question, and there
+     * is no reading of "the safe ticks, plus these" that is not a guess.
+     */
+    std::string policy;
+    if (const auto stated_policy = body.find ("policy");
+    stated_policy != body.end () && !stated_policy->is_null ()) {
+        if (!stated_policy->is_string ()) {
+            return body_error ("Invalid 'policy': must be a string");
+        }
+        policy = stated_policy->get<std::string> ();
+        if (policy != "safe") {
+            return body_error ("Invalid 'policy': '" + policy +
+            "' is not a policy this engine has; the only one is \"safe\" - everything the "
+            "document adds, every field it moved that nobody here had edited, and no deletions");
+        }
+        for (const char* section : { "collections", "create", "update", "delete" }) {
+            if (body.contains (section) && !body[section].is_null ()) {
+                return body_error (std::string ("Invalid '") + section +
+                "': a policy sync decides its own rows; send 'policy' or the rows, not both");
+            }
+        }
+    }
+
     const nlohmann::json* new_collections = nullptr;
     const nlohmann::json* creates         = nullptr;
     const nlohmann::json* updates         = nullptr;
@@ -508,7 +705,10 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
     // engine's own now (issue #869) and are counted against the same limit once
     // they exist, below - refusing here on a number the caller stated would let a
     // payload understate what it is about to write.
-    const size_t stated =
+    // Recomputed inside the lock for a policy sync, whose rows are not known
+    // until the comparison is made - this early check is the one that keeps a
+    // caller's own oversized payload from being parsed row by row first.
+    size_t stated =
     new_collections->size () + creates->size () + updates->size () + deletes->size ();
     if (stated > MAX_SYNC_ITEMS) {
         return body_error ("Sync too large: " + std::to_string (stated) +
@@ -524,7 +724,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             result = { 404, error_body (404, "Collection not found") };
             return;
         }
-        if (bound_spec_id (root->openapi).empty ()) {
+        const std::string bound_id = bound_spec_id (root->openapi);
+        if (bound_id.empty ()) {
             result = body_error ("Collection '" + collection_id +
             "' is not bound to a spec; bind it before syncing");
             return;
@@ -562,6 +763,33 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             const auto url = spec_item["sourceUrl"].get<std::string> ();
             if (!url.empty ()) {
                 batch.spec.source_url = url;
+            }
+        }
+
+        // ---- what a policy sync writes ----------------------------------------
+        // Here rather than before the lock because the answer is read out of the
+        // database: the bound document, the subtree's requests and this
+        // collection's folders are all part of it, and a comparison made outside
+        // the lock could be applied against a tree that has since moved.
+        nlohmann::json policy_rows;
+        if (!policy.empty ()) {
+            SpecComparison comparison;
+            if (auto err = compare_bound_spec (db, stored_collections, subtree, bound_id,
+                document, comparison)) {
+                result = *err;
+                return;
+            }
+            policy_rows     = safe_sync_payload (collection_id, stored_collections, comparison);
+            new_collections = &policy_rows["collections"];
+            creates         = &policy_rows["create"];
+            updates         = &policy_rows["update"];
+            deletes         = &policy_rows["delete"];
+            stated = new_collections->size () + creates->size () + updates->size () +
+                     deletes->size ();
+            if (stated > MAX_SYNC_ITEMS) {
+                result = body_error ("Sync too large: " + std::to_string (stated) +
+                " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call");
+                return;
             }
         }
 
@@ -880,14 +1108,20 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         batch.binding.updated_at = now;
 
         db.spec_sync_apply (batch);
-        result = { 200,
-            nlohmann::json{ { "idMap", claimed.real },
-                { "specId", batch.spec.id },
-                { "specHash", batch.spec.hash },
-                { "syncedAt", now },
-                { "created", batch.created.size () },
-                { "updated", batch.updated.size () },
-                { "deleted", batch.deleted.size () } } };
+        nlohmann::json response{ { "idMap", claimed.real },
+            { "specId", batch.spec.id },
+            { "specHash", batch.spec.hash },
+            { "syncedAt", now },
+            { "created", batch.created.size () },
+            { "updated", batch.updated.size () },
+            { "deleted", batch.deleted.size () } };
+        if (!policy.empty ()) {
+            // What the policy declined, for a caller that stated no ticks and so
+            // cannot see what it did not tick. Absent for an explicit payload,
+            // where nothing was declined - the caller chose the rows itself.
+            response["skipped"] = policy_rows["skipped"];
+        }
+        result = { 200, std::move (response) };
     });
     return result;
 }
@@ -900,7 +1134,11 @@ void register_spec_sync_routes (RouteContext& ctx) {
      * requests the caller selected are created, updated and deleted together.
      * Body params: collectionId (the bound collection), spec ({content,
      * sourceUrl?} - `id`, `hash` and `fetchedAt` are engine-computed and
-     * rejected), collections (new tag folders, each with a `tempId` and an
+     * rejected), policy ("safe" - apply the ticks a caller with no opinion would
+     * make, which is every operation the document adds, every field it moved
+     * that nobody here had edited, and no deletions; the engine works the rows
+     * out itself and the four sections below are then rejected), collections
+     * (new tag folders, each with a `tempId` and an
      * optional `parentId` inside the synced subtree), create (requests, each
      * with a `tempId` and either `collectionId` or `collectionTempId`; the
      * examples come from the document, so `examples` is rejected), update

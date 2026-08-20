@@ -22,6 +22,7 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/schema_validation.hpp"
+#include "vayu/core/spec_diff.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -595,6 +596,72 @@ const std::unordered_set<std::string>& subtree);
  * which collections can be synced at all. Defined in spec_sync.cpp.
  */
 std::string bound_spec_id (const std::string& openapi);
+
+/**
+ * The identity as `requests.spec_operation` stores it, and as every spec route
+ * answers with it.
+ *
+ * `operationId` is **absent** rather than `""` for an operation that declares
+ * none: an operation with no id is not one whose id is empty. Defined in
+ * spec_diff.cpp.
+ */
+nlohmann::json spec_operation_json (const vayu::core::DeclaredOperation& operation);
+
+/**
+ * The request an import of a document would build, in the shape a write of it
+ * takes - `{name, description, method, url, params, headers, body}`.
+ *
+ * Shared by `POST /specs/diff`, which reports it as the `draft` behind every
+ * `next` value, and by a `"safe"` `POST /specs/sync`, which creates the
+ * operations a document added and must build exactly the request the diff said
+ * it would. `examples` is not here: a sync derives those rows from the document
+ * it stores (issue #869) and the diff adds them to its own answer. Defined in
+ * spec_diff.cpp.
+ */
+nlohmann::json draft_request_fields_json (const vayu::core::DraftRequest& draft);
+
+/**
+ * The three-way comparison behind both `POST /specs/diff` and a `"safe"`
+ * `POST /specs/sync` (issue #871).
+ *
+ * Its members are what a caller has to hold together to read a
+ * `vayu::core::SpecDiff` at all: the diff indexes into the fetched drafts and
+ * into the subtree's requests, so the two lists travel with it. Defined in
+ * spec_diff.cpp.
+ */
+struct SpecComparison {
+    /// The re-fetched document as drafts - the values an apply writes.
+    std::vector<vayu::core::SpecRequestDraft> fetched;
+    /**
+     * The subtree's requests as the comparison read them, in
+     * `collection_subtree_requests` order - which is the order `SpecDiff`'s
+     * indices are into.
+     */
+    std::vector<vayu::core::ComparableRequest> requests;
+    /// The stored bytes the comparison was made against.
+    std::string bound_content;
+    vayu::core::SpecDiff diff;
+};
+
+/**
+ * Compares @p fetched_document against the document @p spec_id names and against
+ * every request beneath @p subtree, filling @p out.
+ *
+ * One function for the route that says what would change and the route that
+ * changes it, for the reason every other shared spec helper exists: a sync
+ * applying a comparison it made differently from the one it previewed would
+ * write rows nobody was shown. The caller has already established that the
+ * collection exists, that it binds something, and that the document reads - so
+ * the only failure left here is a binding naming a document the store no longer
+ * holds, returned as the `409` both routes give it. Defined in spec_diff.cpp.
+ */
+std::optional<std::pair<int, nlohmann::json>>
+compare_bound_spec (vayu::db::Database& db,
+const std::vector<vayu::db::Collection>& collections,
+const std::unordered_set<std::string>& subtree,
+const std::string& spec_id,
+const nlohmann::ordered_json& fetched_document,
+SpecComparison& out);
 
 /**
  * What a design-mode response should be checked against (issue #628).

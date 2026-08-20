@@ -3371,8 +3371,52 @@ function describeSpecDiff(answer: Record<string, unknown>): string {
 		);
 	}
 	parts.push(
-		"Nothing was written: this is the read half of a sync. Applying one is done in the Vayu app (Collection -> Spec -> Sync) - see https://github.com/athrvk/vayu/issues/871."
+		"Nothing was written: this is the read half of a sync. `sync_spec` applies the safe half of it - everything the document adds, every field it moved that nobody had edited by hand, and no deletions."
 	);
+	return parts.join(" ");
+}
+
+/**
+ * What a sync wrote, and what its policy declined, in a sentence (issue #871).
+ *
+ * **The declined half is not optional.** An agent reading "3 created, 5
+ * updated" has been told what a safe apply did and nothing about what it
+ * refused, and refusing is the point of the policy: a hand-edited field left
+ * alone and a request not deleted are the two outcomes a caller would otherwise
+ * assume did not exist. The counts are the engine's `skipped`, so this states
+ * them rather than working them out.
+ *
+ * Defensive about the shape for `describeBind`'s reason: an engine answering
+ * something unexpected must cost the caveat, never the result.
+ */
+function describeSync(answer: unknown): string {
+	const outcome = asRecord(answer);
+	const count = (value: unknown): number => (typeof value === "number" ? value : 0);
+	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+	const parts = [
+		`Applied in one transaction: ${plural(count(outcome.created), "request")} created, ${plural(count(outcome.updated), "request")} updated, ${plural(count(outcome.deleted), "request")} deleted. The document is stored and the collection is now bound to it.`,
+	];
+
+	const skipped = asRecord(outcome.skipped);
+	const held = count(skipped.requests);
+	const fields = count(skipped.fields);
+	const deletions = count(skipped.deletions);
+	if (held > 0 || fields > 0 || deletions > 0) {
+		const left: string[] = [];
+		if (held > 0)
+			left.push(
+				`${plural(held, "changed request")} left untouched (a field somebody edited by hand, or a request whose bound document could not be read)`
+			);
+		if (fields > 0) left.push(`${plural(fields, "field")} not written`);
+		if (deletions > 0)
+			left.push(
+				`${plural(deletions, "request")} the document no longer declares but which was NOT deleted`
+			);
+		parts.push(
+			`The safe policy declined the rest: ${left.join(", ")}. Applying any of that needs a person to tick it in the Vayu app (Collection -> Spec -> Sync); \`diff_spec\` shows exactly which entries they are.`
+		);
+	}
 	return parts.join(" ");
 }
 
@@ -4244,6 +4288,82 @@ export const TOOLS: McpTool[] = [
 						: ""
 				}`
 			);
+		},
+	},
+	{
+		name: "sync_spec",
+		category: "write",
+		// The same set a bind uses, and for the same reason: the document and the
+		// binding live on the collection row, and the requests this creates,
+		// updates and deletes live beneath it. A sync moves both at once, so
+		// declaring one would leave an open request list showing rows this call
+		// has already rewritten.
+		invalidates: ["collection", "request"],
+		description:
+			"Apply a drifted OpenAPI contract to the collection bound to it - the safe half of it. GUARDED: requires write access to be enabled in Vayu Settings. Pass the collection and the re-fetched document text; the engine stores the document, moves the binding to it, and creates, updates and deletes requests in ONE transaction - nothing lands unless all of it does. WHAT IT WRITES IS NOT YOURS TO CHOOSE, deliberately: this sends `policy: \"safe\"` and the engine decides, which means every operation the document adds becomes a request, every field the document moved that nobody had edited by hand is written, and NOTHING IS DELETED and NO HAND-EDITED FIELD IS OVERWRITTEN. A request whose bound document could not be read is left alone whole, since there nobody's edit can be told from the document's change. `skipped` reports what that left: requests untouched, fields not written, deletions not made. Use `diff_spec` first to see the drift and which of it is marked safe - it is the same answer this applies. To apply anything the policy declines - a deletion, or a field somebody edited - use the Vayu app (Collection -> Spec -> Sync), where a person can tick it.",
+		annotations: {
+			title: "Apply OpenAPI spec drift",
+			readOnlyHint: false,
+			// Nothing a person authored is written: the policy skips every
+			// hand-edited field, deletes nothing, and leaves a request it cannot
+			// reason about alone. What it does write is what the last import
+			// wrote and the document has since moved - which is the document's,
+			// not the user's. That is precisely what makes the safe half of a
+			// sync the half an agent may have.
+			destructiveHint: false,
+			// The engine mints a new `spec_documents` row per call, as a bind
+			// does, so syncing the same bytes twice is not the same call twice.
+			idempotentHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z
+				.string()
+				.describe(
+					"Collection to sync. It must already be bound to a document - a sync moves a binding forward and binding is `bind_spec`. Its whole subtree is written, since an imported spec files its requests under one sub-collection per tag."
+				),
+			content: z
+				.string()
+				.describe(
+					"The re-fetched OpenAPI document text, JSON or YAML. Stored verbatim and the binding moves to it, even when no request row changes - catching a collection up to a document that only reworded its description is a real sync. Capped by the maxSpecDocumentBytes setting."
+				),
+			sourceUrl: z
+				.string()
+				.optional()
+				.describe(
+					"Where the document was re-fetched from, if it came from a URL. Recorded on the document so the next sync knows what to re-fetch; omit it for one you were handed as text."
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const collectionId = requireStr(args, "collectionId");
+			const content = requireStr(args, "content");
+			const sourceUrl = str(args, "sourceUrl");
+			// `policy` rather than rows, and no argument offering an alternative:
+			// which of a drift is safe to write is `core::safe_spec_apply`, the
+			// same function whose answer `diff_spec` reports per entry. A tool
+			// that let an agent name rows would be a second opinion about which
+			// of a person's fields a sync may overwrite - the one judgement this
+			// side must never make (issue #871).
+			let outcome: unknown;
+			try {
+				outcome = await ctx.client.syncSpec(
+					{
+						collectionId,
+						spec: { content, ...(sourceUrl ? { sourceUrl } : {}) },
+						policy: "safe",
+					},
+					signal
+				);
+			} catch (err) {
+				// The engine's own sentence: a 400 names the collection that binds
+				// nothing and says to bind it first, a 404 names the collection,
+				// and a 409 says a row the comparison was made against has since
+				// gone - which is a re-check, not a bad request.
+				return engineErrorResult(err);
+			}
+			return withCaveat(jsonResult(outcome), `\n\n${describeSync(outcome)}`);
 		},
 	},
 	{

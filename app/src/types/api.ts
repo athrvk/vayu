@@ -1529,6 +1529,11 @@ export interface SpecDiffAdded {
 	/** The sub-collection an import would file it under, `""` for the root. */
 	folder: string;
 	draft: SpecDraftRequest;
+	/**
+	 * A sync with no ticks stated creates this - see {@link SpecDiffChanged.safe}
+	 * for why the engine says so rather than the reader working it out.
+	 */
+	safe: boolean;
 }
 
 /** A request whose recorded operation the new document no longer declares. */
@@ -1536,6 +1541,12 @@ export interface SpecDiffRemoved {
 	requestId: string;
 	name: string;
 	operation: SpecOperation;
+	/**
+	 * A sync with no ticks stated deletes this - always `false`, because
+	 * deleting is opt-in. Carried rather than assumed for
+	 * {@link SpecDiffChanged.safe}'s reason.
+	 */
+	safe: boolean;
 }
 
 /** A request whose operation is still declared but no longer produces it. */
@@ -1558,6 +1569,22 @@ export interface SpecDiffChanged {
 	/** Every field that no longer matches, in display order. Empty for a pure rename. */
 	fields: SpecFieldDiff[];
 	draft: SpecDraftRequest;
+	/**
+	 * A sync with no ticks stated updates this request at all (issue #871).
+	 *
+	 * The engine's answer rather than this side's: the rules behind it - never
+	 * write a field somebody edited, never delete, leave a request nothing can be
+	 * told apart about alone - are the ones whose silent failure costs a person
+	 * their work, and they now have one author (`core::safe_spec_apply`) with
+	 * `POST /specs/sync`'s `policy: "safe"` applying the same answer this
+	 * reports. `defaultSelection` reads these marks instead of deriving them.
+	 */
+	safe: boolean;
+	/**
+	 * The fields such a sync writes. Empty for a pure rename - a real selection
+	 * rather than an absence - and empty for a request it leaves alone.
+	 */
+	safeFields: SpecField[];
 }
 
 export interface SpecDiffResponse {

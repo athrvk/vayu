@@ -344,4 +344,60 @@ TEST_F (SpecDiffRouteTest, ComparesAgainstTheStoredDocumentRatherThanAnythingThe
     EXPECT_TRUE (body["changed"][0]["fields"][0]["userTouched"].get<bool> ());
 }
 
+// ---------------------------------------------------------------------------
+// The marks a safe apply would make (issue #871)
+// ---------------------------------------------------------------------------
+
+/*
+ * The route reports `core::safe_spec_apply`'s answer per entry so that the Spec
+ * tab's pre-ticked boxes and `POST /specs/sync`'s `"policy": "safe"` are one
+ * answer rather than two that agree today. The rule is pinned in
+ * `spec_diff_test.cpp`; what is pinned here is that it reaches the wire, on the
+ * entry it belongs to.
+ */
+
+TEST_F (SpecDiffRouteTest, MarksWhatASyncWouldWriteWithNothingTicked) {
+    create_listed_request (root_);
+    auto [status, response] = routes::create_request_response (*db_,
+    json{ { "collectionId", root_ }, { "name", "Delete a pet" }, { "method", "DELETE" },
+    { "url", "{{baseUrl}}/pets/{{petId}}" },
+    { "specOperation", json{ { "operationId", "deletePet" }, { "method", "DELETE" },
+                      { "path", "/pets/{petId}" } } } });
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    const json body = diff ();
+
+    ASSERT_FALSE (body["added"].empty ());
+    EXPECT_TRUE (body["added"][0]["safe"].get<bool> ());
+    ASSERT_EQ (body["removed"].size (), 1u);
+    // Deleting is opt-in, and this is where a caller reads that rather than
+    // assuming it.
+    EXPECT_FALSE (body["removed"][0]["safe"].get<bool> ());
+    ASSERT_EQ (body["changed"].size (), 1u);
+    EXPECT_TRUE (body["changed"][0]["safe"].get<bool> ());
+    EXPECT_EQ (body["changed"][0]["safeFields"], json::array ({ "name" }));
+}
+
+TEST_F (SpecDiffRouteTest, MarksAFieldSomebodyEditedAsNotSafeToWrite) {
+    /*
+     * The request's name is neither document's, which is the signature of a hand
+     * edit - so the entry is reported (a person may still tick it) and marked
+     * unsafe, with no field ticked inside it. Dropping the `user_touched` guard
+     * reddens this, and an apply would take somebody's work with it.
+     */
+    auto [status, response] = routes::create_request_response (*db_,
+    json{ { "collectionId", root_ }, { "name", "My pets call" }, { "method", "GET" },
+    { "url", "{{baseUrl}}/pets" },
+    { "specOperation",
+    json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    const json body = diff ();
+
+    ASSERT_EQ (body["changed"].size (), 1u);
+    EXPECT_TRUE (body["changed"][0]["fields"][0]["userTouched"].get<bool> ());
+    EXPECT_FALSE (body["changed"][0]["safe"].get<bool> ());
+    EXPECT_TRUE (body["changed"][0]["safeFields"].empty ());
+}
+
 } // namespace

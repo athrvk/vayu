@@ -9,19 +9,28 @@
  * Turning a spec diff and the user's ticks into the one call that applies them
  * (issue #655, phase 2c of #625).
  *
- * The comparison is the engine's since issue #854 (`POST /specs/diff`); this
- * decides what to *write* out of it, and still cannot damage anything, because
- * it only builds a payload - `POST /specs/sync` performs it in one transaction.
- * Splitting it this way is what makes the two rules that matter provable without
- * a database:
+ * The comparison is the engine's since issue #854 (`POST /specs/diff`), and
+ * since issue #871 so is the *selection* - which of a diff a sync writes when
+ * nobody has ticked anything. This file builds the payload for the ticks a user
+ * actually made; it no longer decides what those ticks start as.
  *
- * - **A field the user edited is never written unless they ticked it.** The
- *   default selection reads `SpecFieldDiff.userTouched` and leaves those fields
- *   out; a request whose bound document could not be read is left out whole,
- *   because there "the user edited it" is a claim nothing can make.
- * - **Deleting is opt-in.** Added operations and untouched changes are ticked
- *   by default - they only add or restore what the contract says - while a
- *   request whose operation is gone stays until somebody says otherwise.
+ * That move is the whole point of the split now. The two rules that matter -
+ *
+ * - **a field the user edited is never written unless they ticked it**, and
+ * - **deleting is opt-in** -
+ *
+ * are the ones whose silent failure destroys somebody's work, and they used to
+ * live here alone. `electron/` may not import `src/` (see the MCP doc), so
+ * every caller that was not the Spec tab either went without an apply or copied
+ * them, and a copy of a rule like that is a second opinion about which of a
+ * user's fields a sync may overwrite. They are now `core::safe_spec_apply` in
+ * the engine, reported per entry on the diff (`safe`, `safeFields`) and applied
+ * by `POST /specs/sync`'s `policy: "safe"`. {@link defaultSelection} reads that
+ * answer; it does not re-derive it.
+ *
+ * What is still this file's is the payload for a *changed* selection - a user
+ * who unticked a field, or ticked a deletion. Those are choices a person made,
+ * which no policy can state for them.
  *
  * **Applying a change refreshes that request's imported examples.** The diff
  * deliberately does not compare examples (#654), so the rule is stated rather
@@ -90,30 +99,31 @@ export interface SpecApplySelection {
 }
 
 /**
- * The ticks a user is offered before touching anything: everything the document
- * adds, every field it moved that nobody here had edited, and no deletions.
+ * The ticks a user is offered before touching anything, as the engine states
+ * them (issue #871).
  *
- * A request the comparison could not make three-way (`previousUnknown` - the
- * bound document does not declare this operation) is left unticked whole: with
- * no old value to compare against, every field is potentially somebody's edit,
- * and defaulting to overwrite would be the silent destruction this split exists
- * to prevent.
+ * A reader of `safe` / `safeFields`, not a second author of them: what those
+ * mean - everything the document adds, every field it moved that nobody here
+ * had edited, no deletions, and a request the comparison could not make
+ * three-way left alone whole - is `core::safe_spec_apply`, the same answer
+ * `POST /specs/sync`'s `policy: "safe"` applies. An agent syncing over MCP and
+ * a person clicking Apply without changing a tick therefore write the same
+ * rows, because there is one function deciding it rather than two that agree
+ * today.
  */
 export function defaultSelection(diff: SpecDiffResponse): SpecApplySelection {
 	const changed = new Map<string, ReadonlySet<SpecField>>();
 	for (const item of diff.changed) {
-		if (item.previousUnknown) continue;
-		const fields = new Set(
-			item.fields.filter((field) => !field.userTouched).map((field) => field.field)
-		);
-		// A request with nothing safe to write and no moved identity is not a
-		// change to offer - ticking it would send an update that writes nothing.
-		if (fields.size === 0 && !item.renamed) continue;
-		changed.set(item.requestId, fields);
+		if (!item.safe) continue;
+		changed.set(item.requestId, new Set(item.safeFields));
 	}
 	return {
-		added: new Set(diff.added.map((entry) => operationKey(entry.operation))),
-		removed: new Set<string>(),
+		added: new Set(
+			diff.added.filter((entry) => entry.safe).map((entry) => operationKey(entry.operation))
+		),
+		removed: new Set(
+			diff.removed.filter((entry) => entry.safe).map((entry) => entry.requestId)
+		),
 		changed,
 	};
 }

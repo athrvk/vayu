@@ -1700,6 +1700,7 @@ own edits into the document's - by accident, with a stale copy.
     {
       "operation": { "operationId": "listOwners", "method": "GET", "path": "/owners" },
       "folder": "owners",
+      "safe": true,
       "draft": {
         "name": "List owners",
         "description": "",
@@ -1716,7 +1717,8 @@ own edits into the document's - by accident, with a stale copy.
     {
       "requestId": "req_7b21...",
       "name": "Delete a pet",
-      "operation": { "operationId": "deletePet", "method": "DELETE", "path": "/pets/{petId}" }
+      "operation": { "operationId": "deletePet", "method": "DELETE", "path": "/pets/{petId}" },
+      "safe": false
     }
   ],
   "changed": [
@@ -1728,6 +1730,8 @@ own edits into the document's - by accident, with a stale copy.
       "matchedBy": "operationId",
       "renamed": false,
       "previousUnknown": false,
+      "safe": true,
+      "safeFields": ["name"],
       "fields": [
         {
           "field": "name",
@@ -1758,6 +1762,19 @@ come off the document it stores, so this is what an apply would write, shown.
 `unmapped` counts requests carrying no operation at all - not part of the
 comparison, but stated, because a sync that silently ignores half a collection is
 one nobody can read.
+
+**`safe` is what an apply with no ticks would do to that entry** (issue #871),
+and `safeFields` is which of a changed request's fields it would write - empty
+for a pure rename, which is a real selection rather than an absence. It is
+`core::safe_spec_apply`: **every operation the document adds, every field it
+moved that nobody here had edited, no deletions, and a request whose bound
+document could not be read left alone whole.** Reported rather than left to the
+caller because the rules are the ones whose silent failure costs somebody their
+work, and because the same function decides what
+[`POST /specs/sync`](#post-specssync)'s `policy` applies - so the app's
+pre-ticked boxes and a caller that ticks nothing are one answer rather than two
+that agree today. `safe` on a removal is always `false` and is carried anyway,
+so that a reader marking the bucket reads the rule instead of writing it.
 
 **How it compares.** An operation is followed by its `operationId` first and by
 method + path shape second (the same flattening `POST /specs/match` binds with),
@@ -1961,6 +1978,8 @@ behind it. A sync updates and deletes rows that already exist.
     "content": "{\"openapi\":\"3.1.0\", ...}",           // Required, non-empty, at most maxSpecDocumentBytes
     "sourceUrl": "https://api.example.com/openapi.json"  // Optional; null for a file or a paste
   },                                                   // Both indexes are derived - see POST /specs
+  "policy": "safe",                                    // Optional - apply the safe ticks and state no rows.
+                                                       // Mutually exclusive with the four sections below.
   "collections": [                                     // Optional - tag folders to create
     {"tempId": "t_col", "name": "pets", "parentId": "col_9a1f..."}
   ],
@@ -1983,9 +2002,39 @@ behind it. A sync updates and deletes rows that already exist.
   "specId": "spec_dd45...",
   "specHash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   "syncedAt": 1730000000000,
-  "created": 1, "updated": 1, "deleted": 1
+  "created": 1, "updated": 1, "deleted": 1,
+  "skipped": {"requests": 2, "fields": 3, "deletions": 1}  // Only for a `policy` call - see below
 }
 ```
+
+**`policy` is the alternative to stating rows** (issue #871). `"safe"` - the
+only one - is `core::safe_spec_apply`, the same answer
+[`POST /specs/diff`](#post-specsdiff) reports per entry as `safe` /
+`safeFields`: **every operation the document adds, every field it moved that
+nobody here had edited, no deletions, and a request whose bound document could
+not be read left alone whole.** The engine works out the rows, mints the tag
+folders an added operation needs (matching an existing direct child by name,
+creating one at most once per call), and writes them through everything below -
+the same validation, the same id minting, the same transaction. It exists
+because those rules used to live in the renderer alone, which put applying a
+drift out of reach of every caller that is not the Spec tab: `electron/` may not
+import `src/`, so an MCP `sync_spec` would have needed a *copy* of the one
+judgement whose silent failure destroys a person's work.
+
+Sending `policy` together with `collections`, `create`, `update` or `delete` is
+a `400`: there is no reading of "the safe ticks, plus these" that is not a
+guess. A caller that wants anything the policy declines - a deletion, a field
+somebody edited - states the rows itself, which is what the app does the moment
+a user changes a tick.
+
+`skipped` comes back **only** for a `policy` call and counts what it refused:
+`requests` left untouched entirely, `fields` the document moved that were not
+written (whether their request was skipped whole or applied around them), and
+`deletions` not made. An explicit payload gets no such key - nothing was
+declined, because the caller chose the rows. It is reported for the reason the
+diff bounds its buckets rather than dropping entries: a call that answered only
+with what it wrote would read as "applied the drift", and the part it did not
+apply is exactly the part somebody has to decide about.
 
 Four rules the payload cannot opt out of:
 
@@ -2016,7 +2065,8 @@ Four rules the payload cannot opt out of:
   `400`; use `PUT /requests/:id`.
 
 **Errors:** `404` when the collection does not exist. `400` when it is bound to
-no spec, when a section is not an array, when a payload item is malformed (with
+no spec, when `policy` is not `"safe"` or arrives beside a row section, when a
+section is not an array, when a payload item is malformed (with
 `error.item` naming the `tempId` or the request id, as `/import/apply` does), or
 when the document is over `maxSpecDocumentBytes` - the same helper `POST /specs`
 uses. `409` when an `update` names a request that no longer exists: nothing about
