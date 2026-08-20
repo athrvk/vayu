@@ -160,6 +160,57 @@ const std::vector<std::string>& dynamic_variable_names ();
 std::string resolve_template (const std::string& input, const VariableValues& vars);
 
 /**
+ * Render one row value as the text a `{{data.column}}` token substitutes.
+ *
+ * A string is its own text - the CSV/TSV path produces only strings, so this is
+ * the ordinary case and it is byte-exact. A JSON or JSONL file may carry any
+ * type: numbers and booleans render as JSON writes them (`7`, `true`), `null`
+ * renders empty, and an object or array renders as compact JSON so a nested
+ * value can still be dropped into a body.
+ *
+ * The rendering is what a value *reads* as; whether it is then escaped for the
+ * document it lands in is `core::encode_data_value`'s question. **A null cell
+ * never reaches a request through the binder** - `apply_data_template` refuses
+ * it, for the same reason a missing column is refused - so the empty rendering
+ * here is the answer to "what does this value say", not a value the wire ever
+ * sees.
+ *
+ * Lives here rather than in `core/scenario_data.hpp`, where it started, because
+ * it is the namespace's own spelling rule and the namespace is declared just
+ * above - and because the script sandbox needs it (issue #885) from a layer
+ * below core.
+ */
+[[nodiscard]] std::string render_data_value (const nlohmann::json& value);
+
+/**
+ * The row a `{{data.column}}` resolves against, for the one caller that has one.
+ *
+ * Composition deliberately has none - a plan is resolved once, before any row is
+ * bound, which is why `resolve_template` above keeps the namespace written as it
+ * stands. `pm.variables.replaceIn` is the exception (issue #885): it runs *per
+ * step*, with the iteration's row already in hand, so a token it leaves written
+ * is a token it could have resolved and chose not to.
+ *
+ * @p columns is keyed by column name with the `data.` prefix already stripped,
+ * holding the text each cell substitutes (`core::render_data_value`).
+ *
+ * @p missing_column reports the first `data.` name the row had no column for, in
+ * the shape `resolve_header_template` already uses for its refusal: the resolver
+ * cannot decide what that should cost - at bind time it errors the step, and for
+ * a script it is a thrown TypeError - so it records the name and lets the caller
+ * choose. The returned string is unusable when it is set.
+ */
+struct DataRowColumns {
+    /// Column name (no `data.` prefix) -> the text it substitutes.
+    VariableValues columns;
+};
+
+std::string resolve_template_with_data (const std::string& input,
+const VariableValues& vars,
+const DataRowColumns& row,
+std::optional<std::string>& missing_column);
+
+/**
  * Deep-resolve every string *value* inside a JSON value (object keys are left
  * alone), preserving structure. Non-string leaves pass through verbatim.
  */

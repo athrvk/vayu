@@ -159,6 +159,13 @@ pm.expect(value).to.deep.include({ a: 1 });  // deep applies to include, propert
 
 Notes on the edges:
 
+- **`not` sets the negation for the rest of the chain; it does not flip it.**
+  chai's rule, and the flag is never reset between assertions in one chain, so a
+  second `.not` is a no-op rather than a double negative:
+  `expect(s).to.not.include("+").and.to.not.include("/")` asserts that `s`
+  contains neither. It used to *toggle* (issue #883), which made that same line
+  assert that `s` **does** include `/` - a silent inversion whose direction
+  depended only on how many times the author had written `.not`.
 - **`deep` changes the comparison, it is not a matcher.** `include`, `property`,
   `members` and `oneOf` compare strictly unless a `deep` appears in the chain.
 - **`keys` means exactly these keys**, as in chai's `have.keys`. The subset form
@@ -743,6 +750,16 @@ absent - and its argument must be a string (a non-string is a `TypeError`).
 This is the one sanctioned way to `{{...}}` in a script: script *source* is
 never interpolated (issue #226, D16 - a rewrite cannot tell code from a string
 literal, and splicing values into source is an injection).
+
+**It resolves the reserved data namespace too** (issue #885), which composition
+deliberately does not: `resolve_template` leaves `{{data.column}}` written as it
+stands because a plan is composed once, before any row is bound, while this runs
+per step with the iteration's row in hand. A column the row does not carry is a
+`TypeError` naming the token and the row's columns - the bind-time rule
+(`apply_data_template`) in a shape a script can catch - and with no row bound at
+all the token keeps its braces. It stops at `replaceIn`: `pm.variables.get` and
+`.has` read the variable *scopes*, and `data.` is disjoint from them by design
+(`core/scenario_data.hpp`), with `pm.iterationData` as its accessor.
 
 **Dynamic variables are otherwise not readable from a script.** `{{$guid}}`,
 `{{$timestamp}}` and the rest of the set in

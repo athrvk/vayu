@@ -543,6 +543,55 @@ TEST_F (ScriptEngineTest, ExpectAndChainsAndKeepsAssertingAfterTheJoin) {
     << "the assertion after .and did not run";
 }
 
+/**
+ * `.not` sets the negation, it does not flip it (issue #883).
+ *
+ * chai's `not` is `flag(this, 'negate', true)` - a set - and the flag stays set
+ * for the rest of the chain, so a second `.not` in one chain is a no-op there.
+ * This one toggled, which made every even-numbered `.not` cancel the one before
+ * it: `expect(s).to.not.include("+").and.to.not.include("/")` quietly asserted
+ * that `s` DOES include "/" and went red on a string that was correct. Silent
+ * inversion, in the direction that turns a passing suite red and a failing
+ * assertion green depending only on how many times the author wrote `.not`.
+ *
+ * `.and` is not the mechanism and the third case proves it - a `.not` following
+ * a *positive* assertion always worked, because the flag was still false. What
+ * matters is how many `.not`s the chain has seen.
+ *
+ * Mutation-check: restore the toggle (`state->negated = !state->negated`) and
+ * the first two cases fail while the rest stay green.
+ */
+TEST_F (ScriptEngineTest, ExpectNotSetsTheNegationRatherThanTogglingIt) {
+    auto result = engine.execute_test (R"(
+        pm.test("two nots, joined", function() {
+            pm.expect("abc").to.not.include("z").and.to.not.include("y");
+        });
+        pm.test("two nots, unjoined", function() {
+            pm.expect("abc").to.not.equal("q").to.not.equal("r");
+        });
+        pm.test("a not after a positive", function() {
+            pm.expect("abc").to.include("a").and.to.not.include("z");
+        });
+        pm.test("three nots", function() {
+            pm.expect("abc").to.not.include("x").and.to.not.include("y").and.to.not.include("z");
+        });
+        pm.test("still fails when the second half is wrong", function() {
+            pm.expect("abc").to.not.include("z").and.to.not.include("b");
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 5);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+    EXPECT_TRUE (result.tests[2].passed) << result.tests[2].error_message;
+    EXPECT_TRUE (result.tests[3].passed) << result.tests[3].error_message;
+    // The negation must stay a negation, not become permissive: "abc" does
+    // include "b", so the last chain is genuinely wrong and must say so.
+    EXPECT_FALSE (result.tests[4].passed)
+    << "a negated assertion after another one stopped asserting";
+}
+
 TEST_F (ScriptEngineTest, ExpectOneOf) {
     auto result = engine.execute_test (R"(
         pm.test("hit", function() { pm.expect(200).to.be.oneOf([200, 201]); });
@@ -3823,6 +3872,127 @@ TEST_F (ScriptEngineTest, IterationDataGetOnAnUnknownKeyIsUndefined) {
     auto result = engine.execute (R"JS(
         pm.test("unknown key", function() {
             pm.expect(typeof pm.iterationData.get("missing")).to.equal("undefined");
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+/**
+ * `pm.variables.replaceIn` resolves the data namespace too (issue #885).
+ *
+ * It did not, and that made it the one template resolver in the product that
+ * disagreed with the others about what `{{data.column}}` means. A URL, a header
+ * and a body all bind it; handing the same string to replaceIn returned it
+ * verbatim, so the script had to know which resolver it was talking to. The
+ * token came back with its braces on, which reads as "unresolved variable" -
+ * the same output an unknown `$name` gives - so nothing said the row was
+ * available and simply not consulted.
+ *
+ * Deliberately not extended to `pm.variables.get` / `has` / `toObject`: those
+ * read the variable *scopes*, and `data.` is documented as disjoint from them
+ * (`core/scenario_data.hpp`) with `pm.iterationData` as its accessor.
+ * `replaceIn` is different in kind - it resolves a template, and this is a
+ * token that template syntax has - which is why the fix stops here.
+ *
+ * Mutation-check: drop the row from the resolver and the first case fails.
+ */
+TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
+    const nlohmann::json row{ { "userId", "1001" }, { "city", "Portland, OR" },
+        { "quantity", 3 }, { "active", true } };
+    auto ctx = data_test (request, response, env, row);
+    env["userId"] = { "an-environment-variable", true };
+
+    auto result = engine.execute (R"JS(
+        pm.test("a column resolves", function() {
+            pm.expect(pm.variables.replaceIn("user {{data.userId}}")).to.equal("user 1001");
+            pm.expect(pm.variables.replaceIn("{{data.city}}")).to.equal("Portland, OR");
+        });
+
+        pm.test("a non-string cell substitutes its text", function() {
+            // The same rule the request binding uses (`render_data_value`): the
+            // template holds text, so the value is spelled the way it would be
+            // spelled into a URL - not the typed value pm.iterationData gives.
+            pm.expect(pm.variables.replaceIn("{{data.quantity}}")).to.equal("3");
+            pm.expect(pm.variables.replaceIn("{{data.active}}")).to.equal("true");
+        });
+
+        pm.test("the namespace is reserved, so neither side shadows the other", function() {
+            // `{{userId}}` and `{{data.userId}}` are different names - the whole
+            // reason the namespace exists (issue #402). A row that could shadow
+            // a variable would make the feature unsafe to add to a collection
+            // someone already has.
+            pm.expect(pm.variables.replaceIn("{{userId}}")).to.equal("an-environment-variable");
+            pm.expect(pm.variables.replaceIn("{{data.userId}}")).to.equal("1001");
+        });
+
+        pm.test("the bare prefix names nothing", function() {
+            // `{{data.}}` is not a column reference, so it falls through to the
+            // ordinary unknown-name rule rather than erroring about a column
+            // called "".
+            pm.expect(pm.variables.replaceIn("[{{data.}}]")).to.equal("[]");
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 4u);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+}
+
+/**
+ * A column the row does not carry is an error, the same as it is at bind time.
+ *
+ * Not "" and not the token verbatim: the token says the value came from the
+ * file, so a name the file has no column for is a mistake about the column, and
+ * both quiet answers hide it. This is the rule `apply_data_template` already
+ * enforces on a URL - a script asking the same question gets the same answer.
+ */
+TEST_F (ScriptEngineTest, ReplaceInThrowsForAColumnTheRowDoesNotCarry) {
+    const nlohmann::json row{ { "userId", "1001" } };
+    auto ctx = data_test (request, response, env, row);
+
+    auto result = engine.execute (R"JS(
+        pm.test("names the column and what the row has", function() {
+            let message = "nothing thrown";
+            try {
+                pm.variables.replaceIn("{{data.nosuch}}");
+            } catch (e) {
+                message = String(e.message || e);
+            }
+            pm.expect(message).to.include("data.nosuch");
+            pm.expect(message).to.include("userId");
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+/**
+ * With no row bound there is nothing to resolve against, so the token keeps its
+ * braces - unchanged from before the fix, and the same thing composition does.
+ *
+ * Throwing here would be wrong: a plain design send has no row by design, and a
+ * shared script that guards with `pm.iterationData` must be able to run in both
+ * modes. The token surviving is what a run's plan resolution then refuses by
+ * name (issue #415), which is the layer that owns "this needed a data set".
+ */
+TEST_F (ScriptEngineTest, ReplaceInLeavesADataTokenWrittenWhenNoRowIsBound) {
+    ScriptContext ctx = ScriptContext::for_test (request, response);
+    ctx.environment   = &env;
+
+    auto result = engine.execute (R"JS(
+        pm.test("token survives", function() {
+            pm.expect(pm.variables.replaceIn("user {{data.userId}}"))
+                .to.equal("user {{data.userId}}");
         });
     )JS",
     ctx);

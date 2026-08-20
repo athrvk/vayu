@@ -235,7 +235,7 @@ describe("picking a row", () => {
 		renderBar(executeRequest, CONTRACT);
 
 		openPicker();
-		const second = await screen.findByRole("button", { name: /grace@example\.test/ });
+		const second = await screen.findByRole("row", { name: /grace@example\.test/ });
 		fireEvent.click(second);
 
 		// The row object, exactly as the parser produced it: this is what the
@@ -376,12 +376,19 @@ describe("the caret's place in the attached group", () => {
  * would pass against the broken version.
  */
 describe("the remembered row", () => {
-	/** The picker's row buttons, in order, once it is open. */
+	/**
+	 * The picker's data rows, in file order, once it is open.
+	 *
+	 * Filtered by content rather than sliced past the header: the grid's header
+	 * is a `role="row"` too, so `getAllByRole("row")[1]` would be row 1 of the
+	 * file and reading it as row 2 is exactly the off-by-one this suite exists to
+	 * catch.
+	 */
 	async function openRows() {
 		openPicker();
-		await screen.findByRole("button", { name: /ada@example\.test/ });
+		await screen.findByRole("row", { name: /ada@example\.test/ });
 		return screen
-			.getAllByRole("button")
+			.getAllByRole("row")
 			.filter((el) => /@example\.test/.test(el.textContent ?? ""));
 	}
 
@@ -410,10 +417,17 @@ describe("the remembered row", () => {
 			</TooltipProvider>
 		);
 
+		/*
+		 * B shows the *default* pick, row 1 - not A's row 2. It used to show none
+		 * at all, and that was the assertion here; the dialog has a footer that
+		 * names the row it will send (issue #887), so "nothing is selected" is no
+		 * longer a state it can be in and coherently offer that button. The
+		 * guarantee this test exists for is unchanged and now checked more
+		 * directly: what B highlights must not be what A picked.
+		 */
 		const onB = await openRows();
-		for (const row of onB) {
-			expect(row.className).not.toContain("bg-accent/60");
-		}
+		expect(onB[0].className).toContain("bg-accent/60");
+		expect(onB[1].className).not.toContain("bg-accent/60");
 	});
 
 	it("comes back when the user returns to the request that made it", async () => {
@@ -449,9 +463,13 @@ describe("the remembered row", () => {
  * Reaching a row the list does not show, and arriving from a failed step
  * (issue #730).
  *
- * The list is the first 20 rows by design - a popover is not the file - so
- * before this the rows past it were unreachable from here at all, which is
+ * The list *was* the first 20 rows by design - a popover is not the file - so
+ * before #730 the rows past it were unreachable from here at all, which is
  * precisely the row a long run's failure names ("iteration 501 · row 501").
+ * Issue #887 made the picker a dialog and put every row in it, so the number
+ * field is now the shortcut to a distant row rather than the only route to it -
+ * these still guard it, because typing an index is how a step's repro is
+ * followed and how a 500-row file is navigated without scrolling.
  */
 describe("any row in the file", () => {
 	/** A file of `count` rows, so the browse window is not the whole of it. */
@@ -468,7 +486,7 @@ describe("any row in the file", () => {
 		const execute = vi.fn(async () => {});
 		renderBar(execute, CONTRACT, "req_a");
 		openPicker();
-		await screen.findByRole("button", { name: /user0@example\.test/ });
+		await screen.findByRole("row", { name: /user0@example\.test/ });
 		return execute;
 	}
 
@@ -477,9 +495,9 @@ describe("any row in the file", () => {
 
 		fireEvent.change(numberField(), { target: { value: "51" } });
 
-		// Shown as its own row rather than scrolled to: the list is 20 rows and
-		// row 51 is not among them, so there would be nothing to scroll to.
-		const pinned = screen.getByRole("button", { name: /user50@example\.test/ });
+		// In the grid itself and scrolled to, not pinned above the list: every row
+		// is rendered now, so there is something to scroll to.
+		const pinned = screen.getByRole("row", { name: /user50@example\.test/ });
 		fireEvent.click(pinned);
 
 		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
@@ -519,9 +537,129 @@ describe("any row in the file", () => {
 		expect(screen.getByText(/row numbers are digits/i)).toBeTruthy();
 	});
 
-	it("says the hidden rows are reachable rather than only that they exist", async () => {
-		await openBigPicker();
-		expect(screen.getByText(/reach any of them by number/i)).toBeTruthy();
+	it("reaches a row past the old browse window by scrolling, with no number typed", async () => {
+		// The popover showed twenty rows and made the number field the only way to
+		// the twenty-first (issue #887). A dialog has the room, so every row is in
+		// the list and the number field is a shortcut rather than the mechanism.
+		await openBigPicker(60);
+		expect(screen.getByRole("row", { name: /user0@example\.test/ })).toBeTruthy();
+		expect(screen.getByRole("row", { name: /user30@example\.test/ })).toBeTruthy();
+		expect(screen.getByRole("row", { name: /user59@example\.test/ })).toBeTruthy();
+	});
+});
+
+/**
+ * The row picker is a dialog, not a popover (issue #887).
+ *
+ * The popover was ~384px wide over the response pane, and every constraint the
+ * old design worked around came from that box: a row was one truncated line with
+ * the column name repeated in front of every cell
+ * (`userId=1001 email=ada@example.com plan=pro q…`), twenty of them, and a
+ * number field standing in for the rows it had no room to show. Picking a row
+ * out of that meant reading a sentence rather than scanning a column.
+ */
+describe("the row picker as a dialog", () => {
+	const csv = [
+		"userId,email,plan",
+		"1001,ada@example.com,pro",
+		"1002,grace@example.com,free",
+		"1003,alan@example.com,enterprise",
+	].join("\n");
+
+	async function openDialog() {
+		rememberFile();
+		stubReadDataFile(async () => csvBytes(csv));
+		const execute = vi.fn(async () => {});
+		renderBar(execute, CONTRACT, "req_a");
+		openPicker();
+		await screen.findByRole("row", { name: /ada@example\.com/ });
+		return execute;
+	}
+
+	it("opens as a modal dialog with an accessible name", async () => {
+		await openDialog();
+		const dialog = screen.getByRole("dialog");
+		expect(dialog).toBeTruthy();
+		expect(dialog.textContent).toContain("Send with a data row");
+	});
+
+	it("names each column once, in a header, instead of on every cell", async () => {
+		await openDialog();
+
+		// The header carries the column names...
+		for (const column of ["userId", "email", "plan"]) {
+			expect(screen.getByRole("columnheader", { name: column })).toBeTruthy();
+		}
+		// ...and a row is its values, so the name is not repeated per cell. This
+		// is the whole readability complaint: `userId=1001` on every line.
+		const row = screen.getByRole("row", { name: /ada@example\.com/ });
+		expect(row.textContent).not.toContain("userId=");
+		expect(row.textContent).not.toContain("email=");
+	});
+
+	it("shows the row's number beside its values", async () => {
+		await openDialog();
+		const row = screen.getByRole("row", { name: /grace@example\.com/ });
+		// One-based, matching the number field and the run report's row index.
+		expect(row.textContent).toContain("2");
+		expect(row.textContent).toContain("free");
+	});
+
+	it("narrows the rows to what the filter matches, across every column", async () => {
+		await openDialog();
+		const filter = screen.getByLabelText(/filter rows/i);
+
+		fireEvent.change(filter, { target: { value: "enterprise" } });
+		expect(screen.queryByRole("row", { name: /alan@example\.com/ })).toBeTruthy();
+		expect(screen.queryByRole("row", { name: /ada@example\.com/ })).toBeNull();
+
+		// Case-insensitive, and it reads the whole row rather than one column.
+		fireEvent.change(filter, { target: { value: "GRACE" } });
+		expect(screen.queryByRole("row", { name: /grace@example\.com/ })).toBeTruthy();
+		expect(screen.queryByRole("row", { name: /alan@example\.com/ })).toBeNull();
+	});
+
+	it("says so when the filter matches nothing, rather than showing an empty box", async () => {
+		await openDialog();
+		fireEvent.change(screen.getByLabelText(/filter rows/i), {
+			target: { value: "nosuchvalue" },
+		});
+		expect(screen.getByText(/no rows match/i)).toBeTruthy();
+	});
+
+	it("sends the selected row from the footer, for a row reached by typing", async () => {
+		const execute = await openDialog();
+
+		fireEvent.change(screen.getByLabelText(/send with a row by number/i), {
+			target: { value: "3" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /^send row 3$/i }));
+
+		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+		expect(execute).toHaveBeenCalledWith({
+			userId: "1003",
+			email: "alan@example.com",
+			plan: "enterprise",
+		});
+	});
+
+	it("still sends on a row click, so the fast loop stays one click", async () => {
+		const execute = await openDialog();
+		fireEvent.click(screen.getByRole("row", { name: /ada@example\.com/ }));
+
+		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+		expect(execute).toHaveBeenCalledWith({
+			userId: "1001",
+			email: "ada@example.com",
+			plan: "pro",
+		});
+	});
+
+	it("counts the file's rows and columns in the header", async () => {
+		await openDialog();
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.textContent).toContain("3 rows");
+		expect(dialog.textContent).toContain("3 columns");
 	});
 });
 
@@ -542,7 +680,7 @@ describe("arriving from a failed step", () => {
 		renderBar(execute, CONTRACT, "req_a");
 
 		// Two clicks from the step card to the repro: the card's, and this one.
-		const row = await screen.findByRole("button", { name: /user500@example\.test/ });
+		const row = await screen.findByRole("row", { name: /user500@example\.test/ });
 		fireEvent.click(row);
 
 		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
@@ -559,7 +697,7 @@ describe("arriving from a failed step", () => {
 			"req_a"
 		);
 
-		await screen.findByRole("button", { name: /user25@example\.test/ });
+		await screen.findByRole("row", { name: /user25@example\.test/ });
 		expect(useTabsStore.getState().dataRowTarget).toBeNull();
 	});
 

@@ -123,17 +123,31 @@ namespace vayu::http {
 /**
  * @brief The Content-Type this body implies when the request declares none.
  *
- * Two modes have one. `x-www-form-urlencoded` because its encoding is chosen
- * engine-side, so nothing else can name it; `graphql` because the engine is
- * what writes its envelope (see `graphql_body.hpp`), and a body the engine
- * shaped into JSON cannot be left to libcurl's `x-www-form-urlencoded`
- * default. Empty for json/text/binary - those clients own the header and the
- * request builder writes it, so deriving one would take a header away from the
- * user who typed it.
+ * Every mode whose bytes have one right answer has one here.
+ * `x-www-form-urlencoded` because its encoding is chosen engine-side, so
+ * nothing else can name it; `graphql` and `jsonrpc` because the engine is what
+ * writes their envelope (see `graphql_body.hpp`), and a body the engine shaped
+ * into JSON cannot be left to libcurl's `x-www-form-urlencoded` default; `xml`
+ * and `json` because the mode *is* the type.
  *
- * Only ever a *default*: a Content-Type the caller set wins in both cases
- * (`body_content_type_value`), which is how an explicit
- * `application/graphql` still reaches the server.
+ * **`json` was absent until issue #884, and that was a bug rather than the
+ * restraint it read as.** The old rule here - "those clients own the header and
+ * the request builder writes it" - was true of exactly one client. The request
+ * builder does write the row, so a request authored in the UI went out
+ * correctly; every other origin did not. A request created over MCP, imported,
+ * or posted straight to `/execute` with `mode: "json"` reached the server as
+ * `application/x-www-form-urlencoded`, which is libcurl's default for a POST
+ * carrying a body - the same failure `graphql` was fixed for, one mode over.
+ * Deriving it here takes no header away from anyone, because a declared one
+ * still wins.
+ *
+ * Empty for **text** and **binary**, and that one *is* restraint: `text/plain`,
+ * `text/csv`, a JWT and a raw signature are all `text`, so there is no answer to
+ * derive and the header stays the author's.
+ *
+ * Only ever a *default*: a Content-Type the caller set wins in every case
+ * (`body_content_type_value`), which is how an explicit `application/graphql` -
+ * or an `application/vnd.api+json` on a JSON body - still reaches the server.
  */
 [[nodiscard]] std::string implied_content_type (const Body& body);
 

@@ -336,21 +336,14 @@ size_t row_index);
 [[nodiscard]] std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth);
 
 /**
- * Render one row value as the text a `{{data.column}}` token substitutes.
+ * `render_data_value` moved to `http/request_composer.hpp` (issue #885).
  *
- * A string is its own text - the CSV/TSV path produces only strings, so this is
- * the ordinary case and it is byte-exact. A JSON or JSONL file may carry any
- * type: numbers and booleans render as JSON writes them (`7`, `true`), `null`
- * renders empty, and an object or array renders as compact JSON so a nested
- * value can still be dropped into a body.
- *
- * The rendering is what a value *reads* as; whether it is then escaped for the
- * document it lands in is the encoding above. **A null cell never reaches a
- * request through the binder** - `apply_data_template` refuses it, for the same
- * reason a missing column is refused - so the empty rendering here is the
- * answer to "what does this value say", not a value the wire ever sees.
+ * It is the `data.` namespace's own spelling rule, and the namespace lives in
+ * the composer beside `DATA_NAMESPACE_PREFIX` and `is_data_variable_name`. The
+ * script sandbox needs it too - `pm.variables.replaceIn` resolves the namespace
+ * now - and the runtime layer sits *below* core, so leaving it here would have
+ * meant a second copy of a five-line rule. Use `vayu::http::render_data_value`.
  */
-[[nodiscard]] std::string render_data_value (const nlohmann::json& value);
 
 /**
  * Substitute every `{{data.column}}` in @p request against @p row, in place -

@@ -436,6 +436,17 @@ export function useTreeDnd({
 		springRef.current = null;
 	}, []);
 
+	/**
+	 * Start the countdown to opening @p target, or cancel one in flight.
+	 *
+	 * @param target The folder the drop would land **inside**, and nothing else
+	 *   (issue #886). Passing whichever row resolved a destination opened folders
+	 *   the drop was only landing *beside*: the edge quarters of a folder row are
+	 *   the reorder bands, so lining a reorder up next to a collapsed folder
+	 *   sprang it open, moved every row below it and left the user aiming at a
+	 *   seam that was no longer there. `null` cancels, which is what makes
+	 *   sliding out of the inside band disarm a spring that has not fired.
+	 */
 	const armSpring = useCallback(
 		(target: TreeEntity | null) => {
 			const id = target?.kind === "collection" ? target.id : null;
@@ -534,6 +545,12 @@ export function useTreeDnd({
 			const target = entityFromRow(row);
 
 			let destination: DropDestination | null = null;
+			// The folder a spring would open: only ever the one the drop lands
+			// *inside*. Tracked beside `destination` rather than derived from it,
+			// because a destination alone cannot answer this - "before Beta" and
+			// "into Beta" are both drops Beta's row resolved, and only the second
+			// is a request to see what is in it.
+			let springTarget: TreeEntity | null = null;
 			if (target && !isRowBusy(target.id)) {
 				const rect = (row as HTMLElement).getBoundingClientRect();
 				const zone = zoneAt(
@@ -548,6 +565,7 @@ export function useTreeDnd({
 					isDescendant(target.id, pressed.entity.id, dataRef.current.collections);
 				if (!intoOwnSubtree) {
 					destination = resolveDrop({ dragged: pressed.entity, target, zone });
+					if (destination && zone === "inside") springTarget = target;
 				}
 			}
 
@@ -558,7 +576,7 @@ export function useTreeDnd({
 					? current
 					: indicator
 			);
-			armSpring(destination ? target : null);
+			armSpring(springTarget);
 			updateAutoScroll(e.clientY);
 		},
 		[armSpring, indicatorFor, isRowBusy, updateAutoScroll]

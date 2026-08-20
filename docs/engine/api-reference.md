@@ -267,11 +267,19 @@ but never sent, so switching one back on needs no re-compose; `{{variables}}`
 resolve inside `key`, `value`, and a file part's `src` / `fileName` /
 `contentType` during composition.
 
-Four Content-Type rules follow from the encoding:
+Five Content-Type rules follow from the encoding:
 
 - `x-www-form-urlencoded` sets `Content-Type: application/x-www-form-urlencoded`
   **only when the request declares no Content-Type of its own** - an explicit
   header wins.
+- `json` sets `Content-Type: application/json` under the same rule (issue #884).
+  It did **not** until then, and libcurl's default for a POST carrying a body is
+  `application/x-www-form-urlencoded` - so a request whose `body.mode` said
+  `json` went out declaring itself a form. The app's body panel wrote the header
+  row for a request built in the UI, which is why it survived: every request
+  created any other way - MCP `create_request`, an import, a payload posted
+  straight to `/execute` - sent the wrong type. A declared header still wins, so
+  `application/vnd.api+json` reaches the server unchanged.
 - `graphql` and `jsonrpc` set `Content-Type: application/json` under the same
   rule - a Content-Type the caller wrote wins.
 - `xml` sets `Content-Type: application/xml`, again only when the caller
@@ -281,6 +289,10 @@ Four Content-Type rules follow from the encoding:
 - `form-data` **always** sets its own Content-Type, and a caller-supplied one is
   dropped. The header has to carry the boundary of the body that was actually
   encoded, which no caller can name in advance.
+
+`text` and `binary` derive nothing, and that is a decision rather than a gap:
+`text/plain`, `text/csv`, a JWT and a raw signature are all `text`, so there is
+no single right answer and the header stays the author's.
 
 #### The `graphql` envelope
 

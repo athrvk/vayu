@@ -48,6 +48,7 @@ import { Callout } from "@/components/shared";
 import {
 	DATA_FILE_ACCEPT,
 	DataFileError,
+	dataCellText,
 	decodeDataFile,
 	describeRowCapRefusal,
 	parseDataFile,
@@ -121,13 +122,6 @@ export interface DataFilePickerProps {
 const PREVIEW_ROWS = 10;
 
 /** A cell as the preview prints it. Objects and arrays show as compact JSON. */
-function displayCell(value: unknown): string {
-	if (typeof value === "string") return value;
-	if (value === null || value === undefined) return "";
-	if (typeof value === "object") return JSON.stringify(value);
-	return String(value);
-}
-
 export default function DataFilePicker({
 	selected,
 	onSelect,
@@ -344,7 +338,7 @@ export default function DataFilePicker({
 									<TableRow key={index}>
 										{selected.parsed.columns.map((column) => (
 											<TableCell key={column} className="whitespace-nowrap">
-												{displayCell(row[column])}
+												{dataCellText(row[column])}
 											</TableCell>
 										))}
 									</TableRow>

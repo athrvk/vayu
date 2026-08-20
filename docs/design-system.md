@@ -1468,18 +1468,25 @@ directly. **Tailwind emits no rule for `grid-cols-[minmax(0,1fr)]`** (verified
 against the built CSS), so that spelling is a class that reads correctly, passes
 a `className` assertion, and styles nothing.
 
-### Dialog widths: two sizes
+### Dialog widths: three sizes
 
 | Size | Class | For |
 | ---- | ----- | --- |
 | Standard | `sm:max-w-lg` (512px) | A form or a decision - a confirm, a rename, a picker, a short field set. |
 | Wide | `max-w-xl` (576px), the primitive's default | A dialog holding something with a shape of its own: a table, a diff, a preview, a dense config. |
+| Browser | `sm:max-w-2xl` (672px) | A dialog whose job is *reading* that shape and picking out of it, not confirming something about it. One call site: the data-row picker beside Send. |
 
 These had drifted to five values across eleven call sites, including two one-off
 pixel widths, so the same kind of dialog came out a different size depending on
 who wrote it. `dialog-width-scale.test.tsx` holds the set closed; a dialog that
-genuinely needs a third size should widen the scale here and in `dialog.tsx`
-rather than open a sixth one-off.
+genuinely needs another size widens the scale here and in `dialog.tsx`, with the
+reason, rather than opening a one-off.
+
+`2xl` was opened for the row picker (issue #887): seven columns of ordinary CSV
+at 576px leaves about 60px a column, which is one truncated cell per column and
+nothing scannable. It is deliberately the last size on the scale - a dialog is a
+focus device before it is a container, so content that wants more room than this
+wants a pane, not a wider modal.
 
 Prefer a **cap** (`max-w-*`) over a fixed `w-[…]`: a fixed width is one the panel
 keeps on a viewport narrower than it, where `w-full` under a cap gives the same

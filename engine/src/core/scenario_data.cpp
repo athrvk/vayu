@@ -569,7 +569,7 @@ std::string escape_xml_cdata (const std::string& text) {
 
 /// The rendered cell as it is written into the text around it.
 std::string encode_data_value (const nlohmann::json& value, DataValueEncoding encoding) {
-    std::string rendered = render_data_value (value);
+    std::string rendered = vayu::http::render_data_value (value);
     switch (encoding) {
     case DataValueEncoding::JsonString:
         return escape_json_string_content (rendered);
@@ -716,16 +716,6 @@ std::optional<std::string> StepDataTemplate::first_token () const {
         return std::nullopt;
     }
     return token_for (fields.front ().columns.front ());
-}
-
-std::string render_data_value (const nlohmann::json& value) {
-    if (value.is_string ()) {
-        return value.get<std::string> ();
-    }
-    if (value.is_null ()) {
-        return {};
-    }
-    return value.dump ();
 }
 
 StepDataTemplate tokenize_data_fields (const vayu::Request& request) {
