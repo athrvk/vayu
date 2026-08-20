@@ -33,14 +33,12 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
-
-#include <nlohmann/json.hpp>
 
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/spec_diff.hpp"
 
-using json = nlohmann::ordered_json;
 using vayu::core::ComparableRequest;
 using vayu::core::SpecDiff;
 using vayu::core::SpecField;
@@ -48,21 +46,27 @@ using vayu::core::SpecRequestDraft;
 
 namespace {
 
-/** A 3.0 document with the given `paths`, as bytes a store would hold. */
-std::string document (const json& paths) {
-    json out;
-    out["openapi"] = "3.0.0";
-    out["info"]    = json{ { "title", "Pets API" } };
-    out["servers"] = json::array ({ json{ { "url", "https://api.example.com" } } });
-    out["paths"]   = paths;
-    return out.dump ();
+/**
+ * A 3.0 document with the given `paths` object, as bytes a store would hold.
+ *
+ * The cases below write their documents as JSON **text** rather than as nested
+ * `json{{...}}` initializers, the way `spec_sync_route_test.cpp` and the rest of
+ * the spec suites do. That is not only style: this file's twenty-odd documents
+ * as brace initializers cost MSVC more heap than it has, and the leg died with
+ * `C1060: compiler is out of heap space` rather than with anything about the
+ * code.
+ */
+std::string document (std::string_view paths) {
+    return std::string (R"({"openapi":"3.0.0","info":{"title":"Pets API"},)"
+    R"("servers":[{"url":"https://api.example.com"}],"paths":)") +
+    std::string (paths) + "}";
 }
 
-/** A JSON request body declaring the given properties. */
-json json_body (const json& properties) {
-    return json{ { "content",
-    json{ { "application/json", json{ { "schema", json{ { "type", "object" },
-                                     { "properties", properties } } } } } } } };
+/** A JSON request body declaring one string property. */
+std::string json_body (std::string_view properties) {
+    return std::string (R"("requestBody":{"content":{"application/json":)"
+    R"({"schema":{"type":"object","properties":{)") +
+    std::string (properties) + "}}}}}";
 }
 
 std::vector<SpecRequestDraft> drafts_of (const std::string& text) {
@@ -112,14 +116,15 @@ SpecField field) {
     return found == changed.fields.end () ? nullptr : &*found;
 }
 
+/** The `createPet` operation, which several cases carry unchanged. */
+const std::string CREATE_PET =
+R"("post":{"operationId":"createPet","summary":"Create a pet",)" +
+json_body (R"("name":{"type":"string"})") + "}";
+
 /** The bound document every case below compares against. */
-const std::string BOUND = document (json{
-{ "/pets",
-json{ { "get", json{ { "operationId", "listPets" }, { "summary", "List pets" } } },
-{ "post", json{ { "operationId", "createPet" }, { "summary", "Create a pet" },
-{ "requestBody", json_body (json{ { "name", json{ { "type", "string" } } } }) } } } } },
-{ "/pets/{petId}",
-json{ { "get", json{ { "operationId", "getPet" }, { "summary", "Get a pet" } } } } } });
+const std::string BOUND = document (
+R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
 
 class SpecDiffTest : public ::testing::Test {
     protected:
@@ -200,15 +205,14 @@ class DuplicateOperationIdTest : public ::testing::Test {
     mutable std::vector<SpecRequestDraft> fetched_;
 };
 
-const std::string DuplicateOperationIdTest::DUP = document (json{
-{ "/a", json{ { "get", json{ { "operationId", "list" }, { "summary", "List A" } } } } },
-{ "/b", json{ { "post", json{ { "operationId", "list" }, { "summary", "Create B" } } } } } });
+const std::string DuplicateOperationIdTest::DUP = document (
+R"({"/a":{"get":{"operationId":"list","summary":"List A"}},)"
+R"("/b":{"post":{"operationId":"list","summary":"Create B"}}})");
 
 TEST_F (DuplicateOperationIdTest, LeavesTheSecondRequestOnItsOwnOperationWhenTheFirstChanges) {
-    const std::string tweaked = document (json{
-    { "/a", json{ { "get", json{ { "operationId", "list" }, { "summary", "List A" },
-                    { "description", "Now documented" } } } } },
-    { "/b", json{ { "post", json{ { "operationId", "list" }, { "summary", "Create B" } } } } } });
+    const std::string tweaked = document (
+    R"({"/a":{"get":{"operationId":"list","summary":"List A","description":"Now documented"}},)"
+    R"("/b":{"post":{"operationId":"list","summary":"Create B"}}})");
 
     const SpecDiff diff = diff_dup (tweaked, collection ());
 
@@ -247,9 +251,9 @@ TEST_F (DuplicateOperationIdTest, PrefersTheRequestsOwnEndpointOverAnIdNamingADi
 }
 
 TEST_F (DuplicateOperationIdTest, ReportsAMovedEndpointAsGoneRatherThanFollowingTheSharedId) {
-    const std::string moved = document (json{
-    { "/a", json{ { "get", json{ { "operationId", "list" }, { "summary", "List A" } } } } },
-    { "/b2", json{ { "post", json{ { "operationId", "list" }, { "summary", "Create B" } } } } } });
+    const std::string moved = document (
+    R"({"/a":{"get":{"operationId":"list","summary":"List A"}},)"
+    R"("/b2":{"post":{"operationId":"list","summary":"Create B"}}})");
 
     const SpecDiff diff = diff_dup (moved, collection ());
 
@@ -275,10 +279,9 @@ TEST_F (SpecDiffTest, ReportsNothingChangedWhenTheDocumentIsTheSame) {
 }
 
 TEST_F (SpecDiffTest, PutsAnUnclaimedOperationInAddedAndAGoneOperationsRequestInRemoved) {
-    const std::string next = document (json{
-    { "/pets", json{ { "get", json{ { "operationId", "listPets" }, { "summary", "List pets" } } } } },
-    { "/owners",
-    json{ { "get", json{ { "operationId", "listOwners" }, { "summary", "List owners" } } } } } });
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"}},)"
+    R"("/owners":{"get":{"operationId":"listOwners","summary":"List owners"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
 
@@ -303,13 +306,9 @@ TEST_F (SpecDiffTest, CountsARequestThatCarriesNoOperationInsteadOfTreatingItAsR
 }
 
 TEST_F (SpecDiffTest, FollowsAnOperationIdWhosePathMovedRatherThanReportingADeleteAndAnAdd) {
-    const std::string next = document (json{
-    { "/pets",
-    json{ { "get", json{ { "operationId", "listPets" }, { "summary", "List pets" } } },
-    { "post", json{ { "operationId", "createPet" }, { "summary", "Create a pet" },
-    { "requestBody", json_body (json{ { "name", json{ { "type", "string" } } } }) } } } } },
-    { "/animals/{petId}",
-    json{ { "get", json{ { "operationId", "getPet" }, { "summary", "Get a pet" } } } } } });
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    R"(},"/animals/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
 
@@ -325,13 +324,9 @@ TEST_F (SpecDiffTest, FollowsAnOperationIdWhosePathMovedRatherThanReportingADele
 }
 
 TEST_F (SpecDiffTest, FollowsAPathWhoseOperationIdMovedAndReportsARenameWithNoFieldChange) {
-    const std::string next = document (json{
-    { "/pets",
-    json{ { "get", json{ { "operationId", "listPets" }, { "summary", "List pets" } } },
-    { "post", json{ { "operationId", "createPet" }, { "summary", "Create a pet" },
-    { "requestBody", json_body (json{ { "name", json{ { "type", "string" } } } }) } } } } },
-    { "/pets/{petId}",
-    json{ { "get", json{ { "operationId", "readPet" }, { "summary", "Get a pet" } } } } } });
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    R"(},"/pets/{petId}":{"get":{"operationId":"readPet","summary":"Get a pet"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
 
@@ -347,13 +342,9 @@ TEST_F (SpecDiffTest, FollowsAPathWhoseOperationIdMovedAndReportsARenameWithNoFi
 }
 
 TEST_F (SpecDiffTest, DisclosesAnOperationWhoseIdAndPathBothMovedAsARemovalAndAnAddition) {
-    const std::string next = document (json{
-    { "/pets",
-    json{ { "get", json{ { "operationId", "listPets" }, { "summary", "List pets" } } },
-    { "post", json{ { "operationId", "createPet" }, { "summary", "Create a pet" },
-    { "requestBody", json_body (json{ { "name", json{ { "type", "string" } } } }) } } } } },
-    { "/animals/{animalId}",
-    json{ { "get", json{ { "operationId", "readAnimal" }, { "summary", "Get an animal" } } } } } });
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    R"(},"/animals/{animalId}":{"get":{"operationId":"readAnimal","summary":"Get an animal"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
 
@@ -369,9 +360,9 @@ TEST_F (SpecDiffTest, TreatsARenamedPathParameterAsTheSameEndpoint) {
     // identity - and `{petId}` -> `{id}` is the same position on the server,
     // which is the rule the matcher already binds by.
     const std::vector<SpecRequestDraft> bound =
-    drafts_of (document (json{ { "/pets/{petId}", json{ { "get", json{ { "summary", "Get a pet" } } } } } }));
+    drafts_of (document (R"({"/pets/{petId}":{"get":{"summary":"Get a pet"}}})"));
     const std::vector<SpecRequestDraft> fetched =
-    drafts_of (document (json{ { "/pets/{id}", json{ { "get", json{ { "summary", "Get a pet" } } } } } }));
+    drafts_of (document (R"({"/pets/{id}":{"get":{"summary":"Get a pet"}}})"));
 
     const SpecDiff diff =
     vayu::core::diff_spec (fetched, &bound, { request_from ("req_0", bound[0]) });
@@ -387,16 +378,11 @@ TEST_F (SpecDiffTest, TreatsARenamedPathParameterAsTheSameEndpoint) {
 // ---------------------------------------------------------------------------
 
 TEST_F (SpecDiffTest, NamesEveryFieldTheDocumentMovedWithTheValueItWouldWrite) {
-    const std::string next = document (json{
-    { "/pets",
-    json{ { "get",
-    json{ { "operationId", "listPets" }, { "summary", "List all the pets" },
-    { "parameters", json::array ({ json{ { "name", "limit" }, { "in", "query" },
-                                  { "required", true }, { "example", "10" } } }) } } },
-    { "post", json{ { "operationId", "createPet" }, { "summary", "Create a pet" },
-    { "requestBody", json_body (json{ { "name", json{ { "type", "string" } } } }) } } } } },
-    { "/pets/{petId}",
-    json{ { "get", json{ { "operationId", "getPet" }, { "summary", "Get a pet" } } } } } });
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List all the pets",)"
+    R"("parameters":[{"name":"limit","in":"query","required":true,"example":"10"}]},)" +
+    CREATE_PET +
+    R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
     const auto* listed  = changed_with_id (diff, "listPets");
@@ -412,14 +398,11 @@ TEST_F (SpecDiffTest, NamesEveryFieldTheDocumentMovedWithTheValueItWouldWrite) {
 }
 
 TEST_F (SpecDiffTest, ReportsTheBodyAChangedSchemaNowProduces) {
-    const std::string next = document (json{
-    { "/pets",
-    json{ { "get", json{ { "operationId", "listPets" }, { "summary", "List pets" } } },
-    { "post", json{ { "operationId", "createPet" }, { "summary", "Create a pet" },
-    { "requestBody", json_body (json{ { "name", json{ { "type", "string" } } },
-                     { "tag", json{ { "type", "string" } } } }) } } } } },
-    { "/pets/{petId}",
-    json{ { "get", json{ { "operationId", "getPet" }, { "summary", "Get a pet" } } } } } });
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)"
+    R"("post":{"operationId":"createPet","summary":"Create a pet",)" +
+    json_body (R"("name":{"type":"string"},"tag":{"type":"string"})") +
+    R"(}},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
     const auto* created = changed_with_id (diff, "createPet");
@@ -432,12 +415,9 @@ TEST_F (SpecDiffTest, ReportsTheBodyAChangedSchemaNowProduces) {
 TEST_F (SpecDiffTest, FlagsAFieldTheUserEditedAwayFromTheBoundDocumentsValue) {
     auto edited = request_from ("req_0", draft_of (bound_, "listPets"));
     edited.url  = "{{baseUrl}}/pets?limit=5";
-    const std::string next = document (json{
-    { "/pets",
-    json{ { "get",
-    json{ { "operationId", "listPets" }, { "summary", "List pets" },
-    { "parameters", json::array ({ json{ { "name", "limit" }, { "in", "query" },
-                                  { "required", true }, { "example", "50" } } }) } } } } } });
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
+    R"("parameters":[{"name":"limit","in":"query","required":true,"example":"50"}]}}})");
 
     const SpecDiff diff = diff_against (next, { edited });
 
@@ -454,12 +434,9 @@ TEST_F (SpecDiffTest, DoesNotFlagAFieldOnlyTheDocumentMoved) {
     // *new* document instead of the bound one and this flags, which would have
     // the apply refuse to write a change nobody had touched.
     const auto untouched   = request_from ("req_0", draft_of (bound_, "listPets"));
-    const std::string next = document (json{
-    { "/pets",
-    json{ { "get",
-    json{ { "operationId", "listPets" }, { "summary", "List pets" },
-    { "parameters", json::array ({ json{ { "name", "limit" }, { "in", "query" },
-                                  { "required", true }, { "example", "50" } } }) } } } } } });
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
+    R"("parameters":[{"name":"limit","in":"query","required":true,"example":"50"}]}}})");
 
     const SpecDiff diff = diff_against (next, { untouched });
 
@@ -472,8 +449,8 @@ TEST_F (SpecDiffTest, DoesNotFlagAFieldOnlyTheDocumentMoved) {
 TEST_F (SpecDiffTest, MakesNoClaimAboutWhoEditedWhatWhenTheBoundDocumentCannotBeRead) {
     auto edited = request_from ("req_0", draft_of (bound_, "listPets"));
     edited.name = "My list call";
-    const std::vector<SpecRequestDraft> fetched = drafts_of (document (json{
-    { "/pets", json{ { "get", json{ { "operationId", "listPets" }, { "summary", "List pets" } } } } } }));
+    const std::vector<SpecRequestDraft> fetched = drafts_of (
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"}}})"));
 
     const SpecDiff diff = vayu::core::diff_spec (fetched, nullptr, { edited });
 
@@ -507,13 +484,10 @@ TEST_F (SpecDiffTest, ReportsARequestTheUserEditedAsDivergenceFlaggedAsTheirs) {
  * and adding `examples` to the compared set reddens this.
  */
 TEST_F (SpecDiffTest, DoesNotCompareTheResponsesADocumentDocuments) {
-    const std::string next = document (json{
-    { "/pets",
-    json{ { "get",
-    json{ { "operationId", "listPets" }, { "summary", "List pets" },
-    { "responses", json{ { "200", json{ { "description", "Every pet" },
-                          { "content", json{ { "application/json",
-                          json{ { "schema", json{ { "type", "string" } } } } } } } } } } } } } } } });
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
+    R"("responses":{"200":{"description":"Every pet",)"
+    R"("content":{"application/json":{"schema":{"type":"string"}}}}}}}})");
 
     const std::vector<SpecRequestDraft> fetched = drafts_of (next);
     ASSERT_EQ (fetched.size (), 1u);
@@ -538,9 +512,9 @@ TEST_F (SpecDiffTest, DoesNotCompareTheResponsesADocumentDocuments) {
  */
 TEST_F (SpecDiffTest, TruncatesADisplayedValueWithoutTruncatingTheComparedOne) {
     const std::string long_a (400, 'a');
-    const std::string next = document (json{
-    { "/pets", json{ { "get", json{ { "operationId", "listPets" }, { "summary", "List pets" },
-                       { "description", long_a } } } } } });
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets","description":")" +
+    long_a + R"("}}})");
 
     const SpecDiff diff =
     diff_against (next, { request_from ("req_0", draft_of (bound_, "listPets")) });
@@ -554,9 +528,9 @@ TEST_F (SpecDiffTest, TruncatesADisplayedValueWithoutTruncatingTheComparedOne) {
 
     // And a second document differing from the first only past the cut is still
     // a change: the compared value is the whole string.
-    const std::string longer = document (json{
-    { "/pets", json{ { "get", json{ { "operationId", "listPets" }, { "summary", "List pets" },
-                       { "description", long_a + "b" } } } } } });
+    const std::string longer = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets","description":")" +
+    long_a + R"(b"}}})");
     const std::vector<SpecRequestDraft> a = drafts_of (next);
     const std::vector<SpecRequestDraft> b = drafts_of (longer);
     auto request       = request_from ("req_0", a[0]);
@@ -598,10 +572,9 @@ class StubParameterTest : public ::testing::Test {
     std::vector<SpecRequestDraft> stub_;
 };
 
-const std::string StubParameterTest::STUB = document (json{
-{ "/pets", json{ { "get", json{ { "operationId", "listPets" }, { "summary", "List pets" },
-                   { "parameters", json::array ({ json{ { "name", "verbose" },
-                                                 { "in", "query" } } }) } } } } } });
+const std::string StubParameterTest::STUB = document (
+R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
+R"("parameters":[{"name":"verbose","in":"query"}]}}})");
 
 TEST_F (StubParameterTest, ImportsDisabledWhichIsWhatLeavesAnythingToSurvive) {
     ASSERT_EQ (stub_[0].draft.params.size (), 1u);
@@ -633,14 +606,10 @@ TEST_F (StubParameterTest, StillCallsTheFlipTheUsersWhenTheDocumentMovesTheParam
      * reads as untouched, gets ticked by default, and the sync writes the
      * document's list over the row somebody enabled.
      */
-    const std::vector<SpecRequestDraft> moved = drafts_of (document (json{
-    { "/pets",
-    json{ { "get",
-    json{ { "operationId", "listPets" }, { "summary", "List pets" },
-    { "parameters",
-    json::array ({ json{ { "name", "verbose" }, { "in", "query" } },
-    json{ { "name", "limit" }, { "in", "query" }, { "required", true },
-    { "example", "10" } } }) } } } } } }));
+    const std::vector<SpecRequestDraft> moved = drafts_of (document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets","parameters":[)"
+    R"({"name":"verbose","in":"query"},)"
+    R"({"name":"limit","in":"query","required":true,"example":"10"}]}}})"));
 
     const SpecDiff diff = vayu::core::diff_spec (moved, &stub_, { verbose_enabled () });
 
@@ -667,14 +636,10 @@ TEST_F (SpecDiffTest, ReportsTheUsersMethodEditAsTheirsSoAnApplyCannotTakeItBack
     auto edited_to_head   = request_from ("req_0", draft_of (bound_, "listPets"));
     edited_to_head.method = "HEAD";
 
-    const SpecDiff diff = diff_against (document (json{
-    { "/pets",
-    json{ { "get", json{ { "operationId", "listPets" }, { "summary", "List pets" },
-            { "description", "Paged." } } },
-    { "post", json{ { "operationId", "createPet" }, { "summary", "Create a pet" },
-    { "requestBody", json_body (json{ { "name", json{ { "type", "string" } } } }) } } } } },
-    { "/pets/{petId}",
-    json{ { "get", json{ { "operationId", "getPet" }, { "summary", "Get a pet" } } } } } }),
+    const SpecDiff diff = diff_against (
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
+    R"("description":"Paged."},)" + CREATE_PET +
+    R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})"),
     { edited_to_head });
 
     ASSERT_EQ (diff.changed.size (), 1u);
@@ -691,9 +656,8 @@ TEST_F (SpecDiffTest, ReportsTheUsersMethodEditAsTheirsSoAnApplyCannotTakeItBack
 TEST_F (SpecDiffTest, ReportsAMethodTheDocumentItselfMovedAsTheDocuments) {
     // Same operationId, different verb: the request is still followed (the id
     // leads), and the verb it should now send is offered like any other field.
-    const std::string moved = document (json{
-    { "/pets",
-    json{ { "post", json{ { "operationId", "listPets" }, { "summary", "List pets" } } } } } });
+    const std::string moved =
+    document (R"({"/pets":{"post":{"operationId":"listPets","summary":"List pets"}}})");
 
     const SpecDiff diff =
     diff_against (moved, { request_from ("req_0", draft_of (bound_, "listPets")) });
