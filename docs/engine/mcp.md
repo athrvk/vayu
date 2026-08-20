@@ -166,6 +166,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_collection`    | write    | `GET /collections` (scan, only when variables change) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
 | `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
+| `diff_spec`            | read     | `POST /specs/diff`                           | - (each bucket capped at 50 entries, with `summary` carrying the true totals; the per-entry `draft` is dropped) |
 | `bind_spec`            | write    | `POST /specs/bind`                           | write toggle; one transaction - stores the document, moves the binding, stamps what matched and **clears** what no longer does |
 | `export_spec`          | read     | `POST /specs/export`                         | - (document text capped at 32 KB, with `contentBytes` for the true size; `notes` says what the export could not carry) |
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept |
@@ -245,10 +246,13 @@ Notes:
   no such field - every transfer is bounded by the `defaultTimeout` setting
   (`resolve_request_timeout_ms`), which `update_engine_config` changes. Recorded
   here so it is not re-derived as a gap each time the schema is read.
-- **An agent can bind a collection to a spec now, and export one** (issues
-  [#862](https://github.com/athrvk/vayu/issues/862) and
-  [#855](https://github.com/athrvk/vayu/issues/855)); **spec sync and import
-  stay app-only.** `get_spec` says what a collection is bound to, `bind_spec`
+- **An agent can bind a collection to a spec now, export one, and ask whether a
+  contract has drifted** (issues
+  [#862](https://github.com/athrvk/vayu/issues/862),
+  [#855](https://github.com/athrvk/vayu/issues/855) and
+  [#871](https://github.com/athrvk/vayu/issues/871)); **applying a drift, and
+  import, stay app-only.** `get_spec` says what a collection is bound to,
+  `diff_spec` says what a re-fetched document would change about it, `bind_spec`
   binds one, `export_spec` writes it back out as a document, and `unbind_spec`
   detaches it. `bind_spec` takes the document text and nothing else - no pairing
   - because everything it needs is engine-side after #761's phase B: the engine
@@ -266,6 +270,22 @@ Notes:
   The tool result reports `cleared` beside `stamped` for that reason - it is the
   half a caller would otherwise discover from a later run. `unbind_spec` still
   leaves stamps alone, so unbind-then-rebind of the same document costs nothing.
+- **`diff_spec` is the read half of a sync** (issue
+  [#871](https://github.com/athrvk/vayu/issues/871)). It sends the collection and
+  the candidate document and nothing else: the requests and the **bound**
+  document are the engine's to read, because a caller that could supply the
+  "previous" side of a three-way comparison could turn its own edits into the
+  document's. Three things about the answer are this tool's rather than the
+  route's. The per-entry `draft` is **dropped** - it is what an apply would
+  write, and `POST /specs/sync` re-reads it off the document it stores rather
+  than being handed it, so nothing on either side of the tool consumes it; the
+  rendered `current` / `next` pair, which is what says what moved, survives. Each
+  bucket is capped at 50 entries while `summary` keeps the engine's true totals,
+  so a document that renamed every operation comes back described rather than
+  whole. And a field flagged `userTouched` is named in the caveat sentence, not
+  just carried in the JSON: it is the one part of a drift an apply may not take
+  silently, and an agent reading "6 changed" would otherwise propose overwriting
+  somebody's edit.
 - **`get_run_report` carries contract coverage** for a run of a collection bound
   to an OpenAPI document (issue #629): which of the contract's operations the run
   exercised, which of their declared responses it saw, and any statuses the
@@ -1427,10 +1447,14 @@ builds on the mechanism the spec is deprecating and the payoff is client-depende
   provenance.
 - **`vayu mcp` bin** - package the stdio CLI as a first-class command
   ([#693](https://github.com/athrvk/vayu/issues/693)).
-- **OpenAPI bind / sync / import / export** - phase B of
-  [#761](https://github.com/athrvk/vayu/issues/761), gated on deciding where
-  operation matching, the sync diff and export assembly should live (see the
-  note under [Tools](#tools)).
+- **Applying a spec drift (`sync_spec`), and raw-document import** -
+  [#871](https://github.com/athrvk/vayu/issues/871). The rest of #761's phase B
+  shipped: bind, export and the drift read are tools, and match, diff and
+  assembly are all engine-side, so what is left is not the architecture question
+  this entry used to name. `sync_spec` waits on where the *selection* lives - the
+  rules in the renderer's `spec-apply.ts` that decide which fields an apply may
+  write - since `electron/` may not import `src/`. Import waits on the renderer's
+  parser stack, which is still a second reader of an OpenAPI document.
 - **Live push over HTTP** - stateful sessions (see Design notes).
 - **Hosted MCP for Vayu Cloud** - OAuth-gated, remote.
 
