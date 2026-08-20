@@ -90,51 +90,6 @@ TEST (SchemaValidationPayloadTest, CheckedAlwaysCarriesTheTotal) {
     EXPECT_EQ (node["failuresTotal"].get<size_t> (), 0u);
 }
 
-// ─── The write-path guard ───────────────────────────────────────────────────
-
-TEST (ResponseSchemaIndexWriteTest, AcceptsAWellFormedIndex) {
-    const auto index = json::parse (one_operation_index (pet_schema ()));
-    EXPECT_FALSE (validate_response_schemas_index (index, 1024 * 1024).has_value ());
-}
-
-TEST (ResponseSchemaIndexWriteTest, RefusesShapesNoReaderCouldUse) {
-    const size_t cap = 1024 * 1024;
-    EXPECT_TRUE (validate_response_schemas_index (json::array (), cap).has_value ());
-    EXPECT_TRUE (validate_response_schemas_index (json::object (), cap).has_value ());
-    EXPECT_TRUE (
-    validate_response_schemas_index (json{ { "operations", "nope" } }, cap).has_value ());
-    EXPECT_TRUE (validate_response_schemas_index (
-    json{ { "refRoots", "nope" }, { "operations", json::array () } }, cap)
-    .has_value ());
-
-    // A row missing the identity nothing could resolve it by.
-    const auto no_method = json{ { "operations",
-    json::array ({ json{ { "path", "/pets" }, { "responses", json::array () } } }) } };
-    EXPECT_TRUE (validate_response_schemas_index (no_method, cap).has_value ());
-
-    // A response whose schema is neither an object nor a boolean.
-    const auto bad_schema = json{ { "operations",
-    json::array ({ json{ { "method", "GET" }, { "path", "/pets" },
-    { "responses", json::array ({ json{ { "status", "200" },
-    { "contentType", "application/json" }, { "schema", "a string" } } }) } } }) } };
-    EXPECT_TRUE (validate_response_schemas_index (bad_schema, cap).has_value ());
-}
-
-TEST (ResponseSchemaIndexWriteTest, RefusalNamesTheCountAndTheCap) {
-    const auto index  = json::parse (one_operation_index (pet_schema ()));
-    const auto reason = validate_response_schemas_index (index, 10);
-    ASSERT_TRUE (reason.has_value ());
-    EXPECT_NE (reason->find ("over the limit of 10"), std::string::npos);
-    EXPECT_NE (reason->find ("maxSpecDocumentBytes"), std::string::npos);
-}
-
-TEST (ResponseSchemaIndexWriteTest, AcceptsABooleanSchema) {
-    // `false` is a legal JSON Schema and a real thing to declare: nothing
-    // validates here. Refusing it would refuse a valid contract.
-    const auto index = json::parse (one_operation_index (json (false)));
-    EXPECT_FALSE (validate_response_schemas_index (index, 1024 * 1024).has_value ());
-}
-
 // ─── Matching ───────────────────────────────────────────────────────────────
 
 TEST (ResponseSchemaIndexTest, ValidBodyPasses) {

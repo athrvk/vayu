@@ -142,7 +142,6 @@ export default function SpecTab({ collection }: SpecTabProps) {
 		} catch (e) {
 			return {
 				operations: [],
-				responseSchemas: undefined,
 				format: "",
 				title: "",
 				error: (e as Error).message,
@@ -226,12 +225,6 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					specOperation: operation,
 				})),
 				clearStamps: staleStamps,
-				// The response schema index (issue #628), so a response of a
-				// request in this collection can be checked against what the
-				// document declares for it. The declared-operation index is not
-				// sent: the engine reads the document it is storing and derives
-				// that itself (issue #853).
-				...(parsed?.responseSchemas ? { responseSchemas: parsed.responseSchemas } : {}),
 			},
 			{
 				onSuccess: () => {

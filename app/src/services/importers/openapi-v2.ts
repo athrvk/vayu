@@ -6,7 +6,6 @@
  */
 
 import type {
-	DeclaredResponseSchema,
 	SpecOperation,
 	FormFieldEntry,
 	HttpMethod,
@@ -38,7 +37,6 @@ import {
 	createOperationIdentifier,
 } from "./openapi-shared";
 import { countExamples, importedFilePart, unattachedFileParts } from "./shared";
-import { buildResponseSchemaIndex, responseSchemasV2 } from "./response-schemas";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
@@ -115,11 +113,6 @@ export class OpenApiV2Parser implements ImportParser {
 		// (issue #715), which needs the memory of every id already stamped.
 		const identify = createOperationIdentifier(tally);
 		let requestCount = 0;
-		// The response schema index (issue #628) - see the v3 parser. 2.0 states
-		// its media types per operation (`produces`) rather than per response,
-		// which `responseSchemasV2` is what accounts for.
-		const schemaOperations: { identity: SpecOperation; responses: DeclaredResponseSchema[] }[] =
-			[];
 
 		for (const [path, rawPathItem] of Object.entries(asRecord(spec.paths) ?? {})) {
 			const pathItem = resolvePathItem(rawPathItem, resolveRef);
@@ -133,12 +126,6 @@ export class OpenApiV2Parser implements ImportParser {
 				if (!op) continue;
 				requestCount += 1;
 				const identity = identify(method, path, op.operationId);
-				if (identity) {
-					schemaOperations.push({
-						identity,
-						responses: responseSchemasV2(op, spec, resolveRef),
-					});
-				}
 				const req = buildSwaggerOp(
 					method,
 					path,
@@ -153,8 +140,6 @@ export class OpenApiV2Parser implements ImportParser {
 			}
 		}
 
-		const responseSchemas = buildResponseSchemaIndex(spec, schemaOperations);
-
 		const root: CollectionDraft = {
 			name: asStr(prop(spec.info, "title")) ?? "Imported API",
 			description: asStr(prop(spec.info, "description")) ?? "",
@@ -167,10 +152,10 @@ export class OpenApiV2Parser implements ImportParser {
 			// The document itself, so the import can store it and bind this
 			// collection to it in the same atomic call (issue #637) - see the v3
 			// parser for why it is `raw` rather than a re-serialization, and for
-			// why the declared-operation index (issue #629) is not beside it.
+			// why neither the declared-operation index (issue #629) nor the
+			// response schema index (issue #628) is beside it.
 			spec: {
 				content: raw,
-				...(responseSchemas ? { responseSchemas } : {}),
 			},
 		};
 

@@ -1149,14 +1149,10 @@ export interface ImportApplySpec {
 	/** Absent when the document did not come from a URL (a file or a paste). */
 	sourceUrl?: string;
 	/**
-	 * The response schemas the document declares (issue #628), stored beside it
-	 * so a response can be checked against its contract. Absent for a document
-	 * that declares none, which the engine stores as "no index" - a response of
-	 * it reports that nothing checked it, never that it passed. The
-	 * declared-operation index (issue #629) is derived engine-side from the
-	 * document itself (issue #853), so it is not sent here either.
+	 * Neither index is sent: the engine reads the document this section stores
+	 * and derives the declared operations (issue #853) and the response schemas
+	 * (issue #860) from it, the way it computes the hash.
 	 */
-	responseSchemas?: ResponseSchemaIndex;
 }
 
 /**
@@ -1278,16 +1274,11 @@ export interface CreateSpecRequest {
 	content: string;
 	sourceUrl?: string | null;
 	/**
-	 * The declared-operation index (issue #629) is **not** a field here: the
-	 * engine reads the document it is storing and derives it (issue #853), the
-	 * way it computes the hash, and sending one is a `400`.
-	 *
-	 * The response schemas the document declares (issue #628) still are, stored
-	 * beside it so a response can be checked against its contract. Absent for a
-	 * document that declares none, which the engine stores as "no index" - a
-	 * response of it reports that nothing checked it, never that it passed.
+	 * Neither index is a field here: the engine reads the document it is storing
+	 * and derives the declared-operation index (issue #629, moved by #853) and
+	 * the response schema index (issue #628, moved by #860) from it, the way it
+	 * computes the hash. Sending either is a `400`.
 	 */
-	responseSchemas?: ResponseSchemaIndex;
 }
 
 // Spec sync (issue #655) - `POST /specs/sync` applies a re-fetched document to
@@ -1421,14 +1412,11 @@ export interface SpecSyncRequest {
 		content: string;
 		sourceUrl?: string | null;
 		/**
-		 * The re-fetched document's response schema index (issue #628). Sent on
-		 * every sync for the same reason the content is: the new document is a
-		 * new row, and a sync that omitted it would silently turn validation off
-		 * for a collection that had it. The declared-operation index (issue
-		 * #629) needs no carrying - the engine derives it from the document this
-		 * sync stores (issue #853).
+		 * Neither index is carried: a sync writes a *new* `spec_documents` row,
+		 * and the engine derives both from the document that row stores (issues
+		 * #853 and #860), so there is nothing for a sync to forget and silently
+		 * turn coverage or validation off with.
 		 */
-		responseSchemas?: ResponseSchemaIndex;
 	};
 	collections: SpecSyncCollection[];
 	create: SpecSyncCreate[];

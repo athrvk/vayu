@@ -344,6 +344,29 @@ class Converter {
     }
 };
 
+/**
+ * The JSON branch's half of the depth promise.
+ *
+ * The YAML walk enforces `MAX_READ_DEPTH` as it converts; a JSON document is
+ * handed to nlohmann whole, whose parser is iterative and so has no depth of
+ * its own to run out of - but every reader *below* here recurses, and the schema
+ * translation recurses over exactly the subtrees an attacker chooses the shape
+ * of. So the same bound is checked once, on the way in, rather than by each
+ * reader guessing at its own.
+ */
+void check_json_depth (const nlohmann::ordered_json& node, size_t depth) {
+    if (depth > limits::MAX_READ_DEPTH) {
+        throw ReadFailure ("document nests deeper than " +
+        std::to_string (limits::MAX_READ_DEPTH) + " levels");
+    }
+    if (!node.is_structured ()) {
+        return;
+    }
+    for (const auto& child : node) {
+        check_json_depth (child, depth + 1);
+    }
+}
+
 /// The node budget for @p text - see `read_document`'s contract.
 size_t node_budget_for (size_t bytes) {
     if (bytes >= limits::MAX_READ_NODES - limits::READ_NODES_FLOOR) {
@@ -372,6 +395,12 @@ const nlohmann::ordered_json* find_object (const nlohmann::ordered_json& node, c
 std::string upper (std::string value) {
     std::transform (value.begin (), value.end (), value.begin (),
     [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
+    return value;
+}
+
+std::string lower (std::string value) {
+    std::transform (value.begin (), value.end (), value.begin (),
+    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
     return value;
 }
 
@@ -445,12 +474,21 @@ resolve_ref (const nlohmann::ordered_json& document, const std::string& ref) {
     return node;
 }
 
-/// A Path Item Object that is itself `{"$ref": ...}`, resolved one hop - the
-/// shape a bundler emits when it hoists a shared path item into
-/// `components.pathItems`. `nullptr` when there is nothing to read methods off,
-/// which drops the path rather than looping over a non-object.
+/**
+ * A node that may be `{"$ref": ...}` standing in for the real one, resolved one
+ * hop. `nullptr` when there is nothing behind it, which drops what was being
+ * read rather than walking a `$ref` node as though it were the thing it names.
+ *
+ * Both places a document writes this shape: a Path Item Object hoisted into
+ * `components.pathItems` by a bundler, whose absence drops every operation under
+ * that path, and a Response Object hoisted into `components.responses` (issue
+ * #714) - the form GitHub's public spec uses for nearly every response.
+ *
+ * Single-hop, like every ref the import parsers follow: a ref to a ref is not a
+ * shape generators emit, and chasing one needs a cycle guard.
+ */
 const nlohmann::ordered_json*
-resolve_path_item (const nlohmann::ordered_json& document, const nlohmann::ordered_json& item) {
+resolve_single_hop (const nlohmann::ordered_json& document, const nlohmann::ordered_json& item) {
     if (!item.is_object ()) {
         return nullptr;
     }
@@ -603,6 +641,369 @@ void emit_seq (const nlohmann::ordered_json& node, size_t indent, std::string& o
     }
 }
 
+/// One operation the document declares, as both indexes see it: the identity
+/// the operation index stores and the node the schema index reads. Produced by
+/// one walk so the two cannot disagree about which operations exist, which of
+/// them owns an `operationId`, or which statuses one declares.
+struct WalkedOperation {
+    DeclaredOperation identity;
+    const nlohmann::ordered_json* node;
+};
+
+std::vector<WalkedOperation> walk_operations (const nlohmann::ordered_json& document) {
+    std::vector<WalkedOperation> walked;
+    if (!is_openapi (document)) {
+        return walked;
+    }
+    const nlohmann::ordered_json* paths = find_object (document, "paths");
+    if (paths == nullptr) {
+        return walked;
+    }
+
+    /// Every `operationId` already stamped, so a repeated one is kept on its
+    /// first declaration only (issue #715).
+    std::unordered_set<std::string> claimed_ids;
+
+    for (auto entry = paths->begin (); entry != paths->end (); ++entry) {
+        const std::string& path             = entry.key ();
+        const nlohmann::ordered_json* item = resolve_single_hop (document, entry.value ());
+        if (item == nullptr) {
+            continue;
+        }
+        for (const char* method : HTTP_METHODS) {
+            const nlohmann::ordered_json* operation = find_object (*item, method);
+            if (operation == nullptr) {
+                continue;
+            }
+            if (path.empty () || path[0] != '/') {
+                // A `paths` key that is not a path: the request an import builds
+                // for it carries no identity either, so neither does this index.
+                continue;
+            }
+            DeclaredOperation row;
+            row.method = upper (method);
+            row.path   = path;
+            if (const auto id = operation->find ("operationId");
+                id != operation->end () && id->is_string () && !id->get<std::string> ().empty ()) {
+                const std::string operation_id = id->get<std::string> ();
+                if (claimed_ids.insert (operation_id).second) {
+                    row.operation_id = operation_id;
+                }
+            }
+            row.responses = declared_responses_of (*operation);
+            walked.push_back ({ std::move (row), operation });
+        }
+    }
+    return walked;
+}
+
+/// Where #649's bundler inlines the external files a document referenced.
+constexpr const char* BUNDLED_KEY = "x-vayu-bundled";
+
+/**
+ * Keys OpenAPI adds to its schema language that a JSON Schema validator has
+ * never heard of. Dropped rather than passed through: each one is either
+ * documentation (`example`, `externalDocs`, `xml`) or a serialization concern
+ * (`discriminator`), and none of them constrains a body.
+ *
+ * `nullable` is deliberately absent - it *does* constrain a body, so it is
+ * translated rather than dropped.
+ */
+constexpr std::array<std::string_view, 4> OPENAPI_ONLY_KEYS = { "discriminator", "xml",
+    "externalDocs", "example" };
+
+/**
+ * Where a keyword's value is itself a schema, or a list of them - one branch,
+ * because translating a list is translating each entry of it and the walk below
+ * already does that for any array it is handed.
+ */
+constexpr std::array<std::string_view, 15> SUBSCHEMA_KEYS = { "not", "if", "then", "else",
+    "contains", "additionalProperties", "propertyNames", "additionalItems", "unevaluatedItems",
+    "unevaluatedProperties", "items", "allOf", "anyOf", "oneOf", "prefixItems" };
+
+/// Where a keyword holds a map of subschemas keyed by *data* names - the values
+/// are schemas, the keys are a body's field names and mean nothing here.
+constexpr std::array<std::string_view, 5> SUBSCHEMA_MAP_KEYS = { "properties",
+    "patternProperties", "definitions", "$defs", "dependentSchemas" };
+
+template <size_t N>
+bool holds (const std::array<std::string_view, N>& keys, const std::string& key) {
+    return std::find (keys.begin (), keys.end (), key) != keys.end ();
+}
+
+/**
+ * Translate one schema - and everything below it - out of OpenAPI's dialect and
+ * into JSON Schema.
+ *
+ * Recursion is over the *document's* structure, which is finite and bounded by
+ * `MAX_READ_DEPTH`: a `$ref` is copied as-is rather than followed, so a
+ * recursive schema terminates here for the same reason it terminates in storage.
+ */
+nlohmann::ordered_json to_json_schema (const nlohmann::ordered_json& schema) {
+    if (schema.is_array ()) {
+        nlohmann::ordered_json out = nlohmann::ordered_json::array ();
+        for (const auto& entry : schema) {
+            out.push_back (to_json_schema (entry));
+        }
+        return out;
+    }
+    // `true` / `false` are legal schemas, and any non-object leaf (a `type`
+    // string, a `maxLength` number) is carried through untouched.
+    if (!schema.is_object ()) {
+        return schema;
+    }
+
+    nlohmann::ordered_json out = nlohmann::ordered_json::object ();
+    for (auto entry = schema.begin (); entry != schema.end (); ++entry) {
+        const std::string& key             = entry.key ();
+        const nlohmann::ordered_json& value = entry.value ();
+        // `nullable` is handled below, once, against whatever `type` ends up
+        // being - doing it here would depend on key order.
+        if (holds (OPENAPI_ONLY_KEYS, key) || key == "nullable") {
+            continue;
+        }
+        if (key == "exclusiveMinimum" || key == "exclusiveMaximum") {
+            // draft-04 (and so OpenAPI 3.0) spells these as booleans modifying
+            // `minimum`/`maximum`; draft-07 spells them as the bound itself. A
+            // boolean left as-is is not a stricter check, it is a different one.
+            if (value.is_boolean ()) {
+                const auto bound =
+                schema.find (key == "exclusiveMinimum" ? "minimum" : "maximum");
+                if (value.get<bool> () && bound != schema.end () && bound->is_number ()) {
+                    out[key] = *bound;
+                }
+                // `exclusiveMinimum: true` with no bound leaves `minimum` doing
+                // the non-exclusive job the document did not ask for - but
+                // dropping `minimum` too would lose a constraint the document
+                // *did* state. Keeping it is the conservative half of the two.
+                continue;
+            }
+            out[key] = value;
+            continue;
+        }
+        if (holds (SUBSCHEMA_KEYS, key)) {
+            out[key] = to_json_schema (value);
+            continue;
+        }
+        if (holds (SUBSCHEMA_MAP_KEYS, key)) {
+            if (!value.is_object ()) {
+                out[key] = value;
+                continue;
+            }
+            nlohmann::ordered_json translated = nlohmann::ordered_json::object ();
+            for (auto child = value.begin (); child != value.end (); ++child) {
+                translated[child.key ()] = to_json_schema (child.value ());
+            }
+            out[key] = std::move (translated);
+            continue;
+        }
+        out[key] = value;
+    }
+
+    const auto nullable = schema.find ("nullable");
+    if (nullable == schema.end () || !nullable->is_boolean () || !nullable->get<bool> ()) {
+        return out;
+    }
+    const auto type = out.find ("type");
+    if (type == out.end ()) {
+        // With no `type` at all, `nullable` constrains nothing: every JSON value
+        // was already allowed, null included.
+        return out;
+    }
+    if (type->is_string ()) {
+        *type = nlohmann::ordered_json::array ({ type->get<std::string> (), "null" });
+        return out;
+    }
+    if (type->is_array () &&
+    std::none_of (type->begin (), type->end (), [] (const nlohmann::ordered_json& name) {
+        return name.is_string () && name.get<std::string> () == "null";
+    })) {
+        type->push_back ("null");
+    }
+    return out;
+}
+
+/// Each value of a name-keyed schema map, translated. The map itself is not a
+/// schema - running the translation over the container would walk no further
+/// than the container, which is how a `$ref`-ed 3.0 schema kept its `nullable`
+/// and produced a wrong verdict for every null the document permits.
+nlohmann::ordered_json map_schemas (const nlohmann::ordered_json& map) {
+    nlohmann::ordered_json out = nlohmann::ordered_json::object ();
+    for (auto entry = map.begin (); entry != map.end (); ++entry) {
+        out[entry.key ()] = to_json_schema (entry.value ());
+    }
+    return out;
+}
+
+/**
+ * The subtrees an in-document `$ref` may resolve into, translated once per
+ * document so a `$ref`-ed schema is in the same dialect as an inline one.
+ *
+ * `null` when the document has none, which stores no `refRoots` at all rather
+ * than an empty object.
+ *
+ * The rest of `components` - responses, parameters, examples, headers - is
+ * deliberately dropped rather than carried: a schema `$ref` resolves to a
+ * schema, so nothing here can point at them, and they are pure weight against
+ * the byte cap the index shares with the document.
+ */
+nlohmann::ordered_json ref_roots_of (const nlohmann::ordered_json& document) {
+    nlohmann::ordered_json roots = nlohmann::ordered_json::object ();
+
+    if (const nlohmann::ordered_json* components = find_object (document, "components")) {
+        if (const nlohmann::ordered_json* schemas = find_object (*components, "schemas")) {
+            nlohmann::ordered_json carried = nlohmann::ordered_json::object ();
+            carried["schemas"] = map_schemas (*schemas);
+            roots["components"] = std::move (carried);
+        }
+    }
+    if (const nlohmann::ordered_json* definitions = find_object (document, "definitions")) {
+        roots["definitions"] = map_schemas (*definitions);
+    }
+
+    // A bundled file (#649) is a whole document inlined under its slug, and a
+    // ref into it keeps that document's own shape - so each is reduced by this
+    // same rule. One that carries neither container *is* a schema document (a
+    // bare `pet.yaml`), and is translated as one.
+    if (const nlohmann::ordered_json* bundled = find_object (document, BUNDLED_KEY)) {
+        nlohmann::ordered_json inlined = nlohmann::ordered_json::object ();
+        for (auto entry = bundled->begin (); entry != bundled->end (); ++entry) {
+            if (!entry.value ().is_object ()) {
+                continue;
+            }
+            nlohmann::ordered_json nested = ref_roots_of (entry.value ());
+            inlined[entry.key ()] =
+            nested.is_null () ? to_json_schema (entry.value ()) : std::move (nested);
+        }
+        if (!inlined.empty ()) {
+            roots[BUNDLED_KEY] = std::move (inlined);
+        }
+    }
+
+    return roots.empty () ? nlohmann::ordered_json (nullptr) : roots;
+}
+
+/// One `{status, contentType, schema}` row of the index.
+nlohmann::ordered_json
+declared_response (const std::string& status, std::string content_type, const nlohmann::ordered_json& schema) {
+    nlohmann::ordered_json row;
+    row["status"]      = status;
+    row["contentType"] = std::move (content_type);
+    row["schema"]      = to_json_schema (schema);
+    return row;
+}
+
+/// A schema position that holds something JSON Schema cannot read - `null`, a
+/// string, a number - declares nothing checkable. Skipped like an absent one:
+/// storing the row would put a value in the index no validator can use, and
+/// refusing the whole document would block an import over one malformed
+/// response. Only an object and the two boolean schemas are schemas.
+bool is_schema (const nlohmann::ordered_json& node) {
+    return node.is_object () || node.is_boolean ();
+}
+
+/**
+ * An OpenAPI 3.x operation's declared response schemas.
+ *
+ * Every media type is kept, not just the JSON one: what can be validated is
+ * decided at response time by what the server actually sent, and a document
+ * declaring both `application/json` and `application/xml` describes two real
+ * responses. A media type whose response declares no schema is skipped - there
+ * is nothing to check against, and an empty schema would claim everything is
+ * valid.
+ */
+nlohmann::ordered_json
+response_schemas_v3 (const nlohmann::ordered_json& document, const nlohmann::ordered_json& operation) {
+    nlohmann::ordered_json declared = nlohmann::ordered_json::array ();
+    const nlohmann::ordered_json* responses = find_object (operation, "responses");
+    if (responses == nullptr) {
+        return declared;
+    }
+    for (auto entry = responses->begin (); entry != responses->end (); ++entry) {
+        if (entry.key ().empty ()) {
+            continue;
+        }
+        const nlohmann::ordered_json* response = resolve_single_hop (document, entry.value ());
+        if (response == nullptr) {
+            continue;
+        }
+        const nlohmann::ordered_json* content = find_object (*response, "content");
+        if (content == nullptr) {
+            continue;
+        }
+        for (auto media = content->begin (); media != content->end (); ++media) {
+            if (!media.value ().is_object ()) {
+                continue;
+            }
+            const auto schema = media.value ().find ("schema");
+            if (schema == media.value ().end () || !is_schema (*schema)) {
+                continue;
+            }
+            declared.push_back (declared_response (entry.key (), lower (media.key ()), *schema));
+        }
+    }
+    return declared;
+}
+
+/**
+ * The media types a Swagger 2.0 operation produces: its own `produces`, the
+ * document's when it states none, and JSON when neither does. 2.0 states them
+ * once for the whole operation and the schema once per response, so one
+ * response declares the same schema for each type it produces.
+ */
+std::vector<std::string>
+produced_media_types (const nlohmann::ordered_json& document, const nlohmann::ordered_json& operation) {
+    const nlohmann::ordered_json* produces = nullptr;
+    if (const auto own = operation.find ("produces");
+        own != operation.end () && own->is_array ()) {
+        produces = &(*own);
+    } else if (const auto shared = document.find ("produces");
+               shared != document.end () && shared->is_array ()) {
+        produces = &(*shared);
+    }
+
+    std::vector<std::string> types;
+    if (produces != nullptr) {
+        for (const auto& type : *produces) {
+            if (type.is_string () && !type.get<std::string> ().empty ()) {
+                types.push_back (lower (type.get<std::string> ()));
+            }
+        }
+    }
+    if (types.empty ()) {
+        types.emplace_back ("application/json");
+    }
+    return types;
+}
+
+/// A Swagger 2.0 operation's declared response schemas.
+nlohmann::ordered_json
+response_schemas_v2 (const nlohmann::ordered_json& document, const nlohmann::ordered_json& operation) {
+    nlohmann::ordered_json declared = nlohmann::ordered_json::array ();
+    const nlohmann::ordered_json* responses = find_object (operation, "responses");
+    if (responses == nullptr) {
+        return declared;
+    }
+    const std::vector<std::string> media_types = produced_media_types (document, operation);
+    for (auto entry = responses->begin (); entry != responses->end (); ++entry) {
+        if (entry.key ().empty ()) {
+            continue;
+        }
+        const nlohmann::ordered_json* response = resolve_single_hop (document, entry.value ());
+        if (response == nullptr) {
+            continue;
+        }
+        const auto schema = response->find ("schema");
+        if (schema == response->end () || !is_schema (*schema)) {
+            continue;
+        }
+        for (const std::string& content_type : media_types) {
+            declared.push_back (declared_response (entry.key (), content_type, *schema));
+        }
+    }
+    return declared;
+}
+
 } // namespace
 
 std::string emit_yaml (const nlohmann::ordered_json& document) {
@@ -632,6 +1033,12 @@ DocumentRead read_document (const std::string& text) {
     nlohmann::ordered_json parsed =
     nlohmann::ordered_json::parse (text, /*cb=*/nullptr, /*allow_exceptions=*/false);
     if (!parsed.is_discarded ()) {
+        try {
+            check_json_depth (parsed, 0);
+        } catch (const ReadFailure& failure) {
+            result.error = failure.what ();
+            return result;
+        }
         result.root = std::move (parsed);
         return result;
     }
@@ -656,82 +1063,96 @@ DocumentRead read_document (const std::string& text) {
 
 std::vector<DeclaredOperation> declared_operations_of (const nlohmann::ordered_json& document) {
     std::vector<DeclaredOperation> declared;
-    if (!is_openapi (document)) {
-        return declared;
-    }
-    const nlohmann::ordered_json* paths = find_object (document, "paths");
-    if (paths == nullptr) {
-        return declared;
-    }
-
-    /// Every `operationId` already stamped, so a repeated one is kept on its
-    /// first declaration only (issue #715).
-    std::unordered_map<std::string, bool> claimed_ids;
-
-    for (auto entry = paths->begin (); entry != paths->end (); ++entry) {
-        const std::string& path = entry.key ();
-        const nlohmann::ordered_json* item = resolve_path_item (document, entry.value ());
-        if (item == nullptr) {
-            continue;
-        }
-        for (const char* method : HTTP_METHODS) {
-            const nlohmann::ordered_json* operation = find_object (*item, method);
-            if (operation == nullptr) {
-                continue;
-            }
-            if (path.empty () || path[0] != '/') {
-                // A `paths` key that is not a path: the request an import builds
-                // for it carries no identity either, so neither does this index.
-                continue;
-            }
-            DeclaredOperation row;
-            row.method = upper (method);
-            row.path   = path;
-            if (const auto id = operation->find ("operationId");
-                id != operation->end () && id->is_string () && !id->get<std::string> ().empty ()) {
-                const std::string operation_id = id->get<std::string> ();
-                if (claimed_ids.emplace (operation_id, true).second) {
-                    row.operation_id = operation_id;
-                }
-            }
-            row.responses = declared_responses_of (*operation);
-            declared.push_back (std::move (row));
-        }
+    for (WalkedOperation& walked : walk_operations (document)) {
+        declared.push_back (std::move (walked.identity));
     }
     return declared;
 }
 
-OperationsIndex derive_operations_index (const std::string& text) {
-    OperationsIndex index;
-    const DocumentRead read = read_document (text);
-    if (!read.ok ()) {
-        index.error = "Invalid 'content': " + read.error;
-        return index;
+nlohmann::ordered_json response_schemas_of (const nlohmann::ordered_json& document) {
+    // Which dialect to read is `is_openapi`'s question already answered: a
+    // document it accepts declares `openapi: 3.x` or it is a 2.0 one, and one it
+    // refuses walks no operations at all.
+    const auto version = document.find ("openapi");
+    const bool v3 = version != document.end () && version->is_string () &&
+    version->get<std::string> ().rfind ("3.", 0) == 0;
+
+    nlohmann::ordered_json rows = nlohmann::ordered_json::array ();
+    for (const WalkedOperation& walked : walk_operations (document)) {
+        nlohmann::ordered_json responses = v3 ? response_schemas_v3 (document, *walked.node) :
+                                                response_schemas_v2 (document, *walked.node);
+        if (responses.empty ()) {
+            continue;
+        }
+        nlohmann::ordered_json row;
+        if (!walked.identity.operation_id.empty ()) {
+            row["operationId"] = walked.identity.operation_id;
+        }
+        row["method"]    = walked.identity.method;
+        row["path"]      = walked.identity.path;
+        row["responses"] = std::move (responses);
+        rows.push_back (std::move (row));
+    }
+    if (rows.empty ()) {
+        return nullptr;
     }
 
-    const std::vector<DeclaredOperation> declared = declared_operations_of (read.root);
-    if (declared.empty ()) {
-        return index; // no index, which is not the same as an empty contract
+    nlohmann::ordered_json index = nlohmann::ordered_json::object ();
+    if (nlohmann::ordered_json roots = ref_roots_of (document); !roots.is_null ()) {
+        index["refRoots"] = std::move (roots);
     }
-    if (declared.size () > limits::MAX_OPERATIONS) {
-        index.error = "Spec declares " + std::to_string (declared.size ()) +
+    index["operations"] = std::move (rows);
+    return index;
+}
+
+SpecIndexes derive_spec_indexes (const std::string& text, size_t index_cap) {
+    SpecIndexes indexes;
+    const DocumentRead read = read_document (text);
+    if (!read.ok ()) {
+        indexes.error = "Invalid 'content': " + read.error;
+        return indexes;
+    }
+
+    const std::vector<WalkedOperation> walked = walk_operations (read.root);
+    if (walked.empty ()) {
+        return indexes; // no index, which is not the same as an empty contract
+    }
+    if (walked.size () > limits::MAX_OPERATIONS) {
+        indexes.error = "Spec declares " + std::to_string (walked.size ()) +
         " operations, over the limit of " + std::to_string (limits::MAX_OPERATIONS);
-        return index;
+        return indexes;
     }
 
     nlohmann::ordered_json rows = nlohmann::ordered_json::array ();
-    for (const DeclaredOperation& operation : declared) {
+    for (const WalkedOperation& operation : walked) {
         nlohmann::ordered_json row;
-        if (!operation.operation_id.empty ()) {
-            row["operationId"] = operation.operation_id;
+        if (!operation.identity.operation_id.empty ()) {
+            row["operationId"] = operation.identity.operation_id;
         }
-        row["method"]    = operation.method;
-        row["path"]      = operation.path;
-        row["responses"] = operation.responses;
+        row["method"]    = operation.identity.method;
+        row["path"]      = operation.identity.path;
+        row["responses"] = operation.identity.responses;
         rows.push_back (std::move (row));
     }
-    index.stored = rows.dump ();
-    return index;
+    indexes.operations = rows.dump ();
+
+    const nlohmann::ordered_json schemas = response_schemas_of (read.root);
+    if (schemas.is_null ()) {
+        return indexes;
+    }
+    std::string stored = schemas.dump ();
+    if (stored.size () > index_cap) {
+        // The document passed its own cap and its schemas did not: a document
+        // whose `components` are most of its bytes indexes to nearly its own
+        // size again. Named rather than truncated - an index silently cut short
+        // reports a body as unchecked with no reason a user can act on.
+        indexes.error = "Response schema index is " + std::to_string (stored.size ()) +
+        " bytes, over the limit of " + std::to_string (index_cap) +
+        " (raise the 'maxSpecDocumentBytes' setting to allow more)";
+        return indexes;
+    }
+    indexes.response_schemas = std::move (stored);
+    return indexes;
 }
 
 } // namespace vayu::core

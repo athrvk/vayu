@@ -374,7 +374,11 @@ describe("OpenApiV3Parser", () => {
 
 	describe("a spec whose responses live in components (issue #714)", () => {
 		// GitHub's shape: the response body lives in `components.responses` and
-		// the operation only points at it.
+		// the operation only points at it. What that shape does to the *schema*
+		// index is the engine's case now (issue #860,
+		// `openapi_document_test.cpp`); what is left here is the examples walk,
+		// which derefs the same entry and is the only reader that tallies a
+		// broken one.
 		const spec = {
 			openapi: "3.0.0",
 			paths: {
@@ -411,35 +415,9 @@ describe("OpenApiV3Parser", () => {
 			},
 		};
 
-		it("extracts a schema for a response that lives in components", () => {
-			// Coverage reads the status *keys* and so always saw the 404;
-			// extraction read the `$ref` node's absent `content` and saw nothing,
-			// so the two contradicted each other about one document on one run.
-			// Revert the deref and the 404 vanishes from the schema index while
-			// staying in the operation index the engine derives - which
-			// `declared-operations.conformance.test.ts` holds this same shape to.
-			const root = p.parse(spec, JSON.stringify(spec), opts).collections[0];
-			const indexed = root.spec!.responseSchemas!.operations.find(
-				(o) => o.path === "/repos/{owner}/{repo}"
-			)!;
-			expect(indexed.responses.map((r) => r.status)).toEqual(["200", "404"]);
-			expect(indexed.responses.find((r) => r.status === "404")).toEqual({
-				status: "404",
-				contentType: "application/json",
-				schema: { $ref: "#/components/schemas/basic_error" },
-			});
-			// The schema the `$ref`'d response points at has to be reachable, or
-			// the entry validates nothing - `refRoots` is where the engine looks.
-			expect(root.spec!.responseSchemas!.refRoots).toEqual({
-				components: {
-					schemas: { repo: { type: "object" }, basic_error: { type: "object" } },
-				},
-			});
-		});
-
 		it("counts a response `$ref` that resolves to nothing exactly once", () => {
-			// Two readers deref this entry - examples and schema extraction - and
-			// only the examples walk tallies. Counting in both would report one
+			// The examples walk is the one reader that tallies a broken response
+			// ref, and it must stay the only one: a second count would report one
 			// broken ref as two lost items in the import preview.
 			const broken = {
 				...spec,
@@ -455,8 +433,6 @@ describe("OpenApiV3Parser", () => {
 			};
 			const result = p.parse(broken, JSON.stringify(broken), opts);
 			expect(result.meta.skipped).toEqual([{ kind: "malformed_spec", count: 1 }]);
-			// And nothing half-extracted lands in the index.
-			expect(result.collections[0].spec!.responseSchemas).toBeUndefined();
 		});
 	});
 

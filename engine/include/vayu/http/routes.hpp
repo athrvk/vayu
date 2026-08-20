@@ -506,12 +506,11 @@ std::string spec_content_hash (const std::string& content);
 size_t spec_size_cap (vayu::db::Database& db);
 
 /**
- * Puts a spec write's two indexes onto @p spec - the `operations` index
- * (issue #629), **derived here from `spec.content`** (issue #853), and the
- * app-extracted `responseSchemas` index (issue #628) - returning the
- * caller-facing error when the document cannot be read or the supplied schema
- * index is malformed. A caller that sends `operations` gets a `400`: it is the
- * engine's to compute, like `hash`.
+ * Puts a spec write's two indexes onto @p spec - `operations` (issue #629) and
+ * `responseSchemas` (issue #628) - **both derived here from `spec.content`**
+ * (issues #853 and #860), returning the caller-facing error when the document
+ * cannot be read or its schema index is over the cap. A caller that sends
+ * either gets a `400`: they are the engine's to compute, like `hash`.
  *
  * One copy for all three writers - `POST /specs`, `POST /import/apply`'s spec
  * section and `POST /specs/sync` - because a document stored through one path
@@ -521,11 +520,11 @@ size_t spec_size_cap (vayu::db::Database& db);
  * not "declares nothing". Requires `spec.content` to be set already, which every
  * caller does before the hash. Defined in specs.cpp.
  *
- * @param schema_cap Bytes the serialized `responseSchemas` index may occupy -
+ * @param index_cap Bytes the serialized `responseSchemas` index may occupy -
  *        `spec_size_cap(db)`, the document's own cap rather than a second knob.
  */
 std::optional<std::string>
-read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, size_t schema_cap);
+read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, size_t index_cap);
 
 /**
  * Every collection at or beneath @p root, from one read of the table.

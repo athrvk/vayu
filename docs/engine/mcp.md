@@ -252,18 +252,18 @@ Notes:
   write but a match of every saved request against the document's operations,
   plus the indexes stored beside it. Phase B of #761 is moving what that needs
   into the engine, one piece at a time - `POST /specs/match` owns the matching
-  now, the engine reads the document and derives its **operation index** itself
-  (issue #853), so a bind over MCP would no longer leave a collection's runs
-  reporting no coverage, and `POST /specs/export` owns the assembly (issue
-  #855), which is what makes `export_spec` a tool at all. What still keeps
-  `bind_spec` out is the rest: the **response-schema index** is extracted by the
-  renderer (translating 3.0's dialect into JSON Schema, issue #860), so a bind
-  without it would leave every response of that collection unchecked, and a bind
-  must also clear any stamp from a previously bound document, where coverage
+  now, the engine reads the document and derives **both** indexes stored beside
+  it - the operation index (issue #853) and the response-schema index, dialect
+  translation included (issue #860) - so a document stored by an agent that
+  sends nothing but bytes already reports coverage and validates responses, and
+  `POST /specs/export` owns the assembly (issue #855), which is what makes
+  `export_spec` a tool at all. What still keeps `bind_spec` out is the stamping:
+  a bind must clear any stamp from a previously bound document, where coverage
   resolves it by `operationId` and it claims the wrong operation rather than
-  none. Until those land, bind a spec in Vayu (Collection → Spec). `unbind_spec`
+  none. Until that lands, bind a spec in Vayu (Collection → Spec). `unbind_spec`
   and `export_spec` need none of it, which is why they ship: one writes exactly
-  what the app's Unbind button writes, and the other writes nothing at all.
+  what the app's Unbind button writes and leaves the stamps alone, so re-binding
+  the same document later costs nothing, and the other writes nothing at all.
 - **`get_run_report` carries contract coverage** for a run of a collection bound
   to an OpenAPI document (issue #629): which of the contract's operations the run
   exercised, which of their declared responses it saw, and any statuses the

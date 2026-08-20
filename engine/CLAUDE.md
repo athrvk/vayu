@@ -229,21 +229,29 @@ Three things worth knowing before you design around them:
   else, and that is `plain_scalar`'s question; split across two files a document
   would export as `swagger: 2.0` and re-import as a number.
   **Responses are validated against what the document declares** (#628):
-  `spec_documents.response_schemas` holds an app-extracted index (schemas as
+  `spec_documents.response_schemas` holds an engine-derived index (schemas as
   written, plus one shared `refRoots` their `$ref`s resolve through), and
   `core/schema_validation.cpp` matches a response to one by status pattern and
   media type and validates it with **valijson** - not the `json-schema-validator`
-  #625 named, which segfaults on a recursive schema. This index is still the
-  app's: translating 3.0's dialect (`nullable`, draft-04 `exclusiveMinimum`)
-  into JSON Schema has not moved yet.
+  #625 named, which segfaults on a recursive schema.
   **The engine reads the document itself now** (#853, `core/openapi_document.hpp`
   - rapidyaml, the one YAML dependency and the one translation unit that
-  includes it). What that bought first is the **`operations` index (#629), which
-  is derived on every write and refused in the body** - `POST /specs`,
+  includes it). **Both stored indexes are derived on every write and refused in
+  the body** - the `operations` index (#629, moved by #853) and the
+  `responseSchemas` index (#628, moved by #860). `POST /specs`,
   `POST /specs/sync` and `POST /import/apply` all go through
-  `read_spec_indexes` → `core::derive_operations_index`, so an index is a fact
+  `read_spec_indexes` → `core::derive_spec_indexes`, so an index is a fact
   about the stored bytes the way `hash` is, and a document that cannot be read
-  is a `400` rather than a row nothing downstream can use. The reader keeps
+  is a `400` rather than a row nothing downstream can use. **One read produces
+  both**, which is what makes them agree: a status the schema index carries is
+  one the operation index lists for the same operation, on the same identity -
+  #715's repeated-`operationId` rule included. Deriving the schemas is the half
+  that *translates*: 3.0's `nullable` becomes a union with `null` and its
+  draft-04 boolean `exclusiveMinimum` becomes the bound, because a dialect
+  passed through untouched produces a **wrong** verdict about a body rather than
+  no verdict, and a response that is itself a `$ref` is read through one hop in
+  either dialect (#714). Nothing in the renderer extracts either index any more.
+  The reader keeps
   document order (a JavaScript object could not: it sorts integer-like keys, so
   `responses: {404, 200}` used to reach the store as `200, 404`), types scalars
   like js-yaml's core schema, expands anchors, aliases and merge keys under a

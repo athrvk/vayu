@@ -1390,15 +1390,13 @@ the index:
 A document that declares no operation stores "no index", which is not the same as
 an empty contract: `GET /specs/:id` reads it back as `null` rather than `[]`, and
 a run of a collection bound to it reports **no coverage block at all**. `POST
-/import/apply`'s spec section and `POST /specs/sync` derive the index through the
-same helper, so a document cannot acquire or lose one depending on which route
-stored it.
+/import/apply`'s spec section and `POST /specs/sync` derive both indexes through
+the same helper, so a document cannot acquire or lose one depending on which
+route stored it.
 
-**`responseSchemas`** (optional) is the one index still supplied by the client
-(issue #628) - what the document declares each response *looks like*. It has not
-moved engine-side with `operations` because extracting it means translating
-OpenAPI 3.0's dialect into JSON Schema, which is a bigger move than reading a
-document:
+**`responseSchemas`** is the second index the engine derives from the same read
+(issues #628 and #860) - what the document declares each response *looks like*.
+Like `operations`, it is not a field of the body; sending one is a `400`:
 
 ```json
 {
@@ -1417,24 +1415,38 @@ document:
 }
 ```
 
-Schemas are **JSON Schema**, not OpenAPI's dialect: the client translates
-`nullable`, draft-04 boolean `exclusiveMinimum` and OpenAPI-only keywords before
-sending, because the engine validates against a dialect a validator can read. Each schema
-keeps its `$ref`s and `refRoots` carries the subtrees they point into once, so a
-shared schema is stored once and a recursive one is a pointer rather than an
-infinite expansion. `status` is the pattern verbatim (`"200"`, `"4XX"`,
-`"default"`), `contentType` is a media type, and a `schema` may be `true` or
-`false` as well as an object. The serialized index is held to the same
-`maxSpecDocumentBytes` cap as the document. Omitting it stores "no index", read
-back as `null`, and every response of that document reports `checked: false`
-with the reason `no_index`.
+Schemas are **JSON Schema**, not OpenAPI's dialect: the engine translates
+`nullable` into a union with `null`, draft-04's boolean `exclusiveMinimum` into
+draft-07's numeric one, and drops the OpenAPI-only keywords that constrain no
+body (`discriminator`, `xml`, `externalDocs`, `example`) - a `nullable` passed
+through untouched would report a null the document permits as a type failure,
+which is a *wrong* verdict rather than a missing one. Each schema keeps its
+`$ref`s and `refRoots` carries the subtrees they point into once
+(`components.schemas`, `definitions`, `x-vayu-bundled`), so a shared schema is
+stored once and a recursive one is a pointer rather than an infinite expansion.
+A **response that is itself a `$ref`** is read through, one hop, in either
+dialect (`#/components/responses/x` in 3.x, `#/responses/X` in 2.0) - the shape
+GitHub's spec uses for nearly every response. `status` is the pattern verbatim
+(`"200"`, `"4XX"`, `"default"`), `contentType` is a media type (3.x keeps every
+one the response declares; 2.0 pairs each response with the operation's
+`produces`, falling back to the document's, then to `application/json`), and a
+`schema` may be `true` or `false` as well as an object. The serialized index is
+held to the same `maxSpecDocumentBytes` cap as the document, and one over it is a
+`400` naming the count and the cap. A document where no operation declares a
+schema stores "no index", read back as `null`, and every response of it reports
+`checked: false` with the reason `no_index`.
+
+Both indexes come off **one** read of the document, which is what makes them
+agree: a status the schema index carries is a status the operation index lists
+for the same operation, and the identity in each is the same identity - the
+repeated-`operationId` rule included.
 
 `sourceUrl` is `null` rather than `""` when the document did not come from a URL,
 so a client can offer a re-fetch for exactly the documents that have somewhere to
 re-fetch from.
 
-**Errors:** `400` if the body carries `id`, `hash`, `fetchedAt` or `operations`
-(all engine-computed), if `content` is missing, `null` or empty, if `sourceUrl` is
+**Errors:** `400` if the body carries `id`, `hash`, `fetchedAt`, `operations` or
+`responseSchemas` (all engine-computed), if `content` is missing, `null` or empty, if `sourceUrl` is
 present and not a string or `null`, or if the document is larger than the live
 `maxSpecDocumentBytes` [config entry](#get-config) - default **10 MiB**, aligned
 with the engine's JSON field cap. The size rejection names the byte count, the
@@ -1442,9 +1454,7 @@ cap and the setting, and is checked on `POST /import/apply` too, through the sam
 helper; the document is never stored truncated. **A `content` the engine cannot
 read as JSON or YAML is a `400`** naming the line - storing it would leave a row
 that coverage, a sync and an export can each do nothing with, and none of those
-is a good place to find out. A malformed `responseSchemas` index is a `400` on
-the same terms, and one over the byte cap names the count, the cap and the
-setting.
+is a good place to find out.
 
 ### GET /specs/:id
 
@@ -1691,9 +1701,8 @@ behind it. A sync updates and deletes rows that already exist.
   "collectionId": "col_9a1f...",                       // Required; must be bound to a spec
   "spec": {
     "content": "{\"openapi\":\"3.1.0\", ...}",           // Required, non-empty, at most maxSpecDocumentBytes
-    "sourceUrl": "https://api.example.com/openapi.json", // Optional; null for a file or a paste
-    "responseSchemas": {...}                           // Optional - see POST /specs
-  },
+    "sourceUrl": "https://api.example.com/openapi.json"  // Optional; null for a file or a paste
+  },                                                   // Both indexes are derived - see POST /specs
   "collections": [                                     // Optional - tag folders to create
     {"tempId": "t_col", "name": "pets", "parentId": "col_9a1f..."}
   ],

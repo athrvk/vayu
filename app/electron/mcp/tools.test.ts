@@ -7153,6 +7153,7 @@ describe("OpenAPI spec binding tools", () => {
 				.fn()
 				.mockRejectedValue(
 					new EngineRequestError(
+						"Engine responded 409",
 						409,
 						"Collection is bound to spec 'spec_1', which is not stored"
 					)

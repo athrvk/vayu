@@ -360,14 +360,14 @@ and the notes the dialog prints. A `409` there is a binding whose document is
 not stored, or stored bytes that will not read as OpenAPI; the renderer prints
 the engine's sentence rather than falling back to a skeleton.
 
-Every write that stores a document carries the `responseSchemas` index (#628)
-beside it - `createSpec`, `syncSpec` and the `specs` section of
-`importCollection` below - because omitting it would silently turn response
-validation off for a collection that had it. The **`operations` index (#629) is
-not sent on any of them**: since issue #853 the engine reads the document it is
-storing and derives that index itself, so sending one is a `400`, the way a
-supplied `hash` is. What the renderer still owes the engine is that the identity
-it stamps on each request agrees with what that reader indexes -
+**Neither index is sent on any write that stores a document** - not by
+`createSpec`, `syncSpec` or the `specs` section of `importCollection` below. The
+engine reads the document it is storing and derives the `operations` index (#629,
+moved by #853) and the `responseSchemas` index (#628, moved by #860) from those
+very bytes, so sending either is a `400`, the way a supplied `hash` is; a sync
+that forgets one can no longer turn coverage or response validation off for a
+collection that had it. What the renderer still owes the engine is that the
+identity it stamps on each request agrees with what that reader indexes -
 `engine/tests/fixtures/declared-operations-conformance.json` is the table both
 suites read.
 

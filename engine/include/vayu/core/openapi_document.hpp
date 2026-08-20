@@ -27,8 +27,10 @@
  * 1. **`read_document`** turns the stored bytes into a JSON DOM. A document is
  *    YAML as often as JSON, so this is the one place in the engine that holds a
  *    YAML dependency (rapidyaml). Everything else reads the DOM.
- * 2. **`declared_operations_of`** answers what the document declares, which is
- *    an OpenAPI question and not a YAML one.
+ * 2. **`declared_operations_of`** and **`response_schemas_of`** answer what the
+ *    document declares, which is an OpenAPI question and not a YAML one. They
+ *    walk the same operations by the same rules, so the two indexes a write
+ *    stores cannot disagree about which operation declares which status.
  *
  * ### What the reader promises
  *
@@ -61,6 +63,7 @@
 
 #include "vayu/core/spec_coverage.hpp"
 
+#include <cstddef>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -159,14 +162,61 @@ struct DocumentRead {
 declared_operations_of (const nlohmann::ordered_json& document);
 
 /**
- * The `spec_documents.operations` index for a document, or why it has none.
+ * @brief The response schemas @p document declares, as JSON Schema (issue
+ *        #860), or `null` when it declares none.
  *
- * `stored` is the JSON text the column takes, `""` for a document that declares
- * no operation - which stores as "no index" rather than as an empty contract,
- * the distinction a coverage block rests on.
+ * The index `spec_documents.response_schemas` stores: `refRoots` (absent when
+ * the document has none) beside an `operations` array whose rows carry the same
+ * identity `declared_operations_of` produces and a `responses` list of
+ * `{status, contentType, schema}`. An operation declaring no schema has no row,
+ * and a document where none does has no index at all - "no index" and "declares
+ * nothing" are one state in storage, and the honest reading of a document
+ * nothing was extracted from is the first: a response of it reports
+ * `checked: false`, never a body that passed.
+ *
+ * Two jobs, and the second is the one that cannot be skipped:
+ *
+ * 1. **Find** each operation's schemas, in either dialect - 3.x's
+ *    `responses[status].content[type].schema`, 2.0's `responses[status].schema`
+ *    paired with the operation's `produces` (falling back to the document's,
+ *    then to `application/json`). A response that is itself a `$ref` is read
+ *    through, one hop (issue #714): GitHub's public spec declares nearly every
+ *    response that way, and reading the `$ref` node unresolved finds no
+ *    `content`, so the engine would report "no schema for this status" about a
+ *    status the same document declares plainly two lines above.
+ * 2. **Translate** them out of OpenAPI 3.0's dialect, which is *not* JSON
+ *    Schema. `nullable: true` means "or null" and no validator has heard of it,
+ *    so a null the document explicitly permits would be reported as a type
+ *    failure - a **wrong** verdict, which is worse than no verdict.
+ *    `exclusiveMinimum: true` is draft-04's spelling and means something else
+ *    entirely in draft-07. `discriminator`, `xml`, `externalDocs` and `example`
+ *    are documentation or serialization and constrain no body, so they are
+ *    dropped rather than passed to a validator that would ignore them anyway.
+ *
+ * **`$ref`s are kept as written**, never followed: inlining duplicates a shared
+ * `Error` schema into every operation naming it, and a recursive schema has no
+ * finite expansion at all. What they point into is carried once per document as
+ * `refRoots` - the `components.schemas`, `definitions` and `x-vayu-bundled`
+ * subtrees, each translated by the same rules, since a `$ref`-ed 3.0 schema is
+ * as full of `nullable` as an inline one. `core/schema_validation.hpp` merges
+ * the two back into one validation root.
  */
-struct OperationsIndex {
-    std::string stored;
+[[nodiscard]] nlohmann::ordered_json
+response_schemas_of (const nlohmann::ordered_json& document);
+
+/**
+ * Both indexes a stored document carries, or why it has neither.
+ *
+ * Each is the JSON text its column takes and `""` for a document that declares
+ * nothing of that kind - which stores as "no index" rather than as an empty
+ * contract, the distinction a coverage block and a validation verdict both rest
+ * on.
+ */
+struct SpecIndexes {
+    /// `spec_documents.operations` (issue #629).
+    std::string operations;
+    /// `spec_documents.response_schemas` (issue #628).
+    std::string response_schemas;
     /// Empty on success; otherwise the caller-facing `400` sentence.
     std::string error;
 
@@ -176,16 +226,25 @@ struct OperationsIndex {
 };
 
 /**
- * @brief Derive the stored `operations` index from a document's text.
+ * @brief Derive both stored indexes from a document's text.
  *
- * The whole of what a write path does with a document, in one call: read it,
- * ask what it declares, refuse a document declaring more operations than a run
- * may carry in memory (`spec_document::MAX_OPERATIONS`), and serialize the
- * index. Every route that stores a document goes through this rather than
- * through three arrangements of the same steps - `POST /specs`,
- * `POST /specs/sync` and `POST /import/apply` differ in what else they write,
- * never in what a document declares.
+ * The whole of what a write path does with a document, in one call: read it
+ * **once**, ask what it declares, refuse a document declaring more operations
+ * than a run may carry in memory (`spec_document::MAX_OPERATIONS`) or a schema
+ * index over @p index_cap bytes, and serialize both. Every route that stores a
+ * document goes through this rather than through three arrangements of the same
+ * steps - `POST /specs`, `POST /specs/sync` and `POST /import/apply` differ in
+ * what else they write, never in what a document declares.
+ *
+ * One read for both is not an optimisation: the two indexes describe the same
+ * operations, and a response the schema index carries for a status the
+ * operation index does not list would be a contract disagreeing with itself.
+ *
+ * @param index_cap Bytes the serialized schema index may occupy -
+ *        `maxSpecDocumentBytes`, the same number the document itself is held
+ *        to rather than a second knob, because the two are stored together and
+ *        grow together.
  */
-[[nodiscard]] OperationsIndex derive_operations_index (const std::string& text);
+[[nodiscard]] SpecIndexes derive_spec_indexes (const std::string& text, size_t index_cap);
 
 } // namespace vayu::core

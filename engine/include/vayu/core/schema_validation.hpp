@@ -14,13 +14,19 @@
  *
  * **This file parses no OpenAPI**, and it is not the one that does - the engine
  * reads a document in exactly one place (`core/openapi_document.hpp`, issue
- * #853), and the schema index is not yet one of the things read there. What
- * arrives here is already JSON Schema: the app extracts each operation's
- * declared response schemas when it stores the document, normalises
+ * #853), and the schema index is one of the two things read there (issue #860).
+ * What arrives here is already JSON Schema: `response_schemas_of` extracts each
+ * operation's declared response schemas as the document is stored, normalises
  * the OpenAPI-only spellings (3.0's `nullable`, its draft-04 boolean
  * `exclusiveMinimum`, `discriminator`) into the dialect a validator can read,
- * and stores the result in `spec_documents.response_schemas`. This file matches
- * a response to one of those schemas and validates it.
+ * and the write stores the result in `spec_documents.response_schemas`. This
+ * file matches a response to one of those schemas and validates it.
+ *
+ * A stored index is therefore the engine's own work, not a client's claim -
+ * which is why nothing here validates one on the way in any more. What
+ * `ResponseSchemaIndex::parse` still guards is a *stored* row: one written
+ * before the index existed, or by a client back when the field was accepted,
+ * and every shape it cannot read is `NoIndex` rather than a body reported clean.
  *
  * ### Why the schemas are a column of their own
  *
@@ -180,23 +186,6 @@ struct ValidationVerdict {
  * and a translator that can drift.
  */
 [[nodiscard]] nlohmann::json build_validation_payload (const ValidationVerdict& verdict);
-
-/**
- * @brief Validate a stored `response_schemas` index on the way in.
- *
- * Returns the caller-facing `400` sentence, or `std::nullopt` for an acceptable
- * index. The engine cannot check that the schemas *describe* the document - it
- * does not read the document - but it can refuse a shape no reader could use,
- * and refusing at the write is the only place that can name the client's bug.
- * A malformed index accepted here would instead go missing weeks later as a
- * chip that never appears.
- *
- * @param cap Bytes the serialized index may occupy - `maxSpecDocumentBytes`,
- *        the same number the document itself is held to rather than a second
- *        knob, because the two are stored together and grow together.
- */
-[[nodiscard]] std::optional<std::string>
-validate_response_schemas_index (const nlohmann::json& index, size_t cap);
 
 /**
  * @brief A parsed `spec_documents.response_schemas`, ready to answer one

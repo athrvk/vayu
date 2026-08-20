@@ -70,7 +70,7 @@ import {
 import { readSpecOperations, type SpecRequestDraft } from "@/services/openapi/spec-operations";
 import { refetchSpec } from "@/services/openapi/spec-refetch";
 import type { SpecFileLocation } from "@/stores";
-import type { Collection, Request, ResponseSchemaIndex } from "@/types";
+import type { Collection, Request } from "@/types";
 import { SaveFailed, SectionLabel } from "./shared";
 
 interface SpecSyncProps {
@@ -113,13 +113,6 @@ type CheckState =
 			 * new document.
 			 */
 			sourceUrl: string | null;
-			/**
-			 * The re-fetched document's response schema index (issue #628),
-			 * carried from the check to the apply. Its declared-operation index
-			 * (#629) is not: the engine derives that from the document the apply
-			 * stores (issue #853).
-			 */
-			responseSchemas?: ResponseSchemaIndex;
 			selection: SpecApplySelection;
 	  }
 	| { phase: "applied"; created: number; updated: number; deleted: number };
@@ -189,7 +182,6 @@ export default function SpecSync({
 				unresolvedRefs,
 				content: text,
 				sourceUrl: storedDocument.sourceUrl,
-				...(read.responseSchemas ? { responseSchemas: read.responseSchemas } : {}),
 				selection: defaultSelection(diff),
 			});
 		} catch (e) {
@@ -209,7 +201,6 @@ export default function SpecSync({
 			diff: state.diff,
 			selection: state.selection,
 			content: state.content,
-			...(state.responseSchemas ? { responseSchemas: state.responseSchemas } : {}),
 			// The document is re-fetched from the source the binding recorded, so
 			// the new row records the same one - a file-sourced document keeps
 			// having no URL rather than acquiring one.
