@@ -300,6 +300,45 @@ std::string resolve_template (const std::string& input, const VariableValues& va
     [&vars] (const std::string& name) { return lookup_variable (name, vars); });
 }
 
+std::string render_data_value (const nlohmann::json& value) {
+    if (value.is_string ()) {
+        return value.get<std::string> ();
+    }
+    if (value.is_null ()) {
+        return {};
+    }
+    return value.dump ();
+}
+
+std::string resolve_template_with_data (const std::string& input,
+const VariableValues& vars,
+const DataRowColumns& row,
+std::optional<std::string>& missing_column) {
+    return substitute_tokens (input,
+    [&] (const std::string& name) -> std::optional<std::string> {
+        // Ahead of the scopes, exactly as `lookup_variable` puts it: the
+        // namespace is disjoint from them, so a variable someone named
+        // `data.id` must not answer for the column - and the column must not
+        // answer for the variable.
+        if (!is_data_variable_name (name)) {
+            return lookup_variable (name, vars);
+        }
+        const std::string column = name.substr (DATA_NAMESPACE_PREFIX.size ());
+        if (const auto cell = row.columns.find (column); cell != row.columns.end ()) {
+            return cell->second;
+        }
+        // Recorded rather than resolved to "": the token says the value came
+        // from the file, so a name no column answers is a mistake about the
+        // column and the quiet answer hides it (the rule `apply_data_template`
+        // enforces at bind time). Only the first is kept - the caller reports
+        // one and the rest are the same mistake.
+        if (!missing_column) {
+            missing_column = name;
+        }
+        return std::nullopt; // left written; the caller discards the result
+    });
+}
+
 /// The variable whose value cannot be written into a header line, and whether
 /// its bytes end that line or cut it short.
 struct HeaderTextRefusal {

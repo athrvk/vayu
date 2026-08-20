@@ -622,11 +622,35 @@ TEST (FormBodyRules, ContentTypeOwnership) {
     EXPECT_EQ (implied_content_type (empty), "");
     EXPECT_FALSE (content_type_is_engine_owned (empty));
 
-    // The modes the engine has never derived a Content-Type for keep it that way.
+    // A JSON body implies application/json (issue #884). It did not, and
+    // libcurl's default for a POST with a body is
+    // `application/x-www-form-urlencoded` - so a request whose mode says JSON,
+    // whose editor highlights JSON and whose stored `bodyType` is `json` went
+    // out declaring itself a form. The app's body panel wrote the header row for
+    // a request built in the UI, which is why this survived: every request
+    // created any other way (MCP `create_request`, an import, a payload posted
+    // straight to /execute) sent the wrong type.
     Body json;
     json.mode    = BodyMode::Json;
     json.content = "{}";
-    EXPECT_EQ (implied_content_type (json), "");
+    EXPECT_EQ (implied_content_type (json), "application/json");
+    // Derived, not owned: a Content-Type the caller set still wins, which is
+    // what lets a JSON body go out as `application/vnd.api+json`.
+    EXPECT_FALSE (content_type_is_engine_owned (json));
+
+    // An empty JSON body describes nothing, the same as every other mode.
+    Body empty_json;
+    empty_json.mode = BodyMode::Json;
+    EXPECT_EQ (implied_content_type (empty_json), "");
+
+    // `text` stays absent, and deliberately: JSON has exactly one right answer
+    // and text has none - `text/plain`, `text/csv` and a JWT are all this mode,
+    // so the header is the author's to write. Not an oversight, a different
+    // question.
+    Body text;
+    text.mode    = BodyMode::Text;
+    text.content = "hello";
+    EXPECT_EQ (implied_content_type (text), "");
 }
 
 // ---------------------------------------------------------------------------

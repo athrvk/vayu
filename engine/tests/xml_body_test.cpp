@@ -184,7 +184,10 @@ TEST (XmlBodyNeighbourTest, OtherModesAreUntouched) {
     Body json_body;
     json_body.mode    = BodyMode::Json;
     json_body.content = R"({"a":1})";
-    EXPECT_EQ (implied_content_type (json_body), "");
+    // `application/json` since issue #884. `text` above is the mode that still
+    // derives nothing, and the pair is the point: the engine names a type when
+    // the mode has one answer and stays out of the way when it does not.
+    EXPECT_EQ (implied_content_type (json_body), "application/json");
     EXPECT_EQ (wire_body_bytes (json_body), R"({"a":1})");
 
     Body form;

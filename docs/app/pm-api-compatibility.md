@@ -88,6 +88,32 @@ const id      = pm.variables.replaceIn("{{$guid}}");
 const payload = pm.variables.replaceIn('{"user": "{{userId}}", "trace": "{{$guid}}"}');
 ```
 
+**`{{data.column}}` resolves here too** (issue #885), against the row bound to
+this iteration - the same row `pm.iterationData` reads. It did not before, and
+that made this the one template resolver in the product that disagreed with the
+others about what the token means: a URL, a header and a body all bind it, and
+handing the same string to `replaceIn` returned it with its braces still on.
+
+```javascript
+// In a data-driven run, with a row carrying userId and city:
+pm.variables.replaceIn("/users/{{data.userId}}"); // "/users/1001"
+```
+
+Three rules come with it, all of them the ones the request binding already
+follows:
+
+- **A column the row does not have is a `TypeError`**, naming the token and the
+  columns the row does have - not `""` and not the token verbatim. The token
+  says the value came from the file, so a name no column answers is a mistake
+  about the column, and both quiet answers hide it.
+- **With no row bound the token keeps its braces**, unchanged. A plain design
+  send has no row by design, so a shared script that guards with
+  `pm.iterationData` still runs in both modes.
+- **`data.` is still not a variable scope.** `pm.variables.get("data.userId")`
+  and `.has(...)` read the scopes and answer `undefined` / `false`; the row's
+  accessor is `pm.iterationData`. `replaceIn` is different in kind - it resolves
+  a template, and this is a token that template syntax has.
+
 This is the **only** way `{{...}}` works inside a script, and that is
 deliberate (issue #226, decision D16): script *source* is never interpolated,
 because a rewrite cannot tell code from a string literal and splicing variable
@@ -271,7 +297,8 @@ these:
 .to.include(v)    .to.contain(v)    .to.have.string(sub)
 .to.match(/regex/)                  .to.satisfy(fn)
 .to.throw([msg | /regex/]) / .to.throws(…)
-.to.not …         (negates the chain)
+.to.not …         (sets the negation for the rest of the chain; a second
+                   .not in one chain is a no-op, not a double negative)
 .deep …           (deep comparison for equal / include / property / members / oneOf)
 .nested …         (dotted or indexed path for property)
 .and …            (continues a chain; flags, `not` included, carry over)

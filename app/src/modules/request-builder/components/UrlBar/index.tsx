@@ -56,7 +56,7 @@ import { formatChord, type Chord } from "@/lib/platform";
 import { SEND_CHORD, LOAD_TEST_CHORD } from "@/constants/shortcuts";
 import { cn } from "@/lib/utils";
 import MethodSelector from "./MethodSelector";
-import SendWithRowMenu from "./SendWithRowMenu";
+import SendWithRowDialog from "./SendWithRowDialog";
 import UrlInput from "./UrlInput";
 
 /**
@@ -304,7 +304,7 @@ export default function UrlBar() {
 				    in scope, and never while a stream is open - Send is Stop there,
 				    and a caret on Stop would offer to start what it is ending. */}
 				{showRowCaret && (
-					<SendWithRowMenu
+					<SendWithRowDialog
 						rows={rows}
 						onSend={(row) => void executeRequest(row)}
 						disabled={!canExecute}

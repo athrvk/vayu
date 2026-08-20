@@ -30,7 +30,7 @@
 
 using nlohmann::json;
 using vayu::core::bind_data_row;
-using vayu::core::render_data_value;
+using vayu::http::render_data_value;
 
 namespace {
 

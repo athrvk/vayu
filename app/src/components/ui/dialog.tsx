@@ -97,16 +97,25 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					// one present the panel never scrolls at all and the button
 					// stays pinned.
 					//
-					// Two widths, not eleven. A dialog is either a form or a
-					// decision, which is `sm:max-w-lg` (512px), or it holds
+					// Three widths, not eleven. A dialog is either a form or a
+					// decision, which is `sm:max-w-lg` (512px); or it holds
 					// something with a shape of its own - a table, a diff, a
 					// preview, a dense config - which is `max-w-xl` (576px) and
-					// the default here. They were spread across five values
-					// including two one-off pixel widths, so the same kind of
+					// the default here; or it is a *browser*, where the content is
+					// the whole point and picking one row out of it is the task,
+					// which is `sm:max-w-2xl` (672px). They were spread across five
+					// values including two one-off pixel widths, so the same kind of
 					// dialog came out a different size depending on who wrote it.
+					//
+					// `2xl` was opened for the data-row picker (issue #887), which
+					// is the one dialog whose job is reading a grid rather than
+					// confirming something about it: seven columns of ordinary CSV
+					// at 576px leaves ~60px a column, which is a truncated cell per
+					// column and nothing scannable. It is deliberately the last
+					// size - a dialog is a focus device before it is a container, so
+					// anything that wants more room wants a pane, not a wider modal.
 					// See docs/design-system.md; go wider only with content that
-					// earns it, since a dialog is a focus device before it is a
-					// container.
+					// earns it.
 					"dialog-panel fixed left-[50%] top-[50%] z-50 flex max-h-[85vh] w-full max-w-xl translate-x-[-50%] translate-y-[-50%] flex-col gap-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg",
 					className
 				)}

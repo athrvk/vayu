@@ -299,8 +299,12 @@ TEST (JsonRpcEnvelope, OtherModesAreUntouched) {
     Body json_body;
     json_body.mode    = BodyMode::Json;
     json_body.content = R"({"method":"m"})";
+    // A `json` body naming a method is still not a JSON-RPC frame: no
+    // `"jsonrpc"` and no `"id"` are added, which is the untouched half.
     EXPECT_EQ (wire_body_bytes (json_body), R"({"method":"m"})");
-    EXPECT_EQ (implied_content_type (json_body), "");
+    // Same header as this mode since issue #884, arrived at differently: here
+    // the engine wrote the envelope, there the mode simply is JSON.
+    EXPECT_EQ (implied_content_type (json_body), "application/json");
 
     Body graphql;
     graphql.mode    = BodyMode::GraphQL;

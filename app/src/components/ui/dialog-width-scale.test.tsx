@@ -12,8 +12,13 @@
  * `sm:max-w-lg`, `sm:max-w-xl`, `sm:max-w-[560px]` and a hard `w-[500px]` - so
  * two dialogs of the same kind came out different sizes depending on who wrote
  * them, and the most cramped of them held a data-file preview table. There are
- * now two: `lg` (512px) for a form or a decision, `xl` (576px) for a dialog
- * holding something with a shape of its own.
+ * now three: `lg` (512px) for a form or a decision, `xl` (576px) for a dialog
+ * holding something with a shape of its own, and `2xl` (672px) for one whose job
+ * is *browsing* that shape - the data-row picker, added by issue #887.
+ *
+ * The scale grows by widening it here with a reason, which is what the last
+ * assertion's message asks for; it does not grow by a call site quietly taking a
+ * width of its own.
  *
  * This is a **source scan**, which is the weaker kind of guard, so it is scoped
  * to what only a scan can see - every call site at once - and it asserts it
@@ -67,7 +72,17 @@ function panelWidths(source: string): string[] {
 	return widths;
 }
 
-const ALLOWED = new Set(["max-w-lg", "sm:max-w-lg", "max-w-xl", "sm:max-w-xl"]);
+const ALLOWED = new Set([
+	"max-w-lg",
+	"sm:max-w-lg",
+	"max-w-xl",
+	"sm:max-w-xl",
+	// `2xl` (672px) is the browser size, opened for the data-row picker in
+	// issue #887 - see the rationale on `DialogContent`. It is the last size the
+	// scale takes: past it a modal is competing with a pane.
+	"max-w-2xl",
+	"sm:max-w-2xl",
+]);
 
 describe("the dialog width scale", () => {
 	const files = tsxFiles(srcRoot).filter((f) =>
@@ -90,7 +105,7 @@ describe("the dialog width scale", () => {
 			}
 		}
 		// A dialog that genuinely needs its own width should widen the scale in
-		// `dialog.tsx` and say why, rather than open a sixth one-off here.
+		// `dialog.tsx` and say why, rather than open a one-off here.
 		expect(offenders).toEqual([]);
 	});
 

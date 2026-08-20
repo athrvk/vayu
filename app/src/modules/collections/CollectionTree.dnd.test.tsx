@@ -324,6 +324,104 @@ describe("a drop", () => {
 
 		fireEvent.pointerUp(requestRow("r1"), { pointerId: 1, clientX: 10, clientY: 8 });
 	});
+
+	/**
+	 * Spring-loading answers "I want to drop *into* this folder", so only the
+	 * inside band arms it (issue #886).
+	 *
+	 * It used to arm on any drop a folder row resolved, and the edge quarters
+	 * resolve to a drop *beside* the folder - they are the reorder bands, the
+	 * whole reason `FOLDER_EDGE_RATIO` exists. So lining a reorder up next to a
+	 * collapsed folder opened it after 700ms: its children appeared under the
+	 * pointer, every row below shifted mid-gesture, and the seam the user was
+	 * aiming at moved. The drop that followed was not the one they lined up.
+	 *
+	 * Dragging a *folder* is the reachable case, which is why the source here is
+	 * one: a request over a **root** folder's edge is refused outright
+	 * (`resolveDrop` - the root level has no requests block), so no destination
+	 * resolves and no spring was armed. A folder over a folder's edge is a legal
+	 * reorder among siblings, and that is what sprang the target open.
+	 */
+	it("does not spring a folder open while the drop lands beside it", () => {
+		vi.useFakeTimers();
+		renderTree();
+		const beta = rowIndex(collectionRow("c2"));
+
+		// Alpha to Beta's top quarter: "before Beta", a reorder of the root folders.
+		dragTo(collectionRow("c1"), yIn(beta, 0.1), { hold: true });
+		act(() => void vi.advanceTimersByTime(700));
+		expect(useCollectionsStore.getState().expandedCollectionIds.has("c2")).toBe(false);
+
+		// The bottom quarter: "after Beta". Same rule, other edge.
+		fireEvent.pointerMove(collectionRow("c1"), {
+			pointerId: 1,
+			clientX: 10,
+			clientY: yIn(beta, 0.9),
+		});
+		act(() => void vi.advanceTimersByTime(700));
+		expect(useCollectionsStore.getState().expandedCollectionIds.has("c2")).toBe(false);
+
+		// Crossing into the middle still springs it, so the fix narrows the
+		// trigger rather than removing the feature.
+		fireEvent.pointerMove(collectionRow("c1"), {
+			pointerId: 1,
+			clientX: 10,
+			clientY: yIn(beta, 0.5),
+		});
+		act(() => void vi.advanceTimersByTime(700));
+		expect(useCollectionsStore.getState().expandedCollectionIds.has("c2")).toBe(true);
+
+		fireEvent.pointerUp(collectionRow("c1"), { pointerId: 1, clientX: 10, clientY: 8 });
+	});
+
+	/**
+	 * The same rule for a request, over a folder that *does* accept an edge drop.
+	 *
+	 * Gamma is nested, so its parent has a requests block and "before Gamma"
+	 * resolves - which is what made this reachable while the root-folder case was
+	 * not. Collapsed here on purpose: an already-open folder never arms a spring,
+	 * so the fixture's expanded Gamma would have hidden this.
+	 */
+	it("does not spring a nested folder open for a request dropped beside it", () => {
+		vi.useFakeTimers();
+		useCollectionsStore.setState({ expandedCollectionIds: new Set(["c1"]) });
+		renderTree();
+		const gamma = rowIndex(collectionRow("c3"));
+
+		dragTo(requestRow("r1"), yIn(gamma, 0.1), { hold: true });
+		act(() => void vi.advanceTimersByTime(700));
+		expect(useCollectionsStore.getState().expandedCollectionIds.has("c3")).toBe(false);
+
+		fireEvent.pointerUp(requestRow("r1"), { pointerId: 1, clientX: 10, clientY: 8 });
+	});
+
+	/**
+	 * Sliding off the inside band disarms a spring that has not fired yet.
+	 *
+	 * The timer was cleared when the pointer reached a *different* folder or left
+	 * every row, but not when it stayed on the same row and changed band - so
+	 * moving from a folder's middle out to its own edge left the countdown
+	 * running against a target the drop no longer named, and the folder opened
+	 * with the indicator sitting on the seam above it.
+	 */
+	it("disarms the spring when the pointer slides off the inside band", () => {
+		vi.useFakeTimers();
+		renderTree();
+		const beta = rowIndex(collectionRow("c2"));
+
+		dragTo(collectionRow("c1"), yIn(beta, 0.5), { hold: true });
+		act(() => void vi.advanceTimersByTime(400));
+		fireEvent.pointerMove(collectionRow("c1"), {
+			pointerId: 1,
+			clientX: 10,
+			clientY: yIn(beta, 0.1),
+		});
+		act(() => void vi.advanceTimersByTime(700));
+
+		expect(useCollectionsStore.getState().expandedCollectionIds.has("c2")).toBe(false);
+
+		fireEvent.pointerUp(collectionRow("c1"), { pointerId: 1, clientX: 10, clientY: 8 });
+	});
 });
 
 describe("the keyboard move", () => {

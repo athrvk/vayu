@@ -684,12 +684,24 @@ JSValue expect_to_getter (JSContext* ctx, JSValueConst this_val, int argc, JSVal
     return JS_DupValue (ctx, this_val);
 }
 
+/**
+ * `.not` - negate the rest of this chain.
+ *
+ * A **set**, not a toggle, which is chai's own rule
+ * (`flag(this, 'negate', true)`) and the only one that survives a chain with
+ * more than one `.not` in it (issue #883). Toggling made every even-numbered
+ * `.not` cancel the one before it, so
+ * `expect(x).to.not.include("+").and.to.not.include("/")` asserted that x
+ * *does* include "/" - silently, and in whichever direction the author's count
+ * of `.not`s happened to fall. Nothing resets the flag between assertions in a
+ * chain, so a second `.not` has to be a no-op rather than an inversion.
+ */
 JSValue expect_not_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)argc;
     (void)argv;
     auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
     if (state) {
-        state->negated = !state->negated;
+        state->negated = true;
     }
     return JS_DupValue (ctx, this_val);
 }
@@ -3955,6 +3967,22 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
 //
 // Strict about its argument: a non-string is a TypeError rather than a
 // coerced "undefined" - the caller almost certainly holds a bug.
+/// The row's columns, in payload order, for the "columns: ..." half of the
+/// refusal above. Mirrors `core/scenario_data.cpp`'s `describe_columns`, whose
+/// wording a bind-time failure already uses - the same mistake should read the
+/// same way whether it was the URL or a script that reached the column.
+std::string describe_iteration_columns (const nlohmann::json& row) {
+    std::string out;
+    for (const auto& [key, value] : row.items ()) {
+        (void)value;
+        if (!out.empty ()) {
+            out += ", ";
+        }
+        out += key;
+    }
+    return out.empty () ? "none" : out;
+}
+
 JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     if (argc < 1 || !JS_IsString (argv[0])) {
@@ -3975,7 +4003,33 @@ JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int a
         });
     }
 
-    return JS_NewString (ctx, vayu::http::resolve_template (input, values).c_str ());
+    auto* data = get_context_data (ctx);
+    if (data == nullptr || data->iteration_data == nullptr ||
+        !data->iteration_data->is_object ()) {
+        // No row to resolve against, so the namespace stays written as it
+        // stands - what composition does, and what lets one script run in both
+        // a data-driven run and a plain send.
+        return JS_NewString (ctx, vayu::http::resolve_template (input, values).c_str ());
+    }
+
+    vayu::http::DataRowColumns row;
+    for (const auto& [column, cell] : data->iteration_data->items ()) {
+        row.columns[column] = vayu::http::render_data_value (cell);
+    }
+
+    std::optional<std::string> missing;
+    const std::string resolved =
+    vayu::http::resolve_template_with_data (input, values, row, missing);
+    if (missing) {
+        // The bind-time rule, in the shape a script can catch: naming the token
+        // and the columns the row does carry, because the mistake is almost
+        // always a spelling and the answer is in the second half.
+        return JS_ThrowTypeError (ctx,
+        "pm.variables.replaceIn: {{%s}} names a column this data row does not "
+        "have (columns: %s)",
+        missing->c_str (), describe_iteration_columns (*data->iteration_data).c_str ());
+    }
+    return JS_NewString (ctx, resolved.c_str ());
 }
 
 // Postman's pm.variables.set writes to the *local* scope: alive for one
