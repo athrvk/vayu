@@ -33,6 +33,15 @@ embeds it via `vayu_embed_windows_manifest()`, and `vayu_tests` asserts its own
 copy in `HttpVersionSupport.WindowsOsVersionIsNotShimmed` - but a gtest can only
 vouch for the binary it is running in, and the binary users get is this one.
 
+That chain is dormant rather than gone, which is what #856 established. Since
+#851 the engine verifies with OpenSSL, whose ALPN is not gated on an OS version
+- but Schannel is still *compiled into* this binary (the curl port's `http2`
+feature depends on `curl[ssl]`, which resolves to Schannel on Windows, so the
+build is MultiSSL; #858 is the move to one backend). The process runs on
+OpenSSL because `pin_tls_backend()` selects it at startup, and that call is
+deliberately non-fatal if it fails. So the manifest still guards a reachable
+path, and it retires when #858 removes Schannel from the build - not before.
+
 Usage:
     python .github/check-windows-deps.py <path-to-exe-or-dll>
 """
@@ -58,7 +67,9 @@ ALLOWED_EXACT = {
     # Networking
     "ws2_32.dll", "wsock32.dll", "iphlpapi.dll", "mswsock.dll", "dnsapi.dll",
     "winhttp.dll", "wininet.dll", "netapi32.dll",
-    # Crypto / TLS (curl uses Schannel on Windows)
+    # Crypto / TLS. The engine verifies with OpenSSL on every platform (#851),
+    # but Schannel is still compiled in here (MultiSSL, #858) and OpenSSL reads
+    # the native certificate store through crypt32 - so these stay allowlisted.
     "crypt32.dll", "bcrypt.dll", "ncrypt.dll", "secur32.dll", "sspicli.dll",
     "wintrust.dll",
 }
@@ -76,16 +87,20 @@ RT_MANIFEST = 24
 # supportedOS ids that must appear in it. The 8.1 id is the one HTTP/2 hangs
 # on: curl's Schannel ALPN gate asks for >= 6.3, and an unmanifested process is
 # told 6.2. The 10/11 id is what makes the reported version the real one on a
-# modern box, which curl's other version gates (e.g. the >= 6.1 check that
-# allows a CA bundle) read the same way.
+# modern box - #856 found no live reader of a shimmed version above 6.3 (every
+# other libcurl version gate runs after Curl_win32_init() and so reads ntdll's
+# true answer), so it is the invariant that is asserted rather than a specific
+# caller, and vayu_tests probes for the same two ids.
 REQUIRED_SUPPORTED_OS = {
     "{1f676c76-80e1-4239-95bb-83d0f6d0da78}": (
-        "Windows 8.1 - clears curl's Schannel ALPN gate. Without it every "
-        "HTTPS request is HTTP/1.1, silently."
+        "Windows 8.1 - clears curl's Schannel ALPN gate. Schannel is still in "
+        "this build (MultiSSL, #858); on any path that selects it, every HTTPS "
+        "request would be HTTP/1.1, silently."
     ),
     "{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}": (
         "Windows 10/11 - makes the OS version reported to the process the "
-        "real one, which curl's other version gates also read."
+        "real one rather than capping it at 6.3. No current caller reads it "
+        "(#856), but a half-declared manifest is drift, not a decision."
     ),
 }
 
@@ -130,9 +145,11 @@ def check_manifest(path: str) -> int:
     if manifest is None:
         print(
             f"\nFAILED: {path} has no embedded application manifest.\n"
-            "  Windows will report itself as 6.2 to this process, curl's Schannel\n"
-            "  backend will disable ALPN, and every HTTPS request will be HTTP/1.1\n"
-            "  regardless of the requested httpVersion - with a 200 and no error.\n"
+            "  Windows will report itself as 6.2 to this process. Schannel is still\n"
+            "  compiled into this build (MultiSSL - see #858), and on any path that\n"
+            "  selects it that reported version disables ALPN, so every HTTPS request\n"
+            "  is HTTP/1.1 regardless of the requested httpVersion - with a 200 and\n"
+            "  no error.\n"
             "  Fix: vayu_embed_windows_manifest() in engine/CMakeLists.txt must be\n"
             "  called for this target (engine/res/vayu-windows.manifest).",
             file=sys.stderr,
@@ -159,7 +176,10 @@ def check_manifest(path: str) -> int:
             print(f"\n  {guid}\n    {why}", file=sys.stderr)
         return 1
 
-    print("\nOK: the supportedOS manifest is embedded - ALPN, and so HTTP/2, work.")
+    print(
+        "\nOK: the supportedOS manifest is embedded - this process is told its "
+        "real OS version, so a Schannel path could still negotiate ALPN."
+    )
     return 0
 
 

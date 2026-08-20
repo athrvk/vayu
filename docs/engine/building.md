@@ -224,24 +224,23 @@ Two consequences worth knowing before you change the build:
 
 `engine/res/vayu-windows.manifest` is embedded into `vayu-engine`, `vayu-cli`
 and `vayu_tests` by `vayu_embed_windows_manifest()` in
-`engine/CMakeLists.txt`, and both guards below still assert it.
+`engine/CMakeLists.txt`, and both guards below assert it.
 
-**The chain it was added for is historical since
-[#851](https://github.com/athrvk/vayu/issues/851)**, and it is written out
-because no part of it is guessable from the flag - and because a return to
-Schannel brings it straight back:
+The chain it was added for, written out because no part of it is guessable from
+the flag (line numbers are curl 8.21.0, the pinned version):
 
-1. libcurl on Windows used the Schannel TLS backend, and HTTP/2 over TLS is
-   only reachable through ALPN.
-2. curl's Schannel backend enables ALPN only when the OS is at least Windows
-   8.1 (`s_win_has_alpn`, `lib/vtls/schannel.c`).
+1. libcurl's Schannel backend reaches HTTP/2 over TLS only through ALPN.
+2. It enables ALPN only when the OS is at least Windows 8.1 (`s_win_has_alpn`,
+   `lib/vtls/schannel.c:2620`).
 3. That check prefers ntdll's `RtlVerifyVersionInfo`, which tells the truth -
-   but resolves the pointer to it in `Curl_win32_init()`, which libcurl's
-   `global_init()` runs *after* `Curl_ssl_init()`. The one call that decided
-   ALPN for the whole process therefore fell back to `VerifyVersionInfoW`.
+   but resolves the pointer to it in `Curl_win32_init()`, which `global_init()`
+   runs *after* `Curl_ssl_init()` (`lib/easy.c:143` then `:153`).
+   `s_win_has_alpn` is assigned inside `schannel_init()`, i.e. from within
+   `Curl_ssl_init()`, so the one call that decides ALPN for the whole process
+   falls back to `VerifyVersionInfoW` (`lib/curlx/version_win32.c:207-210`).
 4. `VerifyVersionInfoW` is version-shimmed: since Windows 8.1 it reports 6.2 to
    any process whose manifest does not declare support for a later OS. 6.2 <
-   6.3, so ALPN was switched off for the life of the process - **HTTP/2 never
+   6.3, so ALPN is switched off for the life of the process - **HTTP/2 never
    negotiated**, with a `200 OK` and a reported `HTTP/1.1` for a request that
    asked for h2.
 
@@ -249,17 +248,57 @@ The manifest's `supportedOS` ids turn the shim off. v0.11.0 through v0.14.0
 shipped without it and HTTP/2 was dead on Windows the whole time
 ([#215](https://github.com/athrvk/vayu/issues/215)) - the failure is invisible,
 which is why it is guarded twice: `HttpVersionSupport.WindowsOsVersionIsNotShimmed`
-asserts that the test binary is not being version-lied to, and
-`check-windows-deps.py` scans the *shipped* `vayu-engine.exe` for the ids, since
-a gtest can only vouch for the process it runs in.
+asserts that the test binary is not being version-lied to (both ids, since
+`check-windows-deps.py` requires both), and `check-windows-deps.py` scans the
+*shipped* `vayu-engine.exe` for the same ids, since a gtest can only vouch for
+the process it runs in.
 
-Since #851 the Windows build verifies with OpenSSL, whose ALPN is not gated on
-an OS version check - so step 2 no longer runs and HTTP/2 on Windows does not
-depend on the manifest. The manifest and its two guards stay: they are cheap,
-they are what makes a return to Schannel safe, and whether anything *else*
-still needs them is
-[#856](https://github.com/athrvk/vayu/issues/856) rather than a deletion made
-in passing.
+##### Why it is still here, and when it goes
+
+[#851](https://github.com/athrvk/vayu/issues/851) put every leg on OpenSSL,
+whose ALPN is not gated on an OS version at all, which reads like step 2 no
+longer running. [#856](https://github.com/athrvk/vayu/issues/856) asked what
+still depends on the manifest, and the answer is: **the chain is dormant, not
+gone, because Schannel is still compiled into this binary.**
+
+The curl port's `http2` feature depends on `curl[ssl]`, which resolves to
+Schannel on Windows, so the shipped libcurl is MultiSSL - getting the build down
+to one backend is [#858](https://github.com/athrvk/vayu/issues/858). The process
+runs on OpenSSL because `pin_tls_backend()` names it through
+`curl_global_sslset` before `curl_global_init`, and on a MultiSSL build
+`Curl_ssl_init()` calls `init()` on the selected backend alone
+(`lib/vtls/vtls.c:595-601`), so `schannel_init()` never runs and step 2 is never
+evaluated. That is a runtime selection whose failure path is deliberately
+non-fatal - `pin_tls_backend()` logs and continues - so a process that reaches
+`curl_global_init` first lands on libcurl's own choice, which reads
+`CURL_SSL_BACKEND` from the environment before falling back.
+
+**So the retirement condition is #858, not a date.** When the Windows build is
+genuinely single-backend, `schannel_init()` leaves the binary, the manifest's
+last dependent goes with it, and the manifest, the gtest and the
+`check-windows-deps.py` manifest check are deleted together.
+
+##### What else reads a shimmed OS version: nothing
+
+The `supportedOS` ids change what `GetVersionEx` / `VerifyVersionInfoW` report
+to the **whole process**, so #856 enumerated every other reader in the engine
+and its statically-linked dependencies. Callers of ntdll's `RtlGetVersion` /
+`RtlVerifyVersionInfo` are immune by construction - the shim does not touch
+those - so only the `kernel32` family matters:
+
+| Where | Reads a shimmed version? |
+|-------|--------------------------|
+| Vayu's own sources (`engine/src`, `engine/include`, `engine/vendor`) | No - none read an OS version at all |
+| libcurl `lib/vtls/schannel.c:2620` (`s_win_has_alpn`) | **Yes** - the one dependent, and only when `schannel_init()` runs |
+| libcurl's nine other version gates: `lib/cf-socket.c:193` (the `TCP_KEEP*` `setsockopt` gate, which is backend-independent), five more in `schannel.c`, three in `schannel_verify.c` | No - all evaluated at connect, handshake or verify time, after `Curl_win32_init()` resolved the ntdll pointer, so they read the true OS whatever the manifest says |
+| OpenSSL 3.6.3 | No - calls neither API |
+| SQLite (`sqlite3_win32_is_nt()`) | No - it calls `GetVersionEx[AW]`, but reads only `dwPlatformId` (NT vs Win9x), which the shim does not change; and the call compiles out entirely on this SDK target (`NTDDI_VERSION >= NTDDI_WINBLUE`), leaving `osIsNT()` a constant |
+| nghttp2, cpp-httplib, libsodium, zlib, brotli, sqlite-orm, GoogleTest, rapidyaml/c4core, valijson, quickjs-ng, HdrHistogram | No |
+
+The file itself is only the `supportedOS` ids - no `requestedExecutionLevel`
+(the engine is an unprivileged sidecar and must stay one), no DPI awareness (it
+has no windows), no long-path or code-page declaration - so there is no second
+reason hiding in it that would survive the first one going away.
 
 Add a fourth executable that links libcurl and you must call
 `vayu_embed_windows_manifest()` for it too. Note that the mechanism is a
