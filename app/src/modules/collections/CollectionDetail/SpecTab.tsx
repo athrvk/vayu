@@ -411,11 +411,12 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				<SpecSync
 					collection={collection}
 					collections={collections}
-					// The binding's id, not the document: the section reads the stored
-					// bytes itself, when Check is pressed (issue #712).
+					// The binding's id, not the document: the section looks up where
+					// that document came from when Check is pressed, and the engine
+					// compares its own stored bytes (issues #712, #854). The requests
+					// are not passed either - the engine walks the subtree itself.
 					specId={boundSpecId}
 					specFile={specFile}
-					requests={requests}
 				/>
 			)}
 

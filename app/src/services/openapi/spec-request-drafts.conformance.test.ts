@@ -50,6 +50,14 @@ interface FixtureRow {
 	file: boolean;
 }
 
+interface FixtureExample {
+	name: string;
+	status: number;
+	headers: { key: string; value: string; enabled: boolean }[];
+	body: string;
+	contentType: string;
+}
+
 interface FixtureDraft {
 	operationId?: string;
 	method: string;
@@ -61,6 +69,17 @@ interface FixtureDraft {
 	params: FixtureRow[];
 	headers: FixtureRow[];
 	body: { mode: string; content: string; fields: FixtureRow[] };
+	/**
+	 * The operation's documented responses (issue #854), **sorted by status**.
+	 *
+	 * The order is not a shared answer and cannot be: the engine keeps document
+	 * order, while a JavaScript object sorts integer-like keys ahead of the rest,
+	 * so `responses: {404, 200}` reaches this side as `200, 404`. The same
+	 * divergence `declared-operations.conformance.test.ts` records for the
+	 * response patterns - what has to agree is which responses there are and what
+	 * each one carries.
+	 */
+	examples: FixtureExample[];
 }
 
 interface FixtureCase {
@@ -100,6 +119,7 @@ function shapeOf(entry: SpecRequestDraft): FixtureDraft {
 			content: "content" in body ? body.content : "",
 			fields: "fields" in body ? rows(body.fields) : [],
 		},
+		examples: [...(entry.draft.examples ?? [])].sort((a, b) => a.status - b.status),
 	};
 }
 
@@ -107,7 +127,7 @@ describe("spec request draft conformance with the engine", () => {
 	it("reads a fixture with cases to check", () => {
 		// A fixture that failed to load reads as a suite of passing tests - the
 		// failure mode a source-scanning guard in this repo shipped with for weeks.
-		expect(fixture.cases.length).toBeGreaterThanOrEqual(5);
+		expect(fixture.cases.length).toBeGreaterThanOrEqual(7);
 		expect(fixture.cases.flatMap((c) => c.drafts).length).toBeGreaterThanOrEqual(10);
 	});
 

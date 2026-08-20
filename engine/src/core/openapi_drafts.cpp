@@ -23,9 +23,13 @@
  * `tests/fixtures/spec-request-drafts-conformance.json`.
  *
  * What is deliberately *not* ported: the skip tally (`meta.skipped`), which
- * describes an import to a user rather than a document to the diff, and the
- * saved response examples, which the diff does not compare. Both are the
+ * describes an import to a user rather than a document to the diff, and is the
  * renderer's to keep until the import itself moves.
+ *
+ * The documented responses **are** ported (issue #854), although the diff does
+ * not compare them: applying a change writes them, so a draft without them is
+ * an answer no apply can be built from - which is what kept a second parse of
+ * the same document in the renderer after the comparison had moved.
  */
 
 #include "vayu/core/openapi_document.hpp"
@@ -843,6 +847,204 @@ DraftBody body_v3 (const Sampler& sampler, const json* request_body) {
     return body;
 }
 
+// ---------------------------------------------------------------------------
+// Documented responses
+// ---------------------------------------------------------------------------
+
+/// Defined below with the 2.0 body rules it was written for; the documented
+/// responses need it to read a `produces` entry the same way.
+std::string media_type (const json& value);
+
+/// `findJsonMediaType(content)`: the *key* of a 3.x `content` map's JSON media
+/// type. `find_json_media` answers with the node; an example needs the name of
+/// the type it is in, because that is the row's `Content-Type`.
+std::optional<std::string> find_json_media_type (const json& content) {
+    if (truthy (prop (&content, "application/json"))) {
+        return std::string ("application/json");
+    }
+    for (auto entry = content.begin (); entry != content.end (); ++entry) {
+        const std::string& key = entry.key ();
+        if (key.rfind ("application/json", 0) == 0 ||
+        (key.size () >= 5 && key.compare (key.size () - 5, 5, "+json") == 0)) {
+            return key;
+        }
+    }
+    return std::nullopt;
+}
+
+/// `exampleBodyText(value)`: a documented string is the body verbatim - a spec
+/// that writes `"<xml/>"` documents those bytes, not a quoted JSON string.
+std::string example_body_text (const json& value) {
+    return value.is_string () ? value.get<std::string> () : js_json_text (value);
+}
+
+/// The payload one response documents, or absent when it documents none.
+struct ExamplePayload {
+    std::string body;
+    std::string content_type;
+};
+
+/**
+ * `responseExample(code, response, payload)`: one entry of an operation's
+ * `responses` as a saved example, or absent when it cannot be stored as one.
+ *
+ * Shared by the two dialects, which disagree only about where the payload lives
+ * - @p payload is that half. A key that is not a numeric status (`default`,
+ * `2XX`) has no status line to be served under and is skipped rather than
+ * guessed at; the renderer counts those for its import preview, and a draft has
+ * no preview to report to.
+ */
+template <typename Payload>
+std::optional<DraftExample>
+response_example (const std::string& code, const json* response, Payload payload) {
+    const json* node = as_record (response);
+    if (node == nullptr) {
+        return std::nullopt;
+    }
+    if (code.size () != 3 ||
+    !std::all_of (code.begin (), code.end (), [] (unsigned char c) { return std::isdigit (c) != 0; })) {
+        return std::nullopt;
+    }
+    const int status = std::stoi (code);
+    if (status < 100 || status > 599) {
+        return std::nullopt;
+    }
+
+    const std::optional<ExamplePayload> found = payload (*node);
+    DraftExample example;
+    // "200 - A user" when the document describes the response, "200" when it
+    // does not. The status leads because that is what a reader scans a list of
+    // examples for.
+    const std::string* description = as_str (prop (node, "description"));
+    example.name         = description == nullptr ? code : code + " - " + *description;
+    example.status       = status;
+    example.documented   = found.has_value ();
+    example.content_type = found ? found->content_type : std::string ();
+    example.body         = found ? found->body : std::string ();
+    return example;
+}
+
+/// A 3.x operation's documented responses.
+std::vector<DraftExample> examples_v3 (const Sampler& sampler, const json* responses) {
+    std::vector<DraftExample> out;
+    const json* map = as_record (responses);
+    if (map == nullptr) {
+        return out;
+    }
+    for (auto entry = map->begin (); entry != map->end (); ++entry) {
+        // A response that is itself a `$ref` is read through, one hop - the shape
+        // a document that declares its errors once and names them everywhere
+        // leaves (issue #714).
+        const json* response = sampler.deref (&entry.value ());
+        auto example = response_example (entry.key (), response,
+        [&] (const json& node) -> std::optional<ExamplePayload> {
+            const json* content = as_record (prop (&node, "content"));
+            if (content == nullptr) {
+                return std::nullopt;
+            }
+            const std::optional<std::string> type = find_json_media_type (*content);
+            if (!type) {
+                return std::nullopt;
+            }
+            const json* media = as_record (prop (content, *type));
+            if (media == nullptr) {
+                return std::nullopt;
+            }
+            // `media.example ?? firstNamedExample(...) ?? sample`: `??` falls
+            // through `null` as well as absence, so a documented `example: null`
+            // is not the answer - the named example, then the schema, still is.
+            const json* value = prop (media, "example");
+            if (value == nullptr || value->is_null ()) {
+                value = first_named_example (prop (media, "examples"));
+            }
+            if (value != nullptr && !value->is_null ()) {
+                return ExamplePayload{ example_body_text (*value), *type };
+            }
+            if (const json* schema = prop (media, "schema"); truthy (schema)) {
+                return ExamplePayload{ example_body_text (sampler.sample (schema)), *type };
+            }
+            return std::nullopt;
+        });
+        if (example) {
+            out.push_back (std::move (*example));
+        }
+    }
+    return out;
+}
+
+/**
+ * A 2.0 operation's documented responses.
+ *
+ * The 2.0 shape puts the payload on the response itself rather than under a
+ * media-type map: `examples` is keyed by MIME type and holds the value
+ * directly, and `schema` describes it. The media type comes from the
+ * operation's `produces`, falling back to the document's, because a 2.0
+ * response does not name its own.
+ */
+std::vector<DraftExample>
+examples_v2 (const json& document, const Sampler& sampler, const json* operation) {
+    std::vector<DraftExample> out;
+    const json* map = as_record (prop (operation, "responses"));
+    if (map == nullptr) {
+        return out;
+    }
+
+    const json* declared = prop (operation, "produces");
+    if (declared == nullptr || !declared->is_array ()) {
+        declared = prop (&document, "produces");
+    }
+    std::vector<std::string> produces;
+    if (declared != nullptr && declared->is_array ()) {
+        for (const json& entry : *declared) {
+            produces.push_back (entry.is_string () ? entry.get<std::string> () : std::string ());
+        }
+    }
+    std::optional<std::string> json_produced;
+    for (const std::string& type : produces) {
+        const std::string bare = media_type (json (type));
+        if (bare == "application/json" ||
+        (bare.size () >= 5 && bare.compare (bare.size () - 5, 5, "+json") == 0)) {
+            json_produced = type;
+            break;
+        }
+    }
+    if (!json_produced && produces.empty ()) {
+        json_produced = std::string ("application/json");
+    }
+
+    for (auto entry = map->begin (); entry != map->end (); ++entry) {
+        const json* response = sampler.deref (&entry.value ());
+        auto example = response_example (entry.key (), response,
+        [&] (const json& node) -> std::optional<ExamplePayload> {
+            const std::string content_type = json_produced ? *json_produced :
+            (produces.empty () ? std::string ("application/json") : produces.front ());
+            if (const json* documented = as_record (prop (&node, "examples"))) {
+                // `declared[contentType] ?? declared["application/json"]`, then
+                // `!== undefined` - so an explicitly documented `null` is a body
+                // ("null"), while a `null` under the produced type falls through
+                // to the plain one first.
+                const json* value = prop (documented, content_type);
+                if (value == nullptr || value->is_null ()) {
+                    const json* plain = prop (documented, "application/json");
+                    value = plain != nullptr ? plain : value;
+                }
+                if (value != nullptr) {
+                    return ExamplePayload{ example_body_text (*value), content_type };
+                }
+            }
+            const json* schema = prop (&node, "schema");
+            if (!truthy (schema)) {
+                return std::nullopt;
+            }
+            return ExamplePayload{ example_body_text (sampler.sample (schema)), content_type };
+        });
+        if (example) {
+            out.push_back (std::move (*example));
+        }
+    }
+    return out;
+}
+
 /// A 2.0 `consumes` entry stripped of its parameters, lower-cased.
 std::string media_type (const json& value) {
     std::string text = value.is_string () ? value.get<std::string> () : std::string ();
@@ -994,6 +1196,10 @@ std::vector<SpecRequestDraft> spec_request_drafts_of (const json& document) {
         } else {
             draft.body = body_v3 (sampler, prop (operation, "requestBody"));
         }
+
+        draft.examples = dialect == walk::Dialect::V3 ?
+        examples_v3 (sampler, prop (operation, "responses")) :
+        examples_v2 (document, sampler, operation);
 
         draft.url = append_params ("{{baseUrl}}" + normalize_path_templates (path), draft.params);
 

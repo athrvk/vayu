@@ -140,18 +140,6 @@ const std::optional<std::string>& blob) {
     return identity;
 }
 
-/** The spec a collection's `openapi` binding names, `""` when it binds none. */
-std::string bound_spec_id (const std::string& openapi) {
-    const auto parsed =
-    nlohmann::json::parse (openapi, nullptr, /*allow_exceptions=*/false);
-    if (!parsed.is_object ()) {
-        return {};
-    }
-    const auto spec = parsed.find ("specId");
-    return spec != parsed.end () && spec->is_string () ? spec->get<std::string> () :
-                                                         std::string ();
-}
-
 } // namespace
 
 /**

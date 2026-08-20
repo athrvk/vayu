@@ -68,6 +68,11 @@ export const API_ENDPOINTS = {
 	// asks for the pairing rather than working it out here. Reads only - the
 	// tab shows the counts before the user commits to the bind.
 	SPEC_MATCH: `/specs/match`,
+	// What a re-fetched document would change about the collection bound to it
+	// (issue #854): the comparison moved engine-side, so the Sync section asks
+	// rather than working it out here - and an agent can ask the same way.
+	// Reads only; applying the answer is SPEC_SYNC below.
+	SPEC_DIFF: `/specs/diff`,
 	// The bind itself (issue #862): the document, the binding that moves to it
 	// and every stamp - the ones written and the ones cleared - in one engine
 	// transaction. The pairing above previews what this will do; this one works

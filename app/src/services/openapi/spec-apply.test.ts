@@ -21,13 +21,16 @@
  *    ticked, because a request left recording the old identity is one the next
  *    sync diffs against the wrong operation.
  *
- * The requests are built from the bound document's own drafts, exactly as
- * `spec-diff.test.ts` builds them, so a difference here is one the app would
- * really have had.
+ * **The diffs are written out rather than computed** (issue #854). The
+ * comparison is `POST /specs/diff`'s now, and its own rules - which request is
+ * which operation after a rename, which fields moved, which of them the user had
+ * edited - are pinned in `engine/tests/spec_diff_test.cpp` against real
+ * documents. What is left here is the half this file owns: given that answer,
+ * what gets written. So each case states the diff it is about, which also makes
+ * the input to a payload readable in the same screen as the payload.
  */
 
 import { describe, it, expect } from "vitest";
-import { diffSpec } from "./spec-diff";
 import {
 	buildSyncPayload,
 	defaultSelection,
@@ -35,69 +38,80 @@ import {
 	operationKey,
 	type SpecApplySelection,
 } from "./spec-apply";
-import { readSpecOperations, type SpecRequestDraft } from "./spec-operations";
-import { buildUrlWithParams } from "@/modules/request-builder/utils/url";
-import type { Collection, Request } from "@/types";
+import type {
+	Collection,
+	SpecDiffAdded,
+	SpecDiffChanged,
+	SpecDiffResponse,
+	SpecDraftRequest,
+	SpecField,
+	SpecFieldDiff,
+	SpecOperation,
+} from "@/types";
 
-interface OperationSpec {
-	operationId?: string;
-	summary?: string;
-	tags?: string[];
-	parameters?: unknown[];
-	responses?: unknown;
-}
-
-const doc = (paths: Record<string, Record<string, OperationSpec>>): string =>
-	JSON.stringify({
-		openapi: "3.0.0",
-		info: { title: "Pets API" },
-		servers: [{ url: "https://api.example.com" }],
-		paths,
-	});
-
-const BOUND = doc({
-	"/pets": { get: { operationId: "listPets", summary: "List pets", tags: ["pets"] } },
-	"/owners": { get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] } },
-});
-
-function requestFrom(
-	id: string,
-	entry: SpecRequestDraft,
-	overrides: Partial<Request> = {}
-): Request {
-	const { draft, operation } = entry;
+/** The draft an import would build, with the fields a case cares about. */
+function draft(overrides: Partial<SpecDraftRequest> = {}): SpecDraftRequest {
 	return {
-		id,
-		collectionId: "col_pets",
-		name: draft.name,
-		description: draft.description,
-		method: draft.method,
-		url: draft.url,
-		params: draft.params,
-		headers: draft.headers,
-		body: draft.body,
-		bodyType: draft.body.mode,
-		auth: { mode: "inherit" },
-		preRequestScript: "",
-		postRequestScript: "",
-		followRedirects: true,
-		maxRedirects: 10,
-		verifySSL: true,
-		httpVersion: "auto",
-		stream: false,
-		specOperation: operation,
-		order: 0,
-		createdAt: "2026-01-01T00:00:00.000Z",
-		updatedAt: "2026-01-01T00:00:00.000Z",
+		name: "List pets",
+		description: "",
+		method: "GET",
+		url: "{{baseUrl}}/pets",
+		params: [],
+		headers: [],
+		body: { mode: "none" },
+		examples: [],
 		...overrides,
-	} as Request;
+	};
 }
 
-function boundCollection(overrides: Record<string, Partial<Request>> = {}): Request[] {
-	return readSpecOperations(BOUND).requests.map((entry, i) =>
-		requestFrom(`req_${i}`, entry, overrides[entry.operation.operationId ?? ""] ?? {})
-	);
+function added(
+	operation: SpecOperation,
+	folder: string,
+	overrides: Partial<SpecDraftRequest> = {}
+): SpecDiffAdded {
+	return { operation, folder, draft: draft({ name: operation.path, ...overrides }) };
 }
+
+function field(name: SpecField, userTouched = false): SpecFieldDiff {
+	return { field: name, current: "before", next: "after", userTouched };
+}
+
+function changed(
+	requestId: string,
+	operation: SpecOperation,
+	fields: SpecFieldDiff[],
+	overrides: Partial<SpecDiffChanged> = {}
+): SpecDiffChanged {
+	return {
+		requestId,
+		name: "List pets",
+		boundOperation: operation,
+		operation,
+		matchedBy: "operationId",
+		renamed: false,
+		previousUnknown: false,
+		fields,
+		draft: draft(),
+		...overrides,
+	};
+}
+
+function diffOf(parts: Partial<SpecDiffResponse> = {}): SpecDiffResponse {
+	return {
+		identical: false,
+		added: [],
+		removed: [],
+		changed: [],
+		unchanged: 0,
+		unmapped: 0,
+		...parts,
+	};
+}
+
+const LIST_PETS: SpecOperation = { operationId: "listPets", method: "GET", path: "/pets" };
+const GET_PET: SpecOperation = { operationId: "getPet", method: "GET", path: "/pets/{petId}" };
+const LIST_VETS: SpecOperation = { operationId: "listVets", method: "GET", path: "/vets" };
+const GET_VET: SpecOperation = { operationId: "getVet", method: "GET", path: "/vets/{vetId}" };
 
 const collections = (...names: string[]): Collection[] => [
 	{ id: "col_root", name: "Pets API", order: 0 } as Collection,
@@ -106,27 +120,17 @@ const collections = (...names: string[]): Collection[] => [
 	),
 ];
 
-function diffOf(fetchedRaw: string, requests: Request[]) {
-	return diffSpec({
-		bound: readSpecOperations(BOUND).requests,
-		fetched: readSpecOperations(fetchedRaw).requests,
-		requests,
-	});
-}
-
 function payload(
-	fetchedRaw: string,
-	requests: Request[],
+	diff: SpecDiffResponse,
 	selection?: (base: SpecApplySelection) => SpecApplySelection,
 	stored: Collection[] = collections("pets", "owners")
 ) {
-	const diff = diffOf(fetchedRaw, requests);
 	const base = defaultSelection(diff);
 	return buildSyncPayload({
 		collectionId: "col_root",
 		diff,
 		selection: selection ? selection(base) : base,
-		content: fetchedRaw,
+		content: '{"openapi":"3.0.0"}',
 		sourceUrl: "https://api.example.com/spec.json",
 		collections: stored,
 	});
@@ -139,82 +143,72 @@ describe("a duplicated operationId is not corruption a default apply can commit 
 	 * and upstream then tweaks the first operation. The user clicks Check for
 	 * changes and Apply with everything ticked as it came.
 	 *
-	 * What must not be in that payload is a write that moves the second request
-	 * onto the first one's operation - its method, its URL and its identity.
+	 * The engine's comparison is what refuses to follow the shared id - pinned in
+	 * `spec_diff_test.cpp`, where the second request is followed by its own path
+	 * and reports no field at all. What must not be in the payload built from
+	 * that answer is a write that moves the second request onto the first one's
+	 * operation.
 	 */
-	const DUP = doc({
-		"/a": { get: { operationId: "list", summary: "List A" } },
-		"/b": { post: { operationId: "list", summary: "Create B" } },
-	});
-	const TWEAKED = doc({
-		"/a": { get: { operationId: "list", summary: "List A, now documented" } },
-		"/b": { post: { operationId: "list", summary: "Create B" } },
-	});
-
 	it("writes nothing of the first operation onto the second request", () => {
-		const entries = readSpecOperations(DUP).requests;
-		const requests = [
-			requestFrom("req_a", entries[0]),
-			// The stamp an import before the fix left on the second declaration.
-			requestFrom("req_b", entries[1], {
-				specOperation: { operationId: "list", method: "POST", path: "/b" },
-			}),
-		];
-		const diff = diffSpec({
-			bound: entries,
-			fetched: readSpecOperations(TWEAKED).requests,
-			requests,
+		const createB: SpecOperation = { method: "POST", path: "/b" };
+		const diff = diffOf({
+			changed: [
+				changed("req_a", { operationId: "list", method: "GET", path: "/a" }, [
+					field("name"),
+				]),
+				// Followed by its path: the id two requests claim identifies neither,
+				// so the document's `GET /a` never reaches this row. Its identity is
+				// the whole of the change - dropping the id it can no longer state.
+				changed("req_b", createB, [], {
+					boundOperation: { operationId: "list", method: "POST", path: "/b" },
+					matchedBy: "path",
+					renamed: true,
+				}),
+			],
 		});
-		const body = buildSyncPayload({
-			collectionId: "col_root",
-			diff,
-			selection: defaultSelection(diff),
-			content: TWEAKED,
-			sourceUrl: null,
-			collections: collections(),
-		});
+
+		const body = payload(diff, undefined, collections());
 
 		const b = body.update.find((u) => u.id === "req_b");
 		expect(b?.specOperation).toEqual({ method: "POST", path: "/b" });
-		// Nothing the document produces for this request differs, so no field of
-		// it is written at all - the update exists only to drop the id the other
-		// operation kept, which is the ambiguity being repaired. `method` is one of
-		// those fields since #717, so it is absent rather than re-asserted as
-		// "POST" - a stronger form of the same claim, because the first operation's
-		// `GET` cannot reach this request through a key that is not there.
+		// No field of it is written at all - the update exists only to drop the id
+		// the other operation kept, which is the ambiguity being repaired. `method`
+		// is one of those fields since #717, so it is absent rather than
+		// re-asserted as "POST" - a stronger form of the same claim, because the
+		// first operation's `GET` cannot reach this request through a key that is
+		// not there.
 		expect(b?.method).toBeUndefined();
 		expect(b?.name).toBeUndefined();
 		expect(b?.url).toBeUndefined();
 		// The tweak lands where it belongs, on the request that operation is.
-		expect(body.update.find((u) => u.id === "req_a")?.name).toBe("List A, now documented");
+		expect(body.update.find((u) => u.id === "req_a")?.name).toBe("List pets");
 	});
 });
 
 describe("defaultSelection", () => {
 	it("ticks every added operation and no removal", () => {
-		const fetched = doc({
-			"/pets": { get: { operationId: "listPets", summary: "List pets", tags: ["pets"] } },
-			"/vets": { get: { operationId: "listVets", summary: "List vets", tags: ["vets"] } },
+		const diff = diffOf({
+			added: [added(LIST_VETS, "vets")],
+			removed: [{ requestId: "req_1", name: "List owners", operation: LIST_PETS }],
 		});
-		const diff = diffOf(fetched, boundCollection());
 		const selection = defaultSelection(diff);
 
 		expect([...selection.added]).toEqual(["GET /vets"]);
-		// `listOwners` is gone from the document, and stays until somebody says so.
-		expect(diff.removed).toHaveLength(1);
+		// The operation is gone from the document, and the request stays until
+		// somebody says so.
 		expect(selection.removed.size).toBe(0);
 	});
 
 	it("leaves a field the user edited unticked, and takes one only the document moved", () => {
-		// Mutation check: drop the `userTouched` filter and `name` appears here.
-		const fetched = doc({
-			"/pets": { get: { operationId: "listPets", summary: "Every pet", tags: ["pets"] } },
-			"/owners": {
-				get: { operationId: "listOwners", summary: "Every owner", tags: ["owners"] },
-			},
+		// Mutation check: drop the `userTouched` filter and `name` appears for
+		// `req_0` too.
+		const diff = diffOf({
+			changed: [
+				changed("req_0", LIST_PETS, [field("name", /* userTouched */ true)]),
+				changed("req_1", GET_PET, [field("name")]),
+			],
 		});
-		const requests = boundCollection({ listPets: { name: "My pets call" } });
-		const selection = defaultSelection(diffOf(fetched, requests));
+		const selection = defaultSelection(diff);
 
 		expect([...(selection.changed.get("req_0") ?? [])]).toEqual([]);
 		expect([...(selection.changed.get("req_1") ?? [])]).toEqual(["name"]);
@@ -223,63 +217,46 @@ describe("defaultSelection", () => {
 	it("offers nothing for a request whose bound document could not be read", () => {
 		// With no old value, "the user edited it" is not a claim anything can
 		// make - so the whole request is left for the user to decide about.
-		const fetched = doc({
-			"/pets": { get: { operationId: "listPets", summary: "Every pet", tags: ["pets"] } },
-			"/owners": {
-				get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] },
-			},
-		});
-		const diff = diffSpec({
-			bound: null,
-			fetched: readSpecOperations(fetched).requests,
-			requests: boundCollection(),
+		const diff = diffOf({
+			changed: [changed("req_0", LIST_PETS, [field("name")], { previousUnknown: true })],
 		});
 
-		expect(diff.changed).toHaveLength(1);
-		expect(diff.changed[0].previousUnknown).toBe(true);
 		expect(defaultSelection(diff).changed.size).toBe(0);
 	});
 
 	it("is empty when the document changed nothing this collection holds", () => {
-		expect(isEmptySelection(defaultSelection(diffOf(BOUND, boundCollection())))).toBe(true);
+		expect(isEmptySelection(defaultSelection(diffOf({ unchanged: 2 })))).toBe(true);
+	});
+
+	it("offers a request whose only change is its identity, and not one with nothing to write", () => {
+		// A pure rename is a change to write; a request whose every moved field is
+		// the user's own is not offered at all, because ticking it would send an
+		// update that writes nothing but the identity it already has.
+		const diff = diffOf({
+			changed: [
+				changed("req_renamed", LIST_PETS, [], { renamed: true }),
+				changed("req_edited", GET_PET, [field("name", true)]),
+			],
+		});
+		const selection = defaultSelection(diff);
+
+		expect([...(selection.changed.get("req_renamed") ?? [])]).toEqual([]);
+		expect(selection.changed.has("req_edited")).toBe(false);
 	});
 });
 
 describe("buildSyncPayload", () => {
 	it("files an added operation in the tag folder that already exists", () => {
-		const fetched = doc({
-			"/pets": { get: { operationId: "listPets", summary: "List pets", tags: ["pets"] } },
-			"/pets/{petId}": {
-				get: { operationId: "getPet", summary: "Get a pet", tags: ["pets"] },
-			},
-			"/owners": {
-				get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] },
-			},
-		});
-		const body = payload(fetched, boundCollection());
+		const body = payload(diffOf({ added: [added(GET_PET, "pets")] }));
 
 		expect(body.collections).toEqual([]);
 		expect(body.create).toHaveLength(1);
 		expect(body.create[0].collectionId).toBe("col_pets");
-		expect(body.create[0].specOperation).toEqual({
-			operationId: "getPet",
-			method: "GET",
-			path: "/pets/{petId}",
-		});
+		expect(body.create[0].specOperation).toEqual(GET_PET);
 	});
 
 	it("creates one folder per new tag however many operations name it", () => {
-		const fetched = doc({
-			"/pets": { get: { operationId: "listPets", summary: "List pets", tags: ["pets"] } },
-			"/owners": {
-				get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] },
-			},
-			"/vets": { get: { operationId: "listVets", summary: "List vets", tags: ["vets"] } },
-			"/vets/{vetId}": {
-				get: { operationId: "getVet", summary: "Get a vet", tags: ["vets"] },
-			},
-		});
-		const body = payload(fetched, boundCollection());
+		const body = payload(diffOf({ added: [added(LIST_VETS, "vets"), added(GET_VET, "vets")] }));
 
 		expect(body.collections).toHaveLength(1);
 		expect(body.collections[0].name).toBe("vets");
@@ -289,55 +266,78 @@ describe("buildSyncPayload", () => {
 		expect(body.create.every((item) => item.collectionId === undefined)).toBe(true);
 	});
 
-	it("puts an untagged operation where an import would - its path folder (#710)", () => {
-		const fetched = doc({
-			"/pets": { get: { operationId: "listPets", summary: "List pets", tags: ["pets"] } },
-			"/owners": {
-				get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] },
-			},
-			"/health": { get: { operationId: "health", summary: "Health" } },
-		});
-		const body = payload(fetched, boundCollection());
-
-		// A synced collection has to end up shaped like an imported one, so the
-		// added request follows the import's grouping rather than the rule that
-		// held before the path fallback existed.
-		expect(body.collections).toHaveLength(1);
-		expect(body.collections[0].name).toBe("health");
-		expect(body.create[0].collectionTempId).toBe(body.collections[0].tempId);
-	});
-
-	it("still puts an operation whose path names no resource on the bound collection", () => {
-		const fetched = doc({
-			"/pets": { get: { operationId: "listPets", summary: "List pets", tags: ["pets"] } },
-			"/owners": {
-				get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] },
-			},
-			"/{id}": { get: { operationId: "byId", summary: "By id" } },
-		});
-		const body = payload(fetched, boundCollection());
+	it("puts an operation the engine filed nowhere on the bound collection", () => {
+		// `folder: ""` is what the engine answers for an operation with no tag
+		// whose path names no resource (issues #710, #655) - it imports onto the
+		// root, and a sync has to put it in the same place.
+		const body = payload(diffOf({ added: [added({ method: "GET", path: "/{id}" }, "")] }));
 
 		expect(body.collections).toEqual([]);
 		expect(body.create[0].collectionId).toBe("col_root");
 	});
 
+	it("builds an added request the way an import of the same document would", () => {
+		// The three constants an OpenAPI import writes for every operation, which
+		// the engine's draft omits because they never differ - so they are stated
+		// here, and a create that dropped them would reach the engine with no auth
+		// mode at all.
+		const body = payload(
+			diffOf({
+				added: [
+					added(LIST_VETS, "vets", {
+						url: "{{baseUrl}}/vets?limit=10",
+						params: [{ key: "limit", value: "10", enabled: true }],
+						body: { mode: "json", content: "{}" },
+						examples: [
+							{
+								name: "200 - ok",
+								status: 200,
+								headers: [
+									{
+										key: "Content-Type",
+										value: "application/json",
+										enabled: true,
+									},
+								],
+								body: '{"id":1}',
+								contentType: "application/json",
+							},
+						],
+					}),
+				],
+			})
+		);
+
+		const item = body.create[0];
+		expect(item.auth).toEqual({ mode: "inherit" });
+		expect(item.preRequestScript).toBe("");
+		expect(item.postRequestScript).toBe("");
+		expect(item.url).toBe("{{baseUrl}}/vets?limit=10");
+		expect(item.params).toEqual([{ key: "limit", value: "10", enabled: true }]);
+		expect(item.bodyType).toBe("json");
+		expect(item.examples).toHaveLength(1);
+		expect(item.specOperation).toEqual(LIST_VETS);
+	});
+
+	it("sends no examples key for an added operation that documents no response", () => {
+		// `[]` would read as "this request documents no responses", which is a
+		// claim only a document that declared some can make.
+		const body = payload(diffOf({ added: [added(LIST_VETS, "vets")] }));
+
+		expect(body.create[0].examples).toBeUndefined();
+	});
+
 	it("writes only the ticked fields, plus the identity and the examples", () => {
-		const fetched = doc({
-			"/pets": {
-				get: {
-					operationId: "listPets",
-					summary: "Every pet",
-					tags: ["pets"],
-					parameters: [{ name: "limit", in: "query", required: true, example: "50" }],
-				},
-			},
-			"/owners": {
-				get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] },
-			},
+		const diff = diffOf({
+			changed: [
+				changed("req_0", LIST_PETS, [field("name"), field("url"), field("params")], {
+					draft: draft({ name: "Every pet", url: "{{baseUrl}}/pets?limit=50" }),
+				}),
+			],
 		});
-		const body = payload(fetched, boundCollection(), (base) => ({
+		const body = payload(diff, (base) => ({
 			...base,
-			changed: new Map([["req_0", new Set<"name">(["name"])]]),
+			changed: new Map([["req_0", new Set<SpecField>(["name"])]]),
 		}));
 
 		expect(body.update).toHaveLength(1);
@@ -347,14 +347,12 @@ describe("buildSyncPayload", () => {
 		expect(patch.url).toBeUndefined();
 		expect(patch.params).toBeUndefined();
 		// The identity always rides along - see the module comment.
-		expect(patch.specOperation).toEqual({
-			operationId: "listPets",
-			method: "GET",
-			path: "/pets",
-		});
+		expect(patch.specOperation).toEqual(LIST_PETS);
 		// `request.method` does not, since #717: it is a ticked field like `url`,
 		// and this selection ticked only `name`.
 		expect(patch.method).toBeUndefined();
+		// Present and empty: an operation whose documented responses were removed
+		// must lose the examples the last import wrote for them.
 		expect(patch.examples).toEqual([]);
 	});
 
@@ -362,15 +360,19 @@ describe("buildSyncPayload", () => {
 		// The document renamed the path under a stable operationId, so nothing
 		// about the request's fields moved except the URL - untick it and the
 		// identity is the whole of the change, which is still a change to write.
-		const fetched = doc({
-			"/animals": { get: { operationId: "listPets", summary: "List pets", tags: ["pets"] } },
-			"/owners": {
-				get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] },
-			},
+		const diff = diffOf({
+			changed: [
+				changed(
+					"req_0",
+					{ operationId: "listPets", method: "GET", path: "/animals" },
+					[field("url")],
+					{ boundOperation: LIST_PETS, renamed: true }
+				),
+			],
 		});
-		const body = payload(fetched, boundCollection(), (base) => ({
+		const body = payload(diff, (base) => ({
 			...base,
-			changed: new Map([["req_0", new Set()]]),
+			changed: new Map([["req_0", new Set<SpecField>()]]),
 		}));
 
 		expect(body.update).toHaveLength(1);
@@ -379,179 +381,46 @@ describe("buildSyncPayload", () => {
 	});
 
 	it("names a removal only once it is ticked, in the diff's own order", () => {
-		const fetched = doc({
-			"/pets": { get: { operationId: "listPets", summary: "List pets", tags: ["pets"] } },
+		const diff = diffOf({
+			removed: [
+				{ requestId: "req_1", name: "List owners", operation: GET_PET },
+				{ requestId: "req_2", name: "Get an owner", operation: LIST_VETS },
+			],
 		});
-		const requests = boundCollection();
 
-		expect(payload(fetched, requests).delete).toEqual([]);
+		expect(payload(diff).delete).toEqual([]);
 		expect(
-			payload(fetched, requests, (base) => ({
-				...base,
-				removed: new Set(["req_1"]),
-			})).delete
-		).toEqual(["req_1"]);
+			payload(diff, (base) => ({ ...base, removed: new Set(["req_2", "req_1"]) })).delete
+		).toEqual(["req_1", "req_2"]);
 	});
 
 	it("carries the document's own responses as the examples that replace the imported ones", () => {
-		const fetched = doc({
-			"/pets": {
-				get: {
-					operationId: "listPets",
-					summary: "Every pet",
-					tags: ["pets"],
-					responses: {
-						"200": {
-							description: "ok",
-							content: { "application/json": { example: { id: 1 } } },
-						},
-					},
-				},
-			},
-			"/owners": {
-				get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] },
-			},
+		const example = {
+			name: "200 - ok",
+			status: 200,
+			headers: [{ key: "Content-Type", value: "application/json", enabled: true }],
+			body: '{"id":1}',
+			contentType: "application/json",
+		};
+		const diff = diffOf({
+			changed: [
+				changed("req_0", LIST_PETS, [field("name")], {
+					draft: draft({ examples: [example] }),
+				}),
+			],
 		});
-		const patch = payload(fetched, boundCollection()).update.find(
-			(item) => item.id === "req_0"
-		);
 
-		expect(patch?.examples).toHaveLength(1);
-		expect(patch?.examples?.[0].status).toBe(200);
+		const patch = payload(diff).update.find((item) => item.id === "req_0");
+
+		expect(patch?.examples).toEqual([example]);
 	});
 
 	it("keys an added operation the way the checklist does", () => {
 		// The UI ticks by `operationKey`, so a payload built from a selection the
 		// UI produced depends on the two agreeing.
-		const fetched = doc({
-			"/pets": { get: { operationId: "listPets", summary: "List pets", tags: ["pets"] } },
-			"/owners": {
-				get: { operationId: "listOwners", summary: "List owners", tags: ["owners"] },
-			},
-			"/vets": { get: { operationId: "listVets", summary: "List vets", tags: ["vets"] } },
-		});
-		const diff = diffOf(fetched, boundCollection());
+		const diff = diffOf({ added: [added(LIST_VETS, "vets")] });
 
 		expect(diff.added.map((entry) => operationKey(entry.operation))).toEqual(["GET /vets"]);
-		expect(
-			payload(fetched, boundCollection(), (base) => ({ ...base, added: new Set() })).create
-		).toEqual([]);
-	});
-});
-
-/**
- * A stub parameter the user ticked on, through a whole sync (issue #677 item 1).
- *
- * Issues #622/#658 import an optional, value-less parameter **disabled** - the
- * row is what the endpoint accepts, not what this request should send. Their
- * re-application clause is the half no test reached: a person who ticked the row
- * on has stated the intent the import declined to guess, and a sync must not tick
- * it back off.
- *
- * Three separate things have to hold for that, and each has its own way of
- * failing silently:
- *
- *  - the `[off]` marker in `spec-diff`'s row rendering, without which the flip is
- *    invisible to the comparison and the field reads as matching the document;
- *  - the three-way flag, which is what calls the flip the user's rather than the
- *    document's;
- *  - `defaultSelection`, which leaves a user-touched field out of the ticks.
- *
- * The requests here are built from the document's own drafts and then edited the
- * way the Params table edits them - the row flipped *and* the URL rewritten from
- * the rows, since since #590 the URL is what actually goes on the wire.
- */
-describe("a stub parameter enabled by hand", () => {
-	const STUB = doc({
-		"/pets": {
-			get: {
-				operationId: "listPets",
-				summary: "List pets",
-				tags: ["pets"],
-				parameters: [{ name: "verbose", in: "query" }],
-			},
-		},
-	});
-
-	const stubDrafts = () => readSpecOperations(STUB).requests;
-
-	/** The imported request with `verbose` ticked on, as the Params table leaves it. */
-	function verboseEnabled(): Request {
-		const [entry] = stubDrafts();
-		const params = entry.draft.params.map((row) => ({ ...row, enabled: true }));
-		return requestFrom("req_0", entry, {
-			params,
-			url: buildUrlWithParams(entry.draft.url, params),
-		});
-	}
-
-	function syncPayload(fetchedRaw: string, requests: Request[]) {
-		const diff = diffSpec({
-			bound: stubDrafts(),
-			fetched: readSpecOperations(fetchedRaw).requests,
-			requests,
-		});
-		return {
-			diff,
-			body: buildSyncPayload({
-				collectionId: "col_root",
-				diff,
-				selection: defaultSelection(diff),
-				content: fetchedRaw,
-				sourceUrl: null,
-				collections: collections("pets"),
-			}),
-		};
-	}
-
-	it("imports disabled, which is what leaves anything to survive", () => {
-		const [entry] = stubDrafts();
-		expect(entry.draft.params).toEqual([{ key: "verbose", value: "", enabled: false }]);
-		// And off the URL, so the row is listed without being sent.
-		expect(entry.draft.url).not.toContain("verbose");
-	});
-
-	it("survives a sync against a document that did not move", () => {
-		const { diff, body } = syncPayload(STUB, [verboseEnabled()]);
-
-		// Both halves of the flip are seen, and both are the user's - the document
-		// is byte-identical, so there is nothing else they could be. Remove the
-		// `[off]` marker and `params` drops out of this list.
-		expect(diff.changed[0].fields.map((f) => f.field).sort()).toEqual(["params", "url"]);
-		expect(diff.changed[0].fields.every((f) => f.userTouched)).toBe(true);
-		expect(isEmptySelection(defaultSelection(diff))).toBe(true);
-		expect(body.update).toEqual([]);
-	});
-
-	it("survives a sync that does move the parameter list", () => {
-		// The case the marker is actually load-bearing for. The document adds a
-		// second parameter, so `params` differs from it either way and is reported
-		// either way - what the marker decides is whether the flip is *also* a
-		// difference from the bound document, and therefore the user's. Without it
-		// the field reads as untouched, gets ticked by default, and the sync writes
-		// the document's list over the row somebody enabled.
-		const moved = doc({
-			"/pets": {
-				get: {
-					operationId: "listPets",
-					summary: "List pets",
-					tags: ["pets"],
-					parameters: [
-						{ name: "verbose", in: "query" },
-						{ name: "limit", in: "query", required: true, example: "10" },
-					],
-				},
-			},
-		});
-		const { diff, body } = syncPayload(moved, [verboseEnabled()]);
-
-		const params = diff.changed[0].fields.find((f) => f.field === "params");
-		expect(params?.userTouched).toBe(true);
-		// Nothing here is safe to take, so the request is not offered at all and
-		// the payload writes no row. Remove the `[off]` marker and `params` reads
-		// as untouched, gets ticked, and this update arrives carrying the
-		// document's parameter list.
-		expect(defaultSelection(diff).changed.has("req_0")).toBe(false);
-		expect(body.update).toEqual([]);
+		expect(payload(diff, (base) => ({ ...base, added: new Set() })).create).toEqual([]);
 	});
 });

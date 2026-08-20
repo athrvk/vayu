@@ -301,6 +301,7 @@ add_library(vayu_core STATIC
     src/core/openapi_export.cpp
     src/core/path_template.cpp
     src/core/spec_binding.cpp
+    src/core/spec_diff.cpp
     src/core/spec_coverage.cpp
     src/core/schema_validation.cpp
     src/core/run_manager.cpp
@@ -463,6 +464,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/specs.cpp
         src/http/routes/spec_sync.cpp
         src/http/routes/spec_match.cpp
+        src/http/routes/spec_diff.cpp
         src/http/routes/spec_bind.cpp
         src/http/routes/spec_export.cpp
         src/http/routes/reorder.cpp
@@ -607,10 +609,12 @@ if(VAYU_BUILD_TESTS)
         tests/reorder_route_test.cpp
         tests/spec_sync_route_test.cpp
         tests/spec_match_route_test.cpp
+        tests/spec_diff_route_test.cpp
         tests/spec_bind_route_test.cpp
         tests/operation_match_test.cpp
         tests/openapi_document_test.cpp
         tests/openapi_drafts_test.cpp
+        tests/spec_diff_test.cpp
         tests/openapi_export_test.cpp
         tests/spec_export_route_test.cpp
         tests/spec_coverage_test.cpp
@@ -625,6 +629,7 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/specs.cpp
         src/http/routes/spec_sync.cpp
         src/http/routes/spec_match.cpp
+        src/http/routes/spec_diff.cpp
         src/http/routes/spec_bind.cpp
         src/http/routes/spec_export.cpp
         src/http/routes/reorder.cpp
@@ -792,6 +797,7 @@ if(VAYU_BUILD_TESTS)
         SpecBindRouteTest
         SpecExportRouteTest
         SpecMatchRouteTest
+        SpecDiffRouteTest
         SpecSyncRouteTest
         SpecsRouteTest
         SseLimitsTest

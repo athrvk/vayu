@@ -1603,6 +1603,127 @@ or an operation row the store would refuse. `404` when the collection does not
 exist - not an empty match, since "this document matches none of your requests"
 and "you named a collection that is not there" are different answers.
 
+### POST /specs/diff
+
+What a re-fetched document would change about the collection bound to it - the
+read half of a sync (issue #654's comparison, moved engine-side by #854). The
+app's **Sync** section is this call; an agent asking "has this contract drifted,
+and where" is the same one.
+
+**Reads only.** No document is stored, no binding moved, no request stamped, so
+a caller may ask about a document it has not decided to apply. Applying is
+[`POST /specs/sync`](#post-specssync), which re-reads everything rather than
+being handed this answer - the same split `POST /specs/match` and
+`POST /specs/bind` follow.
+
+**Request:**
+```json
+{
+  "collectionId": "col_9a1f...",
+  "spec": { "content": "{\"openapi\": \"3.0.0\", ...}" }
+}
+```
+
+Neither the requests nor the **bound** document are sent. The engine walks the
+subtree of `collectionId` itself (an import files its requests under one
+sub-collection per tag) and reads the bound document from the collection's own
+binding: the three-way rule below is only worth anything if the "previous" side
+is the bytes actually stored, and a caller that could supply them could turn its
+own edits into the document's - by accident, with a stale copy.
+
+**Response:**
+```json
+{
+  "identical": false,
+  "added": [
+    {
+      "operation": { "operationId": "listOwners", "method": "GET", "path": "/owners" },
+      "folder": "owners",
+      "draft": {
+        "name": "List owners",
+        "description": "",
+        "method": "GET",
+        "url": "{{baseUrl}}/owners",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "none" },
+        "examples": []
+      }
+    }
+  ],
+  "removed": [
+    {
+      "requestId": "req_7b21...",
+      "name": "Delete a pet",
+      "operation": { "operationId": "deletePet", "method": "DELETE", "path": "/pets/{petId}" }
+    }
+  ],
+  "changed": [
+    {
+      "requestId": "req_4c8e...",
+      "name": "List pets",
+      "boundOperation": { "operationId": "listPets", "method": "GET", "path": "/pets" },
+      "operation": { "operationId": "listPets", "method": "GET", "path": "/pets" },
+      "matchedBy": "operationId",
+      "renamed": false,
+      "previousUnknown": false,
+      "fields": [
+        {
+          "field": "name",
+          "current": "List pets",
+          "next": "List all the pets",
+          "userTouched": false
+        }
+      ],
+      "draft": { "name": "List all the pets", "...": "as above" }
+    }
+  ],
+  "unchanged": 12,
+  "unmapped": 1
+}
+```
+
+`identical` is decided on the **stored bytes** - the ones `spec_documents.hash`
+is over - rather than on a hash the caller computed, and is the "up to date"
+answer. The buckets are still reported when it is `true`, empty.
+
+`draft` is the request an import of the new document would build: the values
+behind every `next` (which is truncated for display), plus the operation's
+documented responses as `examples`, so a `POST /specs/sync` payload is built by
+choosing which of these fields to send rather than by re-reading the document.
+`unmapped` counts requests carrying no operation at all - not part of the
+comparison, but stated, because a sync that silently ignores half a collection is
+one nobody can read.
+
+**How it compares.** An operation is followed by its `operationId` first and by
+method + path shape second (the same flattening `POST /specs/match` binds with),
+so a path moved under a stable id and an id moved under a stable path both stay
+one operation, while both moving at once is disclosed as a removal plus an
+addition rather than guessed at. An id **two requests claim** identifies neither
+and is skipped; an id whose entry contradicts the endpoint the request records
+loses to an exact match on that endpoint. `renamed` says the identity itself
+moved, so an apply records the new one.
+
+**`userTouched` is three-way**: the field is flagged when what the request holds
+is neither what the new document produces nor what the **bound** one did - the
+only evidence that a person put it there, and the flag an apply may not overwrite
+silently. `previousUnknown` says the bound document does not declare this
+operation, so no such claim can be made about it at all, and every `userTouched`
+on that request is `false`.
+
+**Response examples are deliberately not compared.** The rule that governs them
+(`origin="import"` is replaced, `origin="user"` survives) only means anything at
+apply time, so they ride on `draft` rather than appearing as a difference nothing
+acts on.
+
+**Errors:** `400` for a missing or empty `collectionId`, a missing or empty
+`spec.content`, a document larger than `maxSpecDocumentBytes`, a document that
+will not read as JSON or YAML (the message names where it broke), or a collection
+that binds nothing - there is nothing to compare against, and binding is
+[`POST /specs/bind`](#post-specsbind). `404` when the collection does not exist.
+`409` when its binding names a document the store no longer holds, which is a
+broken binding rather than a bad request.
+
 ### POST /specs/bind
 
 Bind a collection to an OpenAPI document, in **one transaction**: the document is

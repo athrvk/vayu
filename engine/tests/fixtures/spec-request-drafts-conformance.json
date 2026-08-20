@@ -49,7 +49,16 @@
             "mode": "none",
             "content": "",
             "fields": []
-          }
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         },
         {
           "operationId": "putPet",
@@ -81,7 +90,16 @@
             "mode": "json",
             "content": "{\n  \"id\": 0,\n  \"name\": \"Rex\",\n  \"weight\": 4,\n  \"tags\": [\n    \"\"\n  ],\n  \"status\": \"available\",\n  \"parent\": {}\n}",
             "fields": []
-          }
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         }
       ]
     },
@@ -103,7 +121,16 @@
             "mode": "text",
             "content": "",
             "fields": []
-          }
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         },
         {
           "operationId": "root",
@@ -119,7 +146,16 @@
             "mode": "none",
             "content": "",
             "fields": []
-          }
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         },
         {
           "operationId": "listOrders",
@@ -135,7 +171,16 @@
             "mode": "none",
             "content": "",
             "fields": []
-          }
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         },
         {
           "operationId": "createOrder",
@@ -151,7 +196,16 @@
             "mode": "json",
             "content": "{\n  \"total\": 0,\n  \"note\": \"\"\n}",
             "fields": []
-          }
+          },
+          "examples": [
+            {
+              "name": "201 - made",
+              "status": 201,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         }
       ]
     },
@@ -195,7 +249,16 @@
                 "file": false
               }
             ]
-          }
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         },
         {
           "operationId": "form",
@@ -226,7 +289,16 @@
                 "file": false
               }
             ]
-          }
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         }
       ]
     },
@@ -271,7 +343,16 @@
             "mode": "none",
             "content": "",
             "fields": []
-          }
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         },
         {
           "operationId": "addPet",
@@ -287,7 +368,16 @@
             "mode": "json",
             "content": "{\n  \"id\": 0,\n  \"name\": \"\"\n}",
             "fields": []
-          }
+          },
+          "examples": [
+            {
+              "name": "201 - made",
+              "status": 201,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         },
         {
           "operationId": "uploadPhoto",
@@ -318,7 +408,16 @@
                 "file": false
               }
             ]
-          }
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         }
       ]
     },
@@ -340,7 +439,16 @@
             "mode": "none",
             "content": "",
             "fields": []
-          }
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
         },
         {
           "method": "GET",
@@ -355,7 +463,198 @@
             "mode": "none",
             "content": "",
             "fields": []
-          }
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3.x - documented responses: an example, a named example, a $ref'd response, a sampled schema, and the keys that are not statuses",
+      "document": "{\n  \"openapi\": \"3.0.3\",\n  \"info\": {\n    \"title\": \"Responses\"\n  },\n  \"components\": {\n    \"responses\": {\n      \"NotFound\": {\n        \"description\": \"no such pet\",\n        \"content\": {\n          \"application/json\": {\n            \"schema\": {\n              \"type\": \"object\",\n              \"properties\": {\n                \"message\": {\n                  \"type\": \"string\"\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  },\n  \"paths\": {\n    \"/pets\": {\n      \"get\": {\n        \"operationId\": \"listPets\",\n        \"summary\": \"List pets\",\n        \"tags\": [\n          \"pets\"\n        ],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"every pet\",\n            \"content\": {\n              \"application/json\": {\n                \"example\": [\n                  {\n                    \"id\": 1,\n                    \"name\": \"Rex\"\n                  }\n                ]\n              }\n            }\n          },\n          \"204\": {\n            \"description\": \"nothing to say\"\n          },\n          \"404\": {\n            \"$ref\": \"#/components/responses/NotFound\"\n          },\n          \"default\": {\n            \"description\": \"catch all\"\n          },\n          \"5XX\": {\n            \"description\": \"server trouble\"\n          }\n        }\n      },\n      \"post\": {\n        \"operationId\": \"createPet\",\n        \"tags\": [\n          \"pets\"\n        ],\n        \"responses\": {\n          \"201\": {\n            \"description\": \"made\",\n            \"content\": {\n              \"application/vnd.pets+json\": {\n                \"examples\": {\n                  \"one\": {\n                    \"value\": {\n                      \"id\": 7\n                    }\n                  },\n                  \"two\": {\n                    \"value\": {\n                      \"id\": 8\n                    }\n                  }\n                }\n              }\n            }\n          },\n          \"400\": {\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"type\": \"object\",\n                  \"properties\": {\n                    \"code\": {\n                      \"type\": \"integer\"\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "drafts": [
+        {
+          "operationId": "listPets",
+          "method": "GET",
+          "path": "/pets",
+          "folder": "pets",
+          "name": "List pets",
+          "description": "",
+          "url": "{{baseUrl}}/pets",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "none",
+            "content": "",
+            "fields": []
+          },
+          "examples": [
+            {
+              "name": "200 - every pet",
+              "status": 200,
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "enabled": true
+                }
+              ],
+              "body": "[\n  {\n    \"id\": 1,\n    \"name\": \"Rex\"\n  }\n]",
+              "contentType": "application/json"
+            },
+            {
+              "name": "204 - nothing to say",
+              "status": 204,
+              "headers": [],
+              "body": "",
+              "contentType": ""
+            },
+            {
+              "name": "404 - no such pet",
+              "status": 404,
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "enabled": true
+                }
+              ],
+              "body": "{\n  \"message\": \"\"\n}",
+              "contentType": "application/json"
+            }
+          ]
+        },
+        {
+          "operationId": "createPet",
+          "method": "POST",
+          "path": "/pets",
+          "folder": "pets",
+          "name": "createPet",
+          "description": "",
+          "url": "{{baseUrl}}/pets",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "none",
+            "content": "",
+            "fields": []
+          },
+          "examples": [
+            {
+              "name": "201 - made",
+              "status": 201,
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/vnd.pets+json",
+                  "enabled": true
+                }
+              ],
+              "body": "{\n  \"id\": 7\n}",
+              "contentType": "application/vnd.pets+json"
+            },
+            {
+              "name": "400",
+              "status": 400,
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "enabled": true
+                }
+              ],
+              "body": "{\n  \"code\": 0\n}",
+              "contentType": "application/json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2.0 - documented responses: `examples` keyed by MIME, a sampled schema, and `produces` deciding the media type",
+      "document": "{\n  \"swagger\": \"2.0\",\n  \"info\": {\n    \"title\": \"Responses 2.0\"\n  },\n  \"produces\": [\n    \"application/xml\"\n  ],\n  \"paths\": {\n    \"/pets\": {\n      \"get\": {\n        \"operationId\": \"listPets\",\n        \"tags\": [\n          \"pets\"\n        ],\n        \"produces\": [\n          \"application/json\"\n        ],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\",\n            \"examples\": {\n              \"application/json\": {\n                \"id\": 1\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"gone\",\n            \"schema\": {\n              \"type\": \"object\",\n              \"properties\": {\n                \"message\": {\n                  \"type\": \"string\"\n                }\n              }\n            }\n          }\n        }\n      },\n      \"post\": {\n        \"operationId\": \"createPet\",\n        \"tags\": [\n          \"pets\"\n        ],\n        \"responses\": {\n          \"201\": {\n            \"description\": \"made\",\n            \"schema\": {\n              \"type\": \"string\"\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "drafts": [
+        {
+          "operationId": "listPets",
+          "method": "GET",
+          "path": "/pets",
+          "folder": "pets",
+          "name": "listPets",
+          "description": "",
+          "url": "{{baseUrl}}/pets",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "none",
+            "content": "",
+            "fields": []
+          },
+          "examples": [
+            {
+              "name": "200 - ok",
+              "status": 200,
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "enabled": true
+                }
+              ],
+              "body": "{\n  \"id\": 1\n}",
+              "contentType": "application/json"
+            },
+            {
+              "name": "404 - gone",
+              "status": 404,
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "enabled": true
+                }
+              ],
+              "body": "{\n  \"message\": \"\"\n}",
+              "contentType": "application/json"
+            }
+          ]
+        },
+        {
+          "operationId": "createPet",
+          "method": "POST",
+          "path": "/pets",
+          "folder": "pets",
+          "name": "createPet",
+          "description": "",
+          "url": "{{baseUrl}}/pets",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "none",
+            "content": "",
+            "fields": []
+          },
+          "examples": [
+            {
+              "name": "201 - made",
+              "status": 201,
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/xml",
+                  "enabled": true
+                }
+              ],
+              "body": "",
+              "contentType": "application/xml"
+            }
+          ]
         }
       ]
     }

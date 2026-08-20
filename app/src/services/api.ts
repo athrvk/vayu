@@ -69,6 +69,8 @@ import type {
 	SpecBindResponse,
 	SpecExportRequest,
 	SpecExportResponse,
+	SpecDiffRequest,
+	SpecDiffResponse,
 	SpecMatchRequest,
 	SpecMatchResponse,
 	SpecSyncRequest,
@@ -288,6 +290,21 @@ export const apiService = {
 	 */
 	async matchSpecOperations(payload: SpecMatchRequest): Promise<SpecMatchResponse> {
 		return await httpClient.post<SpecMatchResponse>(API_ENDPOINTS.SPEC_MATCH, payload);
+	},
+
+	/**
+	 * What a re-fetched document would change about a bound collection
+	 * (issue #854).
+	 *
+	 * Reads only, and the whole comparison: which request is which operation
+	 * after a rename, which fields the document moved, and which of those the
+	 * user had edited themselves. It moved engine-side because the Sync section
+	 * was the last part of this feature only the Spec tab could reach - and
+	 * because "what would an import of this document build" now has one answer
+	 * (`core::spec_request_drafts_of`) rather than one here and one there.
+	 */
+	async diffSpec(payload: SpecDiffRequest): Promise<SpecDiffResponse> {
+		return await httpClient.post<SpecDiffResponse>(API_ENDPOINTS.SPEC_DIFF, payload);
 	},
 
 	/**

@@ -9,10 +9,11 @@
  * Turning a spec diff and the user's ticks into the one call that applies them
  * (issue #655, phase 2c of #625).
  *
- * `spec-diff` works out what moved and cannot damage a row; this decides what
- * to *write* and still cannot, because it only builds a payload -
- * `POST /specs/sync` performs it in one transaction. Splitting it this way is
- * what makes the two rules that matter provable without a database:
+ * The comparison is the engine's since issue #854 (`POST /specs/diff`); this
+ * decides what to *write* out of it, and still cannot damage anything, because
+ * it only builds a payload - `POST /specs/sync` performs it in one transaction.
+ * Splitting it this way is what makes the two rules that matter provable without
+ * a database:
  *
  * - **A field the user edited is never written unless they ticked it.** The
  *   default selection reads `SpecFieldDiff.userTouched` and leaves those fields
@@ -26,18 +27,21 @@
  * deliberately does not compare examples (#654), so the rule is stated rather
  * than shown: the document's responses replace the examples a previous import
  * or sync wrote, and an example saved from a live response is never touched -
- * the engine keeps that promise by `origin`, not this payload.
+ * the engine keeps that promise by `origin`, not this payload. The responses
+ * themselves ride on the draft the diff answered with, which is why this file
+ * reads no document.
  *
  * **The identity travels with the request, always - and it is `specOperation`,
  * not `method`.** An applied change writes `specOperation` whether or not
  * anything was ticked: an operation *is* its method and path template, so a
  * request that recorded the old identity after a rename would be diffed against
  * the wrong operation next time - the exact failure the engine's matcher
- * (`core/operation_match.hpp`) warns about. `request.method` used to ride along on that reasoning and does not
- * anymore (issue #717): it is what the request *sends*, protects no lookup, and
- * writing it unconditionally silently reverted a user's `GET` -> `HEAD` edit on
- * any applied change. It is now a compared, flaggable, tickable `SpecField`
- * like `url`, which is what an import-written field is owed.
+ * (`core/operation_match.hpp`) warns about. `request.method` used to ride along
+ * on that reasoning and does not anymore (issue #717): it is what the request
+ * *sends*, protects no lookup, and writing it unconditionally silently reverted
+ * a user's `GET` -> `HEAD` edit on any applied change. It is now a compared,
+ * flaggable, tickable `SpecField` like `url`, which is what an import-written
+ * field is owed.
  *
  * A method left unticked therefore leaves `request.method` disagreeing with the
  * `specOperation.method` beside it. That is a state the user chose and it stays
@@ -47,7 +51,11 @@
 
 import type {
 	Collection,
-	ImportApplyExample,
+	HttpMethod,
+	SpecDiffAdded,
+	SpecDiffChanged,
+	SpecDiffResponse,
+	SpecField,
 	SpecOperation,
 	SpecSyncCollection,
 	SpecSyncCreate,
@@ -55,8 +63,7 @@ import type {
 	SpecSyncUpdate,
 } from "@/types";
 import { requestFieldsFromDraft } from "@/services/importers/request-payload";
-import type { ChangedRequest, SpecDiff, SpecField } from "./spec-diff";
-import type { SpecRequestDraft } from "./spec-operations";
+import type { RequestDraft } from "@/services/importers/types";
 
 /** `GET /pets/{petId}` - how a user recognises an operation, and how one is ticked. */
 export function operationKey(operation: SpecOperation): string {
@@ -84,11 +91,12 @@ export interface SpecApplySelection {
  * adds, every field it moved that nobody here had edited, and no deletions.
  *
  * A request the comparison could not make three-way (`previousUnknown` - the
- * bound document is unreadable) is left unticked whole: with no old value to
- * compare against, every field is potentially somebody's edit, and defaulting
- * to overwrite would be the silent destruction this split exists to prevent.
+ * bound document does not declare this operation) is left unticked whole: with
+ * no old value to compare against, every field is potentially somebody's edit,
+ * and defaulting to overwrite would be the silent destruction this split exists
+ * to prevent.
  */
-export function defaultSelection(diff: SpecDiff): SpecApplySelection {
+export function defaultSelection(diff: SpecDiffResponse): SpecApplySelection {
 	const changed = new Map<string, ReadonlySet<SpecField>>();
 	for (const item of diff.changed) {
 		if (item.previousUnknown) continue;
@@ -98,7 +106,7 @@ export function defaultSelection(diff: SpecDiff): SpecApplySelection {
 		// A request with nothing safe to write and no moved identity is not a
 		// change to offer - ticking it would send an update that writes nothing.
 		if (fields.size === 0 && !item.renamed) continue;
-		changed.set(item.request.id, fields);
+		changed.set(item.requestId, fields);
 	}
 	return {
 		added: new Set(diff.added.map((entry) => operationKey(entry.operation))),
@@ -125,7 +133,7 @@ export function isEmptySelection(selection: SpecApplySelection): boolean {
 export interface BuildSyncPayloadInput {
 	/** The bound collection. Nothing outside its subtree is named in the payload. */
 	collectionId: string;
-	diff: SpecDiff;
+	diff: SpecDiffResponse;
 	selection: SpecApplySelection;
 	/** The re-fetched document, verbatim - the bytes the engine will hash. */
 	content: string;
@@ -164,7 +172,7 @@ export function buildSyncPayload({
 
 	const update: SpecSyncUpdate[] = [];
 	for (const item of diff.changed) {
-		const fields = selection.changed.get(item.request.id);
+		const fields = selection.changed.get(item.requestId);
 		if (!fields) continue;
 		update.push(updateItem(item, fields));
 	}
@@ -181,29 +189,57 @@ export function buildSyncPayload({
 		// The diff's own order, not the set's: a payload that reorders itself run
 		// to run is one nobody can compare two of.
 		delete: diff.removed
-			.filter((request) => selection.removed.has(request.id))
-			.map((request) => request.id),
+			.filter((entry) => selection.removed.has(entry.requestId))
+			.map((entry) => entry.requestId),
 	};
 }
 
-function createItem(
-	entry: SpecRequestDraft,
-	tempId: string,
-	folders: FolderResolver
-): SpecSyncCreate {
+/**
+ * An added operation's draft as the import pipeline's own shape.
+ *
+ * The three constants an OpenAPI import writes for every operation it builds -
+ * `inherit` auth and two empty scripts - are stated here because the engine's
+ * draft deliberately omits them: they are the same value for every operation of
+ * every document, so a comparison would never report one and carrying them
+ * across the wire per operation would be bytes nothing reads.
+ *
+ * The point of assembling one is `requestFieldsFromDraft`: an operation the
+ * document adds must become the request an import of that document would, and
+ * one mapping for both paths is what makes that structural rather than
+ * remembered.
+ */
+function draftOf(entry: SpecDiffAdded): RequestDraft {
+	const { examples, ...rest } = entry.draft;
+	return {
+		...rest,
+		method: entry.draft.method as HttpMethod,
+		auth: { mode: "inherit" },
+		preRequestScript: "",
+		postRequestScript: "",
+		// Absent rather than `[]` for an operation documenting no response, which
+		// is the distinction `requestFieldsFromDraft` carries: "this request
+		// documents no responses" is a claim, and only a document that declared
+		// some can make it. Destructured out above rather than overwritten, since
+		// a key spread in as `[]` is present however it is spelled after.
+		...(examples.length > 0 ? { examples } : {}),
+		specOperation: entry.operation,
+	};
+}
+
+function createItem(entry: SpecDiffAdded, tempId: string, folders: FolderResolver): SpecSyncCreate {
 	const target = folders.resolve(entry.folder);
 	return {
 		tempId,
 		// The same draft-to-payload mapping an import uses, so an operation the
 		// document adds becomes the request an import of that document would.
-		...requestFieldsFromDraft(entry.draft),
+		...requestFieldsFromDraft(draftOf(entry)),
 		...target,
 	};
 }
 
-function updateItem(item: ChangedRequest, fields: ReadonlySet<SpecField>): SpecSyncUpdate {
+function updateItem(item: SpecDiffChanged, fields: ReadonlySet<SpecField>): SpecSyncUpdate {
 	const { draft } = item;
-	const patch: SpecSyncUpdate = { id: item.request.id };
+	const patch: SpecSyncUpdate = { id: item.requestId };
 	if (fields.has("name")) patch.name = draft.name;
 	if (fields.has("description")) patch.description = draft.description;
 	if (fields.has("method")) patch.method = draft.method;
@@ -220,7 +256,7 @@ function updateItem(item: ChangedRequest, fields: ReadonlySet<SpecField>): SpecS
 	// Present, `[]` included: an operation whose documented responses were
 	// removed must lose the examples the last import wrote for them, and an
 	// absent key means "leave every example alone".
-	patch.examples = (draft.examples ?? []) as ImportApplyExample[];
+	patch.examples = draft.examples;
 	return patch;
 }
 

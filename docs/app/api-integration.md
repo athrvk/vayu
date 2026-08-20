@@ -339,6 +339,7 @@ apiService.getSpec(id): Promise<SpecDocument>            // GET  /specs/:id
 apiService.getSpecMeta(id): Promise<SpecDocumentMeta>    // GET  /specs/:id/meta
 apiService.syncSpec(payload): Promise<SpecSyncResponse>  // POST /specs/sync
 apiService.matchSpecOperations(payload)                  // POST /specs/match
+apiService.diffSpec(payload): Promise<SpecDiffResponse>  // POST /specs/diff
 apiService.bindSpec(payload): Promise<SpecBindResponse>  // POST /specs/bind
 apiService.exportSpec(payload): Promise<SpecExportResponse> // POST /specs/export
 ```
@@ -380,6 +381,16 @@ collection bound to a document its requests do not reflect. The renderer decides
 *what* to send (`services/openapi/spec-apply.ts`) and never sequences the writes
 itself.
 
+`diffSpec` is the read that the Sync section's **Check** is (issue #854). It
+sends the collection and the re-fetched bytes and nothing else: the engine walks
+the collection's subtree itself and reads the bound document from the binding,
+because the three-way `userTouched` flag - the request holds neither the new
+document's value nor the bound one's - is worth nothing if a caller can supply
+the previous side. It writes nothing, and the answer carries, per entry, the
+draft an apply would write, so `spec-apply.ts` builds a `POST /specs/sync`
+payload out of it without reading a document at all. The comparison used to be
+`services/openapi/spec-diff.ts`, which is gone.
+
 `bindSpec` is the other (issue #862), and it decides even less: the payload is a
 collection and a document, with **no pairing in it**. Binding used to be three
 calls made in order from `useBindSpecMutation` - store the document, move the
@@ -407,7 +418,7 @@ for choosing is what the caller does with the answer:
 | Caller | Read | Why |
 |--------|------|-----|
 | The Spec tab's card (`useSpecMetaQuery`) | meta | It paints a source, a date and a size; it never renders the document |
-| The Sync section's Check (`useSpecContentReader`) | full, on the click | It compares bytes, and the click is when a comparison was asked for |
+| The Sync section's Check (`useSpecMetaReader`) | meta, on the click | Since #854 it needs only `sourceUrl` - where to re-fetch from - because the engine compares its own stored bytes |
 | The import dialog's bound-spec match (`useBoundSpecReader`) | full, on the action | It compares the document itself |
 
 Export needs neither read any more (issue #855): `POST /specs/export` assembles

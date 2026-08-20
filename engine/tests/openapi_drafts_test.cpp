@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -57,6 +58,38 @@ json rows_of (const std::vector<DraftField>& fields) {
     return out;
 }
 
+/**
+ * The documented responses, **sorted by status** (issue #854).
+ *
+ * The order is not a shared answer and cannot be: this side keeps document
+ * order, while a JavaScript object sorts integer-like keys ahead of the rest, so
+ * `responses: {404, 200}` reaches the renderer as `200, 404` - the same
+ * divergence the declared-operations fixture records for the response patterns.
+ * What has to agree is which responses there are and what each one carries.
+ */
+json examples_of (const std::vector<vayu::core::DraftExample>& examples) {
+    std::vector<const vayu::core::DraftExample*> sorted;
+    sorted.reserve (examples.size ());
+    for (const auto& example : examples) {
+        sorted.push_back (&example);
+    }
+    std::stable_sort (sorted.begin (), sorted.end (),
+    [] (const auto* a, const auto* b) { return a->status < b->status; });
+
+    json out = json::array ();
+    for (const auto* example : sorted) {
+        json headers = json::array ();
+        if (example->documented) {
+            headers.push_back ({ { "key", "Content-Type" }, { "value", example->content_type },
+            { "enabled", true } });
+        }
+        out.push_back ({ { "name", example->name }, { "status", example->status },
+        { "headers", std::move (headers) }, { "body", example->body },
+        { "contentType", example->content_type } });
+    }
+    return out;
+}
+
 /// Built as an unordered `json` on purpose: `ordered_json`'s `operator==`
 /// compares its object entries in *stored* order, so an equal pair of drafts
 /// written with their keys in two orders would read as a difference.
@@ -76,6 +109,7 @@ json as_json (const SpecRequestDraft& draft) {
     out["body"]        = { { "mode", draft.draft.body.mode },
                { "content", draft.draft.body.content },
                { "fields", rows_of (draft.draft.body.fields) } };
+    out["examples"]    = examples_of (draft.draft.examples);
     return out;
 }
 
