@@ -473,7 +473,7 @@ min/max/options):
       "default": "8",
       "min": "1",
       "max": "128",
-      "requiresRestart": true,
+      "requiresRestart": false,
       "advanced": false,
       "keywords": ["cores", "parallelism"],
       "updatedAt": 1234567890
@@ -531,7 +531,12 @@ hand-maintained value-to-label map. `value` and `default` are always strings;
   signal in the Dock too, once such a setting has been saved). Consumers must
   read the field rather than parse the label - the old `(Requires Restart)`
   suffix drifted out of step with the mechanism and misinformed the settings
-  screen and the MCP `update_config` result at the same time.
+  screen and the MCP `update_config` result at the same time. Exactly three
+  entries carry it - `dbCacheSize`, `dbBusyTimeout` and `dbSynchronous`, all
+  read when the database is opened. `workers` carried it too until
+  [#873](https://github.com/athrvk/vayu/issues/873), which is the same drift in
+  the field's own terms: the engine reads it at the start of every run, so the
+  restart it asked for was never needed. `config_route_test.cpp` pins the set.
 - **`advanced`** - an internal with no everyday user story (`dbBusyTimeout`, the
   four `oauth2Refresh*` watchdog knobs, `inboxLivePollIntervalMs`,
   `sseIdleTimeoutMs`, `maxStepsPerIteration`, `monitorScrapeTimeoutMs`,

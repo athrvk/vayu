@@ -2437,14 +2437,17 @@ void Database::seed_default_config () {
     // Limits, leaving the four settings that describe the engine itself.
     // =========================================================================
 
-    upsert_config (restart_required (keywords ({ "cores", "parallelism" }) (
-    ConfigEntry{ "workers",
+    // Not restart_required: `run_manager` reads this at the start of every run
+    // and builds that run's EventLoop from it, so a change is in force for the
+    // next run started. It carried the flag until #873, which told the user to
+    // restart for a setting the engine had already picked up.
+    upsert_config (keywords ({ "cores", "parallelism" }) (ConfigEntry{ "workers",
     std::to_string (std::thread::hardware_concurrency ()), "integer", "Worker Threads",
     "Number of background worker threads. Higher values improve throughput on "
     "multi-core systems but increase RAM usage. "
     "Default equals CPU core count.",
     "general_engine", std::to_string (std::thread::hardware_concurrency ()),
-    "1", "128", std::nullopt, now })));
+    "1", "128", std::nullopt, now }));
 
     upsert_config (restart_required (unit ("bytes") (
     keywords ({ "ram" }) (ConfigEntry{ "dbCacheSize",

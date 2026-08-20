@@ -440,10 +440,14 @@ describe("engine config tools", () => {
 		const client = fakeClient({
 			getConfig: vi.fn().mockResolvedValue({
 				entries: [
+					// A key the engine really does read once, when it opens the
+					// database. `workers` used to stand here and stopped being
+					// restart-gated in #873 - the run reads it - so the example
+					// moved rather than teaching the next reader the old claim.
 					{
-						key: "workers",
-						value: "16",
-						label: "Worker Threads",
+						key: "dbCacheSize",
+						value: "67108864",
+						label: "Database Cache Size",
 						requiresRestart: true,
 					},
 					{
@@ -457,13 +461,13 @@ describe("engine config tools", () => {
 		});
 		const res = await dispatchTool(
 			"update_engine_config",
-			{ entries: { workers: "16", timeoutMs: "5000" } },
+			{ entries: { dbCacheSize: "67108864", timeoutMs: "5000" } },
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBeFalsy();
 		const out = res.structuredContent as { changedKeys: string[]; restartRequired: string[] };
-		expect(out.changedKeys.sort()).toEqual(["timeoutMs", "workers"]);
-		expect(out.restartRequired).toEqual(["workers"]);
+		expect(out.changedKeys.sort()).toEqual(["dbCacheSize", "timeoutMs"]);
+		expect(out.restartRequired).toEqual(["dbCacheSize"]);
 		// The human-readable text warns about the restart.
 		expect(firstText(res)).toMatch(/restart required/i);
 	});

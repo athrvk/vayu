@@ -321,11 +321,10 @@ reproduced and should not be quoted.
 ## Config semantics: live, restart-gated, and retired
 
 Every entry below was verified by locating the read site in the engine source.
-This matters because the seeded labels are wrong in places.
 
 | Key | Read site | When it applies |
 |---|---|---|
-| `workers` | `core/run_manager.cpp` | **Per run.** No restart, despite the entry's `requiresRestart: true` |
+| `workers` | `core/run_manager.cpp` | **Per run.** No restart - and the entry says so since [#873](https://github.com/athrvk/vayu/issues/873), which dropped the `requiresRestart: true` it had carried |
 | `eventLoopMaxPerHost` | `core/run_manager.cpp` | Per run |
 | `eventLoopMaxConcurrent` | `core/run_manager.cpp` | Per run, but **overridden** by the run's own `concurrency` |
 | `dnsCacheTimeout` | `core/run_manager.cpp` | Per run |
@@ -358,8 +357,9 @@ Tracked in [#197](https://github.com/athrvk/vayu/issues/197).
 
 ## Engine tuning notes
 
-Knobs that move RPS (set via `POST /config`; most are read **per run** - no
-restart needed despite `requiresRestart: true` on some):
+Knobs that move RPS (set via `POST /config`; all of the engine-config ones below
+are read **per run**, so none needs a restart - and none is flagged
+`requiresRestart` either, since [#873](https://github.com/athrvk/vayu/issues/873)):
 
 - **run `concurrency`** - the dominant lever, and it is a property of the run,
   not the engine config. **64** on this target. Note the MCP safety cap

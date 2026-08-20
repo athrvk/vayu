@@ -255,7 +255,9 @@ TEST_F (ConfigRouteTest, RestartRequiredSerializesAsATypedFlagBothWays) {
     vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"4"}})");
     ASSERT_EQ (status, 200);
 
-    json restarts = find_entry (body, "workers");
+    // Applied to every connection from the value read when the database is
+    // opened, so the running engine keeps the old one.
+    json restarts = find_entry (body, "dbCacheSize");
     ASSERT_TRUE (restarts.contains ("requiresRestart"));
     EXPECT_TRUE (restarts["requiresRestart"].get<bool> ());
 
@@ -263,6 +265,46 @@ TEST_F (ConfigRouteTest, RestartRequiredSerializesAsATypedFlagBothWays) {
     json does_not = find_entry (body, "defaultTimeout");
     ASSERT_TRUE (does_not.contains ("requiresRestart"));
     EXPECT_FALSE (does_not["requiresRestart"].get<bool> ());
+}
+
+// #873: `workers` carried the flag while `run_manager` read it at the start of
+// every run, so Settings, the Dock and MCP `update_engine_config` all asked the
+// user to restart for a value the engine had already picked up. Asserted on the
+// serialized entry rather than the seed, because the flag is only ever read
+// there.
+TEST_F (ConfigRouteTest, WorkersIsNotRestartRequiredBecauseEveryRunRereadsIt) {
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"4"}})");
+    ASSERT_EQ (status, 200);
+
+    json workers = find_entry (body, "workers");
+    ASSERT_TRUE (workers.contains ("requiresRestart"));
+    EXPECT_FALSE (workers["requiresRestart"].get<bool> ())
+    << "`workers` is read by run_manager at the start of every run - a restart "
+       "is not required and must not be claimed";
+}
+
+// The set, not one entry: the defect #873 fixed is a wrapper on an entry the
+// engine re-reads, and the cure only holds while every flagged key is one read
+// once at startup. The three below are read when the database is opened
+// (db/database.cpp applies them per connection / as PRAGMAs); anything else
+// arriving in this set is either a genuine startup read - name it here - or the
+// same defect again.
+TEST_F (ConfigRouteTest, RestartRequiredIsClaimedOnlyByTheEntriesReadAtStartup) {
+    auto entries = db_->get_all_config_entries ();
+    ASSERT_GT (entries.size (), 20u)
+    << "catalogue empty or unseeded - nothing was scanned";
+
+    const std::set<std::string> read_once_at_startup{ "dbBusyTimeout",
+        "dbCacheSize", "dbSynchronous" };
+
+    std::set<std::string> flagged;
+    for (const auto& entry : entries) {
+        if (entry.requires_restart) {
+            flagged.insert (entry.key);
+        }
+    }
+    EXPECT_EQ (flagged, read_once_at_startup);
 }
 
 // The convention this replaced, guarded against creeping back: the flag is the
