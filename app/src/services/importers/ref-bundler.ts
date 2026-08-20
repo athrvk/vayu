@@ -23,6 +23,16 @@
  * say so. Nothing here guesses: an unreachable ref is left exactly as written
  * and reported, never quietly deleted.
  *
+ * **It holds no parser of its own** (issue #877). It reads a document into a
+ * tree through the engine (`POST /import/document`) - the same reader that
+ * answers what a stored document declares - so this file assembles bytes and
+ * never interprets them: a `$ref` is followed, its target inlined, and the
+ * result re-serialized. That distinction is why the bundler stayed here when
+ * every parser moved: deterministic fetch-time assembly is not an opinion about
+ * what a document says, and the two channels it assembles from - the engine's
+ * URL proxy and the main-process-gated `specFile:read` IPC - are the renderer's
+ * to reach.
+ *
  * **Two intakes, because a spec arrives two ways.** A URL-sourced document
  * resolves its relative refs against that URL and fetches them through the
  * engine's existing `POST /import/fetch` - reused as-is, not widened. A
@@ -55,7 +65,7 @@
  */
 
 import { asRecord, asStr } from "@/lib/json-node";
-import { parseRaw } from "./parse-raw";
+import { apiService } from "@/services/api";
 
 /** Root key the resolved documents are inlined under. */
 export const BUNDLE_KEY = "x-vayu-bundled";
@@ -76,6 +86,14 @@ export interface ExternalRefIntake {
 	 * normalized. Absent = the document was not picked from disk.
 	 */
 	readSibling?: (relativePath: string) => Promise<string>;
+	/**
+	 * Read a document's bytes into a DOM. Defaults to the engine's reader
+	 * (`POST /import/document`), which is the point (issue #877): finding and
+	 * rewriting refs needs a tree, and a YAML reader here would be the second
+	 * opinion about what a document is that #853 exists to end. Injected so a
+	 * test can drive the walk without a running engine.
+	 */
+	parseDocument?: (text: string) => Promise<unknown>;
 }
 
 export interface BundleResult {
@@ -345,9 +363,10 @@ export async function bundleExternalRefs(
 	raw: string,
 	intake: ExternalRefIntake
 ): Promise<BundleResult> {
+	const parseDocument = intake.parseDocument ?? ((text) => apiService.readDocument(text));
 	let root: unknown;
 	try {
-		root = parseRaw(raw);
+		root = await parseDocument(raw);
 	} catch {
 		// Not parseable at all - the format detector reports that, with a message
 		// about the file rather than about its refs.
@@ -402,7 +421,7 @@ export async function bundleExternalRefs(
 
 		let value: unknown;
 		try {
-			value = parseRaw(text);
+			value = await parseDocument(text);
 		} catch {
 			failed.add(next.key);
 			continue;

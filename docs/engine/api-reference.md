@@ -2224,6 +2224,148 @@ never turn into a `500`.
 - `502` `Failed to fetch: <detail>` - the upstream request failed
   (connection error, transport failure).
 
+### POST /import/parse
+
+Parse a raw import document into the tree [`POST /import/apply`](#post-importapply)
+persists (issue [#877](https://github.com/athrvk/vayu/issues/877)). Reads only -
+nothing is stored, so a preview costs no write.
+
+**Every format Vayu accepts, detected by content**, in the order the app's
+dispatcher used to run its parsers in - so a document carrying two formats' keys
+is claimed by the same one it always was:
+
+| Claimed by | `meta.format` |
+|------------|---------------|
+| `info.schema` naming `v2.1.0` | `Postman Collection v2.1` |
+| `info.schema` naming `v2.0.0`, or `info` + `item[]` with no `schema` | `Postman Collection v2.0` |
+| `_postman_variable_scope: "environment"` + `values[]` | `Postman Environment` |
+| `_postman_variable_scope: "globals"` + `values[]` | `Postman Globals` |
+| `_type: "export"` + `__export_format: 4` | `Insomnia Export v4` |
+| `openapi` starting `3.` | `OpenAPI 3.0` |
+| `swagger` being `2.0` (string or number) | `OpenAPI 2.0 (Swagger)` |
+
+The bytes are read once, JSON first and YAML second, through the same
+`core::read_document` behind [`POST /specs`](#post-specs) and
+[`POST /specs/describe`](#post-specsdescribe). **This is the only parser**: the
+renderer holds none, which is what makes "exactly one reader has an opinion
+about a document" true rather than nearly true.
+
+**Request:**
+```json
+{
+  "content": "{\"info\": {...}, \"item\": [...]}",
+  "importEnvironments": true,
+  "importScripts": true,
+  "fileName": "collection.json",
+  "sourceUrl": "https://acme.dev/openapi.json",
+  "unresolvedRefs": 0
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `content` | string, **required** | The document, verbatim. An OpenAPI import stores exactly these bytes as its spec document, so it is never re-serialized. |
+| `importEnvironments` | bool, default `true` | Off, the environments and global variables a document carries are not built and the counts report `0` - gated at parse time, so a preview shows what will actually be created. |
+| `importScripts` | bool, default `true` | Off, every script imports empty. |
+| `fileName` | string | Display only; echoed on `meta.fileName`. Never stored. |
+| `sourceUrl` | string | Recorded on a stored OpenAPI document (so a later sync knows what to re-fetch) and used to resolve a relative `servers[0].url`. |
+| `unresolvedRefs` | int ≥ 0 | External `$ref`s a bundling pass could not reach, counted into `meta.skipped` as `external_ref`. Nothing here follows a ref. |
+
+**Response:** `200` - the whole import tree.
+```json
+{
+  "collections": [ { "name": "Sample API", "description": "", "variables": {}, "auth": {"mode":"none"},
+                     "preRequestScript": "", "postRequestScript": "", "children": [], "requests": [] } ],
+  "environments": [],
+  "globals": {},
+  "meta": {
+    "format": "Postman Collection v2.1", "requestCount": 2, "folderCount": 1,
+    "environmentCount": 0, "globalCount": 0, "exampleCount": 0,
+    "skipped": [ { "kind": "websocket", "count": 1 } ],
+    "nonExecutableAuth": 0, "unattachedFileParts": 0
+  }
+}
+```
+
+`meta.skipped` is what the document declared and Vayu cannot represent, counted
+per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
+`malformed_item`, `unsupported_method`, `malformed_spec`, `example_no_status`,
+`default_response`, `external_ref`, `duplicate_operation_id`, `cookie_param`,
+`unmapped_body`, `unresolved_base_url`. An import that loses something and says
+nothing is the defect this list exists to prevent, so a format with nothing to
+report answers `[]` rather than omitting the field. `meta.folderStrategy`
+(`tags` / `paths` / `mixed`) is present only when an OpenAPI import built
+folders, since a document that declares no operation tags gets a tree it never
+spelled out.
+
+**Errors:**
+- `400` `Invalid 'content': must be the document's text`, and
+  `400` `Invalid 'content': an empty document is not an import`.
+- `400` `Unrecognised format` - readable, and no format claims it. Kept as its
+  own sentence: "Vayu does not read this kind of file" and "this file is broken"
+  are different answers.
+- `400` `Could not read the document: <detail>` - neither JSON nor YAML, with
+  the line named.
+- `400` `Malformed Insomnia export: <field> must be an array` - the one format
+  whose export is a flat resource list, so a broken one leaves nothing to walk.
+- `400` `Invalid 'importScripts': must be a boolean` (and the same for
+  `importEnvironments`, `fileName`, `sourceUrl`, `unresolvedRefs`).
+- `413` `Import document is N bytes, over the limit of M (raise the 'maxSpecDocumentBytes' setting to allow more)`.
+
+### POST /import
+
+Parse a document **and persist it**, in one call - `POST /import/parse`, the
+flattening into temp-id'd sections, and `POST /import/apply`, for a caller with
+no preview to show (issue [#877](https://github.com/athrvk/vayu/issues/877)).
+This is what the MCP `import_document` tool wraps. The app deliberately does not
+use it: a person picks which files of a batch to import and toggles two options
+between the parse and the apply.
+
+**Request:** the same body as `POST /import/parse`.
+
+**Response:** `200`
+```json
+{
+  "idMap": { "c1": "col_<uuid>", "r1": "req_<uuid>" },
+  "meta": { "format": "Postman Collection v2.1", "requestCount": 2, "...": "..." },
+  "collections": 2, "requests": 2, "environments": 0, "globals": 0
+}
+```
+
+**Atomicity:** the tree is one `POST /import/apply` transaction, so a refused
+document creates nothing. The **globals** a Postman globals export carries are
+the one write outside it, and they run **last** and **merge**: `POST /globals`
+replaces the whole set, so running it in front of a write that can still fail
+would leave a user's globals half-rewritten by an import that then failed. On a
+key collision the imported value wins - the caller asked for this file's
+variables, and skipping them would be a silent no-op.
+
+**Errors:** every error of `POST /import/parse`, plus every error of
+`POST /import/apply` (including the per-item `400`s naming a `tempId`).
+
+### POST /import/document
+
+Read a document's bytes (JSON or YAML) into a JSON DOM, through the engine's one
+reader. Stores nothing and interprets nothing: this is what the bytes **are**,
+where [`POST /specs/describe`](#post-specsdescribe) says what they **declare**.
+
+One caller, and it is the reason the route exists: the app's `ref-bundler.ts`
+walks a multi-file OpenAPI document to inline the files it references *before*
+anything is parsed or stored, and finding and rewriting those `$ref`s needs a
+tree. A YAML reader in the renderer to get one was the last thing keeping a
+second parser in `app/src` after issue #877.
+
+**Request:** `{"content": "openapi: 3.0.0\npaths: {}\n"}`
+
+**Response:** `200` `{"document": { "openapi": "3.0.0", "paths": {} }}` - in the
+document's own key order, which is a promise a JavaScript object cannot keep (it
+orders integer-like keys numerically ahead of the rest).
+
+**Errors:**
+- `400` `Invalid 'content': must be the document's text`.
+- `400` `Invalid 'content': <detail>` - neither JSON nor YAML.
+- `413` `Document is N bytes, over the limit of M (raise the 'maxSpecDocumentBytes' setting to allow more)`.
+
 ### POST /import/apply
 
 Persist an entire parsed import - collections, their requests, environments, and

@@ -40,7 +40,17 @@ std::string trimmed (std::string_view value) {
 
 } // namespace
 
-std::string normalize_path_templates (const std::string& path) {
+namespace {
+
+/**
+ * Both spellings, in one pass, with @p path_templates deciding whether a
+ * single brace is one of them.
+ *
+ * The renderer runs two sequential regex passes and only the second is
+ * conditional; a single pass produces the same answer because the `{{` branch
+ * is tried first, so a `{{x}}` this pass wrote is never re-read as a `{x}`.
+ */
+std::string normalize (const std::string& path, bool path_templates) {
     std::string out;
     out.reserve (path.size ());
     for (std::size_t i = 0; i < path.size ();) {
@@ -62,7 +72,7 @@ std::string normalize_path_templates (const std::string& path) {
             i += 2;
             continue;
         }
-        if (path[i] == '{') {
+        if (path_templates && path[i] == '{') {
             const auto close = path.find ('}', i + 1);
             const bool doubled = close != std::string::npos && close + 1 < path.size () &&
             path[close + 1] == '}';
@@ -79,6 +89,16 @@ std::string normalize_path_templates (const std::string& path) {
         ++i;
     }
     return out;
+}
+
+} // namespace
+
+std::string normalize_template_vars (const std::string& text) {
+    return normalize (text, /*path_templates=*/false);
+}
+
+std::string normalize_path_templates (const std::string& path) {
+    return normalize (path, /*path_templates=*/true);
 }
 
 } // namespace vayu::core

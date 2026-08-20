@@ -143,6 +143,13 @@ describe("the registry declares its effects", () => {
 			// requests. No `spec` family for the same reason a bind has none - it
 			// mints a new document row rather than changing a stored one.
 			sync_spec: ["collection", "request"],
+			// An import (#877) can create any of the three, and which of them it
+			// does is not knowable until the document has been read - a Postman
+			// collection makes collections and requests, an environment export
+			// makes an environment, a globals export rewrites the global scope.
+			// The globals *scope* rides on the environment family, which is what
+			// refetches it.
+			import_document: ["collection", "request", "environment"],
 			create_request: ["request"],
 			update_request: ["request"],
 			delete_request: ["request"],

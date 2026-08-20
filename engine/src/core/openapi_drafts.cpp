@@ -34,6 +34,7 @@
 
 #include "vayu/core/openapi_document.hpp"
 
+#include "js_json.hpp"
 #include "openapi_walk.hpp"
 
 #include "vayu/core/path_template.hpp"
@@ -58,246 +59,27 @@ namespace {
 
 using json = nlohmann::ordered_json;
 
-// ---------------------------------------------------------------------------
-// The JavaScript the renderer's parsers are written in
-// ---------------------------------------------------------------------------
+// The JavaScript semantics these rules are written in - `prop`, truthiness,
+// `JSON.stringify`'s number and string forms, `encodeURIComponent`,
+// `appendParamsToUrl`. Shared with the import (issue #877) rather than kept
+// here, so the two readers of a foreign document cannot drift apart.
+using namespace js; // NOLINT(google-build-using-namespace)
 
-/// `prop(node, key)`: the property, or `nullptr` for "undefined" - a missing
-/// key, or a node that is not an object at all.
-const json* prop (const json* node, std::string_view key) {
-    if (node == nullptr || !node->is_object ()) {
-        return nullptr;
-    }
-    const auto found = node->find (key);
-    return found == node->end () ? nullptr : &(*found);
-}
-
-/// `asRecord(v)`: the node when it is a JSON object, else `nullptr`.
-const json* as_record (const json* node) {
-    return node != nullptr && node->is_object () ? node : nullptr;
-}
-
-/// `asStr(v)`: the node's text when it is a string, else "undefined". Never
-/// coerces - an unquoted `name: 5` is not a name here, exactly as it is not one
-/// on the renderer side.
-const std::string* as_str (const json* node) {
-    return node != nullptr && node->is_string () ? node->get_ptr<const std::string*> () : nullptr;
-}
-
-/// `asArray(v)[index]`: the entry, or `nullptr` for a non-array or a short one.
-const json* array_at (const json* node, size_t index) {
-    if (node == nullptr || !node->is_array () || index >= node->size ()) {
-        return nullptr;
-    }
-    return &(*node)[index];
-}
-
-/// JavaScript truthiness: everything except `undefined`, `null`, `false`, `0`
-/// and `""`. An empty object and an empty array are both truthy, which is what
-/// `if (content[ct])` and `if (schema.items)` rest on.
-bool truthy (const json* node) {
-    if (node == nullptr || node->is_null ()) {
-        return false;
-    }
-    if (node->is_boolean ()) {
-        return node->get<bool> ();
-    }
-    if (node->is_number ()) {
-        return node->get<double> () != 0.0;
-    }
-    if (node->is_string ()) {
-        return !node->get_ref<const std::string&> ().empty ();
-    }
-    return true;
-}
-
-/**
- * `String(number)` / a number as `JSON.stringify` writes it.
- *
- * The renderer's drafts carry numbers as text - a parameter's declared value in
- * a row, a sampled body's fields in a JSON string - and both sides have to
- * spell them identically or the diff sees a change. JavaScript prints the
- * *shortest* representation that round-trips and never a trailing `.0`, where
- * `nlohmann::dump` writes `1.0` for a whole float.
- *
- * Exact for every finite value below 1e21 in magnitude, which is every number a
- * document realistically declares; past that both sides switch to exponential
- * notation and JavaScript's exact threshold (an exponent of 21, or -7) is not
- * worth carrying for a value no OpenAPI example holds.
- */
-std::string js_number_text (const json& value) {
-    if (value.is_number_integer () || value.is_number_unsigned ()) {
-        return value.dump ();
-    }
-    const double real = value.get<double> ();
-    if (!std::isfinite (real)) {
-        return "null"; // What `JSON.stringify` writes for NaN and Infinity.
-    }
-    if (std::trunc (real) == real && std::abs (real) < 1e21) {
-        std::array<char, 64> buffer {};
-        const int written = std::snprintf (buffer.data (), buffer.size (), "%.0f", real);
-        if (written > 0) {
-            std::string text (buffer.data (), static_cast<size_t> (written));
-            // `%.0f` writes "-0" for negative zero; JavaScript writes "0".
-            return text == "-0" ? "0" : text;
-        }
-    }
-    std::array<char, 64> buffer {};
-    const auto result = std::to_chars (buffer.data (), buffer.data () + buffer.size (), real);
-    std::string text (buffer.data (), result.ptr);
-    // `to_chars` writes `1e+21` / `1e-07`; JavaScript writes `1e+21` / `1e-7`.
-    const size_t exponent = text.find ('e');
-    if (exponent != std::string::npos) {
-        size_t digits = exponent + 1;
-        if (digits < text.size () && (text[digits] == '+' || text[digits] == '-')) {
-            ++digits;
-        }
-        while (digits + 1 < text.size () && text[digits] == '0') {
-            text.erase (digits, 1);
-        }
-    }
-    return text;
-}
-
-/// `String(value)` for the scalars a `name` or an `in` can hold. A document
-/// writing `name: 5` names the parameter "5" on both sides.
-std::string js_string_of (const json& value) {
-    if (value.is_string ()) {
-        return value.get<std::string> ();
-    }
-    if (value.is_number ()) {
-        return js_number_text (value);
-    }
-    if (value.is_boolean ()) {
-        return value.get<bool> () ? "true" : "false";
-    }
-    if (value.is_null ()) {
-        return "null";
-    }
-    return value.is_array () ? value.dump () : "[object Object]";
-}
-
-/// One string as `JSON.stringify` quotes it: the six short escapes, `\uXXXX`
-/// for the rest of the control range, and every other byte verbatim (both
-/// sides emit UTF-8 rather than escaping it).
-void append_json_string (const std::string& value, std::string& out) {
-    out += '"';
-    for (const char ch : value) {
-        switch (ch) {
-        case '"': out += "\\\""; break;
-        case '\\': out += "\\\\"; break;
-        case '\b': out += "\\b"; break;
-        case '\f': out += "\\f"; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default:
-            if (static_cast<unsigned char> (ch) < 0x20) {
-                std::array<char, 8> escape {};
-                std::snprintf (escape.data (), escape.size (), "\\u%04x",
-                static_cast<unsigned int> (static_cast<unsigned char> (ch)));
-                out += escape.data ();
-            } else {
-                out += ch;
-            }
-            break;
-        }
-    }
-    out += '"';
-}
-
-void append_json_text (const json& value, size_t indent, std::string& out);
-
-void append_json_container (const json& value, size_t indent, std::string& out) {
-    const bool array = value.is_array ();
-    if (value.empty ()) {
-        out += array ? "[]" : "{}";
-        return;
-    }
-    out += array ? "[\n" : "{\n";
-    const std::string inner (indent + 2, ' ');
-    bool first = true;
-    for (auto entry = value.begin (); entry != value.end (); ++entry) {
-        if (!first) {
-            out += ",\n";
-        }
-        first = false;
-        out += inner;
-        if (!array) {
-            append_json_string (entry.key (), out);
-            out += ": ";
-        }
-        append_json_text (entry.value (), indent + 2, out);
-    }
-    out += '\n';
-    out.append (indent, ' ');
-    out += array ? ']' : '}';
-}
-
-void append_json_text (const json& value, size_t indent, std::string& out) {
-    if (value.is_null ()) {
-        out += "null";
-    } else if (value.is_boolean ()) {
-        out += value.get<bool> () ? "true" : "false";
-    } else if (value.is_number ()) {
-        out += js_number_text (value);
-    } else if (value.is_string ()) {
-        append_json_string (value.get_ref<const std::string&> (), out);
-    } else {
-        append_json_container (value, indent, out);
+/// `tally.add(kind)` for a caller that may not be keeping one - the sync diff
+/// asks for drafts and has no preview to report a loss to.
+void tally_add (ImportTally* tally, std::string_view kind) {
+    if (tally != nullptr) {
+        tally->add (kind);
     }
 }
 
-/// `JSON.stringify(value, null, 2)`, which is the text a draft's JSON body is.
-std::string js_json_text (const json& value) {
-    std::string out;
-    append_json_text (value, 0, out);
-    return out;
+/// The same, for a count the walk accumulated rather than one loss.
+void tally_add_count (ImportTally* tally, std::string_view kind, int count) {
+    if (tally != nullptr) {
+        tally->add (kind, count);
+    }
 }
 
-/**
- * `encodeURIComponent(value)`.
- *
- * Deliberately not `utils::url_encode`, which is a different function rather
- * than an older copy of this one: it percent-encodes `!*'()`, which
- * `encodeURIComponent` leaves alone. The renderer writes an imported URL with
- * the latter, and a URL spelled two ways is a field the diff reports as changed
- * every time it is asked.
- */
-std::string encode_uri_component (const std::string& value) {
-    static constexpr std::string_view HEX = "0123456789ABCDEF";
-    static constexpr std::string_view UNRESERVED = "-_.!~*'()";
-    std::string out;
-    out.reserve (value.size ());
-    for (const char ch : value) {
-        const auto c = static_cast<unsigned char> (ch);
-        if (std::isalnum (c) != 0 || UNRESERVED.find (ch) != std::string_view::npos) {
-            out += ch;
-        } else {
-            out += '%';
-            out += HEX[c >> 4U];
-            out += HEX[c & 0x0FU];
-        }
-    }
-    return out;
-}
-
-/// `containsVariableToken(text)`: a `{{name}}` anywhere in the string. Such a
-/// value is left unencoded, so the variable syntax survives into the URL.
-bool contains_variable_token (const std::string& text) {
-    for (size_t at = text.find ("{{"); at != std::string::npos; at = text.find ("{{", at + 1)) {
-        const size_t close = text.find ("}}", at + 2);
-        if (close == std::string::npos) {
-            return false;
-        }
-        // `[^{}]+` between the braces: a `{` inside is not this token's close.
-        const std::string_view inner (text.data () + at + 2, close - at - 2);
-        if (!inner.empty () && inner.find_first_of ("{}") == std::string_view::npos) {
-            return true;
-        }
-    }
-    return false;
-}
 
 // ---------------------------------------------------------------------------
 // The schema sampler (`app/src/services/importers/schema-sampler.ts`)
@@ -576,11 +358,17 @@ const json* parameter_list (const json* parameters) {
  * already holds replaces the value and keeps the insertion order, and the rows
  * reach the draft - and the URL's query - in that order.
  */
-std::vector<const json*>
-merged_parameters (const json& document, const json* path_item, const json* operation) {
+std::vector<const json*> merged_parameters (const json& document, const json* path_item,
+const json* operation, ImportTally* tally) {
     std::vector<const json*> ordered;
     std::unordered_map<std::string, size_t> position;
 
+    // The path item's own `parameters` are counted by the walk, once per path;
+    // this is the operation's half of the same rule.
+    if (const json* declared = prop (operation, "parameters");
+        declared != nullptr && !declared->is_null () && !declared->is_array ()) {
+        tally_add (tally, "malformed_spec");
+    }
     for (const json* list : { parameter_list (prop (path_item, "parameters")),
              parameter_list (prop (operation, "parameters")) }) {
         if (list == nullptr) {
@@ -683,58 +471,11 @@ std::string path_folder_name (const std::string& path) {
 /// Where an import files this operation: its first tag, else the folder its
 /// path names, else the root. Only the first tag groups an operation - a
 /// request duplicated into two folders is two requests to edit.
-std::string folder_of (const json* tags, const std::string& path) {
+std::pair<std::string, bool> folder_of (const json* tags, const std::string& path) {
     if (const std::string* tag = as_str (array_at (tags, 0))) {
-        return *tag;
+        return { *tag, true };
     }
-    return path_folder_name (path);
-}
-
-// ---------------------------------------------------------------------------
-// The URL (`normalizeVars` + `appendParamsToUrl`)
-// ---------------------------------------------------------------------------
-
-/// `toQueryString(params)`: the enabled rows, percent-encoded unless they carry
-/// a `{{var}}`, and a bare key for a row with no value.
-std::string query_string (const std::vector<DraftField>& params) {
-    std::string out;
-    for (const DraftField& row : params) {
-        if (!row.enabled || row.key.find_first_not_of (" \t\n\r\f\v") == std::string::npos) {
-            continue;
-        }
-        if (!out.empty ()) {
-            out += '&';
-        }
-        out += contains_variable_token (row.key) ? row.key : encode_uri_component (row.key);
-        if (!row.value.empty ()) {
-            out += '=';
-            out += contains_variable_token (row.value) ? row.value : encode_uri_component (row.value);
-        }
-    }
-    return out;
-}
-
-/**
- * `appendParamsToUrl(url, params)`, which the import factory applies to every
- * draft it produced.
- *
- * The rows are appended rather than replacing the query, because `url` and
- * `params[]` are two independent statements by the source - and a request built
- * in the app carries its enabled query *inside* `url` (issue #590), which is
- * why a draft that skipped this step would differ from every stored request it
- * is compared against.
- */
-std::string append_params (const std::string& url, const std::vector<DraftField>& params) {
-    const std::string query = query_string (params);
-    if (query.empty ()) {
-        return url;
-    }
-    if (url.find ('?') == std::string::npos) {
-        return url + "?" + query;
-    }
-    // A URL ending in `?` or `&` is already sitting on its separator.
-    const char last = url.back ();
-    return last == '?' || last == '&' ? url + query : url + "&" + query;
+    return { path_folder_name (path), false };
 }
 
 // ---------------------------------------------------------------------------
@@ -795,7 +536,7 @@ const json* declared_param_value_v3 (const Sampler& sampler, const json* param) 
 }
 
 /// An operation's `requestBody` → the request's body (3.x).
-DraftBody body_v3 (const Sampler& sampler, const json* request_body) {
+DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally* tally) {
     DraftBody body;
     const std::string* ref = as_str (prop (request_body, "$ref"));
     const json* resolved   = ref != nullptr ? sampler.deref (request_body) : request_body;
@@ -842,8 +583,13 @@ DraftBody body_v3 (const Sampler& sampler, const json* request_body) {
         return body;
     }
     // A body in a media type the importer has no mode for - `application/xml`,
-    // `image/*` - is `none`, the same as no body. The renderer tells the two
-    // apart for its skip tally; the draft they produce is identical.
+    // `image/*` - is `none`, the same as no body, and the draft is identical.
+    // The two are told apart only for the tally: an operation with no
+    // `requestBody` at all lost nothing, and one that declared a media type
+    // imported without the body it declared (issue #719).
+    if (!content->empty ()) {
+        tally_add (tally, "unmapped_body");
+    }
     return body;
 }
 
@@ -896,17 +642,27 @@ struct ExamplePayload {
  */
 template <typename Payload>
 std::optional<DraftExample>
-response_example (const std::string& code, const json* response, Payload payload) {
+response_example (const std::string& code, const json* response, ImportTally* tally, Payload payload) {
     const json* node = as_record (response);
     if (node == nullptr) {
+        tally_add (tally, "malformed_spec");
+        return std::nullopt;
+    }
+    if (code == "default") {
+        // Spec-conformant and near-universal - Stripe declares one on all 568
+        // of its operations - so it is counted apart from a malformed key
+        // rather than painting a valid document as one defect per operation.
+        tally_add (tally, "default_response");
         return std::nullopt;
     }
     if (code.size () != 3 ||
     !std::all_of (code.begin (), code.end (), [] (unsigned char c) { return std::isdigit (c) != 0; })) {
+        tally_add (tally, "example_no_status");
         return std::nullopt;
     }
     const int status = std::stoi (code);
     if (status < 100 || status > 599) {
+        tally_add (tally, "example_no_status");
         return std::nullopt;
     }
 
@@ -925,7 +681,8 @@ response_example (const std::string& code, const json* response, Payload payload
 }
 
 /// A 3.x operation's documented responses.
-std::vector<DraftExample> examples_v3 (const Sampler& sampler, const json* responses) {
+std::vector<DraftExample>
+examples_v3 (const Sampler& sampler, const json* responses, ImportTally* tally) {
     std::vector<DraftExample> out;
     const json* map = as_record (responses);
     if (map == nullptr) {
@@ -936,7 +693,7 @@ std::vector<DraftExample> examples_v3 (const Sampler& sampler, const json* respo
         // a document that declares its errors once and names them everywhere
         // leaves (issue #714).
         const json* response = sampler.deref (&entry.value ());
-        auto example = response_example (entry.key (), response,
+        auto example = response_example (entry.key (), response, tally,
         [&] (const json& node) -> std::optional<ExamplePayload> {
             const json* content = as_record (prop (&node, "content"));
             if (content == nullptr) {
@@ -982,7 +739,7 @@ std::vector<DraftExample> examples_v3 (const Sampler& sampler, const json* respo
  * response does not name its own.
  */
 std::vector<DraftExample>
-examples_v2 (const json& document, const Sampler& sampler, const json* operation) {
+examples_v2 (const json& document, const Sampler& sampler, const json* operation, ImportTally* tally) {
     std::vector<DraftExample> out;
     const json* map = as_record (prop (operation, "responses"));
     if (map == nullptr) {
@@ -1014,7 +771,7 @@ examples_v2 (const json& document, const Sampler& sampler, const json* operation
 
     for (auto entry = map->begin (); entry != map->end (); ++entry) {
         const json* response = sampler.deref (&entry.value ());
-        auto example = response_example (entry.key (), response,
+        auto example = response_example (entry.key (), response, tally,
         [&] (const json& node) -> std::optional<ExamplePayload> {
             const std::string content_type = json_produced ? *json_produced :
             (produces.empty () ? std::string ("application/json") : produces.front ());
@@ -1079,7 +836,19 @@ std::vector<std::string> consumes_of (const json& document, const json* operatio
 
 } // namespace
 
-std::vector<SpecRequestDraft> spec_request_drafts_of (const json& document) {
+namespace {
+
+/**
+ * The drafts, for either caller: the sync diff, which wants the operations a
+ * document *declares*, and the import, which wants a request for every
+ * operation it *writes* plus a tally of what it had to drop.
+ *
+ * One function rather than two, because a draft the two built differently is
+ * exactly the divergence #865 exists to prevent - the import would then apply
+ * a request the diff never compared.
+ */
+std::vector<SpecRequestDraft>
+build_drafts (const json& document, ImportTally* tally, bool include_unidentified) {
     std::vector<SpecRequestDraft> drafts;
     const walk::Dialect dialect = walk::spec_dialect (document);
     if (dialect == walk::Dialect::None) {
@@ -1087,12 +856,16 @@ std::vector<SpecRequestDraft> spec_request_drafts_of (const json& document) {
     }
     const Sampler sampler (document);
 
-    for (walk::WalkedOperation& walked : walk::walk_operations (document)) {
+    walk::WalkNotes notes;
+    for (walk::WalkedOperation& walked : walk::walk_operations (document, tally == nullptr ? nullptr : &notes)) {
+        if (!walked.identified && !include_unidentified) {
+            continue;
+        }
         const json* operation = walked.node;
         const std::string& path = walked.identity.path;
 
         SpecRequestDraft entry;
-        entry.folder = folder_of (prop (operation, "tags"), path);
+        std::tie (entry.folder, entry.folder_from_tag) = folder_of (prop (operation, "tags"), path);
 
         DraftRequest& draft = entry.draft;
         if (const std::string* summary = as_str (prop (operation, "summary"))) {
@@ -1111,7 +884,7 @@ std::vector<SpecRequestDraft> spec_request_drafts_of (const json& document) {
         draft.method = walked.identity.method;
 
         std::vector<DraftField> form_fields;
-        for (const json* parameter : merged_parameters (document, walked.path_item, operation)) {
+        for (const json* parameter : merged_parameters (document, walked.path_item, operation, tally)) {
             const json* name_node  = prop (parameter, "name");
             const std::string name = name_node == nullptr ? std::string () : js_string_of (*name_node);
             const std::string* in  = as_str (prop (parameter, "in"));
@@ -1147,12 +920,16 @@ std::vector<SpecRequestDraft> spec_request_drafts_of (const json& document) {
                 const std::string* declared = as_str (prop (parameter, "type"));
                 field.file                  = declared != nullptr && *declared == "file";
                 form_fields.push_back (std::move (field));
+            } else if (dialect == walk::Dialect::V3 && kind == "cookie") {
+                // Dropped - a request's cookies come from the jar - and counted
+                // rather than folded into one `Cookie` header, which would
+                // invent a merge the document never wrote (#719). 2.0 has no
+                // cookie parameter, so its parser counts none either.
+                tally_add (tally, "cookie_param");
             }
             // `in: "path"` is deliberately neither a row nor counted: a path
             // parameter is already carried, as the `{{var}}` the URL was
-            // rewritten with. `in: "cookie"` is dropped - a request's cookies
-            // come from the jar, and folding declarations into one `Cookie`
-            // header would invent a merge the document never wrote (#719).
+            // rewritten with.
         }
 
         if (dialect == walk::Dialect::V2) {
@@ -1194,19 +971,65 @@ std::vector<SpecRequestDraft> spec_request_drafts_of (const json& document) {
                 draft.body.fields  = std::move (form_fields);
             }
         } else {
-            draft.body = body_v3 (sampler, prop (operation, "requestBody"));
+            draft.body = body_v3 (sampler, prop (operation, "requestBody"), tally);
         }
 
         draft.examples = dialect == walk::Dialect::V3 ?
-        examples_v3 (sampler, prop (operation, "responses")) :
-        examples_v2 (document, sampler, operation);
+        examples_v3 (sampler, prop (operation, "responses"), tally) :
+        examples_v2 (document, sampler, operation, tally);
 
         draft.url = append_params ("{{baseUrl}}" + normalize_path_templates (path), draft.params);
 
-        entry.operation = std::move (walked.identity);
+        entry.identified = walked.identified;
+        entry.operation  = std::move (walked.identity);
         drafts.push_back (std::move (entry));
     }
+    tally_add_count (tally, "malformed_spec", notes.malformed_spec);
+    tally_add_count (tally, "unsupported_method", notes.unsupported_method);
+    tally_add_count (tally, "duplicate_operation_id", notes.duplicate_operation_id);
     return drafts;
+}
+
+} // namespace
+
+std::vector<SpecRequestDraft> spec_request_drafts_of (const json& document) {
+    return build_drafts (document, nullptr, /*include_unidentified=*/false);
+}
+
+std::vector<SpecRequestDraft> import_drafts_of (const json& document, ImportTally& tally) {
+    return build_drafts (document, &tally, /*include_unidentified=*/true);
+}
+
+void ImportTally::add (std::string_view kind, int count) {
+    if (count <= 0) {
+        return;
+    }
+    for (auto& entry : counts_) {
+        if (entry.first == kind) {
+            entry.second += count;
+            return;
+        }
+    }
+    counts_.emplace_back (kind, count);
+}
+
+nlohmann::ordered_json ImportTally::items () const {
+    // The order `SkippedItem["kind"]` declares, so that two walks of one
+    // document produce one list whatever order they met the losses in.
+    static constexpr std::array<const char*, 15> ORDER = { "websocket", "grpc", "api_spec",
+        "unit_test", "file_body", "malformed_item", "unsupported_method", "malformed_spec",
+        "example_no_status", "default_response", "external_ref", "duplicate_operation_id",
+        "cookie_param", "unmapped_body", "unresolved_base_url" };
+
+    nlohmann::ordered_json items = nlohmann::ordered_json::array ();
+    for (const char* kind : ORDER) {
+        for (const auto& entry : counts_) {
+            if (entry.first == kind) {
+                items.push_back ({ { "kind", entry.first }, { "count", entry.second } });
+            }
+        }
+    }
+    return items;
 }
 
 } // namespace vayu::core

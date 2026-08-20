@@ -185,8 +185,14 @@ export function ImportModal() {
 	// was read from. A re-parse that dropped the fetched URL would store a spec
 	// with nothing to re-fetch from, and the toggles say nothing about where any
 	// of the bytes came from.
+	// The parse is a round trip to the engine now (issue #877), so this reads the
+	// entries and writes the result back rather than updating from the previous
+	// state: a functional `setEntries` cannot await. The toggles are two
+	// checkboxes on a dialog that is already showing a preview, so there is no
+	// second writer to race with.
 	const redetect = (next: { importEnvironments: boolean; importScripts: boolean }) => {
-		if (phase === "preview") setEntries((current) => reparseBatch(current, next));
+		if (phase !== "preview") return;
+		void reparseBatch(entries, next).then(setEntries);
 	};
 
 	/**

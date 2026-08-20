@@ -14,8 +14,18 @@ Parses the two variable exports Postman writes as standalone files, both from _E
 
 Neither is the collection export; see [postman.md](./postman.md) for that. The two share a document shape and therefore a parser, so the mapping rules cannot drift between them - only the destination differs.
 
-- **Source:** `app/src/services/importers/postman-environment.ts`
+- **Source:** `engine/src/core/import_document.cpp`
 - **Exports:**
+
+> **The parse moved engine-side** (issue
+> [#877](https://github.com/athrvk/vayu/issues/877)). Every rule on this page is
+> the same rule it always was - the corpus in
+> `engine/tests/fixtures/import-conformance.json` was recorded from the parser
+> this replaced and is asserted against on every build - it is simply read by
+> `engine/src/core/import_document.cpp` now, behind
+> [`POST /import/parse`](../../engine/api-reference.md#post-importparse), rather
+> than in the renderer. Module names in C++ style below name that file's
+> functions; the app holds no parser.
 
   | Class | `formatName` | `formatKey` |
   |-------|--------------|-------------|
@@ -58,16 +68,16 @@ A globals export carries a `name` (the workspace's). Vayu's globals scope is a s
 |---------|------|-------|
 | `name` | `EnvironmentDraft.name` | Environment scope only. Falls back to `"Imported Environment"` when absent or empty; **dropped** for a globals export. |
 | - | `EnvironmentDraft.description` | Always `""`; the export has no description field. |
-| `values[]` | `variables` / `ImportResult.globals` | Via the shared `toVarRecord` helper, identically for both scopes. |
+| `values[]` | `variables` / `ImportResult.globals` | Via the shared `to_var_record` helper, identically for both scopes. |
 
 ### `values[]` → `variables`
 
-`toVarRecord` (`shared.ts`) is the same helper Postman **collection** variables go through, so the rules are shared rather than re-derived:
+`to_var_record` (`import_document.cpp`) is the same helper Postman **collection** variables go through, so the rules are shared rather than re-derived:
 
 | Postman entry field | Effect |
 |---|---|
 | `key` | The record key. An entry with a falsy `key` is **dropped**. |
-| `value` | `asString` then `normalizeVars`, so `{{ user.name }}` tightens to `{{user.name}}` like every other parser. |
+| `value` | `as_string` then `normalize_template_vars`, so `{{ user.name }}` tightens to `{{user.name}}` like every other parser. |
 | `enabled` / `disabled` | `disabled` wins if present, else `enabled`, else `true`. |
 | `type === "secret"` | Sets `secret: true`. Any other `type` omits the flag entirely (not `secret: false`). |
 
@@ -115,8 +125,7 @@ For this format that is the whole result, which puts two states on screen no oth
 
 ## Tests
 
-- `app/src/services/importers/postman-environment.test.ts` - detection for both scopes (and the collection negative), mapping, the secret flag, the empty-secret case, the dropped workspace name, and the `importEnvironments: false` path for each scope.
-- `app/src/services/importers/factory.test.ts` - routing for both exports, plus the guard that a collection export still reaches the collection parser.
+- `engine/tests/import_parse_test.cpp` - detection for both scopes, the mapping (against the corpus recorded from the parser this replaced), the secret flag, the dropped workspace name, and the `importEnvironments: false` path for each scope.
 - `app/src/services/importers/orchestrator.test.ts` - the merge, the collision rule, that a result with no globals neither reads nor writes the scope, the `importEnvironments: false` skip, that a failed apply never reaches the globals write, that a failed globals write surfaces with the tree already committed, and the globals-last ordering.
 - `app/src/queries/import.test.ts` - `getGlobals` / `updateGlobals` delegation and the globals cache invalidation.
 - `app/src/modules/collections/ImportModal.environments.test.tsx` - the preview rows for both scopes, the merge notice, the blocked Import, and recovery via the toggle.

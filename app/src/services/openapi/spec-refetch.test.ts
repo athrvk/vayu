@@ -18,6 +18,16 @@
 import { describe, it, expect, vi } from "vitest";
 import { NoSpecSourceError, refetchSpec } from "./spec-refetch";
 
+/**
+ * Reading a document into a tree is the engine's (issue #877) - the renderer
+ * holds no reader at all. Every document below is JSON; what a document's bytes
+ * *are* is pinned engine-side by `import_parse_test.cpp`, and what this file is
+ * about is which origin was read and what came back.
+ */
+vi.mock("@/services/api", () => ({
+	apiService: { readDocument: async (text: string) => JSON.parse(text) },
+}));
+
 const ROOT = JSON.stringify({
 	openapi: "3.0.0",
 	info: { title: "Pets API" },

@@ -195,7 +195,7 @@ This document defines the standard file naming conventions for the Vayu applicat
 | Error Components | `PascalCase.tsx` | `ErrorBoundary.tsx` |
 | Error Utilities | `kebab-case.ts` | `error-handler.ts` |
 | Index Files | `index.ts` / `index.tsx` | `index.ts` |
-| Test-only helpers | `kebab-case.testkit.ts` | `imported-operations.testkit.ts` |
+| Test-only helpers | `kebab-case.testkit.ts` | `import-preview.testkit.ts` |
 
 A `.testkit.ts` file is **not part of the app**: it holds something only tests
 need - a walk, a builder, a fixture reader - and the suffix is there so a

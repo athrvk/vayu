@@ -10,10 +10,15 @@
  *
  * The defect it closes is invisible by construction - an external `$ref` used to
  * resolve to `undefined` and the import simply came out smaller - so the
- * load-bearing assertions here are the ones that go through a *parser*: the
- * request body stub is only non-empty if the ref actually reached the schema in
- * the other file. Revert the bundling call and those reds; assertions about the
- * bundled text alone would not.
+ * load-bearing assertions are the ones that walk the *bundled document* and
+ * find the schema the ref named actually there, under a pointer this document
+ * can resolve. Revert the bundling call and those go red.
+ *
+ * They used to run a *parser* over the bundled text and assert on the request
+ * body it produced. That parser is engine-side now (issue #877), and the
+ * substitution is not a loss: what bundling promises is a walkable document,
+ * and what a reader then makes of it is pinned by the engine's own conformance
+ * corpus rather than by this file.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -25,8 +30,33 @@ import {
 	SpecBundleTooLargeError,
 	type ExternalRefIntake,
 } from "./ref-bundler";
-import { parseImport } from "./factory";
-import { createRefResolver } from "./openapi-shared";
+
+/**
+ * A JSON Pointer walk, here rather than imported: the importer's own resolver
+ * went engine-side with the parsers (issue #877), and what these cases need is
+ * not a parser at all - it is whether the *bundled document* is walkable, which
+ * is the bundler's whole output.
+ */
+function resolveRef(document: unknown, ref: string): unknown {
+	let node: unknown = document;
+	for (const raw of ref.replace(/^#\//, "").split("/")) {
+		const segment = raw.replace(/~1/g, "/").replace(/~0/g, "~");
+		node =
+			typeof node === "object" && node !== null
+				? (node as Record<string, unknown>)[segment]
+				: undefined;
+	}
+	return node;
+}
+
+/**
+ * How the bundler reads a document into a tree. In production that is the
+ * engine (`POST /import/document`), which is the point - the renderer holds no
+ * reader (issue #877). Injected here so the walk can be driven with no engine
+ * running; every fixture below is JSON, and what a document's *bytes* are is
+ * pinned engine-side by `import_parse_test.cpp`.
+ */
+const parseDocument = async (text: string): Promise<unknown> => JSON.parse(text);
 
 const MULTIFILE = join(__dirname, "__fixtures__/openapi-v3-multifile");
 const ENTRY = join(MULTIFILE, "spec/openapi.json");
@@ -43,14 +73,13 @@ const ROOMY = 10 * 1024 * 1024;
 function fileIntake(overrides: Partial<ExternalRefIntake> = {}): ExternalRefIntake {
 	return {
 		maxBytes: ROOMY,
+		parseDocument,
 		readSibling: vi.fn(async (relativePath: string) =>
 			readFileSync(resolve(dirname(ENTRY), relativePath), "utf8")
 		),
 		...overrides,
 	};
 }
-
-const opts = { importEnvironments: true, importScripts: true };
 
 describe("bundleExternalRefs - a document with nothing external", () => {
 	it("returns the input byte for byte", async () => {
@@ -83,25 +112,33 @@ describe("bundleExternalRefs - sibling files", () => {
 		expect(bundled).toBe(2);
 		expect(unresolvedRefs).toBe(0);
 
-		const request = parseImport(text, opts).collections[0].children[0].requests[0];
-		const body = request.body;
-		expect(body.mode).toBe("json");
-		// Before bundling this stub was `{}`: the ref resolved to `undefined` and
-		// the sampler had nothing to sample.
-		expect(JSON.parse("content" in body ? body.content : "{}")).toEqual({
-			id: 7,
-			name: "Rex",
-			tag: { label: "good-boy" },
-		});
+		// Before bundling, the request body's schema `$ref` named a file and
+		// resolved to nothing at all - the sampler had nothing to sample and the
+		// operation imported with an empty stub. The assertion is that it is
+		// walkable *in this document*, which is the only thing bundling promises
+		// and the only thing a reader of it can use.
+		const doc = JSON.parse(text) as Record<string, unknown>;
+		const schemaRef = (
+			resolveRef(doc, "#/paths/~1pets/post/requestBody/content/application~1json/schema") as {
+				$ref: string;
+			}
+		).$ref;
+		expect(schemaRef.startsWith(`#/${BUNDLE_KEY}/`)).toBe(true);
+		expect(resolveRef(doc, schemaRef)).toMatchObject({ type: "object" });
 	});
 
 	it("resolves a ref that climbs out of the spec's own directory", async () => {
 		const { text } = await bundleExternalRefs(entryRaw, fileIntake());
-		const example = parseImport(
-			text,
-			opts
-		).collections[0].children[0].requests[0].examples?.find((e) => e.status === 400);
-		expect(JSON.parse(example!.body)).toEqual({ code: 400, message: "pet already exists" });
+		// `../shared/error.json` climbs out of `spec/`, and the ref that named it
+		// resolves inside the bundle.
+		const doc = JSON.parse(text) as Record<string, unknown>;
+		const errorRef = (
+			resolveRef(
+				doc,
+				"#/paths/~1pets/post/responses/400/content/application~1json/schema"
+			) as { $ref: string }
+		).$ref;
+		expect(resolveRef(doc, errorRef)).toBeDefined();
 	});
 
 	it("reads each target once however many refs name it", async () => {
@@ -126,7 +163,7 @@ describe("bundleExternalRefs - sibling files", () => {
 				.tag as unknown as { $ref: string }
 		).$ref;
 		expect(tagRef).toBe(`#/${BUNDLE_KEY}/${pet[0]}/Tag`);
-		expect(createRefResolver(doc)(tagRef)).toEqual(bundle[pet[0]].Tag);
+		expect(resolveRef(doc, tagRef)).toEqual(bundle[pet[0]].Tag);
 	});
 });
 
@@ -152,11 +189,12 @@ describe("bundleExternalRefs - URLs", () => {
 	});
 
 	it("resolves a relative ref against the URL the document was fetched from", async () => {
-		const fetchUrl = vi.fn(
-			async () => "Pet:\n  type: object\n  properties:\n    id:\n      type: integer\n"
+		const fetchUrl = vi.fn(async () =>
+			JSON.stringify({ Pet: { type: "object", properties: { id: { type: "integer" } } } })
 		);
 		const { bundled, unresolvedRefs } = await bundleExternalRefs(urlSpec, {
 			maxBytes: ROOMY,
+			parseDocument,
 			sourceUrl: "https://acme.dev/specs/openapi.json",
 			fetchUrl,
 		});
@@ -192,6 +230,7 @@ describe("bundleExternalRefs - transitive refs and cycles", () => {
 		const readSibling = vi.fn(async (path: string) => chain[path]);
 		const { bundled, unresolvedRefs, text } = await bundleExternalRefs(spec, {
 			maxBytes: ROOMY,
+			parseDocument,
 			readSibling,
 		});
 		expect(bundled).toBe(2);
@@ -199,10 +238,9 @@ describe("bundleExternalRefs - transitive refs and cycles", () => {
 		// The chain is walkable end to end in the bundled document, which is the
 		// only thing a parser can do with it.
 		const doc = JSON.parse(text) as Record<string, unknown>;
-		const resolve = createRefResolver(doc);
-		const a = resolve("#/components/schemas/A") as { $ref: string };
-		const b = resolve(a.$ref) as { $ref: string };
-		expect(resolve(b.$ref)).toEqual({ type: "string" });
+		const a = resolveRef(doc, "#/components/schemas/A") as { $ref: string };
+		const b = resolveRef(doc, a.$ref) as { $ref: string };
+		expect(resolveRef(doc, b.$ref)).toEqual({ type: "string" });
 	});
 
 	it("terminates on a cycle, reading each file once", async () => {
@@ -211,7 +249,11 @@ describe("bundleExternalRefs - transitive refs and cycles", () => {
 			"c.json": JSON.stringify({ C: { $ref: "./b.json#/B" } }),
 		};
 		const readSibling = vi.fn(async (path: string) => cyclic[path]);
-		const { bundled } = await bundleExternalRefs(spec, { maxBytes: ROOMY, readSibling });
+		const { bundled } = await bundleExternalRefs(spec, {
+			maxBytes: ROOMY,
+			parseDocument,
+			readSibling,
+		});
 		expect(bundled).toBe(2);
 		expect(readSibling).toHaveBeenCalledTimes(2);
 	});
@@ -223,6 +265,7 @@ describe("bundleExternalRefs - what it cannot reach is said out loud", () => {
 		// imported short - so both are counted, not the one file.
 		const { text, bundled, unresolvedRefs } = await bundleExternalRefs(entryRaw, {
 			maxBytes: ROOMY,
+			parseDocument,
 		});
 		expect(bundled).toBe(0);
 		expect(unresolvedRefs).toBe(3);
@@ -235,6 +278,7 @@ describe("bundleExternalRefs - what it cannot reach is said out loud", () => {
 		});
 		const { text, unresolvedRefs } = await bundleExternalRefs(entryRaw, {
 			maxBytes: ROOMY,
+			parseDocument,
 			readSibling,
 		});
 		expect(unresolvedRefs).toBe(3);
@@ -245,16 +289,26 @@ describe("bundleExternalRefs - what it cannot reach is said out loud", () => {
 		const readSibling = vi.fn(async () => "{ not: [json");
 		const { bundled, unresolvedRefs } = await bundleExternalRefs(entryRaw, {
 			maxBytes: ROOMY,
+			parseDocument,
 			readSibling,
 		});
 		expect(bundled).toBe(0);
 		expect(unresolvedRefs).toBe(3);
 	});
 
-	it("surfaces the count through the import preview's skip tally", async () => {
-		const { text, unresolvedRefs } = await bundleExternalRefs(entryRaw, { maxBytes: ROOMY });
-		const meta = parseImport(text, opts, { unresolvedRefs }).meta;
-		expect(meta.skipped).toContainEqual({ kind: "external_ref", count: 3 });
+	// The count leaving here is what the preview reports: `parseImport` passes it
+	// to the engine, which stamps it into `meta.skipped` as `external_ref`
+	// (pinned engine-side by `import_parse_test.cpp`). What this file owns is
+	// that the number is right and that it survives the bundle.
+	it("counts every ref it could not reach, once each", async () => {
+		const { text, bundled, unresolvedRefs } = await bundleExternalRefs(entryRaw, {
+			maxBytes: ROOMY,
+			parseDocument,
+		});
+		expect(bundled).toBe(0);
+		expect(unresolvedRefs).toBe(3);
+		// Nothing was resolved, so the document is returned byte for byte.
+		expect(text).toBe(entryRaw);
 	});
 });
 
@@ -263,12 +317,12 @@ describe("bundleExternalRefs - the engine's cap", () => {
 		const readSibling = vi.fn(async () =>
 			JSON.stringify({ Pet: { type: "object" } }).padEnd(4000)
 		);
-		await expect(bundleExternalRefs(entryRaw, { maxBytes: 2048, readSibling })).rejects.toThrow(
-			SpecBundleTooLargeError
-		);
-		await expect(bundleExternalRefs(entryRaw, { maxBytes: 2048, readSibling })).rejects.toThrow(
-			/over the 2048 one document may hold.*maxSpecDocumentBytes/s
-		);
+		await expect(
+			bundleExternalRefs(entryRaw, { maxBytes: 2048, parseDocument, readSibling })
+		).rejects.toThrow(SpecBundleTooLargeError);
+		await expect(
+			bundleExternalRefs(entryRaw, { maxBytes: 2048, parseDocument, readSibling })
+		).rejects.toThrow(/over the 2048 one document may hold.*maxSpecDocumentBytes/s);
 	});
 
 	/**
@@ -282,10 +336,10 @@ describe("bundleExternalRefs - the engine's cap", () => {
 		const oversized = singleFileRaw.padEnd(4096);
 		const readSibling = vi.fn(async () => "{}");
 		await expect(
-			bundleExternalRefs(oversized, { maxBytes: 2048, readSibling })
+			bundleExternalRefs(oversized, { maxBytes: 2048, parseDocument, readSibling })
 		).rejects.toThrow(SpecBundleTooLargeError);
 		await expect(
-			bundleExternalRefs(oversized, { maxBytes: 2048, readSibling })
+			bundleExternalRefs(oversized, { maxBytes: 2048, parseDocument, readSibling })
 		).rejects.toThrow(/The spec is 4096 bytes, over the 2048.*maxSpecDocumentBytes/s);
 		// Before parse, and before a single ref is followed: the point of moving
 		// the check is that nothing downstream runs on a document that cannot be
@@ -300,7 +354,9 @@ describe("bundleExternalRefs - the engine's cap", () => {
 			info: { name: "Big", schema: "https://schema.getpostman.com/json/collection/v2.1.0/" },
 			item: [],
 		}).padEnd(4096);
-		await expect(bundleExternalRefs(collection, { maxBytes: 2048 })).resolves.toEqual({
+		await expect(
+			bundleExternalRefs(collection, { maxBytes: 2048, parseDocument })
+		).resolves.toEqual({
 			text: collection,
 			bundled: 0,
 			unresolvedRefs: 0,
@@ -312,7 +368,7 @@ describe("bundleExternalRefs - the engine's cap", () => {
 			JSON.stringify({ Pet: { type: "object" } }).padEnd(4000)
 		);
 		await expect(
-			bundleExternalRefs(entryRaw, { maxBytes: 1024 * 1024, readSibling })
+			bundleExternalRefs(entryRaw, { maxBytes: 1024 * 1024, parseDocument, readSibling })
 		).resolves.toBeTruthy();
 	});
 });

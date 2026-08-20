@@ -380,10 +380,10 @@ engine reads the document it is storing and derives the `operations` index (#629
 moved by #853) and the `responseSchemas` index (#628, moved by #860) from those
 very bytes, so sending either is a `400`, the way a supplied `hash` is; a sync
 that forgets one can no longer turn coverage or response validation off for a
-collection that had it. What the renderer still owes the engine is that the
-identity it stamps on each request agrees with what that reader indexes -
-`engine/tests/fixtures/declared-operations-conformance.json` is the table both
-suites read.
+collection that had it. The renderer stamps no identity of its own any more either
+(issue #877): an import is parsed by the same reader, so the identity on a
+request and the identity in the index come off one walk rather than two that had
+to be pinned to each other.
 
 Create and read-by-id only, plus the two writes that move a binding.
 `syncSpec` is one (issue #655): it stores the re-fetched document, points

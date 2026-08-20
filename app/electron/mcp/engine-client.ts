@@ -360,6 +360,22 @@ export class EngineClient {
 	}
 
 	/**
+	 * Parse an import document and persist it, in one call (`POST /import`,
+	 * issue #877).
+	 *
+	 * The verb that was missing: an agent could bind, describe, diff, sync,
+	 * export and unbind a spec, and could not *import* a document at all,
+	 * because `POST /import/apply` took a tree only the renderer could build.
+	 * Every format the app accepts comes through here - OpenAPI 2.0/3.x, Postman
+	 * v2.0/v2.1, a Postman environment or globals export, Insomnia v4 - read by
+	 * the engine's one reader, so nothing on this side has an opinion about what
+	 * a document is.
+	 */
+	importDocument(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/import", payload, signal);
+	}
+
+	/**
 	 * What a re-fetched document would change about the collection bound to it
 	 * (`POST /specs/diff`, issue #854).
 	 *

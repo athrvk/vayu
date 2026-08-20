@@ -59,6 +59,9 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
+| POST | `/import/parse` | Read a raw import document - OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4 - into the tree `/import/apply` persists (issue #877); reads only |
+| POST | `/import` | The same parse, flattened and applied in one call - what MCP `import_document` wraps; the app parses and applies separately because a person previews in between |
+| POST | `/import/document` | A document's bytes as a JSON DOM, through the engine's one reader - the whole of what the app's `$ref` bundler needs, and what took the last YAML dependency out of `app/src` |
 | POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
 | POST | `/diagnostics/connection` | One policy-honouring send, reported as which hop answered (issue #708) - outcome only, never a body |
 | GET | `/requests/:id/examples` | A request's saved example responses (issue #481), in stored order |
@@ -285,31 +288,34 @@ Three things worth knowing before you design around them:
   no verdict, and a response that is itself a `$ref` is read through one hop in
   either dialect (#714). Nothing in the renderer extracts either index any more -
   and since #869 nothing there reads a spec document at all:
-  `services/openapi/spec-operations.ts` went with the Spec tab's parse, and what
-  is left of that walk is a `.testkit.ts` the two cross-language conformance
-  suites use to ask whether an *import* still builds what this side derives.
+  `services/openapi/spec-operations.ts` went with the Spec tab's parse, and #877
+  took the last of it - the import parsers, and with them the `.testkit.ts` and
+  the two cross-language conformance suites that had been asking whether an
+  *import* still built what this side derives. There is nothing left to ask.
   The reader keeps
   document order (a JavaScript object could not: it sorts integer-like keys, so
   `responses: {404, 200}` used to reach the store as `200, 404`), types scalars
   like js-yaml's core schema, expands anchors, aliases and merge keys under a
   budget of one node per input byte, and refuses a duplicate mapping key. The
-  identity it indexes and the identity the renderer's importer stamps on a
-  request are pinned to each other by
-  `tests/fixtures/declared-operations-conformance.json`, read by
-  `openapi_document_test.cpp` and the renderer's
-  `declared-operations.conformance.test.ts` - coverage matches one against the
-  other, so a divergence would credit the wrong operation rather than fail.
+  identity it indexes is the identity an import stamps on a request, and since
+  #877 that is one function rather than two agreeing:
+  `tests/fixtures/declared-operations-conformance.json` stayed as this side's own
+  table (`openapi_document_test.cpp`) when its renderer half retired with the
+  parser it pinned, the way `operation-shape-conformance.json` did under #761.
   **The engine builds the request drafts too now** (#865,
   `core::spec_request_drafts_of`): not an identity but *the request an import
   would build* - method, URL with its query joined in, params, headers, sampled
   body, and the folder an import would file it under. That is the half #854's
-  sync diff compares, and it is a port of `openapi-v3.ts` / `openapi-v2.ts` /
-  their shared helpers / the schema sampler held to the **same answers** by
-  `tests/fixtures/spec-request-drafts-conformance.json` - a draft the two sides
-  build differently reads as "the document changed this request" on a document
-  nobody edited, which is why the port carries JavaScript's own semantics
-  (`??` falling through `null` alone, `JSON.stringify`'s number spelling) rather
-  than the nearest C++ idiom. All three answers come off **one** walk
+  sync diff compares, and it was a port of `openapi-v3.ts` / `openapi-v2.ts` /
+  their shared helpers / the schema sampler, held to their answers by a
+  cross-language fixture while both existed. **Since #877 it is the only
+  implementation**: the import runs on it too (`core::import_drafts_of`), so the
+  fixture that pinned the two retired with the renderer parser and
+  `tests/fixtures/import-conformance.json` records what that parser produced
+  instead. The port still carries JavaScript's own semantics (`??` falling
+  through `null` alone, `JSON.stringify`'s number spelling, truthiness) rather
+  than the nearest C++ idiom - `src/core/js_json.hpp` is that shim, shared with
+  the import - because those are the rules the answers were built on. All three answers come off **one** walk
   (`src/core/openapi_walk.hpp`), so no two can disagree about which operations
   exist or which of two kept a repeated `operationId`. A draft carries the
   operation's documented responses too (#854): the diff does not compare them,
@@ -330,7 +336,10 @@ Three things worth knowing before you design around them:
   `core::normalize_path_templates`, the mock server's copy moved out of
   `http/routes/mock_server.cpp` rather than written twice - the app writes those
   URLs and the mock reads them back
-  (`tests/fixtures/path-template-conformance.json`).
+  (`tests/fixtures/path-template-conformance.json`, this side's own table since
+  #877 deleted the `var-normalize.ts` it used to be pinned against; its
+  `{{ x }}`-only half is `core::normalize_template_vars`, which every Postman and
+  Insomnia value an import carries goes through).
   Three rules the shape enforces: an unbound collection gets **no `validation`
   node at all** (never judged is not judged-and-passed); `checked: false` carries
   a reason code and no validity; and keywords the draft-07 validator cannot
@@ -364,6 +373,34 @@ Three things worth knowing before you design around them:
   scenario-only) is the opt-in that lets a schema failure fail a step - and only
   a step that passed everything else, so a step already failing keeps the error
   that named it.
+- **The engine parses every import document now** (#877,
+  `core/import_document.hpp`), which is what makes #853's "exactly one parser has
+  an opinion" true rather than nearly true. All four formats: OpenAPI 2.0/3.x
+  ride the #859 reader and the #865 draft builder - `core::import_drafts_of` is
+  `spec_request_drafts_of` with the skip tally kept and the operations under a
+  malformed `paths` key included, so the import and the sync diff cannot build a
+  request differently - while Postman v2.0/v2.1, the Postman environment and
+  globals exports and Insomnia v4 are nlohmann, no new dependency. Detection is
+  the renderer's old order, so the same bytes are claimed by the same format.
+  **The move is a test, not a promise**:
+  `tests/fixtures/import-conformance.json` holds what the renderer's own parsers
+  produced for a 15-document corpus, recorded at the last commit that had them,
+  and `import_parse_test.cpp` asserts this side matches on every build - two
+  normalisations aside, both of which are things the *renderer* could not do
+  (`meta.skipped` order out of a `Map`, and a JavaScript object sorting
+  integer-like `responses` keys ahead of the rest). `POST /import` is the parse
+  plus `core::import_apply_payload` plus `POST /import/apply`, for a caller with
+  no preview - **globals last and merged**, because `POST /globals` replaces the
+  whole set and must not run in front of a write that can still fail. That
+  flattening exists twice on purpose (the app flattens a previewed, filtered
+  result) and the two are pinned to each other by `import_parse_test.cpp` and the
+  app's `orchestrator.payload-conformance.test.ts`. **What stays in the renderer
+  is `ref-bundler.ts`, and it is exempt with a reason**: inlining the files a
+  multi-file document references is deterministic fetch-time *assembly*, not an
+  opinion about what a document declares - it reads the document through
+  `POST /import/document` (this same reader) and reaches the network and the disk
+  through channels an engine should not have (the URL proxy, the
+  main-process-gated `specFile:read` IPC).
 - **`followRedirects` / `maxRedirects` are per-request and stored** (request
   builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
   Both clients send them on *every* execute and load test rather than eliding

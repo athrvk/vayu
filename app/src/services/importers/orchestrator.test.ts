@@ -1,10 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { ImportOrchestrator, type ImportApi } from "./orchestrator";
 import { assignTempIds } from "./assign-ids";
-import { parseImport } from "./factory";
-import type { ImportResult } from "./types";
+import type { ImportResult, RequestDraft } from "./types";
 import type { ImportApplyRequest, VariableValue } from "@/types";
 
 /**
@@ -58,6 +55,48 @@ function fakeApi(
 		}),
 	};
 	return { api, calls, globals, order };
+}
+
+/** One root collection holding exactly the request the case is about. */
+function fixtureWith(request: Pick<RequestDraft, "name" | "url" | "params">): ImportResult {
+	return {
+		collections: [
+			{
+				name: "root",
+				description: "",
+				variables: {},
+				auth: { mode: "none" },
+				preRequestScript: "",
+				postRequestScript: "",
+				children: [],
+				requests: [
+					{
+						...request,
+						description: "",
+						method: "GET",
+						headers: [],
+						body: { mode: "none" },
+						auth: { mode: "inherit" },
+						preRequestScript: "",
+						postRequestScript: "",
+					},
+				],
+			},
+		],
+		environments: [],
+		globals: {},
+		meta: {
+			format: "test",
+			requestCount: 1,
+			folderCount: 0,
+			environmentCount: 0,
+			globalCount: 0,
+			exampleCount: 0,
+			skipped: [],
+			nonExecutableAuth: 0,
+			unattachedFileParts: 0,
+		},
+	};
 }
 
 function fixture(): ImportResult {
@@ -151,7 +190,7 @@ describe("ImportOrchestrator", () => {
 		expect(Object.keys(unstated)).not.toContain("maxRedirects");
 	});
 
-	it("stores an imported request's query inside its url (issue #590)", async () => {
+	it("sends an imported request's url and params exactly as parsed (issue #590)", async () => {
 		/*
 		 * The end of the chain the issue traced: whatever `url` this payload
 		 * carries is what the engine stores, what the builder loads into the URL
@@ -159,12 +198,23 @@ describe("ImportOrchestrator", () => {
 		 * run - sends verbatim, since no engine path reads `params[]` at all. So
 		 * the query has to be in `url` by the time the import is applied, not
 		 * repaired later by the user's first edit of the Params table.
+		 *
+		 * *Joining* it there is the parse's job and moved with it (issue #877) -
+		 * `join_params_into_urls`, pinned by the engine's conformance corpus,
+		 * where the same Postman fixture still comes out `{{baseUrl}}/users?page=1`
+		 * with the disabled row off the wire. What this file owns is the other
+		 * half: that the orchestrator hands both fields over untouched, so a
+		 * flattening that "helpfully" rebuilt the URL would go red here.
 		 */
 		const result = assignTempIds(
-			parseImport(
-				readFileSync(join(__dirname, "__fixtures__", "postman-v21.json"), "utf8"),
-				opts
-			)
+			fixtureWith({
+				name: "List users",
+				url: "{{baseUrl}}/users?page=1",
+				params: [
+					{ key: "page", value: "1", enabled: true },
+					{ key: "trace", value: "1", enabled: false },
+				],
+			})
 		);
 		const { api, calls } = fakeApi();
 		await new ImportOrchestrator(api).run(result, opts);

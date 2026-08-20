@@ -1201,6 +1201,27 @@ export interface ImportApplyEnvironment {
 	variables?: Record<string, VariableValue>;
 }
 
+/**
+ * `POST /import/parse` (issue #877) - a raw import document in, the whole
+ * `ImportResult` out.
+ *
+ * `fileName`, `sourceUrl` and `unresolvedRefs` are the three facts no parser
+ * can read out of the bytes and the caller can: what the file is called, where
+ * it was fetched from (which a relative `servers[0].url` resolves against and
+ * which a spec document is stored with), and how many external `$ref`s the
+ * bundling pass could not reach.
+ */
+export interface ImportParseRequest {
+	/** The document's text, verbatim. */
+	content: string;
+	/** Both default to `true` engine-side; the dialog sends what its toggles say. */
+	importEnvironments?: boolean;
+	importScripts?: boolean;
+	fileName?: string;
+	sourceUrl?: string;
+	unresolvedRefs?: number;
+}
+
 export interface ImportApplyRequest {
 	collections: ImportApplyCollection[];
 	requests: ImportApplyRequestItem[];

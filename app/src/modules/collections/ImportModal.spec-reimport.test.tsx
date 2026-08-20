@@ -76,6 +76,56 @@ vi.mock("@/services/api", () => ({
 			return document;
 		}),
 		importFetch: vi.fn(),
+		readDocument: async (text: string) => JSON.parse(text),
+		/**
+		 * The parse is the engine's (issue #877). What these cases turn on is the
+		 * one field it puts on an OpenAPI root - `spec.content`, the document
+		 * verbatim - because that is what the bound-document detection hashes.
+		 * Everything else about the parse is pinned engine-side.
+		 */
+		parseImport: async (payload: { content: string; sourceUrl?: string }) => {
+			// Only an OpenAPI import carries a `spec`, which is the whole point of
+			// the last case here: a Postman collection must not send the dialog
+			// looking for a bound document.
+			const spec = typeof JSON.parse(payload.content).openapi === "string";
+			return {
+				collections: [
+					{
+						name: "Petstore",
+						description: "",
+						variables: {},
+						auth: { mode: "none" as const },
+						preRequestScript: "",
+						postRequestScript: "",
+						children: [],
+						requests: [],
+						...(spec
+							? {
+									spec: {
+										content: payload.content,
+										...(payload.sourceUrl
+											? { sourceUrl: payload.sourceUrl }
+											: {}),
+									},
+								}
+							: {}),
+					},
+				],
+				environments: [],
+				globals: {},
+				meta: {
+					format: spec ? "OpenAPI 3.0" : "Postman Collection v2.1",
+					requestCount: 0,
+					folderCount: 0,
+					environmentCount: 0,
+					globalCount: 0,
+					exampleCount: 0,
+					skipped: [],
+					nonExecutableAuth: 0,
+					unattachedFileParts: 0,
+				},
+			};
+		},
 	},
 }));
 

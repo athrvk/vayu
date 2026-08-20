@@ -32,13 +32,14 @@
  * asserted.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore } from "@/stores";
+import { recordedParse, stubParse } from "./import-preview.testkit";
 
 const postman = readFileSync(
 	join(__dirname, "../../services/importers/__fixtures__/postman-v21.json"),
@@ -89,7 +90,12 @@ function invisibleDividers(root: HTMLElement): string[] {
 }
 
 describe("the import dialog declares its surfaces", () => {
-	beforeEach(() => useImportModalStore.setState({ isOpen: true }));
+	beforeEach(() => {
+		vi.restoreAllMocks();
+		// The recorded parse of the fixture these cases paste (issue #877).
+		stubParse(() => recordedParse("postman-v21"));
+		useImportModalStore.setState({ isOpen: true });
+	});
 
 	it("pairs bg-card with surface-card on the panel - both halves load-bearing", () => {
 		renderModal();

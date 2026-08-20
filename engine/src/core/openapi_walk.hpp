@@ -194,6 +194,32 @@ inline std::vector<std::string> declared_responses_of (const nlohmann::ordered_j
     return patterns;
 }
 
+/**
+ * What a walk stepped over on the way to the operations (issue #877).
+ *
+ * Counts, not positions: an import reports these as `meta.skipped` counters and
+ * nothing reads where in the document they were. Filled only when a caller asks
+ * for it - the three index readers do not, because a malformed member does not
+ * change what the document declares.
+ */
+struct WalkNotes {
+    /// A `paths` entry that is not a readable Path Item Object, and a
+    /// `parameters` member of one that is not an array (the missing `-` in
+    /// hand-written YAML). Both are `malformed_spec` to a caller.
+    int malformed_spec = 0;
+    /// A 3.x path item's `trace`, the one method Vayu has no verb for.
+    int unsupported_method = 0;
+    /**
+     * An `operationId` a previous operation already claimed (issue #715).
+     *
+     * The operation imports whole - only the repeated id is dropped from its
+     * identity - and it is counted because a sync follows the identity a
+     * request records, so which request kept the id is not a detail the user
+     * should have to discover from a diff.
+     */
+    int duplicate_operation_id = 0;
+};
+
 /// One operation the document declares, as every reader of one sees it: the
 /// identity the operation index stores, the node the schema index reads, and
 /// the Path Item Object it hangs off - which the request drafts need for the
@@ -205,11 +231,29 @@ struct WalkedOperation {
     const nlohmann::ordered_json* node;
     /// Never null; the walk resolves the single `$ref` hop a path item may be.
     const nlohmann::ordered_json* path_item;
+    /**
+     * Whether the `paths` key this hangs off is a path at all.
+     *
+     * A key that does not start with `/` is a malformed `paths` entry, and
+     * @ref identity says nothing an index or a sync may follow - so every
+     * reader of *identities* skips these rows. The **import** does not (issue
+     * #877): the renderer's parsers build a request for such an operation and
+     * count it, they simply stamp it with no `specOperation`, and an import
+     * that dropped it would lose a request the user can see in their file.
+     *
+     * Carried on the walk rather than re-derived by each reader, because it is
+     * the same question `identity` was already answered by: an id is not
+     * claimed for one of these either, so which of two operations keeps a
+     * repeated `operationId` stays one walk's answer.
+     */
+    bool identified = true;
 };
 
-inline std::vector<WalkedOperation> walk_operations (const nlohmann::ordered_json& document) {
+inline std::vector<WalkedOperation>
+walk_operations (const nlohmann::ordered_json& document, WalkNotes* notes = nullptr) {
     std::vector<WalkedOperation> walked;
-    if (!is_openapi (document)) {
+    const Dialect dialect = spec_dialect (document);
+    if (dialect == Dialect::None) {
         return walked;
     }
     const nlohmann::ordered_json* paths = find_object (document, "paths");
@@ -225,30 +269,54 @@ inline std::vector<WalkedOperation> walk_operations (const nlohmann::ordered_jso
         const std::string& path             = entry.key ();
         const nlohmann::ordered_json* item = resolve_single_hop (document, entry.value ());
         if (item == nullptr) {
+            // An unresolved path item drops every operation under that path,
+            // which is a loss an import has to be able to name.
+            if (notes != nullptr) {
+                notes->malformed_spec += 1;
+            }
             continue;
+        }
+        if (notes != nullptr) {
+            // Once per path item, before its methods - the position the
+            // renderer's parsers count these from.
+            if (const auto parameters = item->find ("parameters");
+                parameters != item->end () && !parameters->is_null () && !parameters->is_array ()) {
+                notes->malformed_spec += 1;
+            }
+            // `trace` is a Path Item Object member in 3.x only, and only a
+            // present *object* is an operation that was dropped.
+            if (dialect == Dialect::V3) {
+                const auto trace = item->find ("trace");
+                if (trace != item->end () && trace->is_structured ()) {
+                    notes->unsupported_method += 1;
+                }
+            }
         }
         for (const char* method : HTTP_METHODS) {
             const nlohmann::ordered_json* operation = find_object (*item, method);
             if (operation == nullptr) {
                 continue;
             }
-            if (path.empty () || path[0] != '/') {
-                // A `paths` key that is not a path: the request an import builds
-                // for it carries no identity either, so neither does this index.
-                continue;
-            }
+            // A `paths` key that is not a path declares no operation - see
+            // `WalkedOperation::identified`. The row is still walked, because
+            // the import builds a request for it; no `operationId` is claimed
+            // off it, since the identity it would sit on does not exist.
+            const bool identified = !path.empty () && path[0] == '/';
             DeclaredOperation row;
             row.method = upper (method);
             row.path   = path;
             if (const auto id = operation->find ("operationId");
+                identified &&
                 id != operation->end () && id->is_string () && !id->get<std::string> ().empty ()) {
                 const std::string operation_id = id->get<std::string> ();
                 if (claimed_ids.insert (operation_id).second) {
                     row.operation_id = operation_id;
+                } else if (notes != nullptr) {
+                    notes->duplicate_operation_id += 1;
                 }
             }
             row.responses = declared_responses_of (*operation);
-            walked.push_back ({ std::move (row), operation, item });
+            walked.push_back ({ std::move (row), operation, item, identified });
         }
     }
     return walked;

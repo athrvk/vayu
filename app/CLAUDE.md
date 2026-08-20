@@ -13,8 +13,16 @@ Renderer and Electron main process for Vayu. Apache-2.0. See the repo root
 - Feature-organized: `app/src/modules/<feature>/` (request-builder, collections,
   dashboard, history, variables, settings, welcome); shared shell + primitives in
   `app/src/components/` (layout, shared, ui). See `docs/app/COMPONENTS.md`.
-- Import parsers: `app/src/services/importers/` (factory → ordered detectors →
-  drafts → orchestrator); per-format docs in `docs/app/import-collections/`.
+- **Import holds no parser** (#877). `app/src/services/importers/` is the batch
+  ledger, the temp ids and the apply; `parseImport` is one `POST /import/parse`
+  call, and every format is read by `engine/src/core/import_document.cpp`. A
+  parser here would be the second reader of a document, which is the thing #853
+  set out to end - and while one existed, an agent over MCP could bind, diff,
+  sync and export a spec and not import one. Per-format mapping docs in
+  `docs/app/import-collections/`. `ref-bundler.ts` is the one file that still
+  walks a document, and it reads it through the engine
+  (`POST /import/document`): inlining a `$ref` target is deterministic
+  re-serialization, not an opinion about what the document declares.
 - State: Zustand for UI state, TanStack Query for server state
 - Styling: Tailwind CSS v4 - all colors via CSS custom properties
 - **Design system: `docs/design-system.md`** - tokens, elevation, typography,

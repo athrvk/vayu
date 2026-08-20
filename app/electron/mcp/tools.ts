@@ -739,6 +739,12 @@ function str(args: Record<string, unknown>, key: string): string | undefined {
 	return typeof v === "string" ? v : undefined;
 }
 
+/** An optional boolean argument, absent when the caller stated nothing. */
+function bool(args: Record<string, unknown>, key: string): boolean | undefined {
+	const v = args[key];
+	return typeof v === "boolean" ? v : undefined;
+}
+
 function requireStr(args: Record<string, unknown>, key: string): string {
 	const v = str(args, key);
 	if (v === undefined || v === "") throw new ToolArgError(`"${key}" is required.`);
@@ -3389,6 +3395,41 @@ function describeSpecDiff(answer: Record<string, unknown>): string {
  * Defensive about the shape for `describeBind`'s reason: an engine answering
  * something unexpected must cost the caveat, never the result.
  */
+/**
+ * What an import did, in a sentence - the caveat beside the JSON.
+ *
+ * `meta.skipped` is the half worth reading aloud: an import that silently
+ * dropped a WebSocket request, a file body or an operation's `default` response
+ * looks exactly like one that had none, and every parser tallies those precisely
+ * so a caller does not have to discover the loss later.
+ */
+function describeImport(answer: unknown): string {
+	if (!isRecord(answer)) return "";
+	const meta = isRecord(answer.meta) ? answer.meta : {};
+	const format = typeof meta.format === "string" ? meta.format : "the document";
+	const parts = [
+		`${num(answer.collections)} collection(s)`,
+		`${num(answer.requests)} request(s)`,
+	];
+	if (num(answer.environments) > 0) parts.push(`${num(answer.environments)} environment(s)`);
+	if (num(answer.globals) > 0) parts.push(`${num(answer.globals)} global(s)`);
+	let text = `Imported ${format}: ${parts.join(", ")}.`;
+	const skipped = Array.isArray(meta.skipped) ? meta.skipped : [];
+	if (skipped.length > 0) {
+		const named = skipped
+			.filter(isRecord)
+			.map((entry) => `${num(entry.count)} ${String(entry.kind)}`)
+			.join(", ");
+		text += ` Not everything imported: ${named}.`;
+	}
+	return text;
+}
+
+/** A count the engine reported, or 0 - never `NaN` in a sentence. */
+function num(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function describeSync(answer: unknown): string {
 	const outcome = asRecord(answer);
 	const count = (value: unknown): number => (typeof value === "number" ? value : 0);
@@ -4364,6 +4405,95 @@ export const TOOLS: McpTool[] = [
 				return engineErrorResult(err);
 			}
 			return withCaveat(jsonResult(outcome), `\n\n${describeSync(outcome)}`);
+		},
+	},
+	{
+		name: "import_document",
+		category: "write",
+		// All three families: a Postman collection creates collections and
+		// requests, an environment export creates an environment, and a globals
+		// export rewrites the global scope. Which of them a given document
+		// touches is not knowable until it has been read, and an entity left out
+		// would leave an open list showing a tree the import has already changed.
+		invalidates: ["collection", "request", "environment"],
+		description:
+			"Import a collection, environment or API spec from its document text. GUARDED: requires write access to be enabled in Vayu Settings. Every format Vayu accepts is read by the engine: OpenAPI 3.x and 2.0 (JSON or YAML), Postman Collection v2.1 and v2.0, a Postman environment or globals export, and an Insomnia v4 export - detection is by content, so you do not say which one it is. The whole tree lands in one transaction: a document that is refused creates nothing. An OpenAPI document is stored and the collection is bound to it, so its runs report contract coverage and its responses are schema-checked straight away, and its operations are filed under one sub-collection per tag. The result reports what was created plus `meta`, which names the format, the counts, and - in `meta.skipped` - everything the document declared that Vayu cannot represent, so a lossy import says so rather than looking complete. A Postman globals export MERGES into the existing global scope, imported values winning on a collision; nothing else here overwrites anything.",
+		annotations: {
+			title: "Import a document",
+			readOnlyHint: false,
+			// Nothing existing is removed: an import only creates. The one write
+			// that touches prior state is the globals merge, which adds and
+			// overwrites by key and deletes nothing.
+			destructiveHint: false,
+			// Two imports of one document are two collections, not one.
+			idempotentHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			content: z
+				.string()
+				.describe(
+					"The document text, verbatim - JSON or YAML. Capped by the maxSpecDocumentBytes setting, which is what an over-large document is refused against."
+				),
+			importEnvironments: z
+				.boolean()
+				.optional()
+				.describe(
+					"Whether to create the environments and global variables the document carries. Defaults to true. Off, they are not created and the counts report 0 - the same toggle the import dialog offers."
+				),
+			importScripts: z
+				.boolean()
+				.optional()
+				.describe(
+					"Whether to import pre-request and post-request scripts. Defaults to true. Off, every script imports empty - a Postman collection's `event` blocks are code from a document you were handed."
+				),
+			sourceUrl: z
+				.string()
+				.optional()
+				.describe(
+					"Where the document was fetched from, if it came from a URL. Recorded on a stored OpenAPI document so a later sync knows what to re-fetch, and used to resolve a relative `servers[0].url`; omit it for a document you were handed as text."
+				),
+			fileName: z
+				.string()
+				.optional()
+				.describe("What the file is called, for the result's `meta` only. Never stored."),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const content = requireStr(args, "content");
+			const sourceUrl = str(args, "sourceUrl");
+			const fileName = str(args, "fileName");
+			// External `$ref`s are not followed: resolving one means fetching a
+			// URL or reading a file beside the document, which is the import
+			// dialog's business (a URL proxy and a gated IPC) and not an agent's.
+			// A document that names another file imports whole and says so -
+			// `meta.skipped` carries no `external_ref` count here, because nothing
+			// tried.
+			// An option the caller did not state is left absent rather than
+			// defaulted here: the engine's default is the one the import dialog
+			// offers, and restating it would be a second place for it to drift.
+			const importEnvironments = bool(args, "importEnvironments");
+			const importScripts = bool(args, "importScripts");
+			let outcome: unknown;
+			try {
+				outcome = await ctx.client.importDocument(
+					{
+						content,
+						...(importEnvironments === undefined ? {} : { importEnvironments }),
+						...(importScripts === undefined ? {} : { importScripts }),
+						...(sourceUrl ? { sourceUrl } : {}),
+						...(fileName ? { fileName } : {}),
+					},
+					signal
+				);
+			} catch (err) {
+				// The engine's own sentence: "Unrecognised format" for a file no
+				// format claims, a read failure naming the line for one that is
+				// broken, and the cap by name for one that is too large.
+				return engineErrorResult(err);
+			}
+			return withCaveat(jsonResult(outcome), `\n\n${describeImport(outcome)}`);
 		},
 	},
 	{
