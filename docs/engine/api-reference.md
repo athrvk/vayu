@@ -1590,6 +1590,88 @@ or an operation row the store would refuse. `404` when the collection does not
 exist - not an empty match, since "this document matches none of your requests"
 and "you named a collection that is not there" are different answers.
 
+### POST /specs/export
+
+A collection back out as an OpenAPI document - its own bound document updated,
+or a skeleton describing its requests when it binds none. Which of the two runs
+is a fact about the collection rather than a parameter.
+
+**Reads only.** Nothing is stored and the collection is left exactly as it is; a
+POST because the answer is a document rather than a resource, and because the
+body carries the format.
+
+**Request:**
+```json
+{
+  "collectionId": "col_9a1f...",   // Required
+  "format": "json"                 // Optional - "json" (default) or "yaml"
+}
+```
+
+Neither the requests nor the document are sent. The engine reads the whole
+subtree of `collectionId` (an OpenAPI import binds the root and files every
+request under one sub-collection per tag), each request's stored examples, and
+the bound document itself - **stopping at any collection bound to a *different*
+document**. That boundary is not a filter: the refused collection takes its own
+descendants with it, because its requests carry another document's operation
+stamps and `operationId`s are names generators hand out in every document
+(`listUsers`, `GET /users`), so letting them through would have them claim these
+operations and rewrite them. A descendant bound to the *same* document is part
+of the export, because its requests describe the very operations being patched.
+
+**Response:**
+```json
+{
+  "text": "{\n  \"openapi\": \"3.0.3\",\n ...",
+  "fileName": "petstore.openapi.json",
+  "notes": {
+    "direction": "document",        // or "skeleton"
+    "dialect": "OpenAPI 3.0.3",
+    "requestsExported": 12,
+    "requestsWithoutOperation": 1,
+    "operationsNotInDocument": 0,
+    "operationsRemoved": 2,
+    "requestsWithoutPath": 0,
+    "duplicateOperations": 0,
+    "examplesWritten": 4,
+    "examplesWithoutMediaType": 1,
+    "examplesTruncated": 0,
+    "sharedParametersLeft": 1,
+    "vocabularyNotWritten": false
+  }
+}
+```
+
+Every count is present, zeros included: "0 requests with no operation" is how a
+bound export states that it carried everything, and a body that omitted its
+zeros would read as complete whether or not it was.
+
+**A bound export patches the stored bytes, never rebuilds them.** Operations no
+request claims are removed (and a path left with no operations goes with them),
+a declared parameter whose request row carries a value gets it as `example`, and
+stored examples become response examples - one as `example`, several as a named
+`examples` map. Everything else - `info`, `tags`, vendor extensions, `security`,
+components nothing references - is carried through by simply not being visited,
+and the dialect is left as it was. A **Swagger 2.0** document is the one partial
+case, reported as `vocabularyNotWritten`: operations nothing claims are still
+removed, but nothing is written *into* an operation, because 2.0 states
+parameters and examples in a vocabulary Vayu does not write.
+
+**A skeleton invents nothing.** `{{variable}}` tokens are written as they stand
+in `servers` and paths alike (resolving `{{baseUrl}}` would export one machine's
+environment as though the contract named it), a path segment that is exactly one
+token becomes the OpenAPI `{petId}` it came from, every Params and Headers row
+is declared without a `required` it was never given, and a body or response is
+described only where there is a stored example to read a shape off - carrying a
+`description` that says the shape is derived.
+
+**Errors:** `400` for a missing or empty `collectionId`, or a `format` other
+than `json`/`yaml`. `404` when the collection does not exist. `409` when the
+collection's binding names a document that is not stored, or when the stored
+bytes will not read as an OpenAPI object - the export refuses rather than
+falling back to a skeleton, which would silently replace the document the caller
+believes they are updating with one that drops everything Vayu does not model.
+
 ### POST /specs/sync
 
 Apply a re-fetched document to the collection bound to it, in **one

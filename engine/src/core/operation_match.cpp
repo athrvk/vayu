@@ -39,22 +39,11 @@ std::string_view trim (std::string_view text) {
     return text.substr (begin, end - begin);
 }
 
-/**
- * True when the whole of @p text is a single `{{name}}` token - the app's
- * `isVariableToken`, and the engine's own `{{name}}` shape.
- *
- * Used rather than "starts with `{{`" because only a URL whose *entire* first
- * segment is one token states its origin that way; `{{a}}b.example.com` names a
- * host that happens to begin with a variable, and dropping the whole segment
- * would silently discard the rest of it.
- */
+/// True when the whole of @p text is a single `{{name}}` token. The shape rule
+/// itself is `variable_token_name`, so the origin scan and the export's path
+/// template cannot disagree about what one token is.
 bool is_variable_token (std::string_view text) {
-    if (text.size () < 5 || text.substr (0, 2) != "{{" ||
-    text.substr (text.size () - 2) != "}}") {
-        return false;
-    }
-    const std::string_view name = text.substr (2, text.size () - 4);
-    return !name.empty () && name.find_first_of ("{}") == NPOS;
+    return variable_token_name (text).has_value ();
 }
 
 /**
@@ -179,6 +168,18 @@ bool fills_template (std::string_view path_shape, std::string_view template_shap
 }
 
 } // namespace
+
+std::optional<std::string> variable_token_name (std::string_view text) {
+    if (text.size () < 5 || text.substr (0, 2) != "{{" ||
+    text.substr (text.size () - 2) != "}}") {
+        return std::nullopt;
+    }
+    const std::string_view name = text.substr (2, text.size () - 4);
+    if (name.empty () || name.find_first_of ("{}") != std::string_view::npos) {
+        return std::nullopt;
+    }
+    return std::string (name);
+}
 
 RequestUrlParts split_request_url (std::string_view url) {
     RequestUrlParts parts;

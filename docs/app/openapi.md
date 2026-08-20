@@ -377,8 +377,12 @@ there is yours.
 
 Any collection exports as an OpenAPI document, from its ⋯ menu in the sidebar or
 from the **Export as OpenAPI** button on the Spec tab. The document is assembled
-here, from what is stored, and written to a file you choose the format of - JSON
-or YAML, the same document either way. Nothing is sent anywhere.
+by the engine, from what is stored, and written to a file you choose the format
+of - JSON or YAML, the same document either way. Nothing is sent anywhere, and
+nothing is written: an export is a read of what the collection already is.
+
+Because it is the engine's, an agent can ask for the same document over MCP
+(`export_spec`) rather than only through this dialog.
 
 **Which of two things happens depends on whether the collection is bound**, and
 the dialog says which before you download.
@@ -468,9 +472,10 @@ recorded, an example stored only in part (the response is written, the body is
 not, in both of those last two). Nothing is dropped quietly.
 
 A large document takes a moment to put together, and the dialog says
-**Assembling the document…** while it does. Switching between JSON and YAML
-assembles the other format once; switching back is immediate, because the first
-one is still there.
+**Assembling the document…** while it does. Switching between JSON and YAML asks
+for the other format once; switching back is immediate, because the first one is
+still there. Reopening the dialog asks again, so an export always describes the
+collection as it is now.
 
 ## Contract coverage
 

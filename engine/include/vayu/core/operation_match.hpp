@@ -129,6 +129,21 @@ struct RequestUrlParts {
 [[nodiscard]] RequestUrlParts split_request_url (std::string_view url);
 
 /**
+ * The name inside @p text when the whole of it is one `{{name}}` token, absent
+ * otherwise - the app's `isVariableToken`, and the engine's own `{{name}}`
+ * shape.
+ *
+ * *Whole*, rather than "starts with `{{`", because only a URL whose entire
+ * first segment is one token states its origin that way, and only a path
+ * segment that is entirely one token is the OpenAPI `{petId}` it came from
+ * (`{{a}}b.example.com`, `/files/{{name}}.json`). The name comes back
+ * untrimmed: what surrounding space means is the caller's question - an origin
+ * keeps the token as written, a path template writes the name into the
+ * document.
+ */
+[[nodiscard]] std::optional<std::string> variable_token_name (std::string_view text);
+
+/**
  * The path portion of a request URL, reduced to a shape, or `std::nullopt` when
  * there is nothing that can be compared to a spec path.
  *

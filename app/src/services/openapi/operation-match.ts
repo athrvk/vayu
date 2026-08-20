@@ -16,15 +16,15 @@
  * rather than through a second copy of a rule that decides which request is
  * which operation.
  *
- * What stays here is the reduction itself, for the two renderer readers that
- * still need it and have not moved yet: the spec diff (`spec-diff.ts`, which
- * compares two *documents* rather than a document to a collection) and the
- * export skeleton (`exporters/skeleton.ts`, which needs a URL split into the
- * origin that becomes a `servers[]` entry and the path that becomes a `paths`
- * key). Both are phase B's remaining moves.
+ * What stays here is the reduction itself, for the one renderer reader that
+ * still needs it and has not moved yet: the spec diff (`spec-diff.ts`, which
+ * compares two *documents* rather than a document to a collection), which is
+ * phase B's remaining move. The URL *split* went with the export (issue #855):
+ * the skeleton was its last reader here, and the engine's
+ * `split_request_url` is now the only one.
  *
- * Until they go, one rule has two implementations, which is exactly the thing
- * this codebase distrusts - so
+ * Until the diff goes, one rule has two implementations, which is exactly the
+ * thing this codebase distrusts - so
  * `engine/tests/fixtures/operation-shape-conformance.json` is the table both
  * read, and `operation-shape.conformance.test.ts` is this side of it.
  *
@@ -35,7 +35,7 @@
  * spelling would report a rename as "removed and added".
  */
 
-import { VARIABLE_PATTERN, isVariableToken } from "@/constants/variables";
+import { VARIABLE_PATTERN } from "@/constants/variables";
 
 /**
  * An OpenAPI path parameter, `{petId}`.
@@ -46,68 +46,6 @@ import { VARIABLE_PATTERN, isVariableToken } from "@/constants/variables";
  * What is left for this one is the single-brace syntax only OpenAPI writes.
  */
 const SPEC_PLACEHOLDER = /\{[^{}]*\}/g;
-
-/** `scheme://host[:port]`, the other way a request states where it goes. */
-const ORIGIN = /^[a-zA-Z][\w+.-]*:\/\/[^/?#]*/;
-
-/**
- * A request URL split into the part that says *where* it goes and the part that
- * says *what* it addresses.
- *
- * Export (#630) keeps both halves - the origin becomes a `servers[]` entry and
- * the path becomes a `paths` key. The engine's matcher splits a URL the same
- * way to flatten the path (`split_request_url`), which is what the shape
- * conformance fixture pins: a second opinion about what counts as an origin
- * would put a request under a `servers[]` entry the document it was matched
- * against does not have.
- */
-export interface RequestUrlParts {
-	/**
-	 * The `{{baseUrl}}` token, or the `scheme://host[:port]`, the URL starts
-	 * with - absent when it states neither.
-	 */
-	origin?: string;
-	/**
-	 * The path, with its template placeholders exactly as the URL wrote them
-	 * (`/pets/{{petId}}`), or `undefined` when the URL states no path at all.
-	 */
-	path?: string;
-}
-
-export function splitRequestUrl(url: string): RequestUrlParts {
-	let rest = url.trim();
-	if (!rest) return {};
-	let origin: string | undefined;
-
-	// Query and fragment first: an origin regex must not have to skip them, and
-	// a `?` inside a path is not a thing.
-	rest = rest.split("#")[0].split("?")[0];
-
-	// A leading `{{baseUrl}}` - what every OpenAPI import writes - stands in for
-	// the whole origin, so the segment before the first slash is dropped when it
-	// is exactly one variable token. `isVariableToken` rather than a regex of our
-	// own, for the same single-matcher reason as above.
-	const firstSlash = rest.indexOf("/");
-	const head = firstSlash === -1 ? rest : rest.slice(0, firstSlash);
-	if (isVariableToken(head)) {
-		origin = head;
-		rest = rest.slice(head.length);
-	} else if (ORIGIN.test(rest)) {
-		origin = ORIGIN.exec(rest)?.[0];
-		rest = rest.replace(ORIGIN, "");
-	} else if (!rest.startsWith("/")) {
-		// A schemeless URL (`api.example.com/pets`): the first segment is a host
-		// when it looks like one, and a path when it does not.
-		if (head.includes(".") || head.includes(":")) {
-			origin = head;
-			rest = firstSlash === -1 ? "" : rest.slice(firstSlash);
-		}
-	}
-
-	if (!rest) return { ...(origin ? { origin } : {}) };
-	if (!rest.startsWith("/")) rest = `/${rest}`;
-	return { ...(origin ? { origin } : {}), path: rest };
-}
 
 /**
  * A spec path (`/pets/{petId}`) reduced to the same shape a request URL reduces

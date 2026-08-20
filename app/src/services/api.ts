@@ -65,6 +65,8 @@ import type {
 	ImportApplyRequest,
 	ImportApplyResponse,
 	CreateSpecRequest,
+	SpecExportRequest,
+	SpecExportResponse,
 	SpecMatchRequest,
 	SpecMatchResponse,
 	SpecSyncRequest,
@@ -284,6 +286,21 @@ export const apiService = {
 	 */
 	async matchSpecOperations(payload: SpecMatchRequest): Promise<SpecMatchResponse> {
 		return await httpClient.post<SpecMatchResponse>(API_ENDPOINTS.SPEC_MATCH, payload);
+	},
+
+	/**
+	 * A collection back out as an OpenAPI document (issue #855).
+	 *
+	 * The assembly is the engine's: it reads the subtree, every request's stored
+	 * examples and the bound document, patches that document (or writes a
+	 * skeleton when the collection binds none) and answers with the finished
+	 * text. It moved there with the rest of #761's phase B so that an agent can
+	 * export the same way the dialog does - and because the document being
+	 * patched is the engine's own stored bytes, which a second reader here could
+	 * only disagree with.
+	 */
+	async exportSpec(payload: SpecExportRequest): Promise<SpecExportResponse> {
+		return await httpClient.post<SpecExportResponse>(API_ENDPOINTS.SPEC_EXPORT, payload);
 	},
 
 	/**
