@@ -64,6 +64,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/requests/:id/examples` | A request's saved example responses (issue #481), in stored order |
 | POST | `/specs` | Store an OpenAPI document (issue #637) and derive its operation index from it (issue #853); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (issue #712) |
 | POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (issue #655) - new document, moved binding and the created/updated/deleted requests in one transaction |
+| POST | `/specs/describe` | What a picked document is - dialect, title, declared operations (issue #869) - reads only, nothing stored; the identities `/specs/match` is then handed |
 | POST | `/specs/match` | Which request of a collection's subtree is which operation of a document (issue #761) - reads only, nothing stored or stamped |
 | POST | `/specs/diff` | What a re-fetched document would change about the collection bound to it (issue #854) - reads only; applying the answer is `POST /specs/sync` |
 | POST | `/specs/bind` | Bind a collection to a document (issue #862) - the document, the binding and every stamp, written **and cleared**, in one transaction |
@@ -193,9 +194,17 @@ Three things worth knowing before you design around them:
   *and* deletes, which is why it is deliberately outside `/import/apply` (that
   one only creates, which is what lets it own every id with nothing stored behind
   it). It refuses to touch a request outside the synced collection's subtree and
-  replaces only `origin="import"` examples. `Database::spec_sync_apply` is its
-  transaction, a sibling of `import_apply` and `apply_reorder` for the same
-  reason those two are separate.
+  replaces only `origin="import"` examples. **The examples it writes are the ones
+  the document it stores documents** (#869): the payload carries a *decision* per
+  updated request - `examples: true` refreshes that request's imported rows,
+  absent leaves every one of them alone - and the rows come off the same read the
+  indexes come off (`core::spec_request_drafts_of` over the DOM
+  `read_spec_indexes` hands back). A list where the boolean belongs is a `400`,
+  as is `examples` on a `create` item, because a caller that states rows can
+  state an example for a response the document does not describe - which is what
+  the app did, having read those rows off `POST /specs/diff` two calls earlier.
+  `Database::spec_sync_apply` is its transaction, a sibling of `import_apply` and
+  `apply_reorder` for the same reason those two are separate.
   **Which request is which operation is the engine's answer** (#761,
   `POST /specs/match` over `core/operation_match.hpp`). Binding a collection
   that already exists has to pair two independent lists, and it does it by
@@ -214,7 +223,13 @@ Three things worth knowing before you design around them:
   sub-collections - through the same `collection_subtree_ids` walk
   `POST /specs/sync` bounds itself by. It still parses no OpenAPI: the caller
   hands it the identities the document declares, the same rows it stores as the
-  `operations` index.
+  `operations` index - and since #869 the caller gets those from
+  **`POST /specs/describe`** rather than reading the document itself, so the
+  identities a pairing is previewed with are the ones the bind derives from the
+  same bytes. That route is the whole of what the Spec tab used to parse for:
+  the dialect (`OpenAPI 3.0` / `OpenAPI 2.0 (Swagger)`), `info.title`, and the
+  declared identities. A file that is readable and *not* a contract is a `400`
+  naming what it does not declare, never an answer declaring nothing.
   **Binding is `POST /specs/bind`** (#862), the third spec write and the one that
   makes an agent able to bind at all: the caller sends a document and a
   collection - never a pairing - and the route reads the document, derives the
@@ -268,7 +283,11 @@ Three things worth knowing before you design around them:
   draft-04 boolean `exclusiveMinimum` becomes the bound, because a dialect
   passed through untouched produces a **wrong** verdict about a body rather than
   no verdict, and a response that is itself a `$ref` is read through one hop in
-  either dialect (#714). Nothing in the renderer extracts either index any more.
+  either dialect (#714). Nothing in the renderer extracts either index any more -
+  and since #869 nothing there reads a spec document at all:
+  `services/openapi/spec-operations.ts` went with the Spec tab's parse, and what
+  is left of that walk is a `.testkit.ts` the two cross-language conformance
+  suites use to ask whether an *import* still builds what this side derives.
   The reader keeps
   document order (a JavaScript object could not: it sorts integer-like keys, so
   `responses: {404, 200}` used to reach the store as `200, 404`), types scalars

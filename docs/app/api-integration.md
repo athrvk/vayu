@@ -338,11 +338,23 @@ apiService.createSpec(data): Promise<SpecDocument>       // POST /specs
 apiService.getSpec(id): Promise<SpecDocument>            // GET  /specs/:id
 apiService.getSpecMeta(id): Promise<SpecDocumentMeta>    // GET  /specs/:id/meta
 apiService.syncSpec(payload): Promise<SpecSyncResponse>  // POST /specs/sync
+apiService.describeSpec(payload)                         // POST /specs/describe
 apiService.matchSpecOperations(payload)                  // POST /specs/match
 apiService.diffSpec(payload): Promise<SpecDiffResponse>  // POST /specs/diff
 apiService.bindSpec(payload): Promise<SpecBindResponse>  // POST /specs/bind
 apiService.exportSpec(payload): Promise<SpecExportResponse> // POST /specs/export
 ```
+
+`describeSpec` is the read that replaced the last parse this app did of a spec
+document (issue #869). It sends the picked bytes and gets back what they are -
+the dialect (`"OpenAPI 3.0"`, `"OpenAPI 2.0 (Swagger)"`), `info.title`, and the
+identities the document declares - and the Spec tab paints its card from that and
+hands those identities to `matchSpecOperations`. It parsed the file itself until
+then, with `services/openapi/spec-operations.ts`, while the bind derived the same
+identities engine-side from the same bytes: two readers of one document, which
+could preview one pairing and commit another. A document that is not a contract,
+or that will not read at all, is a `400`, and the tab prints the engine's
+sentence.
 
 `matchSpecOperations` is a **read** (issue #761): it pairs the requests in a
 collection's subtree with the operations a document declares and writes nothing,
@@ -390,6 +402,14 @@ the previous side. It writes nothing, and the answer carries, per entry, the
 draft an apply would write, so `spec-apply.ts` builds a `POST /specs/sync`
 payload out of it without reading a document at all. The comparison used to be
 `services/openapi/spec-diff.ts`, which is gone.
+
+The one field of that draft `spec-apply.ts` does **not** send back is
+`examples` (issue #869): an update carries `examples: true` - refresh this
+request's imported examples - and the engine writes the responses the document it
+is storing documents. A created request states none at all, for the same reason.
+Echoing the rows back was a round trip through the client of an answer the engine
+had already given, and it let a payload state an example for a response no
+document describes.
 
 `bindSpec` is the other (issue #862), and it decides even less: the payload is a
 collection and a document, with **no pairing in it**. Binding used to be three

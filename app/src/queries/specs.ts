@@ -184,6 +184,38 @@ export function useBoundSpecReader(): (collections: readonly Collection[]) => Pr
 }
 
 /**
+ * What a picked document is, before anything is stored (issue #869).
+ *
+ * The Spec tab used to answer this itself, by running the import parsers over
+ * the picked bytes. The engine reads the same bytes on the bind, so two readers
+ * had an opinion about one document and the card could preview a pairing the
+ * bind would not commit. `POST /specs/describe` is the same reader the write
+ * uses, and what it answers is what the caller hands to `useSpecMatchQuery`
+ * below.
+ *
+ * Keyed by the pick, not by the document: the bytes are not stored and so have
+ * no id, and a key holding a 12 MB string would be one copy of the document per
+ * cache entry. The caller stamps each picked document with a token, which makes
+ * `staleTime: Infinity` honest - a token names one immutable document.
+ *
+ * `retry: false` because the failures worth showing here are answers about the
+ * document - it is not a contract, it is too large, it does not read - and
+ * asking again only delays the sentence that says so.
+ *
+ * @param token `null` while nothing is picked, which disables the query rather
+ *        than describing an empty document.
+ */
+export function useSpecDescribeQuery(token: string | null, content: string) {
+	return useQuery({
+		queryKey: queryKeys.specs.describe(token ?? ""),
+		queryFn: () => apiService.describeSpec({ content }),
+		enabled: !!token,
+		staleTime: Infinity,
+		retry: false,
+	});
+}
+
+/**
  * Which request of this collection is which operation of a document
  * (issue #761).
  *

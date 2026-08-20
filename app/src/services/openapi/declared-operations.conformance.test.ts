@@ -11,7 +11,9 @@
  * (`engine/tests/openapi_document_test.cpp` reads the same table).
  *
  * Since issue #853 the engine reads the stored document and writes the
- * `operations` index itself - the app no longer extracts one. That removes the
+ * `operations` index itself, and since #869 nothing the app ships reads a
+ * document to answer what it declares at all - `importedOperations` here is a
+ * test-only walk of what the import pipeline builds. That removes the
  * duplication but not the *agreement* these two readers still owe each other:
  * coverage resolves a request's stamped `specOperation` against the engine's
  * index, by `operationId` first and `METHOD path` second
@@ -29,7 +31,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { readSpecOperations } from "./spec-operations";
+import { importedOperations } from "./imported-operations.testkit";
 import type { SpecOperation } from "@/types";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -58,9 +60,9 @@ const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as { cases: Fixtur
  *
  * `responses` is the engine's half - nothing here reads it any more. And the
  * order is the engine's half too: it writes the index in document order, while
- * `readSpecOperations` walks the collection tree it built (root requests, then
- * tag folders), so comparing sequences would fail on a document both sides
- * agree about.
+ * `importedOperations` walks the collection tree the parsers built (root
+ * requests, then tag folders), so comparing sequences would fail on a document
+ * both sides agree about.
  */
 function identities(operations: SpecOperation[]): string[] {
 	return operations
@@ -81,9 +83,9 @@ describe("declared-operation conformance", () => {
 				method: o.method,
 				path: o.path,
 			}));
-			expect(identities(readSpecOperations(testCase.document).operations)).toEqual(
-				identities(expected)
-			);
+			expect(
+				identities(importedOperations(testCase.document).map((e) => e.operation))
+			).toEqual(identities(expected));
 		});
 	}
 });

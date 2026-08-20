@@ -76,6 +76,26 @@ const specMetaQuery = {
 	isError: false,
 };
 
+/**
+ * What `POST /specs/describe` answered about the picked document (issue #869).
+ *
+ * The tab reads no document any more: the format and the title it prints, and
+ * the identities it hands to the match query, all come from here. Set per test
+ * for the same reason the match answer is - the reading rule is the engine's and
+ * is pinned in `engine/tests/spec_describe_route_test.cpp`.
+ */
+const specDescribeQuery = {
+	data: undefined as
+		| { format: string; title: string; operations: Request["specOperation"][] }
+		| undefined,
+	isFetching: false,
+	isError: false,
+	error: null as Error | null,
+};
+
+/** The arguments the tab passed to the match query on its last render. */
+let matchArgs: unknown[] = [];
+
 let requests: Request[] = [];
 /** Whether the subtree's request lists have answered - the mapped count's input. */
 let requestsLoading = false;
@@ -92,8 +112,13 @@ vi.mock("@/queries/collections", () => ({
 vi.mock("@/queries/specs", () => ({
 	// The card describes the document rather than reading it (issue #712).
 	useSpecMetaQuery: () => specMetaQuery,
+	// What the engine read out of the picked document (issue #869).
+	useSpecDescribeQuery: () => specDescribeQuery,
 	// The pairing the engine worked out (issue #761).
-	useSpecMatchQuery: () => specMatchQuery,
+	useSpecMatchQuery: (...args: unknown[]) => {
+		matchArgs = args;
+		return specMatchQuery;
+	},
 	useBindSpecMutation: () => bindSpec,
 	// The Sync section looks up where the bound document came from when Check is
 	// pressed, and asks the engine what a re-fetch would change (issue #854).
@@ -195,7 +220,7 @@ async function pickFile(name: string, text: string) {
 	const input = document.querySelector('input[type="file"]') as HTMLInputElement;
 	expect(input).toBeTruthy();
 	fireEvent.change(input, { target: { files: [new File([text], name)] } });
-	await waitFor(() => expect(screen.getByText(/Matched|Not an OpenAPI/)).toBeTruthy());
+	await waitFor(() => expect(screen.getByText(/Matched|Couldn't read/)).toBeTruthy());
 }
 
 /** Resolve the bind the way TanStack would, running the caller's onSuccess. */
@@ -222,6 +247,16 @@ beforeEach(() => {
 	specMatchQuery.isFetching = false;
 	specMatchQuery.isError = false;
 	specMatchQuery.error = null;
+	// The default answer for `OPENAPI` below - the document most cases pick.
+	specDescribeQuery.data = {
+		format: "OpenAPI 3.0",
+		title: "Pets API",
+		operations: [LIST_PETS, GET_PET],
+	};
+	specDescribeQuery.isFetching = false;
+	specDescribeQuery.isError = false;
+	specDescribeQuery.error = null;
+	matchArgs = [];
 	requestsLoading = false;
 	importFetch.mockReset();
 	requests = [];
@@ -417,7 +452,9 @@ describe("binding a collection that already has requests", () => {
 		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
 		fireEvent.change(input, { target: { files: [new File([OPENAPI], "petstore.json")] } });
 
-		await waitFor(() => expect(screen.getByText(/Matching this document/i)).toBeTruthy());
+		await waitFor(() =>
+			expect(screen.getByText(/matching it against the requests/i)).toBeTruthy()
+		);
 		expect(screen.queryByRole("button", { name: /bind this spec/i })).toBeNull();
 	});
 
@@ -436,17 +473,65 @@ describe("binding a collection that already has requests", () => {
 		expect(screen.queryByRole("button", { name: /bind this spec/i })).toBeNull();
 	});
 
-	it("refuses a document that is not a spec, by name, and offers no bind", async () => {
+	it("shows the engine's refusal of a document that is not a spec, and offers no bind", async () => {
+		// Since issue #869 this is a failed read rather than a thrown parse: the
+		// engine reads the picked bytes, and the sentence the user sees is the one
+		// it answered with - naming what the document does not declare.
+		specDescribeQuery.data = undefined;
+		specDescribeQuery.isError = true;
+		specDescribeQuery.error = new Error(
+			"This document declares neither 'openapi': '3.x' nor 'swagger': '2.0', so it is not an OpenAPI document."
+		);
 		render(<SpecTab collection={collection()} />);
 
 		await pickFile("team.postman.json", POSTMAN);
 
-		// The parser that claimed it, named - "unrecognised format" would be a lie
-		// about a file the app imports happily.
-		expect(
-			screen.getByText(/This is Postman Collection v2.1, not an OpenAPI document/i)
-		).toBeTruthy();
+		expect(screen.getByText(/not an OpenAPI document/i)).toBeTruthy();
 		expect(screen.queryByRole("button", { name: /bind this spec/i })).toBeNull();
+	});
+
+	/*
+	 * Issue #869. The card described the picked document from a parse of its own
+	 * while the bind derived the same identities engine-side, so a document the
+	 * two read differently previewed one pairing and committed another.
+	 *
+	 * Mutation check: parse the picked bytes here again and both assertions
+	 * redden - the bytes below are a Postman export, which no OpenAPI parser
+	 * would call "Pets API (OpenAPI 3.0)" or find two operations in.
+	 */
+	it("describes the picked document with the engine's reading, not with a parse of its own", async () => {
+		requests = [request("r1", "{{baseUrl}}/pets")];
+		specMatchQuery.data = {
+			matched: [{ requestId: "r1", operation: LIST_PETS }],
+			unmatchedRequests: [],
+			unmatchedOperations: [GET_PET],
+		};
+		render(<SpecTab collection={collection()} />);
+
+		await pickFile("anything.json", POSTMAN);
+
+		expect(screen.getByText(/Pets API/).textContent).toContain("OpenAPI 3.0");
+		// And the identities the pairing is asked about are the engine's answer,
+		// relayed - not a list this tab extracted.
+		expect(matchArgs[2]).toEqual([LIST_PETS, GET_PET]);
+	});
+
+	it("offers no bind until the engine has read the document", async () => {
+		requests = [request("r1", "{{baseUrl}}/pets")];
+		specDescribeQuery.data = undefined;
+		specDescribeQuery.isFetching = true;
+		render(<SpecTab collection={collection()} />);
+
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [new File([OPENAPI], "petstore.json")] } });
+
+		await waitFor(() =>
+			expect(screen.getByText(/matching it against the requests/i)).toBeTruthy()
+		);
+		expect(screen.queryByRole("button", { name: /bind this spec/i })).toBeNull();
+		// Nothing is asked of the matcher while the document is still being read:
+		// a pairing against identities nobody has yet is not a preview.
+		expect(matchArgs[2]).toBeNull();
 	});
 });
 

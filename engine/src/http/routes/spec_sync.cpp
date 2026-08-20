@@ -10,10 +10,9 @@
  * @brief `POST /specs/sync` - apply an OpenAPI diff to a bound collection, whole
  *        or not at all (issue #655, the write half of #627).
  *
- * The renderer works out *what* moved (`services/openapi/spec-diff.ts`, #654)
- * and which of it the user ticked; this applies exactly that and decides
- * nothing about the document itself. What it does own is every rule a client
- * must not be trusted with:
+ * The comparison is the engine's (`POST /specs/diff`, #854) and the caller
+ * decides which of it to apply; this applies exactly that. What it owns is every
+ * rule a client must not be trusted with:
  *
  * - **The whole thing is one transaction.** The new document, the binding that
  *   moves to it, the created, updated and deleted requests, and the examples
@@ -28,6 +27,12 @@
  * - **The engine mints every id** (#97), as `POST /import/apply` does, and for
  *   the same reason - so new rows are named by `tempId` and translated through
  *   the returned `idMap`.
+ * - **The examples written are the ones the stored document documents** (issue
+ *   #869). The payload carries a decision per updated request - refresh this
+ *   request's imported examples, or leave them - and the rows come off the
+ *   document this call is storing. A caller used to send the rows themselves,
+ *   having read them out of the diff two calls earlier, which made it possible
+ *   to write examples for responses the document does not describe.
  *
  * Deliberately **not** an extension of `/import/apply`: that route creates, and
  * only creates, which is what lets it assign every id and validate a payload
@@ -38,6 +43,8 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/openapi_document.hpp"
+#include "vayu/core/spec_coverage.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
@@ -255,13 +262,14 @@ std::string& temp_id_out) {
 }
 
 /**
- * The example rows one payload item carries, through the same applier every
- * other example write uses.
+ * The example rows a request's documented responses become, through the same
+ * applier every other example write uses.
  *
- * `origin` is fixed to `import` here, and an explicit one is a 400: a sync
- * writes what the document says, and a payload that could claim `user` could
- * manufacture rows the *next* sync then refuses to replace - quietly turning
- * the protection this route exists to provide into a leak.
+ * @p examples is the engine's own answer since issue #869 - the rows
+ * `draft_example_rows` builds from the document being stored - rather than a
+ * list the caller sent. `origin` is fixed to `import` here for the reason it
+ * always was: a sync writes what the document says, and a row claiming `user`
+ * would be one the *next* sync then refuses to replace.
  *
  * @param suppressed_statuses the statuses this request holds a tombstone for
  * (issue #722) - the document's example for one of them is validated like any
@@ -269,7 +277,7 @@ std::string& temp_id_out) {
  * back would make that delete a suggestion. Empty on the create path: a
  * request being created now has nothing behind it to have deleted.
  */
-std::optional<std::pair<int, nlohmann::json>> build_example_rows (const nlohmann::json& item,
+std::optional<std::pair<int, nlohmann::json>> build_example_rows (const nlohmann::json& examples,
 const std::string& request_id,
 const std::string& owner,
 int base_order,
@@ -277,47 +285,27 @@ int64_t now,
 std::vector<vayu::db::RequestExample>& out,
 size_t surviving,
 const std::unordered_set<int>& suppressed_statuses = {}) {
-    if (!item.contains ("examples") || item["examples"].is_null ()) {
-        return std::nullopt;
-    }
-    if (!item["examples"].is_array ()) {
-        return item_error (400, "Invalid 'examples': must be an array", owner);
-    }
-    const auto& examples = item["examples"];
     // Against what will be written rather than what was offered: a tombstoned
     // example never lands, so counting it here would refuse a sync that fits.
     std::vector<vayu::db::RequestExample> rows;
     rows.reserve (examples.size ());
 
-    for (size_t i = 0; i < examples.size (); ++i) {
-        const auto& example = examples[i];
-        if (!example.is_object ()) {
-            return item_error (400, "Invalid example: must be an object", owner);
-        }
-        if (example.contains ("id")) {
-            return item_error (400,
-            "Invalid example: 'id' is not accepted - the engine assigns ids", owner);
-        }
-        if (example.contains ("origin")) {
-            return item_error (400,
-            "Invalid example: 'origin' is not accepted - a sync writes imported examples, "
-            "and the ones you saved yourself are never replaced",
-            owner);
-        }
-
+    for (const auto& example : examples) {
         vayu::db::RequestExample x;
         x.id         = vayu::utils::generate_id ("exa_");
         x.request_id = request_id;
         x.created_at = now;
         x.updated_at = now;
 
+        // Through the applier every other example write goes through, although
+        // these rows are the engine's own: a field the applier learns - the way
+        // `origin` and `suppressed` were learned - must reach a sync's rows too,
+        // and a second construction here is how it would not.
         if (auto err = apply_item_fields (
             [&] { return apply_request_example_fields (x, example, /*is_create=*/true); },
             "example", owner)) {
             return err;
         }
-        // Validated first and dropped second, so a malformed example the user
-        // happens to have deleted is still a 400 rather than a silent skip.
         if (suppressed_statuses.contains (x.status)) {
             continue;
         }
@@ -339,6 +327,59 @@ const std::unordered_set<int>& suppressed_statuses = {}) {
     std::make_move_iterator (rows.end ()));
     return std::nullopt;
 }
+
+/**
+ * What the document being stored documents, per operation (issue #869).
+ *
+ * A sync writes the examples the document describes rather than rows the caller
+ * states: the payload carries the *decision* - refresh this request's imported
+ * examples, or leave them - and the rows come from here. Before that, a client
+ * could write example rows the document does not describe, and the responses it
+ * was echoing back had come from the engine on the diff two calls earlier.
+ *
+ * **Read on the first request that needs it, then reused.** A sync that ticks no
+ * examples - a binding move, a rename with the examples left alone - pays
+ * nothing for it, while a sync of a 4000-operation document reads once however
+ * many requests refresh. The DOM comes from the index derivation, so the whole
+ * route is still one read of the stored bytes.
+ *
+ * Identity resolution is `core::OperationIndex` - the coverage rule, by
+ * `operationId` first and method-and-path second - so the operation whose
+ * responses are written here is the operation a run will later credit the
+ * request with.
+ */
+class DocumentedExamples {
+    public:
+    explicit DocumentedExamples (const nlohmann::ordered_json& document)
+    : document_ (document) {
+    }
+
+    /**
+     * The rows @p spec_operation - a request's stored `requests.spec_operation`
+     * text - documents, or nothing when the document declares no such operation.
+     */
+    std::optional<nlohmann::json> rows_for (const std::string& spec_operation) {
+        if (!index_) {
+            drafts_ = vayu::core::spec_request_drafts_of (document_);
+            std::vector<vayu::core::DeclaredOperation> declared;
+            declared.reserve (drafts_.size ());
+            for (const vayu::core::SpecRequestDraft& draft : drafts_) {
+                declared.push_back (draft.operation);
+            }
+            index_.emplace (declared);
+        }
+        const std::optional<size_t> found = index_->resolve (spec_operation);
+        if (!found) {
+            return std::nullopt;
+        }
+        return draft_example_rows (drafts_[*found].draft.examples);
+    }
+
+    private:
+    const nlohmann::ordered_json& document_;
+    std::vector<vayu::core::SpecRequestDraft> drafts_;
+    std::optional<vayu::core::OperationIndex> index_;
+};
 
 /**
  * What an example refresh replaces, and where the replacements sit.
@@ -463,18 +504,14 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         return *err;
     }
 
-    size_t nested_examples = 0;
-    for (const auto* section : { creates, updates }) {
-        for (const auto& item : *section) {
-            if (item.is_object () && item.contains ("examples") && item["examples"].is_array ()) {
-                nested_examples += item["examples"].size ();
-            }
-        }
-    }
-    const size_t total = new_collections->size () + creates->size () + updates->size () +
-    deletes->size () + nested_examples;
-    if (total > MAX_SYNC_ITEMS) {
-        return body_error ("Sync too large: " + std::to_string (total) +
+    // The rows the payload asks for. The example rows a refresh writes are the
+    // engine's own now (issue #869) and are counted against the same limit once
+    // they exist, below - refusing here on a number the caller stated would let a
+    // payload understate what it is about to write.
+    const size_t stated =
+    new_collections->size () + creates->size () + updates->size () + deletes->size ();
+    if (stated > MAX_SYNC_ITEMS) {
+        return body_error ("Sync too large: " + std::to_string (stated) +
         " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call");
     }
 
@@ -508,10 +545,15 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         batch.spec.content    = content;
         batch.spec.hash       = spec_content_hash (content);
         batch.spec.fetched_at = now;
-        if (auto reason = read_spec_indexes (spec_item, batch.spec, cap)) {
+        // The document itself comes back with the indexes, because a refresh
+        // writes the responses *these* bytes document (issue #869) and reading
+        // them a second time would be a second answer about them.
+        nlohmann::ordered_json document;
+        if (auto reason = read_spec_indexes (spec_item, batch.spec, cap, &document)) {
             result = body_error (*reason);
             return;
         }
+        DocumentedExamples documented (document);
         if (spec_item.contains ("sourceUrl") && !spec_item["sourceUrl"].is_null ()) {
             if (!spec_item["sourceUrl"].is_string ()) {
                 result = body_error ("Invalid 'spec.sourceUrl': must be a string or null");
@@ -592,6 +634,13 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
                 result = *err;
                 return;
             }
+            if (item.contains ("examples")) {
+                result = item_error (400,
+                "Invalid 'examples': a sync writes the responses the document it stores "
+                "documents; omit it",
+                temp);
+                return;
+            }
 
             nlohmann::json fields = item;
             std::string owner;
@@ -656,10 +705,28 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             if (!item.contains ("order") || item["order"].is_null ()) {
                 row.order = next_request_order[owner]++;
             }
-            if (auto err = build_example_rows (item, row.id, temp, /*base_order=*/0, now,
-                batch.examples, /*surviving=*/0)) {
-                result = *err;
-                return;
+            /*
+             * A created request is the request an import of this document would
+             * build, examples included, so its rows are read off the document
+             * rather than sent (issue #869) - and there is no decision to make,
+             * the way there is on an update: nothing exists behind it to leave
+             * alone. A request the payload creates with no identity is not an
+             * operation of anything and documents nothing.
+             */
+            if (row.spec_operation) {
+                if (auto rows = documented.rows_for (*row.spec_operation)) {
+                    if (auto err = build_example_rows (*rows, row.id, temp, /*base_order=*/0,
+                        now, batch.examples, /*surviving=*/0)) {
+                        result = *err;
+                        return;
+                    }
+                } else {
+                    result = item_error (400,
+                    "Invalid 'specOperation': the document being synced declares no such "
+                    "operation, so there is nothing to create for it",
+                    temp);
+                    return;
+                }
             }
             batch.created.push_back (std::move (row));
         }
@@ -714,12 +781,48 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
                 return;
             }
 
-            if (item.contains ("examples") && !item["examples"].is_null ()) {
+            /*
+             * `examples` is a decision, not a list (issue #869): true refreshes
+             * this request's imported examples from the document being stored,
+             * and absent - or false - leaves every one of them alone. Absence is
+             * the default because it is the state that touches nothing: a caller
+             * that forgets the key leaves a user's rows where they are, where a
+             * forgotten list used to mean "the document documents nothing".
+             */
+            bool refresh = false;
+            if (const auto decision = item.find ("examples");
+            decision != item.end () && !decision->is_null ()) {
+                if (!decision->is_boolean ()) {
+                    result = item_error (400,
+                    "Invalid 'examples': must be true to refresh this request's imported "
+                    "examples from the document being synced, or absent to leave them - a "
+                    "sync writes the responses the document documents, not rows you state",
+                    id);
+                    return;
+                }
+                refresh = decision->get<bool> ();
+            }
+            if (refresh) {
+                if (!row.spec_operation) {
+                    result = item_error (400,
+                    "Invalid 'examples': this request records no operation, so the document "
+                    "documents no responses for it",
+                    id);
+                    return;
+                }
+                const auto rows = documented.rows_for (*row.spec_operation);
+                if (!rows) {
+                    result = item_error (400,
+                    "Invalid 'examples': the document being synced declares no operation "
+                    "this request records, so it documents no responses for it",
+                    id);
+                    return;
+                }
                 const auto plan = refresh_examples (db.get_request_examples (id),
                 db.get_suppressed_request_examples (id));
                 batch.deleted_examples.insert (batch.deleted_examples.end (),
                 plan.replaced.begin (), plan.replaced.end ());
-                if (auto err = build_example_rows (item, id, id, plan.base_order, now,
+                if (auto err = build_example_rows (*rows, id, id, plan.base_order, now,
                     batch.examples, plan.surviving, plan.suppressed_statuses)) {
                     result = *err;
                     return;
@@ -756,6 +859,18 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             batch.deleted.push_back (id);
         }
 
+        // ---- what the whole transaction turned out to be -----------------------
+        // The same limit as the payload check above, applied to what will
+        // actually be written: the example rows are derived rather than sent
+        // (issue #869), so this is where their number is finally known, and a cap
+        // that stopped counting them would bound a smaller transaction than the
+        // one it was written for.
+        if (const size_t writing = stated + batch.examples.size (); writing > MAX_SYNC_ITEMS) {
+            result = body_error ("Sync too large: " + std::to_string (writing) +
+            " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call");
+            return;
+        }
+
         // ---- the binding moves with the rows ----------------------------------
         batch.binding            = *root;
         batch.binding.openapi    = nlohmann::json{ { "specId", batch.spec.id },
@@ -787,10 +902,12 @@ void register_spec_sync_routes (RouteContext& ctx) {
      * sourceUrl?} - `id`, `hash` and `fetchedAt` are engine-computed and
      * rejected), collections (new tag folders, each with a `tempId` and an
      * optional `parentId` inside the synced subtree), create (requests, each
-     * with a `tempId` and either `collectionId` or `collectionTempId`, and
-     * optional `examples`), update (requests by `id`, merge-patch, with
-     * optional `examples` which replace the imported ones, never the saved
-     * ones, and never a status the user deleted), delete (request ids).
+     * with a `tempId` and either `collectionId` or `collectionTempId`; the
+     * examples come from the document, so `examples` is rejected), update
+     * (requests by `id`, merge-patch, with an optional boolean `examples` -
+     * true refreshes this request's imported examples from the document being
+     * stored, never the saved ones and never a status the user deleted; absent
+     * leaves every example alone), delete (request ids).
      * Returns: 200 `{idMap, specId, specHash, syncedAt, created, updated,
      * deleted}`; 400 (with `error.item`) for a payload this cannot apply, 404
      * for an unknown collection, 409 when a row the diff was computed against

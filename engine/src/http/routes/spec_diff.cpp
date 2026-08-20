@@ -211,10 +211,15 @@ nlohmann::json rows_json (const std::vector<vayu::core::DraftField>& rows) {
 /**
  * The request an import would build, in the shape a write of it takes.
  *
- * `body` is the discriminated union `requests.body` stores, and the examples are
- * the rows `POST /specs/sync` nests on a create or an update - so applying a
- * change is a matter of choosing which of these fields to send, never of
- * building a value the comparison did not make.
+ * `body` is the discriminated union `requests.body` stores, so applying a change
+ * is a matter of choosing which of these fields to send, never of building a
+ * value the comparison did not make.
+ *
+ * `examples` is the one field here that is *not* sent back: since issue #869 a
+ * sync derives the example rows from the document it stores, and the caller
+ * states only whether to refresh them. It is still reported, because what an
+ * apply would write to a request is exactly the kind of thing a preview exists
+ * to show.
  */
 nlohmann::json draft_json (const vayu::core::DraftRequest& draft) {
     nlohmann::json body{ { "mode", draft.body.mode } };
@@ -224,17 +229,10 @@ nlohmann::json draft_json (const vayu::core::DraftRequest& draft) {
         body["content"] = draft.body.content;
     }
 
-    nlohmann::json examples = nlohmann::json::array ();
-    for (const vayu::core::DraftExample& example : draft.examples) {
-        nlohmann::json headers = nlohmann::json::array ();
-        if (example.documented) {
-            headers.push_back ({ { "key", "Content-Type" }, { "value", example.content_type },
-            { "enabled", true } });
-        }
-        examples.push_back ({ { "name", example.name }, { "status", example.status },
-        { "headers", std::move (headers) }, { "body", example.body },
-        { "contentType", example.content_type } });
-    }
+    // The rows a sync writes for these responses, built by the one function that
+    // knows that shape (issue #869) - the caller no longer sends them back, so
+    // what is reported here and what is stored there cannot drift apart.
+    nlohmann::json examples = draft_example_rows (draft.examples);
 
     return { { "name", draft.name }, { "description", draft.description },
         { "method", draft.method }, { "url", draft.url }, { "params", rows_json (draft.params) },

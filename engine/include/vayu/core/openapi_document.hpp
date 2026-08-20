@@ -162,6 +162,51 @@ struct DocumentRead {
 declared_operations_of (const nlohmann::ordered_json& document);
 
 /**
+ * What a document is, for a caller deciding whether to bind it (issue #869).
+ *
+ * The three things the Spec tab's card said about a picked document while the
+ * renderer still parsed it: which dialect claimed the bytes, what the document
+ * calls itself, and the operations it declares - the identities a bind will
+ * stamp. `POST /specs/describe` is this struct.
+ */
+struct DocumentDescription {
+    /**
+     * The dialect that claimed it - `"OpenAPI 3.0"`, `"OpenAPI 2.0 (Swagger)"` -
+     * and `""` for a readable document that is neither.
+     *
+     * The strings the renderer's import parsers name themselves with
+     * (`openapi-v3.ts` / `openapi-v2.ts`, `formatName`), because this replaces
+     * what the card printed from those parsers and a user who binds a document
+     * and then imports one should not be told two names for one dialect.
+     */
+    std::string format;
+    /// `info.title`, and `""` for a document that states none - never a
+    /// substitute name, which would be this side inventing what the document
+    /// calls itself.
+    std::string title;
+    /// Every operation it declares, in document order - empty when @ref format
+    /// is empty, since a document that is not a contract declares none.
+    std::vector<DeclaredOperation> operations;
+
+    /// Whether these bytes are an OpenAPI document at all.
+    [[nodiscard]] bool is_spec () const {
+        return !format.empty ();
+    }
+};
+
+/**
+ * @brief What @p document is: its dialect, its title, and what it declares
+ *        (issue #869).
+ *
+ * The read behind a bind *preview*. It exists so that the identities a caller
+ * previews a pairing with are the identities the write will derive from the same
+ * bytes (`core::derive_spec_indexes`, through `POST /specs/bind`) - the renderer
+ * extracted its own until this, so a document the two read differently previewed
+ * one pairing and committed another.
+ */
+[[nodiscard]] DocumentDescription describe_document (const nlohmann::ordered_json& document);
+
+/**
  * @brief The response schemas @p document declares, as JSON Schema (issue
  *        #860), or `null` when it declares none.
  *
@@ -415,5 +460,19 @@ struct SpecIndexes {
  *        grow together.
  */
 [[nodiscard]] SpecIndexes derive_spec_indexes (const std::string& text, size_t index_cap);
+
+/**
+ * @brief Both indexes of a document already read, for a caller that needs the
+ *        DOM as well.
+ *
+ * `derive_spec_indexes` above is this plus the read. Two names rather than an
+ * overload because `const char*` converts to both a `std::string` and a
+ * `nlohmann::json`, so the pair would be ambiguous at every literal call site. A write path that also wants
+ * what the document *declares* - `POST /specs/sync`, which derives the example
+ * rows it writes from the responses the stored document documents (issue #869)
+ * - reads once and calls this, rather than parsing the same bytes twice and
+ * risking two answers about them.
+ */
+[[nodiscard]] SpecIndexes spec_indexes_of (const nlohmann::ordered_json& document, size_t index_cap);
 
 } // namespace vayu::core
