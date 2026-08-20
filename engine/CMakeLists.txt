@@ -227,8 +227,11 @@ endif()
 # `VerifyVersionInfoW` reports Windows 8 to the process, curl's Schannel
 # backend concludes the OS is too old for ALPN, and HTTP/2 can never be
 # negotiated - silently, with a 200 and an `httpVersion` of "HTTP/1.1"
-# (issue #215). The full chain is written out in the manifest file itself;
-# read that before removing any of this.
+# (issue #215). The engine selects OpenSSL at startup, so that path is dormant
+# rather than gone: Schannel is still compiled into this build (MultiSSL) and
+# leaves it with #858, which is when this function and both its guards retire.
+# The full chain and the enumeration behind that decision (#856) are written
+# out in the manifest file itself; read that before removing any of this.
 #
 # The mechanism is a plain `.manifest` source, not a linker flag. CMake feeds
 # any `.manifest` source through `mt` and merges it into the one manifest it

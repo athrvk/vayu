@@ -94,30 +94,42 @@ bool os_at_least (DWORD major, DWORD minor, bool use_rtl) {
 } // namespace
 
 /**
- * On Windows, HTTP/2 used to live or die by this process's *reported* OS
- * version, and this is what keeps that from silently coming back.
+ * On Windows, HTTP/2 can live or die by this process's *reported* OS version,
+ * and this is what keeps that from silently happening.
  *
  * curl's Schannel backend enables ALPN only when the OS is at least Windows 8.1
- * (`s_win_has_alpn`, lib/vtls/schannel.c), and without ALPN a TLS connection
- * can never be anything but HTTP/1.1. That check prefers ntdll's
+ * (`s_win_has_alpn`, lib/vtls/schannel.c:2620), and without ALPN a TLS
+ * connection can never be anything but HTTP/1.1. That check prefers ntdll's
  * RtlVerifyVersionInfo, but resolves the pointer to it in Curl_win32_init(),
- * which libcurl's global_init() runs *after* Curl_ssl_init() - so the one call
- * that decided ALPN for the process fell back to VerifyVersionInfoW, which
- * reports Windows 8 (6.2) to any unmanifested process. 6.2 < 6.3, ALPN off,
- * HTTP/2 gone - silently, with a 200 and an httpVersion of "HTTP/1.1".
+ * which libcurl's global_init() runs *after* Curl_ssl_init() - and
+ * `s_win_has_alpn` is assigned inside schannel_init(), i.e. from within
+ * Curl_ssl_init(). So the one call that decides ALPN for the process falls back
+ * to VerifyVersionInfoW, which reports Windows 8 (6.2) to any unmanifested
+ * process. 6.2 < 6.3, ALPN off, HTTP/2 gone - silently, with a 200 and an
+ * httpVersion of "HTTP/1.1" (issue #215).
  *
  * So the invariant is not "the OS is new enough" but "this process is not being
  * lied to about it": the shimmed and unshimmed answers must agree. That holds
  * only while engine/res/vayu-windows.manifest is embedded in the binary, which
  * is what this actually guards.
  *
- * **Since #851 this build verifies with OpenSSL on Windows**, whose ALPN is not
- * gated on an OS version at all - so the chain above no longer runs and HTTP/2
- * here does not depend on the manifest. The assertion stays because it is what
- * makes a return to Schannel safe: the failure it catches is invisible, and a
- * backend change that silently re-armed it would ship an HTTP/1.1-only Windows
- * build reporting success. Whether the manifest is still earning its place for
- * any *other* reason is #856, not a deletion to make in passing.
+ * **Why it still matters after #851 put every leg on OpenSSL** (whose ALPN is
+ * not gated on an OS version at all), which is the question #856 asked and
+ * this is the answer to: Schannel is still compiled into the shipped libcurl.
+ * The curl port's `http2` feature depends on `curl[ssl]`, which resolves to
+ * Schannel on Windows, so the build is MultiSSL and getting it to one backend
+ * is #858. This process runs on OpenSSL only because pin_tls_backend() names it
+ * through curl_global_sslset before curl_global_init, and Curl_ssl_init() then
+ * calls init() on the selected backend alone - so schannel_init() does not run.
+ * That selection is a runtime call whose failure is deliberately non-fatal, so
+ * the chain above is dormant rather than absent. **When #858 removes Schannel
+ * from the build, this test, the manifest and check-windows-deps.py's manifest
+ * check retire together** - that is the deletion condition, and it is not
+ * satisfied yet.
+ *
+ * Both supportedOS ids the manifest ships are probed, because
+ * check-windows-deps.py requires both on the shipped binary and a guard that
+ * asserted only one would pass on half a manifest.
  *
  * Scope: this proves it for vayu_tests. The binary that matters is
  * vayu-engine.exe, and no gtest can inspect a different executable - that half
@@ -127,22 +139,44 @@ bool os_at_least (DWORD major, DWORD minor, bool use_rtl) {
  * libcurl, call it there too.
  */
 TEST (HttpVersionSupport, WindowsOsVersionIsNotShimmed) {
-    const bool truth  = os_at_least (6, 3, /*use_rtl=*/true);
-    const bool shimmed = os_at_least (6, 3, /*use_rtl=*/false);
+    const bool truth_81   = os_at_least (6, 3, /*use_rtl=*/true);
+    const bool shimmed_81 = os_at_least (6, 3, /*use_rtl=*/false);
 
-    ASSERT_TRUE (truth) << "ntdll reports this OS as older than Windows 8.1, so "
-                           "the shim below has nothing to hide and this test can "
-                           "say nothing about the manifest - not a build defect.";
+    ASSERT_TRUE (truth_81) << "ntdll reports this OS as older than Windows 8.1, so "
+                              "the shim below has nothing to hide and this test can "
+                              "say nothing about the manifest - not a build defect.";
 
-    EXPECT_TRUE (shimmed)
+    EXPECT_TRUE (shimmed_81)
     << "This process is being version-shimmed: Windows tells it the OS is 6.2 "
        "while ntdll reports 6.3+.\n"
        "That means the supportedOS compatibility manifest is missing from this "
-       "executable, and curl has silently disabled ALPN - every HTTPS request "
-       "this binary makes is HTTP/1.1 no matter what httpVersion asks for "
+       "executable. Schannel is still in this build (MultiSSL - see #858), and "
+       "anything that puts the process on it gets ALPN silently disabled: every "
+       "HTTPS request would be HTTP/1.1 no matter what httpVersion asks for "
        "(issue #215).\n"
        "Fix: engine/res/vayu-windows.manifest must reach this target via "
        "vayu_embed_windows_manifest() in engine/CMakeLists.txt.";
+
+    // The second id. The shim can only ever under-report, never over-report, so
+    // equality is the exact statement "this process is not being lied to" - and
+    // it stays true on a genuine Windows 8.1 host, where both answers are false.
+    const bool truth_10   = os_at_least (10, 0, /*use_rtl=*/true);
+    const bool shimmed_10 = os_at_least (10, 0, /*use_rtl=*/false);
+
+    EXPECT_EQ (shimmed_10, truth_10)
+    << "ntdll reports this OS as Windows 10 or later, but the shimmed API does "
+       "not.\n"
+       "If the 6.3 probe above passed, the manifest is present but incomplete: "
+       "it is missing the Windows 10/11 supportedOS id "
+       "{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}, which caps what this process is "
+       "told at 6.3.\n"
+       "Nothing reads a shimmed version above 6.3 today (#856 enumerated them), "
+       "so this is not a live defect - but the invariant this test exists for is "
+       "that the reported version is the real one, and "
+       ".github/check-windows-deps.py requires this id on the shipped binary. "
+       "Half a manifest here and a full one there is the drift both guards are "
+       "meant to catch.\n"
+       "Fix: restore the id in engine/res/vayu-windows.manifest.";
 }
 
 #else
