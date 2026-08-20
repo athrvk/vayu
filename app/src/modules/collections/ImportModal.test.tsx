@@ -1,13 +1,14 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore } from "@/stores";
+import { collection, request, result, stubParse } from "./import-preview.testkit";
 
 const postman = readFileSync(
 	join(__dirname, "../../services/importers/__fixtures__/postman-v21.json"),
@@ -35,7 +36,10 @@ function selectTab(name: RegExp) {
 }
 
 describe("ImportModal", () => {
-	beforeEach(() => useImportModalStore.setState({ isOpen: true }));
+	beforeEach(() => {
+		vi.restoreAllMocks();
+		useImportModalStore.setState({ isOpen: true });
+	});
 
 	/**
 	 * The preview used to print the parser's counter slug - "1 file_body" - which
@@ -44,22 +48,13 @@ describe("ImportModal", () => {
 	 * `file_body` is only a *whole-body* file, and the line has to say which.
 	 */
 	it("names a skipped item in words, not as a counter slug", async () => {
-		const withFileBody = JSON.stringify({
-			info: {
-				name: "CB",
-				schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-			},
-			item: [
-				{
-					name: "Upload",
-					request: {
-						method: "POST",
-						url: "https://x/upload",
-						body: { mode: "file", file: { src: "/tmp/a.bin" } },
-					},
-				},
-			],
-		});
+		const withFileBody = JSON.stringify({ any: "document" });
+		stubParse(() =>
+			result({
+				collections: [collection({ name: "CB", requests: [request({ name: "Upload" })] })],
+				meta: { skipped: [{ kind: "file_body", count: 1 }] },
+			})
+		);
 
 		renderModal();
 		selectTab(/Paste JSON/i);
@@ -78,29 +73,18 @@ describe("ImportModal", () => {
 	 * that says the user still has to pick files before those requests can be sent.
 	 */
 	it("counts file parts that still need a file", async () => {
-		const spec = JSON.stringify({
-			openapi: "3.0.0",
-			info: { title: "Upload API" },
-			paths: {
-				"/avatar": {
-					post: {
-						summary: "Upload avatar",
-						requestBody: {
-							content: {
-								"multipart/form-data": {
-									schema: {
-										type: "object",
-										properties: {
-											avatar: { type: "string", format: "binary" },
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		});
+		const spec = JSON.stringify({ any: "document" });
+		stubParse(() =>
+			result({
+				collections: [
+					collection({
+						name: "Upload API",
+						requests: [request({ name: "Upload avatar" })],
+					}),
+				],
+				meta: { format: "OpenAPI 3.0", unattachedFileParts: 1 },
+			})
+		);
 
 		renderModal();
 		selectTab(/Paste JSON/i);
@@ -118,6 +102,16 @@ describe("ImportModal", () => {
 	});
 
 	it("previews a pasted Postman collection with detection badge + stats", async () => {
+		stubParse(() =>
+			result({
+				collections: [
+					collection({
+						name: "Sample API",
+						requests: [request(), request({ name: "Another" })],
+					}),
+				],
+			})
+		);
 		renderModal();
 		selectTab(/Paste JSON/i);
 		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: postman } });
@@ -131,6 +125,10 @@ describe("ImportModal", () => {
 	});
 
 	it("shows an error for unrecognised pasted content", async () => {
+		// `null` is the engine's 400 carrying "Unrecognised format", which
+		// `factory.ts` turns back into `UnrecognisedFormatError` - the path the
+		// dialog's error row actually takes.
+		stubParse(() => null);
 		renderModal();
 		selectTab(/Paste JSON/i);
 		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: '{"x":1}' } });

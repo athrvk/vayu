@@ -63,6 +63,7 @@ import type {
 	GlobalsResponse,
 	ImportFetchResponse,
 	ImportApplyRequest,
+	ImportParseRequest,
 	ImportApplyResponse,
 	CreateSpecRequest,
 	SpecBindRequest,
@@ -105,6 +106,7 @@ import type {
 	StartMockServerRequest,
 	StopMockServerResponse,
 } from "@/types";
+import type { ImportResult } from "@/services/importers/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
@@ -862,6 +864,41 @@ export const apiService = {
 			maxBytes === undefined ? { url } : { url, maxBytes },
 			{ timeout: proxiedRequestTimeoutMs() }
 		);
+	},
+
+	/**
+	 * Parse a raw import document into the tree `applyImport` then persists
+	 * (issue #877).
+	 *
+	 * **The app holds no parser any more.** Every format it accepts - OpenAPI
+	 * 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export,
+	 * Insomnia v4 - is read here, by the same reader that answers what a stored
+	 * document declares. That is what makes "exactly one parser has an opinion"
+	 * true (#853): before this the renderer's `services/importers/` stack was
+	 * the second reader, and an agent over MCP could bind, diff, sync and export
+	 * a spec but could not import a document at all.
+	 *
+	 * Reads only - nothing is stored, so a preview costs no write.
+	 */
+	async parseImport(payload: ImportParseRequest): Promise<ImportResult> {
+		return await httpClient.post<ImportResult>(API_ENDPOINTS.IMPORT_PARSE, payload);
+	},
+
+	/**
+	 * A document's bytes as a JSON DOM, through the engine's reader.
+	 *
+	 * One caller: `ref-bundler.ts`, which walks a multi-file OpenAPI document to
+	 * inline the files it references *before* anything is parsed or stored
+	 * (issue #649). It needs a tree, and a YAML reader in the renderer to get
+	 * one was the last thing keeping `js-yaml` in production `src/`. What a
+	 * document *declares* is `describeSpec`; this is only what its bytes are.
+	 */
+	async readDocument(content: string): Promise<unknown> {
+		const { document } = await httpClient.post<{ document: unknown }>(
+			API_ENDPOINTS.IMPORT_DOCUMENT,
+			{ content }
+		);
+		return document;
 	},
 
 	/**

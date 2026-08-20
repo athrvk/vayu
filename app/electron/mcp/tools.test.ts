@@ -176,6 +176,24 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			unmatchedRequests: [],
 			unmatchedOperations: [],
 		}),
+		importDocument: vi.fn().mockResolvedValue({
+			idMap: { c1: "col_1", r1: "req_1" },
+			meta: {
+				format: "Postman Collection v2.1",
+				requestCount: 2,
+				folderCount: 1,
+				environmentCount: 0,
+				globalCount: 0,
+				exampleCount: 0,
+				skipped: [{ kind: "websocket", count: 1 }],
+				nonExecutableAuth: 0,
+				unattachedFileParts: 0,
+			},
+			collections: 2,
+			requests: 2,
+			environments: 0,
+			globals: 0,
+		}),
 		exportSpec: vi.fn().mockResolvedValue({
 			text: '{\n  "openapi": "3.1.0"\n}\n',
 			fileName: "api.openapi.json",
@@ -7420,6 +7438,82 @@ describe("OpenAPI spec binding tools", () => {
 		);
 		expect(res.isError).toBe(true);
 		expect(allText(res)).toContain("not bound to a spec");
+	});
+
+	/**
+	 * Importing a document over MCP (issue #877).
+	 *
+	 * The verb the spec tools were missing: an agent could bind, describe, diff,
+	 * sync, export and unbind, and could not *import*, because the apply took a
+	 * tree only the renderer could build. What this file holds down is the tool's
+	 * half - the guard, the options travelling verbatim, and the losses being said
+	 * out loud - since what a document parses to is the engine's and pinned there.
+	 */
+	describe("import_document", () => {
+		test("is refused while writes are off, and sends nothing", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"import_document",
+				{ content: "{}" },
+				ctxWith(client, { allowWrites: false })
+			);
+			expect(res.isError).toBe(true);
+			expect(client.importDocument).not.toHaveBeenCalled();
+		});
+
+		test("sends the document and the options the caller stated, and nothing else", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"import_document",
+				{
+					content: '{"info":{}}',
+					importScripts: false,
+					sourceUrl: "https://acme.dev/api.json",
+				},
+				ctxWith(client, WRITES)
+			);
+			expect(res.isError).toBeFalsy();
+			const [payload] = (client.importDocument as ReturnType<typeof vi.fn>).mock.calls[0];
+			// An option the caller did not state is absent rather than defaulted here:
+			// the engine's default is the one the import dialog offers, and restating
+			// it would be a second place for it to drift.
+			expect(payload).toEqual({
+				content: '{"info":{}}',
+				importScripts: false,
+				sourceUrl: "https://acme.dev/api.json",
+			});
+		});
+
+		test("says what was created and what the document lost", async () => {
+			const res = await dispatchTool(
+				"import_document",
+				{ content: "{}" },
+				ctxWith(fakeClient(), WRITES)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(allText(res)).toContain("Postman Collection v2.1");
+			expect(allText(res)).toContain("2 request(s)");
+			// The half a caller cannot see from the counts: an import that dropped a
+			// WebSocket request looks exactly like one that had none.
+			expect(allText(res)).toMatch(/Not everything imported: 1 websocket/);
+		});
+
+		test("passes the engine's refusal through rather than inventing one", async () => {
+			const client = fakeClient({
+				importDocument: vi
+					.fn()
+					.mockRejectedValue(
+						new EngineRequestError("Engine responded 400", 400, "Unrecognised format")
+					),
+			});
+			const res = await dispatchTool(
+				"import_document",
+				{ content: '{"x":1}' },
+				ctxWith(client, WRITES)
+			);
+			expect(res.isError).toBe(true);
+			expect(allText(res)).toContain("Unrecognised format");
+		});
 	});
 
 	test("unbind_spec is refused while writes are off, and reads nothing", async () => {

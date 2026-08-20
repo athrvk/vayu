@@ -877,6 +877,9 @@ DocumentRead read_document (const std::string& text) {
 std::vector<DeclaredOperation> declared_operations_of (const nlohmann::ordered_json& document) {
     std::vector<DeclaredOperation> declared;
     for (WalkedOperation& walked : walk_operations (document)) {
+        if (!walked.identified) {
+            continue; // a `paths` key that is not a path declares nothing
+        }
         declared.push_back (std::move (walked.identity));
     }
     return declared;
@@ -917,6 +920,9 @@ nlohmann::ordered_json response_schemas_of (const nlohmann::ordered_json& docume
 
     nlohmann::ordered_json rows = nlohmann::ordered_json::array ();
     for (const WalkedOperation& walked : walk_operations (document)) {
+        if (!walked.identified) {
+            continue; // no identity to file its schemas under
+        }
         nlohmann::ordered_json responses = v3 ? response_schemas_v3 (document, *walked.node) :
                                                 response_schemas_v2 (document, *walked.node);
         if (responses.empty ()) {
@@ -945,7 +951,10 @@ nlohmann::ordered_json response_schemas_of (const nlohmann::ordered_json& docume
 
 SpecIndexes spec_indexes_of (const nlohmann::ordered_json& document, size_t index_cap) {
     SpecIndexes indexes;
-    const std::vector<WalkedOperation> walked = walk_operations (document);
+    std::vector<WalkedOperation> walked = walk_operations (document);
+    // Only the operations that declare an identity are indexed; the rest are
+    // the import's to build a request for (see `WalkedOperation::identified`).
+    std::erase_if (walked, [] (const WalkedOperation& row) { return !row.identified; });
     if (walked.empty ()) {
         return indexes; // no index, which is not the same as an empty contract
     }

@@ -29,11 +29,19 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const importFetch = vi.fn();
-vi.mock("@/services/api", () => ({
-	apiService: {
-		importFetch: (u: string, maxBytes?: number) => importFetch(u, maxBytes),
-	},
-}));
+vi.mock("@/services/api", async () => {
+	// The recorded parse of the very fixture these cases paste - see
+	// `recordedParse`. The parse itself is the engine's (issue #877); what this
+	// file is about is the two option checkboxes and the URL tab.
+	const { recordedParse } = await import("./import-preview.testkit");
+	return {
+		apiService: {
+			importFetch: (u: string, maxBytes?: number) => importFetch(u, maxBytes),
+			readDocument: async (text: string) => JSON.parse(text),
+			parseImport: async () => recordedParse("postman-v21"),
+		},
+	};
+});
 
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore } from "@/stores";

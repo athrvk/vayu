@@ -349,11 +349,45 @@ struct DraftRequest {
     std::vector<DraftExample> examples;
 };
 
+/**
+ * A running count of what a parse had to drop, which is `ImportMeta.skipped`
+ * (issue #877).
+ *
+ * The half of the import that describes the *file* to a user rather than the
+ * document to the diff, which is why `spec_request_drafts_of` was allowed to
+ * leave it behind in #865 and why the import cannot: a losing import that says
+ * nothing about the loss is the defect the preview exists to prevent.
+ *
+ * Kinds come back in the order `SKIP_KINDS` declares rather than in the order
+ * the walk met them. The renderer's `SkipTally` emitted first-seen order, which
+ * is an artifact of a `Map` and not something any reader depends on - a
+ * counter list is a set of counters - and a fixed order is one fewer thing for
+ * two implementations of the same walk to agree about.
+ */
+class ImportTally {
+    public:
+    /// A no-op for @p count <= 0, so a caller may hand over a computed total.
+    void add (std::string_view kind, int count = 1);
+
+    /// `[{kind, count}]`, non-zero kinds only - `[]` for a parse that lost
+    /// nothing, which is what both parsers used to hardcode.
+    [[nodiscard]] nlohmann::ordered_json items () const;
+
+    private:
+    std::vector<std::pair<std::string, int>> counts_;
+};
+
 /// One operation, the request an import would build for it, and where an import
 /// would file that request.
 struct SpecRequestDraft {
     DeclaredOperation operation;
     DraftRequest draft;
+    /**
+     * Whether the `paths` key this hangs off is a path at all - see
+     * `import_drafts_of`. Always true for a draft `spec_request_drafts_of`
+     * returned, since a diff only ever sees identified operations.
+     */
+    bool identified = true;
     /**
      * The sub-collection an import files this operation under - its first tag,
      * else the folder its path names (issue #710) - and `""` for an operation
@@ -364,6 +398,18 @@ struct SpecRequestDraft {
      * the name the parser gave it is what tells those two cases apart.
      */
     std::string folder;
+    /**
+     * Whether @ref folder came from the operation's first `tag` rather than
+     * from its path (issue #710).
+     *
+     * The import needs the distinction twice and cannot re-derive it from the
+     * name: a folder named by a tag takes that tag's *description* from the
+     * document's top-level `tags[]`, and a document that grouped nothing by tag
+     * has to tell the user its folder tree was read off the paths. A path
+     * segment may be spelled exactly like a tag, so the name alone does not say
+     * which rule produced it.
+     */
+    bool folder_from_tag = false;
 };
 
 /**
@@ -417,6 +463,27 @@ struct SpecRequestDraft {
  */
 [[nodiscard]] std::vector<SpecRequestDraft>
 spec_request_drafts_of (const nlohmann::ordered_json& document);
+
+/**
+ * @brief `spec_request_drafts_of` for an **import** rather than a diff (issue
+ *        #877): every operation, and what was dropped along the way.
+ *
+ * Two differences, both of them the import's needs rather than a second set of
+ * rules - the drafts themselves are built by the very same code:
+ *
+ * - **An operation under a malformed `paths` key is here.** It declares no
+ *   identity (`SpecRequestDraft::identified` is false, and nothing may stamp
+ *   it), but the renderer's parsers built a request for it and counted it, and
+ *   an import that dropped it would lose a request the user can see in their
+ *   file. A diff has no use for one, which is why the other overload filters
+ *   them out.
+ * - **@p tally is filled**, with the losses a document's shape forced -
+ *   `malformed_spec`, `unsupported_method`, `cookie_param`, `unmapped_body`,
+ *   and the two response kinds. The caller adds what it alone knows
+ *   (`unresolved_base_url`, `external_ref`) to the same tally.
+ */
+[[nodiscard]] std::vector<SpecRequestDraft>
+import_drafts_of (const nlohmann::ordered_json& document, ImportTally& tally);
 
 /**
  * Both indexes a stored document carries, or why it has neither.

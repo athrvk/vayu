@@ -7,8 +7,18 @@ description: >-
 
 Parses an Insomnia "Export v4" JSON document into the Vayu draft model. Insomnia exports are a single flat array of typed resources joined by `_id`/`parentId`; the parser reconstructs the workspace → request_group → request tree and emits one root collection per workspace.
 
-- **Source:** `app/src/services/importers/insomnia-v4.ts`
+- **Source:** `engine/src/core/import_document.cpp`
 - **Exports:**
+
+> **The parse moved engine-side** (issue
+> [#877](https://github.com/athrvk/vayu/issues/877)). Every rule on this page is
+> the same rule it always was - the corpus in
+> `engine/tests/fixtures/import-conformance.json` was recorded from the parser
+> this replaced and is asserted against on every build - it is simply read by
+> `engine/src/core/import_document.cpp` now, behind
+> [`POST /import/parse`](../../engine/api-reference.md#post-importparse), rather
+> than in the renderer. Module names in C++ style below name that file's
+> functions; the app holds no parser.
 
   | Class | `formatName` | `formatKey` |
   |-------|--------------|-------------|
@@ -39,7 +49,7 @@ Reconstruction steps in `parse()`:
    - any unlisted `_type` (including `environment`) → silently ignored by the collection walk; environments are processed separately.
 4. `buildRequest(r)` increments `requestCount` and produces a `RequestDraft`.
 
-Key internal functions: `parse` (entry), `buildCollection`, `buildRequest`, `insomniaAuth`, `insomniaBody`, `toEnvVars`. Counters (`requestCount`, `folderCount`, `authCtx.nonExec`) are closures mutated during the walk.
+Key internal functions: `parse` (entry), `buildCollection`, `buildRequest`, `insomniaAuth`, `insomniaBody`, `to_env_vars`. Counters (`requestCount`, `folderCount`, `authCtx.nonExec`) are closures mutated during the walk.
 
 ## Resource type handling
 
@@ -84,8 +94,8 @@ Built by `buildRequest`.
 | `name` | `name` | Falls back to `"Untitled"`. |
 | `description` | `description` | Falls back to `""`. |
 | `method` | `method` | Upper-cased; restricted to `GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS`, otherwise defaults to `GET`. |
-| `url` | `url` | `normalizeVars(asString(url))` - taken verbatim, query string and all. `parseImport` then **appends** the enabled `parameters[]` to it (see [The url/params invariant](./README.md#the-urlparams-invariant)), which is what Insomnia itself does with its two query sources on send: a URL written `https://x/y?a=1` beside a `b=2` parameter stores as `https://x/y?a=1&b=2`. |
-| `parameters[]` (`{name,value,disabled,description}`) | `params` | `mapKeyValues`: `name → key`, `disabled !== true → enabled`. A string `description` is forwarded (any other type is ignored). Rows without a `key` are dropped. Enabled rows also join the `url`, per the row above. |
+| `url` | `url` | `normalize_template_vars(as_string(url))` - taken verbatim, query string and all. The parse then **appends** the enabled `parameters[]` to it (see [The url/params invariant](./README.md#the-urlparams-invariant)), which is what Insomnia itself does with its two query sources on send: a URL written `https://x/y?a=1` beside a `b=2` parameter stores as `https://x/y?a=1&b=2`. |
+| `parameters[]` (`{name,value,disabled,description}`) | `params` | `map_key_values`: `name → key`, `disabled !== true → enabled`. A string `description` is forwarded (any other type is ignored). Rows without a `key` are dropped. Enabled rows also join the `url`, per the row above. |
 | `headers[]` (`{name,value,disabled,description}`) | `headers` | Same mapping as params. |
 | `settingFollowRedirects` (`"global" \| "on" \| "off"`) | `followRedirects` | `"off" → false`, `"on" → true`; `"global"` (Insomnia's default, meaning "use the app setting", which follows redirects) and an absent field leave the draft field **absent**, so the engine default (`true`) applies. Insomnia has no per-request redirect limit, so `maxRedirects` is never imported. |
 | `body` | `body` | Via `insomniaBody`. See [Body mapping](#body-mapping). |
@@ -94,17 +104,17 @@ Built by `buildRequest`.
 | `afterResponseScript` | `postRequestScript` | Only if `opts.importScripts`; else `""`. Note the source field is `afterResponseScript`. |
 | `_id` | - | Not propagated to the draft `id`; used only for tree reconstruction. |
 
-`mapKeyValues` runs `normalizeVars` over every value and preserves duplicate keys and order.
+`map_key_values` runs `normalize_template_vars` over every value and preserves duplicate keys and order.
 
 ## Template normalization
 
-All variable-bearing strings are run through `normalizeVars` (`var-normalize.ts`). It converts foreign template syntax to Vayu's `{{var}}` form:
+All variable-bearing strings are run through `normalize_template_vars` (`path_template.cpp`). It converts foreign template syntax to Vayu's `{{var}}` form:
 
 - `{{ x }}` and `{{ _.x }}` (identifier only, whitespace tolerant) → `{{x}}`. The leading `_.` namespace Insomnia uses is stripped.
-- Single-brace `{x}` is **left alone** here. The rewrite exists for OpenAPI path templates and is opt-in per format (`normalizeVars(input, { pathTemplates: true })`); Insomnia templates with `{{x}}` only, so `{x}` is literal text.
+- Single-brace `{x}` is **left alone** here. The rewrite exists for OpenAPI path templates and is opt-in per format (`normalize_path_templates(path)`); Insomnia templates with `{{x}}` only, so `{x}` is literal text.
 - **Left verbatim:** Nunjucks tags `{% ... %}` and filtered expressions `{{ x | filter }}`. The simple-var regex requires an identifier-only body (`[\w.$-]+`), so a `|` filter never matches and is passed through unchanged. Vayu has no equivalent, so these remain as literal text.
 
-Applied to: request `url`; every `params` and `headers` value (inside `mapKeyValues`); JSON/text/graphql body `content` and urlencoded/form-data field values; every auth token/username/password/key/value string; and every environment value (inside `toEnvVars`).
+Applied to: request `url`; every `params` and `headers` value (inside `map_key_values`); JSON/text/graphql body `content` and urlencoded/form-data field values; every auth token/username/password/key/value string; and every environment value (inside `to_env_vars`).
 
 ## Body mapping
 
@@ -112,19 +122,19 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 
 | Insomnia `body.mimeType` | Vayu `RequestBody` | Notes |
 |--------------------------|--------------------|-------|
-| `application/json` | `{ mode: "json", content }` | `content = normalizeVars(body.text)`. |
-| `text/plain` | `{ mode: "text", content }` | `content = normalizeVars(body.text)`. |
-| `application/graphql` | `{ mode: "graphql", content }` | `content = toGraphQLEnvelope(normalizeVars(body.text))` - a bare query document is wrapped into `{query}`, an envelope passes through (see below). The request also gains a `Content-Type`. |
-| `application/xml`, `text/xml` | `{ mode: "xml", content }` | `content = normalizeVars(body.text)`. The request also gains `Content-Type: application/xml`, and a declared one (`application/soap+xml`) wins - both through the same `withRequiredContentType` rule GraphQL uses. |
-| `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `body.params[]` → `mapKeyValues` (`name → key`, `disabled` honored). |
-| `multipart/form-data` | `{ mode: "form-data", fields }` | `body.params[]` through `mapKeyValues`, except that a `type: "file"` param becomes a **file row**: Insomnia keeps the path in `param.fileName`, which becomes `src` (and its basename the declared `fileName`), and the row is marked `unresolved` since the path is from the exporting machine. Only a file param naming no path increments the `file_body` count in `meta.skipped`. |
-| anything else carrying text (`application/yaml`, `text/csv`, Insomnia's "Other") | `{ mode: "text", content }` | `content = normalizeVars(body.text)`. Reserved for a non-empty **string** `body.text`; the sibling Postman parser's `rawBody()` fallback behaves the same way. No JSON sniffing happens here - Insomnia states the mime. |
+| `application/json` | `{ mode: "json", content }` | `content = normalize_template_vars(body.text)`. |
+| `text/plain` | `{ mode: "text", content }` | `content = normalize_template_vars(body.text)`. |
+| `application/graphql` | `{ mode: "graphql", content }` | `content = toGraphQLEnvelope(normalize_template_vars(body.text))` - a bare query document is wrapped into `{query}`, an envelope passes through (see below). The request also gains a `Content-Type`. |
+| `application/xml`, `text/xml` | `{ mode: "xml", content }` | `content = normalize_template_vars(body.text)`. The request also gains `Content-Type: application/xml`, and a declared one (`application/soap+xml`) wins - both through the same `with_required_content_type` rule GraphQL uses. |
+| `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `body.params[]` → `map_key_values` (`name → key`, `disabled` honored). |
+| `multipart/form-data` | `{ mode: "form-data", fields }` | `body.params[]` through `map_key_values`, except that a `type: "file"` param becomes a **file row**: Insomnia keeps the path in `param.fileName`, which becomes `src` (and its basename the declared `fileName`), and the row is marked `unresolved` since the path is from the exporting machine. Only a file param naming no path increments the `file_body` count in `meta.skipped`. |
+| anything else carrying text (`application/yaml`, `text/csv`, Insomnia's "Other") | `{ mode: "text", content }` | `content = normalize_template_vars(body.text)`. Reserved for a non-empty **string** `body.text`; the sibling Postman parser's `raw_body()` fallback behaves the same way. No JSON sniffing happens here - Insomnia states the mime. |
 | anything else with no text (binary / file-only: `body.fileName` set) | `{ mode: "none" }` | Counted as `file_body` in `meta.skipped` - Vayu has no file body mode, and the file lives outside the export anyway. |
 | missing or empty body | `{ mode: "none" }` | Nothing was lost, so nothing is counted. |
 
 **GraphQL bodies (`toGraphQLEnvelope`):** Insomnia writes `application/graphql` for both shapes its editor produces - the GraphQL-over-HTTP envelope (`{query, variables}`) and, for a hand-written or older request, the **bare query document**. A bare document stored verbatim went on the wire as the whole HTTP body: not JSON, so a GraphQL server reads no `query` at all. Nothing showed it, because the query pane's raw-string fallback renders a bare document exactly as it renders a healthy one. It is normalized at import - the one place the shape is known to be GraphQL - and an envelope is returned untouched, so a mislabelled JSON envelope is never double-wrapped.
 
-**GraphQL `Content-Type` (`withRequiredContentType` in `shared.ts`):** the envelope is JSON, so the request needs `Content-Type: application/json`; the request builder adds it only on an interactive mode switch, which an import never performs. Written at import through the same `contentTypeToAdd` rule, so a Content-Type the export declares wins and a disabled row does not count as declaring one.
+**GraphQL `Content-Type` (`with_required_content_type` in `import_document.cpp`):** the envelope is JSON, so the request needs `Content-Type: application/json`; the request builder adds it only on an interactive mode switch, which an import never performs. Written at import through the same `contentTypeToAdd` rule, so a Content-Type the export declares wins and a disabled row does not count as declaring one.
 
 ## Auth mapping
 
@@ -138,7 +148,7 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 | `bearer` with another `prefix` (e.g. `Token`, `JWT`) | `{ mode: "apikey", key: "Authorization", value: "<prefix> <token>", in: "header" }` | no |
 | `basic` | `{ mode: "basic", username, password }` | no |
 | `apikey` | `{ mode: "apikey", key, value, in }` - `in` is `"query"` when `addTo === "queryParams"`, else `"header"` | no |
-| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` via `mapInsomniaOAuth2` - **executable** | no |
+| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` via `map_insomnia_oauth2` - **executable** | no |
 | `digest` | `{ mode: "digest", config }` | **yes** |
 | `ntlm` | `{ mode: "ntlm", config }` | **yes** |
 | `iam` | `{ mode: "aws", config }` - Insomnia names AWS IAM `"iam"`; Vayu stores it as the `aws` config bag | **yes** |
@@ -146,10 +156,10 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 
 Notes:
 
-- **Bearer PREFIX.** Insomnia sends `Authorization: <prefix> <token>`, defaulting an empty PREFIX to `Bearer`. Vayu's bearer mode always writes `Bearer`, so a different scheme is preserved as an explicit `Authorization` header through the `apikey` mode - the engine writes an `apikey` header value verbatim, so the wire bytes match what Insomnia sent. A prefix differing only in case (`bearer`) keeps the native bearer mode: HTTP auth schemes are case-insensitive (RFC 7235 §2.1). The prefix itself goes through `normalizeVars` and the composed value is trimmed, so an empty token yields just the scheme.
-- **OAuth2 `tokenPrefix`** maps to `OAuth2Config.headerPrefix` (absent or empty → `"Bearer"`), matching `mapPostmanOAuth2`'s `headerPrefix`. Vayu executes OAuth2, so an unread prefix would send `Bearer` and 401 against a server expecting another scheme.
+- **Bearer PREFIX.** Insomnia sends `Authorization: <prefix> <token>`, defaulting an empty PREFIX to `Bearer`. Vayu's bearer mode always writes `Bearer`, so a different scheme is preserved as an explicit `Authorization` header through the `apikey` mode - the engine writes an `apikey` header value verbatim, so the wire bytes match what Insomnia sent. A prefix differing only in case (`bearer`) keeps the native bearer mode: HTTP auth schemes are case-insensitive (RFC 7235 §2.1). The prefix itself goes through `normalize_template_vars` and the composed value is trimmed, so an empty token yields just the scheme.
+- **OAuth2 `tokenPrefix`** maps to `OAuth2Config.headerPrefix` (absent or empty → `"Bearer"`), matching `map_postman_oauth2`'s `headerPrefix`. Vayu executes OAuth2, so an unread prefix would send `Bearer` and 401 against a server expecting another scheme.
 - **`disabled` takes precedence over `type`.** If `authentication.disabled === true`, the result is `{ mode: "none" }` regardless of `type`. If `authentication` is missing or has no `type` (and is not disabled), the result is `{ mode: "inherit" }`.
-- `oauth2` is mapped to an executable `OAuth2Config` (`mapInsomniaOAuth2`) and does **not** count. `digest`/`ntlm`/`iam` are stored as opaque `config` bags (the auth object with `type` and `disabled` removed) and are **not executed** by Vayu - each occurrence increments `meta.nonExecutableAuth`.
+- `oauth2` is mapped to an executable `OAuth2Config` (`map_insomnia_oauth2`) and does **not** count. `digest`/`ntlm`/`iam` are stored as opaque `config` bags (the auth object with `type` and `disabled` removed) and are **not executed** by Vayu - each occurrence increments `meta.nonExecutableAuth`.
 - The same `insomniaAuth` is called for **collection-level** auth (workspace/request_group), sharing the same `authCtx`. So a non-executable auth on a workspace or folder also counts toward `nonExecutableAuth`. For collections, an `inherit` result is coerced to `{ mode: "none" }` (collections can never inherit).
 
 ## Environments
@@ -164,7 +174,7 @@ Flattening per base:
 - **No sub-envs:** emit one `EnvironmentDraft` from the base's `data`. Name = `base.name ?? workspace.name ?? "Environment"`.
 - **Has sub-envs:** emit one `EnvironmentDraft` **per sub-env**, with variables `{ ...baseVars, ...subVars }` (sub-env values override base on key collision). Name = `sub.name ?? "Environment"`. **The standalone base environment is not emitted** when sub-envs exist - its values survive only merged into each sub-env.
 
-Each variable is produced by `toEnvVars`: keys come straight from the env `data` object; values are `normalizeVars(asString(v))` (objects/arrays are JSON-stringified, numbers/booleans coerced to strings), and every variable is `{ value, enabled: true }`. `secret` is never set. `meta.environmentCount` equals the number of emitted `EnvironmentDraft`s.
+Each variable is produced by `to_env_vars`: keys come straight from the env `data` object; values are `normalize_template_vars(as_string(v))` (objects/arrays are JSON-stringified, numbers/booleans coerced to strings), and every variable is `{ value, enabled: true }`. `secret` is never set. `meta.environmentCount` equals the number of emitted `EnvironmentDraft`s.
 
 ## Options & lossy behavior
 
@@ -204,9 +214,9 @@ An **absent** field is not an error anywhere in that table - only a present-but-
 
 | Helper | Source | Used for |
 |--------|--------|----------|
-| `asString` | `./shared.ts` | Coerce any scalar/object to its string form (objects → `JSON.stringify`). |
-| `mapKeyValues` | `./shared.ts` | Map `{name,value,disabled}` arrays → `KeyValueEntry[]` (filters keyless rows, normalizes values, derives `enabled` from `disabled`). |
-| `normalizeVars` | `./var-normalize.ts` | Template syntax normalization (see [Template normalization](#template-normalization)). |
+| `as_string` | `import_document.cpp` | Coerce any scalar/object to its string form (objects → `JSON.stringify`). |
+| `map_key_values` | `import_document.cpp` | Map `{name,value,disabled}` arrays → `KeyValueEntry[]` (filters keyless rows, normalizes values, derives `enabled` from `disabled`). |
+| `normalize_template_vars` | `path_template.cpp` | Template syntax normalization (see [Template normalization](#template-normalization)). |
 
 See [`./README.md`](./README.md) for the full shared-helper reference.
 

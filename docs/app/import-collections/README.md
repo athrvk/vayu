@@ -8,20 +8,35 @@ description: >-
 Developer reference for Vayu's import subsystem: how raw Postman / Insomnia / OpenAPI files
 are detected, parsed into Vayu's internal draft model, and persisted.
 
-**Code:** `app/src/services/importers/`
+**The parse is the engine's** since issue
+[#877](https://github.com/athrvk/vayu/issues/877). Every format below is read by
+`engine/src/core/import_document.cpp`, behind
+[`POST /import/parse`](../../engine/api-reference.md#post-importparse), and the
+app calls it. There is no parser in `app/src` any more, and that is the point:
+the renderer's stack was the *second* reader of a document, which is what
+[#853](https://github.com/athrvk/vayu/issues/853) set out to end - and while it
+existed, an agent over MCP could bind, diff, sync and export a spec but could
+not import one. It can now (`import_document`, see
+[mcp.md](../../engine/mcp.md)).
 
-> This folder is the canonical reference for parser internals. Document behavior **from the
-> code** - when in doubt, the source in `app/src/services/importers/` wins.
+**Code:** `engine/src/core/import_document.cpp` (the parse),
+`app/src/services/importers/` (the batch ledger, the temp ids and the apply).
+
+> This folder documents each format's **mapping rules** - what a Postman `auth`
+> block becomes, which OpenAPI response becomes an example. Document behavior
+> **from the code**: `engine/src/core/import_document.cpp` and, for the two
+> OpenAPI dialects, `engine/src/core/openapi_drafts.cpp` (the request builder
+> those rules are shared with) win when in doubt.
 
 ## Per-format docs
 
-| Format | Module | Detection (summary) | Doc |
-|---|---|---|---|
-| Postman Collection v2.1 / v2.0 | `postman.ts` | `info.schema` contains `v2.1.0` / `v2.0.0` (or `info`+`item` with no schema) | [postman.md](./postman.md) |
-| Postman Environment / Globals | `postman-environment.ts` | `_postman_variable_scope` is `"environment"` or `"globals"` && `values` is an array | [postman-environment.md](./postman-environment.md) |
-| Insomnia Export v4 | `insomnia-v4.ts` | `_type === "export"` && `__export_format === 4` | [insomnia-v4.md](./insomnia-v4.md) |
-| OpenAPI 3.0 | `openapi-v3.ts` | `openapi` starts with `3.` | [openapi-v3.md](./openapi-v3.md) |
-| OpenAPI 2.0 (Swagger) | `openapi-v2.ts` | `swagger === "2.0"` | [openapi-v2.md](./openapi-v2.md) |
+| Format | Detection (summary) | Doc |
+|---|---|---|
+| Postman Collection v2.1 / v2.0 | `info.schema` contains `v2.1.0` / `v2.0.0` (or `info`+`item` with no schema) | [postman.md](./postman.md) |
+| Postman Environment / Globals | `_postman_variable_scope` is `"environment"` or `"globals"` && `values` is an array | [postman-environment.md](./postman-environment.md) |
+| Insomnia Export v4 | `_type === "export"` && `__export_format === 4` | [insomnia-v4.md](./insomnia-v4.md) |
+| OpenAPI 3.0 | `openapi` starts with `3.` | [openapi-v3.md](./openapi-v3.md) |
+| OpenAPI 2.0 (Swagger) | `swagger` is `2.0` (string or number) | [openapi-v2.md](./openapi-v2.md) |
 
 ---
 
@@ -33,9 +48,15 @@ A raw import string flows through three stages, once per document:
 picked files ──▶ detectBatch() ──▶ parseImport() ──▶ assignTempIds() ──▶ ImportOrchestrator.run()
                  (batch.ts)        (factory.ts)      (assign-ids.ts)      (orchestrator.ts)
                      │                  │                  │                     │
-             one row per file,   detect + parse      stamp opaque temp     flatten to one
+             one row per file,   POST /import/parse  stamp opaque temp     flatten to one
              bundle its $refs    → ImportResult      ids (c1/r1/e1)        POST /import/apply
 ```
+
+An agent has no dialog, so it takes the whole of that in one call:
+[`POST /import`](../../engine/api-reference.md#post-import) is the parse, the
+flattening and the apply together. The app deliberately does not use it - a
+person picks which files of a batch to import and toggles two options between
+the parse and the apply.
 
 ### 0. The batch - `batch.ts`
 
@@ -94,22 +115,40 @@ spec in it never reaches the lookup at all. See
 (Postman exports single JSON files; vendors ship git repos). Reopen when a real
 source ships them.
 
-### 1. Detect + parse - `factory.ts`
+### 1. Detect + parse - `factory.ts` → `POST /import/parse`
 
-`parseImport(raw, opts, fileName?)`:
+`parseImport(raw, opts, source?)` is one call to the engine. It is `async` since
+#877; everything that consumed it - the batch, the modal's option toggles -
+awaits.
 
-1. **`parseRaw`** - `JSON.parse(raw)`, falling back to `yaml.load(raw)` on JSON failure.
-   Malformed YAML throws and propagates as a parse error.
-2. Runs each parser's `detect()` in a fixed **most-specific-first** order:
-   `PostmanV21 → PostmanV20 → PostmanEnvironment → InsomniaV4 → OpenApiV3 → OpenApiV2`.
-   The first parser whose `detect()` returns `true` gets to `parse()`.
-3. No match → throws `UnrecognisedFormatError`.
+Engine-side, in `core::parse_import`:
+
+1. **One read** - `core::read_document`: JSON first, YAML second. The same reader
+   behind `POST /specs` and `POST /specs/describe`, which is what makes "exactly
+   one parser has an opinion about a document" true.
+2. Detection in a fixed **most-specific-first** order:
+   `Postman v2.1 → Postman v2.0 → Postman environment/globals → Insomnia v4 →
+   OpenAPI 3.x → OpenAPI 2.0` - the order the renderer's `PARSERS` list ran in,
+   so the same bytes are claimed by the same format they always were.
+3. No match → `400 Unrecognised format`, which `factory.ts` turns back into
+   `UnrecognisedFormatError`. Kept apart from a document that *claimed* a format
+   and is broken (`400 Could not read the document: …`): the dialog says
+   different things about the two.
 4. **Joins each request's enabled params into its `url`** - see
    [The url/params invariant](#the-urlparams-invariant) below.
 
-The factory parses the raw text **once** and hands every detector the already-parsed
-object (plus the raw string). This is a conscious divergence from the PRD's
-`detect(raw: string)` - detectors receive `(parsed, raw)`.
+The two OpenAPI dialects are not a second reader either: their requests come from
+`core::import_drafts_of`, the same builder the OpenAPI sync diff compares a
+stored request against (issue #865), with the import composing the root
+collection, the folders and the skip tally around it. A draft the two built
+differently would report "the document changed this request" about a document
+nobody edited.
+
+**The move is pinned, not promised.** `engine/tests/fixtures/import-conformance.json`
+holds, per format, what the renderer's own parsers produced for a corpus of
+documents - recorded at the last commit that had them - and
+`engine/tests/import_parse_test.cpp` asserts the engine produces the same thing
+on every build.
 
 #### The url/params invariant
 
@@ -197,27 +236,32 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
   surfaces with no rollback to undo the apply. See
   [postman-environment.md](postman-environment.md#globals-merge-they-do-not-replace).
 
-`orchestrator.fixture-parity.test.ts` pins the payload against a reference implementation
-of that deleted per-item walk, per fixture, so the flattening cannot quietly drop a field
-or renumber an `order`.
+**The flattening exists twice, and the two are pinned to each other.**
+`POST /import` has no preview to show, so it flattens engine-side
+(`core::import_apply_payload`); this orchestrator flattens a result a person has
+previewed and filtered. Two implementations of one mapping is the defect this
+repo keeps finding, in the one place a missing field is silent - a request that
+imported without its examples looks exactly like a document that documented none
+- so `orchestrator.payload-conformance.test.ts` and the engine's
+`import_parse_test.cpp` build the payload for the same fixtures and must agree.
 
 ---
 
-## The `ImportParser` interface
+## Reading a document without parsing it
 
-Every parser implements (`types.ts`):
+One renderer path still needs a document as a *tree*: `ref-bundler.ts`, which
+inlines the files a multi-file OpenAPI document references before anything is
+parsed or stored (issue #649). It reads through
+[`POST /import/document`](../../engine/api-reference.md#post-importdocument) -
+`core::read_document` and nothing else - so it holds no parser of its own, and
+`js-yaml` is gone from production `src/`.
 
-```ts
-interface ImportParser {
-  readonly formatName: string; // e.g. "Postman Collection v2.1"
-  readonly formatKey: string;  // e.g. "postman-v21"
-  detect(parsed: unknown, raw: string): boolean;
-  parse(parsed: unknown, raw: string, opts: ImportOptions): ImportResult;
-}
-```
-
-`parse()` never persists - it only produces an `ImportResult`. Persistence is the
-orchestrator's job.
+That is deliberate, and it is the line the bundler sits on: **fetch-time `$ref`
+assembly is deterministic re-serialization, not an opinion about what a document
+declares.** It stays renderer-side because it reaches the network through
+`POST /import/fetch` and the local filesystem through the main-process-gated
+`specFile:read` IPC, and an engine that read sibling files off disk on an
+import's behalf would be a wider capability than any of this needs.
 
 ---
 
@@ -278,14 +322,14 @@ format that carries its own folders makes no such choice, and a parser that says
 not look like one that said `"tags"`.
 
 `exampleCount` totals the saved example responses across the whole tree, from
-`countExamples(collections)` in `shared.ts` - read off the finished drafts for the same
+`count_examples(collections)` in `import_document.cpp` - read off the finished drafts for the same
 reason `unattachedFileParts` is, so the number the preview promises and the drafts about to
 be written cannot disagree.
 
 `unattachedFileParts` counts form-data file rows the import produced with no file attached -
 an OpenAPI spec documents *that* a field is an upload, never *which* file, so those rows
 import complete-but-empty and the user picks the file. Every parser gets it from
-`unattachedFileParts(collections)` in `shared.ts`, which reads the finished drafts rather
+`unattached_file_parts(collections)` in `import_document.cpp`, which reads the finished drafts rather
 than tallying while building them, so the number and the rows cannot disagree.
 
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
@@ -298,7 +342,7 @@ HTTP method has no `HttpMethod` (OpenAPI 3's `trace`), and `malformed_item` / `m
 are shapes the source file got wrong - a Postman `item[]` entry that is not an object (see
 [postman.md](./postman.md)), an OpenAPI path item or `parameters` list that is not what the
 spec allows - stepped over so the rest of the file still imports. The two OpenAPI kinds are
-counted via `SkipTally` in `openapi-shared.ts`, shared by both OpenAPI parsers: they are
+counted via `ImportTally`, shared by both OpenAPI dialects: they are
 structural clones, and a second copy would drift. `example_no_status` is a fourth
 non-representability case: an OpenAPI response keyed `2XX` (or with a junk key) documents a
 real response, but an example is served under one status line and there is no honest value
@@ -372,72 +416,73 @@ no scripts and no environments).
 
 ## Shared helpers
 
-Reusable mapping helpers consumed by the parsers. Postman and Insomnia lean on `shared.ts`;
-the OpenAPI parsers use only `normalizeVars` and `sampleSchema`.
+Reusable mapping rules, shared between the formats that need them. All of them
+live in `engine/src/core/import_document.cpp` unless noted; the two the OpenAPI
+dialects use - `normalize_path_templates` and the sampler - are
+`engine/src/core/path_template.cpp` and `engine/src/core/openapi_drafts.cpp`.
+The names below are those functions'.
 
-### asString
-`asString(v): string` - coerces any scalar to its string form; objects are `JSON.stringify`-d;
-`null`/`undefined` → `""`. Vayu stores all values as strings. (`shared.ts`)
+### as_string
+`as_string(v)` - coerces any scalar to its string form; objects are `JSON.stringify`-d;
+`null`/`undefined` → `""`. Vayu stores all values as strings. 
 
-### toVarRecord
-`toVarRecord(vars)` - Postman/Insomnia variable arrays (`{key, value?, enabled?, disabled?}`)
+### to_var_record
+`to_var_record(vars)` - Postman/Insomnia variable arrays (`{key, value?, enabled?, disabled?}`)
 → `Record<string, VariableValue>`. `disabled` takes precedence over `enabled`; default
-`enabled: true`. Values pass through `normalizeVars`. Rows without a `key` are skipped.
-(`shared.ts`)
+`enabled: true`. Values pass through `normalize_template_vars`. Rows without a `key` are skipped.
 
-### mapKeyValues
-`mapKeyValues(rows)` - Postman header/query/urlencoded arrays → `KeyValueEntry[]`. Sets
+### map_key_values
+`map_key_values(rows)` - Postman header/query/urlencoded arrays → `KeyValueEntry[]`. Sets
 `enabled = r.disabled !== true`, normalizes each value, carries `description` when present,
-and **preserves duplicates and disabled rows**. (`shared.ts`)
+and **preserves duplicates and disabled rows**. 
 
-### mapPostmanAuth
-`mapPostmanAuth(auth)` - a Postman `auth` object (collection / folder / request) → `RequestAuth`.
-Reads the per-type detail via `authDetail`, which handles both v2.1's array shape
+### map_postman_auth
+`map_postman_auth(auth)` - a Postman `auth` object (collection / folder / request) → `RequestAuth`.
+Reads the per-type detail via `auth_detail`, which handles both v2.1's array shape
 (`[{key, value}]`) and v2.0's object shape. Maps `bearer`/`basic`/`apikey` to concrete auth,
-maps `oauth2` to an **executable** `{mode:"oauth2", config}` via `mapPostmanOAuth2` (below),
+maps `oauth2` to an **executable** `{mode:"oauth2", config}` via `map_postman_oauth2` (below),
 stores `digest`/`aws`/`ntlm` as `{mode, config}` (not executed), maps the real AWS wire type
 `awsv4` → the internal `{mode:"aws", config}`, `noauth` → `none`, and missing/`inherit` →
-`inherit`. A collection/folder `noauth` is handled by `collectionAuth` in `postman.ts` instead,
-which maps it to the terminal `{mode:"noauth"}`. (`shared.ts`)
+`inherit`. A collection/folder `noauth` is handled by `collection_auth` instead,
+which maps it to the terminal `{mode:"noauth"}`. 
 
-### OAuth 2.0 mapping (`oauth2-import.ts`)
+### OAuth 2.0 mapping
 Turns each source format's OAuth 2.0 block into Vayu's typed `OAuth2Config`, so imported
 OAuth 2.0 auth is **executable** (not a passive `{mode, config}` bag):
-- `mapPostmanOAuth2(params)` - Postman v2.1 `oauth2` params, incl. grant normalization
+- `map_postman_oauth2(detail)` - Postman v2.1 `oauth2` params, incl. grant normalization
   (`authorization_code_with_pkce` → auth-code + PKCE; `implicit` → auth-code + PKCE; a minimal
   export with only a pre-fetched `accessToken` → a bearer token).
-- `mapInsomniaOAuth2(auth)` - Insomnia's camelCase `oauth2` object.
-- `mapOpenApiV3OAuth2(scheme)` / `mapSwaggerOAuth2(scheme)` - pick the first usable flow from an
+- `map_insomnia_oauth2(auth)` - Insomnia's camelCase `oauth2` object.
+- `map_openapi_v3_oauth2(scheme)` / `map_swagger_oauth2(scheme)` - pick the first usable flow from an
   OpenAPI v3 / Swagger v2 `oauth2` security scheme (client id/secret seeded as `{{variables}}`).
 
 Grant/field normalization is shared here so the parsers agree. Only `digest`/`aws`/`ntlm`
 remain non-executable and are counted in `meta.nonExecutableAuth`.
 
-### rawBody
-`rawBody(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map
+### raw_body
+`raw_body(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map
 directly; with no explicit language it sniffs via `JSON.parse` (success → `json`, else
 `text`) and never guesses `xml`.
-(`shared.ts`)
 
-### joinExec
-`joinExec(event)` - a Postman event entry → a single script string. Joins
-`event.script.exec[]` with `\n` (or returns a string `exec` as-is). (`shared.ts`)
+### join_exec
+`join_exec(event)` - a Postman event entry → a single script string. Joins
+`event.script.exec[]` with `\n` (or returns a string `exec` as-is). 
 
-### normalizeVars
-`normalizeVars(input, opts?)` - normalizes foreign template syntax to Vayu `{{var}}`:
-`{{ x }}` / `{{ _.x }}` → `{{x}}` (trimmed, `_.` prefix stripped). With
-`{ pathTemplates: true }` it additionally rewrites single-brace `{x}` → `{{x}}` (without
-touching an existing `{{…}}` pair); **only the OpenAPI/Swagger parsers pass it**, because in
+### normalize_template_vars / normalize_path_templates
+`normalize_template_vars(text)` - normalizes foreign template syntax to Vayu `{{var}}`:
+`{{ x }}` / `{{ _.x }}` → `{{x}}` (trimmed, `_.` prefix stripped). Its sibling
+`normalize_path_templates(path)` additionally rewrites single-brace `{x}` → `{{x}}` (without
+touching an existing `{{…}}` pair); **only the OpenAPI/Swagger paths call it**, because in
 Postman and Insomnia a single brace is literal text (`/tags/{beta}`, `fields=friends{name}`)
 and rewriting it invents a variable reference that resolves to nothing. Nunjucks tags
 `{% … %}` and filtered vars `{{ x | filter }}` are left **verbatim** - Vayu has no equivalent
-and renders them as literal text. (`var-normalize.ts`)
+and renders them as literal text. 
 
 ### Dynamic variables in imported collections
 
 Postman and Bruno collections routinely contain `{{$guid}}`, `{{$timestamp}}`
-and the `{{$random*}}` faker names. The importers pass them through untouched -
-`normalizeVars` only trims and strips a `_.` prefix - and **they now resolve**
+and the `{{$random*}}` faker names. The parse passes them through untouched -
+`normalize_template_vars` only trims and strips a `_.` prefix - and **they now resolve**
 at send time from the generator table described in
 [variable resolution](../variable-resolution.md#dynamic-variables). Before that
 table existed they resolved to an empty string, so an imported request whose
@@ -447,8 +492,8 @@ A `$name` outside the supported set is left written as `{{$name}}` in the
 outgoing request rather than emptied, so an imported collection using a faker
 value Vayu does not have shows it instead of hiding it.
 
-### sampleSchema
-`sampleSchema(schema, resolveRef)` - generates a sample value for an OpenAPI/Swagger schema,
+### Sampler::sample
+`Sampler::sample(schema)` - generates a sample value for an OpenAPI/Swagger schema,
 used to build request-body stubs. It is **bounded and resilient**, not a naive one-level walk:
 
 - Recurses up to `MAX_DEPTH = 6`.
@@ -469,20 +514,28 @@ as far as a JSON body does instead of reading a `properties` key that isn't ther
 flag comes from the property schema (`format: binary`, or an array of it) rather than the
 sampled value, which flattens a binary string to `""` and cannot be told from a text field.
 
-(`schema-sampler.ts`)
+(the sampler, `engine/src/core/openapi_drafts.cpp`)
 
 ---
 
-## Adding a new parser
+## Adding a new format
 
-1. Implement `ImportParser` in a new module under `app/src/services/importers/`.
-2. Reuse `shared.ts` / `var-normalize.ts` / `schema-sampler.ts` where they fit; emit the
-   draft model above (no IDs, no persistence).
-3. Register the instance in `factory.ts`'s `PARSERS` array at the correct
-   **most-specific-first** position so its `detect()` doesn't shadow (or get shadowed by)
+All of it is engine-side (`engine/src/core/import_document.cpp`); nothing in
+`app/src` needs to change, and the dialog picks the new format up for free.
+
+1. Write the parse in `import_document.cpp`, emitting the draft model above (no
+   ids, no persistence). Reuse what is there - `map_key_values`, `to_var_record`,
+   `imported_file_part`, `with_required_content_type`, the OAuth mappers - rather
+   than a second copy of a rule; the JavaScript semantics the drafts are held to
+   (`js_json.hpp`) are shared with the OpenAPI builder for the same reason.
+2. Add its detector to `parse_import`'s chain at the correct
+   **most-specific-first** position, so it does not shadow (or get shadowed by)
    another format.
-4. Populate `meta.skipped` / `meta.nonExecutableAuth` for anything Vayu can't execute or
-   represent, and `meta.unattachedFileParts` (via the `shared.ts` helper) for uploads the
-   user still has to attach, so the Preview can warn the user.
-5. Add a `docs/app/import-collections/<format>.md` following the structure of the existing
-   per-format docs, and a row in the table at the top of this file.
+3. Populate `meta.skipped` / `meta.nonExecutableAuth` for anything Vayu cannot
+   execute or represent, and let `unattached_file_parts` count uploads the user
+   still has to attach, so the Preview can warn them. A loss the preview never
+   names is the defect this whole subsystem is organised around.
+4. Add cases to `engine/tests/fixtures/import-conformance.json` and register the
+   suite the way `engine/CMakeLists.txt` requires.
+5. Add a `docs/app/import-collections/<format>.md` following the structure of the
+   existing per-format docs, and a row in the table at the top of this file.

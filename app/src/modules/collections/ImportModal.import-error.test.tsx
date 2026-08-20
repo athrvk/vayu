@@ -30,6 +30,7 @@ import { ImportModal } from "./ImportModal";
 import { useImportModalStore } from "@/stores";
 import { ApiError } from "@/services/http-client";
 import { assignTempIds } from "@/services/importers/assign-ids";
+import { collection, request, result, stubParse } from "./import-preview.testkit";
 
 const postman = readFileSync(
 	join(__dirname, "../../services/importers/__fixtures__/postman-v21.json"),
@@ -58,8 +59,17 @@ function selectTab(name: RegExp) {
 
 describe("ImportModal - failed import", () => {
 	beforeEach(() => {
+		vi.restoreAllMocks();
 		useImportModalStore.setState({ isOpen: true });
 		state.rejection = new Error("import boom");
+		// The parse is the engine's (issue #877); what fails here is the *apply*.
+		stubParse(() =>
+			result({
+				collections: [
+					collection({ name: "Sample API", requests: [request({ name: "List users" })] }),
+				],
+			})
+		);
 	});
 
 	/** Drive the modal to the point where Import has been clicked and has failed. */

@@ -23,11 +23,12 @@
  * the first case fails.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore } from "@/stores";
+import { collection, request, result, stubParse } from "./import-preview.testkit";
 
 function renderModal() {
 	const qc = new QueryClient();
@@ -47,42 +48,39 @@ function selectTab(name: RegExp) {
 	fireEvent.click(tab);
 }
 
-async function preview(source: unknown) {
+async function preview() {
 	renderModal();
 	selectTab(/Paste JSON/i);
 	fireEvent.change(screen.getByPlaceholderText(/Paste/i), {
-		target: { value: JSON.stringify(source) },
+		target: { value: JSON.stringify({ any: "document" }) },
 	});
 	fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
 }
 
-/** A Postman collection whose one request carries @p responses. */
-function postmanWith(responses: unknown[]) {
-	return {
-		info: {
-			name: "Pets",
-			schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-		},
-		item: [
-			{
-				name: "List pets",
-				request: { method: "GET", url: "https://x/pets" },
-				response: responses,
-			},
-		],
-	};
+/**
+ * A one-request import that found @p examples saved responses. What a Postman
+ * `item.response[]` becomes is the engine's (issue #877) and pinned there; the
+ * count is what this file is about, because an example has no row of its own in
+ * the preview tree.
+ */
+function foundExamples(examples: number) {
+	stubParse(() =>
+		result({
+			collections: [collection({ name: "Pets", requests: [request({ name: "List pets" })] })],
+			meta: { exampleCount: examples },
+		})
+	);
 }
 
 describe("the import preview's example count", () => {
-	beforeEach(() => useImportModalStore.setState({ isOpen: true }));
+	beforeEach(() => {
+		vi.restoreAllMocks();
+		useImportModalStore.setState({ isOpen: true });
+	});
 
 	it("counts the saved responses an import found", async () => {
-		await preview(
-			postmanWith([
-				{ name: "OK", code: 200, body: '{"id":1}' },
-				{ name: "Missing", code: 404, body: '{"error":"nope"}' },
-			])
-		);
+		foundExamples(2);
+		await preview();
 
 		// Beside the other counts, in the one line that summarises the import.
 		await waitFor(() => expect(screen.getByText(/2 examples/i)).toBeInTheDocument());
@@ -92,7 +90,8 @@ describe("the import preview's example count", () => {
 	it("says zero rather than going silent for a file that carried none", async () => {
 		// A parser that forgot to look and a file with nothing to find are
 		// different answers, and only a rendered 0 can say the second.
-		await preview(postmanWith([]));
+		foundExamples(0);
+		await preview();
 		await waitFor(() => expect(screen.getByText(/0 examples/i)).toBeInTheDocument());
 	});
 });

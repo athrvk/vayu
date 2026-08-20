@@ -26,6 +26,82 @@ import {
 	type BatchIntake,
 } from "./batch";
 
+/**
+ * The parse is the engine's now (issue #877), so it is stubbed here - and that
+ * is the right shape for this file, which is about the *ledger*: which picked
+ * file becomes which row, what is bundled into what, what is applied. What each
+ * format parses to is pinned by the engine's own conformance corpus
+ * (`engine/tests/fixtures/import-conformance.json`), against the very parsers
+ * this stub replaces.
+ *
+ * It answers only what these cases read: the format that claimed the bytes, the
+ * environments an option gates, and the external-ref count the caller passes in.
+ */
+vi.mock("@/services/api", async () => {
+	const { ApiError } = await import("@/services/http-client");
+	return {
+		apiService: {
+			readDocument: async (text: string) => JSON.parse(text),
+			parseImport: async (payload: {
+				content: string;
+				importEnvironments?: boolean;
+				unresolvedRefs?: number;
+			}) => {
+				const document = JSON.parse(payload.content) as Record<string, unknown>;
+				const format = formatOf(document);
+				if (!format) throw new ApiError(400, "BAD_REQUEST", "Unrecognised format");
+				const environments =
+					format === "Postman Environment" && payload.importEnvironments !== false
+						? [{ name: "Imported Environment", description: "", variables: {} }]
+						: [];
+				const collections =
+					format === "Postman Environment"
+						? []
+						: [
+								{
+									name: format,
+									description: "",
+									variables: {},
+									auth: { mode: "none" as const },
+									preRequestScript: "",
+									postRequestScript: "",
+									children: [],
+									requests: [],
+								},
+							];
+				return {
+					collections,
+					environments,
+					globals: {},
+					meta: {
+						format,
+						requestCount: 0,
+						folderCount: 0,
+						environmentCount: environments.length,
+						globalCount: 0,
+						exampleCount: 0,
+						skipped: payload.unresolvedRefs
+							? [{ kind: "external_ref", count: payload.unresolvedRefs }]
+							: [],
+						nonExecutableAuth: 0,
+						unattachedFileParts: 0,
+					},
+				};
+			},
+		},
+	};
+});
+
+/** The engine's detection order, only as far as these fixtures need it. */
+function formatOf(document: Record<string, unknown>): string | null {
+	const info = document.info as { schema?: string } | undefined;
+	if (info?.schema?.includes("v2.1.0")) return "Postman Collection v2.1";
+	if (document._postman_variable_scope === "environment") return "Postman Environment";
+	if (document._type === "export" && document.__export_format === 4) return "Insomnia Export v4";
+	if (typeof document.openapi === "string") return "OpenAPI 3.0";
+	return null;
+}
+
 const OPTS = { importEnvironments: true, importScripts: true };
 
 function fixture(...parts: string[]): string {
@@ -203,12 +279,12 @@ describe("reparseBatch", () => {
 			intake()
 		);
 
-		const off = reparseBatch(entries, { importEnvironments: false, importScripts: true });
+		const off = await reparseBatch(entries, { importEnvironments: false, importScripts: true });
 
 		expect(off[1]?.result?.environments).toEqual([]);
 		expect(applicableEntries(off).map((e) => e.fileName)).toEqual(["a.json"]);
 		// And back, because a toggle is not a re-detect.
-		expect(applicableEntries(reparseBatch(off, OPTS)).map((e) => e.fileName)).toEqual([
+		expect(applicableEntries(await reparseBatch(off, OPTS)).map((e) => e.fileName)).toEqual([
 			"a.json",
 			"env.json",
 		]);
@@ -222,7 +298,7 @@ describe("reparseBatch", () => {
 		);
 		const unchecked = entries.map((e) => ({ ...e, included: false }));
 
-		expect(reparseBatch(unchecked, OPTS)[0]?.included).toBe(false);
+		expect((await reparseBatch(unchecked, OPTS))[0]?.included).toBe(false);
 	});
 
 	it("restates the unresolved refs a re-parse cannot rediscover", async () => {
@@ -241,7 +317,7 @@ describe("reparseBatch", () => {
 		// The count belongs to the document, not to the parse: nothing in the
 		// bundled text says a ref went unresolved, so a re-parse that did not
 		// restate it would quietly un-report a loss the user was already told about.
-		expect(reparseBatch(entries, OPTS)[0]?.result?.meta.skipped).toContainEqual({
+		expect((await reparseBatch(entries, OPTS))[0]?.result?.meta.skipped).toContainEqual({
 			kind: "external_ref",
 			count: 3,
 		});

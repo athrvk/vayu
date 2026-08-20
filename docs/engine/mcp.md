@@ -171,6 +171,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `sync_spec`            | write    | `POST /specs/sync` (`policy: "safe"`)        | write toggle; one transaction - stores the document, moves the binding, creates and updates requests; deletes nothing and overwrites no hand-edited field, with `skipped` counting what it declined |
 | `export_spec`          | read     | `POST /specs/export`                         | - (document text capped at 32 KB, with `contentBytes` for the true size; `notes` says what the export could not carry) |
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept |
+| `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent |
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, both scripts - minus file body parts |
 | `update_request`       | write    | `PUT /requests/:id` (merge-patch)            | write toggle; same fields, and only the ones named are written |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
@@ -251,8 +252,9 @@ Notes:
   contract has drifted and apply the safe half of that drift** (issues
   [#862](https://github.com/athrvk/vayu/issues/862),
   [#855](https://github.com/athrvk/vayu/issues/855) and
-  [#871](https://github.com/athrvk/vayu/issues/871)); **raw-document import
-  stays app-only**, since it needs the renderer's parser stack. `get_spec` says
+  [#871](https://github.com/athrvk/vayu/issues/871)) **and import a document
+  outright** (issue
+  [#877](https://github.com/athrvk/vayu/issues/877)). `get_spec` says
   what a collection is bound to, `diff_spec` says what a re-fetched document
   would change about it, `sync_spec` applies the part of that a caller with no
   opinion should apply, `bind_spec` binds one, `export_spec` writes it back out
@@ -272,6 +274,26 @@ Notes:
   The tool result reports `cleared` beside `stamped` for that reason - it is the
   half a caller would otherwise discover from a later run. `unbind_spec` still
   leaves stamps alone, so unbind-then-rebind of the same document costs nothing.
+- **`import_document` is the fourth verb, and the one that took a parser move**
+  (issue [#877](https://github.com/athrvk/vayu/issues/877)). Every other spec
+  tool had shipped while this one could not: `POST /import/apply` takes a
+  *parsed tree*, and the four parsers that built one lived in the renderer, so an
+  agent could bind, diff, sync and export a contract and not import a document.
+  They are engine-side now - `core/import_document.hpp`, reading through the same
+  `core::read_document` that answers what a stored document declares - so the
+  tool sends bytes and options and nothing else, and detection is by content
+  rather than by a `format` argument a caller could get wrong. `POST /import` is
+  the parse, the flattening and `POST /import/apply` in one call: the tree lands
+  atomically, and the globals a Postman globals export carries are **merged**
+  afterwards rather than written over, because `POST /globals` replaces the whole
+  set and must not run in front of a write that can still fail. The caveat
+  sentence names `meta.skipped` for the reason `diff_spec` names `userTouched`:
+  an import that dropped a WebSocket request, a file body or an operation's
+  `default` response looks exactly like one that had none. **External `$ref`s are
+  not followed** - resolving one means fetching a URL or reading a file beside
+  the document, which is the import dialog's business (a URL proxy and a gated
+  IPC), so a multi-file spec imports whole and says nothing about the files it
+  names.
 - **`diff_spec` is the read half of a sync** (issue
   [#871](https://github.com/athrvk/vayu/issues/871)). It sends the collection and
   the candidate document and nothing else: the requests and the **bound**
@@ -1468,14 +1490,6 @@ builds on the mechanism the spec is deprecating and the payoff is client-depende
   provenance.
 - **`vayu mcp` bin** - package the stdio CLI as a first-class command
   ([#693](https://github.com/athrvk/vayu/issues/693)).
-- **Applying a spec drift (`sync_spec`), and raw-document import** -
-  [#871](https://github.com/athrvk/vayu/issues/871). The rest of #761's phase B
-  shipped: bind, export and the drift read are tools, and match, diff and
-  assembly are all engine-side, so what is left is not the architecture question
-  this entry used to name. `sync_spec` waits on where the *selection* lives - the
-  rules in the renderer's `spec-apply.ts` that decide which fields an apply may
-  write - since `electron/` may not import `src/`. Import waits on the renderer's
-  parser stack, which is still a second reader of an OpenAPI document.
 - **Live push over HTTP** - stateful sessions (see Design notes).
 - **Hosted MCP for Vayu Cloud** - OAuth-gated, remote.
 

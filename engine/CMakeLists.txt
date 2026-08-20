@@ -296,6 +296,7 @@ add_library(vayu_core STATIC
     src/core/scenario_plan.cpp
     src/core/scenario_runner.cpp
     src/core/operation_match.cpp
+    src/core/import_document.cpp
     src/core/openapi_document.cpp
     src/core/openapi_drafts.cpp
     src/core/openapi_export.cpp
@@ -615,6 +616,7 @@ if(VAYU_BUILD_TESTS)
         tests/spec_bind_route_test.cpp
         tests/operation_match_test.cpp
         tests/openapi_document_test.cpp
+        tests/import_parse_test.cpp
         tests/openapi_drafts_test.cpp
         tests/spec_diff_test.cpp
         tests/openapi_export_test.cpp
@@ -765,6 +767,7 @@ if(VAYU_BUILD_TESTS)
         ExamplesRouteTest
         GlobalsRouteTest
         ImportApplyRouteTest
+        ImportParseRoute
         InboxListenerTest
         InboxStorageTest
         LoadReplayEventsTest

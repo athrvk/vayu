@@ -9,7 +9,8 @@
 
 /**
  * @file core/path_template.hpp
- * @brief The one engine-side copy of `normalizeVars(path, {pathTemplates: true})`.
+ * @brief The one engine-side copy of `normalizeVars`, in both of the shapes the
+ *        renderer calls it in.
  *
  * It lived inside `http/routes/mock_server.cpp` while the mock server was its
  * only reader, and moved here when a second one arrived: the request drafts an
@@ -27,6 +28,22 @@
 #include <string>
 
 namespace vayu::core {
+
+/**
+ * @brief Tighten the `{{ }}` spellings in @p text, and nothing else -
+ *        `normalizeVars(text)` with `pathTemplates` off.
+ *
+ * `{{ x }}` and `{{ _.x }}` become `{{x}}`. A **single** brace is left exactly
+ * as written, which is the whole difference from
+ * @ref normalize_path_templates: Postman and Insomnia template with `{{x}}`
+ * alone, so `fields=friends{name}` and a path segment `/tags/{beta}` are
+ * literal text there, and rewriting them would invent a variable reference
+ * that resolves to nothing at execution.
+ *
+ * Every value an import carries out of those two formats goes through this -
+ * a URL, a header value, a variable, an auth secret (issue #877).
+ */
+[[nodiscard]] std::string normalize_template_vars (const std::string& text);
 
 /**
  * @brief Rewrite every template spelling in @p path to `{{name}}`.

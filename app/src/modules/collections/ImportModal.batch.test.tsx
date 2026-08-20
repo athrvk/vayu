@@ -45,6 +45,70 @@ vi.mock("@/queries/import", () => ({
 	}),
 }));
 
+/**
+ * The parse is the engine's (issue #877), so it is answered here by the same
+ * detection order the engine runs, over the same fixture documents. This file
+ * is about the *ledger* - which dropped file becomes which row, which rows are
+ * applied, what a refused one leaves behind - and none of that depends on what
+ * a Postman collection parses to, which is pinned engine-side.
+ */
+vi.mock("@/services/api", async () => {
+	const { ApiError } = await import("@/services/http-client");
+	return {
+		apiService: {
+			importFetch: vi.fn(),
+			readDocument: async (text: string) => JSON.parse(text),
+			parseImport: async (payload: { content: string; fileName?: string }) => {
+				let document: Record<string, unknown>;
+				try {
+					document = JSON.parse(payload.content) as Record<string, unknown>;
+				} catch {
+					throw new ApiError(400, "BAD_REQUEST", "Could not read the document");
+				}
+				const info = document.info as { schema?: string } | undefined;
+				const format = info?.schema?.includes("v2.1.0")
+					? "Postman Collection v2.1"
+					: document._type === "export" && document.__export_format === 4
+						? "Insomnia Export v4"
+						: document.swagger === "2.0"
+							? "OpenAPI 2.0 (Swagger)"
+							: typeof document.openapi === "string"
+								? "OpenAPI 3.0"
+								: null;
+				if (!format) throw new ApiError(400, "BAD_REQUEST", "Unrecognised format");
+				return {
+					collections: [
+						{
+							name: format,
+							description: "",
+							variables: {},
+							auth: { mode: "none" as const },
+							preRequestScript: "",
+							postRequestScript: "",
+							children: [],
+							requests: [],
+						},
+					],
+					environments: [],
+					globals: {},
+					meta: {
+						format,
+						...(payload.fileName ? { fileName: payload.fileName } : {}),
+						requestCount: 0,
+						folderCount: 0,
+						environmentCount: 0,
+						globalCount: 0,
+						exampleCount: 0,
+						skipped: [],
+						nonExecutableAuth: 0,
+						unattachedFileParts: 0,
+					},
+				};
+			},
+		},
+	};
+});
+
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore } from "@/stores";
 

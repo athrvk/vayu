@@ -13,6 +13,8 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/import_document.hpp"
+#include "vayu/core/openapi_document.hpp"
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/client.hpp"
@@ -793,6 +795,191 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
     return result;
 }
 
+
+/**
+ * Testable core of POST /import/parse - the parse, answered, nothing written.
+ *
+ * Separated from the route for the reason every core here is: it takes a
+ * `Database` only for the live cap, and a test can then hand it a document
+ * rather than a socket.
+ */
+std::pair<int, nlohmann::json> import_parse_response (vayu::db::Database& db, const nlohmann::json& body) {
+    if (!body.is_object ()) {
+        return body_error ("Body must be a JSON object");
+    }
+    const auto content_field = body.find ("content");
+    if (content_field == body.end () || !content_field->is_string ()) {
+        return body_error ("Invalid 'content': must be the document's text");
+    }
+    const auto content = content_field->get<std::string> ();
+    if (content.empty ()) {
+        return body_error ("Invalid 'content': an empty document is not an import");
+    }
+
+    // The same cap a stored spec document is held to, because an OpenAPI import
+    // stores exactly these bytes and the whole document is read into memory
+    // before anything is answered. A Postman or Insomnia export is never
+    // stored, but it is read the same way, and one bound is easier to explain
+    // than two.
+    const size_t cap = spec_size_cap (db);
+    if (content.size () > cap) {
+        return { 413, error_body (413, "Import document is " + std::to_string (content.size ()) +
+        " bytes, over the limit of " + std::to_string (cap) +
+        " (raise the 'maxSpecDocumentBytes' setting to allow more)") };
+    }
+
+    vayu::core::ImportOptions options;
+    if (auto found = body.find ("importEnvironments"); found != body.end () && !found->is_null ()) {
+        if (!found->is_boolean ()) {
+            return body_error ("Invalid 'importEnvironments': must be a boolean");
+        }
+        options.import_environments = found->get<bool> ();
+    }
+    if (auto found = body.find ("importScripts"); found != body.end () && !found->is_null ()) {
+        if (!found->is_boolean ()) {
+            return body_error ("Invalid 'importScripts': must be a boolean");
+        }
+        options.import_scripts = found->get<bool> ();
+    }
+
+    vayu::core::ImportSource source;
+    if (auto found = body.find ("fileName"); found != body.end () && !found->is_null ()) {
+        if (!found->is_string ()) {
+            return body_error ("Invalid 'fileName': must be a string");
+        }
+        source.file_name = found->get<std::string> ();
+    }
+    if (auto found = body.find ("sourceUrl"); found != body.end () && !found->is_null ()) {
+        if (!found->is_string ()) {
+            return body_error ("Invalid 'sourceUrl': must be a string");
+        }
+        source.source_url = found->get<std::string> ();
+    }
+    if (auto found = body.find ("unresolvedRefs"); found != body.end () && !found->is_null ()) {
+        if (!found->is_number_integer () || found->get<long long> () < 0) {
+            return body_error ("Invalid 'unresolvedRefs': must be a non-negative integer");
+        }
+        source.unresolved_refs = found->get<int> ();
+    }
+
+    vayu::core::ImportParse parsed = vayu::core::parse_import (content, options, source);
+    if (!parsed.ok ()) {
+        // "Unrecognised format" is kept as its own sentence rather than folded
+        // into a parse failure: the two are different answers to the user - one
+        // says "Vayu does not read this kind of file", the other "this file is
+        // broken" - and the import dialog says different things about them.
+        return body_error (parsed.error);
+    }
+    return { 200, std::move (parsed.result) };
+}
+
+/**
+ * Testable core of POST /import/document - a document's bytes as a JSON DOM.
+ *
+ * The narrowest possible route, and it exists for one caller: the renderer's
+ * `ref-bundler.ts`, which inlines the files a multi-file OpenAPI document
+ * references *before* the document is parsed or stored (issue #649). Finding
+ * and rewriting those `$ref`s needs the document as a tree, and a YAML reader
+ * in the renderer to get one is the last thing that kept `js-yaml` in
+ * production `src/` after #877 moved every parse here.
+ *
+ * So the bundler reads through the engine's reader - the same
+ * `core::read_document` behind `POST /specs`, `POST /specs/describe` and
+ * `POST /import/parse` - which is what makes "exactly one parser has an
+ * opinion" true rather than nearly true. It stores nothing and interprets
+ * nothing: what a document *declares* is `POST /specs/describe`, and this is
+ * only what its bytes *are*.
+ */
+std::pair<int, nlohmann::json> import_document_response (vayu::db::Database& db, const nlohmann::json& body) {
+    if (!body.is_object ()) {
+        return body_error ("Body must be a JSON object");
+    }
+    const auto content_field = body.find ("content");
+    if (content_field == body.end () || !content_field->is_string ()) {
+        return body_error ("Invalid 'content': must be the document's text");
+    }
+    const auto content = content_field->get<std::string> ();
+    const size_t cap   = spec_size_cap (db);
+    if (content.size () > cap) {
+        return { 413, error_body (413, "Document is " + std::to_string (content.size ()) +
+        " bytes, over the limit of " + std::to_string (cap) +
+        " (raise the 'maxSpecDocumentBytes' setting to allow more)") };
+    }
+
+    const vayu::core::DocumentRead read = vayu::core::read_document (content);
+    if (!read.ok ()) {
+        return body_error ("Invalid 'content': " + read.error);
+    }
+    return { 200, nlohmann::json{ { "document", read.root } } };
+}
+
+
+/**
+ * Testable core of POST /import - parse a document and persist it.
+ *
+ * The verb an agent wants and the one thing MCP could not do about a spec
+ * (issue #877): bind, describe, diff, sync, export and unbind were all
+ * reachable, and *import a document* was not, because `POST /import/apply` took
+ * a tree only a renderer could build. This is `import_parse_response` and
+ * `import_apply_response` with the flattening between them.
+ *
+ * Not a replacement for either half. The app still parses and applies
+ * separately, because a person gets a preview in between - which files of a
+ * batch to include, what the two option toggles do to them - and this has none.
+ *
+ * **Globals are written last, and deliberately so** (the rule
+ * `ImportOrchestrator` states): `POST /globals` replaces the whole set, so it is
+ * the one write here that can destroy data the import did not create. Running it
+ * after the apply means nothing can fail behind it, so a failed import never
+ * leaves the user's globals half-rewritten. On a key collision the imported
+ * value wins - the caller asked for this file's variables, and skipping them
+ * would be the silent no-op.
+ */
+std::pair<int, nlohmann::json> import_response (vayu::db::Database& db, const nlohmann::json& body) {
+    auto [status, parsed] = import_parse_response (db, body);
+    if (status != 200) {
+        return { status, parsed };
+    }
+
+    const nlohmann::json payload = vayu::core::import_apply_payload (parsed);
+    auto [applied_status, applied] = import_apply_response (db, payload);
+    if (applied_status != 200) {
+        return { applied_status, applied };
+    }
+
+    const nlohmann::json& globals = parsed.at ("globals");
+    if (!globals.empty ()) {
+        // Merged from a fresh read rather than written over: the engine has no
+        // merge verb, and writing the import's globals alone would silently
+        // delete every global the user already had.
+        nlohmann::json merged = nlohmann::json::object ();
+        if (const auto stored = db.get_globals ()) {
+            const nlohmann::json existing = nlohmann::json::parse (stored->variables, nullptr, false);
+            if (existing.is_object ()) {
+                merged = existing;
+            }
+        }
+        for (auto entry = globals.begin (); entry != globals.end (); ++entry) {
+            merged[entry.key ()] = entry.value ();
+        }
+        vayu::db::Globals row;
+        // The singleton's id, always - a row saved without it is a row
+        // `get_globals` will never find, which is the silent write this whole
+        // resource has a history of (see `save_globals_response`).
+        row.id         = "globals";
+        row.variables  = merged.dump ();
+        row.updated_at = now_ms ();
+        db.save_globals (row);
+    }
+
+    return { 200,
+        nlohmann::json{ { "idMap", applied.at ("idMap") }, { "meta", parsed.at ("meta") },
+        { "collections", payload.at ("collections").size () },
+        { "requests", payload.at ("requests").size () },
+        { "environments", payload.at ("environments").size () },
+        { "globals", globals.size () } } };
+}
+
 void register_import_routes (RouteContext& ctx) {
     /**
      * POST /import/fetch
@@ -859,6 +1046,130 @@ void register_import_routes (RouteContext& ctx) {
             res.set_content (response.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error ("POST /import/apply - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
+        }
+    });
+
+    /**
+     * POST /import/parse
+     * Parses a raw import document - OpenAPI 2.0/3.x, Postman Collection
+     * v2.0/v2.1, a Postman environment or globals export, or an Insomnia v4
+     * export - into the tree `POST /import/apply` then persists (issue #877).
+     * Reads only; nothing is stored, and detection order is the app's.
+     * Body params: content (required - the document's text, verbatim),
+     * importEnvironments / importScripts (optional booleans, both default true),
+     * fileName / sourceUrl (optional - what the caller knows about where the
+     * bytes came from), unresolvedRefs (optional non-negative integer - external
+     * `$ref`s a bundling pass could not reach, counted into `meta.skipped`).
+     * Returns: 200 `{collections, environments, globals, meta}`, 400 for bytes
+     * no format claims or a document that claimed one and is broken, 413 over
+     * `maxSpecDocumentBytes`.
+     */
+    ctx.server.Post ("/import/parse",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        nlohmann::json body;
+        try {
+            body = nlohmann::json::parse (req.body);
+        } catch (const std::exception& e) {
+            vayu::utils::log_warning ("POST /import/parse - invalid JSON body: " +
+            std::string (e.what ()));
+            send_error (res, 400, "Invalid JSON body");
+            return;
+        }
+        try {
+            auto [status, response] = import_parse_response (ctx.db, body);
+            if (status != 200) {
+                vayu::utils::log_warning ("POST /import/parse - " + std::to_string (status) +
+                ": " + error_message_of (response));
+            } else {
+                vayu::utils::log_info ("POST /import/parse - " +
+                response["meta"]["format"].get<std::string> () + ", " +
+                std::to_string (response["meta"]["requestCount"].get<int> ()) + " request(s)");
+            }
+            res.status = status;
+            res.set_content (
+            response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+            "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error ("POST /import/parse - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
+        }
+    });
+
+    /**
+     * POST /import/document
+     * Reads a document's bytes (JSON or YAML) into a JSON DOM, through the
+     * engine's one reader. Stores nothing and interprets nothing - it is what
+     * the bytes *are*, not what they declare (issue #877).
+     * Body params: content (required - the document's text).
+     * Returns: 200 `{"document": ...}`, 400 for bytes that are neither JSON nor
+     * YAML, 413 over `maxSpecDocumentBytes`.
+     */
+    ctx.server.Post ("/import/document",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        nlohmann::json body;
+        try {
+            body = nlohmann::json::parse (req.body);
+        } catch (const std::exception& e) {
+            vayu::utils::log_warning ("POST /import/document - invalid JSON body: " +
+            std::string (e.what ()));
+            send_error (res, 400, "Invalid JSON body");
+            return;
+        }
+        try {
+            auto [status, response] = import_document_response (ctx.db, body);
+            if (status != 200) {
+                vayu::utils::log_warning ("POST /import/document - " + std::to_string (status) +
+                ": " + error_message_of (response));
+            }
+            res.status = status;
+            res.set_content (
+            response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+            "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error ("POST /import/document - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
+        }
+    });
+
+    /**
+     * POST /import
+     * Parses a raw import document and persists it in one call (issue #877) -
+     * `POST /import/parse` and `POST /import/apply` with the flattening between
+     * them, for a caller with no preview to show. The tree lands atomically; the
+     * globals a Postman globals export carries are merged afterwards, because
+     * `POST /globals` replaces the whole set and must not run before a write
+     * that can still fail.
+     * Body params: the same as POST /import/parse.
+     * Returns: 200 `{idMap, meta, collections, requests, environments, globals}`,
+     * 400 for a document no format claims or one the apply refused, 413 over
+     * `maxSpecDocumentBytes`.
+     */
+    ctx.server.Post ("/import", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        nlohmann::json body;
+        try {
+            body = nlohmann::json::parse (req.body);
+        } catch (const std::exception& e) {
+            vayu::utils::log_warning ("POST /import - invalid JSON body: " + std::string (e.what ()));
+            send_error (res, 400, "Invalid JSON body");
+            return;
+        }
+        try {
+            auto [status, response] = import_response (ctx.db, body);
+            if (status != 200) {
+                vayu::utils::log_warning ("POST /import - " + std::to_string (status) + ": " +
+                error_message_of (response));
+            } else {
+                vayu::utils::log_info ("POST /import - imported " +
+                std::to_string (response["requests"].get<size_t> ()) + " request(s) from " +
+                response["meta"]["format"].get<std::string> ());
+            }
+            res.status = status;
+            res.set_content (
+            response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+            "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error ("POST /import - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

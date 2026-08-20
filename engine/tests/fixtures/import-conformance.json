@@ -1,0 +1,3114 @@
+{
+	"$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp.",
+	"cases": [
+		{
+			"name": "postman-v21",
+			"document": "{\n\t\"info\": {\n\t\t\"name\": \"Sample API\",\n\t\t\"description\": \"Demo\",\n\t\t\"schema\": \"https://schema.getpostman.com/json/collection/v2.1.0/collection.json\"\n\t},\n\t\"variable\": [{ \"key\": \"baseUrl\", \"value\": \"https://api.example.com\" }],\n\t\"auth\": { \"type\": \"bearer\", \"bearer\": [{ \"key\": \"token\", \"value\": \"{{token}}\" }] },\n\t\"event\": [{ \"listen\": \"prerequest\", \"script\": { \"exec\": [\"console.log('pre')\"] } }],\n\t\"item\": [\n\t\t{\n\t\t\t\"name\": \"Users\",\n\t\t\t\"item\": [\n\t\t\t\t{\n\t\t\t\t\t\"name\": \"List users\",\n\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\"header\": [{ \"key\": \"Accept\", \"value\": \"application/json\" }],\n\t\t\t\t\t\t\"url\": {\n\t\t\t\t\t\t\t\"raw\": \"{{baseUrl}}/users?page=1\",\n\t\t\t\t\t\t\t\"query\": [\n\t\t\t\t\t\t\t\t{ \"key\": \"page\", \"value\": \"1\" },\n\t\t\t\t\t\t\t\t{ \"key\": \"trace\", \"value\": \"1\", \"disabled\": true }\n\t\t\t\t\t\t\t]\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t]\n\t\t},\n\t\t{\n\t\t\t\"name\": \"Create user\",\n\t\t\t\"request\": {\n\t\t\t\t\"method\": \"POST\",\n\t\t\t\t\"url\": \"{{baseUrl}}/users\",\n\t\t\t\t\"body\": {\n\t\t\t\t\t\"mode\": \"raw\",\n\t\t\t\t\t\"raw\": \"{\\\"name\\\":\\\"x\\\"}\",\n\t\t\t\t\t\"options\": { \"raw\": { \"language\": \"json\" } }\n\t\t\t\t},\n\t\t\t\t\"auth\": { \"type\": \"inherit\" }\n\t\t\t}\n\t\t}\n\t]\n}\n",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Sample API",
+						"description": "Demo",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.example.com",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "bearer",
+							"token": "{{token}}"
+						},
+						"preRequestScript": "console.log('pre')",
+						"postRequestScript": "",
+						"children": [
+							{
+								"name": "Users",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "none"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "List users",
+										"description": "",
+										"method": "GET",
+										"url": "{{baseUrl}}/users?page=1",
+										"params": [
+											{
+												"key": "page",
+												"value": "1",
+												"enabled": true
+											},
+											{
+												"key": "trace",
+												"value": "1",
+												"enabled": false
+											}
+										],
+										"headers": [
+											{
+												"key": "Accept",
+												"value": "application/json",
+												"enabled": true
+											}
+										],
+										"body": {
+											"mode": "none"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": ""
+									}
+								]
+							}
+						],
+						"requests": [
+							{
+								"name": "Create user",
+								"description": "",
+								"method": "POST",
+								"url": "{{baseUrl}}/users",
+								"params": [],
+								"headers": [],
+								"body": {
+									"mode": "json",
+									"content": "{\"name\":\"x\"}"
+								},
+								"auth": {
+									"mode": "inherit"
+								},
+								"preRequestScript": "",
+								"postRequestScript": ""
+							}
+						]
+					}
+				],
+				"environments": [],
+				"globals": {},
+				"meta": {
+					"format": "Postman Collection v2.1",
+					"requestCount": 2,
+					"folderCount": 1,
+					"environmentCount": 0,
+					"globalCount": 0,
+					"exampleCount": 0,
+					"skipped": [],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Sample API",
+						"description": "Demo",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.example.com",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "bearer",
+							"token": "{{token}}"
+						},
+						"preRequestScript": "console.log('pre')",
+						"postRequestScript": ""
+					},
+					{
+						"tempId": "c2",
+						"parentTempId": "c1",
+						"name": "Users",
+						"description": "",
+						"order": 0,
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c1",
+						"name": "Create user",
+						"description": "",
+						"method": "POST",
+						"url": "{{baseUrl}}/users",
+						"params": [],
+						"headers": [],
+						"body": {
+							"mode": "json",
+							"content": "{\"name\":\"x\"}"
+						},
+						"bodyType": "json",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					},
+					{
+						"tempId": "r2",
+						"collectionTempId": "c2",
+						"name": "List users",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}/users?page=1",
+						"params": [
+							{
+								"key": "page",
+								"value": "1",
+								"enabled": true
+							},
+							{
+								"key": "trace",
+								"value": "1",
+								"enabled": false
+							}
+						],
+						"headers": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"enabled": true
+							}
+						],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					}
+				],
+				"environments": [],
+				"specs": []
+			}
+		},
+		{
+			"name": "postman-v21-no-scripts",
+			"document": "{\n\t\"info\": {\n\t\t\"name\": \"Sample API\",\n\t\t\"description\": \"Demo\",\n\t\t\"schema\": \"https://schema.getpostman.com/json/collection/v2.1.0/collection.json\"\n\t},\n\t\"variable\": [{ \"key\": \"baseUrl\", \"value\": \"https://api.example.com\" }],\n\t\"auth\": { \"type\": \"bearer\", \"bearer\": [{ \"key\": \"token\", \"value\": \"{{token}}\" }] },\n\t\"event\": [{ \"listen\": \"prerequest\", \"script\": { \"exec\": [\"console.log('pre')\"] } }],\n\t\"item\": [\n\t\t{\n\t\t\t\"name\": \"Users\",\n\t\t\t\"item\": [\n\t\t\t\t{\n\t\t\t\t\t\"name\": \"List users\",\n\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\"header\": [{ \"key\": \"Accept\", \"value\": \"application/json\" }],\n\t\t\t\t\t\t\"url\": {\n\t\t\t\t\t\t\t\"raw\": \"{{baseUrl}}/users?page=1\",\n\t\t\t\t\t\t\t\"query\": [\n\t\t\t\t\t\t\t\t{ \"key\": \"page\", \"value\": \"1\" },\n\t\t\t\t\t\t\t\t{ \"key\": \"trace\", \"value\": \"1\", \"disabled\": true }\n\t\t\t\t\t\t\t]\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t]\n\t\t},\n\t\t{\n\t\t\t\"name\": \"Create user\",\n\t\t\t\"request\": {\n\t\t\t\t\"method\": \"POST\",\n\t\t\t\t\"url\": \"{{baseUrl}}/users\",\n\t\t\t\t\"body\": {\n\t\t\t\t\t\"mode\": \"raw\",\n\t\t\t\t\t\"raw\": \"{\\\"name\\\":\\\"x\\\"}\",\n\t\t\t\t\t\"options\": { \"raw\": { \"language\": \"json\" } }\n\t\t\t\t},\n\t\t\t\t\"auth\": { \"type\": \"inherit\" }\n\t\t\t}\n\t\t}\n\t]\n}\n",
+			"options": {
+				"importEnvironments": false,
+				"importScripts": false
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Sample API",
+						"description": "Demo",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.example.com",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "bearer",
+							"token": "{{token}}"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"children": [
+							{
+								"name": "Users",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "none"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "List users",
+										"description": "",
+										"method": "GET",
+										"url": "{{baseUrl}}/users?page=1",
+										"params": [
+											{
+												"key": "page",
+												"value": "1",
+												"enabled": true
+											},
+											{
+												"key": "trace",
+												"value": "1",
+												"enabled": false
+											}
+										],
+										"headers": [
+											{
+												"key": "Accept",
+												"value": "application/json",
+												"enabled": true
+											}
+										],
+										"body": {
+											"mode": "none"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": ""
+									}
+								]
+							}
+						],
+						"requests": [
+							{
+								"name": "Create user",
+								"description": "",
+								"method": "POST",
+								"url": "{{baseUrl}}/users",
+								"params": [],
+								"headers": [],
+								"body": {
+									"mode": "json",
+									"content": "{\"name\":\"x\"}"
+								},
+								"auth": {
+									"mode": "inherit"
+								},
+								"preRequestScript": "",
+								"postRequestScript": ""
+							}
+						]
+					}
+				],
+				"environments": [],
+				"globals": {},
+				"meta": {
+					"format": "Postman Collection v2.1",
+					"requestCount": 2,
+					"folderCount": 1,
+					"environmentCount": 0,
+					"globalCount": 0,
+					"exampleCount": 0,
+					"skipped": [],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Sample API",
+						"description": "Demo",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.example.com",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "bearer",
+							"token": "{{token}}"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					},
+					{
+						"tempId": "c2",
+						"parentTempId": "c1",
+						"name": "Users",
+						"description": "",
+						"order": 0,
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c1",
+						"name": "Create user",
+						"description": "",
+						"method": "POST",
+						"url": "{{baseUrl}}/users",
+						"params": [],
+						"headers": [],
+						"body": {
+							"mode": "json",
+							"content": "{\"name\":\"x\"}"
+						},
+						"bodyType": "json",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					},
+					{
+						"tempId": "r2",
+						"collectionTempId": "c2",
+						"name": "List users",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}/users?page=1",
+						"params": [
+							{
+								"key": "page",
+								"value": "1",
+								"enabled": true
+							},
+							{
+								"key": "trace",
+								"value": "1",
+								"enabled": false
+							}
+						],
+						"headers": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"enabled": true
+							}
+						],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					}
+				],
+				"environments": [],
+				"specs": []
+			}
+		},
+		{
+			"name": "postman-v20",
+			"document": "{\n\t\"info\": {\n\t\t\"name\": \"Legacy API\",\n\t\t\"schema\": \"https://schema.getpostman.com/json/collection/v2.0.0/collection.json\"\n\t},\n\t\"item\": [\n\t\t{\n\t\t\t\"name\": \"Get thing\",\n\t\t\t\"request\": {\n\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\"url\": \"https://legacy.example.com/things?id=5\",\n\t\t\t\t\"auth\": { \"type\": \"bearer\", \"bearer\": { \"token\": \"LEGACY\" } }\n\t\t\t}\n\t\t}\n\t]\n}\n",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Legacy API",
+						"description": "",
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"children": [],
+						"requests": [
+							{
+								"name": "Get thing",
+								"description": "",
+								"method": "GET",
+								"url": "https://legacy.example.com/things?id=5",
+								"params": [
+									{
+										"key": "id",
+										"value": "5",
+										"enabled": true
+									}
+								],
+								"headers": [],
+								"body": {
+									"mode": "none"
+								},
+								"auth": {
+									"mode": "bearer",
+									"token": "LEGACY"
+								},
+								"preRequestScript": "",
+								"postRequestScript": ""
+							}
+						]
+					}
+				],
+				"environments": [],
+				"globals": {},
+				"meta": {
+					"format": "Postman Collection v2.0",
+					"requestCount": 1,
+					"folderCount": 0,
+					"environmentCount": 0,
+					"globalCount": 0,
+					"exampleCount": 0,
+					"skipped": [],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Legacy API",
+						"description": "",
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c1",
+						"name": "Get thing",
+						"description": "",
+						"method": "GET",
+						"url": "https://legacy.example.com/things?id=5",
+						"params": [
+							{
+								"key": "id",
+								"value": "5",
+								"enabled": true
+							}
+						],
+						"headers": [],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "bearer",
+							"token": "LEGACY"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					}
+				],
+				"environments": [],
+				"specs": []
+			}
+		},
+		{
+			"name": "postman-environment",
+			"document": "{\n\t\"id\": \"8f1c2a44-9c3e-4b0d-9f2a-1d7e5b6c0a11\",\n\t\"name\": \"Sample Staging\",\n\t\"values\": [\n\t\t{\n\t\t\t\"key\": \"baseUrl\",\n\t\t\t\"value\": \"https://staging.api.example.com\",\n\t\t\t\"type\": \"default\",\n\t\t\t\"enabled\": true\n\t\t},\n\t\t{\n\t\t\t\"key\": \"apiKey\",\n\t\t\t\"value\": \"test-api-key-1\",\n\t\t\t\"type\": \"secret\",\n\t\t\t\"enabled\": true\n\t\t},\n\t\t{\n\t\t\t\"key\": \"emptySecret\",\n\t\t\t\"value\": \"\",\n\t\t\t\"type\": \"secret\",\n\t\t\t\"enabled\": true\n\t\t},\n\t\t{\n\t\t\t\"key\": \"legacyHost\",\n\t\t\t\"value\": \"old.example.com\",\n\t\t\t\"type\": \"default\",\n\t\t\t\"enabled\": false\n\t\t},\n\t\t{\n\t\t\t\"key\": \"greeting\",\n\t\t\t\"value\": \"hello {{ user.name }}\",\n\t\t\t\"type\": \"default\",\n\t\t\t\"enabled\": true\n\t\t},\n\t\t{\n\t\t\t\"key\": \"\",\n\t\t\t\"value\": \"dropped - no key\",\n\t\t\t\"type\": \"default\",\n\t\t\t\"enabled\": true\n\t\t}\n\t],\n\t\"_postman_variable_scope\": \"environment\",\n\t\"_postman_exported_at\": \"2026-07-27T06:00:00.000Z\",\n\t\"_postman_exported_using\": \"Postman/11.62.3\"\n}\n",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"expected": {
+				"collections": [],
+				"environments": [
+					{
+						"name": "Sample Staging",
+						"description": "",
+						"variables": {
+							"baseUrl": {
+								"value": "https://staging.api.example.com",
+								"enabled": true
+							},
+							"apiKey": {
+								"value": "test-api-key-1",
+								"enabled": true,
+								"secret": true
+							},
+							"emptySecret": {
+								"value": "",
+								"enabled": true,
+								"secret": true
+							},
+							"legacyHost": {
+								"value": "old.example.com",
+								"enabled": false
+							},
+							"greeting": {
+								"value": "hello {{user.name}}",
+								"enabled": true
+							}
+						}
+					}
+				],
+				"globals": {},
+				"meta": {
+					"format": "Postman Environment",
+					"requestCount": 0,
+					"folderCount": 0,
+					"environmentCount": 1,
+					"globalCount": 0,
+					"exampleCount": 0,
+					"skipped": [],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [],
+				"requests": [],
+				"environments": [
+					{
+						"tempId": "e1",
+						"name": "Sample Staging",
+						"description": "",
+						"variables": {
+							"baseUrl": {
+								"value": "https://staging.api.example.com",
+								"enabled": true
+							},
+							"apiKey": {
+								"value": "test-api-key-1",
+								"enabled": true,
+								"secret": true
+							},
+							"emptySecret": {
+								"value": "",
+								"enabled": true,
+								"secret": true
+							},
+							"legacyHost": {
+								"value": "old.example.com",
+								"enabled": false
+							},
+							"greeting": {
+								"value": "hello {{user.name}}",
+								"enabled": true
+							}
+						}
+					}
+				],
+				"specs": []
+			}
+		},
+		{
+			"name": "postman-environment-off",
+			"document": "{\n\t\"id\": \"8f1c2a44-9c3e-4b0d-9f2a-1d7e5b6c0a11\",\n\t\"name\": \"Sample Staging\",\n\t\"values\": [\n\t\t{\n\t\t\t\"key\": \"baseUrl\",\n\t\t\t\"value\": \"https://staging.api.example.com\",\n\t\t\t\"type\": \"default\",\n\t\t\t\"enabled\": true\n\t\t},\n\t\t{\n\t\t\t\"key\": \"apiKey\",\n\t\t\t\"value\": \"test-api-key-1\",\n\t\t\t\"type\": \"secret\",\n\t\t\t\"enabled\": true\n\t\t},\n\t\t{\n\t\t\t\"key\": \"emptySecret\",\n\t\t\t\"value\": \"\",\n\t\t\t\"type\": \"secret\",\n\t\t\t\"enabled\": true\n\t\t},\n\t\t{\n\t\t\t\"key\": \"legacyHost\",\n\t\t\t\"value\": \"old.example.com\",\n\t\t\t\"type\": \"default\",\n\t\t\t\"enabled\": false\n\t\t},\n\t\t{\n\t\t\t\"key\": \"greeting\",\n\t\t\t\"value\": \"hello {{ user.name }}\",\n\t\t\t\"type\": \"default\",\n\t\t\t\"enabled\": true\n\t\t},\n\t\t{\n\t\t\t\"key\": \"\",\n\t\t\t\"value\": \"dropped - no key\",\n\t\t\t\"type\": \"default\",\n\t\t\t\"enabled\": true\n\t\t}\n\t],\n\t\"_postman_variable_scope\": \"environment\",\n\t\"_postman_exported_at\": \"2026-07-27T06:00:00.000Z\",\n\t\"_postman_exported_using\": \"Postman/11.62.3\"\n}\n",
+			"options": {
+				"importEnvironments": false,
+				"importScripts": false
+			},
+			"expected": {
+				"collections": [],
+				"environments": [],
+				"globals": {},
+				"meta": {
+					"format": "Postman Environment",
+					"requestCount": 0,
+					"folderCount": 0,
+					"environmentCount": 0,
+					"globalCount": 0,
+					"exampleCount": 0,
+					"skipped": [],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [],
+				"requests": [],
+				"environments": [],
+				"specs": []
+			}
+		},
+		{
+			"name": "postman-globals",
+			"document": "{\n\t\"id\": \"3c9d7e21-5a48-4f16-b8c2-6e0f9a4d2b73\",\n\t\"name\": \"Sample Workspace Globals\",\n\t\"values\": [\n\t\t{\n\t\t\t\"key\": \"apiHost\",\n\t\t\t\"value\": \"https://api.example.com\",\n\t\t\t\"type\": \"default\",\n\t\t\t\"enabled\": true\n\t\t},\n\t\t{\n\t\t\t\"key\": \"sharedToken\",\n\t\t\t\"value\": \"test-shared-token-1\",\n\t\t\t\"type\": \"secret\",\n\t\t\t\"enabled\": true\n\t\t},\n\t\t{\n\t\t\t\"key\": \"retiredFlag\",\n\t\t\t\"value\": \"off\",\n\t\t\t\"type\": \"default\",\n\t\t\t\"enabled\": false\n\t\t},\n\t\t{\n\t\t\t\"key\": \"banner\",\n\t\t\t\"value\": \"welcome {{ tenant }}\",\n\t\t\t\"type\": \"default\",\n\t\t\t\"enabled\": true\n\t\t}\n\t],\n\t\"_postman_variable_scope\": \"globals\",\n\t\"_postman_exported_at\": \"2026-07-28T09:00:00.000Z\",\n\t\"_postman_exported_using\": \"Postman/11.62.3\"\n}\n",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"expected": {
+				"collections": [],
+				"environments": [],
+				"globals": {
+					"apiHost": {
+						"value": "https://api.example.com",
+						"enabled": true
+					},
+					"sharedToken": {
+						"value": "test-shared-token-1",
+						"enabled": true,
+						"secret": true
+					},
+					"retiredFlag": {
+						"value": "off",
+						"enabled": false
+					},
+					"banner": {
+						"value": "welcome {{tenant}}",
+						"enabled": true
+					}
+				},
+				"meta": {
+					"format": "Postman Globals",
+					"requestCount": 0,
+					"folderCount": 0,
+					"environmentCount": 0,
+					"globalCount": 4,
+					"exampleCount": 0,
+					"skipped": [],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [],
+				"requests": [],
+				"environments": [],
+				"specs": []
+			}
+		},
+		{
+			"name": "postman-bodies",
+			"document": "{\"info\":{\"name\":\"Bodies\",\"schema\":\"https://schema.getpostman.com/json/collection/v2.1.0/\"},\"auth\":{\"type\":\"bearer\",\"bearer\":[{\"key\":\"token\",\"value\":\"{{ token }}\"}]},\"item\":[{\"name\":\"GraphQL\",\"request\":{\"method\":\"POST\",\"url\":{\"raw\":\"https://api.example.com/graphql\"},\"body\":{\"mode\":\"graphql\",\"graphql\":{\"query\":\"{ me { id } }\",\"variables\":\"{\\\"limit\\\": 10}\"}}}},{\"name\":\"Upload\",\"request\":{\"method\":\"POST\",\"url\":\"https://api.example.com/upload?tag=a&tag=b\",\"body\":{\"mode\":\"formdata\",\"formdata\":[{\"key\":\"file\",\"type\":\"file\",\"src\":[\"/tmp/a.png\",\"/tmp/b.png\"]},{\"key\":\"orphan\",\"type\":\"file\"},{\"key\":\"note\",\"value\":\"hi\"}]}},\"event\":[{\"listen\":\"prerequest\",\"script\":{\"exec\":[\"console.log(1)\",\"console.log(2)\"]}},{\"listen\":\"test\",\"script\":{\"exec\":\"pm.test()\"}}],\"protocolProfileBehavior\":{\"followRedirects\":false,\"maxRedirects\":3}},null,{\"name\":\"Folder\",\"item\":[{\"name\":\"Soap\",\"request\":{\"method\":\"POST\",\"url\":\"https://api.example.com/soap\",\"body\":{\"mode\":\"raw\",\"raw\":\"<x/>\",\"options\":{\"raw\":{\"language\":\"xml\"}}},\"auth\":{\"type\":\"awsv4\",\"awsv4\":[{\"key\":\"region\",\"value\":\"eu-1\"}]}},\"response\":[{\"name\":\"OK\",\"code\":200,\"header\":[{\"key\":\"Content-Type\",\"value\":\"application/xml\"}],\"body\":\"<y/>\"}]}],\"auth\":{\"type\":\"noauth\"}}],\"variable\":[{\"key\":\"token\",\"value\":\"abc\",\"type\":\"secret\"},{\"key\":\"off\",\"value\":\"x\",\"disabled\":true}]}",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Bodies",
+						"description": "",
+						"variables": {
+							"token": {
+								"value": "abc",
+								"enabled": true,
+								"secret": true
+							},
+							"off": {
+								"value": "x",
+								"enabled": false
+							}
+						},
+						"auth": {
+							"mode": "bearer",
+							"token": "{{token}}"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"children": [
+							{
+								"name": "Folder",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "noauth"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "Soap",
+										"description": "",
+										"method": "POST",
+										"url": "https://api.example.com/soap",
+										"params": [],
+										"headers": [
+											{
+												"key": "Content-Type",
+												"value": "application/xml",
+												"enabled": true
+											}
+										],
+										"body": {
+											"mode": "xml",
+											"content": "<x/>"
+										},
+										"auth": {
+											"mode": "aws",
+											"config": {
+												"region": "eu-1"
+											}
+										},
+										"preRequestScript": "",
+										"postRequestScript": "",
+										"examples": [
+											{
+												"name": "OK",
+												"status": 200,
+												"headers": [
+													{
+														"key": "Content-Type",
+														"value": "application/xml",
+														"enabled": true
+													}
+												],
+												"body": "<y/>",
+												"contentType": "application/xml"
+											}
+										]
+									}
+								]
+							}
+						],
+						"requests": [
+							{
+								"name": "GraphQL",
+								"description": "",
+								"method": "POST",
+								"url": "https://api.example.com/graphql",
+								"params": [],
+								"headers": [
+									{
+										"key": "Content-Type",
+										"value": "application/json",
+										"enabled": true
+									}
+								],
+								"body": {
+									"mode": "graphql",
+									"content": "{\"query\":\"{ me { id } }\",\"variables\":{\"limit\":10}}"
+								},
+								"auth": {
+									"mode": "inherit"
+								},
+								"preRequestScript": "",
+								"postRequestScript": ""
+							},
+							{
+								"name": "Upload",
+								"description": "",
+								"method": "POST",
+								"url": "https://api.example.com/upload?tag=a&tag=b",
+								"params": [
+									{
+										"key": "tag",
+										"value": "a",
+										"enabled": true
+									},
+									{
+										"key": "tag",
+										"value": "b",
+										"enabled": true
+									}
+								],
+								"headers": [],
+								"body": {
+									"mode": "form-data",
+									"fields": [
+										{
+											"key": "file",
+											"value": "",
+											"enabled": true,
+											"type": "file",
+											"src": "/tmp/a.png",
+											"fileName": "a.png",
+											"unresolved": true
+										},
+										{
+											"key": "file",
+											"value": "",
+											"enabled": true,
+											"type": "file",
+											"src": "/tmp/b.png",
+											"fileName": "b.png",
+											"unresolved": true
+										},
+										{
+											"key": "note",
+											"value": "hi",
+											"enabled": true
+										}
+									]
+								},
+								"auth": {
+									"mode": "inherit"
+								},
+								"preRequestScript": "console.log(1)\nconsole.log(2)",
+								"postRequestScript": "pm.test()",
+								"followRedirects": false,
+								"maxRedirects": 3
+							}
+						]
+					}
+				],
+				"environments": [],
+				"globals": {},
+				"meta": {
+					"format": "Postman Collection v2.1",
+					"requestCount": 3,
+					"folderCount": 1,
+					"environmentCount": 0,
+					"globalCount": 0,
+					"exampleCount": 1,
+					"skipped": [
+						{
+							"kind": "file_body",
+							"count": 1
+						},
+						{
+							"kind": "malformed_item",
+							"count": 1
+						}
+					],
+					"nonExecutableAuth": 1,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Bodies",
+						"description": "",
+						"variables": {
+							"token": {
+								"value": "abc",
+								"enabled": true,
+								"secret": true
+							},
+							"off": {
+								"value": "x",
+								"enabled": false
+							}
+						},
+						"auth": {
+							"mode": "bearer",
+							"token": "{{token}}"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					},
+					{
+						"tempId": "c2",
+						"parentTempId": "c1",
+						"name": "Folder",
+						"description": "",
+						"order": 0,
+						"variables": {},
+						"auth": {
+							"mode": "noauth"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c1",
+						"name": "GraphQL",
+						"description": "",
+						"method": "POST",
+						"url": "https://api.example.com/graphql",
+						"params": [],
+						"headers": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"enabled": true
+							}
+						],
+						"body": {
+							"mode": "graphql",
+							"content": "{\"query\":\"{ me { id } }\",\"variables\":{\"limit\":10}}"
+						},
+						"bodyType": "graphql",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					},
+					{
+						"tempId": "r2",
+						"collectionTempId": "c1",
+						"name": "Upload",
+						"description": "",
+						"method": "POST",
+						"url": "https://api.example.com/upload?tag=a&tag=b",
+						"params": [
+							{
+								"key": "tag",
+								"value": "a",
+								"enabled": true
+							},
+							{
+								"key": "tag",
+								"value": "b",
+								"enabled": true
+							}
+						],
+						"headers": [],
+						"body": {
+							"mode": "form-data",
+							"fields": [
+								{
+									"key": "file",
+									"value": "",
+									"enabled": true,
+									"type": "file",
+									"src": "/tmp/a.png",
+									"fileName": "a.png",
+									"unresolved": true
+								},
+								{
+									"key": "file",
+									"value": "",
+									"enabled": true,
+									"type": "file",
+									"src": "/tmp/b.png",
+									"fileName": "b.png",
+									"unresolved": true
+								},
+								{
+									"key": "note",
+									"value": "hi",
+									"enabled": true
+								}
+							]
+						},
+						"bodyType": "form-data",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "console.log(1)\nconsole.log(2)",
+						"postRequestScript": "pm.test()",
+						"followRedirects": false,
+						"maxRedirects": 3,
+						"order": 1
+					},
+					{
+						"tempId": "r3",
+						"collectionTempId": "c2",
+						"name": "Soap",
+						"description": "",
+						"method": "POST",
+						"url": "https://api.example.com/soap",
+						"params": [],
+						"headers": [
+							{
+								"key": "Content-Type",
+								"value": "application/xml",
+								"enabled": true
+							}
+						],
+						"body": {
+							"mode": "xml",
+							"content": "<x/>"
+						},
+						"bodyType": "xml",
+						"auth": {
+							"mode": "aws",
+							"config": {
+								"region": "eu-1"
+							}
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"examples": [
+							{
+								"name": "OK",
+								"status": 200,
+								"headers": [
+									{
+										"key": "Content-Type",
+										"value": "application/xml",
+										"enabled": true
+									}
+								],
+								"body": "<y/>",
+								"contentType": "application/xml"
+							}
+						],
+						"order": 0
+					}
+				],
+				"environments": [],
+				"specs": []
+			}
+		},
+		{
+			"name": "insomnia-v4",
+			"document": "{\n\t\"_type\": \"export\",\n\t\"__export_format\": 4,\n\t\"resources\": [\n\t\t{ \"_id\": \"wrk_1\", \"_type\": \"workspace\", \"name\": \"Acme\", \"description\": \"ws\" },\n\t\t{\n\t\t\t\"_id\": \"grp_1\",\n\t\t\t\"_type\": \"request_group\",\n\t\t\t\"parentId\": \"wrk_1\",\n\t\t\t\"name\": \"Users\",\n\t\t\t\"authentication\": { \"type\": \"bearer\", \"token\": \"{{ _.token }}\" }\n\t\t},\n\t\t{\n\t\t\t\"_id\": \"req_1\",\n\t\t\t\"_type\": \"request\",\n\t\t\t\"parentId\": \"grp_1\",\n\t\t\t\"name\": \"List\",\n\t\t\t\"method\": \"get\",\n\t\t\t\"url\": \"{{ _.baseUrl }}/users\",\n\t\t\t\"parameters\": [\n\t\t\t\t{ \"name\": \"page\", \"value\": \"1\" },\n\t\t\t\t{ \"name\": \"trace\", \"value\": \"1\", \"disabled\": true }\n\t\t\t],\n\t\t\t\"headers\": [{ \"name\": \"Accept\", \"value\": \"application/json\" }],\n\t\t\t\"body\": { \"mimeType\": \"application/json\", \"text\": \"{\\\"a\\\":1}\" }\n\t\t},\n\t\t{\n\t\t\t\"_id\": \"req_2\",\n\t\t\t\"_type\": \"request\",\n\t\t\t\"parentId\": \"wrk_1\",\n\t\t\t\"name\": \"Ping\",\n\t\t\t\"method\": \"get\",\n\t\t\t\"url\": \"{{ _.baseUrl }}/ping\"\n\t\t},\n\t\t{ \"_id\": \"grpc_1\", \"_type\": \"grpc_request\", \"parentId\": \"wrk_1\", \"name\": \"stream\" },\n\t\t{\n\t\t\t\"_id\": \"env_base\",\n\t\t\t\"_type\": \"environment\",\n\t\t\t\"parentId\": \"wrk_1\",\n\t\t\t\"name\": \"Base\",\n\t\t\t\"data\": { \"baseUrl\": \"https://api.acme.com\", \"timeout\": 30 }\n\t\t},\n\t\t{\n\t\t\t\"_id\": \"env_prod\",\n\t\t\t\"_type\": \"environment\",\n\t\t\t\"parentId\": \"env_base\",\n\t\t\t\"name\": \"Production\",\n\t\t\t\"data\": { \"baseUrl\": \"https://prod.acme.com\" }\n\t\t}\n\t]\n}\n",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Acme",
+						"description": "ws",
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"children": [
+							{
+								"name": "Users",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "bearer",
+									"token": "{{token}}"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "List",
+										"description": "",
+										"method": "GET",
+										"url": "{{baseUrl}}/users?page=1",
+										"params": [
+											{
+												"key": "page",
+												"value": "1",
+												"enabled": true
+											},
+											{
+												"key": "trace",
+												"value": "1",
+												"enabled": false
+											}
+										],
+										"headers": [
+											{
+												"key": "Accept",
+												"value": "application/json",
+												"enabled": true
+											}
+										],
+										"body": {
+											"mode": "json",
+											"content": "{\"a\":1}"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": ""
+									}
+								]
+							}
+						],
+						"requests": [
+							{
+								"name": "Ping",
+								"description": "",
+								"method": "GET",
+								"url": "{{baseUrl}}/ping",
+								"params": [],
+								"headers": [],
+								"body": {
+									"mode": "none"
+								},
+								"auth": {
+									"mode": "inherit"
+								},
+								"preRequestScript": "",
+								"postRequestScript": ""
+							}
+						]
+					}
+				],
+				"environments": [
+					{
+						"name": "Production",
+						"description": "",
+						"variables": {
+							"baseUrl": {
+								"value": "https://prod.acme.com",
+								"enabled": true
+							},
+							"timeout": {
+								"value": "30",
+								"enabled": true
+							}
+						}
+					}
+				],
+				"globals": {},
+				"meta": {
+					"format": "Insomnia Export v4",
+					"requestCount": 2,
+					"folderCount": 1,
+					"environmentCount": 1,
+					"globalCount": 0,
+					"exampleCount": 0,
+					"skipped": [
+						{
+							"kind": "grpc",
+							"count": 1
+						}
+					],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Acme",
+						"description": "ws",
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					},
+					{
+						"tempId": "c2",
+						"parentTempId": "c1",
+						"name": "Users",
+						"description": "",
+						"order": 0,
+						"variables": {},
+						"auth": {
+							"mode": "bearer",
+							"token": "{{token}}"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c1",
+						"name": "Ping",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}/ping",
+						"params": [],
+						"headers": [],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					},
+					{
+						"tempId": "r2",
+						"collectionTempId": "c2",
+						"name": "List",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}/users?page=1",
+						"params": [
+							{
+								"key": "page",
+								"value": "1",
+								"enabled": true
+							},
+							{
+								"key": "trace",
+								"value": "1",
+								"enabled": false
+							}
+						],
+						"headers": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"enabled": true
+							}
+						],
+						"body": {
+							"mode": "json",
+							"content": "{\"a\":1}"
+						},
+						"bodyType": "json",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					}
+				],
+				"environments": [
+					{
+						"tempId": "e1",
+						"name": "Production",
+						"description": "",
+						"variables": {
+							"baseUrl": {
+								"value": "https://prod.acme.com",
+								"enabled": true
+							},
+							"timeout": {
+								"value": "30",
+								"enabled": true
+							}
+						}
+					}
+				],
+				"specs": []
+			}
+		},
+		{
+			"name": "insomnia-v4-off",
+			"document": "{\n\t\"_type\": \"export\",\n\t\"__export_format\": 4,\n\t\"resources\": [\n\t\t{ \"_id\": \"wrk_1\", \"_type\": \"workspace\", \"name\": \"Acme\", \"description\": \"ws\" },\n\t\t{\n\t\t\t\"_id\": \"grp_1\",\n\t\t\t\"_type\": \"request_group\",\n\t\t\t\"parentId\": \"wrk_1\",\n\t\t\t\"name\": \"Users\",\n\t\t\t\"authentication\": { \"type\": \"bearer\", \"token\": \"{{ _.token }}\" }\n\t\t},\n\t\t{\n\t\t\t\"_id\": \"req_1\",\n\t\t\t\"_type\": \"request\",\n\t\t\t\"parentId\": \"grp_1\",\n\t\t\t\"name\": \"List\",\n\t\t\t\"method\": \"get\",\n\t\t\t\"url\": \"{{ _.baseUrl }}/users\",\n\t\t\t\"parameters\": [\n\t\t\t\t{ \"name\": \"page\", \"value\": \"1\" },\n\t\t\t\t{ \"name\": \"trace\", \"value\": \"1\", \"disabled\": true }\n\t\t\t],\n\t\t\t\"headers\": [{ \"name\": \"Accept\", \"value\": \"application/json\" }],\n\t\t\t\"body\": { \"mimeType\": \"application/json\", \"text\": \"{\\\"a\\\":1}\" }\n\t\t},\n\t\t{\n\t\t\t\"_id\": \"req_2\",\n\t\t\t\"_type\": \"request\",\n\t\t\t\"parentId\": \"wrk_1\",\n\t\t\t\"name\": \"Ping\",\n\t\t\t\"method\": \"get\",\n\t\t\t\"url\": \"{{ _.baseUrl }}/ping\"\n\t\t},\n\t\t{ \"_id\": \"grpc_1\", \"_type\": \"grpc_request\", \"parentId\": \"wrk_1\", \"name\": \"stream\" },\n\t\t{\n\t\t\t\"_id\": \"env_base\",\n\t\t\t\"_type\": \"environment\",\n\t\t\t\"parentId\": \"wrk_1\",\n\t\t\t\"name\": \"Base\",\n\t\t\t\"data\": { \"baseUrl\": \"https://api.acme.com\", \"timeout\": 30 }\n\t\t},\n\t\t{\n\t\t\t\"_id\": \"env_prod\",\n\t\t\t\"_type\": \"environment\",\n\t\t\t\"parentId\": \"env_base\",\n\t\t\t\"name\": \"Production\",\n\t\t\t\"data\": { \"baseUrl\": \"https://prod.acme.com\" }\n\t\t}\n\t]\n}\n",
+			"options": {
+				"importEnvironments": false,
+				"importScripts": false
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Acme",
+						"description": "ws",
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"children": [
+							{
+								"name": "Users",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "bearer",
+									"token": "{{token}}"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "List",
+										"description": "",
+										"method": "GET",
+										"url": "{{baseUrl}}/users?page=1",
+										"params": [
+											{
+												"key": "page",
+												"value": "1",
+												"enabled": true
+											},
+											{
+												"key": "trace",
+												"value": "1",
+												"enabled": false
+											}
+										],
+										"headers": [
+											{
+												"key": "Accept",
+												"value": "application/json",
+												"enabled": true
+											}
+										],
+										"body": {
+											"mode": "json",
+											"content": "{\"a\":1}"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": ""
+									}
+								]
+							}
+						],
+						"requests": [
+							{
+								"name": "Ping",
+								"description": "",
+								"method": "GET",
+								"url": "{{baseUrl}}/ping",
+								"params": [],
+								"headers": [],
+								"body": {
+									"mode": "none"
+								},
+								"auth": {
+									"mode": "inherit"
+								},
+								"preRequestScript": "",
+								"postRequestScript": ""
+							}
+						]
+					}
+				],
+				"environments": [],
+				"globals": {},
+				"meta": {
+					"format": "Insomnia Export v4",
+					"requestCount": 2,
+					"folderCount": 1,
+					"environmentCount": 0,
+					"globalCount": 0,
+					"exampleCount": 0,
+					"skipped": [
+						{
+							"kind": "grpc",
+							"count": 1
+						}
+					],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Acme",
+						"description": "ws",
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					},
+					{
+						"tempId": "c2",
+						"parentTempId": "c1",
+						"name": "Users",
+						"description": "",
+						"order": 0,
+						"variables": {},
+						"auth": {
+							"mode": "bearer",
+							"token": "{{token}}"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c1",
+						"name": "Ping",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}/ping",
+						"params": [],
+						"headers": [],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					},
+					{
+						"tempId": "r2",
+						"collectionTempId": "c2",
+						"name": "List",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}/users?page=1",
+						"params": [
+							{
+								"key": "page",
+								"value": "1",
+								"enabled": true
+							},
+							{
+								"key": "trace",
+								"value": "1",
+								"enabled": false
+							}
+						],
+						"headers": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"enabled": true
+							}
+						],
+						"body": {
+							"mode": "json",
+							"content": "{\"a\":1}"
+						},
+						"bodyType": "json",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					}
+				],
+				"environments": [],
+				"specs": []
+			}
+		},
+		{
+			"name": "insomnia-bodies",
+			"document": "{\"_type\":\"export\",\"__export_format\":4,\"resources\":[{\"_id\":\"wrk_1\",\"_type\":\"workspace\",\"name\":\"Space\",\"environment\":{\"base\":\"https://x\"}},{\"_id\":\"req_1\",\"_type\":\"request\",\"parentId\":\"wrk_1\",\"name\":\"Graph\",\"method\":\"post\",\"url\":\"https://api.example.com/graphql\",\"body\":{\"mimeType\":\"application/graphql\",\"text\":\"{ me { id } }\"},\"authentication\":{\"type\":\"bearer\",\"token\":\"t\",\"prefix\":\"Token\"},\"settingFollowRedirects\":\"off\"},{\"_id\":\"grp_1\",\"_type\":\"request_group\",\"parentId\":\"wrk_1\",\"name\":\"Folder\",\"authentication\":{\"type\":\"iam\",\"accessKeyId\":\"AK\"}},{\"_id\":\"req_2\",\"_type\":\"request\",\"parentId\":\"grp_1\",\"name\":\"Form\",\"method\":\"POST\",\"url\":\"https://api.example.com/upload\",\"body\":{\"mimeType\":\"multipart/form-data\",\"params\":[{\"name\":\"file\",\"type\":\"file\",\"fileName\":\"/tmp/a.png\"},{\"name\":\"empty\",\"type\":\"file\"},{\"name\":\"note\",\"value\":\"hi\"}]},\"headers\":[{\"name\":\"X-A\",\"value\":\"1\",\"disabled\":true}],\"parameters\":[{\"name\":\"q\",\"value\":\"{{ _.term }}\"}]},{\"_id\":\"ws_1\",\"_type\":\"websocket_request\",\"parentId\":\"wrk_1\"},{\"_id\":\"grpc_1\",\"_type\":\"grpc_request\",\"parentId\":\"wrk_1\"},{\"_id\":\"env_base\",\"_type\":\"environment\",\"parentId\":\"wrk_1\",\"name\":\"Base\",\"data\":{\"a\":\"1\"}},{\"_id\":\"env_sub\",\"_type\":\"environment\",\"parentId\":\"env_base\",\"name\":\"Prod\",\"data\":{\"a\":\"2\",\"b\":\"3\"}}]}",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Space",
+						"description": "",
+						"variables": {
+							"base": {
+								"value": "https://x",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"children": [
+							{
+								"name": "Folder",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "aws",
+									"config": {
+										"accessKeyId": "AK"
+									}
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "Form",
+										"description": "",
+										"method": "POST",
+										"url": "https://api.example.com/upload?q={{term}}",
+										"params": [
+											{
+												"key": "q",
+												"value": "{{term}}",
+												"enabled": true
+											}
+										],
+										"headers": [
+											{
+												"key": "X-A",
+												"value": "1",
+												"enabled": false
+											}
+										],
+										"body": {
+											"mode": "form-data",
+											"fields": [
+												{
+													"key": "file",
+													"value": "",
+													"enabled": true,
+													"type": "file",
+													"src": "/tmp/a.png",
+													"fileName": "a.png",
+													"unresolved": true
+												},
+												{
+													"key": "note",
+													"value": "hi",
+													"enabled": true
+												}
+											]
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": ""
+									}
+								]
+							}
+						],
+						"requests": [
+							{
+								"name": "Graph",
+								"description": "",
+								"method": "POST",
+								"url": "https://api.example.com/graphql",
+								"params": [],
+								"headers": [
+									{
+										"key": "Content-Type",
+										"value": "application/json",
+										"enabled": true
+									}
+								],
+								"body": {
+									"mode": "graphql",
+									"content": "{\"query\":\"{ me { id } }\"}"
+								},
+								"auth": {
+									"mode": "apikey",
+									"key": "Authorization",
+									"value": "Token t",
+									"in": "header"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"followRedirects": false
+							}
+						]
+					}
+				],
+				"environments": [
+					{
+						"name": "Prod",
+						"description": "",
+						"variables": {
+							"a": {
+								"value": "2",
+								"enabled": true
+							},
+							"b": {
+								"value": "3",
+								"enabled": true
+							}
+						}
+					}
+				],
+				"globals": {},
+				"meta": {
+					"format": "Insomnia Export v4",
+					"requestCount": 2,
+					"folderCount": 1,
+					"environmentCount": 1,
+					"globalCount": 0,
+					"exampleCount": 0,
+					"skipped": [
+						{
+							"kind": "websocket",
+							"count": 1
+						},
+						{
+							"kind": "grpc",
+							"count": 1
+						},
+						{
+							"kind": "file_body",
+							"count": 1
+						}
+					],
+					"nonExecutableAuth": 1,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Space",
+						"description": "",
+						"variables": {
+							"base": {
+								"value": "https://x",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					},
+					{
+						"tempId": "c2",
+						"parentTempId": "c1",
+						"name": "Folder",
+						"description": "",
+						"order": 0,
+						"variables": {},
+						"auth": {
+							"mode": "aws",
+							"config": {
+								"accessKeyId": "AK"
+							}
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c1",
+						"name": "Graph",
+						"description": "",
+						"method": "POST",
+						"url": "https://api.example.com/graphql",
+						"params": [],
+						"headers": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"enabled": true
+							}
+						],
+						"body": {
+							"mode": "graphql",
+							"content": "{\"query\":\"{ me { id } }\"}"
+						},
+						"bodyType": "graphql",
+						"auth": {
+							"mode": "apikey",
+							"key": "Authorization",
+							"value": "Token t",
+							"in": "header"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"followRedirects": false,
+						"order": 0
+					},
+					{
+						"tempId": "r2",
+						"collectionTempId": "c2",
+						"name": "Form",
+						"description": "",
+						"method": "POST",
+						"url": "https://api.example.com/upload?q={{term}}",
+						"params": [
+							{
+								"key": "q",
+								"value": "{{term}}",
+								"enabled": true
+							}
+						],
+						"headers": [
+							{
+								"key": "X-A",
+								"value": "1",
+								"enabled": false
+							}
+						],
+						"body": {
+							"mode": "form-data",
+							"fields": [
+								{
+									"key": "file",
+									"value": "",
+									"enabled": true,
+									"type": "file",
+									"src": "/tmp/a.png",
+									"fileName": "a.png",
+									"unresolved": true
+								},
+								{
+									"key": "note",
+									"value": "hi",
+									"enabled": true
+								}
+							]
+						},
+						"bodyType": "form-data",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					}
+				],
+				"environments": [
+					{
+						"tempId": "e1",
+						"name": "Prod",
+						"description": "",
+						"variables": {
+							"a": {
+								"value": "2",
+								"enabled": true
+							},
+							"b": {
+								"value": "3",
+								"enabled": true
+							}
+						}
+					}
+				],
+				"specs": []
+			}
+		},
+		{
+			"name": "openapi-v3",
+			"document": "{\n\t\"openapi\": \"3.0.1\",\n\t\"info\": { \"title\": \"Pet API\", \"description\": \"pets\" },\n\t\"servers\": [{ \"url\": \"https://api.pets.com/v1\" }],\n\t\"components\": {\n\t\t\"securitySchemes\": { \"bearerAuth\": { \"type\": \"http\", \"scheme\": \"bearer\" } },\n\t\t\"schemas\": {\n\t\t\t\"Pet\": {\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": { \"id\": { \"type\": \"integer\" }, \"name\": { \"type\": \"string\" } }\n\t\t\t}\n\t\t}\n\t},\n\t\"security\": [{ \"bearerAuth\": [] }],\n\t\"tags\": [{ \"name\": \"pets\", \"description\": \"Pet ops\" }],\n\t\"paths\": {\n\t\t\"/pets/{petId}\": {\n\t\t\t\"get\": {\n\t\t\t\t\"summary\": \"Get pet\",\n\t\t\t\t\"tags\": [\"pets\"],\n\t\t\t\t\"operationId\": \"getPet\",\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"petId\",\n\t\t\t\t\t\t\"in\": \"path\",\n\t\t\t\t\t\t\"required\": true,\n\t\t\t\t\t\t\"schema\": { \"type\": \"string\" }\n\t\t\t\t\t},\n\t\t\t\t\t{ \"name\": \"verbose\", \"in\": \"query\", \"schema\": { \"type\": \"boolean\" } },\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"X-Request-Id\",\n\t\t\t\t\t\t\"in\": \"header\",\n\t\t\t\t\t\t\"schema\": { \"type\": \"string\" }\n\t\t\t\t\t}\n\t\t\t\t]\n\t\t\t}\n\t\t},\n\t\t\"/pets\": {\n\t\t\t\"post\": {\n\t\t\t\t\"summary\": \"Create pet\",\n\t\t\t\t\"tags\": [\"pets\"],\n\t\t\t\t\"operationId\": \"createPet\",\n\t\t\t\t\"requestBody\": {\n\t\t\t\t\t\"content\": {\n\t\t\t\t\t\t\"application/json\": { \"schema\": { \"$ref\": \"#/components/schemas/Pet\" } }\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t},\n\t\t\"/health\": { \"get\": { \"summary\": \"Health\" } }\n\t}\n}\n",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"source": {
+				"fileName": "openapi-v3.json"
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Pet API",
+						"description": "pets",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.pets.com/v1",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "bearer",
+							"token": ""
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"children": [
+							{
+								"name": "pets",
+								"description": "Pet ops",
+								"variables": {},
+								"auth": {
+									"mode": "none"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "Get pet",
+										"description": "",
+										"method": "GET",
+										"url": "{{baseUrl}}/pets/{{petId}}",
+										"params": [
+											{
+												"key": "verbose",
+												"value": "",
+												"enabled": false
+											}
+										],
+										"headers": [
+											{
+												"key": "X-Request-Id",
+												"value": "",
+												"enabled": false
+											}
+										],
+										"body": {
+											"mode": "none"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": "",
+										"specOperation": {
+											"operationId": "getPet",
+											"method": "GET",
+											"path": "/pets/{petId}"
+										}
+									},
+									{
+										"name": "Create pet",
+										"description": "",
+										"method": "POST",
+										"url": "{{baseUrl}}/pets",
+										"params": [],
+										"headers": [],
+										"body": {
+											"mode": "json",
+											"content": "{\n  \"id\": 0,\n  \"name\": \"\"\n}"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": "",
+										"specOperation": {
+											"operationId": "createPet",
+											"method": "POST",
+											"path": "/pets"
+										}
+									}
+								]
+							},
+							{
+								"name": "health",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "none"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "Health",
+										"description": "",
+										"method": "GET",
+										"url": "{{baseUrl}}/health",
+										"params": [],
+										"headers": [],
+										"body": {
+											"mode": "none"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": "",
+										"specOperation": {
+											"method": "GET",
+											"path": "/health"
+										}
+									}
+								]
+							}
+						],
+						"requests": [],
+						"spec": {
+							"content": "{\n\t\"openapi\": \"3.0.1\",\n\t\"info\": { \"title\": \"Pet API\", \"description\": \"pets\" },\n\t\"servers\": [{ \"url\": \"https://api.pets.com/v1\" }],\n\t\"components\": {\n\t\t\"securitySchemes\": { \"bearerAuth\": { \"type\": \"http\", \"scheme\": \"bearer\" } },\n\t\t\"schemas\": {\n\t\t\t\"Pet\": {\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": { \"id\": { \"type\": \"integer\" }, \"name\": { \"type\": \"string\" } }\n\t\t\t}\n\t\t}\n\t},\n\t\"security\": [{ \"bearerAuth\": [] }],\n\t\"tags\": [{ \"name\": \"pets\", \"description\": \"Pet ops\" }],\n\t\"paths\": {\n\t\t\"/pets/{petId}\": {\n\t\t\t\"get\": {\n\t\t\t\t\"summary\": \"Get pet\",\n\t\t\t\t\"tags\": [\"pets\"],\n\t\t\t\t\"operationId\": \"getPet\",\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"petId\",\n\t\t\t\t\t\t\"in\": \"path\",\n\t\t\t\t\t\t\"required\": true,\n\t\t\t\t\t\t\"schema\": { \"type\": \"string\" }\n\t\t\t\t\t},\n\t\t\t\t\t{ \"name\": \"verbose\", \"in\": \"query\", \"schema\": { \"type\": \"boolean\" } },\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"X-Request-Id\",\n\t\t\t\t\t\t\"in\": \"header\",\n\t\t\t\t\t\t\"schema\": { \"type\": \"string\" }\n\t\t\t\t\t}\n\t\t\t\t]\n\t\t\t}\n\t\t},\n\t\t\"/pets\": {\n\t\t\t\"post\": {\n\t\t\t\t\"summary\": \"Create pet\",\n\t\t\t\t\"tags\": [\"pets\"],\n\t\t\t\t\"operationId\": \"createPet\",\n\t\t\t\t\"requestBody\": {\n\t\t\t\t\t\"content\": {\n\t\t\t\t\t\t\"application/json\": { \"schema\": { \"$ref\": \"#/components/schemas/Pet\" } }\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t},\n\t\t\"/health\": { \"get\": { \"summary\": \"Health\" } }\n\t}\n}\n"
+						}
+					}
+				],
+				"environments": [],
+				"globals": {},
+				"meta": {
+					"format": "OpenAPI 3.0",
+					"requestCount": 3,
+					"folderCount": 2,
+					"folderStrategy": "mixed",
+					"environmentCount": 0,
+					"globalCount": 0,
+					"exampleCount": 0,
+					"skipped": [],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0,
+					"fileName": "openapi-v3.json"
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Pet API",
+						"description": "pets",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.pets.com/v1",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "bearer",
+							"token": ""
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"openapi": {
+							"specTempId": "s1"
+						}
+					},
+					{
+						"tempId": "c2",
+						"parentTempId": "c1",
+						"name": "pets",
+						"description": "Pet ops",
+						"order": 0,
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					},
+					{
+						"tempId": "c3",
+						"parentTempId": "c1",
+						"name": "health",
+						"description": "",
+						"order": 1,
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c2",
+						"name": "Get pet",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}/pets/{{petId}}",
+						"params": [
+							{
+								"key": "verbose",
+								"value": "",
+								"enabled": false
+							}
+						],
+						"headers": [
+							{
+								"key": "X-Request-Id",
+								"value": "",
+								"enabled": false
+							}
+						],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"specOperation": {
+							"operationId": "getPet",
+							"method": "GET",
+							"path": "/pets/{petId}"
+						},
+						"order": 0
+					},
+					{
+						"tempId": "r2",
+						"collectionTempId": "c2",
+						"name": "Create pet",
+						"description": "",
+						"method": "POST",
+						"url": "{{baseUrl}}/pets",
+						"params": [],
+						"headers": [],
+						"body": {
+							"mode": "json",
+							"content": "{\n  \"id\": 0,\n  \"name\": \"\"\n}"
+						},
+						"bodyType": "json",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"specOperation": {
+							"operationId": "createPet",
+							"method": "POST",
+							"path": "/pets"
+						},
+						"order": 1
+					},
+					{
+						"tempId": "r3",
+						"collectionTempId": "c3",
+						"name": "Health",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}/health",
+						"params": [],
+						"headers": [],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"specOperation": {
+							"method": "GET",
+							"path": "/health"
+						},
+						"order": 0
+					}
+				],
+				"environments": [],
+				"specs": [
+					{
+						"tempId": "s1",
+						"content": "{\n\t\"openapi\": \"3.0.1\",\n\t\"info\": { \"title\": \"Pet API\", \"description\": \"pets\" },\n\t\"servers\": [{ \"url\": \"https://api.pets.com/v1\" }],\n\t\"components\": {\n\t\t\"securitySchemes\": { \"bearerAuth\": { \"type\": \"http\", \"scheme\": \"bearer\" } },\n\t\t\"schemas\": {\n\t\t\t\"Pet\": {\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": { \"id\": { \"type\": \"integer\" }, \"name\": { \"type\": \"string\" } }\n\t\t\t}\n\t\t}\n\t},\n\t\"security\": [{ \"bearerAuth\": [] }],\n\t\"tags\": [{ \"name\": \"pets\", \"description\": \"Pet ops\" }],\n\t\"paths\": {\n\t\t\"/pets/{petId}\": {\n\t\t\t\"get\": {\n\t\t\t\t\"summary\": \"Get pet\",\n\t\t\t\t\"tags\": [\"pets\"],\n\t\t\t\t\"operationId\": \"getPet\",\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"petId\",\n\t\t\t\t\t\t\"in\": \"path\",\n\t\t\t\t\t\t\"required\": true,\n\t\t\t\t\t\t\"schema\": { \"type\": \"string\" }\n\t\t\t\t\t},\n\t\t\t\t\t{ \"name\": \"verbose\", \"in\": \"query\", \"schema\": { \"type\": \"boolean\" } },\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"X-Request-Id\",\n\t\t\t\t\t\t\"in\": \"header\",\n\t\t\t\t\t\t\"schema\": { \"type\": \"string\" }\n\t\t\t\t\t}\n\t\t\t\t]\n\t\t\t}\n\t\t},\n\t\t\"/pets\": {\n\t\t\t\"post\": {\n\t\t\t\t\"summary\": \"Create pet\",\n\t\t\t\t\"tags\": [\"pets\"],\n\t\t\t\t\"operationId\": \"createPet\",\n\t\t\t\t\"requestBody\": {\n\t\t\t\t\t\"content\": {\n\t\t\t\t\t\t\"application/json\": { \"schema\": { \"$ref\": \"#/components/schemas/Pet\" } }\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t},\n\t\t\"/health\": { \"get\": { \"summary\": \"Health\" } }\n\t}\n}\n"
+					}
+				]
+			}
+		},
+		{
+			"name": "swagger-v2",
+			"document": "{\n\t\"swagger\": \"2.0\",\n\t\"info\": { \"title\": \"Store API\", \"description\": \"store\" },\n\t\"host\": \"api.store.com\",\n\t\"basePath\": \"/v2\",\n\t\"schemes\": [\"https\"],\n\t\"securityDefinitions\": { \"apiKey\": { \"type\": \"apiKey\", \"name\": \"X-API-Key\", \"in\": \"header\" } },\n\t\"security\": [{ \"apiKey\": [] }],\n\t\"definitions\": {\n\t\t\"Order\": {\n\t\t\t\"type\": \"object\",\n\t\t\t\"properties\": { \"id\": { \"type\": \"integer\" }, \"status\": { \"type\": \"string\" } }\n\t\t}\n\t},\n\t\"tags\": [{ \"name\": \"orders\" }],\n\t\"paths\": {\n\t\t\"/orders\": {\n\t\t\t\"post\": {\n\t\t\t\t\"summary\": \"Place order\",\n\t\t\t\t\"tags\": [\"orders\"],\n\t\t\t\t\"consumes\": [\"application/json\"],\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{ \"name\": \"body\", \"in\": \"body\", \"schema\": { \"$ref\": \"#/definitions/Order\" } }\n\t\t\t\t]\n\t\t\t},\n\t\t\t\"get\": {\n\t\t\t\t\"summary\": \"List orders\",\n\t\t\t\t\"tags\": [\"orders\"],\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"status\",\n\t\t\t\t\t\t\"in\": \"query\",\n\t\t\t\t\t\t\"type\": \"array\",\n\t\t\t\t\t\t\"collectionFormat\": \"multi\",\n\t\t\t\t\t\t\"items\": { \"type\": \"string\" }\n\t\t\t\t\t},\n\t\t\t\t\t{ \"name\": \"X-Request-Id\", \"in\": \"header\", \"type\": \"string\" }\n\t\t\t\t]\n\t\t\t}\n\t\t}\n\t}\n}\n",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Store API",
+						"description": "store",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.store.com/v2",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "apikey",
+							"key": "X-API-Key",
+							"value": "",
+							"in": "header"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"children": [
+							{
+								"name": "orders",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "none"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "List orders",
+										"description": "",
+										"method": "GET",
+										"url": "{{baseUrl}}/orders",
+										"params": [
+											{
+												"key": "status",
+												"value": "",
+												"enabled": false
+											}
+										],
+										"headers": [
+											{
+												"key": "X-Request-Id",
+												"value": "",
+												"enabled": false
+											}
+										],
+										"body": {
+											"mode": "none"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": "",
+										"specOperation": {
+											"method": "GET",
+											"path": "/orders"
+										}
+									},
+									{
+										"name": "Place order",
+										"description": "",
+										"method": "POST",
+										"url": "{{baseUrl}}/orders",
+										"params": [],
+										"headers": [],
+										"body": {
+											"mode": "json",
+											"content": "{\n  \"id\": 0,\n  \"status\": \"\"\n}"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": "",
+										"specOperation": {
+											"method": "POST",
+											"path": "/orders"
+										}
+									}
+								]
+							}
+						],
+						"requests": [],
+						"spec": {
+							"content": "{\n\t\"swagger\": \"2.0\",\n\t\"info\": { \"title\": \"Store API\", \"description\": \"store\" },\n\t\"host\": \"api.store.com\",\n\t\"basePath\": \"/v2\",\n\t\"schemes\": [\"https\"],\n\t\"securityDefinitions\": { \"apiKey\": { \"type\": \"apiKey\", \"name\": \"X-API-Key\", \"in\": \"header\" } },\n\t\"security\": [{ \"apiKey\": [] }],\n\t\"definitions\": {\n\t\t\"Order\": {\n\t\t\t\"type\": \"object\",\n\t\t\t\"properties\": { \"id\": { \"type\": \"integer\" }, \"status\": { \"type\": \"string\" } }\n\t\t}\n\t},\n\t\"tags\": [{ \"name\": \"orders\" }],\n\t\"paths\": {\n\t\t\"/orders\": {\n\t\t\t\"post\": {\n\t\t\t\t\"summary\": \"Place order\",\n\t\t\t\t\"tags\": [\"orders\"],\n\t\t\t\t\"consumes\": [\"application/json\"],\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{ \"name\": \"body\", \"in\": \"body\", \"schema\": { \"$ref\": \"#/definitions/Order\" } }\n\t\t\t\t]\n\t\t\t},\n\t\t\t\"get\": {\n\t\t\t\t\"summary\": \"List orders\",\n\t\t\t\t\"tags\": [\"orders\"],\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"status\",\n\t\t\t\t\t\t\"in\": \"query\",\n\t\t\t\t\t\t\"type\": \"array\",\n\t\t\t\t\t\t\"collectionFormat\": \"multi\",\n\t\t\t\t\t\t\"items\": { \"type\": \"string\" }\n\t\t\t\t\t},\n\t\t\t\t\t{ \"name\": \"X-Request-Id\", \"in\": \"header\", \"type\": \"string\" }\n\t\t\t\t]\n\t\t\t}\n\t\t}\n\t}\n}\n"
+						}
+					}
+				],
+				"environments": [],
+				"globals": {},
+				"meta": {
+					"format": "OpenAPI 2.0 (Swagger)",
+					"requestCount": 2,
+					"folderCount": 1,
+					"folderStrategy": "tags",
+					"environmentCount": 0,
+					"globalCount": 0,
+					"exampleCount": 0,
+					"skipped": [],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Store API",
+						"description": "store",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.store.com/v2",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "apikey",
+							"key": "X-API-Key",
+							"value": "",
+							"in": "header"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"openapi": {
+							"specTempId": "s1"
+						}
+					},
+					{
+						"tempId": "c2",
+						"parentTempId": "c1",
+						"name": "orders",
+						"description": "",
+						"order": 0,
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c2",
+						"name": "List orders",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}/orders",
+						"params": [
+							{
+								"key": "status",
+								"value": "",
+								"enabled": false
+							}
+						],
+						"headers": [
+							{
+								"key": "X-Request-Id",
+								"value": "",
+								"enabled": false
+							}
+						],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"specOperation": {
+							"method": "GET",
+							"path": "/orders"
+						},
+						"order": 0
+					},
+					{
+						"tempId": "r2",
+						"collectionTempId": "c2",
+						"name": "Place order",
+						"description": "",
+						"method": "POST",
+						"url": "{{baseUrl}}/orders",
+						"params": [],
+						"headers": [],
+						"body": {
+							"mode": "json",
+							"content": "{\n  \"id\": 0,\n  \"status\": \"\"\n}"
+						},
+						"bodyType": "json",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"specOperation": {
+							"method": "POST",
+							"path": "/orders"
+						},
+						"order": 1
+					}
+				],
+				"environments": [],
+				"specs": [
+					{
+						"tempId": "s1",
+						"content": "{\n\t\"swagger\": \"2.0\",\n\t\"info\": { \"title\": \"Store API\", \"description\": \"store\" },\n\t\"host\": \"api.store.com\",\n\t\"basePath\": \"/v2\",\n\t\"schemes\": [\"https\"],\n\t\"securityDefinitions\": { \"apiKey\": { \"type\": \"apiKey\", \"name\": \"X-API-Key\", \"in\": \"header\" } },\n\t\"security\": [{ \"apiKey\": [] }],\n\t\"definitions\": {\n\t\t\"Order\": {\n\t\t\t\"type\": \"object\",\n\t\t\t\"properties\": { \"id\": { \"type\": \"integer\" }, \"status\": { \"type\": \"string\" } }\n\t\t}\n\t},\n\t\"tags\": [{ \"name\": \"orders\" }],\n\t\"paths\": {\n\t\t\"/orders\": {\n\t\t\t\"post\": {\n\t\t\t\t\"summary\": \"Place order\",\n\t\t\t\t\"tags\": [\"orders\"],\n\t\t\t\t\"consumes\": [\"application/json\"],\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{ \"name\": \"body\", \"in\": \"body\", \"schema\": { \"$ref\": \"#/definitions/Order\" } }\n\t\t\t\t]\n\t\t\t},\n\t\t\t\"get\": {\n\t\t\t\t\"summary\": \"List orders\",\n\t\t\t\t\"tags\": [\"orders\"],\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"status\",\n\t\t\t\t\t\t\"in\": \"query\",\n\t\t\t\t\t\t\"type\": \"array\",\n\t\t\t\t\t\t\"collectionFormat\": \"multi\",\n\t\t\t\t\t\t\"items\": { \"type\": \"string\" }\n\t\t\t\t\t},\n\t\t\t\t\t{ \"name\": \"X-Request-Id\", \"in\": \"header\", \"type\": \"string\" }\n\t\t\t\t]\n\t\t\t}\n\t\t}\n\t}\n}\n"
+					}
+				]
+			}
+		},
+		{
+			"name": "openapi-v3-yaml-relative-server",
+			"document": "openapi: 3.0.0\ninfo:\n  title: Relative Server\n  description: A YAML document whose server URL is relative.\nservers:\n  - url: ../v2\npaths:\n  /pets/{petId}:\n    parameters:\n      - name: petId\n        in: path\n        required: true\n        schema: { type: string }\n    get:\n      operationId: getPet\n      summary: Get a pet\n      tags: [pets]\n      parameters:\n        - name: verbose\n          in: query\n          schema: { type: boolean }\n        - name: X-Trace\n          in: header\n          required: true\n          schema: { type: string }\n        - name: session\n          in: cookie\n          schema: { type: string }\n      responses:\n        \"200\":\n          description: A pet\n          content:\n            application/json:\n              schema:\n                type: object\n                properties:\n                  id: { type: string }\n                  age: { type: integer }\n        default:\n          description: Anything else\n        \"2XX\":\n          description: A wildcard\n    trace:\n      summary: Not a Vayu verb\n      responses:\n        \"200\": { description: ok }\n",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"source": {
+				"sourceUrl": "https://api.example.com/specs/openapi.yaml",
+				"unresolvedRefs": 2
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Relative Server",
+						"description": "A YAML document whose server URL is relative.",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.example.com/v2",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"children": [
+							{
+								"name": "pets",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "none"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "Get a pet",
+										"description": "",
+										"method": "GET",
+										"url": "{{baseUrl}}/pets/{{petId}}",
+										"params": [
+											{
+												"key": "verbose",
+												"value": "",
+												"enabled": false
+											}
+										],
+										"headers": [
+											{
+												"key": "X-Trace",
+												"value": "",
+												"enabled": true
+											}
+										],
+										"body": {
+											"mode": "none"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": "",
+										"examples": [
+											{
+												"name": "200 - A pet",
+												"status": 200,
+												"headers": [
+													{
+														"key": "Content-Type",
+														"value": "application/json",
+														"enabled": true
+													}
+												],
+												"body": "{\n  \"id\": \"\",\n  \"age\": 0\n}",
+												"contentType": "application/json"
+											}
+										],
+										"specOperation": {
+											"operationId": "getPet",
+											"method": "GET",
+											"path": "/pets/{petId}"
+										}
+									}
+								]
+							}
+						],
+						"requests": [],
+						"spec": {
+							"content": "openapi: 3.0.0\ninfo:\n  title: Relative Server\n  description: A YAML document whose server URL is relative.\nservers:\n  - url: ../v2\npaths:\n  /pets/{petId}:\n    parameters:\n      - name: petId\n        in: path\n        required: true\n        schema: { type: string }\n    get:\n      operationId: getPet\n      summary: Get a pet\n      tags: [pets]\n      parameters:\n        - name: verbose\n          in: query\n          schema: { type: boolean }\n        - name: X-Trace\n          in: header\n          required: true\n          schema: { type: string }\n        - name: session\n          in: cookie\n          schema: { type: string }\n      responses:\n        \"200\":\n          description: A pet\n          content:\n            application/json:\n              schema:\n                type: object\n                properties:\n                  id: { type: string }\n                  age: { type: integer }\n        default:\n          description: Anything else\n        \"2XX\":\n          description: A wildcard\n    trace:\n      summary: Not a Vayu verb\n      responses:\n        \"200\": { description: ok }\n",
+							"sourceUrl": "https://api.example.com/specs/openapi.yaml"
+						}
+					}
+				],
+				"environments": [],
+				"globals": {},
+				"meta": {
+					"format": "OpenAPI 3.0",
+					"requestCount": 1,
+					"folderCount": 1,
+					"folderStrategy": "tags",
+					"environmentCount": 0,
+					"globalCount": 0,
+					"exampleCount": 1,
+					"skipped": [
+						{
+							"kind": "unsupported_method",
+							"count": 1
+						},
+						{
+							"kind": "cookie_param",
+							"count": 1
+						},
+						{
+							"kind": "default_response",
+							"count": 1
+						},
+						{
+							"kind": "example_no_status",
+							"count": 1
+						},
+						{
+							"kind": "external_ref",
+							"count": 2
+						}
+					],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Relative Server",
+						"description": "A YAML document whose server URL is relative.",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.example.com/v2",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"openapi": {
+							"specTempId": "s1"
+						}
+					},
+					{
+						"tempId": "c2",
+						"parentTempId": "c1",
+						"name": "pets",
+						"description": "",
+						"order": 0,
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c2",
+						"name": "Get a pet",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}/pets/{{petId}}",
+						"params": [
+							{
+								"key": "verbose",
+								"value": "",
+								"enabled": false
+							}
+						],
+						"headers": [
+							{
+								"key": "X-Trace",
+								"value": "",
+								"enabled": true
+							}
+						],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"examples": [
+							{
+								"name": "200 - A pet",
+								"status": 200,
+								"headers": [
+									{
+										"key": "Content-Type",
+										"value": "application/json",
+										"enabled": true
+									}
+								],
+								"body": "{\n  \"id\": \"\",\n  \"age\": 0\n}",
+								"contentType": "application/json"
+							}
+						],
+						"specOperation": {
+							"operationId": "getPet",
+							"method": "GET",
+							"path": "/pets/{petId}"
+						},
+						"order": 0
+					}
+				],
+				"environments": [],
+				"specs": [
+					{
+						"tempId": "s1",
+						"content": "openapi: 3.0.0\ninfo:\n  title: Relative Server\n  description: A YAML document whose server URL is relative.\nservers:\n  - url: ../v2\npaths:\n  /pets/{petId}:\n    parameters:\n      - name: petId\n        in: path\n        required: true\n        schema: { type: string }\n    get:\n      operationId: getPet\n      summary: Get a pet\n      tags: [pets]\n      parameters:\n        - name: verbose\n          in: query\n          schema: { type: boolean }\n        - name: X-Trace\n          in: header\n          required: true\n          schema: { type: string }\n        - name: session\n          in: cookie\n          schema: { type: string }\n      responses:\n        \"200\":\n          description: A pet\n          content:\n            application/json:\n              schema:\n                type: object\n                properties:\n                  id: { type: string }\n                  age: { type: integer }\n        default:\n          description: Anything else\n        \"2XX\":\n          description: A wildcard\n    trace:\n      summary: Not a Vayu verb\n      responses:\n        \"200\": { description: ok }\n",
+						"sourceUrl": "https://api.example.com/specs/openapi.yaml"
+					}
+				]
+			}
+		},
+		{
+			"name": "openapi-v3-templated-server",
+			"document": "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"Templated\"},\"servers\":[{\"url\":\"{protocol}://{host}/api\",\"variables\":{\"protocol\":{\"default\":\"https\"}}}],\"components\":{\"securitySchemes\":{\"main\":{\"type\":\"oauth2\",\"flows\":{\"clientCredentials\":{\"tokenUrl\":\"https://auth.example.com/token\",\"scopes\":{\"read\":\"Read\",\"write\":\"Write\"}}}}}},\"security\":[{\"main\":[]}],\"paths\":{\"/api/v1/widgets\":{\"post\":{\"operationId\":\"createWidget\",\"requestBody\":{\"content\":{\"application/xml\":{\"schema\":{\"type\":\"object\"}}}},\"responses\":{\"204\":{\"description\":\"No content\"}}}},\"/api/v1/gadgets\":{\"parameters\":\"not-an-array\",\"get\":{\"operationId\":\"createWidget\",\"responses\":{}}},\"no-leading-slash\":{\"get\":{\"summary\":\"Malformed path key\",\"responses\":{}}}}}",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Templated",
+						"description": "",
+						"variables": {
+							"baseUrl": {
+								"value": "https://{host}/api",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "oauth2",
+							"config": {
+								"grantType": "client_credentials",
+								"accessTokenUrl": "https://auth.example.com/token",
+								"clientId": "{{clientId}}",
+								"clientSecret": "{{clientSecret}}",
+								"scope": "read write",
+								"credentialsPlacement": "basic_auth_header",
+								"tokenPlacement": "header",
+								"headerPrefix": "Bearer",
+								"pkce": true,
+								"autoFetchToken": true,
+								"autoRefreshToken": true,
+								"useEmbeddedBrowser": false
+							}
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"children": [
+							{
+								"name": "widgets",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "none"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "createWidget",
+										"description": "",
+										"method": "POST",
+										"url": "{{baseUrl}}/api/v1/widgets",
+										"params": [],
+										"headers": [],
+										"body": {
+											"mode": "none"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": "",
+										"examples": [
+											{
+												"name": "204 - No content",
+												"status": 204,
+												"headers": [],
+												"body": "",
+												"contentType": ""
+											}
+										],
+										"specOperation": {
+											"operationId": "createWidget",
+											"method": "POST",
+											"path": "/api/v1/widgets"
+										}
+									}
+								]
+							},
+							{
+								"name": "gadgets",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "none"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "createWidget",
+										"description": "",
+										"method": "GET",
+										"url": "{{baseUrl}}/api/v1/gadgets",
+										"params": [],
+										"headers": [],
+										"body": {
+											"mode": "none"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": "",
+										"specOperation": {
+											"method": "GET",
+											"path": "/api/v1/gadgets"
+										}
+									}
+								]
+							},
+							{
+								"name": "no-leading-slash",
+								"description": "",
+								"variables": {},
+								"auth": {
+									"mode": "none"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "Malformed path key",
+										"description": "",
+										"method": "GET",
+										"url": "{{baseUrl}}no-leading-slash",
+										"params": [],
+										"headers": [],
+										"body": {
+											"mode": "none"
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": ""
+									}
+								]
+							}
+						],
+						"requests": [],
+						"spec": {
+							"content": "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"Templated\"},\"servers\":[{\"url\":\"{protocol}://{host}/api\",\"variables\":{\"protocol\":{\"default\":\"https\"}}}],\"components\":{\"securitySchemes\":{\"main\":{\"type\":\"oauth2\",\"flows\":{\"clientCredentials\":{\"tokenUrl\":\"https://auth.example.com/token\",\"scopes\":{\"read\":\"Read\",\"write\":\"Write\"}}}}}},\"security\":[{\"main\":[]}],\"paths\":{\"/api/v1/widgets\":{\"post\":{\"operationId\":\"createWidget\",\"requestBody\":{\"content\":{\"application/xml\":{\"schema\":{\"type\":\"object\"}}}},\"responses\":{\"204\":{\"description\":\"No content\"}}}},\"/api/v1/gadgets\":{\"parameters\":\"not-an-array\",\"get\":{\"operationId\":\"createWidget\",\"responses\":{}}},\"no-leading-slash\":{\"get\":{\"summary\":\"Malformed path key\",\"responses\":{}}}}}"
+						}
+					}
+				],
+				"environments": [],
+				"globals": {},
+				"meta": {
+					"format": "OpenAPI 3.0",
+					"requestCount": 3,
+					"folderCount": 3,
+					"folderStrategy": "paths",
+					"environmentCount": 0,
+					"globalCount": 0,
+					"exampleCount": 1,
+					"skipped": [
+						{
+							"kind": "unresolved_base_url",
+							"count": 1
+						},
+						{
+							"kind": "unmapped_body",
+							"count": 1
+						},
+						{
+							"kind": "malformed_spec",
+							"count": 1
+						},
+						{
+							"kind": "duplicate_operation_id",
+							"count": 1
+						}
+					],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 0
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Templated",
+						"description": "",
+						"variables": {
+							"baseUrl": {
+								"value": "https://{host}/api",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "oauth2",
+							"config": {
+								"grantType": "client_credentials",
+								"accessTokenUrl": "https://auth.example.com/token",
+								"clientId": "{{clientId}}",
+								"clientSecret": "{{clientSecret}}",
+								"scope": "read write",
+								"credentialsPlacement": "basic_auth_header",
+								"tokenPlacement": "header",
+								"headerPrefix": "Bearer",
+								"pkce": true,
+								"autoFetchToken": true,
+								"autoRefreshToken": true,
+								"useEmbeddedBrowser": false
+							}
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"openapi": {
+							"specTempId": "s1"
+						}
+					},
+					{
+						"tempId": "c2",
+						"parentTempId": "c1",
+						"name": "widgets",
+						"description": "",
+						"order": 0,
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					},
+					{
+						"tempId": "c3",
+						"parentTempId": "c1",
+						"name": "gadgets",
+						"description": "",
+						"order": 1,
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					},
+					{
+						"tempId": "c4",
+						"parentTempId": "c1",
+						"name": "no-leading-slash",
+						"description": "",
+						"order": 2,
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c2",
+						"name": "createWidget",
+						"description": "",
+						"method": "POST",
+						"url": "{{baseUrl}}/api/v1/widgets",
+						"params": [],
+						"headers": [],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"examples": [
+							{
+								"name": "204 - No content",
+								"status": 204,
+								"headers": [],
+								"body": "",
+								"contentType": ""
+							}
+						],
+						"specOperation": {
+							"operationId": "createWidget",
+							"method": "POST",
+							"path": "/api/v1/widgets"
+						},
+						"order": 0
+					},
+					{
+						"tempId": "r2",
+						"collectionTempId": "c3",
+						"name": "createWidget",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}/api/v1/gadgets",
+						"params": [],
+						"headers": [],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"specOperation": {
+							"method": "GET",
+							"path": "/api/v1/gadgets"
+						},
+						"order": 0
+					},
+					{
+						"tempId": "r3",
+						"collectionTempId": "c4",
+						"name": "Malformed path key",
+						"description": "",
+						"method": "GET",
+						"url": "{{baseUrl}}no-leading-slash",
+						"params": [],
+						"headers": [],
+						"body": {
+							"mode": "none"
+						},
+						"bodyType": "none",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"order": 0
+					}
+				],
+				"environments": [],
+				"specs": [
+					{
+						"tempId": "s1",
+						"content": "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"Templated\"},\"servers\":[{\"url\":\"{protocol}://{host}/api\",\"variables\":{\"protocol\":{\"default\":\"https\"}}}],\"components\":{\"securitySchemes\":{\"main\":{\"type\":\"oauth2\",\"flows\":{\"clientCredentials\":{\"tokenUrl\":\"https://auth.example.com/token\",\"scopes\":{\"read\":\"Read\",\"write\":\"Write\"}}}}}},\"security\":[{\"main\":[]}],\"paths\":{\"/api/v1/widgets\":{\"post\":{\"operationId\":\"createWidget\",\"requestBody\":{\"content\":{\"application/xml\":{\"schema\":{\"type\":\"object\"}}}},\"responses\":{\"204\":{\"description\":\"No content\"}}}},\"/api/v1/gadgets\":{\"parameters\":\"not-an-array\",\"get\":{\"operationId\":\"createWidget\",\"responses\":{}}},\"no-leading-slash\":{\"get\":{\"summary\":\"Malformed path key\",\"responses\":{}}}}}"
+					}
+				]
+			}
+		},
+		{
+			"name": "swagger-v2-forms",
+			"document": "{\"swagger\":\"2.0\",\"info\":{\"title\":\"Forms\",\"description\":\"Swagger form bodies\"},\"host\":\"api.example.com\",\"basePath\":\"/v1\",\"schemes\":[\"https\"],\"consumes\":[\"multipart/form-data\"],\"securityDefinitions\":{\"key\":{\"type\":\"apiKey\",\"name\":\"X-Key\",\"in\":\"query\"}},\"paths\":{\"/upload\":{\"post\":{\"operationId\":\"upload\",\"tags\":[\"files\"],\"parameters\":[{\"name\":\"file\",\"in\":\"formData\",\"type\":\"file\"},{\"name\":\"label\",\"in\":\"formData\",\"type\":\"string\"},{\"name\":\"q\",\"in\":\"query\",\"type\":\"string\",\"default\":\"all\"}],\"responses\":{\"201\":{\"description\":\"Created\",\"schema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}}}}}},\"tags\":[{\"name\":\"files\",\"description\":\"Uploads\"}]}",
+			"options": {
+				"importEnvironments": true,
+				"importScripts": true
+			},
+			"expected": {
+				"collections": [
+					{
+						"name": "Forms",
+						"description": "Swagger form bodies",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.example.com/v1",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "apikey",
+							"key": "X-Key",
+							"value": "",
+							"in": "query"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"children": [
+							{
+								"name": "files",
+								"description": "Uploads",
+								"variables": {},
+								"auth": {
+									"mode": "none"
+								},
+								"preRequestScript": "",
+								"postRequestScript": "",
+								"children": [],
+								"requests": [
+									{
+										"name": "upload",
+										"description": "",
+										"method": "POST",
+										"url": "{{baseUrl}}/upload?q=all",
+										"params": [
+											{
+												"key": "q",
+												"value": "all",
+												"enabled": true
+											}
+										],
+										"headers": [],
+										"body": {
+											"mode": "form-data",
+											"fields": [
+												{
+													"key": "file",
+													"value": "",
+													"enabled": true,
+													"type": "file",
+													"src": ""
+												},
+												{
+													"key": "label",
+													"value": "",
+													"enabled": true
+												}
+											]
+										},
+										"auth": {
+											"mode": "inherit"
+										},
+										"preRequestScript": "",
+										"postRequestScript": "",
+										"examples": [
+											{
+												"name": "201 - Created",
+												"status": 201,
+												"headers": [
+													{
+														"key": "Content-Type",
+														"value": "application/json",
+														"enabled": true
+													}
+												],
+												"body": "{\n  \"id\": \"\"\n}",
+												"contentType": "application/json"
+											}
+										],
+										"specOperation": {
+											"operationId": "upload",
+											"method": "POST",
+											"path": "/upload"
+										}
+									}
+								]
+							}
+						],
+						"requests": [],
+						"spec": {
+							"content": "{\"swagger\":\"2.0\",\"info\":{\"title\":\"Forms\",\"description\":\"Swagger form bodies\"},\"host\":\"api.example.com\",\"basePath\":\"/v1\",\"schemes\":[\"https\"],\"consumes\":[\"multipart/form-data\"],\"securityDefinitions\":{\"key\":{\"type\":\"apiKey\",\"name\":\"X-Key\",\"in\":\"query\"}},\"paths\":{\"/upload\":{\"post\":{\"operationId\":\"upload\",\"tags\":[\"files\"],\"parameters\":[{\"name\":\"file\",\"in\":\"formData\",\"type\":\"file\"},{\"name\":\"label\",\"in\":\"formData\",\"type\":\"string\"},{\"name\":\"q\",\"in\":\"query\",\"type\":\"string\",\"default\":\"all\"}],\"responses\":{\"201\":{\"description\":\"Created\",\"schema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}}}}}},\"tags\":[{\"name\":\"files\",\"description\":\"Uploads\"}]}"
+						}
+					}
+				],
+				"environments": [],
+				"globals": {},
+				"meta": {
+					"format": "OpenAPI 2.0 (Swagger)",
+					"requestCount": 1,
+					"folderCount": 1,
+					"folderStrategy": "tags",
+					"environmentCount": 0,
+					"globalCount": 0,
+					"exampleCount": 1,
+					"skipped": [],
+					"nonExecutableAuth": 0,
+					"unattachedFileParts": 1
+				}
+			},
+			"payload": {
+				"collections": [
+					{
+						"tempId": "c1",
+						"parentTempId": null,
+						"name": "Forms",
+						"description": "Swagger form bodies",
+						"variables": {
+							"baseUrl": {
+								"value": "https://api.example.com/v1",
+								"enabled": true
+							}
+						},
+						"auth": {
+							"mode": "apikey",
+							"key": "X-Key",
+							"value": "",
+							"in": "query"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"openapi": {
+							"specTempId": "s1"
+						}
+					},
+					{
+						"tempId": "c2",
+						"parentTempId": "c1",
+						"name": "files",
+						"description": "Uploads",
+						"order": 0,
+						"variables": {},
+						"auth": {
+							"mode": "none"
+						},
+						"preRequestScript": "",
+						"postRequestScript": ""
+					}
+				],
+				"requests": [
+					{
+						"tempId": "r1",
+						"collectionTempId": "c2",
+						"name": "upload",
+						"description": "",
+						"method": "POST",
+						"url": "{{baseUrl}}/upload?q=all",
+						"params": [
+							{
+								"key": "q",
+								"value": "all",
+								"enabled": true
+							}
+						],
+						"headers": [],
+						"body": {
+							"mode": "form-data",
+							"fields": [
+								{
+									"key": "file",
+									"value": "",
+									"enabled": true,
+									"type": "file",
+									"src": ""
+								},
+								{
+									"key": "label",
+									"value": "",
+									"enabled": true
+								}
+							]
+						},
+						"bodyType": "form-data",
+						"auth": {
+							"mode": "inherit"
+						},
+						"preRequestScript": "",
+						"postRequestScript": "",
+						"examples": [
+							{
+								"name": "201 - Created",
+								"status": 201,
+								"headers": [
+									{
+										"key": "Content-Type",
+										"value": "application/json",
+										"enabled": true
+									}
+								],
+								"body": "{\n  \"id\": \"\"\n}",
+								"contentType": "application/json"
+							}
+						],
+						"specOperation": {
+							"operationId": "upload",
+							"method": "POST",
+							"path": "/upload"
+						},
+						"order": 0
+					}
+				],
+				"environments": [],
+				"specs": [
+					{
+						"tempId": "s1",
+						"content": "{\"swagger\":\"2.0\",\"info\":{\"title\":\"Forms\",\"description\":\"Swagger form bodies\"},\"host\":\"api.example.com\",\"basePath\":\"/v1\",\"schemes\":[\"https\"],\"consumes\":[\"multipart/form-data\"],\"securityDefinitions\":{\"key\":{\"type\":\"apiKey\",\"name\":\"X-Key\",\"in\":\"query\"}},\"paths\":{\"/upload\":{\"post\":{\"operationId\":\"upload\",\"tags\":[\"files\"],\"parameters\":[{\"name\":\"file\",\"in\":\"formData\",\"type\":\"file\"},{\"name\":\"label\",\"in\":\"formData\",\"type\":\"string\"},{\"name\":\"q\",\"in\":\"query\",\"type\":\"string\",\"default\":\"all\"}],\"responses\":{\"201\":{\"description\":\"Created\",\"schema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}}}}}},\"tags\":[{\"name\":\"files\",\"description\":\"Uploads\"}]}"
+					}
+				]
+			}
+		}
+	]
+}

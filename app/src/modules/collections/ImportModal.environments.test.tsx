@@ -25,7 +25,55 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-vi.mock("@/services/api", () => ({ apiService: { importFetch: vi.fn() } }));
+/**
+ * The parse is the engine's (issue #877). What this file is about is the two
+ * previously unreachable preview states above, so the stub answers only what
+ * they need: the scope the document declares, gated by the one toggle. The
+ * mapping itself - the secret flag, the enabled precedence, the name a globals
+ * export does *not* get - is pinned engine-side by
+ * `engine/tests/fixtures/import-conformance.json`, which carries both of these
+ * fixtures.
+ */
+vi.mock("@/services/api", () => ({
+	apiService: {
+		importFetch: vi.fn(),
+		readDocument: async (text: string) => JSON.parse(text),
+		parseImport: async (payload: { content: string; importEnvironments?: boolean }) => {
+			const document = JSON.parse(payload.content) as {
+				name?: string;
+				values?: { key: string; value: string }[];
+				_postman_variable_scope?: string;
+			};
+			const globals = document._postman_variable_scope === "globals";
+			const on = payload.importEnvironments !== false;
+			const variables = Object.fromEntries(
+				(on ? (document.values ?? []) : [])
+					// A row with no key names nothing - the engine's `toVarRecord`
+					// rule, restated because these counts are what is on screen.
+					.filter((v) => !!v.key)
+					.map((v) => [v.key, { value: v.value, enabled: true }])
+			);
+			const environments =
+				globals || !on ? [] : [{ name: document.name ?? "", description: "", variables }];
+			return {
+				collections: [],
+				environments,
+				globals: globals ? variables : {},
+				meta: {
+					format: globals ? "Postman Globals" : "Postman Environment",
+					requestCount: 0,
+					folderCount: 0,
+					environmentCount: environments.length,
+					globalCount: Object.keys(globals ? variables : {}).length,
+					exampleCount: 0,
+					skipped: [],
+					nonExecutableAuth: 0,
+					unattachedFileParts: 0,
+				},
+			};
+		},
+	},
+}));
 
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore } from "@/stores";
@@ -93,7 +141,11 @@ describe("ImportModal with a Postman environment export", () => {
 
 		fireEvent.click(screen.getByLabelText(/Import environments/i));
 
-		expect(screen.getByRole("button", { name: /^Import/i })).toBeDisabled();
+		// The re-parse is a round trip to the engine now (issue #877), so the
+		// footer catches up a tick later.
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: /^Import/i })).toBeDisabled()
+		);
 		expect(screen.getByText(/No collections in this file/i)).toBeVisible();
 		expect(screen.queryByText("Sample Staging")).toBeNull();
 	});
@@ -104,10 +156,13 @@ describe("ImportModal with a Postman environment export", () => {
 
 		const envs = screen.getByLabelText(/Import environments/i);
 		fireEvent.click(envs);
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: /^Import/i })).toBeDisabled()
+		);
 		fireEvent.click(envs);
 
+		await waitFor(() => expect(screen.getByText("Sample Staging")).toBeVisible());
 		expect(screen.getByRole("button", { name: /^Import/i })).toBeEnabled();
-		expect(screen.getByText("Sample Staging")).toBeVisible();
 		expect(screen.queryByText(/No collections in this file/i)).toBeNull();
 	});
 });
@@ -151,11 +206,13 @@ describe("ImportModal with a Postman globals export", () => {
 
 		const envs = screen.getByLabelText(/Import environments/i);
 		fireEvent.click(envs);
-		expect(screen.getByRole("button", { name: /^Import/i })).toBeDisabled();
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: /^Import/i })).toBeDisabled()
+		);
 		expect(screen.queryByText("4 variables")).toBeNull();
 
 		fireEvent.click(envs);
+		await waitFor(() => expect(screen.getByText("4 variables")).toBeVisible());
 		expect(screen.getByRole("button", { name: /^Import/i })).toBeEnabled();
-		expect(screen.getByText("4 variables")).toBeVisible();
 	});
 });

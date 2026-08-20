@@ -36,13 +36,12 @@ const srcRoot = join(here, "..");
 const CANONICAL = "constants/variables.ts";
 
 /**
- * Deliberately different patterns, with the difference named.
- *
- * `var-normalize.ts` matches `{{ _.x }}` - an identifier-only body with the
- * importer's Postman-flavoured prefixes - so it accepts a strictly narrower
- * set than `VARIABLE_PATTERN` and is not a copy of it.
+ * Deliberately different patterns, with the difference named. Empty since the
+ * import parsers moved engine-side (issue #877): the one exemption was
+ * `var-normalize.ts`, whose `{{ _.x }}` rewrite is now
+ * `engine/src/core/path_template.cpp`.
  */
-const EXEMPT = new Set(["services/importers/var-normalize.ts"]);
+const EXEMPT = new Set<string>();
 
 /**
  * A regex literal that matches a whole `{{...}}` token.

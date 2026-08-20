@@ -191,7 +191,13 @@ export const API_ENDPOINTS = {
 	// Import. FETCH proxies a remote collection past CORS; APPLY persists the
 	// whole parsed tree in one atomic call and returns the temp-id -> real-id map
 	// (the import path no longer creates items one POST at a time).
+	// PARSE turns a raw document into that tree - every format the app accepts,
+	// read by the engine's one reader (issue #877). DOCUMENT is the narrower
+	// half of it: a document's bytes as a JSON DOM, which is all the ref bundler
+	// needs to find and rewrite external `$ref`s before a spec is stored.
 	IMPORT_FETCH: `/import/fetch`,
+	IMPORT_PARSE: `/import/parse`,
+	IMPORT_DOCUMENT: `/import/document`,
 	IMPORT_APPLY: `/import/apply`,
 
 	// Transport diagnostics (issue #708). One policy-honouring request whose

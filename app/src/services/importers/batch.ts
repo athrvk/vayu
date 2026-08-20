@@ -256,6 +256,30 @@ export async function detectBatch(
 		})
 	);
 
+	/**
+	 * A file another document inlined, or one that could not be read, is never
+	 * parsed - the first is a fragment of somebody else's spec and the second has
+	 * nothing to parse. Decided once, here, because the parse is now a round trip
+	 * to the engine and the map below has to be synchronous.
+	 */
+	const skipParse = (bundle: (typeof bundles)[number]): boolean => {
+		const key = batchKey(bundle.document);
+		return !!bundle.error || !!(key && consumed.get(key));
+	};
+
+	// One wave for the whole batch rather than one file at a time: a 13-document
+	// folder pick is 13 parses, and sequentially that is 13 round trips.
+	const parsed = await Promise.all(
+		bundles.map(async (bundle) =>
+			skipParse(bundle)
+				? null
+				: await parseEntry(bundle.raw, opts, {
+						...bundle.document,
+						unresolvedRefs: bundle.unresolvedRefs,
+					})
+		)
+	);
+
 	return bundles.map((bundle, index) => {
 		const { document } = bundle;
 		const key = batchKey(document);
@@ -292,20 +316,20 @@ export async function detectBatch(
 			// stamp it into `meta.skipped` - bundling runs before detection, so no
 			// parser can know it, and a count nothing reads is a loss the preview
 			// never names.
-			...parseEntry(bundle.raw, opts, { ...document, unresolvedRefs: bundle.unresolvedRefs }),
+			...(parsed[index] ?? { result: null, error: null, included: false }),
 			bundledInto: null,
 		};
 	});
 }
 
 /** Parse one already-bundled document into the half of an entry that can fail. */
-function parseEntry(
+async function parseEntry(
 	raw: string,
 	opts: ImportOptions,
 	source: Pick<BatchDocument, "fileName" | "sourceUrl"> & { unresolvedRefs?: number }
-): Pick<BatchEntry, "result" | "error" | "included"> {
+): Promise<Pick<BatchEntry, "result" | "error" | "included">> {
 	try {
-		const result = parseImport(raw, opts, {
+		const result = await parseImport(raw, opts, {
 			...(source.fileName ? { fileName: source.fileName } : {}),
 			...(source.sourceUrl ? { sourceUrl: source.sourceUrl } : {}),
 			...(source.unresolvedRefs ? { unresolvedRefs: source.unresolvedRefs } : {}),
@@ -325,16 +349,21 @@ function parseEntry(
  * user was already told about. Anything already applied keeps its outcome and
  * stays out of the next apply.
  */
-export function reparseBatch(entries: BatchEntry[], opts: ImportOptions): BatchEntry[] {
-	return entries.map((entry) => {
-		if (entry.bundledInto || entry.outcome) return entry;
-		const parsed = parseEntry(entry.raw, opts, {
-			...(entry.fileName ? { fileName: entry.fileName } : {}),
-			...(entry.sourceUrl ? { sourceUrl: entry.sourceUrl } : {}),
-			unresolvedRefs: entry.unresolvedRefs,
-		});
-		// A file the user had unchecked stays unchecked; a toggle changes what is
-		// in each file, not which files the user asked for.
-		return { ...entry, ...parsed, included: parsed.result !== null && entry.included };
-	});
+export async function reparseBatch(
+	entries: BatchEntry[],
+	opts: ImportOptions
+): Promise<BatchEntry[]> {
+	return await Promise.all(
+		entries.map(async (entry) => {
+			if (entry.bundledInto || entry.outcome) return entry;
+			const parsed = await parseEntry(entry.raw, opts, {
+				...(entry.fileName ? { fileName: entry.fileName } : {}),
+				...(entry.sourceUrl ? { sourceUrl: entry.sourceUrl } : {}),
+				unresolvedRefs: entry.unresolvedRefs,
+			});
+			// A file the user had unchecked stays unchecked; a toggle changes what is
+			// in each file, not which files the user asked for.
+			return { ...entry, ...parsed, included: parsed.result !== null && entry.included };
+		})
+	);
 }
