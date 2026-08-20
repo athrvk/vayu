@@ -3263,6 +3263,119 @@ function describeBind(outcome: unknown): string {
 	return parts.join(" ");
 }
 
+/**
+ * How many entries of one spec-diff bucket a tool result carries (issue #871).
+ *
+ * Nothing caps the buckets upstream: a document that renamed every operation
+ * puts one `changed` entry per request in the collection, and each carries its
+ * changed fields. Fifty is the number that keeps the common answer whole while
+ * bounding the pathological one, and - the rule the run-report rows follow -
+ * the *counts* stay true, so a cut list is visible as one rather than reading
+ * as the whole drift.
+ */
+export const MAX_SPEC_DIFF_ENTRIES = 50;
+
+/**
+ * One bucket of `POST /specs/diff`, capped, with what it was cut from.
+ *
+ * The engine's own count is the second element rather than the length of the
+ * first: an agent deciding whether a contract drifted reads the total, and a
+ * total read off a cut list would say it did not.
+ */
+function boundedBucket(value: unknown, shape: (entry: Record<string, unknown>) => unknown) {
+	const entries = Array.isArray(value) ? value : [];
+	return {
+		entries: entries.slice(0, MAX_SPEC_DIFF_ENTRIES).map((entry) => shape(asRecord(entry))),
+		total: entries.length,
+	};
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+	return isRecord(value) ? value : {};
+}
+
+/**
+ * A changed request, as an agent reads one.
+ *
+ * `draft` is dropped rather than passed through. It is what an apply *would*
+ * write, and `POST /specs/sync` re-reads it off the document being stored
+ * rather than being handed it (the same split `POST /specs/match` and
+ * `POST /specs/bind` follow), so nothing on either side of this tool consumes
+ * it - it would be the heaviest field in the answer and the "written but never
+ * read" defect at once. The rendered `current` / `next` pair survives, which is
+ * what says *what* moved; the engine already truncates both for display.
+ */
+function changedEntry(item: Record<string, unknown>): Record<string, unknown> {
+	const fields = Array.isArray(item.fields) ? item.fields : [];
+	return {
+		requestId: item.requestId ?? null,
+		name: item.name ?? null,
+		boundOperation: item.boundOperation ?? null,
+		operation: item.operation ?? null,
+		matchedBy: item.matchedBy ?? null,
+		renamed: item.renamed === true,
+		previousUnknown: item.previousUnknown === true,
+		fields: fields.map((field) => {
+			const row = asRecord(field);
+			return {
+				field: row.field ?? null,
+				current: row.current ?? null,
+				next: row.next ?? null,
+				userTouched: row.userTouched === true,
+			};
+		}),
+	};
+}
+
+/** Whether any field of @p item is one a person edited by hand. */
+function hasUserEdit(item: Record<string, unknown>): boolean {
+	const fields = Array.isArray(item.fields) ? item.fields : [];
+	return fields.some((field) => asRecord(field).userTouched === true);
+}
+
+/**
+ * What a document would change, in a sentence (issue #871).
+ *
+ * The counts are in the structured body; this says the three things that change
+ * what an agent should do next. **Hand-edited fields are named on their own**:
+ * they are the one part of a drift that an apply may not take silently, and an
+ * agent reading only "6 changed" would propose overwriting somebody's edit.
+ * `unmapped` is named for the reason the diff reports it at all - a collection
+ * half of which carries no operation is one this answer describes half of.
+ *
+ * Defensive about the shape for `describeBind`'s reason: an engine answering
+ * something unexpected must cost the caveat, never the result.
+ */
+function describeSpecDiff(answer: Record<string, unknown>): string {
+	const bucket = (value: unknown): number => (Array.isArray(value) ? value.length : 0);
+	const count = (value: unknown): number => (typeof value === "number" ? value : 0);
+	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+	if (answer.identical === true) {
+		return "This document is byte-identical to the one the collection is bound to, so there is nothing to apply.";
+	}
+
+	const changed = Array.isArray(answer.changed) ? answer.changed : [];
+	const edited = changed.filter((item) => hasUserEdit(asRecord(item))).length;
+	const parts = [
+		`${plural(bucket(answer.added), "operation")} added, ${plural(bucket(answer.removed), "request")} no longer declared, ${plural(changed.length, "request")} changed, ${count(answer.unchanged)} unchanged.`,
+	];
+	if (edited > 0) {
+		parts.push(
+			`${plural(edited, "changed request")} hold a field somebody edited by hand (userTouched) - applying the document there overwrites a person's work, not an import's.`
+		);
+	}
+	if (count(answer.unmapped) > 0) {
+		parts.push(
+			`${plural(count(answer.unmapped), "request")} in this collection carry no operation at all and are not part of the comparison.`
+		);
+	}
+	parts.push(
+		"Nothing was written: this is the read half of a sync. Applying one is done in the Vayu app (Collection -> Spec -> Sync) - see https://github.com/athrvk/vayu/issues/871."
+	);
+	return parts.join(" ");
+}
+
 // --- Tool definitions --------------------------------------------------------
 
 export const TOOLS: McpTool[] = [
@@ -4048,6 +4161,89 @@ export const TOOLS: McpTool[] = [
 			} catch (err) {
 				return engineErrorResult(err);
 			}
+		},
+	},
+	{
+		name: "diff_spec",
+		category: "read",
+		invalidates: [],
+		description:
+			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. APPLYING a drift is app-only for now (Collection -> Spec -> Sync); this tool is the read half.",
+		annotations: {
+			title: "Diff OpenAPI spec against collection",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z
+				.string()
+				.describe(
+					"Collection to compare. It must already be bound to a document - the comparison is three-way and the bound document is the middle term. Its whole subtree is read, since an imported spec files its requests under one sub-collection per tag."
+				),
+			content: z
+				.string()
+				.describe(
+					"The re-fetched OpenAPI document text, JSON or YAML. Not stored - this is the candidate, compared against the bytes the collection is bound to. Capped by the maxSpecDocumentBytes setting, the same cap a bind applies."
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const collectionId = requireStr(args, "collectionId");
+			const content = requireStr(args, "content");
+			// The requests and the bound document are deliberately not sent: the
+			// engine walks the subtree and reads the binding itself, so a caller
+			// cannot make its own stale copy the "previous" side of a three-way
+			// comparison. Nothing is worked out here for the same reason
+			// `bind_spec` works nothing out - the comparison is the engine's
+			// (`core::diff_spec`), off the bytes handed to it.
+			let answer: unknown;
+			try {
+				answer = await ctx.client.diffSpec({ collectionId, spec: { content } }, signal);
+			} catch (err) {
+				// The engine's own sentence is the useful one: a 400 names the
+				// collection that binds nothing and says to bind it first, a 404
+				// names the collection, and a 409 names the binding whose document
+				// the store no longer holds.
+				return engineErrorResult(err);
+			}
+			const diff = asRecord(answer);
+			const added = boundedBucket(diff.added, (entry) => ({
+				operation: entry.operation ?? null,
+				folder: entry.folder ?? null,
+			}));
+			const removed = boundedBucket(diff.removed, (entry) => ({
+				requestId: entry.requestId ?? null,
+				name: entry.name ?? null,
+				operation: entry.operation ?? null,
+			}));
+			const changed = boundedBucket(diff.changed, changedEntry);
+			const truncated = [added, removed, changed].some(
+				(bucket) => bucket.entries.length < bucket.total
+			);
+			return withCaveat(
+				jsonResult({
+					collectionId,
+					identical: diff.identical === true,
+					// The engine's totals, not these lists' lengths - see
+					// `MAX_SPEC_DIFF_ENTRIES` for why the two can differ.
+					summary: {
+						added: added.total,
+						removed: removed.total,
+						changed: changed.total,
+						unchanged: typeof diff.unchanged === "number" ? diff.unchanged : 0,
+						unmapped: typeof diff.unmapped === "number" ? diff.unmapped : 0,
+					},
+					added: added.entries,
+					removed: removed.entries,
+					changed: changed.entries,
+					entriesTruncated: truncated,
+				}),
+				`\n\n${describeSpecDiff(diff)}${
+					truncated
+						? ` Each list here is capped at ${MAX_SPEC_DIFF_ENTRIES} entries; the counts in \`summary\` are the true totals.`
+						: ""
+				}`
+			);
 		},
 	},
 	{

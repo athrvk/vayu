@@ -360,6 +360,20 @@ export class EngineClient {
 	}
 
 	/**
+	 * What a re-fetched document would change about the collection bound to it
+	 * (`POST /specs/diff`, issue #854).
+	 *
+	 * A POST that writes nothing: the document is compared, never stored, and
+	 * the collection keeps its binding and its stamps. Neither the requests nor
+	 * the bound document ride in the payload - the engine walks the subtree and
+	 * reads the binding itself, because a caller that could supply the
+	 * "previous" side could turn its own edits into the document's.
+	 */
+	diffSpec(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/specs/diff", payload, signal);
+	}
+
+	/**
 	 * A collection back out as an OpenAPI document (`POST /specs/export`, issue
 	 * #855) - its own bound document updated, or a skeleton when it binds none.
 	 *

@@ -21,6 +21,7 @@ import {
 	MAX_REPORT_TRACE_BYTES,
 	MAX_RUN_SERIES_LIMIT,
 	MAX_SLOW_THRESHOLD_MS,
+	MAX_SPEC_DIFF_ENTRIES,
 	MAX_SUCCESS_SAMPLE_PERIOD,
 	REQUEST_SETTINGS_KEYS,
 	toolCatalog,
@@ -179,6 +180,49 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			text: '{\n  "openapi": "3.1.0"\n}\n',
 			fileName: "api.openapi.json",
 			notes: { direction: "document", dialect: "OpenAPI 3.1.0", requestsExported: 2 },
+		}),
+		diffSpec: vi.fn().mockResolvedValue({
+			identical: false,
+			added: [
+				{
+					operation: { operationId: "listOwners", method: "GET", path: "/owners" },
+					folder: "owners",
+					draft: { name: "List owners", method: "GET", url: "{{baseUrl}}/owners" },
+				},
+			],
+			removed: [
+				{
+					requestId: "req_9",
+					name: "Delete a pet",
+					operation: {
+						operationId: "deletePet",
+						method: "DELETE",
+						path: "/pets/{petId}",
+					},
+				},
+			],
+			changed: [
+				{
+					requestId: "req_1",
+					name: "List pets",
+					boundOperation: { operationId: "listPets", method: "GET", path: "/pets" },
+					operation: { operationId: "listPets", method: "GET", path: "/pets" },
+					matchedBy: "operationId",
+					renamed: false,
+					previousUnknown: false,
+					fields: [
+						{
+							field: "name",
+							current: "List pets",
+							next: "List all the pets",
+							userTouched: false,
+						},
+					],
+					draft: { name: "List all the pets", method: "GET", url: "{{baseUrl}}/pets" },
+				},
+			],
+			unchanged: 12,
+			unmapped: 1,
 		}),
 		listRequestExamples: vi.fn().mockResolvedValue([]),
 		createRequestExample: vi
@@ -7171,6 +7215,197 @@ describe("OpenAPI spec binding tools", () => {
 		const res = await dispatchTool("export_spec", { collectionId: "col_1" }, ctxWith(client));
 		expect(res.isError).toBe(true);
 		expect(allText(res)).toContain("spec_1");
+	});
+
+	test("diff_spec sends the candidate document and nothing it could compare wrongly", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"diff_spec",
+			{ collectionId: "col_1", content: '{"openapi":"3.1.0"}' },
+			ctxWith(client)
+		);
+		expect(res.isError).toBeFalsy();
+		// Neither the requests nor the bound document ride in the payload: the
+		// engine walks the subtree and reads the binding itself, so a caller
+		// cannot make a stale copy the "previous" side of a three-way compare.
+		expect(client.diffSpec).toHaveBeenCalledWith(
+			{ collectionId: "col_1", spec: { content: '{"openapi":"3.1.0"}' } },
+			undefined
+		);
+		expect(client.listRequests).not.toHaveBeenCalled();
+		expect(client.getSpec).not.toHaveBeenCalled();
+		expect(client.getCollection).not.toHaveBeenCalled();
+
+		const value = JSON.parse(firstText(res));
+		expect(value.identical).toBe(false);
+		expect(value.summary).toEqual({
+			added: 1,
+			removed: 1,
+			changed: 1,
+			unchanged: 12,
+			unmapped: 1,
+		});
+		expect(value.added[0].operation.operationId).toBe("listOwners");
+		expect(value.removed[0].requestId).toBe("req_9");
+		expect(value.changed[0].fields[0]).toMatchObject({
+			field: "name",
+			current: "List pets",
+			next: "List all the pets",
+			userTouched: false,
+		});
+		expect(value.entriesTruncated).toBe(false);
+		// Reads only, and the caveat says so rather than leaving an agent to
+		// assume a diff applied something.
+		expect(allText(res)).toContain("Nothing was written");
+	});
+
+	test("diff_spec drops the drafts the engine attaches to every entry", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"diff_spec",
+			{ collectionId: "col_1", content: "{}" },
+			ctxWith(client)
+		);
+		// `draft` is what an apply *would* write, and `POST /specs/sync` re-reads
+		// it off the document being stored rather than being handed it - so no
+		// reader on either side of this tool consumes it. Passing it through
+		// would be the heaviest field in the answer and the "written but never
+		// read" defect at once. The rendered current/next pair, which is what
+		// says *what* moved, survives - asserted above.
+		expect(firstText(res)).not.toContain("draft");
+		expect(firstText(res)).not.toContain("{{baseUrl}}");
+	});
+
+	test("diff_spec names the fields a person edited, and stays quiet when none were", async () => {
+		const edited = {
+			identical: false,
+			added: [],
+			removed: [],
+			changed: [
+				{
+					requestId: "req_1",
+					name: "List pets",
+					operation: { operationId: "listPets", method: "GET", path: "/pets" },
+					matchedBy: "operationId",
+					renamed: false,
+					previousUnknown: false,
+					fields: [{ field: "url", current: "{{host}}/pets", next: "{{baseUrl}}/pets" }],
+				},
+			],
+			unchanged: 0,
+			unmapped: 0,
+		};
+		const untouched = await dispatchTool(
+			"diff_spec",
+			{ collectionId: "col_1", content: "{}" },
+			ctxWith(fakeClient({ diffSpec: vi.fn().mockResolvedValue(edited) }))
+		);
+		// The flag rides on every field either way; what must not appear is the
+		// warning, which is about fields somebody actually edited.
+		expect(allText(untouched)).not.toContain("overwrites a person's work");
+
+		// The same drift with the flag set is the one an agent must not propose
+		// applying silently, so it is named rather than left inside the JSON.
+		const client = fakeClient({
+			diffSpec: vi.fn().mockResolvedValue({
+				...edited,
+				changed: [
+					{
+						...edited.changed[0],
+						fields: [{ ...edited.changed[0].fields[0], userTouched: true }],
+					},
+				],
+			}),
+		});
+		const res = await dispatchTool(
+			"diff_spec",
+			{ collectionId: "col_1", content: "{}" },
+			ctxWith(client)
+		);
+		expect(allText(res)).toContain("userTouched");
+		expect(allText(res)).toContain("overwrites a person's work");
+		expect(JSON.parse(firstText(res)).changed[0].fields[0].userTouched).toBe(true);
+	});
+
+	test("diff_spec says a byte-identical document has nothing to apply", async () => {
+		const client = fakeClient({
+			diffSpec: vi.fn().mockResolvedValue({
+				identical: true,
+				added: [],
+				removed: [],
+				changed: [],
+				unchanged: 14,
+				unmapped: 0,
+			}),
+		});
+		const res = await dispatchTool(
+			"diff_spec",
+			{ collectionId: "col_1", content: "{}" },
+			ctxWith(client)
+		);
+		const value = JSON.parse(firstText(res));
+		expect(value.identical).toBe(true);
+		expect(value.summary).toEqual({
+			added: 0,
+			removed: 0,
+			changed: 0,
+			unchanged: 14,
+			unmapped: 0,
+		});
+		expect(allText(res)).toContain("byte-identical");
+	});
+
+	test("diff_spec caps each bucket and keeps the counts true", async () => {
+		const over = MAX_SPEC_DIFF_ENTRIES + 7;
+		const client = fakeClient({
+			diffSpec: vi.fn().mockResolvedValue({
+				identical: false,
+				added: Array.from({ length: over }, (_unused, index) => ({
+					operation: { operationId: `op_${index}`, method: "GET", path: `/p${index}` },
+					folder: "",
+				})),
+				removed: [],
+				changed: [],
+				unchanged: 0,
+				unmapped: 0,
+			}),
+		});
+		const res = await dispatchTool(
+			"diff_spec",
+			{ collectionId: "col_1", content: "{}" },
+			ctxWith(client)
+		);
+		const value = JSON.parse(firstText(res));
+		expect(value.added).toHaveLength(MAX_SPEC_DIFF_ENTRIES);
+		// The count an agent reads to decide whether a contract drifted is the
+		// engine's, never the cut list's length - a total read off the list
+		// would report 50 additions for a document that made 57.
+		expect(value.summary.added).toBe(over);
+		expect(value.entriesTruncated).toBe(true);
+		expect(allText(res)).toContain(`capped at ${MAX_SPEC_DIFF_ENTRIES}`);
+	});
+
+	test("diff_spec passes the engine's refusal through rather than inventing one", async () => {
+		// A collection that binds nothing has no middle term for the three-way
+		// comparison, and the engine's sentence already says what to do about it.
+		const client = fakeClient({
+			diffSpec: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError(
+						"Engine responded 400",
+						400,
+						"Collection 'col_1' is not bound to a spec; bind it before asking what a document would change"
+					)
+				),
+		});
+		const res = await dispatchTool(
+			"diff_spec",
+			{ collectionId: "col_1", content: "{}" },
+			ctxWith(client)
+		);
+		expect(res.isError).toBe(true);
+		expect(allText(res)).toContain("not bound to a spec");
 	});
 
 	test("unbind_spec is refused while writes are off, and reads nothing", async () => {
