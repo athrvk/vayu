@@ -23,8 +23,6 @@
  */
 
 import { vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services/http-client";
 import type { ImportParseRequest } from "@/types";
@@ -134,23 +132,4 @@ export function stubParse(
 	});
 }
 
-/**
- * The recorded parse of a fixture document (issue #877).
- *
- * Not a hand-written stand-in: `engine/tests/fixtures/import-conformance.json`
- * carries what the renderer's own parsers produced for each of these documents,
- * recorded at the commit before they were deleted and asserted against the
- * engine's parse on every build. So a case that pastes `postman-v21.json` and
- * previews it is looking at the same tree a running engine would answer with.
- */
-export function recordedParse(name: string): ImportResult {
-	const fixture = JSON.parse(
-		readFileSync(
-			join(__dirname, "../../../../engine/tests/fixtures/import-conformance.json"),
-			"utf8"
-		)
-	) as { cases: { name: string; expected: ImportResult }[] };
-	const found = fixture.cases.find((entry) => entry.name === name);
-	if (!found) throw new Error(`no recorded parse named "${name}"`);
-	return found.expected;
-}
+export { recordedParse } from "./recorded-parse.testkit";

@@ -33,7 +33,7 @@ vi.mock("@/services/api", async () => {
 	// The recorded parse of the very fixture these cases paste - see
 	// `recordedParse`. The parse itself is the engine's (issue #877); what this
 	// file is about is the two option checkboxes and the URL tab.
-	const { recordedParse } = await import("./import-preview.testkit");
+	const { recordedParse } = await import("./recorded-parse.testkit");
 	return {
 		apiService: {
 			importFetch: (u: string, maxBytes?: number) => importFetch(u, maxBytes),
