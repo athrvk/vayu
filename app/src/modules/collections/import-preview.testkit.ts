@@ -81,7 +81,14 @@ export function collection(over: Partial<CollectionDraft> = {}): CollectionDraft
 	};
 }
 
-export function result(over: Partial<ImportResult> = {}): ImportResult {
+/**
+ * `meta` is a *partial* here while the rest of the result is not: a case states
+ * the one counter it is about (`unattachedFileParts: 1`) and lets the others
+ * answer 0, the way a parse that found nothing would.
+ */
+export function result(
+	over: Partial<Omit<ImportResult, "meta">> & { meta?: Partial<ImportMeta> } = {}
+): ImportResult {
 	const { meta: metaOver, ...rest } = over;
 	const collections = rest.collections ?? [collection()];
 	return {
