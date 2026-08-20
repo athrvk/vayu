@@ -433,11 +433,11 @@ than silently truncated.
 
 **response_schemas** is what the document declares each response *looks like*
 (issue #628) - a JSON object of `{refRoots?, operations: [{operationId?, method,
-path, responses: [{status, contentType, schema}]}]}`, written by the client that
-parsed the document and read when a response comes back with a body to check.
-Still supplied rather than derived, unlike `operations`: extracting it means
-translating OpenAPI 3.0's dialect (`nullable`, draft-04 `exclusiveMinimum`) into
-JSON Schema, which has not moved engine-side yet.
+path, responses: [{status, contentType, schema}]}]}`, read when a response comes
+back with a body to check. **Derived, never supplied** (issue #860), off the
+*same* read as `operations`: a write carrying a `responseSchemas` field is a
+`400`, and one read for both is what keeps them agreeing about which operation
+declares which status.
 
 A column of its own rather than a field on `operations` because the two are read
 at different moments: the operation index is parsed when a run's plan resolves
@@ -448,9 +448,11 @@ and they are orders of magnitude larger.
 `x-vayu-bundled` subtrees **once**, and each schema keeps its `$ref`s as written;
 validation merges the two into one root document. Inlining instead would copy a
 shared `Error` schema into every operation naming it, and a recursive schema - a
-tree node whose child is itself - has no finite expansion at all. Schemas arrive
-already translated out of OpenAPI's dialect (3.0's `nullable`, its draft-04
-boolean `exclusiveMinimum`): the engine consumes JSON Schema and nothing else.
+tree node whose child is itself - has no finite expansion at all. Schemas are
+translated out of OpenAPI's dialect as they are derived (3.0's `nullable`, its
+draft-04 boolean `exclusiveMinimum`, and the OpenAPI-only keywords that constrain
+no body): the column holds JSON Schema and nothing else, because that is what the
+validator reads.
 
 `""` means *no index* on the same terms as `operations`: a response of such a
 document reports `checked: false` with the reason `no_index`, never a body that

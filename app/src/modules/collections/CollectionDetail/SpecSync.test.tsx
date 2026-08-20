@@ -453,7 +453,7 @@ describe("SpecSync", () => {
 			expect(screen.getByText(/document-level changes only/i)).toBeTruthy();
 		});
 
-		it("applies it - the new bytes and both indexes, with no request row touched", async () => {
+		it("applies it - the new bytes, with no request row touched", async () => {
 			// Mutation check: restore `isEmptySelection(...)` to the Apply button's
 			// `disabled` and this reddens at the click - `syncSpec` is never called,
 			// which is the dead end this issue is.
@@ -483,11 +483,11 @@ describe("SpecSync", () => {
 			expect(payload.update).toEqual([]);
 			expect(payload.delete).toEqual([]);
 			expect(payload.collections).toEqual([]);
-			// The schema index rides along, which is what makes validation read
-			// the *new* contract rather than the one it was stale against. The
-			// operation index does not: the engine derives it from the document
-			// this payload stores (issue #853).
-			expect(JSON.stringify(payload.spec.responseSchemas)).toContain("name");
+			// Neither index rides along: the engine derives both from the document
+			// this payload stores (issues #853 and #860), which is what makes
+			// validation read the *new* contract rather than one a client
+			// re-sent - or forgot to.
+			expect(Object.keys(payload.spec).sort()).toEqual(["content", "sourceUrl"]);
 			expect(
 				await screen.findByText(/no request changed.*now bound to the document/i)
 			).toBeTruthy();

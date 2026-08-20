@@ -78,42 +78,36 @@ std::string spec_content_hash (const std::string& content) {
 
 /**
  * Puts the `operations` (#629) and `responseSchemas` (#628) indexes onto
- * @p spec - the first derived from the document, the second still supplied.
+ * @p spec, both derived from the document about to be stored.
  *
- * **`operations` is computed here, never taken from the caller** (issue #853),
- * for the reason `hash` is: an index a client worked out is a claim about a
- * document nobody verified, and a wrong one does not merely go unread - coverage
- * resolves a stamp by `operationId` first, so a row claiming an id the document
- * does not declare claims whichever operation happens to share it. The engine
- * reading the document is what #761's phase B moved here, and this is the write
- * path's whole use of it: `core::derive_operations_index` reads the bytes about
- * to be stored and answers what they declare.
+ * **Neither is taken from the caller**, for the reason `hash` is not: an index a
+ * client worked out is a claim about a document nobody verified, and a wrong one
+ * does not merely go unread - coverage resolves a stamp by `operationId` first,
+ * so a row claiming an id the document does not declare claims whichever
+ * operation happens to share it. The engine reading the document is what #761's
+ * phase B moved here (#853 for the operations, #860 for the schemas), and this
+ * is the write path's whole use of it: `core::derive_spec_indexes` reads the
+ * bytes about to be stored, once, and answers what they declare.
  *
- * `responseSchemas` is still supplied, because extracting it needs 3.0's dialect
- * translated into JSON Schema and that has not moved yet (tracked separately);
- * it is validated on the way in rather than tolerated and ignored at run end - a
- * client sending a malformed index has a bug, and a validation chip that
- * silently went missing weeks later would not name it. `null` and absent both
- * mean "no index"; the column stores `""` for both.
+ * One read for both is what makes the two agree. They describe the same
+ * operations by the same identity rules, so a schema index carrying a status the
+ * operation index does not list would be a contract disagreeing with itself -
+ * which is what two extractors, in two languages, produced before this.
  */
 std::optional<std::string>
-read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, size_t schema_cap) {
-    if (item.contains ("operations")) {
-        return "'operations' is derived from the document by the engine; omit it";
-    }
-    auto operations = vayu::core::derive_operations_index (spec.content);
-    if (!operations.ok ()) {
-        return operations.error;
-    }
-    spec.operations = std::move (operations.stored);
-
-    if (auto schemas = item.find ("responseSchemas");
-        schemas != item.end () && !schemas->is_null ()) {
-        if (auto reason = vayu::core::validate_response_schemas_index (*schemas, schema_cap)) {
-            return reason;
+read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, size_t index_cap) {
+    for (const char* derived : { "operations", "responseSchemas" }) {
+        if (item.contains (derived)) {
+            return std::string ("'") + derived +
+            "' is derived from the document by the engine; omit it";
         }
-        spec.response_schemas = schemas->dump ();
     }
+    auto indexes = vayu::core::derive_spec_indexes (spec.content, index_cap);
+    if (!indexes.ok ()) {
+        return indexes.error;
+    }
+    spec.operations       = std::move (indexes.operations);
+    spec.response_schemas = std::move (indexes.response_schemas);
     return std::nullopt;
 }
 
@@ -298,12 +292,11 @@ void stamp_binding_from_store (vayu::db::Database& db, std::string& openapi) {
  * invalidate the hash every run of every collection bound to it was stamped
  * with. Phase 2 (#627) re-fetches by storing a new one and moving the binding.
  *
- * `hash`, `fetchedAt` and the `operations` index are engine-computed and
- * rejected in the body for the same reason `id` is: each would otherwise be a
- * claim about bytes nobody verified. The index is derived from the document by
- * `core::derive_operations_index` (issue #853), which is also what makes an
- * unreadable document a `400` here rather than a row nothing downstream can
- * read.
+ * `hash`, `fetchedAt` and both indexes are engine-computed and rejected in the
+ * body for the same reason `id` is: each would otherwise be a claim about bytes
+ * nobody verified. The indexes come from `core::derive_spec_indexes` (issues
+ * #853 and #860), which is also what makes an unreadable document a `400` here
+ * rather than a row nothing downstream can read.
  */
 std::pair<int, nlohmann::json>
 create_spec_document_response (vayu::db::Database& db, const nlohmann::json& json) {

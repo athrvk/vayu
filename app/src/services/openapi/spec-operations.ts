@@ -20,7 +20,7 @@
  * existing collection deliberately creates no requests (that is sync, #627).
  */
 
-import type { ResponseSchemaIndex, SpecOperation } from "@/types";
+import type { SpecOperation } from "@/types";
 import { parseImport } from "@/services/importers/factory";
 import type { CollectionDraft, RequestDraft } from "@/services/importers/types";
 
@@ -60,14 +60,6 @@ export interface ReadSpecResult {
 	requests: SpecRequestDraft[];
 	/** Every operation the document declares, in document order. */
 	operations: SpecOperation[];
-	/**
-	 * The response schemas the document declares (issue #628), taken off the
-	 * parse rather than walked for a second time. `undefined` for a document
-	 * that declares none,
-	 * which is stored as "no index" - a response of it reports that it was not
-	 * checked, never that it passed.
-	 */
-	responseSchemas?: ResponseSchemaIndex;
 	/** The parser that claimed it - "OpenAPI 3.0", "OpenAPI 2.0 (Swagger)". */
 	format: string;
 	/** `info.title`, which is what the document calls itself. */
@@ -105,7 +97,6 @@ export function readSpecOperations(raw: string): ReadSpecResult {
 		// wants identities and a reader that wants drafts cannot disagree about
 		// what the document declares.
 		operations: requests.map((r) => r.operation),
-		...(root.spec.responseSchemas ? { responseSchemas: root.spec.responseSchemas } : {}),
 		format: result.meta.format,
 		title: root.name,
 	};

@@ -209,12 +209,11 @@ export interface CollectionOpenApiBinding {
  * (issue #629): an operation's identity plus the status patterns its `responses`
  * map declares.
  *
- * The index exists because **the engine does not parse OpenAPI** - the division
- * of labour #625 decided - and contract coverage still has to know which
- * operations a document declares and which responses each promises. So the side
- * that already parses the document writes it down, once, at the moment the
- * document is stored, and the engine counts against it without ever reading the
- * document itself.
+ * The index exists because contract coverage has to know which operations a
+ * document declares and which responses each promises, without re-reading the
+ * document on every run. **The engine derives it** from the bytes it stores
+ * (issue #853) rather than taking one from a client, so what a document declares
+ * has one reader; this type is how the app reads the stored result back.
  *
  * `responses` keeps the patterns verbatim and in document order: `"200"`, `"4XX"`
  * and `"default"` are three different promises, and expanding a range into codes
@@ -233,9 +232,9 @@ export interface DeclaredOperation {
  *
  * `status` is the pattern verbatim - `"200"`, `"4XX"`, `"default"` - for the
  * same reason `DeclaredOperation.responses` keeps them that way. `schema` is
- * JSON Schema, translated out of OpenAPI's dialect when it was extracted (see
- * `services/importers/response-schemas.ts`), and may legally be `true` or
- * `false` as well as an object.
+ * JSON Schema, translated out of OpenAPI's dialect by the engine as the document
+ * was stored (`core/openapi_document.hpp`, issue #860), and may legally be
+ * `true` or `false` as well as an object.
  */
 export interface DeclaredResponseSchema {
 	status: string;
