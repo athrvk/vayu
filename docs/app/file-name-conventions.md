@@ -195,6 +195,12 @@ This document defines the standard file naming conventions for the Vayu applicat
 | Error Components | `PascalCase.tsx` | `ErrorBoundary.tsx` |
 | Error Utilities | `kebab-case.ts` | `error-handler.ts` |
 | Index Files | `index.ts` / `index.tsx` | `index.ts` |
+| Test-only helpers | `kebab-case.testkit.ts` | `imported-operations.testkit.ts` |
+
+A `.testkit.ts` file is **not part of the app**: it holds something only tests
+need - a walk, a builder, a fixture reader - and the suffix is there so a
+production import of it stands out in review. It is not picked up as a test file
+either, since vitest matches `*.test.*` / `*.spec.*` only.
 
 ## Directory Structure
 

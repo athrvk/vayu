@@ -27,9 +27,12 @@
  * deliberately does not compare examples (#654), so the rule is stated rather
  * than shown: the document's responses replace the examples a previous import
  * or sync wrote, and an example saved from a live response is never touched -
- * the engine keeps that promise by `origin`, not this payload. The responses
- * themselves ride on the draft the diff answered with, which is why this file
- * reads no document.
+ * the engine keeps that promise by `origin`, not this payload. Since issue #869
+ * the *rows* are the engine's too: this sends the decision (`examples: true`)
+ * and the engine writes what the document it is storing documents. What rode
+ * here before was that same answer, carried from the diff two calls earlier and
+ * handed back - a round trip that let a payload state examples for a response no
+ * document describes.
  *
  * **The identity travels with the request, always - and it is `specOperation`,
  * not `method`.** An applied change writes `specOperation` whether or not
@@ -209,19 +212,18 @@ export function buildSyncPayload({
  * remembered.
  */
 function draftOf(entry: SpecDiffAdded): RequestDraft {
-	const { examples, ...rest } = entry.draft;
+	// The documented responses are dropped rather than carried: a sync writes the
+	// examples the document it stores documents (issue #869), so a created
+	// request's rows come off that document and `examples` in the payload is a
+	// `400`. They stay on the diff's answer because that is a preview of what an
+	// apply will write.
+	const { examples: _documented, ...rest } = entry.draft;
 	return {
 		...rest,
 		method: entry.draft.method as HttpMethod,
 		auth: { mode: "inherit" },
 		preRequestScript: "",
 		postRequestScript: "",
-		// Absent rather than `[]` for an operation documenting no response, which
-		// is the distinction `requestFieldsFromDraft` carries: "this request
-		// documents no responses" is a claim, and only a document that declared
-		// some can make it. Destructured out above rather than overwritten, since
-		// a key spread in as `[]` is present however it is spelled after.
-		...(examples.length > 0 ? { examples } : {}),
 		specOperation: entry.operation,
 	};
 }
@@ -253,10 +255,13 @@ function updateItem(item: SpecDiffChanged, fields: ReadonlySet<SpecField>): Spec
 	// The recorded identity, whether or not anything else was ticked - see the
 	// file comment for why this rides along and `request.method` no longer does.
 	patch.specOperation = item.operation;
-	// Present, `[]` included: an operation whose documented responses were
-	// removed must lose the examples the last import wrote for them, and an
-	// absent key means "leave every example alone".
-	patch.examples = draft.examples;
+	// True on every applied change, which is the rule this file has always
+	// followed: applying anything to a request refreshes the examples the
+	// document wrote for it. The engine reads the rows off the document being
+	// stored - including the empty answer for an operation whose responses were
+	// removed, which is what makes the last import's examples go. Absent would
+	// mean "leave every example alone", and no applied change means that.
+	patch.examples = true;
 	return patch;
 }
 

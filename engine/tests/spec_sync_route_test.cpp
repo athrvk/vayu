@@ -15,6 +15,10 @@
  *    replaced and `origin="user"` rows are not, and the replacements never jump
  *    ahead of a user row that was already in front of them - "the first example"
  *    is what a mock server answers with, so the order is a contract.
+ *  - **The replacements are the document's** (issue #869). The payload says
+ *    whether to refresh a request's imported examples; the rows come off the
+ *    document the call is storing, so a caller cannot write an example for a
+ *    response the document does not describe.
  *  - **So does deleting an imported one.** A refresh writes the document's
  *    examples back for every status except one the user removed (issue #722) -
  *    without that, any later sync of any field undid the delete.
@@ -85,6 +89,27 @@ R"({"openapi":"3.1.0","info":{"title":"Pets","version":"1.1.0"},)"
 R"("paths":{"/pets":{"get":{"operationId":"listPets",)"
 R"("responses":{"200":{},"404":{}}}},)"
 R"("/owners":{"get":{"operationId":"listOwners","responses":{"200":{}}}}}})";
+
+// A revision that declares the same operation and documents no response for it:
+// the state "this operation documents nothing", which a refresh has to write as
+// no rows rather than as no change (issue #869).
+constexpr const char* NO_RESPONSES_DOC =
+R"({"openapi":"3.1.0","info":{"title":"Pets","version":"1.2.0"},)"
+R"("paths":{"/pets":{"get":{"operationId":"listPets"}}}})";
+
+// One whose 404 is reworded, which moves the *name* an imported example takes
+// and leaves its status alone - the case a name-keyed tombstone would miss.
+constexpr const char* REWORDED_404_DOC =
+R"({"openapi":"3.1.0","info":{"title":"Pets","version":"1.3.0"},)"
+R"("paths":{"/pets":{"get":{"operationId":"listPets",)"
+R"("responses":{"404":{"description":"No such user any more"}}}}}})";
+
+/// The identities `FETCHED_DOC` declares, as a request's stamp records them -
+/// which is how a refresh finds the responses the document documents for it.
+const json LIST_PETS =
+json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } };
+const json LIST_OWNERS =
+json{ { "operationId", "listOwners" }, { "method", "GET" }, { "path", "/owners" } };
 
 class SpecSyncRouteTest : public ::testing::Test {
     protected:
@@ -388,42 +413,50 @@ TEST_F (SpecSyncRouteTest, RefusesAFolderParentedOutsideTheSyncedCollection) {
 }
 
 // ---------------------------------------------------------------------------
-// Examples - the user's survive, the imported ones are replaced in place
+// Examples - the document's responses, the user's rows left alone
+//
+// Since issue #869 the payload states a *decision* and the rows come off the
+// document being stored, so every case here is written against what
+// `FETCHED_DOC` (or the document the case sends) documents.
 // ---------------------------------------------------------------------------
 
-TEST_F (SpecSyncRouteTest, ReplacesImportedExamplesAndKeepsTheUsersOwn) {
-    const std::string request = create_request (root_);
+TEST_F (SpecSyncRouteTest, WritesTheDocumentsResponsesAndKeepsTheUsersOwnExamples) {
+    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_USER, 0);
     const std::string replaced =
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 1);
 
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "update",
-        json::array ({ json{ { "id", request },
-            { "examples", json::array ({ json{ { "name", "200 ok" }, { "status", 200 } } }) } } }) } }));
+        json::array ({ json{ { "id", request }, { "examples", true } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
 
     auto rows = db_->get_request_examples (request);
-    ASSERT_EQ (rows.size (), 2u);
-    // The user's row is first and unchanged; the imported one is gone and its
-    // replacement sits where it sat. Mutation check: replace `refresh_examples`
-    // with "delete everything" and the first assertion reddens; give the new row
-    // order 0 and the second does.
+    // The two statuses `FETCHED_DOC` declares for `listPets`, in document order,
+    // beside the row the user saved. Mutation check: hand `rows_for` the wrong
+    // operation and the statuses redden; replace `refresh_examples` with "delete
+    // everything" and the user's row goes with it.
+    ASSERT_EQ (rows.size (), 3u) << "expected the user's row plus the document's 200 and 404";
     EXPECT_EQ (rows[0].origin, vayu::core::constants::request_example::ORIGIN_USER);
-    EXPECT_EQ (rows[1].name, "200 ok");
+    EXPECT_EQ (rows[1].status, 200);
     EXPECT_EQ (rows[1].order, 1);
     EXPECT_EQ (rows[1].origin, vayu::core::constants::request_example::ORIGIN_IMPORT);
+    EXPECT_EQ (rows[2].status, 404);
+    EXPECT_EQ (rows[2].order, 2);
     EXPECT_FALSE (db_->get_request_example (replaced).has_value ());
 }
 
-TEST_F (SpecSyncRouteTest, AnEmptyExampleListRemovesTheImportedOnesOnly) {
-    const std::string request = create_request (root_);
+// An operation whose responses the document dropped: the refresh has nothing to
+// write, and the imported rows still go. "The document documents nothing here"
+// is a real state, and it is the one the empty list used to spell.
+TEST_F (SpecSyncRouteTest, ADocumentedNothingRemovesTheImportedExamplesOnly) {
+    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_USER, 0);
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 1);
 
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "update",
-        json::array ({ json{ { "id", request }, { "examples", json::array () } } }) } }));
+    body (json{ { "spec", json{ { "content", NO_RESPONSES_DOC } } },
+    { "update", json::array ({ json{ { "id", request }, { "examples", true } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
 
     auto rows = db_->get_request_examples (request);
@@ -431,14 +464,95 @@ TEST_F (SpecSyncRouteTest, AnEmptyExampleListRemovesTheImportedOnesOnly) {
     EXPECT_EQ (rows[0].origin, vayu::core::constants::request_example::ORIGIN_USER);
 }
 
-TEST_F (SpecSyncRouteTest, AnAbsentExampleListLeavesEveryExampleAlone) {
-    const std::string request = create_request (root_);
+TEST_F (SpecSyncRouteTest, AnAbsentExamplesDecisionLeavesEveryExampleAlone) {
+    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0);
 
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "update", json::array ({ json{ { "id", request }, { "name", "renamed" } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
     EXPECT_EQ (db_->get_request_examples (request).size (), 1u);
+}
+
+// `false` is the same state as absent, said out loud - which is what makes the
+// decision expressible by a caller that builds its payload from a table rather
+// than by leaving keys out. Mutation check: treat a `false` as a refresh and the
+// seeded imported row is replaced by the document's two.
+TEST_F (SpecSyncRouteTest, AFalseExamplesDecisionLeavesEveryExampleAlone) {
+    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
+    seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 500);
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "update",
+        json::array ({ json{ { "id", request }, { "examples", false } } }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    auto rows = db_->get_request_examples (request);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_EQ (rows[0].status, 500);
+}
+
+// The rows are the document's, so a caller cannot state them (issue #869). A
+// stale client sending the list it used to send is refused rather than half
+// honoured: writing examples the document does not describe is exactly what this
+// route now exists to prevent. Mutation check: accept an array again and the
+// 400 becomes a 200 with a row for a status `FETCHED_DOC` never mentions.
+TEST_F (SpecSyncRouteTest, RefusesAnExampleListWhereADecisionBelongs) {
+    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "update", json::array ({ json{ { "id", request },
+                     { "examples", json::array ({ json{ { "name", "418 - Invented" },
+                         { "status", 418 } } }) } } }) } }));
+    ASSERT_EQ (status, 400) << response.dump ();
+    EXPECT_EQ (db_->get_request_examples (request).size (), 0u);
+}
+
+// A refresh names an operation by the request's own stamp, so a request the
+// document does not declare has no responses to write. Refused rather than
+// silently left alone: the caller asked for a refresh, and a route that answered
+// 200 having done nothing would report a sync that did not happen.
+TEST_F (SpecSyncRouteTest, RefusesARefreshForARequestTheDocumentDoesNotDeclare) {
+    const std::string stranger = create_request (root_,
+    json{ { "specOperation", json{ { "method", "GET" }, { "path", "/nowhere" } } } });
+    const std::string unstamped = create_request (root_);
+
+    auto [missing, missing_body] = routes::spec_sync_response (*db_,
+    body (json{ { "update",
+        json::array ({ json{ { "id", stranger }, { "examples", true } } }) } }));
+    EXPECT_EQ (missing, 400) << missing_body.dump ();
+
+    auto [unnamed, unnamed_body] = routes::spec_sync_response (*db_,
+    body (json{ { "update",
+        json::array ({ json{ { "id", unstamped }, { "examples", true } } }) } }));
+    EXPECT_EQ (unnamed, 400) << unnamed_body.dump ();
+}
+
+// A created request is the request an import would build, examples included -
+// the operation's documented responses, with no decision to make, because there
+// is nothing behind it to leave alone.
+TEST_F (SpecSyncRouteTest, ACreatedRequestGetsTheResponsesTheDocumentDocuments) {
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "create", json::array ({ json{ { "tempId", "t_req" },
+        { "collectionId", root_ }, { "name", "list owners" }, { "method", "GET" },
+        { "url", "https://example.test/owners" }, { "specOperation", LIST_OWNERS } } }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    const auto created = response["idMap"]["t_req"].get<std::string> ();
+    auto rows          = db_->get_request_examples (created);
+    ASSERT_EQ (rows.size (), 1u) << "the 200 `FETCHED_DOC` declares for listOwners";
+    EXPECT_EQ (rows[0].status, 200);
+    EXPECT_EQ (rows[0].origin, vayu::core::constants::request_example::ORIGIN_IMPORT);
+}
+
+TEST_F (SpecSyncRouteTest, RefusesACreatedRequestThatStatesItsOwnExamples) {
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "create", json::array ({ json{ { "tempId", "t_req" },
+        { "collectionId", root_ }, { "name", "list owners" }, { "method", "GET" },
+        { "url", "https://example.test/owners" }, { "specOperation", LIST_OWNERS },
+        { "examples", json::array ({ json{ { "name", "418" }, { "status", 418 } } }) } } }) } }));
+    ASSERT_EQ (status, 400) << response.dump ();
+    EXPECT_EQ (db_->get_requests_in_collection (root_).size (), 0u);
 }
 
 // Issue #722. The refresh replaces every imported row of a request an apply
@@ -448,7 +562,7 @@ TEST_F (SpecSyncRouteTest, AnAbsentExampleListLeavesEveryExampleAlone) {
 // `suppressed_statuses` skip in `build_example_rows` and the deleted 404 comes
 // back, reddening both size assertions.
 TEST_F (SpecSyncRouteTest, ADeletedImportedExampleIsNotWrittenBackByALaterSync) {
-    const std::string request = create_request (root_);
+    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 200);
     const std::string unwanted =
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 1, 404);
@@ -457,22 +571,18 @@ TEST_F (SpecSyncRouteTest, ADeletedImportedExampleIsNotWrittenBackByALaterSync) 
     routes::delete_request_example_response (*db_, request, unwanted);
     ASSERT_EQ (deleted, 200) << delete_body.dump ();
 
-    // The payload a rename-only tick sends: every documented example, because
-    // the diff does not compare them (#654) and the app attaches the lot.
+    // A rename with its examples ticked: the document declares both statuses, so
+    // without the tombstone rule both would come back.
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "update",
-        json::array ({ json{ { "id", request }, { "name", "renamed" },
-            { "examples",
-                json::array ({ json{ { "name", "200 - A user" }, { "status", 200 } },
-                    json{ { "name", "404 - Not found" }, { "status", 404 } } }) } } }) } }));
+    body (json{ { "update", json::array ({ json{ { "id", request }, { "name", "renamed" },
+                     { "examples", true } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
 
     auto rows = db_->get_request_examples (request);
     ASSERT_EQ (rows.size (), 1u) << "the deleted 404 example came back";
-    EXPECT_EQ (rows[0].status, 200);
     // The status the user kept still refreshes from the document - a tombstone
     // suppresses its own status and nothing else.
-    EXPECT_EQ (rows[0].name, "200 - A user");
+    EXPECT_EQ (rows[0].status, 200);
     EXPECT_EQ (rows[0].order, 0);
 }
 
@@ -481,29 +591,18 @@ TEST_F (SpecSyncRouteTest, ADeletedImportedExampleIsNotWrittenBackByALaterSync) 
 // reword - and a name-keyed tombstone would then miss, resurrecting exactly
 // what this fix makes durable (issue #722).
 TEST_F (SpecSyncRouteTest, ARewordedDescriptionDoesNotBringADeletedExampleBack) {
-    const std::string request = create_request (root_);
+    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
     const std::string unwanted =
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 404);
     ASSERT_EQ (routes::delete_request_example_response (*db_, request, unwanted).first, 200);
 
+    // The re-fetched document rewords the 404 it declares, which moves the name
+    // an import would give the example and leaves its status where it was.
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "update",
-        json::array ({ json{ { "id", request },
-            { "examples", json::array ({ json{ { "name", "404 - No such user any more" },
-                { "status", 404 } } }) } } }) } }));
+    body (json{ { "spec", json{ { "content", REWORDED_404_DOC } } },
+    { "update", json::array ({ json{ { "id", request }, { "examples", true } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
     EXPECT_TRUE (db_->get_request_examples (request).empty ());
-}
-
-TEST_F (SpecSyncRouteTest, RefusesAnExampleThatClaimsToBeTheUsers) {
-    const std::string request = create_request (root_);
-
-    auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "update", json::array ({ json{ { "id", request },
-                     { "examples", json::array ({ json{ { "name", "x" },
-                         { "origin", "user" } } }) } } }) } }));
-    ASSERT_EQ (status, 400) << response.dump ();
-    EXPECT_EQ (db_->get_request_examples (request).size (), 0u);
 }
 
 // ---------------------------------------------------------------------------

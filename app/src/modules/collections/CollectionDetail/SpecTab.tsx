@@ -39,6 +39,12 @@
  * sends a document and a collection, and nothing it decided. The match query
  * below is the *preview* - it writes nothing, and is what the counts above the
  * Bind button are painted from.
+ * **Nor does this tab read the document any more** (#869, `POST
+ * /specs/describe`): the format, the title and the operations the card shows
+ * before a bind come from the reader the bind itself uses, so the identities
+ * previewed here are the identities that will be stamped. It parsed the picked
+ * file until then, which made the preview and the write two opinions about one
+ * document.
  * The one place this tab writes *other* request fields is the Sync section, and
  * only for the items the user ticks: it re-reads the document and says what
  * moved (#654), and applies the selection in one engine transaction (#655).
@@ -55,10 +61,14 @@ import {
 	useMultipleCollectionRequests,
 	useUpdateCollectionMutation,
 } from "@/queries/collections";
-import { useBindSpecMutation, useSpecMatchQuery, useSpecMetaQuery } from "@/queries/specs";
+import {
+	useBindSpecMutation,
+	useSpecDescribeQuery,
+	useSpecMatchQuery,
+	useSpecMetaQuery,
+} from "@/queries/specs";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { useSpecFileStore } from "@/stores";
-import { readSpecOperations } from "@/services/openapi/spec-operations";
 import SpecCoverageLine from "./SpecCoverageLine";
 import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import { formatBytes } from "@/modules/settings/utils/format-size";
@@ -75,11 +85,29 @@ interface SpecTabProps {
 /** A document the user has chosen but not yet bound. */
 interface PickedSpec {
 	content: string;
+	/**
+	 * What names *this* pick, for the read that describes it (issue #869).
+	 *
+	 * The document is not stored and so has no id, and its bytes are not a cache
+	 * key - so each pick gets a token, and the query keyed by it can be cached
+	 * indefinitely: the same token is always the same document.
+	 */
+	token: string;
 	/** The URL it was fetched from; absent for a file. */
 	sourceUrl?: string;
 	/** The file it was read from, and where that file is - absent for a URL. */
 	fileName?: string;
 	path?: string;
+}
+
+/**
+ * The token above. A counter rather than a hash of the content: hashing a 12 MB
+ * document to name it costs the read this whole change removed.
+ */
+let pickCounter = 0;
+function nextPickToken(): string {
+	pickCounter += 1;
+	return `pick_${pickCounter}`;
 }
 
 export default function SpecTab({ collection }: SpecTabProps) {
@@ -138,22 +166,16 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	const { maxBytes: specMaxBytes } = useSpecDocumentLimit();
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
-	// Parsed on every render of a picked document rather than stored in state:
-	// the parse is pure and the alternative is two pieces of state that can
-	// disagree about which document is on screen.
-	const parsed = useMemo(() => {
-		if (!picked) return null;
-		try {
-			return { ...readSpecOperations(picked.content), error: null as string | null };
-		} catch (e) {
-			return {
-				operations: [],
-				format: "",
-				title: "",
-				error: (e as Error).message,
-			};
-		}
-	}, [picked]);
+	/*
+	 * What the picked document *is* is the engine's answer now (issue #869).
+	 * This tab used to run the import parsers over the picked bytes to paint the
+	 * three things below - the format, the title and the operations - while the
+	 * bind derived the same identities from the same bytes engine-side. Two
+	 * readers of one document is the thing #853 set out to end, and here it could
+	 * preview a pairing the bind would not commit.
+	 */
+	const describeQuery = useSpecDescribeQuery(picked?.token ?? null, picked?.content ?? "");
+	const described = describeQuery.data ?? null;
 
 	/*
 	 * The pairing is the engine's answer now (issue #761): the rule that decides
@@ -162,11 +184,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	 * way rather than through a second copy of it. Nothing is written by asking -
 	 * the counts below still appear before the user commits to the bind.
 	 */
-	const matchQuery = useSpecMatchQuery(
-		collection.id,
-		requests,
-		parsed && !parsed.error ? parsed.operations : null
-	);
+	const matchQuery = useSpecMatchQuery(collection.id, requests, described?.operations ?? null);
 	const match = matchQuery.data ?? null;
 
 	const mappedCount = requests.filter((r) => r.specOperation).length;
@@ -195,6 +213,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 			setPickError(null);
 			setPicked({
 				content: String(reader.result),
+				token: nextPickToken(),
 				fileName: file.name,
 				// The path while there is still a `File` to take it from - see
 				// `spec-file-store` for why only the path is kept.
@@ -211,7 +230,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 		setPickError(null);
 		try {
 			const { content } = await apiService.importFetch(url, specMaxBytes);
-			setPicked({ content, sourceUrl: url });
+			setPicked({ content, token: nextPickToken(), sourceUrl: url });
 		} catch (e) {
 			setPickError((e as Error).message);
 		} finally {
@@ -220,7 +239,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	};
 
 	const handleBind = () => {
-		if (!picked || !match || parsed?.error) return;
+		if (!picked || !match) return;
 		// The document and the collection, and nothing else: the engine works
 		// the pairing out from the bytes it stores and stamps both halves of it
 		// in one transaction (issue #862). What `match` gave us above is the
@@ -354,9 +373,13 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						</Callout>
 					)}
 
-					{parsed?.error && (
-						<Callout severity="blocking" title="Not an OpenAPI document">
-							{parsed.error}
+					{/* Reading the document is an engine read now (issue #869), so
+					    "this is not an OpenAPI document" arrives as a failed query
+					    rather than as a thrown parse - and it carries the engine's own
+					    sentence, which names what is missing. */}
+					{describeQuery.isError && (
+						<Callout severity="blocking" title="Couldn't read that document">
+							{(describeQuery.error as Error).message}
 						</Callout>
 					)}
 
@@ -366,11 +389,11 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					    match - a bind stamps identity, and identity worked out by a
 					    second implementation is the thing this move exists to end. */}
 					{/* `isFetching`, not `isPending`: a disabled query - nothing picked,
-					    or a document that did not parse - is pending forever. */}
-					{matchQuery.isFetching && (
+					    or a document that did not read - is pending forever. */}
+					{(describeQuery.isFetching || matchQuery.isFetching) && (
 						<p className="flex items-center gap-2 text-xs text-muted-foreground">
 							<Loader2 className="h-3 w-3 animate-spin" />
-							Matching this document against the requests here...
+							Reading this document and matching it against the requests here...
 						</p>
 					)}
 
@@ -380,10 +403,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						</Callout>
 					)}
 
-					{picked && match && parsed && !parsed.error && (
+					{picked && match && described && (
 						<MatchSummary
-							title={parsed.title}
-							format={parsed.format}
+							title={described.title}
+							format={described.format}
 							source={picked.sourceUrl ?? picked.fileName ?? "the picked document"}
 							matched={match.matched.length}
 							unmatchedRequests={match.unmatchedRequests.length}
@@ -392,7 +415,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						/>
 					)}
 
-					{picked && match && !parsed?.error && (
+					{picked && match && (
 						<Button onClick={handleBind} disabled={bindSpec.isPending}>
 							{bindSpec.isPending ? (
 								<Loader2 className="mr-2 h-4 w-4 animate-spin" />

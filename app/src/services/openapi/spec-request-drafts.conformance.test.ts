@@ -26,7 +26,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { readSpecOperations, type SpecRequestDraft } from "./spec-operations";
+import { importedOperations, type ImportedOperation } from "./imported-operations.testkit";
 import type { KeyValueEntry } from "@/types";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -102,7 +102,7 @@ function rows(entries: readonly (KeyValueEntry & { type?: string })[] | undefine
 	}));
 }
 
-function shapeOf(entry: SpecRequestDraft): FixtureDraft {
+function shapeOf(entry: ImportedOperation): FixtureDraft {
 	const { body } = entry.draft;
 	return {
 		...(entry.operation.operationId ? { operationId: entry.operation.operationId } : {}),
@@ -134,10 +134,10 @@ describe("spec request draft conformance with the engine", () => {
 	for (const testCase of fixture.cases) {
 		it(`builds the requests the engine derives: ${testCase.name}`, () => {
 			// Keyed rather than ordered: the engine walks the document while
-			// `readSpecOperations` walks the collection tree it built (root
-			// requests, then tag folders). Two orders both sides agree about.
+			// `importedOperations` walks the collection tree the parsers built
+			// (root requests, then tag folders). Two orders both sides agree about.
 			const built = new Map(
-				readSpecOperations(testCase.document).requests.map((entry) => {
+				importedOperations(testCase.document).map((entry) => {
 					const shape = shapeOf(entry);
 					return [`${shape.method} ${shape.path}`, shape];
 				})

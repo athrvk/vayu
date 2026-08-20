@@ -73,6 +73,12 @@ export const API_ENDPOINTS = {
 	// rather than working it out here - and an agent can ask the same way.
 	// Reads only; applying the answer is SPEC_SYNC below.
 	SPEC_DIFF: `/specs/diff`,
+	// What a picked document *is*, before anything is stored (issue #869):
+	// the dialect, the title and the operations it declares. The Spec tab used
+	// to read those out of the document itself; describing it here is what
+	// leaves one reader of a document - the one the bind below derives its
+	// stamps from. Reads only, and stores nothing.
+	SPEC_DESCRIBE: `/specs/describe`,
 	// The bind itself (issue #862): the document, the binding that moves to it
 	// and every stamp - the ones written and the ones cleared - in one engine
 	// transaction. The pairing above previews what this will do; this one works

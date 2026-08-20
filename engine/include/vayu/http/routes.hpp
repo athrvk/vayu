@@ -32,6 +32,14 @@
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/logger.hpp"
 
+namespace vayu::core {
+// One documented response of a draft request; defined in
+// core/openapi_document.hpp. Forward-declared so the whole OpenAPI reader is not
+// pulled into every route TU for one signature - a `const std::vector<T>&`
+// parameter needs no more than the name.
+struct DraftExample;
+} // namespace vayu::core
+
 namespace vayu::http {
 // Owns interactive OAuth 2.0 authorization attempts; defined in
 // oauth_authorize.hpp. Forward-declared here so RouteContext can carry a
@@ -522,9 +530,27 @@ size_t spec_size_cap (vayu::db::Database& db);
  *
  * @param index_cap Bytes the serialized `responseSchemas` index may occupy -
  *        `spec_size_cap(db)`, the document's own cap rather than a second knob.
+ * @param document_out Optional: the DOM the indexes were derived from, moved out
+ *        for a caller that needs the document itself as well. `POST /specs/sync`
+ *        does - it writes the example rows the stored document documents (issue
+ *        #869) - and taking the DOM from here rather than reading the same bytes
+ *        again is what keeps one read behind everything one write says about a
+ *        document. Untouched when the read fails.
  */
-std::optional<std::string>
-read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, size_t index_cap);
+std::optional<std::string> read_spec_indexes (const nlohmann::json& item,
+vayu::db::SpecDocument& spec,
+size_t index_cap,
+nlohmann::ordered_json* document_out = nullptr);
+
+/**
+ * The example rows one draft request's documented responses become, in the shape
+ * a write of them takes (issue #869).
+ *
+ * Shared by `POST /specs/diff`, which reports what an apply would write, and
+ * `POST /specs/sync`, which writes it - so the rows a caller is shown and the
+ * rows the engine stores are one answer rather than two. Defined in specs.cpp.
+ */
+nlohmann::json draft_example_rows (const std::vector<vayu::core::DraftExample>& examples);
 
 /**
  * Every collection at or beneath @p root, from one read of the table.
@@ -897,6 +923,7 @@ void register_spec_routes (RouteContext& ctx);
 void register_spec_sync_routes (RouteContext& ctx);
 void register_spec_match_routes (RouteContext& ctx);
 void register_spec_diff_routes (RouteContext& ctx);
+void register_spec_describe_routes (RouteContext& ctx);
 void register_spec_bind_routes (RouteContext& ctx);
 void register_spec_export_routes (RouteContext& ctx);
 void register_reorder_routes (RouteContext& ctx);

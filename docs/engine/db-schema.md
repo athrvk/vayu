@@ -294,9 +294,11 @@ could save a live response as an example. It exists because the OpenAPI spec
 sync replaces the examples a document produced and must leave the ones a person
 saved alone, and nothing else about a row says which it is - `POST /specs/sync`
 (issue #655) is the reader: applying a change to a request deletes that
-request's `import` rows and writes the document's in their place, and an
-explicit `origin` in that payload is a `400` so a sync cannot manufacture rows
-it would then refuse to replace. The write paths validate it against those two
+request's `import` rows and writes the document's in their place. The rows are
+the engine's own since issue #869 - the payload says only *whether* to refresh a
+request's imported examples, and what is written is what the document being
+stored documents - so a sync cannot manufacture a row it would then refuse to
+replace, nor one for a response no document describes. The write paths validate it against those two
 values and `400` on anything else; no read path in the app displays it.
 
 **body_truncated** (issue #659) records that `body` is only the first slice of

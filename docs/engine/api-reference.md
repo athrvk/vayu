@@ -1560,7 +1560,11 @@ carried between them.
 cannot be matched against here first. They are sent here (unlike on
 `POST /specs`, which reads them off the document) because this route matches
 against a document that has not been stored yet, which is the point of a bind
-preview. `responses` may ride along and is ignored.
+preview. **Get them from [`POST /specs/describe`](#post-specsdescribe)** rather
+than by reading the document yourself (issue #869): that route is the same reader
+`POST /specs/bind` derives its stamps from, so a preview and the write it
+previews cannot pair the requests differently. `responses` may ride along and is
+ignored.
 
 The requests are **not** sent. The engine gathers the whole subtree of
 `collectionId` itself, because an OpenAPI import binds the root and files every
@@ -1602,6 +1606,58 @@ applies changes *by* it.
 or an operation row the store would refuse. `404` when the collection does not
 exist - not an empty match, since "this document matches none of your requests"
 and "you named a collection that is not there" are different answers.
+
+### POST /specs/describe
+
+Say what a document *is*, without storing it: the dialect that claimed it, what
+it calls itself, and every operation it declares. The read behind a bind
+preview - the app's Spec tab paints its card from this and hands the identities
+straight to [`POST /specs/match`](#post-specsmatch).
+
+**Reads only.** Nothing is stored, which is why the document rides in the body:
+a caller asks about a file the user has not decided to bind, and a route that
+stored one to describe it would leave a row behind for every file merely looked
+at. Describing a document that *is* stored is
+[`GET /specs/:id/meta`](#get-specsidmeta).
+
+**Request:**
+```json
+{
+  "content": "{\"openapi\":\"3.1.0\", ...}"   // Required, non-empty, at most maxSpecDocumentBytes
+}
+```
+
+**Response:**
+```json
+{
+  "format": "OpenAPI 3.0",
+  "title": "Pets API",
+  "operations": [
+    { "operationId": "listPets", "method": "GET", "path": "/pets" },
+    { "method": "GET", "path": "/pets/{petId}" }
+  ]
+}
+```
+
+`format` is `"OpenAPI 3.0"` or `"OpenAPI 2.0 (Swagger)"`. `title` is the
+document's `info.title` and `""` when it states none - never a substitute name,
+because the caller asked what the document calls itself. `operations` are in
+document order, in the shape a request's `spec_operation` records, `operationId`
+**absent** rather than `""` for an operation that declares none - the same rows
+`POST /specs/match` takes.
+
+This is the reader every spec write uses (issue #853), which is the point of the
+route: the identities answered here are the identities
+[`POST /specs/bind`](#post-specsbind) will derive from the same bytes. Before
+issue #869 the app read the picked document itself, so a document the two sides
+read differently previewed one pairing and committed another.
+
+**Errors:** `400` for a missing or empty `content`, bytes over
+`maxSpecDocumentBytes` (the same cap a store applies, so a preview cannot succeed
+where the bind will fail), bytes that cannot be read as JSON or YAML, a document
+declaring more than 2000 operations, and a readable file that is **not** an
+OpenAPI document - the last named as what is missing rather than answered as a
+contract declaring nothing.
 
 ### POST /specs/diff
 
@@ -1691,6 +1747,9 @@ answer. The buckets are still reported when it is `true`, empty.
 behind every `next` (which is truncated for display), plus the operation's
 documented responses as `examples`, so a `POST /specs/sync` payload is built by
 choosing which of these fields to send rather than by re-reading the document.
+The `examples` here are reported rather than returned to the engine: since issue
+#869 a sync says *whether* to refresh a request's imported examples and the rows
+come off the document it stores, so this is what an apply would write, shown.
 `unmapped` counts requests carrying no operation at all - not part of the
 comparison, but stated, because a sync that silently ignores half a collection is
 one nobody can read.
@@ -1906,7 +1965,7 @@ behind it. A sync updates and deletes rows that already exist.
      "specOperation": {"operationId": "getPet", "method": "GET", "path": "/pets/{petId}"}}
   ],
   "update": [                                          // Optional - merge-patch by id
-    {"id": "req_1234...", "name": "List pets", "specOperation": {...}, "examples": [...]}
+    {"id": "req_1234...", "name": "List pets", "specOperation": {...}, "examples": true}
   ],
   "delete": ["req_5678..."]                            // Optional - request ids
 }
@@ -1931,17 +1990,23 @@ Four rules the payload cannot opt out of:
   without this the route would be a way to delete any row by id.
 - **The engine mints every id**, as `/import/apply` does: new rows are named by
   `tempId` and translated through `idMap`, and a body `id` is a `400`.
-- **`examples` on an update replaces only the imported ones.** Rows with
-  `origin: "user"` (issue #588) always survive; the replacements take the block
-  the replaced rows occupied, so a saved example never loses its position - "the
-  first example" is what a mock server answers with. An **absent** `examples`
-  leaves every example alone, `[]` removes the imported ones. An explicit
-  `origin` on an item is a `400`: a sync writes imported examples by definition.
-  An example whose **status the user deleted** is not written back either
-  (issue #722) - the delete left a tombstone and the refresh skips that status,
-  so a sync of any field cannot undo it. The identity is the status, not the
-  name, because a name carries the document's response description and moves
-  when the document rewords it.
+- **`examples` is a decision, and the rows are the document's** (issue #869).
+  `true` on an update refreshes that request's imported examples from the
+  document this call is storing; **absent** (or `false`) leaves every example
+  alone. A created request always gets the responses its operation documents, so
+  `examples` on a `create` item is a `400` - as is a *list* on an update, which
+  is what a caller sent before this and what let a payload write an example for a
+  response no document describes. A refresh whose request records no operation of
+  the document being stored is a `400` too, rather than a silent no-op.
+  Rows with `origin: "user"` (issue #588) always survive; the replacements take
+  the block the replaced rows occupied, so a saved example never loses its
+  position - "the first example" is what a mock server answers with. An operation
+  whose documented responses were removed refreshes to *no* rows, which is how
+  the last import's examples go. An example whose **status the user deleted** is
+  not written back either (issue #722) - the delete left a tombstone and the
+  refresh skips that status, so a sync of any field cannot undo it. The identity
+  is the status, not the name, because a name carries the document's response
+  description and moves when the document rewords it.
 - **A request cannot be moved here.** `collectionId` inside an `update` item is a
   `400`; use `PUT /requests/:id`.
 

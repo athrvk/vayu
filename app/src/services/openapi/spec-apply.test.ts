@@ -315,16 +315,38 @@ describe("buildSyncPayload", () => {
 		expect(item.url).toBe("{{baseUrl}}/vets?limit=10");
 		expect(item.params).toEqual([{ key: "limit", value: "10", enabled: true }]);
 		expect(item.bodyType).toBe("json");
-		expect(item.examples).toHaveLength(1);
 		expect(item.specOperation).toEqual(LIST_VETS);
+		// Not the documented responses, though the diff reported them: a sync
+		// writes the examples the document it stores documents (issue #869), and
+		// a create that stated its own is a 400.
+		expect(item).not.toHaveProperty("examples");
 	});
 
-	it("sends no examples key for an added operation that documents no response", () => {
-		// `[]` would read as "this request documents no responses", which is a
-		// claim only a document that declared some can make.
-		const body = payload(diffOf({ added: [added(LIST_VETS, "vets")] }));
+	it("never states examples on a created request, documented or not", () => {
+		// The engine reads the operation's responses off the document it is
+		// storing (issue #869), so there is no key here in either case - and a
+		// payload that carried one would be refused rather than half applied.
+		const documented = payload(
+			diffOf({
+				added: [
+					added(LIST_VETS, "vets", {
+						examples: [
+							{
+								name: "200 - ok",
+								status: 200,
+								headers: [],
+								body: "{}",
+								contentType: "application/json",
+							},
+						],
+					}),
+				],
+			})
+		);
+		const silent = payload(diffOf({ added: [added(LIST_VETS, "vets")] }));
 
-		expect(body.create[0].examples).toBeUndefined();
+		expect(documented.create[0]).not.toHaveProperty("examples");
+		expect(silent.create[0]).not.toHaveProperty("examples");
 	});
 
 	it("writes only the ticked fields, plus the identity and the examples", () => {
@@ -351,9 +373,11 @@ describe("buildSyncPayload", () => {
 		// `request.method` does not, since #717: it is a ticked field like `url`,
 		// and this selection ticked only `name`.
 		expect(patch.method).toBeUndefined();
-		// Present and empty: an operation whose documented responses were removed
-		// must lose the examples the last import wrote for them.
-		expect(patch.examples).toEqual([]);
+		// The decision, not the rows (issue #869): every applied change refreshes
+		// the request's imported examples from the document being stored, which
+		// is what makes an operation whose responses were removed lose the ones
+		// the last import wrote.
+		expect(patch.examples).toBe(true);
 	});
 
 	it("sends a request whose only change is its identity", () => {
@@ -394,7 +418,11 @@ describe("buildSyncPayload", () => {
 		).toEqual(["req_1", "req_2"]);
 	});
 
-	it("carries the document's own responses as the examples that replace the imported ones", () => {
+	it("asks for a refresh rather than sending the responses it was shown", () => {
+		// The diff reports what an apply would write, so the rows are right there
+		// - and sending them back is what let a payload state an example for a
+		// response no document describes (issue #869). The engine reads them off
+		// the document this sync is storing instead.
 		const example = {
 			name: "200 - ok",
 			status: 200,
@@ -412,7 +440,7 @@ describe("buildSyncPayload", () => {
 
 		const patch = payload(diff).update.find((item) => item.id === "req_0");
 
-		expect(patch?.examples).toEqual([example]);
+		expect(patch?.examples).toBe(true);
 	});
 
 	it("keys an added operation the way the checklist does", () => {

@@ -164,6 +164,15 @@ export const queryKeys = {
 		match: (collectionId: string, fingerprint: string) =>
 			[...queryKeys.specs.all, "match", collectionId, fingerprint] as const,
 		/**
+		 * One picked document, described (issue #869).
+		 *
+		 * Keyed by the pick rather than by the bytes: the document has not been
+		 * stored, so it has no id, and a 12 MB string is not a cache key. The
+		 * Spec tab holds one picked document at a time and stamps each pick with
+		 * a token, so the token *is* the identity of "the document on screen".
+		 */
+		describe: (token: string) => [...queryKeys.specs.all, "describe", token] as const,
+		/**
 		 * One collection assembled into a document (issue #855).
 		 *
 		 * Keyed by format as well as collection, because the two serializations

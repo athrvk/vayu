@@ -882,6 +882,33 @@ std::vector<DeclaredOperation> declared_operations_of (const nlohmann::ordered_j
     return declared;
 }
 
+DocumentDescription describe_document (const nlohmann::ordered_json& document) {
+    DocumentDescription described;
+    switch (walk::spec_dialect (document)) {
+    case walk::Dialect::V3:
+        described.format = "OpenAPI 3.0";
+        break;
+    case walk::Dialect::V2:
+        described.format = "OpenAPI 2.0 (Swagger)";
+        break;
+    case walk::Dialect::None:
+        // Readable, and not a contract. Said as an empty format rather than as a
+        // failure, because the caller asked what these bytes are and "not an
+        // OpenAPI document" is an answer to that question.
+        return described;
+    }
+
+    if (const auto info = document.find ("info");
+    info != document.end () && info->is_object ()) {
+        if (const auto title = info->find ("title");
+        title != info->end () && title->is_string ()) {
+            described.title = title->get<std::string> ();
+        }
+    }
+    described.operations = declared_operations_of (document);
+    return described;
+}
+
 nlohmann::ordered_json response_schemas_of (const nlohmann::ordered_json& document) {
     // Which dialect to read is the walk's question already answered, through the
     // same detector: a document it refuses walks no operations at all, so the
@@ -916,15 +943,9 @@ nlohmann::ordered_json response_schemas_of (const nlohmann::ordered_json& docume
     return index;
 }
 
-SpecIndexes derive_spec_indexes (const std::string& text, size_t index_cap) {
+SpecIndexes spec_indexes_of (const nlohmann::ordered_json& document, size_t index_cap) {
     SpecIndexes indexes;
-    const DocumentRead read = read_document (text);
-    if (!read.ok ()) {
-        indexes.error = "Invalid 'content': " + read.error;
-        return indexes;
-    }
-
-    const std::vector<WalkedOperation> walked = walk_operations (read.root);
+    const std::vector<WalkedOperation> walked = walk_operations (document);
     if (walked.empty ()) {
         return indexes; // no index, which is not the same as an empty contract
     }
@@ -947,7 +968,7 @@ SpecIndexes derive_spec_indexes (const std::string& text, size_t index_cap) {
     }
     indexes.operations = rows.dump ();
 
-    const nlohmann::ordered_json schemas = response_schemas_of (read.root);
+    const nlohmann::ordered_json schemas = response_schemas_of (document);
     if (schemas.is_null ()) {
         return indexes;
     }
@@ -964,6 +985,16 @@ SpecIndexes derive_spec_indexes (const std::string& text, size_t index_cap) {
     }
     indexes.response_schemas = std::move (stored);
     return indexes;
+}
+
+SpecIndexes derive_spec_indexes (const std::string& text, size_t index_cap) {
+    const DocumentRead read = read_document (text);
+    if (!read.ok ()) {
+        SpecIndexes indexes;
+        indexes.error = "Invalid 'content': " + read.error;
+        return indexes;
+    }
+    return spec_indexes_of (read.root, index_cap);
 }
 
 } // namespace vayu::core

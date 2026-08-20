@@ -1296,8 +1296,14 @@ export interface SpecSyncCollection {
 	description?: string;
 }
 
-/** An operation the document added, as the request it becomes. */
-export type SpecSyncCreate = Omit<ImportApplyRequestItem, "collectionTempId"> & {
+/**
+ * An operation the document added, as the request it becomes.
+ *
+ * `examples` is not among the fields: a sync writes the responses the document
+ * it stores documents (issue #869), so a created request's examples come off
+ * that document rather than out of the payload. Sending them is a `400`.
+ */
+export type SpecSyncCreate = Omit<ImportApplyRequestItem, "collectionTempId" | "examples"> & {
 	/** The stored collection it lands in - or `collectionTempId`, never both. */
 	collectionId?: string;
 	collectionTempId?: string;
@@ -1307,8 +1313,12 @@ export type SpecSyncCreate = Omit<ImportApplyRequestItem, "collectionTempId"> & 
  * A merge-patch on one stored request: only the fields the user chose to take
  * from the document, plus the identity when the document moved it.
  *
- * `examples` present replaces the request's imported examples with these and
- * leaves the ones saved from live responses alone; absent leaves all of them.
+ * `examples` is a decision rather than a list (issue #869): `true` refreshes
+ * this request's imported examples from the document being stored - the ones
+ * saved from live responses are never touched, nor is a status the user deleted
+ * - and absent leaves every example alone. The rows themselves are the engine's,
+ * read off the document it is storing, so a payload cannot state an example for
+ * a response the document does not describe.
  */
 export interface SpecSyncUpdate {
 	id: string;
@@ -1321,7 +1331,7 @@ export interface SpecSyncUpdate {
 	body?: RequestBody;
 	bodyType?: string;
 	specOperation?: SpecOperation;
-	examples?: ImportApplyExample[];
+	examples?: boolean;
 }
 
 /**
@@ -1335,7 +1345,37 @@ export interface SpecSyncUpdate {
  */
 export interface SpecMatchRequest {
 	collectionId: string;
-	/** The identities the document declares - the `operations` index's rows. */
+	/**
+	 * The identities the document declares.
+	 *
+	 * Relayed from `POST /specs/describe` rather than extracted by the caller
+	 * (issue #869): the engine reads the picked bytes, and what it answers is
+	 * what the bind will derive from the same bytes - so a preview and the write
+	 * it previews cannot pair the requests differently.
+	 */
+	operations: SpecOperation[];
+}
+
+/** A picked document, for `POST /specs/describe` (issue #869). */
+export interface SpecDescribeRequest {
+	/** The document's text, verbatim. */
+	content: string;
+}
+
+/**
+ * What the engine says a picked document is (issue #869).
+ *
+ * The three things the Spec tab's card shows before a bind, from the reader the
+ * bind itself uses. A document that is not a contract, or that cannot be read at
+ * all, is a `400` with the sentence saying which - never an answer declaring
+ * nothing.
+ */
+export interface SpecDescribeResponse {
+	/** `"OpenAPI 3.0"` or `"OpenAPI 2.0 (Swagger)"`. */
+	format: string;
+	/** `info.title`, and `""` for a document that states none. */
+	title: string;
+	/** Every operation it declares, in document order. */
 	operations: SpecOperation[];
 }
 

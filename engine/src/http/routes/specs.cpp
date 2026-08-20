@@ -92,23 +92,64 @@ std::string spec_content_hash (const std::string& content) {
  * One read for both is what makes the two agree. They describe the same
  * operations by the same identity rules, so a schema index carrying a status the
  * operation index does not list would be a contract disagreeing with itself -
- * which is what two extractors, in two languages, produced before this.
+ * which is what two extractors, in two languages, produced before this. The DOM
+ * is handed out rather than dropped for that same reason: a sync writes the
+ * examples the document it stores documents (issue #869), and reading those
+ * bytes a second time would be a second answer about them.
  */
-std::optional<std::string>
-read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, size_t index_cap) {
+std::optional<std::string> read_spec_indexes (const nlohmann::json& item,
+vayu::db::SpecDocument& spec,
+size_t index_cap,
+nlohmann::ordered_json* document_out) {
     for (const char* derived : { "operations", "responseSchemas" }) {
         if (item.contains (derived)) {
             return std::string ("'") + derived +
             "' is derived from the document by the engine; omit it";
         }
     }
-    auto indexes = vayu::core::derive_spec_indexes (spec.content, index_cap);
+    vayu::core::DocumentRead read = vayu::core::read_document (spec.content);
+    if (!read.ok ()) {
+        return "Invalid 'content': " + read.error;
+    }
+    auto indexes = vayu::core::spec_indexes_of (read.root, index_cap);
     if (!indexes.ok ()) {
         return indexes.error;
     }
     spec.operations       = std::move (indexes.operations);
     spec.response_schemas = std::move (indexes.response_schemas);
+    if (document_out != nullptr) {
+        *document_out = std::move (read.root);
+    }
     return std::nullopt;
+}
+
+/**
+ * A draft's documented responses, as the example rows a write of them takes.
+ *
+ * One definition of that shape for the two routes that have one: `POST
+ * /specs/diff` reports it, so a caller can see what an apply would write, and
+ * `POST /specs/sync` writes it (issue #869). It used to be the diff's alone, and
+ * the caller echoed the rows back into the sync payload - which made a client
+ * able to state examples the document does not describe, and made the shape
+ * something two sides had to keep agreeing about.
+ *
+ * `documented` is the field that decides whether the row carries a
+ * `Content-Type` at all: a `204 No Content` documents nothing and still becomes
+ * an example, because a mock server has to be able to answer with it.
+ */
+nlohmann::json draft_example_rows (const std::vector<vayu::core::DraftExample>& examples) {
+    nlohmann::json rows = nlohmann::json::array ();
+    for (const vayu::core::DraftExample& example : examples) {
+        nlohmann::json headers = nlohmann::json::array ();
+        if (example.documented) {
+            headers.push_back ({ { "key", "Content-Type" }, { "value", example.content_type },
+            { "enabled", true } });
+        }
+        rows.push_back ({ { "name", example.name }, { "status", example.status },
+        { "headers", std::move (headers) }, { "body", example.body },
+        { "contentType", example.content_type } });
+    }
+    return rows;
 }
 
 /**

@@ -69,6 +69,8 @@ import type {
 	SpecBindResponse,
 	SpecExportRequest,
 	SpecExportResponse,
+	SpecDescribeRequest,
+	SpecDescribeResponse,
 	SpecDiffRequest,
 	SpecDiffResponse,
 	SpecMatchRequest,
@@ -276,6 +278,20 @@ export const apiService = {
 	 */
 	async getSpecMeta(id: string): Promise<SpecDocumentMeta> {
 		return await httpClient.get<SpecDocumentMeta>(API_ENDPOINTS.SPEC_META(id));
+	},
+
+	/**
+	 * What a picked document is - its dialect, its title and the operations it
+	 * declares - without storing it (issue #869).
+	 *
+	 * Reads only, and the last read of a document this app used to make itself:
+	 * the Spec tab parsed a picked file to paint its card and to hand the
+	 * identities to `matchSpecOperations` below, while the bind derived the same
+	 * identities from the same bytes engine-side - so a document the two read
+	 * differently previewed one pairing and committed another.
+	 */
+	async describeSpec(payload: SpecDescribeRequest): Promise<SpecDescribeResponse> {
+		return await httpClient.post<SpecDescribeResponse>(API_ENDPOINTS.SPEC_DESCRIBE, payload);
 	},
 
 	/**
