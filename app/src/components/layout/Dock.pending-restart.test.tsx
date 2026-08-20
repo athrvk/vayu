@@ -69,13 +69,17 @@ describe("the Dock's pending-restart signal", () => {
 	});
 
 	it("appears once a restart-required setting has been saved", () => {
-		useEngineStore.getState().addRestartRequiredKey("workers");
+		// Any key would do - the store holds what the engine flagged and the Dock
+		// never branches on which. `dbCacheSize` is one the engine really does
+		// read once, at DB open; `workers` stood here until #873, where it stopped
+		// being restart-gated because every run re-reads it.
+		useEngineStore.getState().addRestartRequiredKey("dbCacheSize");
 		renderDock();
 		expect(signal()).not.toBeNull();
 	});
 
 	it("restarts the engine and lowers itself", async () => {
-		useEngineStore.getState().addRestartRequiredKey("workers");
+		useEngineStore.getState().addRestartRequiredKey("dbCacheSize");
 		renderDock();
 
 		fireEvent.click(signal()!);
@@ -91,7 +95,7 @@ describe("the Dock's pending-restart signal", () => {
 
 	it("keeps standing when the restart fails, and says why", async () => {
 		restartEngine.mockResolvedValue({ success: false, error: "engine did not come back" });
-		useEngineStore.getState().addRestartRequiredKey("workers");
+		useEngineStore.getState().addRestartRequiredKey("dbCacheSize");
 		renderDock();
 
 		fireEvent.click(signal()!);
