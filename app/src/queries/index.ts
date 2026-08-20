@@ -48,8 +48,6 @@ export {
 	useSpecContentReader,
 	useBindSpecMutation,
 	type BindSpecInput,
-	type BindSpecResult,
-	type SpecOperationStamp,
 } from "./specs";
 
 // Runs (History)

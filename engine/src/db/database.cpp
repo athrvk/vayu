@@ -1381,7 +1381,9 @@ const std::vector<Request>& requests) {
 // imported rows, write these" - two halves of one replacement, where writing
 // first would briefly double the list and, on a re-used id, lose the new row.
 void Database::spec_sync_apply (const SpecSyncBatch& batch) {
-    vayu::utils::log_debug ("Applying spec sync: collection=" + batch.binding.id + ", spec=" +
+    // "spec write" rather than "sync": `POST /specs/bind` commits through this
+    // same batch (issue #862), with its create and delete halves empty.
+    vayu::utils::log_debug ("Applying spec write: collection=" + batch.binding.id + ", spec=" +
     batch.spec.id + ", +" + std::to_string (batch.created.size ()) + " requests, ~" +
     std::to_string (batch.updated.size ()) + ", -" + std::to_string (batch.deleted.size ()) +
     ", " + std::to_string (batch.new_collections.size ()) + " new collections");

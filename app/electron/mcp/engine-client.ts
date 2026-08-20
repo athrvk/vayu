@@ -347,6 +347,19 @@ export class EngineClient {
 	}
 
 	/**
+	 * Bind a collection to an OpenAPI document (`POST /specs/bind`, issue #862).
+	 *
+	 * One call for the document, the binding and every stamp - written and
+	 * cleared - because they are one state: a collection bound to a contract its
+	 * requests do not name reports no coverage and validates nothing. The
+	 * pairing is the engine's, worked out from the bytes this stores, so nothing
+	 * here has an opinion about what the document declares.
+	 */
+	bindSpec(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/specs/bind", payload, signal);
+	}
+
+	/**
 	 * A collection back out as an OpenAPI document (`POST /specs/export`, issue
 	 * #855) - its own bound document updated, or a skeleton when it binds none.
 	 *

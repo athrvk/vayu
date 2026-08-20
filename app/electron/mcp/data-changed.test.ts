@@ -132,6 +132,12 @@ describe("the registry declares its effects", () => {
 			// immutable under its id and this write neither changes nor deletes
 			// one, so the caches keyed by spec id cannot go stale here.
 			unbind_spec: ["collection"],
+			// Binding (#862) writes both families: the binding is a field of the
+			// collection row, and the identity it stamps - and clears - lives on
+			// the requests beneath it. Still no `spec` family, for the reason
+			// unbinding has none: a stored document is immutable under its id, so
+			// a bind mints a new row rather than staling a cached one.
+			bind_spec: ["collection", "request"],
 			create_request: ["request"],
 			update_request: ["request"],
 			delete_request: ["request"],

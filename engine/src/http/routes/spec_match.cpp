@@ -30,11 +30,14 @@
  *   because this route matches against a document that has not been stored yet,
  *   which is the whole point of a bind preview.
  *
- * It writes nothing and stores nothing: the caller sees the counts, and the
- * writes a bind performs are still `POST /specs` plus the collection and
- * request updates. That split is deliberate - the Spec tab shows this result
- * *before* the user commits to it, so a route that stored the document to
- * answer would store one for every document merely looked at.
+ * It writes nothing and stores nothing: the caller sees the counts, and
+ * `POST /specs/bind` (issue #862) performs the write. That split is deliberate
+ * - the Spec tab shows this result *before* the user commits to it, so a route
+ * that stored the document to answer would store one for every document merely
+ * looked at. The bind matches again rather than being handed this answer, over
+ * the same walk and the same `core::match_operations`, because between a
+ * preview and a commit a request may have moved; what the two share is the
+ * rule, not a result the caller carried between them.
  */
 
 #include "vayu/core/operation_match.hpp"
@@ -101,15 +104,12 @@ match_spec_operations_response (vayu::db::Database& db, const nlohmann::json& js
 
     const auto collections = db.get_collections ();
     const auto subtree = collection_subtree_ids (collections, collection_id);
+    // The same walk `POST /specs/bind` matches over, so the pairing this
+    // previews is the pairing that one stamps.
     std::vector<vayu::core::MatchableRequest> requests;
-    for (const auto& collection : collections) {
-        if (!subtree.contains (collection.id)) {
-            continue;
-        }
-        for (const auto& request : db.get_requests_in_collection (collection.id)) {
-            requests.push_back (
-            { request.id, vayu::to_string (request.method), request.url });
-        }
+    for (const auto& request : collection_subtree_requests (db, collections, subtree)) {
+        requests.push_back (
+        { request.id, vayu::to_string (request.method), request.url });
     }
 
     std::vector<vayu::core::MatchableOperation> operations;

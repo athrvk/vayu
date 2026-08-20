@@ -166,6 +166,15 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			operations: null,
 			responseSchemas: null,
 		}),
+		bindSpec: vi.fn().mockResolvedValue({
+			specId: "spec_2",
+			specHash: "def456",
+			syncedAt: 1_755_000_100_000,
+			stamped: 2,
+			cleared: 0,
+			unmatchedRequests: [],
+			unmatchedOperations: [],
+		}),
 		exportSpec: vi.fn().mockResolvedValue({
 			text: '{\n  "openapi": "3.1.0"\n}\n',
 			fileName: "api.openapi.json",
@@ -7239,12 +7248,116 @@ describe("OpenAPI spec binding tools", () => {
 		expect(tools.get("unbind_spec")?.annotations.destructiveHint).toBe(false);
 	});
 
-	test("phase A ships no bind tool", () => {
-		// Deliberate, and recorded on #761: binding without operation matching
-		// would store a document with no operations/responseSchemas index and
-		// leave stale stamps uncleared, which makes coverage claim the wrong
-		// operation rather than none. If a bind lands later, this expectation is
-		// the thing that should be updated in the same commit.
-		expect(TOOLS.map((t) => t.name)).not.toContain("bind_spec");
+	/*
+	 * Binding (#862). Phase A deliberately shipped no bind tool, because a bind
+	 * without operation matching stores a document with no index and leaves
+	 * stale stamps uncleared - which makes coverage claim the wrong operation
+	 * rather than none. Both halves moved engine-side (#853, #860), so the tool
+	 * exists now and is one call to `POST /specs/bind`.
+	 *
+	 * What these cases hold is the two things the tool layer can get wrong: it
+	 * must send the document and nothing it decided itself, and it must tell the
+	 * agent about the identities the bind *removed* - the half a caller would
+	 * otherwise learn about from a later run reporting no coverage.
+	 */
+	test("bind_spec is refused while writes are off, and writes nothing", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"bind_spec",
+			{ collectionId: "col_1", content: "openapi: 3.0.0" },
+			ctxWith(client, { allowWrites: false })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.bindSpec).not.toHaveBeenCalled();
+	});
+
+	test("bind_spec sends the document and no pairing of its own", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"bind_spec",
+			{
+				collectionId: "col_1",
+				content: "openapi: 3.0.0",
+				sourceUrl: "https://api.example.com/openapi.yaml",
+			},
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		const [payload] = (client.bindSpec as ReturnType<typeof vi.fn>).mock.calls[0];
+		// Exhaustive on purpose: an agent has no OpenAPI reader, and a `stamps`
+		// or `clear` list appearing here would mean one had been written.
+		expect(payload).toEqual({
+			collectionId: "col_1",
+			spec: {
+				content: "openapi: 3.0.0",
+				sourceUrl: "https://api.example.com/openapi.yaml",
+			},
+		});
+		expect(allText(res)).toContain("spec_2");
+	});
+
+	test("bind_spec omits sourceUrl for a document handed over as text", async () => {
+		const client = fakeClient();
+		await dispatchTool(
+			"bind_spec",
+			{ collectionId: "col_1", content: "openapi: 3.0.0" },
+			ctxWith(client, WRITES)
+		);
+		const [payload] = (client.bindSpec as ReturnType<typeof vi.fn>).mock.calls[0];
+		// Absent, not null: the engine reads absent as "it did not come from a
+		// URL", and a null would be a second spelling of the same thing.
+		expect(Object.keys((payload as { spec: object }).spec)).toEqual(["content"]);
+	});
+
+	test("bind_spec says how many identities it removed, not only how many it wrote", async () => {
+		const client = fakeClient({
+			bindSpec: vi.fn().mockResolvedValue({
+				specId: "spec_2",
+				specHash: "def456",
+				syncedAt: 1_755_000_100_000,
+				stamped: 1,
+				cleared: 2,
+				unmatchedRequests: ["req_8", "req_9"],
+				unmatchedOperations: [
+					{ operationId: "getPet", method: "GET", path: "/pets/{petId}" },
+				],
+			}),
+		});
+		const res = await dispatchTool(
+			"bind_spec",
+			{ collectionId: "col_1", content: "openapi: 3.0.0" },
+			ctxWith(client, WRITES)
+		);
+		const text = allText(res);
+		// The count a re-bind takes away is the one an agent acts on: it means
+		// requests that were part of a contract are no longer part of this one.
+		expect(text).toMatch(/Cleared identity from 2 requests/i);
+		expect(text).toMatch(/Recorded identity on 1 request\./i);
+		expect(text).toMatch(/2 requests matched no operation/i);
+		expect(text).toMatch(/1 operation matched no request/i);
+	});
+
+	test("bind_spec reports an engine refusal rather than claiming a bind", async () => {
+		const client = fakeClient({
+			bindSpec: vi.fn().mockRejectedValue(new Error("Collection not found")),
+		});
+		const res = await dispatchTool(
+			"bind_spec",
+			{ collectionId: "nope", content: "openapi: 3.0.0" },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBe(true);
+		expect(allText(res)).not.toMatch(/Bound to spec/i);
+	});
+
+	test("bind_spec declares both families it changes", () => {
+		const tools = new Map(TOOLS.map((t) => [t.name, t]));
+		expect(tools.get("bind_spec")?.category).toBe("write");
+		// Requests as well as collections: the binding is a collection field, but
+		// the identity this writes and clears lives on the requests beneath it.
+		expect(tools.get("bind_spec")?.invalidates).toEqual(["collection", "request"]);
+		// Each call mints a new document row, so the same arguments twice is not
+		// the same call twice.
+		expect(tools.get("bind_spec")?.annotations.idempotentHint).toBe(false);
 	});
 });

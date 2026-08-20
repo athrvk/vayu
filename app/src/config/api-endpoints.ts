@@ -68,6 +68,12 @@ export const API_ENDPOINTS = {
 	// asks for the pairing rather than working it out here. Reads only - the
 	// tab shows the counts before the user commits to the bind.
 	SPEC_MATCH: `/specs/match`,
+	// The bind itself (issue #862): the document, the binding that moves to it
+	// and every stamp - the ones written and the ones cleared - in one engine
+	// transaction. The pairing above previews what this will do; this one works
+	// it out again from the document it stores, because a bind is a write and
+	// the identity it records must come from the bytes it recorded.
+	SPEC_BIND: `/specs/bind`,
 	// A collection back out as an OpenAPI document (issue #855): its own bound
 	// document updated, or a skeleton when it binds none. The assembly moved
 	// engine-side with the rest of #761's phase B, so the renderer asks for the

@@ -166,6 +166,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_collection`    | write    | `GET /collections` (scan, only when variables change) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
 | `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
+| `bind_spec`            | write    | `POST /specs/bind`                           | write toggle; one transaction - stores the document, moves the binding, stamps what matched and **clears** what no longer does |
 | `export_spec`          | read     | `POST /specs/export`                         | - (document text capped at 32 KB, with `contentBytes` for the true size; `notes` says what the export could not carry) |
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept |
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, both scripts - minus file body parts |
@@ -244,26 +245,27 @@ Notes:
   no such field - every transfer is bounded by the `defaultTimeout` setting
   (`resolve_request_timeout_ms`), which `update_engine_config` changes. Recorded
   here so it is not re-derived as a gap each time the schema is read.
-- **OpenAPI is readable over MCP, not writable** (issue
-  [#761](https://github.com/athrvk/vayu/issues/761), phase A). `get_spec` says
-  what a collection is bound to, `export_spec` writes it back out as a document,
-  and `unbind_spec` detaches it; **binding, spec sync and import stay
-  app-only.** That is a boundary, not a gap in the tool list: binding is not one
-  write but a match of every saved request against the document's operations,
-  plus the indexes stored beside it. Phase B of #761 is moving what that needs
-  into the engine, one piece at a time - `POST /specs/match` owns the matching
-  now, the engine reads the document and derives **both** indexes stored beside
-  it - the operation index (issue #853) and the response-schema index, dialect
-  translation included (issue #860) - so a document stored by an agent that
-  sends nothing but bytes already reports coverage and validates responses, and
-  `POST /specs/export` owns the assembly (issue #855), which is what makes
-  `export_spec` a tool at all. What still keeps `bind_spec` out is the stamping:
-  a bind must clear any stamp from a previously bound document, where coverage
-  resolves it by `operationId` and it claims the wrong operation rather than
-  none. Until that lands, bind a spec in Vayu (Collection → Spec). `unbind_spec`
-  and `export_spec` need none of it, which is why they ship: one writes exactly
-  what the app's Unbind button writes and leaves the stamps alone, so re-binding
-  the same document later costs nothing, and the other writes nothing at all.
+- **An agent can bind a collection to a spec now, and export one** (issues
+  [#862](https://github.com/athrvk/vayu/issues/862) and
+  [#855](https://github.com/athrvk/vayu/issues/855)); **spec sync and import
+  stay app-only.** `get_spec` says what a collection is bound to, `bind_spec`
+  binds one, `export_spec` writes it back out as a document, and `unbind_spec`
+  detaches it. `bind_spec` takes the document text and nothing else - no pairing
+  - because everything it needs is engine-side after #761's phase B: the engine
+  reads the document (issue #853), derives **both** indexes from it - the
+  operation index and the response-schema index, dialect translation included
+  (issues #629, #628, #860) - and matches the collection's subtree against the
+  index it just derived, through the same `core::operation_match.hpp` rule
+  `POST /specs/match` previews with. So a document an agent sends as bytes
+  reports coverage and validates responses, with no OpenAPI reader on the
+  agent's side, and `POST /specs/export` owns the assembly that sends one back.
+  **A bind writes identity in both directions**, which is what kept the tool out
+  through phase A: re-binding to a different document clears every stamp that
+  document does not account for, because coverage resolves a stamp by
+  `operationId` and a surviving one claims the wrong operation rather than none.
+  The tool result reports `cleared` beside `stamped` for that reason - it is the
+  half a caller would otherwise discover from a later run. `unbind_spec` still
+  leaves stamps alone, so unbind-then-rebind of the same document costs nothing.
 - **`get_run_report` carries contract coverage** for a run of a collection bound
   to an OpenAPI document (issue #629): which of the contract's operations the run
   exercised, which of their declared responses it saw, and any statuses the
