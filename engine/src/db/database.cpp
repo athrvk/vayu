@@ -301,7 +301,7 @@ inline auto make_storage (const std::string& path) {
     make_column ("source_url", &SpecDocument::source_url), // NULL = not fetched from a URL
     make_column ("fetched_at", &SpecDocument::fetched_at),
     make_column ("hash", &SpecDocument::hash), // hex sha256 of `content`
-    // The app-extracted operation index (issue #629). NOT NULL + default_value
+    // The engine-derived operation index (issue #629, #853). NOT NULL + default_value
     // so sync_schema ALTERs it onto an existing table, and every pre-existing
     // row backfills to `""` - which is the truth about them: they were stored
     // before anything extracted an index, and a run of one reports no coverage

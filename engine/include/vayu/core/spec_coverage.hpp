@@ -12,14 +12,15 @@
  * @brief Which operations of a bound contract a run exercised, and which of
  *        their declared responses it saw (issue #629).
  *
- * **The engine does not parse OpenAPI, and this file does not either.** That is
- * the division of labour #625 decided, and it is load-bearing rather than
- * tidiness: a stored document is the bytes the app imported, which are YAML as
- * often as JSON, and a C++ reader of them would be a second opinion about what a
- * document declares - disagreeing with the parser that stamped every request's
- * `spec_operation` in exactly the cases that matter (a `$ref`-ed path item, a
- * response inherited from a component). So the app extracts the operation index
- * once, at the moment it stores the document, and this file counts against it.
+ * **This file parses no OpenAPI, and there is exactly one reader that does.**
+ * The rule #625 decided was never "the engine must stay ignorant" - it was that
+ * one reader answers what a document declares, because two disagree exactly
+ * where it matters (a `$ref`-ed path item, a response inherited from a
+ * component) and this file's counts are matched against the identity that
+ * reader stamped. #761's phase B moved that reader into the engine
+ * (`core/openapi_document.hpp`, issue #853): the index in
+ * `spec_documents.operations` is derived from the document as it is stored,
+ * and this file counts against it.
  *
  * What that index costs is one column (`spec_documents.operations`) and one
  * honest gap: a document stored before the index existed has none, and a run of

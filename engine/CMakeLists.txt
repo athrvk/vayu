@@ -130,6 +130,10 @@ find_package(httplib CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(SqliteOrm CONFIG REQUIRED)
 find_package(valijson CONFIG REQUIRED)
+# The one YAML reader in the engine (issue #853). A stored OpenAPI document is
+# YAML as often as JSON, and core/openapi_document.cpp is the only translation
+# unit that includes it - everything else reads the nlohmann DOM it produces.
+find_package(ryml CONFIG REQUIRED)
 
 if(VAYU_BUILD_TESTS)
     find_package(GTest CONFIG REQUIRED)
@@ -289,6 +293,7 @@ add_library(vayu_core STATIC
     src/core/scenario_plan.cpp
     src/core/scenario_runner.cpp
     src/core/operation_match.cpp
+    src/core/openapi_document.cpp
     src/core/spec_binding.cpp
     src/core/spec_coverage.cpp
     src/core/schema_validation.cpp
@@ -315,6 +320,10 @@ target_link_libraries(vayu_core PUBLIC
     unofficial-sodium::sodium
     nlohmann_json::nlohmann_json
     valijson
+    # PRIVATE would do for the linker - only openapi_document.cpp includes it -
+    # but vayu_core is linked into three binaries and the static lib carries the
+    # symbols, so it rides with the rest.
+    ryml::ryml
     unofficial::sqlite3::sqlite3
     sqlite_orm::sqlite_orm
     hdrhistogram
@@ -591,6 +600,7 @@ if(VAYU_BUILD_TESTS)
         tests/spec_sync_route_test.cpp
         tests/spec_match_route_test.cpp
         tests/operation_match_test.cpp
+        tests/openapi_document_test.cpp
         tests/spec_coverage_test.cpp
         tests/schema_validation_test.cpp
         tests/version_isolation_test.cpp

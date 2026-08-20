@@ -1341,10 +1341,7 @@ Store one OpenAPI document. **Create only**, and the engine owns the id - see
 ```json
 {
   "content": "{\"openapi\":\"3.1.0\", ...}",  // Required, non-empty, at most maxSpecDocumentBytes
-  "sourceUrl": "https://api.example.com/openapi.json",  // Optional; null when pasted or uploaded
-  "operations": [                                       // Optional - the declared-operation index
-    {"operationId": "listPets", "method": "GET", "path": "/pets", "responses": ["200", "default"]}
-  ]
+  "sourceUrl": "https://api.example.com/openapi.json"   // Optional; null when pasted or uploaded
 }
 ```
 
@@ -1362,27 +1359,46 @@ Store one OpenAPI document. **Create only**, and the engine owns the id - see
 }
 ```
 
-**`operations` is supplied, never derived - the engine does not parse OpenAPI.**
-`content` is the bytes the client imported, which are YAML as often as JSON, and
-a C++ reader of them would be a second opinion about what a document declares.
-So whichever side parsed the document writes down what it found, once, and the
-engine counts [contract coverage](#get-runsrunidreport) against that index
-without ever reading the document itself.
+**`operations` is derived by the engine, never sent** (issue #853). It is a fact
+about the bytes being stored, like `hash`, so the engine reads them: `content` is
+parsed as JSON and then, failing that, as YAML, and the operation index comes off
+that parse. Sending an `operations` field is a `400`.
 
-Each row needs a non-empty `method` and `path` (the **templated** path, as the
-document keys it); `operationId` is optional, and `responses` holds the status
-patterns the document declares - `"200"`, `"4XX"`, `"default"` - verbatim and in
-document order. At most **2000** rows.
+Each row carries a `method` and the **templated** `path` as the document keys it,
+an `operationId` when the document declares one, and `responses` - the status
+patterns the document declares (`"200"`, `"4XX"`, `"default"`), verbatim and in
+document order. A document declaring more than **2000** operations is refused
+with the count and the cap, because a run holds the index in memory for its life.
 
-Omitting it stores "no index", which is not the same as a document that declares
-nothing: `GET /specs/:id` reads it back as `null` rather than `[]`, and a run of
-a collection bound to it reports **no coverage block at all**. `POST
-/import/apply`'s spec section and `POST /specs/sync` take the same field through
-the same validator, so a document cannot acquire or lose an index depending on
-which route stored it.
+What the reader does with a document, stated because the answers are visible in
+the index:
 
-**`responseSchemas`** (optional) is the other supplied index (issue #628) - what
-the document declares each response *looks like*:
+- **Document order is kept**, for `paths` and for each operation's `responses`.
+- **Both formats**: `openapi: 3.x` and `swagger: 2.0` (quoted or not). Anything
+  else declares nothing - a stored file that is not a contract stores fine and
+  reports no coverage.
+- A **path item that is a `$ref`** is followed one hop, in-document; one that
+  resolves to nothing drops that path rather than failing the write.
+- The seven methods Vayu executes are indexed, `trace` is not.
+- A **repeated `operationId`** is kept on its first declaration only (issue
+  #715); the later operation is indexed by method and path alone.
+- **Anchors, aliases and merge keys (`<<`)** are expanded as js-yaml expands
+  them; an alias naming no anchor, a duplicate mapping key, and a document that
+  expands to far more nodes than its own size are each a `400` naming the
+  problem.
+
+A document that declares no operation stores "no index", which is not the same as
+an empty contract: `GET /specs/:id` reads it back as `null` rather than `[]`, and
+a run of a collection bound to it reports **no coverage block at all**. `POST
+/import/apply`'s spec section and `POST /specs/sync` derive the index through the
+same helper, so a document cannot acquire or lose one depending on which route
+stored it.
+
+**`responseSchemas`** (optional) is the one index still supplied by the client
+(issue #628) - what the document declares each response *looks like*. It has not
+moved engine-side with `operations` because extracting it means translating
+OpenAPI 3.0's dialect into JSON Schema, which is a bigger move than reading a
+document:
 
 ```json
 {
@@ -1403,7 +1419,7 @@ the document declares each response *looks like*:
 
 Schemas are **JSON Schema**, not OpenAPI's dialect: the client translates
 `nullable`, draft-04 boolean `exclusiveMinimum` and OpenAPI-only keywords before
-sending, because the engine validates and does not read OpenAPI. Each schema
+sending, because the engine validates against a dialect a validator can read. Each schema
 keeps its `$ref`s and `refRoots` carries the subtrees they point into once, so a
 shared schema is stored once and a recursive one is a pointer rather than an
 infinite expansion. `status` is the pattern verbatim (`"200"`, `"4XX"`,
@@ -1417,17 +1433,18 @@ with the reason `no_index`.
 so a client can offer a re-fetch for exactly the documents that have somewhere to
 re-fetch from.
 
-**Errors:** `400` if the body carries `id`, `hash` or `fetchedAt` (all
-engine-computed), if `content` is missing, `null` or empty, if `sourceUrl` is
+**Errors:** `400` if the body carries `id`, `hash`, `fetchedAt` or `operations`
+(all engine-computed), if `content` is missing, `null` or empty, if `sourceUrl` is
 present and not a string or `null`, or if the document is larger than the live
 `maxSpecDocumentBytes` [config entry](#get-config) - default **10 MiB**, aligned
 with the engine's JSON field cap. The size rejection names the byte count, the
 cap and the setting, and is checked on `POST /import/apply` too, through the same
-helper; the document is never stored truncated. A malformed `operations` index is
-a `400` naming the row and the field - it is refused at the write rather than
-stored and silently ignored when a run tries to count against it. A malformed
-`responseSchemas` index is a `400` on the same terms, and one over the byte cap
-names the count, the cap and the setting.
+helper; the document is never stored truncated. **A `content` the engine cannot
+read as JSON or YAML is a `400`** naming the line - storing it would leave a row
+that coverage, a sync and an export can each do nothing with, and none of those
+is a good place to find out. A malformed `responseSchemas` index is a `400` on
+the same terms, and one over the byte cap names the count, the cap and the
+setting.
 
 ### GET /specs/:id
 
@@ -1525,9 +1542,12 @@ still `POST /specs` plus `PUT /collections/:id` and the per-request updates.
 }
 ```
 
-`operations` are the same identity rows `POST /specs` accepts as its `operations`
-index, validated by the same rule - so a payload the store would refuse cannot
-be matched against here first. `responses` may ride along and is ignored.
+`operations` are the same identity rows the engine derives into a document's
+`operations` index, validated by the same rule - so a set the store would refuse
+cannot be matched against here first. They are sent here (unlike on
+`POST /specs`, which reads them off the document) because this route matches
+against a document that has not been stored yet, which is the point of a bind
+preview. `responses` may ride along and is ignored.
 
 The requests are **not** sent. The engine gathers the whole subtree of
 `collectionId` itself, because an OpenAPI import binds the root and files every
@@ -1590,7 +1610,7 @@ behind it. A sync updates and deletes rows that already exist.
   "spec": {
     "content": "{\"openapi\":\"3.1.0\", ...}",           // Required, non-empty, at most maxSpecDocumentBytes
     "sourceUrl": "https://api.example.com/openapi.json", // Optional; null for a file or a paste
-    "operations": [...]                                // Optional - see POST /specs
+    "responseSchemas": {...}                           // Optional - see POST /specs
   },
   "collections": [                                     // Optional - tag folders to create
     {"tempId": "t_col", "name": "pets", "parentId": "col_9a1f..."}

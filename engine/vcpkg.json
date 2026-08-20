@@ -15,6 +15,7 @@
     },
     "libsodium",
     "nlohmann-json",
+    "ryml",
     "valijson",
     {
       "name": "cpp-httplib",

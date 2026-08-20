@@ -483,10 +483,11 @@ describe("SpecSync", () => {
 			expect(payload.update).toEqual([]);
 			expect(payload.delete).toEqual([]);
 			expect(payload.collections).toEqual([]);
-			// The indexes ride along, which is what makes validation and coverage
-			// read the *new* contract rather than the one they were stale against.
+			// The schema index rides along, which is what makes validation read
+			// the *new* contract rather than the one it was stale against. The
+			// operation index does not: the engine derives it from the document
+			// this payload stores (issue #853).
 			expect(JSON.stringify(payload.spec.responseSchemas)).toContain("name");
-			expect(payload.spec.operations?.length).toBeGreaterThan(0);
 			expect(
 				await screen.findByText(/no request changed.*now bound to the document/i)
 			).toBeTruthy();

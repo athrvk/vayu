@@ -23,6 +23,7 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/openapi_document.hpp"
 #include "vayu/core/schema_validation.hpp"
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/core/spec_coverage.hpp"
@@ -76,27 +77,35 @@ std::string spec_content_hash (const std::string& content) {
 }
 
 /**
- * Reads the optional `operations` (#629) and `responseSchemas` (#628) indexes
- * onto @p spec.
+ * Puts the `operations` (#629) and `responseSchemas` (#628) indexes onto
+ * @p spec - the first derived from the document, the second still supplied.
  *
- * Both are *supplied*, never derived: the engine does not parse OpenAPI (see
- * `core/spec_coverage.hpp` and `core/schema_validation.hpp` for why), so this is
- * the only place a bad one can be caught. They are validated on the way in
- * rather than tolerated and ignored at run end - a client sending a malformed
- * index has a bug, and a coverage block or a validation chip that silently went
- * missing weeks later would not name it.
+ * **`operations` is computed here, never taken from the caller** (issue #853),
+ * for the reason `hash` is: an index a client worked out is a claim about a
+ * document nobody verified, and a wrong one does not merely go unread - coverage
+ * resolves a stamp by `operationId` first, so a row claiming an id the document
+ * does not declare claims whichever operation happens to share it. The engine
+ * reading the document is what #761's phase B moved here, and this is the write
+ * path's whole use of it: `core::derive_operations_index` reads the bytes about
+ * to be stored and answers what they declare.
  *
- * `null` and absent both mean "no index"; the column stores `""` for both.
+ * `responseSchemas` is still supplied, because extracting it needs 3.0's dialect
+ * translated into JSON Schema and that has not moved yet (tracked separately);
+ * it is validated on the way in rather than tolerated and ignored at run end - a
+ * client sending a malformed index has a bug, and a validation chip that
+ * silently went missing weeks later would not name it. `null` and absent both
+ * mean "no index"; the column stores `""` for both.
  */
 std::optional<std::string>
 read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, size_t schema_cap) {
-    if (auto operations = item.find ("operations");
-        operations != item.end () && !operations->is_null ()) {
-        if (auto reason = vayu::core::validate_operations_index (*operations)) {
-            return reason;
-        }
-        spec.operations = operations->dump ();
+    if (item.contains ("operations")) {
+        return "'operations' is derived from the document by the engine; omit it";
     }
+    auto operations = vayu::core::derive_operations_index (spec.content);
+    if (!operations.ok ()) {
+        return operations.error;
+    }
+    spec.operations = std::move (operations.stored);
 
     if (auto schemas = item.find ("responseSchemas");
         schemas != item.end () && !schemas->is_null ()) {
@@ -289,9 +298,12 @@ void stamp_binding_from_store (vayu::db::Database& db, std::string& openapi) {
  * invalidate the hash every run of every collection bound to it was stamped
  * with. Phase 2 (#627) re-fetches by storing a new one and moving the binding.
  *
- * `hash` and `fetchedAt` are engine-computed and rejected in the body for the
- * same reason `id` is: a caller-supplied hash would be a claim about bytes
- * nobody verified.
+ * `hash`, `fetchedAt` and the `operations` index are engine-computed and
+ * rejected in the body for the same reason `id` is: each would otherwise be a
+ * claim about bytes nobody verified. The index is derived from the document by
+ * `core::derive_operations_index` (issue #853), which is also what makes an
+ * unreadable document a `400` here rather than a row nothing downstream can
+ * read.
  */
 std::pair<int, nlohmann::json>
 create_spec_document_response (vayu::db::Database& db, const nlohmann::json& json) {
@@ -436,9 +448,11 @@ void register_spec_routes (RouteContext& ctx) {
      * Stores one OpenAPI document verbatim and returns it with the id, hash and
      * fetch time the engine assigned. Create only - there is no PUT, because a
      * changed document is a new one (see the core above).
-     * Body params: content (required, non-empty, at most `maxSpecDocumentBytes`),
-     * sourceUrl (optional; null or absent means it did not come from a URL).
-     * `id`, `hash` and `fetchedAt` are engine-owned and a 400 if sent.
+     * Body params: content (required, non-empty, at most `maxSpecDocumentBytes`,
+     * and readable as JSON or YAML), sourceUrl (optional; null or absent means
+     * it did not come from a URL), responseSchemas (optional, issue #628).
+     * `id`, `hash`, `fetchedAt` and `operations` are engine-owned and a 400 if
+     * sent - the operation index is read off the document here.
      * Returns: the stored document, or 400.
      */
     ctx.server.Post ("/specs", [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -464,7 +478,7 @@ void register_spec_routes (RouteContext& ctx) {
     /**
      * GET /specs/:id/meta
      * Returns everything about the document except the document: id, sourceUrl,
-     * fetchedAt, hash and contentBytes. `content` and the two app-extracted
+     * fetchedAt, hash and contentBytes. `content` and the two stored
      * indexes are **absent**, not empty - see `serialize_meta`.
      * Registered before the read below because both are `GET /specs/...`; the
      * one-segment pattern cannot match this path, and the order says so anyway.

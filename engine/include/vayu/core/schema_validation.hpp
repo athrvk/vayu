@@ -12,10 +12,11 @@
  * @brief Checking a response body against the schema its contract declares
  *        (issue #628, phase 3 of #625).
  *
- * **The engine does not parse OpenAPI, and this file does not either** - the
- * same division of labour `core/spec_coverage.hpp` states at length, for the
- * same reason. What arrives here is already JSON Schema: the app extracts each
- * operation's declared response schemas when it stores the document, normalises
+ * **This file parses no OpenAPI**, and it is not the one that does - the engine
+ * reads a document in exactly one place (`core/openapi_document.hpp`, issue
+ * #853), and the schema index is not yet one of the things read there. What
+ * arrives here is already JSON Schema: the app extracts each operation's
+ * declared response schemas when it stores the document, normalises
  * the OpenAPI-only spellings (3.0's `nullable`, its draft-04 boolean
  * `exclusiveMinimum`, `discriminator`) into the dialect a validator can read,
  * and stores the result in `spec_documents.response_schemas`. This file matches

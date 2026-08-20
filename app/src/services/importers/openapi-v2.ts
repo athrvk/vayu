@@ -6,7 +6,6 @@
  */
 
 import type {
-	DeclaredOperation,
 	DeclaredResponseSchema,
 	SpecOperation,
 	FormFieldEntry,
@@ -30,7 +29,6 @@ import { mapSwaggerOAuth2 } from "./oauth2-import";
 import {
 	createRefResolver,
 	declaredParamRow,
-	declaredResponsesOf,
 	deref,
 	exampleBodyText,
 	resolvePathItem,
@@ -117,9 +115,6 @@ export class OpenApiV2Parser implements ImportParser {
 		// (issue #715), which needs the memory of every id already stamped.
 		const identify = createOperationIdentifier(tally);
 		let requestCount = 0;
-		// The declared-operation index (issue #629) - see the v3 parser for why
-		// it is built in this walk rather than by a second pass over `paths`.
-		const declaredOperations: DeclaredOperation[] = [];
 		// The response schema index (issue #628) - see the v3 parser. 2.0 states
 		// its media types per operation (`produces`) rather than per response,
 		// which `responseSchemasV2` is what accounts for.
@@ -139,10 +134,6 @@ export class OpenApiV2Parser implements ImportParser {
 				requestCount += 1;
 				const identity = identify(method, path, op.operationId);
 				if (identity) {
-					declaredOperations.push({
-						...identity,
-						responses: declaredResponsesOf(op.responses),
-					});
 					schemaOperations.push({
 						identity,
 						responses: responseSchemasV2(op, spec, resolveRef),
@@ -176,10 +167,9 @@ export class OpenApiV2Parser implements ImportParser {
 			// The document itself, so the import can store it and bind this
 			// collection to it in the same atomic call (issue #637) - see the v3
 			// parser for why it is `raw` rather than a re-serialization, and for
-			// why the declared-operation index (issue #629) rides beside it.
+			// why the declared-operation index (issue #629) is not beside it.
 			spec: {
 				content: raw,
-				...(declaredOperations.length > 0 ? { operations: declaredOperations } : {}),
 				...(responseSchemas ? { responseSchemas } : {}),
 			},
 		};

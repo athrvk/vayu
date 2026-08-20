@@ -248,15 +248,17 @@ Notes:
   what a collection is bound to and `unbind_spec` detaches it; **binding, spec
   sync, import and export stay app-only.** That is a boundary, not a gap in the
   tool list: binding is not one write but a match of every saved request against
-  the document's operations, and the matcher, the sync diff and the export
-  assembly are renderer modules the main process cannot import (see
-  `app/tsconfig.node.json`). A bind that skipped the matching would store a
-  document with no operations or response-schema index - so the collection's runs
-  would report no coverage and its responses would go unchecked - and would leave
-  any stamp from a previous document in place, where coverage resolves it by
-  `operationId` and it claims the wrong operation rather than none. Phase B of
-  #761 is the decision about where that logic should live; until it lands, bind a
-  spec in Vayu (Collection → Spec). `unbind_spec` needs none of it, which is why
+  the document's operations, plus the indexes stored beside it. Phase B of #761
+  is moving what that needs into the engine, one piece at a time -
+  `POST /specs/match` owns the matching now, and the engine reads the document
+  and derives its **operation index** itself (issue #853), so a bind over MCP
+  would no longer leave a collection's runs reporting no coverage. What still
+  keeps `bind_spec` out is the rest: the **response-schema index** is extracted
+  by the renderer (translating 3.0's dialect into JSON Schema), so a bind
+  without it would leave every response of that collection unchecked, and a bind
+  must also clear any stamp from a previously bound document, where coverage
+  resolves it by `operationId` and it claims the wrong operation rather than
+  none. Until those land, bind a spec in Vayu (Collection → Spec). `unbind_spec` needs none of it, which is why
   it ships: it writes exactly what the app's Unbind button writes, and leaves the
   stamps alone for the same reason - re-binding the same document later costs
   nothing.

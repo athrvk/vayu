@@ -47,7 +47,6 @@
 
 import type {
 	Collection,
-	DeclaredOperation,
 	ResponseSchemaIndex,
 	ImportApplyExample,
 	SpecOperation,
@@ -134,15 +133,11 @@ export interface BuildSyncPayloadInput {
 	/** Where it was re-fetched from, or `null` for a file or a paste. */
 	sourceUrl: string | null;
 	/**
-	 * What the re-fetched document declares (issue #629), stored beside it. The
-	 * sync writes a *new* `spec_documents` row, so omitting it would silently
-	 * turn coverage off for a collection that had it.
-	 */
-	operations?: DeclaredOperation[];
-	/**
 	 * What the re-fetched document declares responses look like (issue #628),
-	 * on the same terms as `operations`: the sync writes a new row, so omitting
-	 * it would silently turn validation off for a collection that had it.
+	 * stored beside it: the sync writes a *new* `spec_documents` row, so
+	 * omitting it would silently turn validation off for a collection that had
+	 * it. The declared-operation index (issue #629) needs no such carrying - the
+	 * engine derives it from the document the sync stores (issue #853).
 	 */
 	responseSchemas?: ResponseSchemaIndex;
 	/** Every stored collection, to find the folder an added operation lands in. */
@@ -166,7 +161,6 @@ export function buildSyncPayload({
 	selection,
 	content,
 	sourceUrl,
-	operations,
 	responseSchemas,
 	collections,
 }: BuildSyncPayloadInput): SpecSyncRequest {
@@ -190,7 +184,6 @@ export function buildSyncPayload({
 		spec: {
 			content,
 			sourceUrl,
-			...(operations && operations.length > 0 ? { operations } : {}),
 			...(responseSchemas ? { responseSchemas } : {}),
 		},
 		collections: folders.created,

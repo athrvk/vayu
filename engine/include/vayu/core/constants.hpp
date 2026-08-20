@@ -714,6 +714,29 @@ constexpr size_t MAX_BYTES = 10 * 1024 * 1024;
 /// shortened coverage block reads as a contract that is smaller than it is.
 constexpr size_t MAX_OPERATIONS = 2000;
 
+/// Deepest a stored document may nest before the engine's reader refuses it
+/// (issue #853). The reader walks the parsed tree recursively, so this is a
+/// stack bound rather than a policy: an OpenAPI document nests tens of levels,
+/// a schema that references itself through `$ref` nests none at all (the
+/// reference is a string), and a document that nests a hundred is being written
+/// at the reader rather than describing an API.
+constexpr size_t MAX_READ_DEPTH = 100;
+
+/// Nodes a stored document may expand to when it is read, over and above one
+/// per byte of its own text - see `core/openapi_document.hpp`.
+///
+/// The budget is proportional to the input because that is the shape of what it
+/// refuses: YAML aliases are the only way a document expands past its own size,
+/// so an alias bomb (200 bytes resolving to millions of nodes) is refused while
+/// the densest honest document - a flow sequence, about one node per two bytes
+/// - passes with half the budget unspent.
+constexpr size_t READ_NODES_FLOOR = 4096;
+
+/// The absolute ceiling on that budget, whatever `maxSpecDocumentBytes` is
+/// raised to. The DOM is held whole while the index is extracted, so this is
+/// the memory bound of a single write.
+constexpr size_t MAX_READ_NODES = 4 * 1000 * 1000;
+
 /// Status codes one coverage row may list under `statusesSeen`/`undeclaredSeen`.
 /// A misconfigured target can answer one operation with hundreds of distinct
 /// codes; the row stays readable and says how many distinct codes it hides -

@@ -412,26 +412,32 @@ paths - never a truncation, and never cpp-httplib's own body cap dropping the
 connection without explaining itself.
 
 **operations** is what the document *declares* - a JSON array of
-`{operationId?, method, path, responses[]}` in document order - written by the
-client that parsed the document and read by [contract coverage](../app/openapi.md#contract-coverage)
-(issue #629). **Supplied, never derived:** the engine does not parse OpenAPI, and
-`content` above is as often YAML as JSON, so a C++ reader of it would be a second
-opinion about what the document declares. NOT NULL with a `default_value`, the
+`{operationId?, method, path, responses[]}` in document order - read by
+[contract coverage](../app/openapi.md#contract-coverage) (issue #629).
+**Derived, never supplied** (issue #853): the engine reads `content` as it stores
+it (`core/openapi_document.cpp`, JSON first and YAML second) and writes this
+column from that parse, the way it computes `hash` rather than taking one; a
+write carrying an `operations` field is a `400`. One reader answers what a
+document declares, which is what keeps this column agreeing with the
+`spec_operation` stamped on each request. NOT NULL with a `default_value`, the
 same migration shape `request_examples.origin` uses, so `sync_schema()` ALTERs it
 onto an existing table and every pre-existing row backfills to `""`.
 
 `""` means *no index*, which is not the same as a document declaring nothing: a
 run of a collection bound to such a document reports no coverage block at all,
 and `GET /specs/:id` reads the column back as `null` rather than `[]` so the two
-stay distinguishable. Re-binding or syncing the collection stores a document that
-has one. Capped at 2000 rows on the write, which is refused with the count rather
+stay distinguishable. A row can hold `""` because it predates the column, or
+because the document declares no operation at all - a stored file that is not a
+contract. Capped at 2000 rows on the write, which is refused with the count rather
 than silently truncated.
 
 **response_schemas** is what the document declares each response *looks like*
 (issue #628) - a JSON object of `{refRoots?, operations: [{operationId?, method,
 path, responses: [{status, contentType, schema}]}]}`, written by the client that
 parsed the document and read when a response comes back with a body to check.
-Supplied rather than derived, for the same reason `operations` is.
+Still supplied rather than derived, unlike `operations`: extracting it means
+translating OpenAPI 3.0's dialect (`nullable`, draft-04 `exclusiveMinimum`) into
+JSON Schema, which has not moved engine-side yet.
 
 A column of its own rather than a field on `operations` because the two are read
 at different moments: the operation index is parsed when a run's plan resolves

@@ -70,7 +70,7 @@ import {
 import { readSpecOperations, type SpecRequestDraft } from "@/services/openapi/spec-operations";
 import { refetchSpec } from "@/services/openapi/spec-refetch";
 import type { SpecFileLocation } from "@/stores";
-import type { Collection, DeclaredOperation, Request, ResponseSchemaIndex } from "@/types";
+import type { Collection, Request, ResponseSchemaIndex } from "@/types";
 import { SaveFailed, SectionLabel } from "./shared";
 
 interface SpecSyncProps {
@@ -113,9 +113,12 @@ type CheckState =
 			 * new document.
 			 */
 			sourceUrl: string | null;
-			/** The re-fetched document's declared-operation index (issue #629). */
-			operations: DeclaredOperation[];
-			/** And its response schema index (issue #628), carried the same way. */
+			/**
+			 * The re-fetched document's response schema index (issue #628),
+			 * carried from the check to the apply. Its declared-operation index
+			 * (#629) is not: the engine derives that from the document the apply
+			 * stores (issue #853).
+			 */
 			responseSchemas?: ResponseSchemaIndex;
 			selection: SpecApplySelection;
 	  }
@@ -186,11 +189,6 @@ export default function SpecSync({
 				unresolvedRefs,
 				content: text,
 				sourceUrl: storedDocument.sourceUrl,
-				// Carried from the check to the apply so the new document is
-				// stored with its own index (issue #629): the sync writes a new
-				// `spec_documents` row, and one without an index would silently
-				// turn coverage off for a collection that had it.
-				operations: read.declaredOperations,
 				...(read.responseSchemas ? { responseSchemas: read.responseSchemas } : {}),
 				selection: defaultSelection(diff),
 			});
@@ -211,7 +209,6 @@ export default function SpecSync({
 			diff: state.diff,
 			selection: state.selection,
 			content: state.content,
-			operations: state.operations,
 			...(state.responseSchemas ? { responseSchemas: state.responseSchemas } : {}),
 			// The document is re-fetched from the source the binding recorded, so
 			// the new row records the same one - a file-sourced document keeps

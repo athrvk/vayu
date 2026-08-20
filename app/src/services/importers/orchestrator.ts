@@ -163,13 +163,10 @@ function flatten(
 			tempId: specTempId,
 			content: c.spec.content,
 			...(c.spec.sourceUrl !== undefined ? { sourceUrl: c.spec.sourceUrl } : {}),
-			// The declared-operation index the parser extracted (issue #629),
-			// stored in the same atomic call as the document it describes.
-			...(c.spec.operations && c.spec.operations.length > 0
-				? { operations: c.spec.operations }
-				: {}),
-			// The response schema index (issue #628), on the same terms: stored
-			// with the document it describes, in the same transaction.
+			// The response schema index (issue #628): stored with the document it
+			// describes, in the same transaction. The declared-operation index
+			// (issue #629) is not sent - the engine reads the document and
+			// derives it as it stores it (issue #853).
 			...(c.spec.responseSchemas ? { responseSchemas: c.spec.responseSchemas } : {}),
 		});
 	}

@@ -29,7 +29,12 @@ engine/
   the dependency being unavailable - run `vcpkg-fix-port <port>` (no arguments
   re-does the whole manifest), which rewrites the port to `vcpkg_from_git` as an
   overlay, then build again. A session read that 403 as a policy wall and
-  abandoned a phase of #625 over it.
+  abandoned a phase of #625 over it. **A port whose portfile pulls extra
+  archives of its own needs a hand** - `c4core` (under `ryml`) fetches three
+  `vcpkg_download_distfile` sub-archives that the fixer, which only rewrites
+  `vcpkg_from_github`, leaves alone; rewriting those three to `vcpkg_from_git`
+  in the overlay is a two-minute edit and only ever needed in this environment,
+  since CI reaches the archives.
 - A new `tests/*_test.cpp` must be listed in `add_executable(vayu_tests ...)`
   in `engine/CMakeLists.txt` - the source list is explicit, never a glob. A
   guard beside it fails configure naming any unregistered file, because an
@@ -57,7 +62,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
 | POST | `/diagnostics/connection` | One policy-honouring send, reported as which hop answered (issue #708) - outcome only, never a body |
 | GET | `/requests/:id/examples` | A request's saved example responses (issue #481), in stored order |
-| POST | `/specs` | Store an OpenAPI document (issue #637); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (issue #712) |
+| POST | `/specs` | Store an OpenAPI document (issue #637) and derive its operation index from it (issue #853); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (issue #712) |
 | POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (issue #655) - new document, moved binding and the created/updated/deleted requests in one transaction |
 | POST | `/specs/match` | Which request of a collection's subtree is which operation of a document (issue #761) - reads only, nothing stored or stamped |
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only** - 409 on an existing id |
@@ -211,8 +216,27 @@ Three things worth knowing before you design around them:
   written, plus one shared `refRoots` their `$ref`s resolve through), and
   `core/schema_validation.cpp` matches a response to one by status pattern and
   media type and validates it with **valijson** - not the `json-schema-validator`
-  #625 named, which segfaults on a recursive schema. The engine still parses no
-  OpenAPI: the app translates 3.0's dialect into JSON Schema before storing.
+  #625 named, which segfaults on a recursive schema. This index is still the
+  app's: translating 3.0's dialect (`nullable`, draft-04 `exclusiveMinimum`)
+  into JSON Schema has not moved yet.
+  **The engine reads the document itself now** (#853, `core/openapi_document.hpp`
+  - rapidyaml, the one YAML dependency and the one translation unit that
+  includes it). What that bought first is the **`operations` index (#629), which
+  is derived on every write and refused in the body** - `POST /specs`,
+  `POST /specs/sync` and `POST /import/apply` all go through
+  `read_spec_indexes` → `core::derive_operations_index`, so an index is a fact
+  about the stored bytes the way `hash` is, and a document that cannot be read
+  is a `400` rather than a row nothing downstream can use. The reader keeps
+  document order (a JavaScript object could not: it sorts integer-like keys, so
+  `responses: {404, 200}` used to reach the store as `200, 404`), types scalars
+  like js-yaml's core schema, expands anchors, aliases and merge keys under a
+  budget of one node per input byte, and refuses a duplicate mapping key. The
+  identity it indexes and the identity the renderer's importer stamps on a
+  request are pinned to each other by
+  `tests/fixtures/declared-operations-conformance.json`, read by
+  `openapi_document_test.cpp` and the renderer's
+  `declared-operations.conformance.test.ts` - coverage matches one against the
+  other, so a divergence would credit the wrong operation rather than fail.
   Three rules the shape enforces: an unbound collection gets **no `validation`
   node at all** (never judged is not judged-and-passed); `checked: false` carries
   a reason code and no validity; and keywords the draft-07 validator cannot

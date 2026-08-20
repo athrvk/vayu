@@ -351,13 +351,16 @@ payload names the collection and sends the operations; it does **not** send the
 requests, because an OpenAPI import files them under tag sub-collections and the
 engine gathers the whole subtree itself.
 
-Every write that stores a document carries the two indexes the parsers extract
-beside it - `operations` (#629) and `responseSchemas` (#628) - and all three
-paths do: `createSpec`, `syncSpec`, and the `specs` section of `importCollection`
-below. Omitting one on any of them would silently turn coverage or response
-validation off for a collection that had it, which is why `readSpecOperations`
-returns both off the same parse rather than each caller walking the document
-again.
+Every write that stores a document carries the `responseSchemas` index (#628)
+beside it - `createSpec`, `syncSpec` and the `specs` section of
+`importCollection` below - because omitting it would silently turn response
+validation off for a collection that had it. The **`operations` index (#629) is
+not sent on any of them**: since issue #853 the engine reads the document it is
+storing and derives that index itself, so sending one is a `400`, the way a
+supplied `hash` is. What the renderer still owes the engine is that the identity
+it stamps on each request agrees with what that reader indexes -
+`engine/tests/fixtures/declared-operations-conformance.json` is the table both
+suites read.
 
 Create and read-by-id only, plus the one write that moves a binding.
 `syncSpec` is that write (issue #655): it stores the re-fetched document, points

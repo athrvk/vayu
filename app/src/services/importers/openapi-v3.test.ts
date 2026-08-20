@@ -360,14 +360,10 @@ describe("OpenApiV3Parser", () => {
 			});
 		});
 
-		it("indexes the declared operations by those same identities", () => {
-			// The engine resolves coverage by operationId first, so an index that
-			// disagreed with the requests would reintroduce the ambiguity there.
-			expect(parse().collections[0].spec!.operations).toEqual([
-				{ operationId: "list", method: "GET", path: "/a", responses: ["200"] },
-				{ method: "POST", path: "/b", responses: ["201"] },
-			]);
-		});
+		// The declared-operation index this used to be checked against is the
+		// engine's now (issue #853). That the two still agree about which
+		// operation kept the id is pinned across both languages by
+		// `declared-operations.conformance.test.ts`, over the same document.
 
 		it("names the dropped id in the preview rather than losing it silently", () => {
 			expect(parse().meta.skipped).toEqual([{ kind: "duplicate_operation_id", count: 1 }]);
@@ -377,8 +373,8 @@ describe("OpenApiV3Parser", () => {
 	});
 
 	describe("a spec whose responses live in components (issue #714)", () => {
-		// GitHub's shape. Both indexes stored beside the document are built in
-		// this one walk, so this is where they can be held to the same answer.
+		// GitHub's shape: the response body lives in `components.responses` and
+		// the operation only points at it.
 		const spec = {
 			openapi: "3.0.0",
 			paths: {
@@ -415,18 +411,14 @@ describe("OpenApiV3Parser", () => {
 			},
 		};
 
-		it("agrees with coverage about which statuses are declared", () => {
+		it("extracts a schema for a response that lives in components", () => {
 			// Coverage reads the status *keys* and so always saw the 404;
 			// extraction read the `$ref` node's absent `content` and saw nothing,
 			// so the two contradicted each other about one document on one run.
 			// Revert the deref and the 404 vanishes from the schema index while
-			// staying in the operation index.
+			// staying in the operation index the engine derives - which
+			// `declared-operations.conformance.test.ts` holds this same shape to.
 			const root = p.parse(spec, JSON.stringify(spec), opts).collections[0];
-			const declared = root.spec!.operations!.find(
-				(o) => o.path === "/repos/{owner}/{repo}"
-			)!;
-			expect(declared.responses).toEqual(["200", "404"]);
-
 			const indexed = root.spec!.responseSchemas!.operations.find(
 				(o) => o.path === "/repos/{owner}/{repo}"
 			)!;
