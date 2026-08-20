@@ -140,6 +140,32 @@ const std::unordered_set<std::string>& subtree) {
     return requests;
 }
 
+/**
+ * The `specId` a collection's own binding names, or "" when it binds nothing.
+ *
+ * The collection's *own* column, deliberately not `nearest_spec_binding`'s walk
+ * up the ancestry: a sync and a diff write to and describe the collection they
+ * were given, and answering for a document only its parent binds would report
+ * an inherited contract as this collection's own. Shared with
+ * `POST /specs/diff` (declared in routes.hpp) so the route that says what would
+ * change and the route that changes it cannot come to disagree about which
+ * collections are syncable at all.
+ *
+ * An unparseable or non-object column binds nothing, the reading every other
+ * reader of it gives.
+ */
+std::string bound_spec_id (const std::string& openapi) {
+    try {
+        const auto parsed = nlohmann::json::parse (openapi);
+        if (!parsed.is_object ()) {
+            return {};
+        }
+        return parsed.value ("specId", std::string ());
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 namespace {
 
 /**
@@ -199,19 +225,6 @@ apply_item_fields (Apply apply, const char* kind, const std::string& item) {
         return err;
     }
     return std::nullopt;
-}
-
-/** The `specId` a collection's binding names, or "" when it is bound to nothing. */
-std::string bound_spec_id (const std::string& openapi) {
-    try {
-        const auto parsed = nlohmann::json::parse (openapi);
-        if (!parsed.is_object ()) {
-            return {};
-        }
-        return parsed.value ("specId", std::string ());
-    } catch (const std::exception&) {
-        return {};
-    }
 }
 
 /** Validates a `tempId`, rejects a client-supplied `id`, and claims a real one. */

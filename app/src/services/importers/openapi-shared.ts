@@ -296,7 +296,7 @@ export class OperationFolders {
  *
  * So a repeated id is dropped rather than repeated: the later operation imports
  * with the identity it can still state unambiguously - its method and templated
- * path - which is what `spec-diff` then follows it by. First declaration wins
+ * path - which is what the engine's sync diff then follows it by. First declaration wins
  * because document order is stable across re-fetches of the same file, so two
  * syncs of an unchanged document agree about which request holds the id. The
  * drop is counted, because a request quietly missing the identity the document

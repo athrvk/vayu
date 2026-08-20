@@ -550,16 +550,25 @@ const std::function<bool (const vayu::db::Collection&)>& descend_into = {});
 /**
  * Every request stored beneath @p subtree, in one canonical order.
  *
- * Shared by `POST /specs/match` and `POST /specs/bind` (issue #862) because the
- * preview and the write must consider the same requests in the same order - the
- * match reports indices into this list, and a bind that walked its own would
- * stamp a pairing the preview never showed. Defined in spec_sync.cpp, beside
- * the subtree walk it completes.
+ * Shared by `POST /specs/match`, `POST /specs/bind` (issue #862) and
+ * `POST /specs/diff` (issue #854) because a preview and the write it previews
+ * must consider the same requests in the same order - each of those routes
+ * reports indices into this list, and a write that walked its own would act on a
+ * pairing the preview never showed. Defined in spec_sync.cpp, beside the subtree
+ * walk it completes.
  */
 std::vector<vayu::db::Request>
 collection_subtree_requests (vayu::db::Database& db,
 const std::vector<vayu::db::Collection>& all,
 const std::unordered_set<std::string>& subtree);
+
+/**
+ * The `specId` a collection's own binding names, or "" when it binds nothing.
+ *
+ * Shared by `POST /specs/sync` and `POST /specs/diff`, which have to agree about
+ * which collections can be synced at all. Defined in spec_sync.cpp.
+ */
+std::string bound_spec_id (const std::string& openapi);
 
 /**
  * What a design-mode response should be checked against (issue #628).
@@ -887,6 +896,7 @@ void register_request_example_routes (RouteContext& ctx);
 void register_spec_routes (RouteContext& ctx);
 void register_spec_sync_routes (RouteContext& ctx);
 void register_spec_match_routes (RouteContext& ctx);
+void register_spec_diff_routes (RouteContext& ctx);
 void register_spec_bind_routes (RouteContext& ctx);
 void register_spec_export_routes (RouteContext& ctx);
 void register_reorder_routes (RouteContext& ctx);

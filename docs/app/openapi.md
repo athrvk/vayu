@@ -218,6 +218,12 @@ across several files is compared as the same one document that was stored. If it
 is **byte for byte** what the collection is bound to, the answer is "up to date"
 and nothing further is computed.
 
+The comparison itself is the engine's (`POST /specs/diff`, issue #854), over the
+document it stores rather than a copy the app sends it. That is what makes
+"has this contract drifted, and where" answerable outside the Spec tab - an
+agent over MCP asks the same question the button does - and it is why the app
+holds no second opinion about what a document produces.
+
 ### The three buckets
 
 Otherwise the difference is reported by **operation identity** - the

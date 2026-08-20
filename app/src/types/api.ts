@@ -1393,6 +1393,149 @@ export interface SpecBindResponse {
 	unmatchedOperations: SpecOperation[];
 }
 
+// Spec diff (issue #854) - `POST /specs/diff` answers what a re-fetched
+// document would change about the collection bound to it. The comparison moved
+// engine-side with the rest of #761's phase B: the Sync section was the last
+// part of the spec feature an agent could not reach, and a second implementation
+// of "what does this document produce" is the thing #853's reader exists to
+// prevent. Nothing is written - applying is `POST /specs/sync`.
+
+/**
+ * What `POST /specs/diff` is asked: a bound collection, and the document to
+ * compare it against.
+ *
+ * Neither the requests nor the *bound* document are sent. The engine walks the
+ * collection's subtree itself (an import files its requests under one
+ * sub-collection per tag) and reads the bound document from the binding -
+ * the three-way user-touched rule is only worth anything if the "previous" side
+ * is the bytes actually stored.
+ */
+export interface SpecDiffRequest {
+	collectionId: string;
+	/** The re-fetched document, verbatim. */
+	spec: { content: string };
+}
+
+/**
+ * The request an import of the document would build for one operation - the
+ * values behind every `SpecFieldDiff.next`, and what an apply writes.
+ *
+ * The rendered `next` is truncated for display, so the apply reads from here
+ * rather than from the report: one draft, compared and then written.
+ */
+export interface SpecDraftRequest {
+	name: string;
+	description: string;
+	method: string;
+	url: string;
+	params: KeyValueEntry[];
+	headers: KeyValueEntry[];
+	body: RequestBody;
+	/**
+	 * The operation's documented responses (issue #481).
+	 *
+	 * Not compared - the rule that governs them (`origin="import"` is replaced,
+	 * `origin="user"` survives) only means anything at apply time - but carried,
+	 * because applying a change refreshes the request's imported examples from
+	 * them.
+	 */
+	examples: SpecDraftExample[];
+}
+
+/**
+ * One documented response of an operation, as the engine derives it.
+ *
+ * The same shape the import parsers' `ExampleDraft` has, and stated in full
+ * rather than as an `ImportApplyExample`: every field is present on the wire
+ * here, where the import payload's are optional because a format that states no
+ * status or no media type still writes a row.
+ */
+export interface SpecDraftExample {
+	/** `"200 - A user"` when the response is described, `"200"` when it is not. */
+	name: string;
+	status: number;
+	/** `Content-Type`, or empty when the response documents no payload. */
+	headers: KeyValueEntry[];
+	body: string;
+	contentType: string;
+}
+
+/**
+ * The fields an OpenAPI import writes, and therefore the only ones a sync has
+ * any claim on. `auth` and the scripts are absent on purpose: an import sets
+ * auth to `inherit` and both scripts to empty for every operation, so a
+ * difference there is always the user's and never the document's.
+ */
+export type SpecField = "name" | "description" | "method" | "url" | "params" | "headers" | "body";
+
+/** One field of one request that no longer matches the document. */
+export interface SpecFieldDiff {
+	field: SpecField;
+	/** What the request holds today, rendered for display. */
+	current: string;
+	/** What the re-fetched document produces, rendered for display. */
+	next: string;
+	/**
+	 * The request's value is neither the new document's nor the bound one's -
+	 * somebody edited it. False whenever `previousUnknown` is set: with no bound
+	 * value to compare against, "the user did this" is not a claim to make.
+	 */
+	userTouched: boolean;
+}
+
+/** An operation no request claims. It becomes a request only if the user ticks it. */
+export interface SpecDiffAdded {
+	operation: SpecOperation;
+	/** The sub-collection an import would file it under, `""` for the root. */
+	folder: string;
+	draft: SpecDraftRequest;
+}
+
+/** A request whose recorded operation the new document no longer declares. */
+export interface SpecDiffRemoved {
+	requestId: string;
+	name: string;
+	operation: SpecOperation;
+}
+
+/** A request whose operation is still declared but no longer produces it. */
+export interface SpecDiffChanged {
+	requestId: string;
+	name: string;
+	/** The identity the request carries today. */
+	boundOperation: SpecOperation;
+	/** The same operation as the new document declares it. */
+	operation: SpecOperation;
+	/** How the request was followed from its recorded identity into the document. */
+	matchedBy: "operationId" | "path";
+	/** The document moved the identity itself - the other half of it changed. */
+	renamed: boolean;
+	/**
+	 * The bound document does not declare this operation, so what the user
+	 * edited cannot be told apart from what the document changed.
+	 */
+	previousUnknown: boolean;
+	/** Every field that no longer matches, in display order. Empty for a pure rename. */
+	fields: SpecFieldDiff[];
+	draft: SpecDraftRequest;
+}
+
+export interface SpecDiffResponse {
+	/** The document is byte for byte the stored one - there is nothing to apply. */
+	identical: boolean;
+	added: SpecDiffAdded[];
+	removed: SpecDiffRemoved[];
+	changed: SpecDiffChanged[];
+	/** Requests whose operation is unchanged in every compared field. */
+	unchanged: number;
+	/**
+	 * Requests carrying no operation identity at all - not part of the
+	 * comparison, but counted, because a sync that silently ignores half a
+	 * collection is a sync nobody can read.
+	 */
+	unmapped: number;
+}
+
 /** The serializations `POST /specs/export` writes. */
 export type ExportFormat = "json" | "yaml";
 

@@ -65,6 +65,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/specs` | Store an OpenAPI document (issue #637) and derive its operation index from it (issue #853); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (issue #712) |
 | POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (issue #655) - new document, moved binding and the created/updated/deleted requests in one transaction |
 | POST | `/specs/match` | Which request of a collection's subtree is which operation of a document (issue #761) - reads only, nothing stored or stamped |
+| POST | `/specs/diff` | What a re-fetched document would change about the collection bound to it (issue #854) - reads only; applying the answer is `POST /specs/sync` |
 | POST | `/specs/bind` | Bind a collection to a document (issue #862) - the document, the binding and every stamp, written **and cleared**, in one transaction |
 | POST | `/specs/export` | A collection back out as an OpenAPI document (issue #855) - its bound document patched, or a skeleton when it binds none; reads only |
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only** - 409 on an existing id |
@@ -204,10 +205,11 @@ Three things worth knowing before you design around them:
   refused in both directions rather than guessed at, because the sync applies
   changes *by* identity and a wrong one is worse than none. It moved out of the
   renderer so an agent over MCP can bind the same way rather than through a
-  second copy of that rule; the renderer still reduces the same shapes for the
-  spec diff and the export skeleton, and
-  `tests/fixtures/operation-shape-conformance.json` is the table both languages
-  read until those move too. The route reads the **subtree** of the collection
+  second copy of that rule. Since #854 moved the sync diff, **nothing in the
+  renderer reduces these shapes any more** - `services/openapi/operation-match.ts`
+  and its conformance suite are gone with it, and
+  `tests/fixtures/operation-shape-conformance.json` is this side's own table
+  rather than a cross-language pin. The route reads the **subtree** of the collection
   it is given - an import binds the root and files requests under tag
   sub-collections - through the same `collection_subtree_ids` walk
   `POST /specs/sync` bounds itself by. It still parses no OpenAPI: the caller
@@ -290,8 +292,21 @@ Three things worth knowing before you design around them:
   (`??` falling through `null` alone, `JSON.stringify`'s number spelling) rather
   than the nearest C++ idiom. All three answers come off **one** walk
   (`src/core/openapi_walk.hpp`), so no two can disagree about which operations
-  exist or which of two kept a repeated `operationId`. No route: the only caller
-  is the diff, and that is still renderer-side until #854. The `{param}` ->
+  exist or which of two kept a repeated `operationId`. A draft carries the
+  operation's documented responses too (#854): the diff does not compare them,
+  but applying a change *writes* them, and a draft without them is an answer no
+  apply can be built from - which is what kept a second parse of the same
+  document in the renderer after the comparison had moved.
+  **The comparison itself is here now** (#854, `core/spec_diff.hpp` over
+  `POST /specs/diff`): what a re-fetched document would change about the
+  collection bound to it, which was the last part of the spec feature only the
+  Spec tab could reach. It reads the bound document from the binding and walks
+  the subtree itself - the three-way `userTouched` rule (the request holds
+  neither the new document's value nor the bound one's) is worth nothing if the
+  caller can supply the previous side - and it writes nothing, exactly as
+  `POST /specs/match` previews what `POST /specs/bind` commits. The renderer's
+  `spec-diff.ts` went with it; what stays there is `spec-apply.ts`, which turns
+  this answer plus the user's ticks into the `POST /specs/sync` payload. The `{param}` ->
   `{{param}}` rewrite a draft's URL is written with is
   `core::normalize_path_templates`, the mock server's copy moved out of
   `http/routes/mock_server.cpp` rather than written twice - the app writes those

@@ -95,10 +95,12 @@ vi.mock("@/queries/specs", () => ({
 	// The pairing the engine worked out (issue #761).
 	useSpecMatchQuery: () => specMatchQuery,
 	useBindSpecMutation: () => bindSpec,
-	// The Sync section reads the stored bytes when Check is pressed. Stubbed
-	// like the queries above - what a check does with them is asserted in
-	// SpecSync.test.tsx.
-	useSpecContentReader: () => () => new Promise(() => {}),
+	// The Sync section looks up where the bound document came from when Check is
+	// pressed, and asks the engine what a re-fetch would change (issue #854).
+	// Stubbed like the queries above - what a check does with either is asserted
+	// in SpecSync.test.tsx.
+	useSpecMetaReader: () => () => new Promise(() => {}),
+	useDiffSpecMutation: () => ({ mutateAsync: () => new Promise(() => {}) }),
 	// The Sync section's apply half (issue #655). Stubbed like the two above:
 	// this file renders the tab without a QueryClient, and what a sync writes is
 	// asserted in SpecSync.test.tsx.

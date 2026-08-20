@@ -10,11 +10,13 @@
  * apply the parts the user ticks (issues #654 and #655, phase 2 of #625).
  *
  * The read half and the write half stayed separate all the way down. Every
- * judgement about what changed lives in `spec-diff`, and every judgement about
- * what to *write* lives in `spec-apply`; both are pure, so the rules that
+ * judgement about what changed is `POST /specs/diff`'s (issue #854 moved it
+ * engine-side, where the reader that says what a document produces already
+ * lives), and every judgement about what to *write* lives in `spec-apply`; the
+ * first stores nothing and the second only builds a payload, so the rules that
  * matter - a field somebody edited is never overwritten unless they ask, a
  * removal is never a default - are provable without a row to damage. This
- * component ticks boxes and calls one engine route.
+ * component ticks boxes and calls two engine routes.
  *
  * **Applying is one call because it has to be one transaction.** `POST
  * /specs/sync` writes the document, moves the binding and applies the rows
@@ -24,7 +26,7 @@
  *
  * **Every apply stores the document; the ticks decide which rows ride along**
  * (issue #717). That one rule is what makes the dead end structurally
- * impossible: `spec-diff` compares request-shaped fields, so a document that
+ * impossible: the comparison covers request-shaped fields, so a document that
  * only moved a response schema, a status, or its `servers` block produces three
  * empty buckets - and gating Apply on those buckets left the commonest contract
  * change of all permanently unapplyable, with the stored document, the
@@ -33,13 +35,13 @@
  * the two it is about to be, because an unlabelled one would be a write nobody
  * asked for.
  *
- * **The stored document is read when Check is pressed, not before** (issue
- * #712). This section is the only reader here that needs the document's *bytes*
- * - to compare them - and it needs them at the moment a comparison is asked
- * for. It used to be handed the document the tab had preloaded, which meant
- * Check stayed disabled until a transfer of up to `maxSpecDocumentBytes` had
- * finished for a comparison nobody had requested yet; the tab now describes the
- * document instead of reading it.
+ * **The stored document is never read here at all** (issues #712, #854). This
+ * section used to be handed the document the tab had preloaded, which kept
+ * Check disabled until a transfer of up to `maxSpecDocumentBytes` had finished
+ * for a comparison nobody had asked for; then it read the bytes on the click
+ * instead. Now the engine compares its own stored bytes against the re-fetched
+ * ones, so all this needs of the binding is `sourceUrl` - where to re-fetch
+ * from - which is what `useSpecMetaReader` answers without the document.
  *
  * The counts are stated in full, zeros included, for the reason `MatchSummary`
  * states its three: "4 changed" alone reads as the whole answer, while "4
@@ -53,13 +55,7 @@ import { Button, DeleteConfirmDialog } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { apiService } from "@/services/api";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
-import { useSpecContentReader, useSyncSpecMutation } from "@/queries/specs";
-import {
-	diffSpec,
-	type ChangedRequest,
-	type SpecDiff,
-	type SpecField,
-} from "@/services/openapi/spec-diff";
+import { useDiffSpecMutation, useSpecMetaReader, useSyncSpecMutation } from "@/queries/specs";
 import {
 	buildSyncPayload,
 	defaultSelection,
@@ -67,10 +63,9 @@ import {
 	operationKey,
 	type SpecApplySelection,
 } from "@/services/openapi/spec-apply";
-import { readSpecOperations, type SpecRequestDraft } from "@/services/openapi/spec-operations";
 import { refetchSpec } from "@/services/openapi/spec-refetch";
 import type { SpecFileLocation } from "@/stores";
-import type { Collection, Request } from "@/types";
+import type { Collection, SpecDiffChanged, SpecDiffResponse, SpecField } from "@/types";
 import { SaveFailed, SectionLabel } from "./shared";
 
 interface SpecSyncProps {
@@ -81,16 +76,13 @@ interface SpecSyncProps {
 	/**
 	 * The bound document's id, from the collection's own binding (issue #712).
 	 *
-	 * The id rather than the document: this section is the one reader that needs
-	 * the *bytes*, and it needs them on a click, not on a tab opening. It used to
-	 * take the document the tab had preloaded, which made Check unpressable until
-	 * a 12 MB transfer nobody asked for had finished.
+	 * The id rather than the document, and since #854 not even for the bytes: the
+	 * engine compares its own stored document, so this is used to look up where
+	 * that document was fetched from and for nothing else.
 	 */
 	specId: string;
 	/** Where this machine keeps the picked file, when it was this machine that picked it. */
 	specFile: SpecFileLocation | undefined;
-	/** Every request beneath the bound collection - the same set the counts describe. */
-	requests: Request[];
 }
 
 type CheckState =
@@ -100,7 +92,7 @@ type CheckState =
 	| { phase: "unchanged" }
 	| {
 			phase: "diff";
-			diff: SpecDiff;
+			diff: SpecDiffResponse;
 			unresolvedRefs: number;
 			/** The bytes that were diffed, and the ones an apply stores - never a re-fetch. */
 			content: string;
@@ -117,37 +109,29 @@ type CheckState =
 	  }
 	| { phase: "applied"; created: number; updated: number; deleted: number };
 
-export default function SpecSync({
-	collection,
-	collections,
-	specId,
-	specFile,
-	requests,
-}: SpecSyncProps) {
+export default function SpecSync({ collection, collections, specId, specFile }: SpecSyncProps) {
 	const { maxBytes } = useSpecDocumentLimit();
 	const [state, setState] = useState<CheckState>({ phase: "idle" });
 	const [confirmingDeletes, setConfirmingDeletes] = useState(false);
 	const syncSpec = useSyncSpecMutation();
-	const readSpecContent = useSpecContentReader();
+	const diffSpec = useDiffSpecMutation();
+	const readSpecMeta = useSpecMetaReader();
 
 	const handleCheck = async () => {
 		if (state.phase === "checking") return;
 		setState({ phase: "checking" });
 		try {
 			/*
-			 * The bound bytes first, and here rather than on mount (issue #712): a
-			 * comparison needs the document this collection is bound to, and this is
-			 * the moment a comparison was asked for. Serial rather than concurrent
-			 * with the re-fetch below, so a stored document that cannot be read says
-			 * *that* instead of racing a network error for which message the user
-			 * gets. Cached by spec id, so a second check - or an export in the same
-			 * session - costs one read, not two.
+			 * Where the bound document came from, which is all this needs of it
+			 * (issues #712, #854): the re-fetch goes to that source, and the
+			 * comparison against the stored bytes is the engine's. Cached beside
+			 * the tab's own card, so this normally costs no request.
 			 */
-			const storedDocument = await readSpecContent(specId);
+			const meta = await readSpecMeta(specId);
 
 			const { text, unresolvedRefs } = await refetchSpec(
 				{
-					sourceUrl: storedDocument.sourceUrl,
+					sourceUrl: meta.sourceUrl,
 					...(specFile ? { file: specFile } : {}),
 				},
 				{
@@ -161,27 +145,24 @@ export default function SpecSync({
 				}
 			);
 
-			// The bytes, not a second hash of them: the engine hashes what it
-			// stores (`spec_content_hash`), this holds exactly those bytes, and a
-			// SHA-256 in the renderer would be a copy of that rule with its own
-			// way of being wrong.
-			if (text === storedDocument.content) {
+			const diff = await diffSpec.mutateAsync({
+				collectionId: collection.id,
+				spec: { content: text },
+			});
+			// The engine compares the bytes it stores against the ones just sent -
+			// the same bytes it hashes - so "unchanged" is one answer rather than a
+			// second opinion formed here.
+			if (diff.identical) {
 				setState({ phase: "unchanged" });
 				return;
 			}
 
-			const read = readSpecOperations(text);
-			const diff = diffSpec({
-				bound: boundDrafts(storedDocument.content),
-				fetched: read.requests,
-				requests,
-			});
 			setState({
 				phase: "diff",
 				diff,
 				unresolvedRefs,
 				content: text,
-				sourceUrl: storedDocument.sourceUrl,
+				sourceUrl: meta.sourceUrl,
 				selection: defaultSelection(diff),
 			});
 		} catch (e) {
@@ -341,21 +322,6 @@ export default function SpecSync({
 }
 
 /**
- * The bound document as drafts, or `null` when it cannot be read.
- *
- * `null` rather than an exception: a stored document Vayu can no longer parse
- * is a reason to compare two-way and say so per request, not a reason to refuse
- * to tell the user what the *new* document says.
- */
-function boundDrafts(content: string): SpecRequestDraft[] | null {
-	try {
-		return readSpecOperations(content).requests;
-	} catch {
-		return null;
-	}
-}
-
-/**
  * "3 to create, 1 to update, 0 to delete" - what the button is about to do.
  *
  * The document is named on both branches because it is written on both: with
@@ -373,12 +339,12 @@ function applySummary(selection: SpecApplySelection): string {
 
 /**
  * The document moved, but nothing it says about *this collection's* operations
- * did - the shape `spec-diff` renders as three empty buckets.
+ * did - the shape the comparison answers with as three empty buckets.
  *
  * Named rather than inferred from the summary, because "0 · 0 · 0 · N" is the
  * one reading a user cannot act on without being told what it means (#717).
  */
-function documentLevelOnly(diff: SpecDiff): boolean {
+function documentLevelOnly(diff: SpecDiffResponse): boolean {
 	return diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0;
 }
 
@@ -392,7 +358,7 @@ function DiffReport({
 	unresolvedRefs,
 	selection,
 	onChange,
-}: { diff: SpecDiff; unresolvedRefs: number } & SelectionProps) {
+}: { diff: SpecDiffResponse; unresolvedRefs: number } & SelectionProps) {
 	const toggleAdded = (key: string, on: boolean) => {
 		const added = new Set(selection.added);
 		if (on) added.add(key);
@@ -470,17 +436,13 @@ function DiffReport({
 					title="Operations the document no longer declares"
 					hint="Unticked by default - deleting a request takes everything saved on it."
 				>
-					{diff.removed.map((request) => (
+					{diff.removed.map((entry) => (
 						<CheckRow
-							key={request.id}
-							checked={selection.removed.has(request.id)}
-							onChange={(on) => toggleRemoved(request.id, on)}
-							title={request.name}
-							detail={
-								request.specOperation
-									? operationKey(request.specOperation)
-									: request.url
-							}
+							key={entry.requestId}
+							checked={selection.removed.has(entry.requestId)}
+							onChange={(on) => toggleRemoved(entry.requestId, on)}
+							title={entry.name}
+							detail={operationKey(entry.operation)}
 							note="delete"
 						/>
 					))}
@@ -494,10 +456,10 @@ function DiffReport({
 				>
 					{diff.changed.map((changed) => (
 						<ChangedRow
-							key={changed.request.id}
+							key={changed.requestId}
 							changed={changed}
-							fields={selection.changed.get(changed.request.id)}
-							onChange={(fields) => setChanged(changed.request.id, fields)}
+							fields={selection.changed.get(changed.requestId)}
+							onChange={(fields) => setChanged(changed.requestId, fields)}
 						/>
 					))}
 				</Group>
@@ -517,7 +479,7 @@ function ChangedRow({
 	fields,
 	onChange,
 }: {
-	changed: ChangedRequest;
+	changed: SpecDiffChanged;
 	/** The ticked fields, or `undefined` when this request is not being applied. */
 	fields: ReadonlySet<SpecField> | undefined;
 	onChange: (fields: ReadonlySet<SpecField> | null) => void;
@@ -548,9 +510,9 @@ function ChangedRow({
 								: null
 						)
 					}
-					aria-label={`Apply changes to ${changed.request.name}`}
+					aria-label={`Apply changes to ${changed.name}`}
 				/>
-				<span className="text-xs font-medium">{changed.request.name}</span>
+				<span className="text-xs font-medium">{changed.name}</span>
 				<span className="text-[11px] font-mono text-muted-foreground break-all">
 					{operationKey(changed.operation)}
 				</span>
@@ -582,7 +544,7 @@ function ChangedRow({
 									checked={fields?.has(field.field) ?? false}
 									disabled={!applying}
 									onChange={(e) => toggleField(field.field, e.target.checked)}
-									aria-label={`Apply ${field.field} to ${changed.request.name}`}
+									aria-label={`Apply ${field.field} to ${changed.name}`}
 								/>
 								<span className="font-semibold">{field.field}</span>
 								{field.userTouched && (

@@ -37,13 +37,14 @@ using vayu::core::spec_path_shape;
 using vayu::core::split_request_url;
 
 /**
- * The table both languages read.
+ * The shape table.
  *
- * The renderer still reduces these same shapes for the spec diff and the export
- * skeleton, so two implementations of one rule exist until those move too - and
- * a rule that decides which request is which operation cannot be allowed to
- * mean two things. Same arrangement as the variable-resolution fixture: one
- * file, two suites, a divergence fails one of them.
+ * It was a cross-language conformance fixture while the renderer reduced these
+ * same shapes for the spec diff - one file, two suites, a divergence failing one
+ * of them - and it is kept as this side's own table now that #854 moved the diff
+ * and deleted `services/openapi/operation-match.ts` with it. The cases are the
+ * value: each one is a way two paths do or do not describe the same endpoint,
+ * and they are worth no less for having one reader.
  */
 json load_shape_fixture () {
     const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /

@@ -232,6 +232,39 @@ struct DraftField {
     bool file = false;
 };
 
+/**
+ * One saved example response an import writes for a documented response (issue
+ * #481), in the shape `request_examples` stores.
+ *
+ * Carried on a draft although the sync diff does not compare examples (#654):
+ * applying a change *writes* them - the document's responses replace the rows a
+ * previous import or sync left - so a draft without them would make an engine
+ * answer that an apply cannot be built from, which is what put the parse back
+ * in the renderer.
+ */
+struct DraftExample {
+    /// `"200 - A user"` when the response is described, `"200"` when it is not.
+    std::string name;
+    /// The status the example documents. Only a numeric 100-599 key becomes one:
+    /// `default` and `2XX` have no status line to be served under.
+    int status = 200;
+    /**
+     * Whether the document states a payload for this response.
+     *
+     * Distinct from an empty @ref body or @ref content_type, both of which a
+     * documented response may legitimately have: it is what decides whether the
+     * stored row carries a `Content-Type` header at all. A `204 No Content`
+     * documents nothing and still imports, because a mock server has to be able
+     * to answer with it.
+     */
+    bool documented = false;
+    /// The media type the payload is in, `""` when nothing is documented.
+    std::string content_type;
+    /// The payload as text - a documented string verbatim, anything else as
+    /// `JSON.stringify(value, null, 2)` writes it.
+    std::string body;
+};
+
 /// A draft request's body, in the shape `requests.body` stores.
 struct DraftBody {
     /// `none`, `json`, `text`, `form-data` or `x-www-form-urlencoded`.
@@ -248,10 +281,13 @@ struct DraftBody {
  * Not an identity: `DeclaredOperation` says *which* operation this is, and this
  * says what a request for it looks like - which is what makes "the spec changed
  * this request" answerable without a second opinion about what the document
- * means. The fields are exactly the ones the sync diff compares (issue #654);
- * a request's auth, scripts and saved examples are deliberately absent, since
- * the diff does not compare them and inventing them here would be state nothing
- * reads.
+ * means. The first seven fields are exactly the ones the sync diff compares
+ * (issue #654); a request's auth and scripts are deliberately absent, because an
+ * import writes one value for every operation and a difference there is always
+ * the user's.
+ *
+ * @ref examples is the one member the diff does not compare and an apply still
+ * needs - see `DraftExample`.
  */
 struct DraftRequest {
     std::string name;
@@ -264,6 +300,8 @@ struct DraftRequest {
     std::vector<DraftField> params;
     std::vector<DraftField> headers;
     DraftBody body;
+    /// The operation's documented responses, in document order.
+    std::vector<DraftExample> examples;
 };
 
 /// One operation, the request an import would build for it, and where an import
@@ -316,6 +354,11 @@ struct SpecRequestDraft {
  *   unchanged document.
  * - **The folder is where an import would have put it**: first tag, else the
  *   first path segment that names a resource, else the root.
+ * - **Each documented response becomes a saved example** (issue #481), by the
+ *   same precedence the request body follows - the media type's `example`, else
+ *   the first entry of its `examples` map, else a sample of its schema - and a
+ *   response documenting no payload still becomes one, because `204 No Content`
+ *   is an answer a mock server has to be able to give.
  *
  * `$ref`s are followed **in-document only**, which is a guarantee rather than a
  * gap: external ones are inlined into `x-vayu-bundled` before a document is
