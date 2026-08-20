@@ -22,6 +22,7 @@
 #include "vayu/http/mock_server.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/path_template.hpp"
 #include "vayu/http/managed_listener.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
@@ -48,12 +49,6 @@ namespace constants = vayu::core::constants;
 
 namespace {
 
-/// The characters the app's `SIMPLE_VAR` accepts inside `{{ }}` (`[\w.$-]`).
-bool is_simple_var_char (char ch) {
-    const auto c = static_cast<unsigned char> (ch);
-    return std::isalnum (c) != 0 || ch == '_' || ch == '.' || ch == '$' || ch == '-';
-}
-
 /// The characters the app's `PATH_TEMPLATE` accepts inside `{ }` (`[\w$-]`) -
 /// no dot, deliberately: `{a.b}` is not a path parameter in OpenAPI.
 bool is_path_template_char (char ch) {
@@ -68,57 +63,6 @@ std::string trimmed (std::string_view value) {
     }
     const auto end = value.find_last_not_of (" \t");
     return std::string (value.substr (begin, end - begin + 1));
-}
-
-/**
- * Rewrite every template spelling in @p path to `{{name}}`.
- *
- * Mirrors `normalizeVars(path, {pathTemplates: true})` in
- * `app/src/services/importers/var-normalize.ts`: `{{ x }}` and `{{ _.x }}`
- * tighten to `{{x}}`, a single-brace `{x}` becomes `{{x}}`, and anything that
- * does not fit either shape (a Nunjucks filter, `{a|b}`) is left verbatim
- * rather than guessed at. Pinned to the app's copy by
- * `tests/fixtures/path-template-conformance.json`.
- */
-std::string normalize_templates (const std::string& path) {
-    std::string out;
-    out.reserve (path.size ());
-    for (std::size_t i = 0; i < path.size ();) {
-        if (path.compare (i, 2, "{{") == 0) {
-            const auto close = path.find ("}}", i + 2);
-            if (close != std::string::npos) {
-                const std::string name = trimmed (std::string_view (path).substr (i + 2, close - i - 2));
-                const bool ok = !name.empty () &&
-                std::all_of (name.begin (), name.end (), is_simple_var_char);
-                if (ok) {
-                    // `_.x` is Insomnia's spelling of the same variable.
-                    const std::string bare = name.rfind ("_.", 0) == 0 ? name.substr (2) : name;
-                    out += "{{" + bare + "}}";
-                    i = close + 2;
-                    continue;
-                }
-            }
-            out += path.substr (i, 2);
-            i += 2;
-            continue;
-        }
-        if (path[i] == '{') {
-            const auto close = path.find ('}', i + 1);
-            const bool doubled = close != std::string::npos && close + 1 < path.size () &&
-            path[close + 1] == '}';
-            if (close != std::string::npos && close > i + 1 && !doubled) {
-                const std::string_view name (path.data () + i + 1, close - i - 1);
-                if (std::all_of (name.begin (), name.end (), is_path_template_char)) {
-                    out += "{{" + std::string (name) + "}}";
-                    i = close + 1;
-                    continue;
-                }
-            }
-        }
-        out += path[i];
-        ++i;
-    }
-    return out;
 }
 
 /// True when @p authority looks like a host rather than the first segment of a
@@ -171,7 +115,7 @@ std::string normalize_mock_path (const std::string& url) {
         }
     }
 
-    work = normalize_templates (work);
+    work = vayu::core::normalize_path_templates (work);
 
     // Rebuild from segments: that applies the `:param` rule per whole segment,
     // collapses `//`, drops a trailing slash, and guarantees a leading one.

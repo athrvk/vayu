@@ -1,0 +1,363 @@
+{
+  "$comment": "Cross-language conformance fixture for the request drafts an OpenAPI import builds (issue #865). Read by BOTH the engine gtest suite (openapi_drafts_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/services/openapi/spec-request-drafts.conformance.test.ts). A draft is not an identity - it is the request an import would build - and the spec sync diff compares a stored request against one, so a draft the two sides build differently is a field reported as changed for a document that did not change. Every case's `drafts` are keyed by 'METHOD path' rather than ordered, because the engine walks the document while readSpecOperations walks the collection tree it built (root requests, then tag folders) - two orders both sides agree about. Generated from the renderer's own parsers; regenerate by hand only with a matching engine change.",
+  "cases": [
+    {
+      "name": "3.x - a $ref-ed request body, merged path and operation parameters, a tag folder",
+      "document": "{\n  \"openapi\": \"3.0.3\",\n  \"info\": {\n    \"title\": \"Pet Store\"\n  },\n  \"paths\": {\n    \"/pets/{petId}\": {\n      \"parameters\": [\n        {\n          \"name\": \"petId\",\n          \"in\": \"path\",\n          \"required\": true,\n          \"schema\": {\n            \"type\": \"string\"\n          }\n        },\n        {\n          \"name\": \"verbose\",\n          \"in\": \"query\",\n          \"schema\": {\n            \"type\": \"boolean\"\n          }\n        },\n        {\n          \"name\": \"X-Trace\",\n          \"in\": \"header\",\n          \"schema\": {\n            \"type\": \"string\",\n            \"default\": \"off\"\n          }\n        }\n      ],\n      \"get\": {\n        \"operationId\": \"getPet\",\n        \"summary\": \"Get a pet\",\n        \"description\": \"Reads one pet.\",\n        \"tags\": [\n          \"pets\"\n        ],\n        \"parameters\": [\n          {\n            \"name\": \"verbose\",\n            \"in\": \"query\",\n            \"required\": true,\n            \"description\": \"Long form\",\n            \"schema\": {\n              \"type\": \"boolean\"\n            }\n          },\n          {\n            \"name\": \"status\",\n            \"in\": \"query\",\n            \"example\": \"available\"\n          },\n          {\n            \"name\": \"X-Request-Id\",\n            \"in\": \"header\",\n            \"schema\": {\n              \"type\": \"string\"\n            }\n          },\n          {\n            \"name\": \"Authorization\",\n            \"in\": \"header\",\n            \"schema\": {\n              \"type\": \"string\"\n            }\n          },\n          {\n            \"name\": \"session\",\n            \"in\": \"cookie\",\n            \"schema\": {\n              \"type\": \"string\"\n            }\n          }\n        ],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\"\n          }\n        }\n      },\n      \"put\": {\n        \"operationId\": \"putPet\",\n        \"tags\": [\n          \"pets\"\n        ],\n        \"requestBody\": {\n          \"$ref\": \"#/components/requestBodies/PetBody\"\n        },\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\"\n          }\n        }\n      }\n    }\n  },\n  \"components\": {\n    \"requestBodies\": {\n      \"PetBody\": {\n        \"content\": {\n          \"application/json\": {\n            \"schema\": {\n              \"$ref\": \"#/components/schemas/Pet\"\n            }\n          }\n        }\n      }\n    },\n    \"schemas\": {\n      \"Pet\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"id\": {\n            \"type\": \"integer\"\n          },\n          \"name\": {\n            \"type\": \"string\",\n            \"example\": \"Rex\"\n          },\n          \"weight\": {\n            \"type\": \"number\",\n            \"example\": 4\n          },\n          \"tags\": {\n            \"type\": \"array\",\n            \"items\": {\n              \"type\": \"string\"\n            }\n          },\n          \"status\": {\n            \"type\": \"string\",\n            \"enum\": [\n              \"available\",\n              \"sold\"\n            ]\n          },\n          \"parent\": {\n            \"$ref\": \"#/components/schemas/Pet\"\n          }\n        }\n      }\n    }\n  }\n}",
+      "drafts": [
+        {
+          "operationId": "getPet",
+          "method": "GET",
+          "path": "/pets/{petId}",
+          "folder": "pets",
+          "name": "Get a pet",
+          "description": "Reads one pet.",
+          "url": "{{baseUrl}}/pets/{{petId}}?verbose&status=available",
+          "params": [
+            {
+              "key": "verbose",
+              "value": "",
+              "enabled": true,
+              "description": "Long form",
+              "file": false
+            },
+            {
+              "key": "status",
+              "value": "available",
+              "enabled": true,
+              "description": "",
+              "file": false
+            }
+          ],
+          "headers": [
+            {
+              "key": "X-Trace",
+              "value": "off",
+              "enabled": true,
+              "description": "",
+              "file": false
+            },
+            {
+              "key": "X-Request-Id",
+              "value": "",
+              "enabled": false,
+              "description": "",
+              "file": false
+            }
+          ],
+          "body": {
+            "mode": "none",
+            "content": "",
+            "fields": []
+          }
+        },
+        {
+          "operationId": "putPet",
+          "method": "PUT",
+          "path": "/pets/{petId}",
+          "folder": "pets",
+          "name": "putPet",
+          "description": "",
+          "url": "{{baseUrl}}/pets/{{petId}}",
+          "params": [
+            {
+              "key": "verbose",
+              "value": "",
+              "enabled": false,
+              "description": "",
+              "file": false
+            }
+          ],
+          "headers": [
+            {
+              "key": "X-Trace",
+              "value": "off",
+              "enabled": true,
+              "description": "",
+              "file": false
+            }
+          ],
+          "body": {
+            "mode": "json",
+            "content": "{\n  \"id\": 0,\n  \"name\": \"Rex\",\n  \"weight\": 4,\n  \"tags\": [\n    \"\"\n  ],\n  \"status\": \"available\",\n  \"parent\": {}\n}",
+            "fields": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "3.x - an untagged operation takes its path's folder, and one with no resource segment stays on the root",
+      "document": "{\n  \"openapi\": \"3.1.0\",\n  \"info\": {\n    \"title\": \"Untagged\"\n  },\n  \"paths\": {\n    \"/api/v2/orders\": {\n      \"get\": {\n        \"operationId\": \"listOrders\",\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\"\n          }\n        }\n      },\n      \"post\": {\n        \"operationId\": \"createOrder\",\n        \"requestBody\": {\n          \"content\": {\n            \"application/vnd.api+json\": {\n              \"schema\": {\n                \"type\": \"object\",\n                \"properties\": {\n                  \"total\": {\n                    \"type\": \"integer\"\n                  },\n                  \"note\": {\n                    \"type\": [\n                      \"string\",\n                      \"null\"\n                    ]\n                  }\n                }\n              }\n            }\n          }\n        },\n        \"responses\": {\n          \"201\": {\n            \"description\": \"made\"\n          }\n        }\n      }\n    },\n    \"/{id}\": {\n      \"get\": {\n        \"operationId\": \"byId\",\n        \"requestBody\": {\n          \"content\": {\n            \"text/plain\": {}\n          }\n        },\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\"\n          }\n        }\n      }\n    },\n    \"/\": {\n      \"get\": {\n        \"operationId\": \"root\",\n        \"tags\": [\n          \"\"\n        ],\n        \"requestBody\": {\n          \"content\": {\n            \"application/xml\": {\n              \"schema\": {\n                \"type\": \"object\"\n              }\n            }\n          }\n        },\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\"\n          }\n        }\n      }\n    }\n  }\n}",
+      "drafts": [
+        {
+          "operationId": "byId",
+          "method": "GET",
+          "path": "/{id}",
+          "folder": "",
+          "name": "byId",
+          "description": "",
+          "url": "{{baseUrl}}/{{id}}",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "text",
+            "content": "",
+            "fields": []
+          }
+        },
+        {
+          "operationId": "root",
+          "method": "GET",
+          "path": "/",
+          "folder": "",
+          "name": "root",
+          "description": "",
+          "url": "{{baseUrl}}/",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "none",
+            "content": "",
+            "fields": []
+          }
+        },
+        {
+          "operationId": "listOrders",
+          "method": "GET",
+          "path": "/api/v2/orders",
+          "folder": "orders",
+          "name": "listOrders",
+          "description": "",
+          "url": "{{baseUrl}}/api/v2/orders",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "none",
+            "content": "",
+            "fields": []
+          }
+        },
+        {
+          "operationId": "createOrder",
+          "method": "POST",
+          "path": "/api/v2/orders",
+          "folder": "orders",
+          "name": "createOrder",
+          "description": "",
+          "url": "{{baseUrl}}/api/v2/orders",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "json",
+            "content": "{\n  \"total\": 0,\n  \"note\": \"\"\n}",
+            "fields": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "3.x - a multipart body names its uploads, a urlencoded one cannot",
+      "document": "{\n  \"openapi\": \"3.0.0\",\n  \"info\": {\n    \"title\": \"Uploads\"\n  },\n  \"paths\": {\n    \"/upload\": {\n      \"post\": {\n        \"operationId\": \"upload\",\n        \"tags\": [\n          \"files\"\n        ],\n        \"requestBody\": {\n          \"content\": {\n            \"multipart/form-data\": {\n              \"schema\": {\n                \"allOf\": [\n                  {\n                    \"type\": \"object\",\n                    \"properties\": {\n                      \"file\": {\n                        \"type\": \"string\",\n                        \"format\": \"binary\"\n                      },\n                      \"shots\": {\n                        \"type\": \"array\",\n                        \"items\": {\n                          \"type\": \"string\",\n                          \"format\": \"binary\"\n                        }\n                      },\n                      \"caption\": {\n                        \"type\": \"string\"\n                      }\n                    }\n                  }\n                ]\n              }\n            }\n          }\n        },\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\"\n          }\n        }\n      }\n    },\n    \"/form\": {\n      \"post\": {\n        \"operationId\": \"form\",\n        \"tags\": [\n          \"files\"\n        ],\n        \"requestBody\": {\n          \"content\": {\n            \"application/x-www-form-urlencoded\": {\n              \"schema\": {\n                \"type\": \"object\",\n                \"properties\": {\n                  \"blob\": {\n                    \"type\": \"string\",\n                    \"format\": \"binary\"\n                  },\n                  \"note\": {\n                    \"type\": \"string\"\n                  }\n                }\n              }\n            }\n          }\n        },\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\"\n          }\n        }\n      }\n    }\n  }\n}",
+      "drafts": [
+        {
+          "operationId": "upload",
+          "method": "POST",
+          "path": "/upload",
+          "folder": "files",
+          "name": "upload",
+          "description": "",
+          "url": "{{baseUrl}}/upload",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "form-data",
+            "content": "",
+            "fields": [
+              {
+                "key": "file",
+                "value": "",
+                "enabled": true,
+                "description": "",
+                "file": true
+              },
+              {
+                "key": "shots",
+                "value": "",
+                "enabled": true,
+                "description": "",
+                "file": true
+              },
+              {
+                "key": "caption",
+                "value": "",
+                "enabled": true,
+                "description": "",
+                "file": false
+              }
+            ]
+          }
+        },
+        {
+          "operationId": "form",
+          "method": "POST",
+          "path": "/form",
+          "folder": "files",
+          "name": "form",
+          "description": "",
+          "url": "{{baseUrl}}/form",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "x-www-form-urlencoded",
+            "content": "",
+            "fields": [
+              {
+                "key": "blob",
+                "value": "",
+                "enabled": true,
+                "description": "",
+                "file": false
+              },
+              {
+                "key": "note",
+                "value": "",
+                "enabled": true,
+                "description": "",
+                "file": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2.0 - a body parameter, a file part, and a value stated as `default`",
+      "document": "{\n  \"swagger\": \"2.0\",\n  \"info\": {\n    \"title\": \"Swagger Store\"\n  },\n  \"host\": \"api.example.com\",\n  \"basePath\": \"/v1\",\n  \"consumes\": [\n    \"application/json\"\n  ],\n  \"paths\": {\n    \"/pets\": {\n      \"get\": {\n        \"operationId\": \"listPets\",\n        \"tags\": [\n          \"pets\"\n        ],\n        \"parameters\": [\n          {\n            \"name\": \"limit\",\n            \"in\": \"query\",\n            \"type\": \"integer\",\n            \"default\": 20,\n            \"description\": \"How many\"\n          },\n          {\n            \"name\": \"cursor\",\n            \"in\": \"query\",\n            \"type\": \"string\"\n          },\n          {\n            \"name\": \"X-Api-Version\",\n            \"in\": \"header\",\n            \"type\": \"string\",\n            \"required\": true\n          }\n        ],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\"\n          }\n        }\n      },\n      \"post\": {\n        \"operationId\": \"addPet\",\n        \"tags\": [\n          \"pets\"\n        ],\n        \"parameters\": [\n          {\n            \"name\": \"body\",\n            \"in\": \"body\",\n            \"schema\": {\n              \"$ref\": \"#/definitions/Pet\"\n            }\n          }\n        ],\n        \"responses\": {\n          \"201\": {\n            \"description\": \"made\"\n          }\n        }\n      }\n    },\n    \"/pets/{petId}/photo\": {\n      \"post\": {\n        \"operationId\": \"uploadPhoto\",\n        \"consumes\": [\n          \"multipart/form-data\"\n        ],\n        \"parameters\": [\n          {\n            \"name\": \"petId\",\n            \"in\": \"path\",\n            \"type\": \"string\",\n            \"required\": true\n          },\n          {\n            \"name\": \"photo\",\n            \"in\": \"formData\",\n            \"type\": \"file\"\n          },\n          {\n            \"name\": \"caption\",\n            \"in\": \"formData\",\n            \"type\": \"string\"\n          }\n        ],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"ok\"\n          }\n        }\n      }\n    }\n  },\n  \"definitions\": {\n    \"Pet\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"id\": {\n          \"type\": \"integer\"\n        },\n        \"name\": {\n          \"type\": \"string\"\n        }\n      }\n    }\n  }\n}",
+      "drafts": [
+        {
+          "operationId": "listPets",
+          "method": "GET",
+          "path": "/pets",
+          "folder": "pets",
+          "name": "listPets",
+          "description": "",
+          "url": "{{baseUrl}}/pets?limit=20",
+          "params": [
+            {
+              "key": "limit",
+              "value": "20",
+              "enabled": true,
+              "description": "How many",
+              "file": false
+            },
+            {
+              "key": "cursor",
+              "value": "",
+              "enabled": false,
+              "description": "",
+              "file": false
+            }
+          ],
+          "headers": [
+            {
+              "key": "X-Api-Version",
+              "value": "",
+              "enabled": true,
+              "description": "",
+              "file": false
+            }
+          ],
+          "body": {
+            "mode": "none",
+            "content": "",
+            "fields": []
+          }
+        },
+        {
+          "operationId": "addPet",
+          "method": "POST",
+          "path": "/pets",
+          "folder": "pets",
+          "name": "addPet",
+          "description": "",
+          "url": "{{baseUrl}}/pets",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "json",
+            "content": "{\n  \"id\": 0,\n  \"name\": \"\"\n}",
+            "fields": []
+          }
+        },
+        {
+          "operationId": "uploadPhoto",
+          "method": "POST",
+          "path": "/pets/{petId}/photo",
+          "folder": "pets",
+          "name": "uploadPhoto",
+          "description": "",
+          "url": "{{baseUrl}}/pets/{{petId}}/photo",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "form-data",
+            "content": "",
+            "fields": [
+              {
+                "key": "photo",
+                "value": "",
+                "enabled": true,
+                "description": "",
+                "file": true
+              },
+              {
+                "key": "caption",
+                "value": "",
+                "enabled": true,
+                "description": "",
+                "file": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2.0 as YAML - a repeated operationId is still the second request's name",
+      "document": "swagger: 2.0\ninfo:\n  title: Duplicated\npaths:\n  /a:\n    get:\n      operationId: same\n      summary: First\n      responses:\n        \"200\":\n          description: ok\n  /b:\n    get:\n      operationId: same\n      summary: Second\n      responses:\n        \"200\":\n          description: ok\n",
+      "drafts": [
+        {
+          "operationId": "same",
+          "method": "GET",
+          "path": "/a",
+          "folder": "a",
+          "name": "First",
+          "description": "",
+          "url": "{{baseUrl}}/a",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "none",
+            "content": "",
+            "fields": []
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/b",
+          "folder": "b",
+          "name": "Second",
+          "description": "",
+          "url": "{{baseUrl}}/b",
+          "params": [],
+          "headers": [],
+          "body": {
+            "mode": "none",
+            "content": "",
+            "fields": []
+          }
+        }
+      ]
+    }
+  ]
+}

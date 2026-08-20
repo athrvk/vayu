@@ -294,7 +294,9 @@ add_library(vayu_core STATIC
     src/core/scenario_runner.cpp
     src/core/operation_match.cpp
     src/core/openapi_document.cpp
+    src/core/openapi_drafts.cpp
     src/core/openapi_export.cpp
+    src/core/path_template.cpp
     src/core/spec_binding.cpp
     src/core/spec_coverage.cpp
     src/core/schema_validation.cpp
@@ -605,6 +607,7 @@ if(VAYU_BUILD_TESTS)
         tests/spec_bind_route_test.cpp
         tests/operation_match_test.cpp
         tests/openapi_document_test.cpp
+        tests/openapi_drafts_test.cpp
         tests/openapi_export_test.cpp
         tests/spec_export_route_test.cpp
         tests/spec_coverage_test.cpp
