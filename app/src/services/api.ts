@@ -65,6 +65,8 @@ import type {
 	ImportApplyRequest,
 	ImportApplyResponse,
 	CreateSpecRequest,
+	SpecBindRequest,
+	SpecBindResponse,
 	SpecExportRequest,
 	SpecExportResponse,
 	SpecMatchRequest,
@@ -286,6 +288,19 @@ export const apiService = {
 	 */
 	async matchSpecOperations(payload: SpecMatchRequest): Promise<SpecMatchResponse> {
 		return await httpClient.post<SpecMatchResponse>(API_ENDPOINTS.SPEC_MATCH, payload);
+	},
+
+	/**
+	 * Bind a collection to a document (issue #862).
+	 *
+	 * One call for what used to be three - store the document, move the
+	 * binding, stamp the requests - because the three are one state: a bind that
+	 * stopped after the second leaves a collection measured against a contract
+	 * its requests do not name. The engine does the pairing itself, from the
+	 * bytes it stores, so nothing here decides which request is which operation.
+	 */
+	async bindSpec(payload: SpecBindRequest): Promise<SpecBindResponse> {
+		return await httpClient.post<SpecBindResponse>(API_ENDPOINTS.SPEC_BIND, payload);
 	},
 
 	/**

@@ -249,7 +249,7 @@ describe("binding a collection that already has requests", () => {
 		expect(summary.textContent).toContain("1 operation with no request");
 	});
 
-	it("stamps only the matched requests, and remembers where the file is", async () => {
+	it("sends the document alone, and remembers where the file is", async () => {
 		requests = [request("r1", "{{baseUrl}}/pets"), request("r2", "{{baseUrl}}/health")];
 		specMatchQuery.data = {
 			matched: [{ requestId: "r1", operation: LIST_PETS }],
@@ -267,9 +267,12 @@ describe("binding a collection that already has requests", () => {
 		// A file has no URL to re-fetch from, and the engine stores `null` rather
 		// than an empty string for that.
 		expect(payload.sourceUrl).toBeNull();
-		// Exactly the pairs the engine returned, in its order - the tab decides
-		// none of them.
-		expect(payload.stamps).toEqual([{ requestId: "r1", specOperation: LIST_PETS }]);
+		// No pairing travels with it (issue #862): `POST /specs/bind` works out
+		// which request is which operation from the bytes it stores, and stamps
+		// both halves - the matches and the clears - in one transaction. What the
+		// match query gave us paints the summary above the button; it is not a
+		// payload.
+		expect(Object.keys(payload).sort()).toEqual(["collectionId", "content", "sourceUrl"]);
 
 		bindSucceeds();
 		expect(useSpecFileStore.getState().locations.col_1).toEqual({
@@ -326,14 +329,13 @@ describe("binding a collection that already has requests", () => {
 	});
 
 	/*
-	 * Re-binding to a different document (issue #718). Nothing writes null to a
-	 * request's `specOperation` anywhere else in the app, so a stamp the new
-	 * document does not account for would otherwise be permanent - and coverage
-	 * resolves stamps by `operationId` first, so it would claim whichever
-	 * operation of the new document shares the id rather than simply going
-	 * unread.
+	 * Re-binding to a different document (issue #718). The clearing itself is
+	 * the engine's since #862 - `POST /specs/bind` stamps both halves in one
+	 * transaction, and `spec_bind_route_test.cpp` is where re-binding is pinned.
+	 * What this tab still owes the user is saying so *before* they press Bind:
+	 * it is the one write a bind makes to a request that did not match.
 	 */
-	it("clears identity recorded against a document this one is not", async () => {
+	it("warns that identity recorded against another document will be cleared", async () => {
 		requests = [
 			request("r1", "{{baseUrl}}/pets"),
 			// Matched the *old* document, matches nothing here: its URL is not a
@@ -344,7 +346,7 @@ describe("binding a collection that already has requests", () => {
 				path: "/v1/legacy",
 			}),
 			// No stamp to clear - an unmatched request that never had identity is
-			// left exactly as it was.
+			// left exactly as it was, and is not counted here.
 			request("r3", "{{baseUrl}}/health"),
 		];
 		specMatchQuery.data = {
@@ -355,13 +357,11 @@ describe("binding a collection that already has requests", () => {
 		render(<SpecTab collection={collection()} />);
 		await pickFile("petstore.json", OPENAPI);
 
-		fireEvent.click(screen.getByRole("button", { name: /bind this spec/i }));
-
-		const [payload] = bindSpec.mutate.mock.calls[0];
-		expect(payload.clearStamps).toEqual(["r2"]);
-		// The matched request is stamped, not cleared - the two lists are disjoint,
-		// which is what lets the mutation write both at once.
-		expect(payload.stamps.map((s: { requestId: string }) => s.requestId)).toEqual(["r1"]);
+		// One of the two unmatched requests, not both: r3 carries no identity to
+		// lose, so counting it would warn about a write that never happens.
+		expect(
+			screen.getByText(/1 request records an operation this document does not have/i)
+		).toBeTruthy();
 	});
 
 	it("discloses the clearing before it happens, and stays silent when there is none", async () => {
@@ -556,19 +556,11 @@ describe("a bound collection", () => {
 		expect(screen.queryByRole("button", { name: /choose file/i })).toBeNull();
 	});
 
-	it("says which requests kept no identity when some stamps failed", async () => {
-		bindSpec.data = { failedStamps: ["req_9"], failedClears: [] };
-		render(<SpecTab collection={bound()} />);
-		expect(screen.getByText(/1 request kept no operation identity/i)).toBeTruthy();
-	});
-
-	// The other half of the same report, and the worse state of the two: a stamp
-	// that survived still reads as identity, in a document nothing is bound to.
-	it("says which requests still record another document's operation", async () => {
-		bindSpec.data = { failedStamps: [], failedClears: ["req_9"] };
-		render(<SpecTab collection={bound()} />);
-		expect(
-			screen.getByText(/1 request still records an operation of another document/i)
-		).toBeTruthy();
-	});
+	/*
+	 * Two cases lived here until #862: a bind was three writes from the
+	 * renderer, so it could land in halves, and the tab reported which stamps
+	 * and which clears had failed. `POST /specs/bind` is one transaction, so
+	 * there is no half-applied state left to describe - a bind that failed
+	 * wrote nothing, and `SaveFailed` above says so like every other mutation.
+	 */
 });

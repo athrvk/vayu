@@ -65,6 +65,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/specs` | Store an OpenAPI document (issue #637) and derive its operation index from it (issue #853); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (issue #712) |
 | POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (issue #655) - new document, moved binding and the created/updated/deleted requests in one transaction |
 | POST | `/specs/match` | Which request of a collection's subtree is which operation of a document (issue #761) - reads only, nothing stored or stamped |
+| POST | `/specs/bind` | Bind a collection to a document (issue #862) - the document, the binding and every stamp, written **and cleared**, in one transaction |
 | POST | `/specs/export` | A collection back out as an OpenAPI document (issue #855) - its bound document patched, or a skeleton when it binds none; reads only |
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only** - 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch) - 404 on a missing id |
@@ -212,6 +213,21 @@ Three things worth knowing before you design around them:
   `POST /specs/sync` bounds itself by. It still parses no OpenAPI: the caller
   hands it the identities the document declares, the same rows it stores as the
   `operations` index.
+  **Binding is `POST /specs/bind`** (#862), the third spec write and the one that
+  makes an agent able to bind at all: the caller sends a document and a
+  collection - never a pairing - and the route reads the document, derives the
+  indexes, matches the subtree with the *same* `core::match_operations` over the
+  same `collection_subtree_requests` walk `POST /specs/match` previews with, and
+  commits the document, the moved binding and every stamp through
+  `Database::spec_sync_apply` - the sync's transaction, with its create and
+  delete halves empty. **Both halves of the stamping are that one walk**: a
+  request that matched is stamped, and one that carries a stamp and matched
+  nothing is *cleared*, because a stamp naming an operation only the previously
+  bound document declared is resolved by `operationId` first and claims the wrong
+  operation rather than none (#718). Clearing is deliberately not a list the
+  caller states - a list is what a caller can forget. Unbinding stays
+  `PUT /collections/:id` with `openapi: null`: one row, stamps untouched, so
+  unbind-then-rebind of the same document is lossless.
   **Writing a collection back out as a document is the engine's too** (#855,
   `core/openapi_export.hpp` over `POST /specs/export`), which is what makes
   `export_spec` reachable over MCP. Two directions that are not variants of

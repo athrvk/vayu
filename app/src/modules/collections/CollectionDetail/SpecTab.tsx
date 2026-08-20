@@ -33,6 +33,12 @@
  * still leaves stamps exactly as they are, so unbind-then-bind-the-same-document
  * costs nothing - it is re-binding to a different one that would otherwise leave
  * a request claiming an operation of a document nothing is bound to.
+ * **The bind itself is one engine call** (#862, `POST /specs/bind`): the
+ * document, the binding and both halves of the stamping commit together, and
+ * the pairing is worked out engine-side from the bytes it stores. So this tab
+ * sends a document and a collection, and nothing it decided. The match query
+ * below is the *preview* - it writes nothing, and is what the counts above the
+ * Bind button are painted from.
  * The one place this tab writes *other* request fields is the Sync section, and
  * only for the items the user ticks: it re-reads the document and says what
  * moved (#654), and applies the selection in one engine transaction (#655).
@@ -215,16 +221,15 @@ export default function SpecTab({ collection }: SpecTabProps) {
 
 	const handleBind = () => {
 		if (!picked || !match || parsed?.error) return;
+		// The document and the collection, and nothing else: the engine works
+		// the pairing out from the bytes it stores and stamps both halves of it
+		// in one transaction (issue #862). What `match` gave us above is the
+		// preview the summary is painted from, not a payload.
 		bindSpec.mutate(
 			{
 				collectionId: collection.id,
 				content: picked.content,
 				sourceUrl: picked.sourceUrl ?? null,
-				stamps: match.matched.map(({ requestId, operation }) => ({
-					requestId,
-					specOperation: operation,
-				})),
-				clearStamps: staleStamps,
 			},
 			{
 				onSuccess: () => {
@@ -416,32 +421,6 @@ export default function SpecTab({ collection }: SpecTabProps) {
 
 			<SaveFailed mutation={bindSpec} what="the spec binding" />
 			<SaveFailed mutation={updateCollection} what="the spec binding" />
-
-			{bindSpec.data &&
-				(bindSpec.data.failedStamps.length > 0 ||
-					bindSpec.data.failedClears.length > 0) && (
-					<Callout severity="warning" title="Bound, but some identities did not land">
-						{bindSpec.data.failedStamps.length > 0 && (
-							<>
-								{bindSpec.data.failedStamps.length} request
-								{bindSpec.data.failedStamps.length === 1 ? "" : "s"} kept no
-								operation identity.{" "}
-							</>
-						)}
-						{/* Named apart from the line above because it is the worse state:
-						    a stamp that survived still *reads* as identity, and it is
-						    identity in a document this collection is not bound to. */}
-						{bindSpec.data.failedClears.length > 0 && (
-							<>
-								{bindSpec.data.failedClears.length} request
-								{bindSpec.data.failedClears.length === 1 ? "" : "s"} still record
-								{bindSpec.data.failedClears.length === 1 ? "s" : ""} an operation of
-								another document.{" "}
-							</>
-						)}
-						Bind again to retry those.
-					</Callout>
-				)}
 
 			{bound && (
 				<div>

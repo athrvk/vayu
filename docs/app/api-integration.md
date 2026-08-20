@@ -339,6 +339,7 @@ apiService.getSpec(id): Promise<SpecDocument>            // GET  /specs/:id
 apiService.getSpecMeta(id): Promise<SpecDocumentMeta>    // GET  /specs/:id/meta
 apiService.syncSpec(payload): Promise<SpecSyncResponse>  // POST /specs/sync
 apiService.matchSpecOperations(payload)                  // POST /specs/match
+apiService.bindSpec(payload): Promise<SpecBindResponse>  // POST /specs/bind
 apiService.exportSpec(payload): Promise<SpecExportResponse> // POST /specs/export
 ```
 
@@ -371,13 +372,24 @@ identity it stamps on each request agrees with what that reader indexes -
 `engine/tests/fixtures/declared-operations-conformance.json` is the table both
 suites read.
 
-Create and read-by-id only, plus the one write that moves a binding.
-`syncSpec` is that write (issue #655): it stores the re-fetched document, points
+Create and read-by-id only, plus the two writes that move a binding.
+`syncSpec` is one (issue #655): it stores the re-fetched document, points
 the collection at it and applies the created, updated and deleted requests in a
 single engine transaction, because a sync that stopped halfway would leave a
 collection bound to a document its requests do not reflect. The renderer decides
 *what* to send (`services/openapi/spec-apply.ts`) and never sequences the writes
 itself.
+
+`bindSpec` is the other (issue #862), and it decides even less: the payload is a
+collection and a document, with **no pairing in it**. Binding used to be three
+calls made in order from `useBindSpecMutation` - store the document, move the
+binding, then stamp the matched requests and clear the stale ones - and both
+halves of that were defects waiting to happen: three writes are three places to
+stop, and the clearing half is a list a caller can forget, which is exactly what
+issue #718 was. `POST /specs/bind` commits all of it or none of it and works the
+pairing out from the bytes it stores. `matchSpecOperations` above is still what
+the Spec tab previews with; it is not a payload for this call, and the bind
+matches again over the same rule.
 
 A document is immutable - a changed spec is a new
 document and a moved binding, which is what keeps a run's `specHash` stamp

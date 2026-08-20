@@ -193,9 +193,11 @@ than no identity, because [coverage](#contract-coverage) resolves a stamp by its
 `operationId` first, so a stale stamp claims whichever operation of the new
 document happens to share that id.
 
-The summary counts them before you press Bind, and if a clear fails to land the
-tab names how many requests still record another document's operation - binding
-again retries them.
+The summary counts them before you press Bind. The bind itself is one engine
+transaction - the document, the binding and both halves of the stamping land
+together, or none of them do - so there is no half-bound state to report
+afterwards: a bind that failed changed nothing, and the collection is still
+bound to whatever it was bound to.
 
 ## Checking a bound spec for changes
 
