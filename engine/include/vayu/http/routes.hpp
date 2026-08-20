@@ -540,6 +540,20 @@ std::unordered_set<std::string>
 collection_subtree_ids (const std::vector<vayu::db::Collection>& all, const std::string& root);
 
 /**
+ * Every request stored beneath @p subtree, in one canonical order.
+ *
+ * Shared by `POST /specs/match` and `POST /specs/bind` (issue #862) because the
+ * preview and the write must consider the same requests in the same order - the
+ * match reports indices into this list, and a bind that walked its own would
+ * stamp a pairing the preview never showed. Defined in spec_sync.cpp, beside
+ * the subtree walk it completes.
+ */
+std::vector<vayu::db::Request>
+collection_subtree_requests (vayu::db::Database& db,
+const std::vector<vayu::db::Collection>& all,
+const std::unordered_set<std::string>& subtree);
+
+/**
  * What a design-mode response should be checked against (issue #628).
  *
  * `bound == false` is the one state that means **no verdict node at all**: the
@@ -865,6 +879,7 @@ void register_request_example_routes (RouteContext& ctx);
 void register_spec_routes (RouteContext& ctx);
 void register_spec_sync_routes (RouteContext& ctx);
 void register_spec_match_routes (RouteContext& ctx);
+void register_spec_bind_routes (RouteContext& ctx);
 void register_reorder_routes (RouteContext& ctx);
 void register_environment_routes (RouteContext& ctx);
 void register_client_certificate_routes (RouteContext& ctx);

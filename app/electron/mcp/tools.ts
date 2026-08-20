@@ -3219,6 +3219,50 @@ function boundSpecContent(document: unknown): Record<string, unknown> {
 	return { content: text, contentTruncated: truncated };
 }
 
+/**
+ * What a bind did, in a sentence (issue #862).
+ *
+ * The counts are already in the structured body; this says the two that change
+ * what an agent should do next. **The cleared count is named on its own** - it
+ * is the one thing a bind takes away rather than adds, and an agent that
+ * re-bound a collection to the wrong document should learn that from the reply
+ * rather than from a later run reporting no coverage. Unmatched requests are
+ * named the same way, because they are what a `sync` would create operations
+ * for and are the honest answer to "did this document fit this collection".
+ *
+ * Defensive about the shape for `readSpecBinding`'s reason: an engine answering
+ * something unexpected must cost the caveat, never the result.
+ */
+function describeBind(outcome: unknown): string {
+	const count = (value: unknown): number => (typeof value === "number" ? value : 0);
+	if (!isRecord(outcome)) return "Bound.";
+	const stamped = count(outcome.stamped);
+	const cleared = count(outcome.cleared);
+	const unmatchedRequests = Array.isArray(outcome.unmatchedRequests)
+		? outcome.unmatchedRequests.length
+		: 0;
+	const unmatchedOperations = Array.isArray(outcome.unmatchedOperations)
+		? outcome.unmatchedOperations.length
+		: 0;
+	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+	const parts = [
+		`Bound to spec ${typeof outcome.specId === "string" ? outcome.specId : "(unknown)"}.`,
+		`Recorded identity on ${plural(stamped, "request")}.`,
+	];
+	if (cleared > 0) {
+		parts.push(
+			`Cleared identity from ${plural(cleared, "request")} - each named an operation only the previously bound document declared.`
+		);
+	}
+	if (unmatchedRequests > 0 || unmatchedOperations > 0) {
+		parts.push(
+			`${plural(unmatchedRequests, "request")} matched no operation, and ${plural(unmatchedOperations, "operation")} matched no request; nothing was created or deleted for either.`
+		);
+	}
+	return parts.join(" ");
+}
+
 // --- Tool definitions --------------------------------------------------------
 
 export const TOOLS: McpTool[] = [
@@ -4007,11 +4051,78 @@ export const TOOLS: McpTool[] = [
 		},
 	},
 	{
+		name: "bind_spec",
+		category: "write",
+		// Both families: the binding lives on the collection row, and the stamps
+		// this writes and clears live on the requests beneath it. Declaring only
+		// the collection would leave an open request list showing identity a bind
+		// has already removed. No `spec` family - the stored document is
+		// immutable under its id, and this creates a new one rather than
+		// changing any cached row.
+		invalidates: ["collection", "request"],
+		description:
+			"Bind a collection to an OpenAPI document, so its runs report contract coverage and its responses are schema-checked. GUARDED: requires write access to be enabled in Vayu Settings. Pass the document text (JSON or YAML) - the engine stores it, works out which of the collection's requests is which operation by method and path shape, and records that identity, all in one transaction: nothing is created or deleted, and a bind that fails writes nothing at all. RE-BINDING REPLACES THE CONTRACT: any request whose identity the new document does not account for has it cleared, because a stamp naming an operation of a document this collection is no longer bound to would be read as identity rather than as a gap. The result reports how many requests were stamped and how many cleared, plus the requests and operations nothing paired with.",
+		annotations: {
+			title: "Bind OpenAPI spec",
+			readOnlyHint: false,
+			// Nothing a user authored is lost: no request is created or deleted,
+			// the only field written is the identity a bind exists to record, and
+			// the document a collection was bound to before is still stored while
+			// anything else binds it. A re-bind is undone by binding the previous
+			// document again.
+			destructiveHint: false,
+			// The engine mints a new `spec_documents` row per call, so binding the
+			// same bytes twice is not the same call twice.
+			idempotentHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z
+				.string()
+				.describe(
+					"Collection to bind. Its whole subtree is matched - an imported spec files its requests under one sub-collection per tag."
+				),
+			content: z
+				.string()
+				.describe(
+					"The OpenAPI document text, JSON or YAML, stored verbatim. Capped by the maxSpecDocumentBytes setting."
+				),
+			sourceUrl: z
+				.string()
+				.optional()
+				.describe(
+					"Where the document came from, if it came from a URL. Recorded on the document so a later sync knows what to re-fetch; omit it for a document you were handed as text."
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const collectionId = requireStr(args, "collectionId");
+			const content = requireStr(args, "content");
+			const sourceUrl = str(args, "sourceUrl");
+			// The document and the collection, and nothing worked out here: the
+			// pairing is the engine's (`core::match_operations`), read off the
+			// bytes it is about to store. An agent has no OpenAPI reader, and one
+			// written here would be the second opinion about what a document
+			// declares that #761's phase B moved the reader engine-side to end.
+			let outcome: unknown;
+			try {
+				outcome = await ctx.client.bindSpec(
+					{ collectionId, spec: { content, ...(sourceUrl ? { sourceUrl } : {}) } },
+					signal
+				);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			return withCaveat(jsonResult(outcome), `\n\n${describeBind(outcome)}`);
+		},
+	},
+	{
 		name: "unbind_spec",
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Detach a collection from the OpenAPI document it is bound to. GUARDED: requires write access to be enabled in Vayu Settings. The document itself is kept - other collections may bind it - and the requests keep the operation identities they were stamped with, exactly as the app's Unbind button leaves them, so re-binding the same document later costs nothing. After this the collection's runs report no contract coverage and its responses are no longer schema-checked. There is no bind over MCP yet: binding has to match every request to an operation, which is app-side logic (see issue #761), so re-binding is done in Vayu (Collection → Spec).",
+			"Detach a collection from the OpenAPI document it is bound to. GUARDED: requires write access to be enabled in Vayu Settings. The document itself is kept - other collections may bind it - and the requests keep the operation identities they were stamped with, exactly as the app's Unbind button leaves them, so re-binding the same document later costs nothing. After this the collection's runs report no contract coverage and its responses are no longer schema-checked. Re-binding is `bind_spec`, which restores this state exactly if you hand it the same document.",
 		annotations: {
 			title: "Unbind OpenAPI spec",
 			readOnlyHint: false,

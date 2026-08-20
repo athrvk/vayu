@@ -457,6 +457,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/specs.cpp
         src/http/routes/spec_sync.cpp
         src/http/routes/spec_match.cpp
+        src/http/routes/spec_bind.cpp
         src/http/routes/reorder.cpp
         src/http/routes/environments.cpp
         src/http/routes/client_certificates.cpp
@@ -599,6 +600,7 @@ if(VAYU_BUILD_TESTS)
         tests/reorder_route_test.cpp
         tests/spec_sync_route_test.cpp
         tests/spec_match_route_test.cpp
+        tests/spec_bind_route_test.cpp
         tests/operation_match_test.cpp
         tests/openapi_document_test.cpp
         tests/spec_coverage_test.cpp
@@ -613,6 +615,7 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/specs.cpp
         src/http/routes/spec_sync.cpp
         src/http/routes/spec_match.cpp
+        src/http/routes/spec_bind.cpp
         src/http/routes/reorder.cpp
         src/http/routes/runs.cpp
         src/http/routes/collections.cpp
@@ -775,6 +778,7 @@ if(VAYU_BUILD_TESTS)
         ScratchDatabaseCleanup
         ScriptRequestNameTest
         ScriptVariableScopesTest
+        SpecBindRouteTest
         SpecMatchRouteTest
         SpecSyncRouteTest
         SpecsRouteTest

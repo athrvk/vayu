@@ -1538,8 +1538,11 @@ identity as it builds it).
 
 **Reads only.** Nothing is stored, stamped or created, so a caller may ask about
 a document it has not decided to bind - which is exactly what the app's Spec tab
-does, showing the counts before the user commits. The writes a bind performs are
-still `POST /specs` plus `PUT /collections/:id` and the per-request updates.
+does, showing the counts before the user commits. The write is
+[`POST /specs/bind`](#post-specsbind), which matches again over the same walk and
+the same rule rather than being handed this answer: between a preview and a
+commit a request may have moved, so what the two share is the rule, not a result
+carried between them.
 
 **Request:**
 ```json
@@ -1599,6 +1602,76 @@ applies changes *by* it.
 or an operation row the store would refuse. `404` when the collection does not
 exist - not an empty match, since "this document matches none of your requests"
 and "you named a collection that is not there" are different answers.
+
+### POST /specs/bind
+
+Bind a collection to an OpenAPI document, in **one transaction**: the document is
+stored, the collection's binding moves to it, and every request in the
+collection's subtree is stamped with the operation it matched or has its stamp
+cleared. Nothing is created or deleted - that is what a sync is for.
+
+**The caller sends a document, never a pairing.** The engine reads the bytes it
+is about to store, derives the `operations` index from them, and matches the
+subtree with `core::match_operations` - the same rule `POST /specs/match`
+previews with, over the same subtree walk. A pairing worked out by the caller
+would be a second opinion about what the document declares, and an agent over
+MCP has bytes and no OpenAPI reader at all.
+
+**Request:**
+```json
+{
+  "collectionId": "col_9a1f...",
+  "spec": {
+    "content": "openapi: 3.0.0\n...",
+    "sourceUrl": "https://api.example.com/openapi.yaml"
+  }
+}
+```
+
+`spec.content` is the document verbatim, JSON or YAML, capped by
+`maxSpecDocumentBytes`. `sourceUrl` is optional and `null` or absent means the
+document did not come from a URL. `id`, `hash`, `fetchedAt`, `operations` and
+`responseSchemas` are engine-computed and a `400` if sent, the same rule
+`POST /specs` applies.
+
+**Response:**
+```json
+{
+  "specId": "spec_2b74...",
+  "specHash": "8f3c...",
+  "syncedAt": 1755000100000,
+  "stamped": 12,
+  "cleared": 2,
+  "unmatchedRequests": ["req_7b21..."],
+  "unmatchedOperations": [{ "method": "GET", "path": "/pets/{petId}" }]
+}
+```
+
+`unmatchedRequests` and `unmatchedOperations` carry the same shapes
+`POST /specs/match` answers with, so a caller reads one shape for the preview and
+the commit.
+
+**Stamping goes both ways** (issue #718). After a bind, a request's
+`spec_operation` is the operation it matched in the bound document, or nothing:
+`cleared` counts the requests whose identity was removed because this document
+does not account for it. That half is not a list the caller states - it is the
+other side of the same walk - because a bind that wrote only the matches left
+every non-matcher carrying identity from the previous document, and coverage
+resolves a stamp by `operationId` first, so such a stamp claims whichever
+operation of the new document shares the id rather than going unread.
+
+**Nothing outside the subtree is touched**, the rule `POST /specs/sync` follows:
+a request under another collection keeps its own stamp even when it would have
+matched.
+
+**Errors:** `400` for a malformed body, an engine-owned field, a document over
+the cap, or one that cannot be read as JSON or YAML - and in that last case
+nothing is written, so the collection stays bound to whatever it was bound to.
+`404` when the collection does not exist. `409` when a row moved under the write.
+
+Unbinding is not here: it is `PUT /collections/:id` with `"openapi": null`, which
+writes one row, leaves every stamp in place - so unbind-then-rebind of the same
+document is lossless - and has no document to read.
 
 ### POST /specs/sync
 

@@ -92,6 +92,35 @@ collection_subtree_ids (const std::vector<vayu::db::Collection>& all, const std:
     return seen;
 }
 
+/**
+ * Every request stored beneath @p subtree, in the order the collections table
+ * lists their collections and each collection lists its own.
+ *
+ * The order is the contract, not a convenience: `POST /specs/match` reports its
+ * answer as indices into this list and `POST /specs/bind` matches the same set
+ * again to decide what to stamp, so the two must walk the requests the same way
+ * or a preview would describe a pairing the bind then did not make. One walk
+ * rather than two is what makes that impossible rather than merely true today.
+ *
+ * @param all The collections table, already read - both callers need it for the
+ *        subtree walk itself, and reading it twice under one lock would only
+ *        add a scan.
+ */
+std::vector<vayu::db::Request> collection_subtree_requests (vayu::db::Database& db,
+const std::vector<vayu::db::Collection>& all,
+const std::unordered_set<std::string>& subtree) {
+    std::vector<vayu::db::Request> requests;
+    for (const auto& collection : all) {
+        if (!subtree.contains (collection.id)) {
+            continue;
+        }
+        for (auto& request : db.get_requests_in_collection (collection.id)) {
+            requests.push_back (std::move (request));
+        }
+    }
+    return requests;
+}
+
 namespace {
 
 /**

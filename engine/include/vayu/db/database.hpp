@@ -89,6 +89,14 @@ class MissingRowError : public std::runtime_error {
  *
  * Ids are assigned by the caller, like `import_apply`: nothing here can look up
  * a row the same transaction has not committed yet.
+ *
+ * **`POST /specs/bind` writes through this too** (issue #862), filling only
+ * @ref spec, @ref binding and @ref updated: a bind stores a document, moves the
+ * binding and rewrites the identity column of the requests beneath it, which is
+ * this batch with its create and delete halves empty. It shares the transaction
+ * rather than owning a second one because the state a half-applied bind leaves
+ * is the same state described above, and one transaction cannot come to
+ * disagree with another about what "all of it" means.
  */
 struct SpecSyncBatch {
     /// The re-fetched document. A new row, never a rewrite - see `SpecDocument`.

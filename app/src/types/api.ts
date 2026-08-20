@@ -1351,6 +1351,48 @@ export interface SpecMatchResponse {
 	unmatchedOperations: SpecOperation[];
 }
 
+/**
+ * What `POST /specs/bind` is asked (issue #862): a collection and a document.
+ *
+ * **No pairing is sent**, which is the whole shape of this route. A bind writes
+ * identity, and identity worked out by the caller would be a second opinion
+ * about what the document declares - so the engine reads the bytes it is about
+ * to store, matches the collection's subtree against the index it derives from
+ * them, and stamps the result. `SpecMatchRequest` above previews the same rule
+ * over the same walk; this commits it.
+ *
+ * There is deliberately no `clear` list either. Clearing the requests that
+ * matched the *previous* document is not a second thing a caller states, it is
+ * the other half of the same walk - and a list is exactly what #718 was: one a
+ * caller could forget.
+ */
+export interface SpecBindRequest {
+	collectionId: string;
+	/** The document. `hash`, `fetchedAt` and both indexes are engine-computed. */
+	spec: {
+		content: string;
+		sourceUrl?: string | null;
+	};
+}
+
+export interface SpecBindResponse {
+	/** The stored document the collection is now bound to. */
+	specId: string;
+	specHash: string;
+	syncedAt: number;
+	/** Requests that matched an operation and now carry its identity. */
+	stamped: number;
+	/**
+	 * Requests whose identity was *removed* because nothing in this document
+	 * claimed them (issue #718). Non-zero only on a re-bind.
+	 */
+	cleared: number;
+	/** Request ids left over - no operation, or an ambiguous shape. */
+	unmatchedRequests: string[];
+	/** Operations no request claimed. A bind creates nothing for them. */
+	unmatchedOperations: SpecOperation[];
+}
+
 export interface SpecSyncRequest {
 	/** The bound collection. Nothing outside its subtree is written. */
 	collectionId: string;
