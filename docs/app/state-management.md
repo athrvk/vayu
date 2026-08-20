@@ -1299,8 +1299,14 @@ meta read describes the row and nothing else. They are kept apart rather than
 merged so a cached description can never satisfy a reader that needs the text -
 and holding one row twice is safe here precisely because a document is immutable,
 which is also why both carry `staleTime: Infinity`. The Spec tab's card reads
-meta; export, the import dialog's bound-spec match and the Sync section's Check
-read the full document, each on the action that needs it.
+meta; the import dialog's bound-spec match and the Sync section's Check read the
+full document, each on the action that needs it. Export reads neither since it
+moved engine-side (issue #855) - `specs.export(collectionId, format, opened)`
+holds the finished document instead, keyed by format because the dialog toggles
+between two serializations of one answer, and by the moment the dialog mounted
+because a *collection* changes under its id in a way a document never does:
+that is what makes it fresh on every open and cached across a toggle, which
+neither `staleTime` alone can say.
 
 `specs.match(collectionId, fingerprint)` is the third of that family and the one
 that names no document (issue #761): the pairing of a collection's requests

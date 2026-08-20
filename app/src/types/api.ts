@@ -1351,6 +1351,59 @@ export interface SpecMatchResponse {
 	unmatchedOperations: SpecOperation[];
 }
 
+/** The serializations `POST /specs/export` writes. */
+export type ExportFormat = "json" | "yaml";
+
+/**
+ * What `POST /specs/export` is asked (issue #855): a collection, and how to
+ * write it.
+ *
+ * Neither the requests nor the bound document are sent. The engine gathers the
+ * subtree, its examples and the stored document itself - the same reason
+ * `SpecMatchRequest` sends no requests, plus one of its own: the document is
+ * what the export *patches*, and a renderer that sent it would be handing back
+ * bytes it had already read a second opinion out of.
+ */
+export interface SpecExportRequest {
+	collectionId: string;
+	/** Defaults to `json` engine-side. */
+	format?: ExportFormat;
+}
+
+/**
+ * What the export could not carry, and what it changed.
+ *
+ * Every field is shown before the user downloads. A count of zero is a
+ * statement too - "0 requests with no operation" is how a bound export says it
+ * carried everything - so these are always present rather than optional.
+ */
+export interface ExportNotes {
+	/** `document` updated the bound spec; `skeleton` described a free-form collection. */
+	direction: "document" | "skeleton";
+	/** What the exported document declares itself to be - `OpenAPI 3.0.3`, `Swagger 2.0`. */
+	dialect: string;
+	requestsExported: number;
+	requestsWithoutOperation: number;
+	operationsNotInDocument: number;
+	operationsRemoved: number;
+	requestsWithoutPath: number;
+	duplicateOperations: number;
+	examplesWritten: number;
+	examplesWithoutMediaType: number;
+	examplesTruncated: number;
+	sharedParametersLeft: number;
+	/** A Swagger 2.0 document: operations are removed, nothing is written in. */
+	vocabularyNotWritten: boolean;
+}
+
+export interface SpecExportResponse {
+	/** The document, serialized in the requested format. */
+	text: string;
+	/** What a download should be called. */
+	fileName: string;
+	notes: ExportNotes;
+}
+
 export interface SpecSyncRequest {
 	/** The bound collection. Nothing outside its subtree is written. */
 	collectionId: string;

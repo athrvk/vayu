@@ -137,6 +137,7 @@ void Server::setup_routes () {
     routes::register_spec_routes (*route_ctx_);
     routes::register_spec_sync_routes (*route_ctx_);
     routes::register_spec_match_routes (*route_ctx_);
+    routes::register_spec_export_routes (*route_ctx_);
     routes::register_reorder_routes (*route_ctx_);
     routes::register_environment_routes (*route_ctx_);
     routes::register_client_certificate_routes (*route_ctx_);

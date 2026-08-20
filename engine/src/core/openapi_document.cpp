@@ -517,6 +517,130 @@ std::vector<std::string> declared_responses_of (const nlohmann::ordered_json& op
     return patterns;
 }
 
+// --- Writing a DOM back out as YAML (issue #855) -----------------------------
+
+/// Spaces one nesting level indents by. Two, which is what every OpenAPI
+/// document in the wild is written with and what js-yaml's `dump` wrote before
+/// the export moved here.
+constexpr size_t YAML_INDENT = 2;
+
+/**
+ * Whether @p text survives being written as a *plain* (unquoted) YAML scalar.
+ *
+ * The reader's rule, asked rather than restated: a string a plain scalar would
+ * retype - `2.0`, `007`, `true`, `~` - has to be quoted, and `plain_scalar` is
+ * the one place that knows which those are. The rest is YAML's own syntax,
+ * where a plain scalar cannot start with an indicator, carry `: ` or ` #`, hold
+ * a control character, or keep surrounding space.
+ */
+bool is_plain_safe (const std::string& text) {
+    if (text.empty () || !plain_scalar (text).is_string ()) {
+        return false;
+    }
+    const auto is_space = [] (char c) {
+        return std::isspace (static_cast<unsigned char> (c)) != 0;
+    };
+    if (is_space (text.front ()) || is_space (text.back ())) {
+        return false;
+    }
+    constexpr std::string_view INDICATORS = "-?:,[]{}#&*!|>'\"%@`";
+    if (INDICATORS.find (text.front ()) != std::string_view::npos) {
+        return false;
+    }
+    for (size_t i = 0; i < text.size (); ++i) {
+        const auto c = static_cast<unsigned char> (text[i]);
+        if (c < 0x20 || c == 0x7f) {
+            return false;
+        }
+        if (c == ':' && (i + 1 == text.size () || text[i + 1] == ' ')) {
+            return false;
+        }
+        if (c == '#' && i > 0 && text[i - 1] == ' ') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * One scalar as YAML writes it.
+ *
+ * The quoted form is nlohmann's JSON string, because YAML's double-quoted style
+ * takes JSON's escapes unchanged - one escaping table, already right, rather
+ * than a second one here. `error_handler_t::replace` is what keeps a stored
+ * example body that is not valid UTF-8 from throwing in the middle of an
+ * export: the bytes came off somebody's server, and refusing the whole document
+ * over one of them would be the wrong answer.
+ */
+std::string scalar_text (const nlohmann::ordered_json& value) {
+    const auto dump = [] (const nlohmann::ordered_json& node) {
+        return node.dump (-1, ' ', false, nlohmann::ordered_json::error_handler_t::replace);
+    };
+    if (!value.is_string ()) {
+        return dump (value);
+    }
+    const auto text = value.get<std::string> ();
+    return is_plain_safe (text) ? text : dump (value);
+}
+
+void emit_map (const nlohmann::ordered_json& node, size_t indent, std::string& out);
+void emit_seq (const nlohmann::ordered_json& node, size_t indent, std::string& out);
+
+/// A value written after the `key:` or `-` that already stands on this line: on
+/// the same line when it is a scalar or an empty container, indented beneath it
+/// when it has members of its own.
+void emit_after_marker (const nlohmann::ordered_json& value, size_t indent, std::string& out) {
+    if (value.is_object () && !value.empty ()) {
+        out += '\n';
+        emit_map (value, indent + YAML_INDENT, out);
+        return;
+    }
+    if (value.is_array () && !value.empty ()) {
+        out += '\n';
+        emit_seq (value, indent + YAML_INDENT, out);
+        return;
+    }
+    out += ' ';
+    out += value.is_object () ? "{}" : (value.is_array () ? "[]" : scalar_text (value));
+    out += '\n';
+}
+
+void emit_map (const nlohmann::ordered_json& node, size_t indent, std::string& out) {
+    for (auto entry = node.begin (); entry != node.end (); ++entry) {
+        out.append (indent, ' ');
+        // A key is quoted by the same rule a value is: `200:` reads back as the
+        // integer 200, and a `responses` map keyed by numbers is not the one the
+        // document declared.
+        out += scalar_text (nlohmann::ordered_json (entry.key ()));
+        out += ':';
+        emit_after_marker (entry.value (), indent, out);
+    }
+}
+
+void emit_seq (const nlohmann::ordered_json& node, size_t indent, std::string& out) {
+    for (const auto& item : node) {
+        if ((item.is_object () || item.is_array ()) && !item.empty ()) {
+            // The compact form - `- name: petId` rather than a bare `-` and the
+            // mapping below it. The nested block is rendered one level in and
+            // its first line's indent is exactly the width of the `- ` that
+            // replaces it, so the two always line up.
+            std::string nested;
+            if (item.is_object ()) {
+                emit_map (item, indent + YAML_INDENT, nested);
+            } else {
+                emit_seq (item, indent + YAML_INDENT, nested);
+            }
+            nested.replace (0, indent + YAML_INDENT, std::string (indent, ' ') + "- ");
+            out += nested;
+            continue;
+        }
+        out.append (indent, ' ');
+        out += "- ";
+        out += item.is_object () ? "{}" : (item.is_array () ? "[]" : scalar_text (item));
+        out += '\n';
+    }
+}
+
 /// One operation the document declares, as both indexes see it: the identity
 /// the operation index stores and the node the schema index reads. Produced by
 /// one walk so the two cannot disagree about which operations exist, which of
@@ -881,6 +1005,21 @@ response_schemas_v2 (const nlohmann::ordered_json& document, const nlohmann::ord
 }
 
 } // namespace
+
+std::string emit_yaml (const nlohmann::ordered_json& document) {
+    std::string out;
+    if (document.is_object () && !document.empty ()) {
+        emit_map (document, 0, out);
+        return out;
+    }
+    if (document.is_array () && !document.empty ()) {
+        emit_seq (document, 0, out);
+        return out;
+    }
+    out += document.is_object () ? "{}" : (document.is_array () ? "[]" : scalar_text (document));
+    out += '\n';
+    return out;
+}
 
 DocumentRead read_document (const std::string& text) {
     DocumentRead result;

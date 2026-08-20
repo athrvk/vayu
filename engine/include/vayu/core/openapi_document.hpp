@@ -111,6 +111,24 @@ struct DocumentRead {
 [[nodiscard]] DocumentRead read_document (const std::string& text);
 
 /**
+ * @brief Write a DOM back out as YAML, in block style.
+ *
+ * The other half of `read_document`, and it lives beside it because the two
+ * share one rule: **a string is quoted exactly when writing it plainly would
+ * read back as something else.** The reader's `plain_scalar` decides what an
+ * unquoted scalar means, so the writer asks it - a value it would retype
+ * (`2.0`, `007`, `true`, `null`, ``) is double-quoted, and so is a mapping key
+ * with the same problem. Splitting these two across translation units is how a
+ * document would export as `swagger: 2.0` and re-import as a number.
+ *
+ * Deliberately not rapidyaml's emitter: its tree holds no opinion about which
+ * scalars need quoting, so it would write back whatever it was handed. What it
+ * does share with js-yaml's `dump`, which this replaces on the export path, is
+ * that comments and anchors do not survive - both expand aliases on the way in.
+ */
+[[nodiscard]] std::string emit_yaml (const nlohmann::ordered_json& document);
+
+/**
  * @brief Every operation @p document declares, in document order.
  *
  * The rules are the import parsers' rules, because the identity this produces

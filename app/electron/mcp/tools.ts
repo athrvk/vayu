@@ -4007,6 +4007,55 @@ export const TOOLS: McpTool[] = [
 		},
 	},
 	{
+		name: "export_spec",
+		category: "read",
+		invalidates: [],
+		description:
+			"Export a collection as an OpenAPI document - its own bound document updated, or a skeleton describing its requests when it binds none. Reads only: nothing is stored, and the collection is left exactly as it is. A bound export patches the stored document, so everything Vayu does not model (vendor extensions, security schemes, unreferenced components) survives and operations no request claims are removed; a skeleton is a starting point rather than a contract, with no schema Vayu did not read off a stored example body. `notes` says what the export could not carry - a request with no operation identity, an example whose media type nobody recorded - and the document text is capped at 32 KB with `contentBytes` reporting the true size, so a large spec comes back described rather than whole.",
+		annotations: {
+			title: "Export collection as OpenAPI",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z
+				.string()
+				.describe(
+					"Collection to export. Its whole subtree is read - an OpenAPI import files requests under one sub-collection per tag - stopping at any collection bound to a different document."
+				),
+			format: z
+				.enum(["json", "yaml"])
+				.optional()
+				.describe('Serialization to write. Defaults to "json".'),
+		},
+		handler: async (args, ctx, signal) => {
+			const collectionId = requireStr(args, "collectionId");
+			const format = str(args, "format") || "json";
+			let exported: unknown;
+			try {
+				exported = await ctx.client.exportSpec(collectionId, format, signal);
+			} catch (err) {
+				// The engine's own sentence, which is the useful one here: a 404
+				// names the collection, and a 409 names the binding whose document
+				// it could not read and says unbinding would export a skeleton.
+				return engineErrorResult(err);
+			}
+			const answer = isRecord(exported) ? exported : {};
+			const text = typeof answer.text === "string" ? answer.text : "";
+			const { text: bounded, truncated } = boundText(text);
+			return jsonResult({
+				collectionId,
+				format,
+				fileName: answer.fileName ?? null,
+				notes: answer.notes ?? null,
+				document: bounded,
+				documentTruncated: truncated,
+				contentBytes: Buffer.byteLength(text, "utf8"),
+			});
+		},
+	},
+	{
 		name: "unbind_spec",
 		category: "write",
 		invalidates: ["collection"],

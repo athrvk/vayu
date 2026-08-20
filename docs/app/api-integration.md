@@ -339,6 +339,7 @@ apiService.getSpec(id): Promise<SpecDocument>            // GET  /specs/:id
 apiService.getSpecMeta(id): Promise<SpecDocumentMeta>    // GET  /specs/:id/meta
 apiService.syncSpec(payload): Promise<SpecSyncResponse>  // POST /specs/sync
 apiService.matchSpecOperations(payload)                  // POST /specs/match
+apiService.exportSpec(payload): Promise<SpecExportResponse> // POST /specs/export
 ```
 
 `matchSpecOperations` is a **read** (issue #761): it pairs the requests in a
@@ -350,6 +351,14 @@ anything that is not the Spec tab - an agent over MCP first among them. The
 payload names the collection and sends the operations; it does **not** send the
 requests, because an OpenAPI import files them under tag sub-collections and the
 engine gathers the whole subtree itself.
+
+`exportSpec` is a read for the same reason and sends even less (issue #855): a
+collection id and a format. The engine reads the subtree, each request's stored
+examples and the bound document - which is the point, since a bound export
+*patches* those stored bytes - and answers with the finished text, a file name
+and the notes the dialog prints. A `409` there is a binding whose document is
+not stored, or stored bytes that will not read as OpenAPI; the renderer prints
+the engine's sentence rather than falling back to a skeleton.
 
 **Neither index is sent on any write that stores a document** - not by
 `createSpec`, `syncSpec` or the `specs` section of `importCollection` below. The
@@ -387,7 +396,11 @@ for choosing is what the caller does with the answer:
 |--------|------|-----|
 | The Spec tab's card (`useSpecMetaQuery`) | meta | It paints a source, a date and a size; it never renders the document |
 | The Sync section's Check (`useSpecContentReader`) | full, on the click | It compares bytes, and the click is when a comparison was asked for |
-| Export (`useOpenApiExportSource`), the import dialog's bound-spec match | full, on the action | They rewrite or diff the document itself |
+| The import dialog's bound-spec match (`useBoundSpecReader`) | full, on the action | It compares the document itself |
+
+Export needs neither read any more (issue #855): `POST /specs/export` assembles
+the document engine-side from the bytes it already stores, so the renderer asks
+for the finished text and never for the spec.
 
 Reading the full document *on tab open* is the thing this split removed: a first
 open of a bound tab transferred the whole spec to paint two fields, on a query

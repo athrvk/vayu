@@ -163,6 +163,20 @@ export const queryKeys = {
 		 */
 		match: (collectionId: string, fingerprint: string) =>
 			[...queryKeys.specs.all, "match", collectionId, fingerprint] as const,
+		/**
+		 * One collection assembled into a document (issue #855).
+		 *
+		 * Keyed by format as well as collection, because the two serializations
+		 * are two answers and the dialog toggles between them - a shared key
+		 * would re-assemble the document on every toggle. `opened` is what the
+		 * document reads above do not need: a spec cannot change under its id,
+		 * but a collection changes under its whenever a request is edited, so
+		 * the reading is pinned to *when it was asked for* rather than cached
+		 * indefinitely. See `useSpecExportQuery` for why that is a key rather
+		 * than a `staleTime`.
+		 */
+		export: (collectionId: string, format: string, opened: number) =>
+			[...queryKeys.specs.all, "export", collectionId, format, opened] as const,
 	},
 
 	// Environments

@@ -166,6 +166,11 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			operations: null,
 			responseSchemas: null,
 		}),
+		exportSpec: vi.fn().mockResolvedValue({
+			text: '{\n  "openapi": "3.1.0"\n}\n',
+			fileName: "api.openapi.json",
+			notes: { direction: "document", dialect: "OpenAPI 3.1.0", requestsExported: 2 },
+		}),
 		listRequestExamples: vi.fn().mockResolvedValue([]),
 		createRequestExample: vi
 			.fn()
@@ -6974,6 +6979,11 @@ describe("OAuth 2.0 token tools", () => {
  * version that read the full document and dropped `content` would answer
  * identically and cost the same megabytes.
  *
+ * The third is that `export_spec` is a read that bounds what it hands back: an
+ * exported document is as large as the stored one, so the text is capped like
+ * every other body an agent sees (#767) and `contentBytes` says what the cap is
+ * a prefix of.
+ *
  * The second is that `unbind_spec` writes `openapi: null` and never `{}`. The
  * engine reads an absent field as "keep" and null as "reset to the default";
  * `{}` is a value that happens to serialize as unbound today, and the two would
@@ -7092,6 +7102,68 @@ describe("OpenAPI spec binding tools", () => {
 		expect(value.sourceUrl).toBeNull();
 	});
 
+	test("export_spec asks the engine for the document and passes its notes through", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"export_spec",
+			{ collectionId: "col_1", format: "yaml" },
+			ctxWith(client)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.exportSpec).toHaveBeenCalledWith("col_1", "yaml", undefined);
+		// The assembly is the engine's, so nothing here reads the collection, its
+		// requests or the document it is bound to - one call is the whole tool.
+		expect(client.listRequests).not.toHaveBeenCalled();
+		expect(client.getSpec).not.toHaveBeenCalled();
+		const value = JSON.parse(firstText(res));
+		expect(value).toMatchObject({
+			collectionId: "col_1",
+			format: "yaml",
+			fileName: "api.openapi.json",
+			documentTruncated: false,
+		});
+		expect(value.notes.direction).toBe("document");
+		expect(value.document).toContain("openapi");
+	});
+
+	test("export_spec defaults to JSON and caps a document too large to hand back whole", async () => {
+		const document = `{"openapi":"3.1.0","x":"${"a".repeat(MAX_INLINE_BODY_BYTES)}"}`;
+		const client = fakeClient({
+			exportSpec: vi
+				.fn()
+				.mockResolvedValue({ text: document, fileName: "api.openapi.json", notes: {} }),
+		});
+		const res = await dispatchTool("export_spec", { collectionId: "col_1" }, ctxWith(client));
+		expect(client.exportSpec).toHaveBeenCalledWith("col_1", "json", undefined);
+		const value = JSON.parse(firstText(res));
+		expect(Buffer.byteLength(value.document, "utf8")).toBeLessThanOrEqual(
+			MAX_INLINE_BODY_BYTES
+		);
+		expect(value.documentTruncated).toBe(true);
+		// The cut says what it is a prefix of - a length read off the truncated
+		// text would tell an agent the document is 32 KB.
+		expect(value.contentBytes).toBe(document.length);
+	});
+
+	test("export_spec passes the engine's refusal through rather than inventing one", async () => {
+		// A binding whose document is not stored is a 409 with a sentence naming
+		// it - the one answer a caller can act on, so it is not reworded here.
+		const client = fakeClient({
+			exportSpec: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError(
+						"Engine responded 409",
+						409,
+						"Collection is bound to spec 'spec_1', which is not stored"
+					)
+				),
+		});
+		const res = await dispatchTool("export_spec", { collectionId: "col_1" }, ctxWith(client));
+		expect(res.isError).toBe(true);
+		expect(allText(res)).toContain("spec_1");
+	});
+
 	test("unbind_spec is refused while writes are off, and reads nothing", async () => {
 		const client = fakeClient({
 			getCollection: vi.fn().mockResolvedValue(boundCollection),
@@ -7154,6 +7226,11 @@ describe("OpenAPI spec binding tools", () => {
 		const tools = new Map(TOOLS.map((t) => [t.name, t]));
 		expect(tools.get("get_spec")?.category).toBe("read");
 		expect(tools.get("get_spec")?.invalidates).toEqual([]);
+		// An export writes nothing and needs no write toggle: it is a read of what
+		// the collection already is.
+		expect(tools.get("export_spec")?.category).toBe("read");
+		expect(tools.get("export_spec")?.invalidates).toEqual([]);
+		expect(tools.get("export_spec")?.annotations.readOnlyHint).toBe(true);
 		expect(tools.get("unbind_spec")?.category).toBe("write");
 		// The Spec tab reads the binding off the collection row, so the family that
 		// refetches collections is the one that refreshes it - no `spec` entity.
