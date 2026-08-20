@@ -43,6 +43,7 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <iterator>
 #include <optional>
 #include <string>
@@ -61,13 +62,25 @@ namespace vayu::http::routes {
  * sidebar-sized one - the same reasoning `get_collections_bound_to_spec`
  * scans on. A cycle among stored rows cannot loop it: `seen` gates the descent.
  *
- * Shared with `POST /specs/match` (declared in routes.hpp), which has to gather
- * the same subtree for the same reason a sync refuses to leave it: a
- * spec-bound root usually owns no requests directly, so anything that answers
- * for a collection's contract has to mean the subtree by "the collection".
+ * Shared with `POST /specs/match` and `POST /specs/export` (declared in
+ * routes.hpp), which have to gather the same subtree for the same reason a sync
+ * refuses to leave it: a spec-bound root usually owns no requests directly, so
+ * anything that answers for a collection's contract has to mean the subtree by
+ * "the collection".
+ *
+ * @p descend_into is where one caller's contract stops early - the export's
+ * boundary at a collection bound to a *different* document (issue #721). Empty
+ * for the two that take the whole subtree, and the child it refuses takes its
+ * own descendants with it, which is what makes it a boundary rather than a
+ * filter.
  */
-std::unordered_set<std::string>
-collection_subtree_ids (const std::vector<vayu::db::Collection>& all, const std::string& root) {
+std::unordered_set<std::string> collection_subtree_ids (const std::vector<vayu::db::Collection>& all,
+const std::string& root,
+const std::function<bool (const vayu::db::Collection&)>& descend_into) {
+    std::unordered_map<std::string, const vayu::db::Collection*> rows;
+    for (const auto& col : all) {
+        rows.emplace (col.id, &col);
+    }
     std::unordered_map<std::string, std::vector<std::string>> children;
     for (const auto& col : all) {
         if (col.parent_id && !col.parent_id->empty ()) {
@@ -84,6 +97,12 @@ collection_subtree_ids (const std::vector<vayu::db::Collection>& all, const std:
             continue;
         }
         for (const auto& child : kids->second) {
+            if (descend_into) {
+                const auto row = rows.find (child);
+                if (row != rows.end () && !descend_into (*row->second)) {
+                    continue;
+                }
+            }
             if (seen.insert (child).second) {
                 stack.push_back (child);
             }

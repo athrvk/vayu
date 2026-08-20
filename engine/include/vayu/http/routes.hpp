@@ -10,6 +10,7 @@
 #include <httplib.h>
 
 #include <chrono>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -528,16 +529,23 @@ read_spec_indexes (const nlohmann::json& item, vayu::db::SpecDocument& spec, siz
 /**
  * Every collection at or beneath @p root, from one read of the table.
  *
- * One walk for the two routes that answer for a collection's whole contract -
- * `POST /specs/sync`, which refuses to touch anything outside it, and
- * `POST /specs/match`, which has to gather the requests inside it. An OpenAPI
- * import binds the root and files its requests under one sub-collection per
- * tag, so "the collection" means the subtree to both of them, and two walks
- * would be two chances to disagree about where a contract stops. Defined in
+ * One walk for the three routes that answer for a collection's whole contract -
+ * `POST /specs/sync`, which refuses to touch anything outside it,
+ * `POST /specs/match`, which has to gather the requests inside it, and
+ * `POST /specs/export`, which assembles them into a document. An OpenAPI import
+ * binds the root and files its requests under one sub-collection per tag, so
+ * "the collection" means the subtree to all of them, and three walks would be
+ * three chances to disagree about where a contract stops. Defined in
  * spec_sync.cpp.
+ *
+ * @param descend_into Optional boundary: a child it refuses is left out with its
+ *        own descendants. The export passes one, because a collection bound to a
+ *        *different* document is where this contract stops (issue #721); the
+ *        other two take the whole subtree and pass nothing.
  */
-std::unordered_set<std::string>
-collection_subtree_ids (const std::vector<vayu::db::Collection>& all, const std::string& root);
+std::unordered_set<std::string> collection_subtree_ids (const std::vector<vayu::db::Collection>& all,
+const std::string& root,
+const std::function<bool (const vayu::db::Collection&)>& descend_into = {});
 
 /**
  * Every request stored beneath @p subtree, in one canonical order.
@@ -880,6 +888,7 @@ void register_spec_routes (RouteContext& ctx);
 void register_spec_sync_routes (RouteContext& ctx);
 void register_spec_match_routes (RouteContext& ctx);
 void register_spec_bind_routes (RouteContext& ctx);
+void register_spec_export_routes (RouteContext& ctx);
 void register_reorder_routes (RouteContext& ctx);
 void register_environment_routes (RouteContext& ctx);
 void register_client_certificate_routes (RouteContext& ctx);

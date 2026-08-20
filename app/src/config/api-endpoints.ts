@@ -57,7 +57,7 @@ export const API_ENDPOINTS = {
 	SPEC_BY_ID: (id: string) => `/specs/${id}`,
 	// The same document without the document (issue #712): what the Spec tab's
 	// card needs, so opening the tab does not transfer a 12 MB spec to paint a
-	// URL and a date. The full read above still backs export, sync and matching.
+	// URL and a date. The full read above still backs sync and matching.
 	SPEC_META: (id: string) => `/specs/${id}/meta`,
 	// Applying a re-fetched document to the collection bound to it (issue #655):
 	// the new document, the moved binding and the created/updated/deleted
@@ -74,6 +74,11 @@ export const API_ENDPOINTS = {
 	// it out again from the document it stores, because a bind is a write and
 	// the identity it records must come from the bytes it recorded.
 	SPEC_BIND: `/specs/bind`,
+	// A collection back out as an OpenAPI document (issue #855): its own bound
+	// document updated, or a skeleton when it binds none. The assembly moved
+	// engine-side with the rest of #761's phase B, so the renderer asks for the
+	// finished text rather than reading the stored document to build it here.
+	SPEC_EXPORT: `/specs/export`,
 
 	// Batch reorder for both entity kinds (issue #365). One drop is one call and
 	// one engine transaction; a reorder expressed as N sibling PUTs is neither.

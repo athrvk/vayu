@@ -1,7 +1,7 @@
 {
-  "description": "Cross-language conformance for the path shapes a request URL and an OpenAPI path reduce to (issue #638, moved engine-side by #761). The engine owns operation matching now; the renderer still reduces the same shapes for the spec diff (services/openapi/spec-diff.ts) and the export skeleton (services/exporters/skeleton.ts), so two implementations of one rule exist until those move too. This table is what keeps them honest: engine/tests/operation_match_test.cpp and app/src/services/openapi/operation-shape.conformance.test.ts both read it, and a divergence fails ctest or vitest rather than reaching a user as a bind that matches nothing.",
+  "description": "Cross-language conformance for the path shapes a request URL and an OpenAPI path reduce to (issue #638, moved engine-side by #761). The engine owns operation matching and, since #855, the export that was the last renderer reader of the URL split; the renderer still reduces a spec path to a shape for the spec diff (services/openapi/spec-diff.ts), so two implementations of that one rule exist until it moves too. This table is what keeps them honest: engine/tests/operation_match_test.cpp and app/src/services/openapi/operation-shape.conformance.test.ts both read it, and a divergence fails ctest or vitest rather than reaching a user as a bind that matches nothing.",
   "readers": {
-    "requestUrls": "both - `origin` and `path` (split_request_url / splitRequestUrl); `shape` is engine-only, since the renderer no longer reduces a request URL to a shape (that was the matcher's job)",
+    "requestUrls": "engine only (split_request_url) - the renderer stopped splitting a request URL when the export moved (#855), and stopped reducing one to a shape when the matcher did (#761)",
     "specPaths": "both (spec_path_shape / specPathShape)",
     "shapeKeys": "both (operation_shape_key / operationShapeKey)"
   },

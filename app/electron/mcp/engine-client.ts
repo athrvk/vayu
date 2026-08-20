@@ -360,6 +360,20 @@ export class EngineClient {
 	}
 
 	/**
+	 * A collection back out as an OpenAPI document (`POST /specs/export`, issue
+	 * #855) - its own bound document updated, or a skeleton when it binds none.
+	 *
+	 * A POST that writes nothing: the body says which collection and which
+	 * serialization, and the engine reads the subtree, its examples and the
+	 * stored document itself. A 404 (no such collection) and a 409 (a binding
+	 * whose document it cannot read) both arrive as an
+	 * {@link EngineRequestError} carrying the engine's sentence.
+	 */
+	exportSpec(collectionId: string, format: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/specs/export", { collectionId, format }, signal);
+	}
+
+	/**
 	 * A page of run history (newest first), bounded so a caller never pulls
 	 * unbounded history. Returns the `{data, pagination}` envelope; `data` rows
 	 * carry the compact `summary`, not the full config_snapshot.

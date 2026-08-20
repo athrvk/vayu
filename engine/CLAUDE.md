@@ -66,6 +66,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (issue #655) - new document, moved binding and the created/updated/deleted requests in one transaction |
 | POST | `/specs/match` | Which request of a collection's subtree is which operation of a document (issue #761) - reads only, nothing stored or stamped |
 | POST | `/specs/bind` | Bind a collection to a document (issue #862) - the document, the binding and every stamp, written **and cleared**, in one transaction |
+| POST | `/specs/export` | A collection back out as an OpenAPI document (issue #855) - its bound document patched, or a skeleton when it binds none; reads only |
 | POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only** - 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch) - 404 on a missing id |
 
@@ -227,6 +228,22 @@ Three things worth knowing before you design around them:
   caller states - a list is what a caller can forget. Unbinding stays
   `PUT /collections/:id` with `openapi: null`: one row, stamps untouched, so
   unbind-then-rebind of the same document is lossless.
+  **Writing a collection back out as a document is the engine's too** (#855,
+  `core/openapi_export.hpp` over `POST /specs/export`), which is what makes
+  `export_spec` reachable over MCP. Two directions that are not variants of
+  each other: a bound collection's own stored bytes are *patched* - operations
+  nothing claims removed, request values and stored examples written in, and
+  every member Vayu does not model carried through by simply not being visited,
+  because a regenerated document would silently drop every `securityScheme`,
+  vendor extension and description the app has no model for - while an unbound
+  collection gets a skeleton that invents nothing. The same subtree walk bounds
+  it, with one addition: it stops at a collection bound to a *different*
+  document and not at one bound to the same (#721), so `collection_subtree_ids`
+  takes that boundary as a predicate rather than growing a second walk. YAML
+  output is `core::emit_yaml`, which lives beside the reader on purpose - a
+  string is quoted exactly when writing it plainly would read back as something
+  else, and that is `plain_scalar`'s question; split across two files a document
+  would export as `swagger: 2.0` and re-import as a number.
   **Responses are validated against what the document declares** (#628):
   `spec_documents.response_schemas` holds an engine-derived index (schemas as
   written, plus one shared `refRoots` their `$ref`s resolve through), and
