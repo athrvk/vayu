@@ -13,10 +13,10 @@
  */
 
 #define VAYU_VERSION_MAJOR 0
-#define VAYU_VERSION_MINOR 19
+#define VAYU_VERSION_MINOR 20
 #define VAYU_VERSION_PATCH 0
 
-#define VAYU_VERSION_STRING "0.19.0"
+#define VAYU_VERSION_STRING "0.20.0"
 
 namespace vayu {
 
