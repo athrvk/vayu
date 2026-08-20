@@ -645,8 +645,8 @@ design: it compares bytes, and these bytes did not move.
 
 ### Where OpenAPI stops being JSON Schema
 
-Schemas are translated when the document is stored, because a validator reads
-JSON Schema and OpenAPI 3.0's dialect is *not* it. `nullable: true` becomes a
+Schemas are translated by the engine when the document is stored, because a
+validator reads JSON Schema and OpenAPI 3.0's dialect is *not* it. `nullable: true` becomes a
 union with null, 3.0's draft-04 boolean `exclusiveMinimum` becomes the bound
 itself, and `discriminator` / `xml` / `example` are dropped as things that
 describe no constraint. Without that step a null the document explicitly permits

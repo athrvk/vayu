@@ -251,14 +251,13 @@ Notes:
   the document's operations, plus the indexes stored beside it. Phase B of #761
   is moving what that needs into the engine, one piece at a time -
   `POST /specs/match` owns the matching now, and the engine reads the document
-  and derives its **operation index** itself (issue #853), so a bind over MCP
-  would no longer leave a collection's runs reporting no coverage. What still
-  keeps `bind_spec` out is the rest: the **response-schema index** is extracted
-  by the renderer (translating 3.0's dialect into JSON Schema), so a bind
-  without it would leave every response of that collection unchecked, and a bind
-  must also clear any stamp from a previously bound document, where coverage
-  resolves it by `operationId` and it claims the wrong operation rather than
-  none. Until those land, bind a spec in Vayu (Collection → Spec). `unbind_spec` needs none of it, which is why
+  and derives **both** indexes stored beside it - the operation index (issue
+  #853) and the response-schema index, dialect translation included (issue
+  #860). So a document stored by an agent that sends nothing but bytes already
+  reports coverage and validates responses. What still keeps `bind_spec` out is
+  the stamping: a bind must clear any stamp from a previously bound document,
+  where coverage resolves it by `operationId` and it claims the wrong operation
+  rather than none. Until that lands, bind a spec in Vayu (Collection → Spec). `unbind_spec` needs none of it, which is why
   it ships: it writes exactly what the app's Unbind button writes, and leaves the
   stamps alone for the same reason - re-binding the same document later costs
   nothing.

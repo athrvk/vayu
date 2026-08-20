@@ -10,7 +10,6 @@ import type {
 	KeyValueEntry,
 	RequestBody,
 	RequestAuth,
-	ResponseSchemaIndex,
 	SpecOperation,
 	VariableValue,
 } from "@/types";
@@ -240,17 +239,6 @@ export interface SpecDraft {
 	content: string;
 	/** Set only for a URL-sourced import - a file or a paste has no URL to re-fetch. */
 	sourceUrl?: string;
-	/**
-	 * The response schemas the document declares (issue #628), extracted in the
-	 * parse, so the engine can check a response against its contract without
-	 * translating 3.0's dialect itself. The *operation* index beside it is no
-	 * longer written here: the engine reads the document and derives it (issue
-	 * #853), so one reader answers what a document declares. Absent when nothing
-	 * declared a schema - which the
-	 * engine stores as "no index" and reports as `checked: false`, never as a
-	 * body that passed.
-	 */
-	responseSchemas?: ResponseSchemaIndex;
 }
 
 export interface CollectionDraft {

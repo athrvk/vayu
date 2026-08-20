@@ -5,14 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type {
-	DeclaredResponseSchema,
-	SpecOperation,
-	HttpMethod,
-	KeyValueEntry,
-	RequestAuth,
-	RequestBody,
-} from "@/types";
+import type { SpecOperation, HttpMethod, KeyValueEntry, RequestAuth, RequestBody } from "@/types";
 import type {
 	CollectionDraft,
 	ExampleDraft,
@@ -40,7 +33,6 @@ import {
 	createOperationIdentifier,
 } from "./openapi-shared";
 import { countExamples, importedFilePart, unattachedFileParts } from "./shared";
-import { buildResponseSchemaIndex, responseSchemasV3 } from "./response-schemas";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
@@ -98,11 +90,6 @@ export class OpenApiV3Parser implements ImportParser {
 		// (issue #715), which needs the memory of every id already stamped.
 		const identify = createOperationIdentifier(tally);
 		let requestCount = 0;
-		// The response schemas stored beside the document (issue #628), gathered
-		// in the same walk and for the same reason: a second pass could disagree
-		// with this one about which operation declares what.
-		const schemaOperations: { identity: SpecOperation; responses: DeclaredResponseSchema[] }[] =
-			[];
 
 		for (const [path, rawPathItem] of Object.entries(asRecord(spec.paths) ?? {})) {
 			const pathItem = resolvePathItem(rawPathItem, resolveRef);
@@ -120,12 +107,6 @@ export class OpenApiV3Parser implements ImportParser {
 				if (!op) continue;
 				requestCount += 1;
 				const identity = identify(method, path, op.operationId);
-				if (identity) {
-					schemaOperations.push({
-						identity,
-						responses: responseSchemasV3(op, resolveRef),
-					});
-				}
 				const req = buildOperation(
 					method,
 					path,
@@ -138,8 +119,6 @@ export class OpenApiV3Parser implements ImportParser {
 				folders.place(req, path, op.tags);
 			}
 		}
-
-		const responseSchemas = buildResponseSchemaIndex(spec, schemaOperations);
 
 		const root: CollectionDraft = {
 			name: asStr(prop(spec.info, "title")) ?? "Imported API",
@@ -154,16 +133,12 @@ export class OpenApiV3Parser implements ImportParser {
 			// collection to it in the same atomic call (issue #637). `raw` and not
 			// a re-serialization: the engine hashes the bytes it stores, and a
 			// sync compares against that hash.
-			// The declared-operation index (issue #629) is *not* beside it: the
-			// engine reads the document and derives that itself (issue #853), so
-			// one reader answers what a document declares.
-			// `responseSchemas` is (issue #628), so a response can be checked
-			// against what the document declared for it. Absent when nothing
-			// declared a schema, which stores as "no index" rather than as a
-			// contract that permits everything.
+			// Neither index is beside it: the engine reads the document and
+			// derives both the declared operations (issue #629, moved by #853)
+			// and the response schemas (issue #628, moved by #860) from the very
+			// bytes it stores, so one reader answers what a document declares.
 			spec: {
 				content: raw,
-				...(responseSchemas ? { responseSchemas } : {}),
 			},
 		};
 

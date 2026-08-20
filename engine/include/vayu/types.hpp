@@ -1104,7 +1104,7 @@ struct SpecDocument {
      * `{operationId?, method, path, responses[]}`, in document order.
      *
      * **Derived by the engine from `content`, never supplied** (issue #853):
-     * `core::derive_operations_index` reads the document as it is stored, the
+     * `core::derive_spec_indexes` reads the document as it is stored, the
      * way `hash` is computed rather than taken, and a write carrying an
      * `operations` field is a `400`. One reader answers what a document
      * declares - which is the rule #625 decided; #761's phase B moved which
@@ -1118,10 +1118,15 @@ struct SpecDocument {
      */
     std::string operations;
     /**
-     * The response schemas this document declares, extracted by the app when it
-     * stored the document (issue #628): a JSON object of
+     * The response schemas this document declares (issue #628): a JSON object of
      * `{refRoots?, operations: [{operationId?, method, path, responses: [{status,
      * contentType, schema}]}]}`.
+     *
+     * **Derived by the engine from `content`, never supplied** (issue #860), off
+     * the *same* read as `operations` above - which is what keeps the two
+     * agreeing about which operation declares which status, and what makes
+     * translating OpenAPI 3.0's dialect into JSON Schema the engine's job. A
+     * write carrying a `responseSchemas` field is a `400`.
      *
      * A column of its own rather than a field on `operations` above, because
      * that index is parsed when a run's plan resolves and held for the run's
