@@ -14,6 +14,11 @@ is - `operationId`, method, and the templated path. See
 [OpenAPI Collections](../openapi.md) for what the binding is for and what the
 collection's Spec tab does with it.
 
+The requests this parser builds are mirrored engine-side as well (issue #865,
+`core::spec_request_drafts_of`), for the reason and under the conformance
+fixture written out in [OpenAPI 3.0](./openapi-v3.md#operation-identity) - both
+dialects are read by that one port, so a 2.0 rule changed here changes there too.
+
 - **Source:** `app/src/services/importers/openapi-v2.ts`
 - **Exports:**
 

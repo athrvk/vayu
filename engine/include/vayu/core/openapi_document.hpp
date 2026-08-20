@@ -205,6 +205,132 @@ declared_operations_of (const nlohmann::ordered_json& document);
 response_schemas_of (const nlohmann::ordered_json& document);
 
 /**
+ * One row of a draft request's key/value table: a query parameter, a header, or
+ * a form-body field.
+ *
+ * The fields the sync diff compares a stored request's rows against, and no
+ * others - `description` because a document that re-words what a parameter
+ * means has changed the row Vayu shows, `file` because a multipart part the
+ * document declares as an upload is a different row from a text one even when
+ * both are empty (issue #425).
+ */
+struct DraftField {
+    std::string key;
+    std::string value;
+    /**
+     * A spec's parameter list declares what the endpoint *accepts*, not what
+     * every request should *send* (issues #622, #658): an optional parameter
+     * with no declared value imports **disabled**, one click from use and off
+     * the wire. Only `required: true` or a declared value turns it on.
+     */
+    bool enabled = true;
+    /// Query rows only. The Headers table has no column for one, so a header
+    /// row carries none rather than a field nothing reads.
+    std::string description;
+    /// A multipart part the document declares as an upload (`format: binary`,
+    /// or 2.0's `type: file`). The part imports with no path attached.
+    bool file = false;
+};
+
+/// A draft request's body, in the shape `requests.body` stores.
+struct DraftBody {
+    /// `none`, `json`, `text`, `form-data` or `x-www-form-urlencoded`.
+    std::string mode = "none";
+    /// The `json` / `text` payload, and `""` for the form and `none` modes.
+    std::string content;
+    /// The form modes' fields, empty for every other mode.
+    std::vector<DraftField> fields;
+};
+
+/**
+ * The request an import of this document would build for one operation.
+ *
+ * Not an identity: `DeclaredOperation` says *which* operation this is, and this
+ * says what a request for it looks like - which is what makes "the spec changed
+ * this request" answerable without a second opinion about what the document
+ * means. The fields are exactly the ones the sync diff compares (issue #654);
+ * a request's auth, scripts and saved examples are deliberately absent, since
+ * the diff does not compare them and inventing them here would be state nothing
+ * reads.
+ */
+struct DraftRequest {
+    std::string name;
+    std::string description;
+    /// Upper-case, as the request stores it.
+    std::string method;
+    /// `{{baseUrl}}` plus the templated path with its `{param}`s rewritten as
+    /// `{{param}}`, plus whatever enabled query rows append to it.
+    std::string url;
+    std::vector<DraftField> params;
+    std::vector<DraftField> headers;
+    DraftBody body;
+};
+
+/// One operation, the request an import would build for it, and where an import
+/// would file that request.
+struct SpecRequestDraft {
+    DeclaredOperation operation;
+    DraftRequest draft;
+    /**
+     * The sub-collection an import files this operation under - its first tag,
+     * else the folder its path names (issue #710) - and `""` for an operation
+     * that gets neither, which imports onto the root (issue #655).
+     *
+     * A name rather than a reference: the tag collection an *added* operation
+     * needs may already exist under the bound collection, and matching it by
+     * the name the parser gave it is what tells those two cases apart.
+     */
+    std::string folder;
+};
+
+/**
+ * @brief The requests an import of @p document would build, in document order
+ *        (issue #865).
+ *
+ * The third thing derived from the walk `declared_operations_of` and
+ * `response_schemas_of` share, and derived from it for the same reason: a draft
+ * whose identity disagreed with the index would describe a change to an
+ * operation the document does not declare.
+ *
+ * **This is the import parsers' answer, not a second one.** Every rule the
+ * renderer's `openapi-v3.ts` / `openapi-v2.ts` learned the hard way is here
+ * because the sync diff compares a stored request against a draft, so a draft
+ * this side builds differently is a field reported as changed when only the two
+ * readers differ:
+ *
+ * - **2.0 and 3.x told apart the way the parsers detect them**, and read the
+ *   way each dialect writes: 2.0 states a parameter's value as `default` and
+ *   puts the body in a `body` / `formData` parameter, 3.x has `example` /
+ *   `examples` and a `requestBody` under a media type.
+ * - **A path item's `parameters` are merged with the operation's**, keyed by
+ *   `in` and `name`, the operation's winning in the path item's position.
+ * - **`in: "path"` is not a row** - it is already carried, as the `{{var}}` the
+ *   URL was rewritten with - and `in: "cookie"` is dropped, since a request's
+ *   cookies come from the jar (issue #719). `Authorization` and `Content-Type`
+ *   headers are dropped too: both are produced by the request's own auth and
+ *   body rather than typed into a row.
+ * - **The body is sampled from its schema** when the document documents no
+ *   example, by `$ref`-following, depth-capped, first-branch-of-`allOf` rules
+ *   that have to match the renderer's sampler exactly - the sample *is* the
+ *   compared value, so a different sampler is a different draft for an
+ *   unchanged document.
+ * - **The folder is where an import would have put it**: first tag, else the
+ *   first path segment that names a resource, else the root.
+ *
+ * `$ref`s are followed **in-document only**, which is a guarantee rather than a
+ * gap: external ones are inlined into `x-vayu-bundled` before a document is
+ * ever stored, so a ref still external by now is one the user has already been
+ * told about, and it resolves to nothing on both sides alike.
+ *
+ * Pinned to the renderer's parsers by
+ * `tests/fixtures/spec-request-drafts-conformance.json`, read by
+ * `openapi_drafts_test.cpp` and by the app's
+ * `spec-request-drafts.conformance.test.ts`.
+ */
+[[nodiscard]] std::vector<SpecRequestDraft>
+spec_request_drafts_of (const nlohmann::ordered_json& document);
+
+/**
  * Both indexes a stored document carries, or why it has neither.
  *
  * Each is the JSON text its column takes and `""` for a document that declares

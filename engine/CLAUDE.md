@@ -262,6 +262,25 @@ Three things worth knowing before you design around them:
   `openapi_document_test.cpp` and the renderer's
   `declared-operations.conformance.test.ts` - coverage matches one against the
   other, so a divergence would credit the wrong operation rather than fail.
+  **The engine builds the request drafts too now** (#865,
+  `core::spec_request_drafts_of`): not an identity but *the request an import
+  would build* - method, URL with its query joined in, params, headers, sampled
+  body, and the folder an import would file it under. That is the half #854's
+  sync diff compares, and it is a port of `openapi-v3.ts` / `openapi-v2.ts` /
+  their shared helpers / the schema sampler held to the **same answers** by
+  `tests/fixtures/spec-request-drafts-conformance.json` - a draft the two sides
+  build differently reads as "the document changed this request" on a document
+  nobody edited, which is why the port carries JavaScript's own semantics
+  (`??` falling through `null` alone, `JSON.stringify`'s number spelling) rather
+  than the nearest C++ idiom. All three answers come off **one** walk
+  (`src/core/openapi_walk.hpp`), so no two can disagree about which operations
+  exist or which of two kept a repeated `operationId`. No route: the only caller
+  is the diff, and that is still renderer-side until #854. The `{param}` ->
+  `{{param}}` rewrite a draft's URL is written with is
+  `core::normalize_path_templates`, the mock server's copy moved out of
+  `http/routes/mock_server.cpp` rather than written twice - the app writes those
+  URLs and the mock reads them back
+  (`tests/fixtures/path-template-conformance.json`).
   Three rules the shape enforces: an unbound collection gets **no `validation`
   node at all** (never judged is not judged-and-passed); `checked: false` carries
   a reason code and no validity; and keywords the draft-07 validator cannot
