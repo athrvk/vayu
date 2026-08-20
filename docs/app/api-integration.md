@@ -403,6 +403,15 @@ draft an apply would write, so `spec-apply.ts` builds a `POST /specs/sync`
 payload out of it without reading a document at all. The comparison used to be
 `services/openapi/spec-diff.ts`, which is gone.
 
+Each entry also carries **what a sync with no ticks would do to it** - `safe`,
+and `safeFields` on a changed request (issue #871). `defaultSelection` reads
+those rather than deriving them from `userTouched`, because the rules behind
+them are the ones whose silent failure destroys a person's work and they now
+have one author: `core::safe_spec_apply`, which `POST /specs/sync`'s
+`policy: "safe"` applies for a caller that states no rows at all. `syncSpec`
+still sends explicit rows from here, since the ticks a person changed are not a
+policy.
+
 The one field of that draft `spec-apply.ts` does **not** send back is
 `examples` (issue #869): an update carries `examples: true` - refresh this
 request's imported examples - and the engine writes the responses the document it

@@ -64,12 +64,21 @@ function draft(overrides: Partial<SpecDraftRequest> = {}): SpecDraftRequest {
 	};
 }
 
+/**
+ * An added entry as the engine answers one.
+ *
+ * `safe` is part of the answer now (issue #871), not something this side works
+ * out - these fixtures stand in for `POST /specs/diff`, so they state the marks
+ * the engine would. What the marks *mean* is pinned engine-side, in
+ * `spec_diff_test.cpp`.
+ */
 function added(
 	operation: SpecOperation,
 	folder: string,
-	overrides: Partial<SpecDraftRequest> = {}
+	overrides: Partial<SpecDraftRequest> = {},
+	safe = true
 ): SpecDiffAdded {
-	return { operation, folder, draft: draft({ name: operation.path, ...overrides }) };
+	return { operation, folder, draft: draft({ name: operation.path, ...overrides }), safe };
 }
 
 function field(name: SpecField, userTouched = false): SpecFieldDiff {
@@ -82,16 +91,29 @@ function changed(
 	fields: SpecFieldDiff[],
 	overrides: Partial<SpecDiffChanged> = {}
 ): SpecDiffChanged {
-	return {
+	const base = {
 		requestId,
 		name: "List pets",
 		boundOperation: operation,
 		operation,
-		matchedBy: "operationId",
+		matchedBy: "operationId" as const,
 		renamed: false,
 		previousUnknown: false,
 		fields,
 		draft: draft(),
+		...overrides,
+	};
+	// The marks an engine answering this entry would attach, unless the case
+	// states its own. Written out here rather than imported from anywhere,
+	// because this is a stand-in for a wire answer - the rule itself has one
+	// author and it is C++.
+	const safeFields = base.previousUnknown
+		? []
+		: base.fields.filter((f) => !f.userTouched).map((f) => f.field);
+	return {
+		safe: !base.previousUnknown && (safeFields.length > 0 || base.renamed),
+		safeFields,
+		...base,
 		...overrides,
 	};
 }
@@ -185,63 +207,89 @@ describe("a duplicated operationId is not corruption a default apply can commit 
 	});
 });
 
-describe("defaultSelection", () => {
-	it("ticks every added operation and no removal", () => {
+describe("defaultSelection reads the engine's marks", () => {
+	/*
+	 * What these ticks *mean* - everything the document adds, every field it
+	 * moved that nobody had edited, no deletions, a request nothing can be told
+	 * apart about left alone - is `core::safe_spec_apply`, pinned in the engine's
+	 * `spec_diff_test.cpp` (issue #871). What is pinned here is that this side
+	 * reads that answer rather than deriving its own, which is the whole of what
+	 * moving the rule engine-side bought: an agent's `sync_spec` and a person's
+	 * untouched Apply write the same rows.
+	 */
+	it("ticks what the engine marked safe and nothing it did not", () => {
 		const diff = diffOf({
-			added: [added(LIST_VETS, "vets")],
-			removed: [{ requestId: "req_1", name: "List owners", operation: LIST_PETS }],
+			added: [added(LIST_VETS, "vets"), added(GET_VET, "vets", {}, /* safe */ false)],
+			removed: [
+				{ requestId: "req_1", name: "List owners", operation: LIST_PETS, safe: false },
+			],
+			changed: [
+				changed("req_0", LIST_PETS, [field("name")], { safe: false, safeFields: [] }),
+				changed("req_1", GET_PET, [field("name"), field("url")], {
+					safe: true,
+					safeFields: ["url"],
+				}),
+			],
 		});
 		const selection = defaultSelection(diff);
 
 		expect([...selection.added]).toEqual(["GET /vets"]);
-		// The operation is gone from the document, and the request stays until
-		// somebody says so.
 		expect(selection.removed.size).toBe(0);
+		expect(selection.changed.has("req_0")).toBe(false);
+		expect([...(selection.changed.get("req_1") ?? [])]).toEqual(["url"]);
 	});
 
-	it("leaves a field the user edited unticked, and takes one only the document moved", () => {
-		// Mutation check: drop the `userTouched` filter and `name` appears for
-		// `req_0` too.
+	it("follows the marks even where they disagree with userTouched", () => {
+		/*
+		 * The mutation check for the move itself. Both entries are marked the
+		 * opposite of what the old local derivation would have concluded: a
+		 * hand-edited field the engine marked safe, and an untouched one it did
+		 * not. Re-deriving from `userTouched` here - the rule this file used to
+		 * own - flips both assertions.
+		 *
+		 * The disagreement is not a state the engine produces; it is how a test
+		 * tells "reads the answer" apart from "computes the same answer".
+		 */
 		const diff = diffOf({
 			changed: [
-				changed("req_0", LIST_PETS, [field("name", /* userTouched */ true)]),
-				changed("req_1", GET_PET, [field("name")]),
+				changed("req_edited", LIST_PETS, [field("name", /* userTouched */ true)], {
+					safe: true,
+					safeFields: ["name"],
+				}),
+				changed("req_clean", GET_PET, [field("name")], { safe: false, safeFields: [] }),
 			],
 		});
 		const selection = defaultSelection(diff);
 
-		expect([...(selection.changed.get("req_0") ?? [])]).toEqual([]);
-		expect([...(selection.changed.get("req_1") ?? [])]).toEqual(["name"]);
+		expect([...(selection.changed.get("req_edited") ?? [])]).toEqual(["name"]);
+		expect(selection.changed.has("req_clean")).toBe(false);
 	});
 
-	it("offers nothing for a request whose bound document could not be read", () => {
-		// With no old value, "the user edited it" is not a claim anything can
-		// make - so the whole request is left for the user to decide about.
+	it("ticks a deletion the engine marked safe, so the rule has one author", () => {
+		// No document produces this today - `safe_spec_apply` never marks a
+		// removal - and that is the point: if the policy ever does, this side
+		// follows it instead of hardcoding "never delete" a second time.
 		const diff = diffOf({
-			changed: [changed("req_0", LIST_PETS, [field("name")], { previousUnknown: true })],
+			removed: [{ requestId: "req_9", name: "Delete a pet", operation: GET_PET, safe: true }],
 		});
 
-		expect(defaultSelection(diff).changed.size).toBe(0);
+		expect([...defaultSelection(diff).removed]).toEqual(["req_9"]);
+	});
+
+	it("takes a request whose only change is its identity, with no field ticked", () => {
+		const diff = diffOf({
+			changed: [changed("req_renamed", LIST_PETS, [], { renamed: true })],
+		});
+		const selection = defaultSelection(diff);
+
+		// Present with an empty set - a real selection rather than an absence,
+		// which is what makes the identity write happen.
+		expect(selection.changed.has("req_renamed")).toBe(true);
+		expect([...(selection.changed.get("req_renamed") ?? [])]).toEqual([]);
 	});
 
 	it("is empty when the document changed nothing this collection holds", () => {
 		expect(isEmptySelection(defaultSelection(diffOf({ unchanged: 2 })))).toBe(true);
-	});
-
-	it("offers a request whose only change is its identity, and not one with nothing to write", () => {
-		// A pure rename is a change to write; a request whose every moved field is
-		// the user's own is not offered at all, because ticking it would send an
-		// update that writes nothing but the identity it already has.
-		const diff = diffOf({
-			changed: [
-				changed("req_renamed", LIST_PETS, [], { renamed: true }),
-				changed("req_edited", GET_PET, [field("name", true)]),
-			],
-		});
-		const selection = defaultSelection(diff);
-
-		expect([...(selection.changed.get("req_renamed") ?? [])]).toEqual([]);
-		expect(selection.changed.has("req_edited")).toBe(false);
 	});
 });
 
@@ -407,8 +455,8 @@ describe("buildSyncPayload", () => {
 	it("names a removal only once it is ticked, in the diff's own order", () => {
 		const diff = diffOf({
 			removed: [
-				{ requestId: "req_1", name: "List owners", operation: GET_PET },
-				{ requestId: "req_2", name: "Get an owner", operation: LIST_VETS },
+				{ requestId: "req_1", name: "List owners", operation: GET_PET, safe: false },
+				{ requestId: "req_2", name: "Get an owner", operation: LIST_VETS, safe: false },
 			],
 		});
 

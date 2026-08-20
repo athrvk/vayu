@@ -181,6 +181,16 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			fileName: "api.openapi.json",
 			notes: { direction: "document", dialect: "OpenAPI 3.1.0", requestsExported: 2 },
 		}),
+		syncSpec: vi.fn().mockResolvedValue({
+			idMap: {},
+			specId: "spec_2",
+			specHash: "def456",
+			syncedAt: 1_755_000_100_000,
+			created: 1,
+			updated: 2,
+			deleted: 0,
+			skipped: { requests: 1, fields: 3, deletions: 1 },
+		}),
 		diffSpec: vi.fn().mockResolvedValue({
 			identical: false,
 			added: [
@@ -7583,6 +7593,155 @@ describe("OpenAPI spec binding tools", () => {
 		);
 		expect(res.isError).toBe(true);
 		expect(allText(res)).not.toMatch(/Bound to spec/i);
+	});
+
+	test("sync_spec is refused when writes are disabled", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"sync_spec",
+			{ collectionId: "col_1", content: "openapi: 3.0.0" },
+			ctxWith(client, { allowWrites: false })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.syncSpec).not.toHaveBeenCalled();
+	});
+
+	test("sync_spec asks for the safe policy and states no rows of its own", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"sync_spec",
+			{ collectionId: "col_1", content: '{"openapi":"3.1.0"}' },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBeFalsy();
+		/*
+		 * The whole design of the tool, in one assertion (issue #871). Which of a
+		 * drift is safe to write is `core::safe_spec_apply`, and a payload naming
+		 * rows here would be a second opinion about which of a person's fields a
+		 * sync may overwrite. Adding a `create` / `update` / `delete` section -
+		 * or dropping the policy - reddens this.
+		 */
+		expect(client.syncSpec).toHaveBeenCalledWith(
+			{
+				collectionId: "col_1",
+				spec: { content: '{"openapi":"3.1.0"}' },
+				policy: "safe",
+			},
+			undefined
+		);
+		const [payload] = (client.syncSpec as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(Object.keys(payload as object).sort()).toEqual(["collectionId", "policy", "spec"]);
+		// Nothing is worked out here either - no reading of the collection, no
+		// diff of its own to decide from.
+		expect(client.diffSpec).not.toHaveBeenCalled();
+		expect(client.listRequests).not.toHaveBeenCalled();
+	});
+
+	test("sync_spec says what the policy declined, not only what it wrote", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"sync_spec",
+			{ collectionId: "col_1", content: "openapi: 3.0.0" },
+			ctxWith(client, WRITES)
+		);
+		const text = allText(res);
+		expect(text).toMatch(/1 request created, 2 requests updated, 0 requests deleted/i);
+		/*
+		 * The half an agent would otherwise assume did not exist. A caller that
+		 * ticked nothing cannot see what it did not tick, so "2 updated" alone
+		 * reads as "applied the drift" - and the two things left are a person's
+		 * edit and a request the document dropped, which are exactly the two an
+		 * agent must not conclude it has handled. Dropping the `skipped` sentence
+		 * reddens this.
+		 */
+		expect(text).toMatch(/declined the rest/i);
+		expect(text).toMatch(/1 changed request left untouched/i);
+		expect(text).toMatch(/3 fields not written/i);
+		expect(text).toMatch(/NOT deleted/);
+		// And the counts are in the structured body too, not only in the prose.
+		expect(JSON.parse(firstText(res)).skipped).toEqual({
+			requests: 1,
+			fields: 3,
+			deletions: 1,
+		});
+	});
+
+	test("sync_spec stays quiet about a policy that declined nothing", async () => {
+		const client = fakeClient({
+			syncSpec: vi.fn().mockResolvedValue({
+				idMap: {},
+				specId: "spec_3",
+				specHash: "aaa",
+				syncedAt: 1,
+				created: 0,
+				updated: 1,
+				deleted: 0,
+				skipped: { requests: 0, fields: 0, deletions: 0 },
+			}),
+		});
+		const res = await dispatchTool(
+			"sync_spec",
+			{ collectionId: "col_1", content: "openapi: 3.0.0" },
+			ctxWith(client, WRITES)
+		);
+		// A caveat that always warns is one nobody reads by the third call.
+		expect(allText(res)).not.toMatch(/declined the rest/i);
+	});
+
+	test("sync_spec reports an engine refusal rather than claiming an apply", async () => {
+		const client = fakeClient({
+			syncSpec: vi
+				.fn()
+				.mockRejectedValue(
+					new Error("Collection 'col_1' is not bound to a spec; bind it before syncing")
+				),
+		});
+		const res = await dispatchTool(
+			"sync_spec",
+			{ collectionId: "col_1", content: "openapi: 3.0.0" },
+			ctxWith(client, WRITES)
+		);
+		expect(res.isError).toBe(true);
+		// The engine's own sentence, which names the fix.
+		expect(allText(res)).toMatch(/not bound to a spec/i);
+		expect(allText(res)).not.toMatch(/Applied in one transaction/i);
+	});
+
+	test("sync_spec sends a sourceUrl only when it was given one", async () => {
+		const client = fakeClient();
+		await dispatchTool(
+			"sync_spec",
+			{ collectionId: "col_1", content: "openapi: 3.0.0" },
+			ctxWith(client, WRITES)
+		);
+		const [bare] = (client.syncSpec as ReturnType<typeof vi.fn>).mock.calls[0];
+		// Absent, not null: the engine reads absent as "it did not come from a
+		// URL", the same reading `bind_spec` relies on.
+		expect(Object.keys((bare as { spec: object }).spec)).toEqual(["content"]);
+
+		const withUrl = fakeClient();
+		await dispatchTool(
+			"sync_spec",
+			{
+				collectionId: "col_1",
+				content: "openapi: 3.0.0",
+				sourceUrl: "https://api.example.com/openapi.json",
+			},
+			ctxWith(withUrl, WRITES)
+		);
+		const [stated] = (withUrl.syncSpec as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect((stated as { spec: { sourceUrl?: string } }).spec.sourceUrl).toBe(
+			"https://api.example.com/openapi.json"
+		);
+	});
+
+	test("sync_spec declares both families it changes", () => {
+		const tools = new Map(TOOLS.map((t) => [t.name, t]));
+		expect(tools.get("sync_spec")?.category).toBe("write");
+		// The same set a bind uses: the document and the binding are collection
+		// state, and the rows this creates, updates and deletes are requests.
+		expect(tools.get("sync_spec")?.invalidates).toEqual(["collection", "request"]);
+		expect(tools.get("sync_spec")?.annotations.idempotentHint).toBe(false);
 	});
 
 	test("bind_spec declares both families it changes", () => {

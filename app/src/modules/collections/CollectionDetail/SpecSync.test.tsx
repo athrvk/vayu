@@ -113,17 +113,34 @@ function field(name: SpecField, userTouched = false): SpecFieldDiff {
 	return { field: name, current: "List pets", next: "List all the pets", userTouched };
 }
 
+/**
+ * A changed entry as the engine answers one.
+ *
+ * `safe` / `safeFields` are part of that answer since issue #871 - the ticks
+ * are `core::safe_spec_apply`'s and this section reads them - so a fixture
+ * standing in for `POST /specs/diff` states them. The marks below are what the
+ * engine would attach; a case that wants different ones passes them.
+ */
 function changed(overrides: Partial<SpecDiffChanged> = {}): SpecDiffChanged {
-	return {
+	const base = {
 		requestId: "req_1",
 		name: "List pets",
 		boundOperation: LIST_PETS,
 		operation: LIST_PETS,
-		matchedBy: "operationId",
+		matchedBy: "operationId" as const,
 		renamed: false,
 		previousUnknown: false,
 		fields: [field("name")],
 		draft: draft(),
+		...overrides,
+	};
+	const safeFields = base.previousUnknown
+		? []
+		: base.fields.filter((f) => !f.userTouched).map((f) => f.field);
+	return {
+		safe: !base.previousUnknown && (safeFields.length > 0 || base.renamed),
+		safeFields,
+		...base,
 		...overrides,
 	};
 }
@@ -443,9 +460,14 @@ describe("SpecSync", () => {
 						operation: LIST_OWNERS,
 						folder: "owners",
 						draft: draft({ name: "List owners", url: "{{baseUrl}}/owners" }),
+						safe: true,
 					},
 				],
-				removed: [{ requestId: "req_1", name: "List pets", operation: LIST_PETS }],
+				// Marked unsafe by the engine, which is where "deleting is opt-in"
+				// is decided now (issue #871) - this section reads it.
+				removed: [
+					{ requestId: "req_1", name: "List pets", operation: LIST_PETS, safe: false },
+				],
 			})
 		);
 		renderSync();

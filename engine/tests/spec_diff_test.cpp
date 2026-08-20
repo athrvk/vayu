@@ -681,4 +681,148 @@ TEST_F (SpecDiffTest, LeavesARequestAloneWhenTheDocumentAgreesWithTheVerbItHolds
     EXPECT_EQ (diff.unchanged, 1u);
 }
 
+// ---------------------------------------------------------------------------
+// What a sync writes when nobody has ticked anything (issue #871)
+// ---------------------------------------------------------------------------
+
+/*
+ * `safe_spec_apply` is the selection rule, and it is the one part of a sync
+ * whose failure is silent and permanent: a field written over a person's edit is
+ * gone, and a request deleted because the policy defaulted to deleting is gone
+ * with its history. It lived in the renderer until this issue, which is why an
+ * agent could read a drift and not apply one - `electron/` may not import
+ * `src/`, and a copy of this rule would be a second opinion about which of a
+ * user's fields a sync may overwrite.
+ *
+ * These cases pin the rule itself. `POST /specs/diff` reports the answer per
+ * entry and `POST /specs/sync`'s `"policy": "safe"` applies it, so both are
+ * pinned here once rather than twice with room to disagree.
+ */
+
+/** The ticked field names of one changed entry, sorted. */
+std::vector<std::string> safe_field_names (const vayu::core::SafeChangedApply& entry) {
+    std::vector<std::string> names;
+    for (const SpecField field : entry.fields) {
+        names.emplace_back (vayu::core::spec_field_name (field));
+    }
+    std::sort (names.begin (), names.end ());
+    return names;
+}
+
+TEST_F (SpecDiffTest, SafeApplyCreatesEveryAddedOperationAndDeletesNothing) {
+    // The document drops `getPet` and adds `listOwners`. Creating what a contract
+    // gained takes nothing away from anybody; deleting a request whose operation
+    // is gone might, so it waits for a person.
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    R"(},"/owners":{"get":{"operationId":"listOwners","summary":"List owners"}}})");
+
+    const SpecDiff diff = diff_against (next, bound_collection ());
+    const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
+
+    ASSERT_EQ (diff.added.size (), 1u);
+    ASSERT_EQ (diff.removed.size (), 1u);
+    EXPECT_TRUE (safe.create[0]);
+    EXPECT_FALSE (safe.remove[0]);
+}
+
+TEST_F (SpecDiffTest, SafeApplyLeavesAFieldTheUserEditedAndTakesOneOnlyTheDocumentMoved) {
+    /*
+     * The case the whole policy exists for. One request holds a name somebody
+     * typed, against a document that did not move it; the other holds what the
+     * import wrote, against a document that reworded it. Dropping the
+     * `user_touched` guard reddens this - the edited name appears in the ticks
+     * and an apply would put the document's summary back over a person's work.
+     */
+    auto edited = request_from ("req_0", draft_of (bound_, "listPets"));
+    edited.name = "My list call";
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Fetch one pet"}}})");
+
+    const SpecDiff diff =
+    diff_against (next, { edited, request_from ("req_2", draft_of (bound_, "getPet")) });
+    const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
+
+    ASSERT_EQ (diff.changed.size (), 2u);
+    ASSERT_EQ (safe.update.size (), 2u);
+    for (size_t i = 0; i < diff.changed.size (); ++i) {
+        const bool is_the_edited_one = diff.changed[i].fields[0].user_touched;
+        if (is_the_edited_one) {
+            // Nothing safe to write and no moved identity, so not offered at all:
+            // an update that writes nothing is a row in a transaction for no
+            // reason.
+            EXPECT_FALSE (safe.update[i].apply);
+            EXPECT_TRUE (safe.update[i].fields.empty ());
+        } else {
+            EXPECT_TRUE (safe.update[i].apply);
+            EXPECT_EQ (safe_field_names (safe.update[i]), std::vector<std::string>{ "name" });
+        }
+    }
+}
+
+TEST_F (SpecDiffTest, SafeApplyLeavesARequestWholeWhenTheBoundDocumentCouldNotBeRead) {
+    /*
+     * With no bound values to compare against, every field is potentially
+     * somebody's edit and `user_touched` is false on all of them - so the guard
+     * above would tick the lot. `previous_unknown` is what stops it, and removing
+     * that branch reddens this: the request would be applied with its name
+     * overwritten by the document.
+     */
+    auto edited = request_from ("req_0", draft_of (bound_, "listPets"));
+    edited.name = "My list call";
+    const std::vector<SpecRequestDraft> fetched = drafts_of (
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"}}})"));
+
+    const SpecDiff diff = vayu::core::diff_spec (fetched, nullptr, { edited });
+    const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
+
+    ASSERT_EQ (diff.changed.size (), 1u);
+    ASSERT_TRUE (diff.changed[0].previous_unknown);
+    ASSERT_FALSE (diff.changed[0].fields.empty ());
+    EXPECT_FALSE (safe.update[0].apply);
+    EXPECT_TRUE (safe.update[0].fields.empty ());
+}
+
+TEST_F (SpecDiffTest, SafeApplyTakesARequestWhoseOnlyMovementIsItsIdentity) {
+    /*
+     * A pure rename is applied with **no field ticked**, which is a real
+     * selection rather than an absence: the write exists to move the recorded
+     * operation, and a request left carrying the old identity would be compared
+     * against the wrong operation on the next sync. Dropping `|| item.renamed`
+     * reddens this.
+     */
+    // The path and every field it produces stay put; only the id the operation
+    // answers to moves, so the request is followed by its path and nothing it
+    // holds is stale. Moving the *path* instead would change the url too, which
+    // is a field and not this case.
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    R"(},"/pets/{petId}":{"get":{"operationId":"fetchPet","summary":"Get a pet"}}})");
+
+    const SpecDiff diff = diff_against (next, { request_from ("req_2", draft_of (bound_, "getPet")) });
+    const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
+
+    ASSERT_EQ (diff.changed.size (), 1u);
+    ASSERT_TRUE (diff.changed[0].renamed);
+    EXPECT_TRUE (safe.update[0].apply);
+    EXPECT_TRUE (safe.update[0].fields.empty ());
+}
+
+TEST_F (SpecDiffTest, SafeApplyAnswersOneEntryPerBucketEntrySoNoReaderHasToAlign) {
+    // The parallel-arrays contract every reader rests on: the marks a route
+    // reports and the rows a policy sync builds are both "the entry I am holding,
+    // at the index I am holding it".
+    const std::string next = document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"Pets, listed"},)" + CREATE_PET +
+    R"(},"/owners":{"get":{"operationId":"listOwners","summary":"List owners"}}})");
+
+    const SpecDiff diff = diff_against (next, bound_collection ());
+    const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
+
+    EXPECT_EQ (safe.create.size (), diff.added.size ());
+    EXPECT_EQ (safe.remove.size (), diff.removed.size ());
+    EXPECT_EQ (safe.update.size (), diff.changed.size ());
+}
+
 } // namespace

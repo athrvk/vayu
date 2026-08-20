@@ -32,6 +32,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -103,6 +104,20 @@ constexpr const char* REWORDED_404_DOC =
 R"({"openapi":"3.1.0","info":{"title":"Pets","version":"1.3.0"},)"
 R"("paths":{"/pets":{"get":{"operationId":"listPets",)"
 R"("responses":{"404":{"description":"No such user any more"}}}}}})";
+
+// One that rewords `listPets` and keeps `listOwners`: the only way to get a
+// *changed* entry out of the comparison, since a draft takes its name from the
+// operation's `summary` and both documents above declare none.
+constexpr const char* REWORDED_PETS_DOC =
+R"({"openapi":"3.1.0","info":{"title":"Pets","version":"1.4.0"},)"
+R"("paths":{"/pets":{"get":{"operationId":"listPets","summary":"List all the pets",)"
+R"("responses":{"200":{},"404":{}}}},)"
+R"("/owners":{"get":{"operationId":"listOwners","responses":{"200":{}}}}}})";
+
+/// An operation neither fetched document declares - a request stamped with it is
+/// a *removal*, which a safe apply must leave standing.
+const nlohmann::json DELETE_PET =
+nlohmann::json{ { "operationId", "deletePet" }, { "method", "DELETE" }, { "path", "/pets/{petId}" } };
 
 /// The identities `FETCHED_DOC` declares, as a request's stamp records them -
 /// which is how a refresh finds the responses the document documents for it.
@@ -772,6 +787,150 @@ TEST_F (SpecSyncRouteTest, ASyncLeavesAnOlderRunsStoredCoverageAlone) {
     << "the newer document declares two - reading it here would say so";
     EXPECT_EQ (after["metadata"]["openapi"]["specId"].get<std::string> (), v1_id);
     EXPECT_EQ (after["metadata"]["openapi"]["specHash"].get<std::string> (), v1_hash);
+}
+
+// ---------------------------------------------------------------------------
+// `policy: "safe"` - the apply that decides its own rows (issue #871)
+// ---------------------------------------------------------------------------
+
+/*
+ * The rows are `core::safe_spec_apply`'s, pinned as a rule in
+ * `spec_diff_test.cpp`. What is pinned here is that this route *applies* that
+ * answer - and applies it through the same validation, id minting and
+ * transaction an explicit payload goes through, rather than down a second write
+ * path where a bound could quietly not hold.
+ *
+ * Why the policy exists at all: these rules lived in the renderer, and
+ * `electron/` may not import `src/`, so every caller that was not the Spec tab
+ * either went without an apply or copied the one judgement whose silent failure
+ * destroys a person's work.
+ */
+
+TEST_F (SpecSyncRouteTest, PolicyCreatesWhatTheDocumentAddedAndDeletesNothing) {
+    const std::string stamped =
+    create_request (root_, json{ { "name", "listPets" }, { "specOperation", LIST_PETS } });
+    // Stamped with an operation no fetched document declares - a removal, and the
+    // one thing a safe apply may never act on.
+    const std::string orphaned = create_request (root_,
+    json{ { "name", "deletePet" }, { "method", "DELETE" }, { "specOperation", DELETE_PET } });
+
+    auto [status, response] =
+    routes::spec_sync_response (*db_, body (json{ { "policy", "safe" } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    EXPECT_EQ (response["created"].get<size_t> (), 1u);
+    EXPECT_EQ (response["deleted"].get<size_t> (), 0u);
+    // Still there, and still stamped: the document dropped its operation and a
+    // person decides what that means.
+    EXPECT_TRUE (db_->get_request (orphaned).has_value ());
+    EXPECT_EQ (response["skipped"]["deletions"].get<size_t> (), 1u);
+
+    // The created request is the operation the document added, filed under the
+    // folder an import would have used rather than on the bound collection.
+    const auto created = db_->get_requests_in_collection (root_);
+    const auto folders = db_->get_collections ();
+    const auto owners  = std::find_if (folders.begin (), folders.end (),
+    [&] (const vayu::db::Collection& c) { return c.name == "owners"; });
+    ASSERT_NE (owners, folders.end ()) << "the tag folder an import files this under";
+    ASSERT_EQ (owners->parent_id.value_or (""), root_);
+    const auto filed = db_->get_requests_in_collection (owners->id);
+    ASSERT_EQ (filed.size (), 1u);
+    EXPECT_TRUE (filed[0].spec_operation.has_value ());
+    EXPECT_EQ (json::parse (*filed[0].spec_operation)["operationId"], "listOwners");
+    // The untouched request is left where it was - nothing about it moved.
+    EXPECT_TRUE (db_->get_request (stamped).has_value ());
+}
+
+TEST_F (SpecSyncRouteTest, PolicyWritesAFieldOnlyTheDocumentMoved) {
+    // The name is exactly what an import of the bound document wrote, so the
+    // reworded summary is the document's move and nobody else's. The url is not
+    // - this fixture's requests point at `example.test` - which makes the case
+    // sharper: one request, one field written and one left alone, decided field
+    // by field rather than row by row.
+    const std::string stamped =
+    create_request (root_, json{ { "name", "listPets" }, { "specOperation", LIST_PETS } });
+    const std::string edited_url = db_->get_request (stamped)->url;
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    json{ { "collectionId", root_ }, { "spec", json{ { "content", REWORDED_PETS_DOC } } },
+        { "policy", "safe" } });
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    EXPECT_EQ (response["updated"].get<size_t> (), 1u);
+    auto updated = db_->get_request (stamped);
+    ASSERT_TRUE (updated.has_value ());
+    EXPECT_EQ (updated->name, "List all the pets");
+    // The url the fixture typed is neither document's, so it is somebody's edit
+    // and this apply writes around it - counted, not dropped.
+    EXPECT_EQ (updated->url, edited_url);
+    EXPECT_EQ (response["skipped"]["fields"].get<size_t> (), 1u);
+    EXPECT_EQ (response["skipped"]["requests"].get<size_t> (), 0u);
+}
+
+TEST_F (SpecSyncRouteTest, PolicyLeavesAFieldSomebodyEditedExactlyAsTheyLeftIt) {
+    /*
+     * The case the policy exists for, end to end. The stored name is neither the
+     * bound document's nor the new one's, which is the signature of a hand edit -
+     * so the sync stores the document, moves the binding, and does not touch the
+     * request. Dropping the `user_touched` guard in `safe_spec_apply` reddens
+     * this: the name becomes "List all the pets" and somebody's work is gone.
+     */
+    const std::string edited =
+    create_request (root_, json{ { "name", "My pets call" }, { "specOperation", LIST_PETS } });
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    json{ { "collectionId", root_ }, { "spec", json{ { "content", REWORDED_PETS_DOC } } },
+        { "policy", "safe" } });
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    auto after = db_->get_request (edited);
+    ASSERT_TRUE (after.has_value ());
+    EXPECT_EQ (after->name, "My pets call");
+    EXPECT_EQ (response["updated"].get<size_t> (), 0u);
+    // Counted rather than dropped: a caller that stated no ticks cannot see what
+    // it did not tick, and "0 updated" alone reads as "nothing had changed".
+    EXPECT_EQ (response["skipped"]["requests"].get<size_t> (), 1u);
+    // The name somebody typed and the url this fixture's requests carry - both
+    // theirs, both left.
+    EXPECT_EQ (response["skipped"]["fields"].get<size_t> (), 2u);
+    // The document still landed - catching a collection up to a contract is a
+    // real sync even when no row moves.
+    EXPECT_EQ (binding ()["specId"].get<std::string> (), response["specId"].get<std::string> ());
+}
+
+TEST_F (SpecSyncRouteTest, PolicyRefusesAPayloadThatAlsoStatesRows) {
+    // Two answers to one question. There is no reading of "the safe ticks, plus
+    // these" that is not a guess, so it is refused rather than merged.
+    for (const char* section : { "collections", "create", "update", "delete" }) {
+        json payload = body (json{ { "policy", "safe" } });
+        payload[section] = json::array ();
+        auto [status, response] = routes::spec_sync_response (*db_, payload);
+        EXPECT_EQ (status, 400) << section << ": " << response.dump ();
+        EXPECT_NE (response["error"]["message"].get<std::string> ().find (section),
+        std::string::npos);
+    }
+}
+
+TEST_F (SpecSyncRouteTest, RefusesAPolicyThisEngineDoesNotHave) {
+    auto [status, response] =
+    routes::spec_sync_response (*db_, body (json{ { "policy", "everything" } }));
+    EXPECT_EQ (status, 400) << response.dump ();
+    auto [type_status, type_response] =
+    routes::spec_sync_response (*db_, body (json{ { "policy", true } }));
+    EXPECT_EQ (type_status, 400) << type_response.dump ();
+}
+
+TEST_F (SpecSyncRouteTest, AnExplicitPayloadIsToldNothingAboutWhatAPolicyWouldHaveDeclined) {
+    // `skipped` answers "what did the policy refuse", which is a question an
+    // explicit payload never asked: the caller chose the rows itself.
+    const std::string stayed = create_request (root_, json{ { "name", "list pets" } });
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "update",
+        json::array ({ json{ { "id", stayed }, { "name", "list every pet" } } }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    EXPECT_FALSE (response.contains ("skipped"));
 }
 
 } // namespace

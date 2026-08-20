@@ -180,6 +180,69 @@ struct SpecDiff {
 };
 
 /**
+ * What a safe apply writes for one changed request.
+ *
+ * `apply` and `fields` are two answers rather than one because they are two
+ * questions: a request whose only movement is the identity is applied with no
+ * field ticked at all, which is a real selection and not an absence.
+ */
+struct SafeChangedApply {
+    /// A safe apply updates this request at all.
+    bool apply = false;
+    /// The fields it writes. Empty for a pure rename, and for a request it skips.
+    std::vector<SpecField> fields;
+};
+
+/**
+ * Which of a {@link SpecDiff} a sync writes when nobody has ticked anything -
+ * the policy behind `POST /specs/sync`'s `"safe"` and the marks
+ * `POST /specs/diff` reports (issue #871).
+ *
+ * Each member is **parallel to the bucket it names**, so a reader marks the
+ * entry it is already holding and no reader has to decide anything a second
+ * time. That is the whole point of the type: the rules below used to live in
+ * the renderer alone (`spec-apply.ts`, `defaultSelection`), which put every
+ * apply out of reach of anything that is not the Spec tab, and any copy of them
+ * elsewhere would be a second opinion about which of a user's fields a sync may
+ * overwrite.
+ */
+struct SafeSpecApply {
+    /// Parallel to `SpecDiff::added` - true where a safe apply creates the operation.
+    std::vector<bool> create;
+    /**
+     * Parallel to `SpecDiff::removed`, and **false throughout**.
+     *
+     * Deleting is opt-in: a request whose operation the document no longer
+     * declares may be one somebody still wants. It is a member rather than an
+     * absence so that a reader marking the removed bucket reads the rule here
+     * instead of writing `false` itself.
+     */
+    std::vector<bool> remove;
+    /// Parallel to `SpecDiff::changed`.
+    std::vector<SafeChangedApply> update;
+};
+
+/**
+ * @brief What a sync writes out of @p diff when the caller states no ticks.
+ *
+ * Three rules, and the two that matter are the ones whose silent failure costs
+ * a person their work:
+ *
+ * - **A field somebody edited is never written.** `SpecFieldDiff::user_touched`
+ *   marks a value that is neither the document's old one nor its new one, which
+ *   is the signature of a hand edit; those fields are left out.
+ * - **A request the comparison could not make three-way is left alone whole.**
+ *   With `previous_unknown` there is no bound value to compare against, so every
+ *   field is potentially somebody's edit and none of them can be told apart.
+ * - **Nothing is deleted.**
+ *
+ * A changed request with nothing safe to write and no moved identity is not
+ * applied: an update that writes nothing is a row in a transaction for no
+ * reason.
+ */
+[[nodiscard]] SafeSpecApply safe_spec_apply (const SpecDiff& diff);
+
+/**
  * @brief Compare a collection's requests against the document they would be
  *        imported from now.
  *

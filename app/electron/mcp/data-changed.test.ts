@@ -138,6 +138,11 @@ describe("the registry declares its effects", () => {
 			// unbinding has none: a stored document is immutable under its id, so
 			// a bind mints a new row rather than staling a cached one.
 			bind_spec: ["collection", "request"],
+			// A sync (#871) moves the same two: the document and the binding are
+			// collection state, and the rows it creates, updates and deletes are
+			// requests. No `spec` family for the same reason a bind has none - it
+			// mints a new document row rather than changing a stored one.
+			sync_spec: ["collection", "request"],
 			create_request: ["request"],
 			update_request: ["request"],
 			delete_request: ["request"],

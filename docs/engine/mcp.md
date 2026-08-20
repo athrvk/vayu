@@ -168,6 +168,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
 | `diff_spec`            | read     | `POST /specs/diff`                           | - (each bucket capped at 50 entries, with `summary` carrying the true totals; the per-entry `draft` is dropped) |
 | `bind_spec`            | write    | `POST /specs/bind`                           | write toggle; one transaction - stores the document, moves the binding, stamps what matched and **clears** what no longer does |
+| `sync_spec`            | write    | `POST /specs/sync` (`policy: "safe"`)        | write toggle; one transaction - stores the document, moves the binding, creates and updates requests; deletes nothing and overwrites no hand-edited field, with `skipped` counting what it declined |
 | `export_spec`          | read     | `POST /specs/export`                         | - (document text capped at 32 KB, with `contentBytes` for the true size; `notes` says what the export could not carry) |
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept |
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, both scripts - minus file body parts |
@@ -246,15 +247,16 @@ Notes:
   no such field - every transfer is bounded by the `defaultTimeout` setting
   (`resolve_request_timeout_ms`), which `update_engine_config` changes. Recorded
   here so it is not re-derived as a gap each time the schema is read.
-- **An agent can bind a collection to a spec now, export one, and ask whether a
-  contract has drifted** (issues
+- **An agent can bind a collection to a spec now, export one, ask whether a
+  contract has drifted and apply the safe half of that drift** (issues
   [#862](https://github.com/athrvk/vayu/issues/862),
   [#855](https://github.com/athrvk/vayu/issues/855) and
-  [#871](https://github.com/athrvk/vayu/issues/871)); **applying a drift, and
-  import, stay app-only.** `get_spec` says what a collection is bound to,
-  `diff_spec` says what a re-fetched document would change about it, `bind_spec`
-  binds one, `export_spec` writes it back out as a document, and `unbind_spec`
-  detaches it. `bind_spec` takes the document text and nothing else - no pairing
+  [#871](https://github.com/athrvk/vayu/issues/871)); **raw-document import
+  stays app-only**, since it needs the renderer's parser stack. `get_spec` says
+  what a collection is bound to, `diff_spec` says what a re-fetched document
+  would change about it, `sync_spec` applies the part of that a caller with no
+  opinion should apply, `bind_spec` binds one, `export_spec` writes it back out
+  as a document, and `unbind_spec` detaches it. `bind_spec` takes the document text and nothing else - no pairing
   - because everything it needs is engine-side after #761's phase B: the engine
   reads the document (issue #853), derives **both** indexes from it - the
   operation index and the response-schema index, dialect translation included
@@ -286,6 +288,25 @@ Notes:
   just carried in the JSON: it is the one part of a drift an apply may not take
   silently, and an agent reading "6 changed" would otherwise propose overwriting
   somebody's edit.
+- **`sync_spec` applies a drift, and does not let the agent choose which of it**
+  (issue [#871](https://github.com/athrvk/vayu/issues/871)). It sends
+  `policy: "safe"` and nothing else: the engine works out the rows from
+  `core::safe_spec_apply`, the same function whose answer `diff_spec` reports
+  per entry as `safe` / `safeFields`. That is the whole design. Which of a drift
+  is safe to write - **every operation the document adds, every field it moved
+  that nobody had edited by hand, no deletions, and a request whose bound
+  document could not be read left alone whole** - used to live in the renderer
+  alone (`spec-apply.ts`, `defaultSelection`), which is why applying a drift was
+  app-only through phase 1: `electron/` may not import `src/`, so any tool would
+  have needed a copy, and a copy of *that* rule is a second opinion about which
+  of a user's fields a sync may overwrite. The rule moved engine-side instead,
+  and `defaultSelection` now reads the marks rather than deriving them, so the
+  Spec tab's pre-ticked boxes and an agent's sync are one answer. A person who
+  changes a tick still sends explicit rows - a choice a person made is not a
+  policy. The tool result's `skipped` (requests untouched, fields not written,
+  deletions not made) is named in the caveat sentence for `diff_spec`'s reason:
+  a caller that stated no ticks cannot see what it did not tick, and "5 updated"
+  alone reads as "applied the drift".
 - **`get_run_report` carries contract coverage** for a run of a collection bound
   to an OpenAPI document (issue #629): which of the contract's operations the run
   exercised, which of their declared responses it saw, and any statuses the

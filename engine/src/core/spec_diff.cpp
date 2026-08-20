@@ -408,4 +408,29 @@ const std::vector<ComparableRequest>& requests) {
     return diff;
 }
 
+SafeSpecApply safe_spec_apply (const SpecDiff& diff) {
+    SafeSpecApply safe;
+    // Everything the document adds: an operation no request claims is one the
+    // contract gained, and creating it takes nothing away from anybody.
+    safe.create.assign (diff.added.size (), true);
+    safe.remove.assign (diff.removed.size (), false);
+
+    safe.update.reserve (diff.changed.size ());
+    for (const ChangedRequest& item : diff.changed) {
+        SafeChangedApply entry;
+        if (!item.previous_unknown) {
+            for (const SpecFieldDiff& field : item.fields) {
+                if (!field.user_touched) {
+                    entry.fields.push_back (field.field);
+                }
+            }
+            // The identity is written whether or not a field was ticked - see
+            // the route that applies this - so a pure rename is still an apply.
+            entry.apply = !entry.fields.empty () || item.renamed;
+        }
+        safe.update.push_back (std::move (entry));
+    }
+    return safe;
+}
+
 } // namespace vayu::core

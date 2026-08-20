@@ -171,18 +171,6 @@ std::optional<vayu::core::DeclaredOperation> read_identity (const std::optional<
     return identity;
 }
 
-/** The identity as `requests.spec_operation` stores it. */
-nlohmann::json operation_json (const vayu::core::DeclaredOperation& operation) {
-    nlohmann::json out{ { "method", operation.method }, { "path", operation.path } };
-    if (!operation.operation_id.empty ()) {
-        // Absent rather than "", the spelling every other spec route answers
-        // with: an operation that declares no `operationId` is not one whose id
-        // is empty.
-        out["operationId"] = operation.operation_id;
-    }
-    return out;
-}
-
 /** One draft row, in the shape `requests.params` / `.headers` stores. */
 nlohmann::json row_json (const vayu::core::DraftField& row) {
     nlohmann::json out{ { "key", row.key }, { "value", row.value }, { "enabled", row.enabled } };
@@ -209,35 +197,20 @@ nlohmann::json rows_json (const std::vector<vayu::core::DraftField>& rows) {
 }
 
 /**
- * The request an import would build, in the shape a write of it takes.
+ * The draft as this route reports it: the fields an apply writes, plus the
+ * example rows it would refresh.
  *
- * `body` is the discriminated union `requests.body` stores, so applying a change
- * is a matter of choosing which of these fields to send, never of building a
- * value the comparison did not make.
- *
- * `examples` is the one field here that is *not* sent back: since issue #869 a
- * sync derives the example rows from the document it stores, and the caller
+ * `examples` is the one field here that is *not* sent back on an apply: since
+ * issue #869 a sync derives the rows from the document it stores and the caller
  * states only whether to refresh them. It is still reported, because what an
  * apply would write to a request is exactly the kind of thing a preview exists
- * to show.
+ * to show - and it is built by the one function that knows that shape, so what
+ * is shown here and what is stored there cannot drift apart.
  */
 nlohmann::json draft_json (const vayu::core::DraftRequest& draft) {
-    nlohmann::json body{ { "mode", draft.body.mode } };
-    if (draft.body.mode == "form-data" || draft.body.mode == "x-www-form-urlencoded") {
-        body["fields"] = rows_json (draft.body.fields);
-    } else if (draft.body.mode != "none") {
-        body["content"] = draft.body.content;
-    }
-
-    // The rows a sync writes for these responses, built by the one function that
-    // knows that shape (issue #869) - the caller no longer sends them back, so
-    // what is reported here and what is stored there cannot drift apart.
-    nlohmann::json examples = draft_example_rows (draft.examples);
-
-    return { { "name", draft.name }, { "description", draft.description },
-        { "method", draft.method }, { "url", draft.url }, { "params", rows_json (draft.params) },
-        { "headers", rows_json (draft.headers) }, { "body", std::move (body) },
-        { "examples", std::move (examples) } };
+    nlohmann::json out = draft_request_fields_json (draft);
+    out["examples"]    = draft_example_rows (draft.examples);
+    return out;
 }
 
 nlohmann::json fields_json (const std::vector<vayu::core::SpecFieldDiff>& fields) {
@@ -250,7 +223,90 @@ nlohmann::json fields_json (const std::vector<vayu::core::SpecFieldDiff>& fields
     return out;
 }
 
+/** The wire spelling of every field a safe apply would write. */
+nlohmann::json safe_fields_json (const std::vector<vayu::core::SpecField>& fields) {
+    nlohmann::json out = nlohmann::json::array ();
+    for (const vayu::core::SpecField field : fields) {
+        out.push_back (vayu::core::spec_field_name (field));
+    }
+    return out;
+}
+
 } // namespace
+
+nlohmann::json spec_operation_json (const vayu::core::DeclaredOperation& operation) {
+    nlohmann::json out{ { "method", operation.method }, { "path", operation.path } };
+    if (!operation.operation_id.empty ()) {
+        // Absent rather than "", the spelling every other spec route answers
+        // with: an operation that declares no `operationId` is not one whose id
+        // is empty.
+        out["operationId"] = operation.operation_id;
+    }
+    return out;
+}
+
+nlohmann::json draft_request_fields_json (const vayu::core::DraftRequest& draft) {
+    nlohmann::json body{ { "mode", draft.body.mode } };
+    if (draft.body.mode == "form-data" || draft.body.mode == "x-www-form-urlencoded") {
+        body["fields"] = rows_json (draft.body.fields);
+    } else if (draft.body.mode != "none") {
+        body["content"] = draft.body.content;
+    }
+    return { { "name", draft.name }, { "description", draft.description },
+        { "method", draft.method }, { "url", draft.url }, { "params", rows_json (draft.params) },
+        { "headers", rows_json (draft.headers) }, { "body", std::move (body) } };
+}
+
+std::optional<std::pair<int, nlohmann::json>>
+compare_bound_spec (vayu::db::Database& db,
+const std::vector<vayu::db::Collection>& collections,
+const std::unordered_set<std::string>& subtree,
+const std::string& spec_id,
+const nlohmann::ordered_json& fetched_document,
+SpecComparison& out) {
+    const auto stored = db.get_spec_document (spec_id);
+    if (!stored) {
+        return std::make_pair (409,
+        error_body (409, "Collection is bound to spec '" + spec_id +
+        "', which is not stored - rebind it before syncing"));
+    }
+    out.bound_content = stored->content;
+    out.fetched       = vayu::core::spec_request_drafts_of (fetched_document);
+
+    /*
+     * A stored document that cannot be read is not a reason to refuse to say
+     * what the *new* one declares. Every write path derives its indexes from the
+     * document (issue #853), so this is only reachable for a row written before
+     * that rule - and the honest answer there is the two-way comparison, with
+     * `previousUnknown` on every changed request saying so per request.
+     */
+    const vayu::core::DocumentRead bound_read = vayu::core::read_document (stored->content);
+    const std::optional<std::vector<vayu::core::SpecRequestDraft>> bound =
+    bound_read.ok () ?
+    std::optional<std::vector<vayu::core::SpecRequestDraft>> (
+    vayu::core::spec_request_drafts_of (bound_read.root)) :
+    std::nullopt;
+
+    const std::vector<vayu::db::Request> stored_requests =
+    collection_subtree_requests (db, collections, subtree);
+    out.requests.reserve (stored_requests.size ());
+    for (const auto& row : stored_requests) {
+        vayu::core::ComparableRequest entry;
+        entry.id          = row.id;
+        entry.name        = row.name;
+        entry.description = row.description;
+        entry.method      = vayu::to_string (row.method);
+        entry.url         = row.url;
+        entry.params      = read_rows (row.params);
+        entry.headers     = read_rows (row.headers);
+        entry.body        = read_body (row.body);
+        entry.operation   = read_identity (row.spec_operation);
+        out.requests.push_back (std::move (entry));
+    }
+
+    out.diff = vayu::core::diff_spec (out.fetched, bound ? &*bound : nullptr, out.requests);
+    return std::nullopt;
+}
 
 /**
  * Testable core of POST /specs/diff - the comparison, computed and returned,
@@ -308,78 +364,65 @@ diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
         " (raise the 'maxSpecDocumentBytes' setting to allow more)");
     }
 
-    const auto stored = db.get_spec_document (spec_id);
-    if (!stored) {
-        return { 409,
-            error_body (409, "Collection is bound to spec '" + spec_id +
-            "', which is not stored - rebind it before syncing") };
-    }
-
     const vayu::core::DocumentRead fetched_read = vayu::core::read_document (content);
     if (!fetched_read.ok ()) {
         return body_error ("Invalid 'spec.content': " + fetched_read.error);
     }
-    const std::vector<vayu::core::SpecRequestDraft> fetched =
-    vayu::core::spec_request_drafts_of (fetched_read.root);
-
-    /*
-     * A stored document that cannot be read is not a reason to refuse to say
-     * what the *new* one declares. Every write path derives its indexes from the
-     * document (issue #853), so this is only reachable for a row written before
-     * that rule - and the honest answer there is the two-way comparison, with
-     * `previousUnknown` on every changed request saying so per request.
-     */
-    const vayu::core::DocumentRead bound_read = vayu::core::read_document (stored->content);
-    const std::optional<std::vector<vayu::core::SpecRequestDraft>> bound =
-    bound_read.ok () ?
-    std::optional<std::vector<vayu::core::SpecRequestDraft>> (
-    vayu::core::spec_request_drafts_of (bound_read.root)) :
-    std::nullopt;
 
     const auto collections = db.get_collections ();
     const auto subtree     = collection_subtree_ids (collections, collection_id);
-    const auto stored_requests = collection_subtree_requests (db, collections, subtree);
 
-    std::vector<vayu::core::ComparableRequest> requests;
-    requests.reserve (stored_requests.size ());
-    for (const auto& row : stored_requests) {
-        vayu::core::ComparableRequest entry;
-        entry.id          = row.id;
-        entry.name        = row.name;
-        entry.description = row.description;
-        entry.method      = vayu::to_string (row.method);
-        entry.url         = row.url;
-        entry.params      = read_rows (row.params);
-        entry.headers     = read_rows (row.headers);
-        entry.body        = read_body (row.body);
-        entry.operation   = read_identity (row.spec_operation);
-        requests.push_back (std::move (entry));
+    // The comparison itself, shared with a `"safe"` sync (issue #871): the route
+    // that says what would change and the route that changes it read one answer,
+    // so an apply cannot write rows its preview never showed.
+    SpecComparison comparison;
+    if (auto err = compare_bound_spec (db, collections, subtree, spec_id, fetched_read.root,
+        comparison)) {
+        return *err;
     }
+    const auto& fetched  = comparison.fetched;
+    const auto& requests = comparison.requests;
+    const vayu::core::SpecDiff& diff = comparison.diff;
 
-    const vayu::core::SpecDiff diff =
-    vayu::core::diff_spec (fetched, bound ? &*bound : nullptr, requests);
+    // What an apply with no ticks would write, per entry (issue #871). Reported
+    // rather than left to the caller: the rules behind it - never write a field
+    // somebody edited, never delete, leave a request nothing can be told apart
+    // about alone - are the ones whose silent failure costs a person their work,
+    // and a second author for them is exactly what moving them here removes. The
+    // Spec tab's pre-ticked boxes are this answer read back, and
+    // `POST /specs/sync`'s `"policy": "safe"` applies the same one.
+    const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
 
     nlohmann::json added = nlohmann::json::array ();
-    for (const size_t index : diff.added) {
-        added.push_back ({ { "operation", operation_json (fetched[index].operation) },
-        { "folder", fetched[index].folder }, { "draft", draft_json (fetched[index].draft) } });
+    for (size_t i = 0; i < diff.added.size (); ++i) {
+        const size_t index = diff.added[i];
+        added.push_back ({ { "operation", spec_operation_json (fetched[index].operation) },
+        { "folder", fetched[index].folder }, { "draft", draft_json (fetched[index].draft) },
+        { "safe", safe.create[i] } });
     }
     nlohmann::json removed = nlohmann::json::array ();
-    for (const size_t index : diff.removed) {
+    for (size_t i = 0; i < diff.removed.size (); ++i) {
+        const size_t index = diff.removed[i];
         removed.push_back ({ { "requestId", requests[index].id }, { "name", requests[index].name },
-        { "operation", operation_json (*requests[index].operation) } });
+        // Present by construction: a request with no identity is `unmapped`,
+        // never removed.
+        { "operation", spec_operation_json (*requests[index].operation) },
+        { "safe", safe.remove[i] } });
     }
     nlohmann::json changed = nlohmann::json::array ();
-    for (const auto& item : diff.changed) {
+    for (size_t i = 0; i < diff.changed.size (); ++i) {
+        const auto& item  = diff.changed[i];
         const auto& entry = fetched[item.draft];
         changed.push_back ({ { "requestId", requests[item.request].id },
         { "name", requests[item.request].name },
-        { "boundOperation", operation_json (item.bound_operation) },
-        { "operation", operation_json (entry.operation) },
+        { "boundOperation", spec_operation_json (item.bound_operation) },
+        { "operation", spec_operation_json (entry.operation) },
         { "matchedBy",
         item.matched_by == vayu::core::IdentityMatch::OperationId ? "operationId" : "path" },
         { "renamed", item.renamed }, { "previousUnknown", item.previous_unknown },
-        { "fields", fields_json (item.fields) }, { "draft", draft_json (entry.draft) } });
+        { "fields", fields_json (item.fields) }, { "draft", draft_json (entry.draft) },
+        { "safe", safe.update[i].apply },
+        { "safeFields", safe_fields_json (safe.update[i].fields) } });
     }
 
     return { 200,
@@ -387,7 +430,7 @@ diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
         // The stored bytes rather than a hash of them: the engine hashes what it
         // stores, and a second opinion about whether two documents are the same
         // is the one thing this route exists to prevent.
-        { "identical", stored->content == content }, { "added", std::move (added) },
+        { "identical", comparison.bound_content == content }, { "added", std::move (added) },
         { "removed", std::move (removed) }, { "changed", std::move (changed) },
         { "unchanged", diff.unchanged }, { "unmapped", diff.unmapped } } };
 }

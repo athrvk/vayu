@@ -318,6 +318,15 @@ When the bound document cannot be read at all, nothing about that request is
 ticked for you: "you edited this" is a three-way judgement, and with one side
 missing it is not a judgement anything can make.
 
+**The engine decides what arrives ticked** (issue #871). Every row of that table
+is `core::safe_spec_apply`, reported per entry on `POST /specs/diff` as `safe`
+and `safeFields`; this section reads those marks rather than working the rules
+out a second time. The reason is the two rows in bold: their silent failure
+costs you work, and the same rules now answer for a caller with no checkboxes -
+`POST /specs/sync` takes `policy: "safe"` and applies exactly what the marks
+say, which is what an agent's `sync_spec` sends. Change a tick and the app sends
+explicit rows again, because a choice you made is not a policy.
+
 **Applying is one call and one engine transaction.** The re-fetched document is
 stored, the collection's binding moves to it, and every created, updated and
 deleted request lands with it - or none of it does and the collection stays
