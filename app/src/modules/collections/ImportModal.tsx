@@ -62,6 +62,28 @@ import { MethodBadge } from "@/components/shared";
 type Tab = "file" | "url" | "paste";
 type Phase = "idle" | "detecting" | "preview" | "error";
 
+/**
+ * What one tab is showing and doing (issue #884).
+ *
+ * `entries` is one row per picked document, in pick order (issue #666). A single
+ * file is this same list with one entry, so the URL and Paste tabs - single by
+ * construction - travel the batch path rather than a second one beside it. Each
+ * entry carries its own bundled text, its own parse and its own apply outcome;
+ * nothing about a batch is derived from another file's.
+ *
+ * `progress` is what this tab is doing right now, or null when it waits on the
+ * user (issue #882). `phase` alone could not carry it: `detecting` covers a
+ * download, a `$ref` walk and N engine parses alike.
+ */
+interface TabState {
+	phase: Phase;
+	error: string;
+	entries: BatchEntry[];
+	progress: ImportProgress | null;
+}
+
+const IDLE_TAB: TabState = { phase: "idle", error: "", entries: [], progress: null };
+
 const FORMAT_BADGES = [
 	"Postman v2.1",
 	"Postman v2.0",
@@ -80,17 +102,25 @@ export function ImportModal() {
 	const openCollectionSpecTab = useTabsStore((s) => s.openCollectionSpecTab);
 
 	const [tab, setTab] = useState<Tab>("file");
-	const [phase, setPhase] = useState<Phase>("idle");
-	const [error, setError] = useState("");
 	/**
-	 * One row per picked document, in pick order (issue #666).
+	 * Every tab's state, side by side (issue #884).
 	 *
-	 * A single file is this same list with one entry, so the URL and Paste tabs -
-	 * single by construction - travel the batch path rather than a second one
-	 * beside it. Each entry carries its own bundled text, its own parse and its
-	 * own apply outcome; nothing about a batch is derived from another file's.
+	 * These four used to be one `phase`, one `entries`, one `error` and one
+	 * `progress` for the whole dialog, and switching tab called a `reset()` over
+	 * them - which cleared the *display* and did nothing at all to the work. A URL
+	 * fetch went on running, and when it landed it wrote its preview into that
+	 * shared state: the document appeared under whichever tab the user had
+	 * switched to, and the URL they had typed was gone.
+	 *
+	 * So a tab's work belongs to the tab, and every async writer patches the tab
+	 * it *started on* rather than the one that happens to be active when it
+	 * finishes - see `patchTab`.
 	 */
-	const [entries, setEntries] = useState<BatchEntry[]>([]);
+	const [tabs, setTabs] = useState<Record<Tab, TabState>>(() => ({
+		file: IDLE_TAB,
+		url: IDLE_TAB,
+		paste: IDLE_TAB,
+	}));
 	const [pasteText, setPasteText] = useState("");
 	const [url, setUrl] = useState("");
 	const [importEnvironments, setImportEnvironments] = useState(true);
@@ -100,39 +130,95 @@ export function ImportModal() {
 	 * fork is on screen; `null` when it is not (issue #680).
 	 */
 	const [reimports, setReimports] = useState<SpecReimportMatch[] | null>(null);
-	/** The bound-document lookup is a round trip - see `handleImport`. */
-	const [checkingBindings, setCheckingBindings] = useState(false);
 	/**
-	 * What the dialog is doing right now, or null when it is waiting on the user
-	 * (issue #882).
+	 * The bound-document lookup is a round trip - see `handleImport`.
 	 *
-	 * `phase` alone could not carry this: `detecting` covered a download, a `$ref`
-	 * walk and N engine parses alike, and was read by nothing that renders - so
-	 * the File tab showed the untouched dropzone for the whole of a 13-file pick.
+	 * Dialog-wide rather than per-tab, and deliberately: it gates the *apply*,
+	 * only one of which can be in flight, and the fork it leads to is a modal over
+	 * this dialog - so there is no tab to switch to while it runs.
 	 */
-	const [progress, setProgress] = useState<ImportProgress | null>(null);
+	const [checkingBindings, setCheckingBindings] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const folderInputRef = useRef<HTMLInputElement>(null);
 	const { maxBytes: specMaxBytes } = useSpecDocumentLimit();
+
+	/**
+	 * Which run of each tab is current (issue #884).
+	 *
+	 * A generation rather than an abort path per stage, because the writes are
+	 * what must stop and there are four kinds of them - the fetch, the detect, an
+	 * option re-parse and the apply's outcomes. Each captures its tab's number at
+	 * the start and drops its patch if the number has moved, which happens when
+	 * the dialog closes or the tab is reset. `handleClose` never blocked on
+	 * `detecting`, so closing mid-detect used to let the parse finish and write a
+	 * preview into the state the dialog next opened with.
+	 *
+	 * A ref, not state: it is read inside async work that must see the current
+	 * value, not the one captured when its closure was made.
+	 */
+	const generation = useRef<Record<Tab, number>>({ file: 0, url: 0, paste: 0 });
+	/**
+	 * The in-flight URL download's cancel, or null.
+	 *
+	 * The generation guard above stops the *writes*; this stops the *work*. Only
+	 * the fetch has one, because it is the only stage that goes on costing
+	 * something after nobody is listening - the engine reads the rest of a 10 MB
+	 * document either way.
+	 */
+	const fetchAbort = useRef<AbortController | null>(null);
+
+	const active = tabs[tab];
+	const { phase, error, entries, progress } = active;
+
+	/**
+	 * Write into one tab's slice, unless that tab has moved on.
+	 *
+	 * Functional, always. Two tabs are sibling keys of one record and their
+	 * writers genuinely overlap - a URL download's progress tick lands while a
+	 * File pick is mid-parse - so a spread over a captured snapshot would drop
+	 * whichever landed first.
+	 */
+	const patchTab = (t: Tab, at: number, patch: Partial<TabState>): void => {
+		if (generation.current[t] !== at) return;
+		setTabs((current) => ({ ...current, [t]: { ...current[t], ...patch } }));
+	};
+
+	/** Abandon whatever this tab was doing, so no late write can land on it. */
+	const supersede = (t: Tab): number => {
+		generation.current[t] += 1;
+		if (t === "url") {
+			fetchAbort.current?.abort();
+			fetchAbort.current = null;
+		}
+		return generation.current[t];
+	};
 
 	/** The one-file case, which renders the full preview rather than a ledger row. */
 	const single = entries.length === 1 ? entries[0] : null;
 	/** What Import would send: included, parsed, and carrying something to create. */
 	const applicable = applicableEntries(entries);
 
-	const reset = () => {
-		setPhase("idle");
-		setError("");
-		setEntries([]);
-		setPasteText("");
-		setUrl("");
-		setReimports(null);
-		setProgress(null);
+	/**
+	 * Put one tab back to empty, and abandon whatever it was doing.
+	 *
+	 * The Dismiss button on a preview, and the whole dialog closing. **Not** a tab
+	 * switch: that used to call this, which is how a running fetch lost the URL it
+	 * was fetching while going on fetching it.
+	 */
+	const resetTab = (t: Tab) => {
+		const at = supersede(t);
+		if (t === "url") setUrl("");
+		if (t === "paste") setPasteText("");
+		patchTab(t, at, IDLE_TAB);
 	};
 
 	const handleClose = () => {
 		if (importMutation.isPending || checkingBindings) return;
-		reset();
+		// Every tab, not just the visible one: another may be mid-download, and a
+		// dialog that reopens showing work the user closed is the same leak this
+		// change is about.
+		(["file", "url", "paste"] as Tab[]).forEach(resetTab);
+		setReimports(null);
 		close();
 	};
 
@@ -147,10 +233,9 @@ export function ImportModal() {
 	 * uses whichever a given ref needs: a file already in this batch, a sibling on
 	 * disk through the gated IPC, or an absolute URL through the engine proxy.
 	 */
-	const runBatch = async (documents: BatchDocument[]): Promise<void> => {
+	const runBatch = async (t: Tab, at: number, documents: BatchDocument[]): Promise<void> => {
 		if (documents.length === 0) return;
-		setPhase("detecting");
-		setError("");
+		patchTab(t, at, { phase: "detecting", error: "" });
 		const readSpecFile = window.electronAPI?.readSpecFile;
 		const next = await detectBatch(
 			documents,
@@ -177,41 +262,48 @@ export function ImportModal() {
 						}
 					: {}),
 			},
-			setProgress
+			(reported) => patchTab(t, at, { progress: reported })
 		);
-		setProgress(null);
-		setEntries(next);
 		// One document that failed is the whole import failing, and says so where
 		// it always did. Several is a ledger: the failures are rows in it, beside
 		// the files that did parse, which is the only way a batch can report a
 		// mixed outcome at all.
-		if (next.length === 1 && next[0].error) {
-			setError(next[0].error);
-			setPhase("error");
-			return;
-		}
-		setPhase("preview");
+		const failedAlone = next.length === 1 && next[0].error;
+		patchTab(t, at, {
+			progress: null,
+			entries: next,
+			...(failedAlone
+				? { error: next[0].error as string, phase: "error" as const }
+				: { phase: "preview" as const }),
+		});
 	};
 
-	// Re-parse every entry when an option toggle changes in preview, from the text
-	// already bundled - nothing is re-fetched, and each file keeps the source it
-	// was read from. A re-parse that dropped the fetched URL would store a spec
-	// with nothing to re-fetch from, and the toggles say nothing about where any
-	// of the bytes came from.
-	// The parse is a round trip to the engine now (issue #877), so this reads the
-	// entries and writes the result back rather than updating from the previous
-	// state: a functional `setEntries` cannot await. The toggles are two
-	// checkboxes on a dialog that is already showing a preview, so there is no
-	// second writer to race with.
+	/**
+	 * Re-parse when an option toggle changes, from the text already bundled -
+	 * nothing is re-fetched, and each file keeps the source it was read from. A
+	 * re-parse that dropped the fetched URL would store a spec with nothing to
+	 * re-fetch from, and the toggles say nothing about where any of the bytes came
+	 * from.
+	 *
+	 * **Every tab holding a parse, not just the one on screen** (issue #884). The
+	 * two options are dialog-wide while the entries are per-tab, so re-parsing
+	 * only the visible tab leaves the other one holding a parse made under the old
+	 * options - and importing it later would apply a setting the checkbox says is
+	 * off. The alternative was per-tab options, which would mean the same two
+	 * checkboxes answering differently depending on which tab was showing.
+	 */
 	const redetect = (next: { importEnvironments: boolean; importScripts: boolean }) => {
-		if (phase !== "preview") return;
-		// Reported like the first parse, because it *is* the first parse again -
-		// one engine round trip per file, which on a folder pick is a wait a
-		// checkbox click should not make look instant.
-		void reparseBatch(entries, next, setProgress).then((reparsed) => {
-			setProgress(null);
-			setEntries(reparsed);
-		});
+		for (const t of ["file", "url", "paste"] as Tab[]) {
+			const state = tabs[t];
+			if (state.phase !== "preview" || state.entries.length === 0) continue;
+			const at = generation.current[t];
+			// Reported like the first parse, because it *is* the first parse again -
+			// one engine round trip per file, which on a folder pick is a wait a
+			// checkbox click should not make look instant.
+			void reparseBatch(state.entries, next, (reported) =>
+				patchTab(t, at, { progress: reported })
+			).then((reparsed) => patchTab(t, at, { progress: null, entries: reparsed }));
+		}
 	};
 
 	/**
@@ -262,16 +354,20 @@ export function ImportModal() {
 	 */
 	const handleFiles = async (files: File[], filterExtensions = false): Promise<void> => {
 		const picked = filterExtensions ? files.filter((f) => isImportableFileName(f.name)) : files;
+		// A pick supersedes whatever this tab was showing, so a late write from the
+		// previous one cannot land on top of the new pick's.
+		const at = supersede("file");
 		if (picked.length === 0) {
 			if (files.length > 0) {
-				setError("No .json, .yaml or .yml files in that folder.");
-				setPhase("error");
+				patchTab("file", at, {
+					error: "No .json, .yaml or .yml files in that folder.",
+					phase: "error",
+				});
 			}
 			return;
 		}
-		setPhase("detecting");
-		setProgress({ stage: "reading" });
-		await runBatch(await Promise.all(picked.map(readDocument)));
+		patchTab("file", at, { phase: "detecting", progress: { stage: "reading" } });
+		await runBatch("file", at, await Promise.all(picked.map(readDocument)));
 	};
 
 	// Fetching a URL is the only source the user can enter twice by hand, so it is
@@ -286,9 +382,19 @@ export function ImportModal() {
 	// is what puts the progress panel on screen (issue #882).
 	const isBusy = phase === "detecting";
 
+	/** Detect and preview a pasted document, on the Paste tab's own slice. */
+	const handlePaste = async (): Promise<void> => {
+		if (isBusy) return;
+		const at = supersede("paste");
+		await runBatch("paste", at, [{ text: pasteText }]);
+	};
+
 	const handleFetchUrl = async () => {
 		if (isBusy) return;
-		setPhase("detecting");
+		const at = supersede("url");
+		const abort = new AbortController();
+		fetchAbort.current = abort;
+		patchTab("url", at, { phase: "detecting", error: "" });
 		try {
 			// No `maxBytes`: this box takes any format, and a Postman or
 			// Insomnia export is never stored as a spec document, so bounding it
@@ -300,14 +406,24 @@ export function ImportModal() {
 			// The third argument is what asks the engine to stream its download
 			// (issue #882). Without it this route answers only once the whole body
 			// is buffered, which for an 8 MB spec is the frozen dialog this closes.
-			const { content } = await apiService.importFetch(url, undefined, (received) =>
-				setProgress({ stage: "fetching", ...received })
+			// The fourth argument is this tab's cancel (issue #884). Without it the
+			// engine goes on reading a 10 MB document after the dialog that asked
+			// for it has closed.
+			const { content } = await apiService.importFetch(
+				url,
+				undefined,
+				(received) => patchTab("url", at, { progress: { stage: "fetching", ...received } }),
+				abort.signal
 			);
-			await runBatch([{ text: content, sourceUrl: url }]);
+			await runBatch("url", at, [{ text: content, sourceUrl: url }]);
 		} catch (e) {
-			setProgress(null);
-			setError((e as Error).message);
-			setPhase("error");
+			// A cancel is not a failure to report: the only way to reach it is to
+			// close the dialog, and an error banner would be waiting the next time
+			// it opened, about a download the user themselves stopped.
+			if (abort.signal.aborted) return;
+			patchTab("url", at, { progress: null, error: (e as Error).message, phase: "error" });
+		} finally {
+			if (fetchAbort.current === abort) fetchAbort.current = null;
 		}
 	};
 
@@ -366,10 +482,15 @@ export function ImportModal() {
 	 */
 	const runImport = async () => {
 		if (applicable.length === 0) return;
+		// The tab this apply belongs to, captured now: it writes outcomes onto its
+		// own rows, and the user may be looking at another tab by the time the
+		// engine has answered for every file.
+		const t = tab;
+		const at = generation.current[t];
 		const outcomes = new Map<string, BatchEntry["outcome"]>();
 		// The apply is one transaction per file and always was; the only sign of it
 		// used to be a button reading "Importing…" for all of them.
-		setProgress({ stage: "applying", done: 0, total: applicable.length });
+		patchTab(t, at, { progress: { stage: "applying", done: 0, total: applicable.length } });
 		for (const entry of applicable) {
 			const result = entry.result as ImportResult;
 			try {
@@ -394,34 +515,49 @@ export function ImportModal() {
 				// resolves that back to the name shown in the preview (issue #173).
 				outcomes.set(entry.id, { ok: false, message: importFailureMessage(e, result) });
 			}
-			setProgress({ stage: "applying", done: outcomes.size, total: applicable.length });
+			patchTab(t, at, {
+				progress: { stage: "applying", done: outcomes.size, total: applicable.length },
+			});
 		}
-		setProgress(null);
 		const failures = [...outcomes.values()].filter((o) => o && !o.ok);
 		if (failures.length === 0) {
 			handleClose();
 			return;
 		}
-		setEntries((current) =>
-			current.map((entry) => {
-				const outcome = outcomes.get(entry.id);
-				return outcome ? { ...entry, outcome, included: false } : entry;
-			})
-		);
-		// One file: the engine's own message, where it has always been. Several:
-		// the count, because each row already carries its own message.
-		setError(
-			outcomes.size === 1
-				? (failures[0]?.message ?? "Import failed")
-				: `${failures.length} of ${outcomes.size} files failed to import.`
-		);
+		setTabs((current) => {
+			if (generation.current[t] !== at) return current;
+			return {
+				...current,
+				[t]: {
+					...current[t],
+					progress: null,
+					entries: current[t].entries.map((entry) => {
+						const outcome = outcomes.get(entry.id);
+						return outcome ? { ...entry, outcome, included: false } : entry;
+					}),
+					// One file: the engine's own message, where it has always been.
+					// Several: the count, because each row carries its own message.
+					error:
+						outcomes.size === 1
+							? (failures[0]?.message ?? "Import failed")
+							: `${failures.length} of ${outcomes.size} files failed to import.`,
+				},
+			};
+		});
 	};
 
 	/** Include or exclude one file of the batch. Nothing re-parses; only the apply set changes. */
 	const toggleEntry = (id: string, included: boolean) => {
-		setEntries((current) =>
-			current.map((entry) => (entry.id === id ? { ...entry, included } : entry))
-		);
+		const t = tab;
+		setTabs((current) => ({
+			...current,
+			[t]: {
+				...current[t],
+				entries: current[t].entries.map((entry) =>
+					entry.id === id ? { ...entry, included } : entry
+				),
+			},
+		}));
 	};
 
 	const toggleEnvironments = (v: boolean) => {
@@ -443,10 +579,14 @@ export function ImportModal() {
 						<PreviewView
 							result={single.result}
 							importEnvironments={importEnvironments}
-							onDismiss={reset}
+							onDismiss={() => resetTab(tab)}
 						/>
 					) : (
-						<BatchLedger entries={entries} onToggle={toggleEntry} onDismiss={reset} />
+						<BatchLedger
+							entries={entries}
+							onToggle={toggleEntry}
+							onDismiss={() => resetTab(tab)}
+						/>
 					)}
 					{/* An apply that failed leaves the list on screen - the per-file
 					    outcomes are in it - so the message that would have replaced it
@@ -592,7 +732,7 @@ export function ImportModal() {
 								className="h-40 w-full font-mono text-xs"
 							/>
 							<Button
-								onClick={() => void runBatch([{ text: pasteText }])}
+								onClick={() => void handlePaste()}
 								disabled={!pasteText.trim() || isBusy}
 								className="mt-2"
 							>
@@ -686,10 +826,11 @@ export function ImportModal() {
 				 */}
 				<Tabs
 					value={tab}
-					onValueChange={(v) => {
-						setTab(v as Tab);
-						reset();
-					}}
+					// Switching tab shows the other tab, and that is all it does
+					// (issue #884). It used to `reset()` the one shared state, which
+					// cleared the display of work that went right on running - and
+					// then landed under whichever tab was showing when it finished.
+					onValueChange={(v) => setTab(v as Tab)}
 					className="flex min-h-0 flex-1 flex-col"
 				>
 					<TabsList className="w-full px-4">
