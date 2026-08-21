@@ -792,6 +792,30 @@
 	}
 }
 
+/*
+ * Indeterminate progress (see components/ui/progress.tsx).
+ *
+ * For work whose total nobody stated - a download whose upstream declared no
+ * Content-Length. The stripe crosses the track rather than growing from its
+ * start, because growth reads as a fraction and there is no fraction to report.
+ * The reduced-motion rule below collapses this like any other animation, which
+ * is why every caller of this state also shows a figure that keeps changing.
+ */
+@keyframes progress-indeterminate {
+	0% {
+		transform: translateX(-100%);
+	}
+	100% {
+		transform: translateX(400%);
+	}
+}
+
+@layer components {
+	.progress-indeterminate {
+		animation: progress-indeterminate 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+	}
+}
+
 @keyframes vayu-fadepulse {
 	0%,
 	100% {

@@ -143,6 +143,8 @@ export { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "./resizabl
 
 export { Collapsible, CollapsibleTrigger, CollapsibleContent } from "./collapsible";
 
+export { Progress } from "./progress";
+export type { ProgressProps } from "./progress";
 export { Skeleton } from "./skeleton";
 
 export { Switch } from "./switch";

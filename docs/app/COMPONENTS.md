@@ -1414,7 +1414,7 @@ since it is always under the provider.
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
 
 ### `dialog`
 
@@ -1435,6 +1435,24 @@ The `cva` definitions for `badge`, `button` and `toast` live in sibling
 module that exports both a component and a value cannot be hot-reloaded, which
 is the only reason for the split - import `badgeVariants` / `buttonVariants` /
 `toastVariants` from `@/components/ui` as before.
+
+### `progress`
+
+A determinate or indeterminate bar over `@radix-ui/react-progress`
+(issue [#882](https://github.com/athrvk/vayu/issues/882)). `value` is a fraction
+0..1, or **null** when nothing stated a total to be a fraction of - a download
+whose upstream declared no `Content-Length`. Null is not zero and must not
+collapse into it: Radix drops `aria-valuenow` for it, and this adds `aria-busy`,
+which Radix expresses only as `data-state="indeterminate"` (a styling hook that
+tells a screen reader nothing). `label` is required, because a bar is a number
+with no noun in it.
+
+The indeterminate stripe animates through `.progress-indeterminate` in
+`index.css`, so the global `prefers-reduced-motion` rule collapses it like any
+other animation. Every caller of that state therefore also shows a figure that
+keeps changing (bytes received): the information is in the text and the motion is
+only the hint that something is still happening. Sole consumer so far is
+`modules/collections/ImportProgressView.tsx`.
 
 ### `info-chip`
 

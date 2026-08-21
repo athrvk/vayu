@@ -518,7 +518,7 @@ apiService.updateGlobals(variables): Promise<GlobalVariables>
 #### Import
 
 ```typescript
-apiService.importFetch(url, maxBytes?): Promise<ImportFetchResponse> // POST /import/fetch
+apiService.importFetch(url, maxBytes?, onProgress?): Promise<ImportFetchResponse> // POST /import/fetch
 apiService.applyImport(payload): Promise<ImportApplyResponse>      // POST /import/apply
 ```
 
@@ -530,6 +530,24 @@ exports as well as OpenAPI documents - so the caller states it: the spec paths
 import URL box passes nothing, leaving the engine's transport ceiling. Over the
 bound is a `413` whose message names it, raised while the body is arriving
 rather than after it has been buffered whole.
+
+`importFetch`'s third argument is what asks the engine to **stream** the download
+(issue [#882](https://github.com/athrvk/vayu/issues/882)): with an `onProgress`
+callback the call goes through `httpClient.stream`, which sends
+`Accept: text/event-stream` and reports `{received, total}` as the bytes land -
+`total` being null whenever the upstream declared no `Content-Length`. Without it
+this is the buffered POST it has always been, which is what `$ref` bundling and
+spec re-fetch want: they have nowhere to draw a bar and no reason to pay for a
+stream.
+
+Two things `httpClient.stream` does that `request` cannot. Its timeout is an
+**idle** one, so a 10 MB document arriving steadily is no longer racing
+`proxiedRequestTimeoutMs` - what is bounded is the stall, not the transfer. And a
+response that comes back as buffered JSON yields one `buffered` message instead
+of failing, because the app and the engine sidecar are not updated together and
+an older engine answers this request the way it always has. Abandoning the
+iteration cancels the body stream, which is what makes the engine stop
+downloading when the import dialog closes.
 
 `applyImport` sends a whole parsed import - collections, requests, environments
 and **spec documents** - in one atomic call. Items reference each other by
