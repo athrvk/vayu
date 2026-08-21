@@ -2212,6 +2212,19 @@ themselves and the rest pass nothing.
   not, so nothing buffers the whole document first. A declared length is what the
   refusal names as the size.
 
+**A fetch is bounded by a stall, not by a total** (issue
+[#882](https://github.com/athrvk/vayu/issues/882)). This route used to inherit
+the 30-second `timeout_ms` every request carries, which bounds a download's
+*size* rather than its health: 10 MB needed better than 340 KB/s merely to
+arrive, and the failure read `Operation timed out after 30001 milliseconds with
+4177920 out of 6296254 bytes received` for a transfer that had never once
+stopped. It is now abandoned only after
+`constants::import_fetch::STALL_TIMEOUT_MS` below
+`STALL_FLOOR_BYTES_PER_SEC` - so a slow link finishes, slowly, and a dead one
+still ends. What bounds a transfer that never ends at all is `maxBytes` above,
+which is the bound that was always meant. Both forms of the route get this: a
+document must not arrive on one and time out on the other.
+
 **Response:** `200`
 ```json
 {
@@ -2235,6 +2248,38 @@ never turn into a `500`.
   asked for) and the size when the upstream declared one.
 - `502` `Failed to fetch: <detail>` - the upstream request failed
   (connection error, transport failure).
+
+**With `Accept: text/event-stream` the same fetch answers as a stream**
+(issue [#882](https://github.com/athrvk/vayu/issues/882)), reporting the
+download as it arrives. An 8 MB spec behind a URL is otherwise a client with
+nothing to draw: the buffered form above cannot say a word until libcurl holds
+the entire body, and the wait is on the *upstream* download, so no amount of
+streaming between engine and client would help.
+
+Three events, and the last one is always terminal:
+
+| Event | Data | Meaning |
+|-------|------|---------|
+| `progress` | `{"received": 262144, "total": 8388608}` | Bytes buffered so far. `total` is the upstream's `Content-Length` and is **null** when it declared none - a chunked response has no denominator, so a client shows bytes received rather than a percentage of a number nobody stated. |
+| `result` | `{"content": "...", "contentType": "application/json"}` | Exactly what the buffered form returns. |
+| `error` | `{"status": 413, "error": {"code": "error", "message": "..."}}` | The failure the buffered form would have answered with. |
+
+- **A malformed request is still the `400` above**, on both forms: it is decided
+  before any of the response has gone out, while a status is still available to
+  say it with.
+- **A failed fetch is an `error` event, not a status.** The response headers left
+  before the download began, so the `200` is already spent - which is why that
+  event carries the numeric `status` itself. The standard error body could not:
+  its `code` is a slug, and `413` and `404` both slug to plain `error`.
+- Progress is throttled to at most one frame per 256 KiB or 100 ms
+  (`constants::import_fetch::PROGRESS_EVERY_BYTES` / `_MS`). libcurl reports
+  every ~16 KiB write, which for a 10 MB document is ~640 frames for a bar with
+  a few hundred pixels to cross.
+- **Closing the stream stops the download.** The engine abandons the transfer as
+  soon as a write to the SSE sink fails, rather than reading the remaining
+  megabytes for a client that has gone.
+- Every caller that sends no `Accept` gets the buffered JSON unchanged, which is
+  what `$ref` bundling, spec re-fetch and the MCP tools do.
 
 ### POST /import/parse
 

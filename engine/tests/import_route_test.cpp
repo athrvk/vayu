@@ -9,19 +9,34 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/client.hpp"
 #include "vayu/http/transport_policy.hpp"
 
 namespace vayu::http::routes {
 // Declared in import.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
 const vayu::http::TransportPolicy& transport);
+
+// The streaming half of the same route (issue #882). `emit` takes one SSE
+// event's name and data and returns false once its listener has gone.
+using ImportFetchEmitter =
+std::function<bool (const std::string& event, const nlohmann::json& data)>;
+std::pair<int, nlohmann::json> import_fetch_stream (const std::string& request_body,
+const vayu::http::TransportPolicy& transport, const ImportFetchEmitter& emit);
+
+// The client config both forms build, so the bounds a fetch runs under can be
+// asserted without a test that waits out a 30-second stall window.
+vayu::http::ClientConfig
+import_fetch_client_config (size_t max_bytes, const vayu::http::TransportPolicy& transport);
 } // namespace vayu::http::routes
 
 namespace {
@@ -31,6 +46,11 @@ namespace {
 /// for anything close to all of them - which is how `served()` proves the
 /// refusal happened while the bytes were arriving.
 constexpr size_t CHUNK_BYTES         = 1024;
+
+/// `/slow` serves this much in these pieces, 20ms apart - ~1.3s of transfer at
+/// ~190 KB/s, below the ~340 KB/s a 30s total bound demands of a 10 MB file.
+constexpr size_t SLOW_CHUNK = 4 * 1024;
+constexpr size_t SLOW_BYTES = 256 * 1024;
 constexpr size_t CHUNKED_TOTAL_BYTES = 4 * 1024 * 1024;
 
 class MockSpecServer {
@@ -48,6 +68,21 @@ class MockSpecServer {
         svr_.Get ("/large", [large_bytes] (const httplib::Request&, httplib::Response& res) {
             res.set_content (std::string (large_bytes, 'x'), "application/octet-stream");
         });
+        // Steady but slow: every chunk arrives, none quickly. A total timeout
+        // kills this for its size; a stall timeout lets it finish.
+        svr_.Get ("/slow", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider ("application/json",
+            [] (size_t offset, httplib::DataSink& sink) {
+                if (offset >= SLOW_BYTES) {
+                    sink.done ();
+                    return true;
+                }
+                std::this_thread::sleep_for (std::chrono::milliseconds (20));
+                const std::string chunk (SLOW_CHUNK, 's');
+                return sink.write (chunk.data (), chunk.size ());
+            });
+        });
+
         // No Content-Length at all, so only the write callback can stop it.
         svr_.Get ("/chunked", [this] (const httplib::Request&, httplib::Response& res) {
             res.set_chunked_content_provider ("application/octet-stream",
@@ -239,6 +274,191 @@ TEST (ImportFetchBound, AStatedBoundOverTheCeilingIsClampedRatherThanRefused) {
 
     EXPECT_EQ (status, 200);
     EXPECT_EQ (json["content"].get<std::string> (), R"({"openapi":"3.0.0"})");
+}
+
+// ---------------------------------------------------------------------------
+// The streaming variant (issue #882)
+// ---------------------------------------------------------------------------
+//
+// A 10 MB spec behind a URL used to be a frozen dialog: the route buffered the
+// whole download before it built a single byte of response, so the renderer had
+// nothing to draw. The stream reports the arrival as it happens.
+//
+// Tested through the emitter rather than through a socket. The route's own job
+// is *what* it emits and in what order; turning an event into `event:`/`data:`
+// lines and pushing them down a `DataSink` is httplib's, and asserting on a
+// real connection would trade the whole of this coverage for a flaky port.
+
+/// One emitted event, as it was emitted.
+struct Emitted {
+    std::string event;
+    nlohmann::json data;
+};
+
+/// Collects every event, and optionally stops listening after the first.
+class Recorder {
+    public:
+    explicit Recorder (bool keep_listening = true) : keep_listening_ (keep_listening) {
+    }
+
+    vayu::http::routes::ImportFetchEmitter emitter () {
+        return [this] (const std::string& event, const nlohmann::json& data) {
+            events.push_back ({ event, data });
+            return keep_listening_;
+        };
+    }
+
+    /// Events of one name, in order.
+    std::vector<nlohmann::json> of (const std::string& name) const {
+        std::vector<nlohmann::json> matching;
+        for (const auto& emitted : events) {
+            if (emitted.event == name) {
+                matching.push_back (emitted.data);
+            }
+        }
+        return matching;
+    }
+
+    std::vector<Emitted> events;
+
+    private:
+    bool keep_listening_;
+};
+
+TEST (ImportFetchStream, ReportsProgressAndThenTheResult) {
+    MockSpecServer mock (64 * 1024);
+    Recorder recorder;
+
+    const auto [status, body] = vayu::http::routes::import_fetch_stream (
+    fetch_body (mock.url ("/large")), vayu::http::TransportPolicy{}, recorder.emitter ());
+
+    // Nothing to answer with a status: the outcome went out as an event.
+    EXPECT_EQ (status, 200);
+    EXPECT_TRUE (body.is_null ());
+
+    const auto progress = recorder.of ("progress");
+    ASSERT_FALSE (progress.empty ());
+    for (const auto& tick : progress) {
+        EXPECT_EQ (tick["total"].get<uint64_t> (), 64U * 1024U);
+        EXPECT_LE (tick["received"].get<uint64_t> (), 64U * 1024U);
+    }
+
+    // The result is last, and carries what the non-streaming route returns.
+    ASSERT_FALSE (recorder.events.empty ());
+    EXPECT_EQ (recorder.events.back ().event, "result");
+    const auto& result = recorder.events.back ().data;
+    EXPECT_EQ (result["content"].get<std::string> (), std::string (64 * 1024, 'x'));
+    EXPECT_EQ (result["contentType"].get<std::string> (), "application/octet-stream");
+}
+
+TEST (ImportFetchStream, ReportsNoTotalForAResponseThatDeclaresNoLength) {
+    MockSpecServer mock;
+    Recorder recorder;
+
+    vayu::http::routes::import_fetch_stream (
+    fetch_body (mock.url ("/chunked")), vayu::http::TransportPolicy{}, recorder.emitter ());
+
+    const auto progress = recorder.of ("progress");
+    ASSERT_FALSE (progress.empty ());
+    // Null rather than a guess: the dialog draws "4.2 MB received" for this,
+    // and inventing a denominator would be inventing the percentage with it.
+    for (const auto& tick : progress) {
+        EXPECT_TRUE (tick["total"].is_null ());
+    }
+}
+
+TEST (ImportFetchStream, ThrottlesProgressWellBelowOneEventPerWrite) {
+    // 4 MiB arriving in curl's ~16 KiB writes is ~256 callbacks. Relaying each
+    // one is 256 SSE frames for a bar that has 400-odd pixels to move across.
+    MockSpecServer mock;
+    Recorder recorder;
+
+    vayu::http::routes::import_fetch_stream (
+    fetch_body (mock.url ("/chunked")), vayu::http::TransportPolicy{}, recorder.emitter ());
+
+    const auto progress = recorder.of ("progress");
+    ASSERT_FALSE (progress.empty ());
+    EXPECT_LT (progress.size (), 64U);
+}
+
+TEST (ImportFetchStream, ReportsAFailedFetchAsAnErrorEvent) {
+    Recorder recorder;
+
+    const auto [status, body] = vayu::http::routes::import_fetch_stream (
+    fetch_body ("http://127.0.0.1:1/spec.json"), vayu::http::TransportPolicy{},
+    recorder.emitter ());
+
+    // Still a 200: the response headers went out before the fetch began, so a
+    // status is no longer available to say this with. Which is why the event
+    // carries the numeric one - the standard error body's `code` is a slug
+    // (`bad_gateway`), and 413 and 404 both slug to plain "error".
+    EXPECT_EQ (status, 200);
+    ASSERT_FALSE (recorder.events.empty ());
+    EXPECT_EQ (recorder.events.back ().event, "error");
+    EXPECT_EQ (recorder.events.back ().data["status"].get<int> (), 502);
+    EXPECT_FALSE (
+    recorder.events.back ().data["error"]["message"].get<std::string> ().empty ());
+    EXPECT_TRUE (recorder.of ("result").empty ());
+}
+
+TEST (ImportFetchStream, ReportsAnOverBoundResponseAsAnErrorEvent) {
+    MockSpecServer mock (64 * 1024);
+    Recorder recorder;
+
+    vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/large"), 1024),
+    vayu::http::TransportPolicy{}, recorder.emitter ());
+
+    ASSERT_FALSE (recorder.events.empty ());
+    EXPECT_EQ (recorder.events.back ().event, "error");
+    // The same 413 the buffered route answers with, carried as an event.
+    EXPECT_EQ (recorder.events.back ().data["status"].get<int> (), 413);
+}
+
+TEST (ImportFetchStream, RefusesAnInvalidRequestBeforeEmittingAnything) {
+    Recorder recorder;
+
+    const auto [status, body] = vayu::http::routes::import_fetch_stream (
+    fetch_body ("ftp://example.com/spec.json"), vayu::http::TransportPolicy{},
+    recorder.emitter ());
+
+    // Nothing has been written yet, so this is still a status the client reads
+    // the same way it reads the buffered route's.
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"]["message"].get<std::string> (), "Invalid URL");
+    EXPECT_TRUE (recorder.events.empty ());
+}
+
+TEST (ImportFetchStream, StopsFetchingOnceTheListenerHasGone) {
+    MockSpecServer mock;
+    Recorder recorder (false); // The socket died after the first frame.
+
+    vayu::http::routes::import_fetch_stream (
+    fetch_body (mock.url ("/chunked")), vayu::http::TransportPolicy{}, recorder.emitter ());
+
+    // The 4 MiB body is abandoned rather than read to the end for nobody. One
+    // event went out - the one whose write revealed the listener was gone.
+    EXPECT_EQ (recorder.events.size (), 1U);
+    EXPECT_LT (mock.served (), CHUNKED_TOTAL_BYTES / 2);
+}
+
+TEST (ImportFetchBounds, AFetchIsBoundedByAStallRatherThanByATotal) {
+    // Issue #882. This route inherited `Request::timeout_ms` - 30 seconds for
+    // the whole transfer - which bounds a download's *size*: 10 MB needed better
+    // than 340 KB/s just to arrive, and the import dialog's new progress bar
+    // filled to two thirds before reporting "Operation timed out ... with
+    // 4177920 out of 6296254 bytes received" on a download that never stopped.
+    //
+    // Asserted on the config because the behaviour is not observable inside a
+    // test worth keeping: proving a 30-second window takes 30 seconds. What this
+    // catches is the line going missing, which every behavioural test in this
+    // file would survive.
+    const auto config = vayu::http::routes::import_fetch_client_config (
+    4096, vayu::http::TransportPolicy{});
+
+    EXPECT_EQ (config.stall_timeout_ms, vayu::core::constants::import_fetch::STALL_TIMEOUT_MS);
+    // Still bounded in bytes - that is what stands in for the total it replaced,
+    // and a fetch with neither bound would be a fetch nothing could stop.
+    EXPECT_EQ (config.max_response_bytes, 4096U);
 }
 
 } // namespace

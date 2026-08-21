@@ -12,7 +12,10 @@
  * @brief HTTP client using libcurl
  */
 
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -20,6 +23,23 @@
 #include "vayu/types.hpp"
 
 namespace vayu::http {
+
+/**
+ * @brief Called as a response body arrives, for a caller that reports it
+ *        (issue #882).
+ *
+ * `received` is the body buffered so far and `declared_total` is the upstream's
+ * `Content-Length`, absent when it declared none - a chunked response has no
+ * denominator, and the import dialog says "4.2 MB received" rather than drawing
+ * a percentage of a number nobody stated.
+ *
+ * Return false to abandon the transfer. That is what a streaming caller does
+ * when its own listener has gone: `/import/fetch` writes each report to an SSE
+ * sink, and once that socket is dead there is nobody to read the remaining
+ * megabytes for.
+ */
+using BodyProgressCallback =
+std::function<bool (uint64_t received, std::optional<uint64_t> declared_total)>;
 
 /**
  * @brief HTTP Client configuration
@@ -87,6 +107,44 @@ struct ClientConfig {
      * error message names as the count.
      */
     size_t max_response_bytes = 0;
+
+    /**
+     * @brief Report the body's arrival to this callback, or null to report
+     *        nothing (issue #882).
+     *
+     * Null for every caller but the streaming half of `/import/fetch`, which is
+     * the only one with somewhere to send a report. Called from the write
+     * callback, so it is called on the thread that ran `send` and once per curl
+     * write - roughly every 16 KiB - which means a caller that emits something
+     * per call has to throttle for itself. Deliberately unthrottled here: the
+     * client reports what arrived, and how often that is worth relaying is a
+     * decision only the caller can make.
+     */
+    BodyProgressCallback on_body_progress;
+
+    /**
+     * @brief Abort only after this long below a trickle, instead of after a
+     *        fixed total (issue #882). 0 keeps the total bound.
+     *
+     * A total timeout on a download is a bound on its *size*, not on its health:
+     * `Request::timeout_ms` defaults to 30s, so a 10 MB spec needed better than
+     * 340 KB/s merely to arrive. `/import/fetch` reported that as
+     * "Operation timed out ... with 4177920 out of 6296254 bytes received" - a
+     * transfer that had never once stopped, killed for being large.
+     *
+     * Set instead of the total, not beside it: libcurl's low-speed options abort
+     * when throughput stays under `STALL_FLOOR_BYTES_PER_SEC` for this long, and
+     * a transfer with both bounds would still die at whichever fired first. What
+     * still bounds the total is `max_response_bytes`, which every caller that
+     * sets this also sets - so a hostile URL is bounded by the bytes it may send
+     * rather than by the seconds it may take, which is the bound that was always
+     * meant.
+     *
+     * Only the import fetch sets it. A design send's timeout is a number the
+     * user typed against an endpoint they are testing, and it must stay exactly
+     * what they typed.
+     */
+    long stall_timeout_ms = 0;
 };
 
 /**

@@ -19,6 +19,7 @@
 #endif
 #endif
 
+#include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/debug_redact.hpp"
@@ -30,6 +31,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <optional>
 #include <stdexcept>
@@ -112,7 +114,25 @@ struct BodySink {
     /// Set by write_callback when it refused to buffer more, so the completion
     /// can name the bound instead of reporting curl's generic write failure.
     bool limit_exceeded = false;
+    /// Where to report the arrival, or null to report nothing (issue #882).
+    /// Points at `ClientConfig::on_body_progress`, which outlives the transfer.
+    const BodyProgressCallback* on_progress = nullptr;
+    /// The headers collected so far, for the declared length. A pointer rather
+    /// than a copy because the header callback is still filling them: the whole
+    /// block has arrived by the time the first body byte does, but not before
+    /// the sink is built.
+    const Headers* headers = nullptr;
+    /// The upstream's `Content-Length`, read off `headers` on the first write
+    /// and kept. Resolved once because the answer cannot change mid-transfer and
+    /// re-scanning the header list per 16 KiB chunk would be work for nothing.
+    std::optional<uint64_t> declared_total;
+    bool total_resolved = false;
 };
+
+/// Forward declaration: the write callback below resolves the declared length,
+/// which is defined after it because it belongs beside the message that names
+/// the same number.
+std::optional<unsigned long long> declared_content_length (const Headers& headers);
 
 /**
  * @brief Callback for writing response body, bounded by the sink's cap.
@@ -145,6 +165,29 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     }
 
     sink->body.append (ptr, total_size);
+
+    // Reported after the append, so `received` is the body a reader would see
+    // and not the one that is about to exist. A refusal is a short count for
+    // the same reason the bound's is - it is the only way to stop curl from
+    // inside the callback - and the transfer surfaces as curl's generic write
+    // failure, which is the honest outcome: the only party who could be told
+    // anything more specific is the one that just said it had stopped
+    // listening.
+    if (sink->on_progress != nullptr && *sink->on_progress) {
+        if (!sink->total_resolved) {
+            sink->total_resolved = true;
+            if (sink->headers != nullptr) {
+                if (const auto declared = declared_content_length (*sink->headers)) {
+                    sink->declared_total = static_cast<uint64_t> (*declared);
+                }
+            }
+        }
+        if (!(*sink->on_progress) (static_cast<uint64_t> (sink->body.size ()),
+            sink->declared_total)) {
+            return 0; // Short count: abort with CURLE_WRITE_ERROR.
+        }
+    }
+
     return total_size;
 }
 
@@ -419,7 +462,9 @@ Result<Response> Client::send (const Request& request) {
     // Response data
     Response response;
     BodySink sink;
-    sink.max_bytes = impl_->config.max_response_bytes;
+    sink.max_bytes   = impl_->config.max_response_bytes;
+    sink.on_progress = &impl_->config.on_body_progress;
+    sink.headers     = &response.headers;
 
     // `request_headers` is the *sent* record and is filled by
     // build_request_header_list below, from the very appends that build the
@@ -453,7 +498,18 @@ Result<Response> Client::send (const Request& request) {
     curl_easy_setopt (curl, CURLOPT_HEADERDATA, &response);
 
     // Set timeout
-    curl_easy_setopt (curl, CURLOPT_TIMEOUT_MS, static_cast<long> (request.timeout_ms));
+    if (impl_->config.stall_timeout_ms > 0) {
+        // A stall bound in place of the total one (issue #882). Both together
+        // would leave the total deciding whenever it fired first, which is the
+        // behaviour this exists to replace - so the total is left unset and
+        // `max_response_bytes` is what bounds a transfer that never ends.
+        curl_easy_setopt (curl, CURLOPT_LOW_SPEED_LIMIT,
+        static_cast<long> (vayu::core::constants::import_fetch::STALL_FLOOR_BYTES_PER_SEC));
+        curl_easy_setopt (curl, CURLOPT_LOW_SPEED_TIME,
+        static_cast<long> ((impl_->config.stall_timeout_ms + 999) / 1000));
+    } else {
+        curl_easy_setopt (curl, CURLOPT_TIMEOUT_MS, static_cast<long> (request.timeout_ms));
+    }
 
     // Set redirect options
     if (request.follow_redirects) {

@@ -21,56 +21,80 @@
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include "vayu/core/run_manager.hpp"
+
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace vayu::http::routes {
 
 /**
- * Fetch the URL in `request_body` ({"url": "...", "maxBytes": 12345}) via libcurl.
+ * @brief One event of a streamed `/import/fetch` (issue #882).
  *
- * The caller states the bound (issue #784). This route is one shared proxy for
- * every URL import - a Postman or Insomnia export comes through it exactly as an
- * OpenAPI document does - so it has no format to derive a cap from, and
- * `maxSpecDocumentBytes` governs nothing about an export that is never stored as
- * a `spec_documents` row. The callers that *are* fetching a spec pass that live
- * cap themselves; a stated bound over
- * `constants::import_fetch::MAX_BYTES` is clamped to it, and an absent one is
- * that ceiling, because a bound the caller chooses is not a bound against a
- * hostile URL. An over-bound response is a `413` naming what was refused,
- * without the whole body ever being buffered - see `ClientConfig::max_response_bytes`.
- *
- * @param transport How to reach the network. Passed in rather than resolved
- *                  here because this function is deliberately `Database`-free
- *                  so it can be unit tested - and required rather than
- *                  defaulted, so a future caller cannot acquire a direct
- *                  connection by forgetting an argument. Spec re-fetch and
- *                  `$ref` bundling ride this path, so it is what makes
- *                  importing a spec by URL work behind a proxy (issue #705).
- * @return {http_status, json_body}. Separated from the route for unit testing.
+ * Returns false once the listener has gone. Declared here rather than in
+ * `routes.hpp` for the same reason `import_fetch` is: these two are the route's
+ * own testable seam, and every caller is either in this file or a test that
+ * names them.
  */
-std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
-const vayu::http::TransportPolicy& transport) {
+using ImportFetchEmitter =
+std::function<bool (const std::string& event, const nlohmann::json& data)>;
+
+/**
+ * @brief The client config both fetch forms build, for the wiring test.
+ *
+ * The bounds a fetch runs under are not observable from its result on any test
+ * short enough to keep - a stall window is 30 seconds - so the assertion is on
+ * the config itself. What that catches is the line going missing: drop the stall
+ * bound and every behavioural test stays green while a 10 MB import goes back to
+ * failing at 30 seconds.
+ */
+vayu::http::ClientConfig
+import_fetch_client_config (size_t max_bytes, const vayu::http::TransportPolicy& transport);
+
+namespace {
+
+/** A validated fetch: what to get, and the bound to get it under. */
+struct FetchTarget {
+    std::string url;
+    size_t max_bytes = 0;
+};
+
+/** The `{status, body}` answer a route sends instead of fetching anything. */
+using FetchRefusal = std::pair<int, nlohmann::json>;
+
+/**
+ * Read and validate the body both fetch routes share.
+ *
+ * Split out because the streaming route has to make exactly the same judgement
+ * about exactly the same body, and a second copy of it would be a second
+ * opinion about what a valid request is. A refusal is returned rather than
+ * thrown because both routes can still answer it with a status: nothing has
+ * been fetched, and on the streaming path nothing has been written.
+ */
+std::variant<FetchTarget, FetchRefusal> read_fetch_target (const std::string& request_body) {
     nlohmann::json req;
     try {
         req = nlohmann::json::parse (request_body);
     } catch (const std::exception&) {
-        return { 400, error_body (400, "Invalid JSON body") };
+        return FetchRefusal{ 400, error_body (400, "Invalid JSON body") };
     }
 
     if (!req.contains ("url") || !req["url"].is_string ()) {
-        return { 400, error_body (400, "Invalid URL") };
+        return FetchRefusal{ 400, error_body (400, "Invalid URL") };
     }
     const std::string url = req["url"].get<std::string> ();
     if (url.rfind ("http://", 0) != 0 && url.rfind ("https://", 0) != 0) {
-        return { 400, error_body (400, "Invalid URL") };
+        return FetchRefusal{ 400, error_body (400, "Invalid URL") };
     }
 
     // The caller's bound, clamped to the transport ceiling. Absent or null is
@@ -82,17 +106,26 @@ const vayu::http::TransportPolicy& transport) {
     if (req.contains ("maxBytes") && !req["maxBytes"].is_null ()) {
         const auto& stated = req["maxBytes"];
         if (!stated.is_number_unsigned () || stated.get<uint64_t> () == 0) {
-            return { 400, error_body (400, "Invalid 'maxBytes': must be a positive integer") };
+            return FetchRefusal{ 400,
+                error_body (400, "Invalid 'maxBytes': must be a positive integer") };
         }
         max_bytes = static_cast<size_t> (
         std::min (stated.get<uint64_t> (), static_cast<uint64_t> (max_bytes)));
     }
 
-    vayu::http::ClientConfig client_config;
-    client_config.transport          = transport;
-    client_config.max_response_bytes = max_bytes;
-    vayu::http::Client client (client_config);
-    auto result = client.get (url);
+    return FetchTarget{ url, max_bytes };
+}
+
+/**
+ * Turn one finished fetch into the `{status, body}` both routes carry.
+ *
+ * Shared for the same reason the validator is: the buffered route answers this
+ * with a status and the streaming one with an event, but *what* it says - a 413
+ * for a refused body, a 502 for a failed hop, the content and its type for a
+ * good one - must be the one answer.
+ */
+std::pair<int, nlohmann::json>
+fetch_outcome (const vayu::http::Client& client, const Result<Response>& result) {
     if (!result.is_ok ()) {
         return { 502, error_body (502, "Failed to fetch: " + client.last_error ()) };
     }
@@ -122,6 +155,171 @@ const vayu::http::TransportPolicy& transport) {
     }
 
     return { 200, nlohmann::json{ { "content", resp.body }, { "contentType", content_type } } };
+}
+
+/**
+ * The client both fetch routes run their transfer on.
+ *
+ * Extracted because the two must not differ: `$ref` bundling and spec re-fetch
+ * ride the buffered form while the import dialog rides the streamed one, and a
+ * document that arrives on one and times out on the other would be the same
+ * import succeeding or failing depending on which surface asked for it.
+ */
+vayu::http::ClientConfig
+fetch_client_config (size_t max_bytes, const vayu::http::TransportPolicy& transport) {
+    vayu::http::ClientConfig config;
+    config.transport          = transport;
+    config.max_response_bytes = max_bytes;
+    // A stall bound in place of the total (issue #882). This route inherited
+    // `Request::timeout_ms` - 30 seconds for the whole transfer - which bounds a
+    // download's size rather than its health: 10 MB needed better than 340 KB/s
+    // just to arrive, and the failure read "Operation timed out ... with 4177920
+    // out of 6296254 bytes received" for a download that had never once stopped.
+    // What bounds a transfer that truly never ends is `max_response_bytes`, set
+    // just above.
+    config.stall_timeout_ms = vayu::core::constants::import_fetch::STALL_TIMEOUT_MS;
+    return config;
+}
+
+/**
+ * The refusal this body earns before anything is fetched, or none.
+ *
+ * Only the streaming route needs it, and only because `set_content_provider`
+ * commits a 200 the moment it is installed - so a malformed request has to be
+ * recognized before that, while a status is still something this route can say.
+ */
+std::optional<FetchRefusal> import_fetch_refusal (const std::string& request_body) {
+    auto target = read_fetch_target (request_body);
+    if (const auto* refusal = std::get_if<FetchRefusal> (&target)) {
+        return *refusal;
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+/**
+ * Fetch the URL in `request_body` ({"url": "...", "maxBytes": 12345}) via libcurl.
+ *
+ * The caller states the bound (issue #784). This route is one shared proxy for
+ * every URL import - a Postman or Insomnia export comes through it exactly as an
+ * OpenAPI document does - so it has no format to derive a cap from, and
+ * `maxSpecDocumentBytes` governs nothing about an export that is never stored as
+ * a `spec_documents` row. The callers that *are* fetching a spec pass that live
+ * cap themselves; a stated bound over
+ * `constants::import_fetch::MAX_BYTES` is clamped to it, and an absent one is
+ * that ceiling, because a bound the caller chooses is not a bound against a
+ * hostile URL. An over-bound response is a `413` naming what was refused,
+ * without the whole body ever being buffered - see `ClientConfig::max_response_bytes`.
+ *
+ * @param transport How to reach the network. Passed in rather than resolved
+ *                  here because this function is deliberately `Database`-free
+ *                  so it can be unit tested - and required rather than
+ *                  defaulted, so a future caller cannot acquire a direct
+ *                  connection by forgetting an argument. Spec re-fetch and
+ *                  `$ref` bundling ride this path, so it is what makes
+ *                  importing a spec by URL work behind a proxy (issue #705).
+ * @return {http_status, json_body}. Separated from the route for unit testing.
+ */
+vayu::http::ClientConfig
+import_fetch_client_config (size_t max_bytes, const vayu::http::TransportPolicy& transport) {
+    return fetch_client_config (max_bytes, transport);
+}
+
+std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
+const vayu::http::TransportPolicy& transport) {
+    auto target = read_fetch_target (request_body);
+    if (const auto* refusal = std::get_if<FetchRefusal> (&target)) {
+        return *refusal;
+    }
+    const auto& fetch = std::get<FetchTarget> (target);
+
+    vayu::http::Client client (fetch_client_config (fetch.max_bytes, transport));
+    return fetch_outcome (client, client.get (fetch.url));
+}
+
+/**
+ * The same fetch, reporting the download as it arrives (issue #882).
+ *
+ * Why this exists: an 8 MB spec behind a URL was a frozen import dialog. The
+ * buffered route above cannot say anything until libcurl has the whole body, and
+ * the wait is on the *upstream* download - so no amount of streaming between
+ * engine and renderer would have helped. The report has to start where the bytes
+ * do, which is the client's write callback.
+ *
+ * Three events, and the last one is always terminal: `progress`
+ * (`{received, total}`, `total` null when the upstream declared no length),
+ * then either `result` (`{content, contentType}`) or `error`
+ * (`{error: {code, message}}`) carrying exactly what `import_fetch` would have
+ * answered with.
+ *
+ * @param emit one event. Returns false once its listener has gone, which
+ *             abandons the transfer rather than reading the rest of a download
+ *             for nobody - and stops anything further being emitted, including
+ *             the outcome.
+ * @return `{400, body}` for a request refused before the fetch began; nothing
+ *         has been emitted in that case, so a caller that has not yet committed
+ *         a status can still send one. `{200, null}` otherwise: the outcome went
+ *         out as an event.
+ */
+std::pair<int, nlohmann::json> import_fetch_stream (const std::string& request_body,
+const vayu::http::TransportPolicy& transport, const ImportFetchEmitter& emit) {
+    auto target = read_fetch_target (request_body);
+    if (const auto* refusal = std::get_if<FetchRefusal> (&target)) {
+        return *refusal;
+    }
+    const auto& fetch = std::get<FetchTarget> (target);
+
+    bool listening              = true;
+    bool reported_once          = false;
+    uint64_t reported_at_bytes  = 0;
+    auto reported_at            = std::chrono::steady_clock::now ();
+
+    vayu::http::ClientConfig client_config = fetch_client_config (fetch.max_bytes, transport);
+    client_config.on_body_progress         = [&] (uint64_t received,
+                                       std::optional<uint64_t> declared_total) {
+        const auto now = std::chrono::steady_clock::now ();
+        const auto since =
+        std::chrono::duration_cast<std::chrono::milliseconds> (now - reported_at).count ();
+        // The first report always goes out: it is what tells the dialog the
+        // download has started and how large it is, and holding it back for a
+        // throttle window is holding back the only thing worth saying early.
+        const bool due = !reported_once || received - reported_at_bytes >= vayu::core::constants::import_fetch::PROGRESS_EVERY_BYTES ||
+        since >= vayu::core::constants::import_fetch::PROGRESS_EVERY_MS;
+        if (!due) {
+            return true;
+        }
+        reported_once     = true;
+        reported_at_bytes = received;
+        reported_at       = now;
+        listening         = emit (vayu::core::constants::import_fetch::EVENT_PROGRESS,
+        nlohmann::json{ { "received", received },
+        { "total", declared_total ? nlohmann::json (*declared_total) : nlohmann::json () } });
+        return listening;
+    };
+
+    vayu::http::Client client (client_config);
+    const auto [status, body] = fetch_outcome (client, client.get (fetch.url));
+
+    // Nothing is said to a listener that has already gone - which includes the
+    // failure its own departure caused, since the client reports an abandoned
+    // transfer as the write error it is.
+    if (listening) {
+        if (status == 200) {
+            emit (vayu::core::constants::import_fetch::EVENT_RESULT, body);
+        } else {
+            // The numeric status rides *inside* the event, because the status
+            // line was spent on the 200 that opened the stream. The standard
+            // error body alone would not carry it: its `code` is a slug, and
+            // `default_error_code` has nothing but "error" for a 413 - so a
+            // client could not tell a refused-for-size document from any other
+            // failure, which is the one distinction it acts on.
+            nlohmann::json failure = body;
+            failure["status"]      = status;
+            emit (vayu::core::constants::import_fetch::EVENT_ERROR, failure);
+        }
+    }
+    return { 200, nlohmann::json () };
 }
 
 namespace {
@@ -990,16 +1188,70 @@ void register_import_routes (RouteContext& ctx) {
      * absent means that ceiling).
      * Returns: 200 `{"content", "contentType"}`, 400 on a bad url or maxBytes,
      * 413 when the response is over the bound, 502 when the fetch itself failed.
+     *
+     * With `Accept: text/event-stream` the same fetch answers as a stream
+     * instead (issue #882), reporting the download as it arrives so a client
+     * can draw a progress bar for an 8 MB spec rather than freeze on it:
+     * `progress` (`{received, total}`, `total` null when the upstream declared
+     * no length), then one terminal `result` (`{content, contentType}`) or
+     * `error` (`{error: {code, message}}`) carrying what the buffered form
+     * would have answered with. A malformed *request* is still the 400 above,
+     * because that is decided before any of the response has gone out. Every
+     * existing caller sends no `Accept` and gets the buffered JSON unchanged.
      */
     ctx.server.Post ("/import/fetch",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        vayu::utils::log_info ("POST /import/fetch");
-        auto [status, body] =
-        import_fetch (req.body, vayu::http::resolve_transport_policy (ctx.db));
-        res.status = status;
-        res.set_content (
-        body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
-        "application/json");
+        const bool streaming =
+        req.get_header_value ("Accept").find ("text/event-stream") != std::string::npos;
+        vayu::utils::log_info (std::string ("POST /import/fetch") +
+        (streaming ? " (streaming)" : ""));
+
+        if (!streaming) {
+            auto [status, body] =
+            import_fetch (req.body, vayu::http::resolve_transport_policy (ctx.db));
+            res.status = status;
+            res.set_content (
+            body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+            "application/json");
+            return;
+        }
+
+        // Validated before the provider is installed, while a status is still
+        // available to answer with: `set_content_provider` commits a 200, and a
+        // client that sent a malformed body should read the same 400 on both
+        // forms of this route. `import_fetch_stream` reads the body again for
+        // itself - one parse of a two-field object - rather than the two of them
+        // holding separate opinions about what a valid request is.
+        if (const auto refusal = import_fetch_refusal (req.body)) {
+            res.status = refusal->first;
+            res.set_content (
+            refusal->second.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+            "application/json");
+            return;
+        }
+
+        // Copied, not captured by reference: the provider runs after this
+        // handler has returned and the `Request` is gone.
+        const std::string body      = req.body;
+        const auto transport        = vayu::http::resolve_transport_policy (ctx.db);
+        res.set_content_provider ("text/event-stream",
+        [body, transport] (size_t, httplib::DataSink& sink) {
+            size_t frame = 0;
+            const auto emit = [&sink, &frame] (const std::string& event,
+                              const nlohmann::json& data) {
+                if (!sink.is_writable ()) {
+                    return false;
+                }
+                // The shared framer, so this stream's frames cannot drift from
+                // the run topics' shape.
+                const std::string payload = vayu::core::build_sse_frame (event,
+                data.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace), frame++);
+                return sink.write (payload.data (), payload.size ());
+            };
+            import_fetch_stream (body, transport, emit);
+            sink.done ();
+            return false;
+        });
     });
 
     /**
