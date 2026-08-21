@@ -239,7 +239,7 @@ TEST (RunConfigValidation, NumericDurationIsRejected) {
 }
 
 TEST (RunConfigValidation, NonStringDurationTypesAreRejected) {
-    for (const nlohmann::json bad :
+    for (const nlohmann::json& bad :
     { nlohmann::json (true), nlohmann::json (nlohmann::json::array ({ 1 })),
     nlohmann::json (nlohmann::json::object ()) }) {
         auto config        = valid_config ();
@@ -547,7 +547,7 @@ TEST (RunConfigValidation, AValidCapacityConfigIsAccepted) {
 }
 
 TEST (RunConfigValidation, AnUnparseableStepDurationIsRejected) {
-    for (const nlohmann::json bad : { nlohmann::json (5000), nlohmann::json ("soon"),
+    for (const nlohmann::json& bad : { nlohmann::json (5000), nlohmann::json ("soon"),
     nlohmann::json ("0s"), nlohmann::json ("-1s"), nlohmann::json (true) }) {
         auto config            = valid_config ();
         config["stepDuration"] = bad;
@@ -571,7 +571,7 @@ TEST (RunConfigValidation, ANullStepDurationIsAcceptedAsAbsent) {
 }
 
 TEST (RunConfigValidation, AnOutOfRangeSloIsRejected) {
-    for (const nlohmann::json bad :
+    for (const nlohmann::json& bad :
     { nlohmann::json (0), nlohmann::json (-1), nlohmann::json (60001), nlohmann::json ("fast") }) {
         auto config     = valid_config ();
         config["sloMs"] = bad;
@@ -590,7 +590,7 @@ TEST (RunConfigValidation, AnOutOfRangeSloIsRejected) {
 TEST (RunConfigValidation, ANonBooleanBooleanSettingIsRejected) {
     for (const char* key :
     { "phase_histograms", "save_timing_breakdown", "capture_response_bodies" }) {
-        for (const nlohmann::json bad : { nlohmann::json ("true"),
+        for (const nlohmann::json& bad : { nlohmann::json ("true"),
              nlohmann::json (1), nlohmann::json (nlohmann::json::array ()) }) {
             auto config = valid_config ();
             config[key] = bad;

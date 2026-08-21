@@ -15,6 +15,7 @@
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/diagnostics.hpp"
 
 using namespace vayu;
 using namespace vayu::runtime;
@@ -3319,6 +3320,10 @@ TEST_F (ScriptEngineTest, DocExampleRewritesAJsonBodyThenDerivesFromIt) {
     std::to_string (request.body.content.size ()));
 }
 
+// Concatenating the script source onto a call line: GCC 13 reports the heap
+// copy that follows as reading past the small-string buffer. See
+// utils/diagnostics.hpp.
+VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS
 TEST_F (ScriptEngineTest, DocExampleSetsAQueryParamAcrossItsThreeCases) {
     static constexpr const char* kSetQueryParam = R"JS(
         function setQueryParam(url, name, value) {
@@ -3364,6 +3369,7 @@ TEST_F (ScriptEngineTest, DocExampleSetsAQueryParamAcrossItsThreeCases) {
         EXPECT_EQ (req.url, c.expected) << "input: " << c.url;
     }
 }
+VAYU_DIAGNOSTIC_POP
 
 // scripting.md's "Sign a request" example, with the timestamp pinned so the
 // signature is reproducible. Until #187 this section taught an FNV-1a checksum

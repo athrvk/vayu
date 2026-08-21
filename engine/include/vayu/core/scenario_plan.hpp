@@ -72,16 +72,22 @@ struct ScenarioStep {
     /// `request`'s `{{data.column}}` tokens, split once here so no executor has
     /// to re-scan the step per iteration. Empty for a step that carries none,
     /// which is what both executors test before doing any join work at all.
-    StepDataTemplate data_template;
+    ///
+    /// Every field from here down carries a `{}`: the plan tests build steps by
+    /// aggregate init and stop at `stored_url`, so a trailing field without a
+    /// default member initializer is a -Wmissing-field-initializers warning at
+    /// each of those sites. The defaults are what default construction already
+    /// produced.
+    StepDataTemplate data_template{};
     /// The step's parsed auth, kept **only** when its credentials carry a
     /// `{{data.column}}`. `NoAuth` for every other step, whose auth is already
     /// resolved into `request` above.
-    vayu::http::Auth auth;
+    vayu::http::Auth auth{};
     /// The stored `requests.spec_operation` text, "" for a step whose request
     /// names no operation. Carried on the step so contract coverage (#629) can
     /// resolve each step's identity **once**, when the tally is built, rather
     /// than parsing it per completion on the load path.
-    std::string spec_operation;
+    std::string spec_operation{};
     /// `auth`'s tokens, split once here like `data_template`.
     ///
     /// **Non-empty means this step's auth was deferred**: `request` carries no
@@ -89,7 +95,7 @@ struct ScenarioStep {
     /// sending or the request goes out unauthenticated. Deferral only ever
     /// happens in a run that has rows - a data token with no data set is
     /// refused when the plan resolves - so an executor always has a row for it.
-    StepDataTemplate auth_template;
+    StepDataTemplate auth_template{};
 };
 
 /** An ordered, immutable sequence of composed steps. */

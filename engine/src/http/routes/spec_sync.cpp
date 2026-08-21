@@ -373,7 +373,11 @@ class DocumentedExamples {
         if (!found) {
             return std::nullopt;
         }
-        return draft_example_rows (drafts_[*found].draft.examples);
+        // `make_optional` rather than a bare return: copy-initializing an
+        // `optional<json>` from a `json` puts nlohmann's `operator ValueType()`
+        // up against `optional`'s converting constructor, which GCC reports as
+        // -Wconversion. Direct-initializing considers the constructor alone.
+        return std::make_optional (draft_example_rows (drafts_[*found].draft.examples));
     }
 
     private:

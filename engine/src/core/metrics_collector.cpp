@@ -228,7 +228,8 @@ bool MetricsCollector::claim_status_exemplar (int status_code) {
     const int slot = (status_code >= 0 && status_code < STATUS_CODE_SLOTS - 1) ?
     status_code :
     STATUS_CODE_SLOTS - 1;
-    const size_t claimed = exemplar_claims_[slot].fetch_add (1, std::memory_order_relaxed);
+    const size_t claimed =
+    exemplar_claims_[static_cast<size_t> (slot)].fetch_add (1, std::memory_order_relaxed);
     return claimed < constants::metrics_collector::EXEMPLARS_PER_STATUS;
 }
 
@@ -734,7 +735,8 @@ MetricsCollector::Percentiles MetricsCollector::sample_window_percentiles () {
 void MetricsCollector::record_status_code (int status_code) {
     if (status_code >= 0 && status_code < STATUS_CODE_SLOTS) {
         // Hot path: single relaxed atomic increment, no lock.
-        status_code_counts_[status_code].fetch_add (1, std::memory_order_relaxed);
+        status_code_counts_[static_cast<size_t> (status_code)].fetch_add (
+        1, std::memory_order_relaxed);
         return;
     }
     // Out-of-range (non-standard) code: dead path for real HTTP traffic.
@@ -745,7 +747,8 @@ void MetricsCollector::record_status_code (int status_code) {
 std::map<int, size_t> MetricsCollector::status_code_distribution () const {
     std::map<int, size_t> result;
     for (int code = 0; code < STATUS_CODE_SLOTS; ++code) {
-        size_t count = status_code_counts_[code].load (std::memory_order_relaxed);
+        size_t count =
+        status_code_counts_[static_cast<size_t> (code)].load (std::memory_order_relaxed);
         if (count > 0) {
             result[code] = count;
         }

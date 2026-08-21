@@ -394,7 +394,7 @@ TEST_F (ImportApplyRouteTest, RejectsAnObjectFieldGivenANonObject) {
     };
 
     for (const auto& c : cases) {
-        for (const json bad_shape :
+        for (const json& bad_shape :
         { json (42), json ("bearer"), json::array ({ 1, 2 }) }) {
             json item     = c.item;
             item[c.field] = bad_shape;

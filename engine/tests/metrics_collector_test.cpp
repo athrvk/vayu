@@ -342,7 +342,8 @@ TEST_F (MetricsCollectorTest, ThreadSafePerCodeCounts) {
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back ([this, &codes] () {
             for (int i = 0; i < requests_per_thread; ++i) {
-                collector->record_success (codes[i % codes.size ()], 5.0, 0.0);
+                collector->record_success (
+                codes[static_cast<size_t> (i) % codes.size ()], 5.0, 0.0);
             }
         });
     }
@@ -357,7 +358,7 @@ TEST_F (MetricsCollectorTest, ThreadSafePerCodeCounts) {
     std::map<int, size_t> expected;
     for (int t = 0; t < num_threads; ++t)
         for (int i = 0; i < requests_per_thread; ++i)
-            expected[codes[i % codes.size ()]]++;
+            expected[codes[static_cast<size_t> (i) % codes.size ()]]++;
 
     for (const auto& [code, count] : expected) {
         EXPECT_EQ (distribution[code], count) << "code " << code;

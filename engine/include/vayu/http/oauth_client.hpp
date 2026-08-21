@@ -30,8 +30,12 @@ struct TokenError {
                            // | "oauth2_provider_error" | "oauth2_network_error"
     std::string message;
     int provider_status = 0;
-    std::string provider_error;             // RFC 6749 "error"
-    std::string provider_error_description; // RFC 6749 "error_description"
+    // `{}` rather than bare declarations: every construction here is a
+    // three-field aggregate init for a failure that carries no provider body,
+    // and without the default member initializer each of those eight sites is
+    // a -Wmissing-field-initializers warning. Empty is the intended value.
+    std::string provider_error{};             // RFC 6749 "error"
+    std::string provider_error_description{}; // RFC 6749 "error_description"
 };
 
 /**

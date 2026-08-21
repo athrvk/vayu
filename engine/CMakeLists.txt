@@ -713,7 +713,8 @@ if(VAYU_BUILD_TESTS)
 
     target_link_libraries(vayu_tests PRIVATE
         vayu_core
-        GTest::gtest
+        # gtest_main already carries gtest; naming both made Apple's linker
+        # report "ignoring duplicate libraries: libgtest.a" on every macOS build.
         GTest::gtest_main
         httplib::httplib
         vayu_warnings

@@ -669,6 +669,11 @@ Json media_type_body (std::string_view content_type, const Json& value) {
  * Nothing is inferred about the endpoint here either: the schema is read off
  * the body that is actually stored, and a mode whose stored text is not the
  * body the endpoint receives writes nothing at all.
+ *
+ * Every `Json` answer leaves through `std::make_optional`: copy-initializing an
+ * `optional<Json>` from a `Json` puts nlohmann's `operator ValueType()` up
+ * against `optional`'s converting constructor, which GCC reports as
+ * -Wconversion. Direct-initializing considers the constructor alone.
  */
 std::optional<Json> request_body_object (const ExportBody& body) {
     const std::string_view content = trim (body.content);
@@ -676,7 +681,8 @@ std::optional<Json> request_body_object (const ExportBody& body) {
         if (content.empty ()) {
             return std::nullopt;
         }
-        return media_type_body ("application/json", example_value (body.content));
+        return std::make_optional (
+        media_type_body ("application/json", example_value (body.content)));
     }
     if (body.mode == "xml") {
         // The text as it stands, never parsed: an XML body is not JSON, so the
@@ -684,13 +690,13 @@ std::optional<Json> request_body_object (const ExportBody& body) {
         if (content.empty ()) {
             return std::nullopt;
         }
-        return media_type_body ("application/xml", body.content);
+        return std::make_optional (media_type_body ("application/xml", body.content));
     }
     if (body.mode == "text") {
         if (content.empty ()) {
             return std::nullopt;
         }
-        return media_type_body ("text/plain", body.content);
+        return std::make_optional (media_type_body ("text/plain", body.content));
     }
     if (body.mode == "form-data" || body.mode == "x-www-form-urlencoded") {
         Json properties = Json::object ();
@@ -709,8 +715,8 @@ std::optional<Json> request_body_object (const ExportBody& body) {
         // states what the collection holds rather than a shape read off one
         // sample - it carries no derivation note.
         Json schema{ { "type", "object" }, { "properties", std::move (properties) } };
-        return Json{ { "content",
-        Json{ { content_type, Json{ { "schema", std::move (schema) } } } } } };
+        return std::make_optional (Json{ { "content",
+        Json{ { content_type, Json{ { "schema", std::move (schema) } } } } } });
     }
     // `graphql` and `none`. GraphQL over HTTP posts a JSON envelope, but the
     // stored body is the query text alone - Vayu composes the envelope at send

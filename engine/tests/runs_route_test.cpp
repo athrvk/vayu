@@ -25,6 +25,7 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/utils/diagnostics.hpp"
 #include "vayu/utils/json.hpp"
 
 using nlohmann::json;
@@ -90,6 +91,9 @@ class RunsRouteTest : public ::testing::Test {
     /// One stored exchange for @p run_id. `trace_data` is deliberately large:
     /// the list must never read this column, and a row that does shows up as a
     /// payload, not as a failure.
+    // The 4 KB filler concatenation below is what GCC 13 reports as reading past
+    // the small-string buffer. See utils/diagnostics.hpp.
+    VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS
     void seed_result (const std::string& run_id, int status_code, double latency_ms) {
         vayu::db::Result result;
         result.run_id      = run_id;
@@ -100,6 +104,7 @@ class RunsRouteTest : public ::testing::Test {
         result.trace_data = R"({"response":{"body":")" + std::string (4096, 'x') + R"("}})";
         db_->add_result (result);
     }
+    VAYU_DIAGNOSTIC_POP
 
     std::unique_ptr<vayu::db::Database> db_;
 };

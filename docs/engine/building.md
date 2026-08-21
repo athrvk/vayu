@@ -499,6 +499,39 @@ directly (`daemon.cpp`, `cli.cpp`, `http/client.cpp`, `http/server.cpp`,
 first. Including `vayu/version.hpp` from a `.cpp` is fine, and from a header only
 where that header is not itself broadly included.
 
+### Compiler warnings, and the three that are suppressed
+
+The engine builds **warning-clean** on Linux and macOS, and a release build is
+where that is measured - several of the analyses below only run once the
+optimizer does. If a change adds a warning, fix it rather than leave it: the
+count is the signal, and it is only useful while it is zero.
+
+```bash
+# The build the count is read off: release, tests included, from cold.
+cmake --preset linux-prod -DVAYU_BUILD_TESTS=ON
+cmake --build --preset linux-prod --clean-first 2>&1 | grep -c 'warning:'
+```
+
+The flags are on `vayu_warnings` in `engine/CMakeLists.txt` - `-Wall -Wextra
+-Wpedantic` plus `-Wconversion`, `-Wsign-conversion`, `-Wdouble-promotion`,
+`-Wformat=2` and `-Wnull-dereference` on GCC and clang, `/W4 /WX` on MSVC.
+
+Three GCC 13 diagnostics fire only on code the engine did not write, and those
+are suppressed - narrowly, one function at a time, through the macros in
+`engine/include/vayu/utils/diagnostics.hpp`, which carry the reason and the
+trace beside each one:
+
+| Family | Where it comes from |
+|--------|---------------------|
+| `-Wdangling-reference` | GCC 13's ref-in/ref-out heuristic, on a test helper that indexes a caller-owned document and returns a reference into it |
+| `-Wnull-dereference` | Inlined libstdc++: a `basic_streambuf` pointer GCC cannot prove non-null, and nlohmann's internal `swap` |
+| `-Warray-bounds` / `-Wstringop-overflow` | GCC 13's string-concatenation family, which reasons about the 32-byte small-string buffer as though it were the whole object. One diagnostic under two names, so both are named together |
+
+**Never widen these into `vayu_warnings`.** A `-Wno-...` there hides the next
+genuine instance of the same family across the whole engine, which is the entire
+value of having the flag on. A suppression that a code change could remove
+should be that code change instead.
+
 ### Static Analysis
 
 The pre-commit hook (`scripts/pre-commit`, installed by

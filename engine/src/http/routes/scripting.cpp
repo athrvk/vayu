@@ -1441,7 +1441,7 @@ void register_scripting_routes (RouteContext& ctx) {
      * This is a startup API - frontend fetches once and caches.
      */
     ctx.server.Get ("/scripting/completions",
-    [&ctx] (const httplib::Request&, httplib::Response& res) {
+    [] (const httplib::Request&, httplib::Response& res) {
         vayu::utils::log_info (
         "GET /scripting/completions - Fetching script API completions");
         try {
@@ -1466,7 +1466,7 @@ void register_scripting_routes (RouteContext& ctx) {
      * app can cache on `version` without re-parsing the declarations.
      */
     ctx.server.Get ("/scripting/types",
-    [&ctx] (const httplib::Request&, httplib::Response& res) {
+    [] (const httplib::Request&, httplib::Response& res) {
         vayu::utils::log_info (
         "GET /scripting/types - Generating script type declarations");
         try {

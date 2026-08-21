@@ -30,6 +30,7 @@
 
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/openapi_export.hpp"
+#include "vayu/utils/diagnostics.hpp"
 
 using vayu::core::export_openapi;
 using vayu::core::ExportCollection;
@@ -105,6 +106,11 @@ const ExportCollection& collection        = PETSTORE) {
     return { json::parse (outcome.text), outcome.notes, outcome.text, outcome.file_name };
 }
 
+// `operation_of` takes a reference and returns one into it, which is GCC 13's
+// ref-in/ref-out heuristic exactly; every call below chains into a live
+// `exported.document`, so nothing dangles. See utils/diagnostics.hpp - the
+// suppression covers the rest of the file because every use is a call site.
+VAYU_IGNORE_FALSE_DANGLING_REFERENCE
 const json&
 operation_of (const json& document, const std::string& path, const std::string& method) {
     return document.at ("paths").at (path).at (method);
@@ -553,3 +559,4 @@ TEST (ExportSerialization, NamesTheFileAfterTheCollectionHoweverItIsNamed) {
     EXPECT_EQ (named ("Pet Store / v2"), "pet-store-v2.openapi.json");
     EXPECT_EQ (named ("   "), "collection.openapi.json");
 }
+VAYU_DIAGNOSTIC_POP
