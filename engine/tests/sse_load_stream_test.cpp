@@ -86,7 +86,7 @@ class LoadStreamServer {
             });
         });
 
-        svr_.Get ("/finite", [this] (const httplib::Request&, httplib::Response& res) {
+        svr_.Get ("/finite", [] (const httplib::Request&, httplib::Response& res) {
             res.set_chunked_content_provider (
             "text/event-stream", [] (size_t, httplib::DataSink& sink) {
                 const std::string body = "data: a\n\n: ping\n\ndata: b\n\ndata: c\n\n";

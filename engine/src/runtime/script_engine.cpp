@@ -43,6 +43,11 @@
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #if defined(__clang__)
+// Must come first: the names below are not all known to every Clang
+// (-Wcast-function-type-mismatch is 19+), and an unrecognised one is itself a
+// warning - which VAYU_WERROR turns into a build failure, so the suppression
+// block would break the build it exists to keep quiet.
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
 #pragma GCC diagnostic ignored "-Wc99-extensions"
 #pragma GCC diagnostic ignored "-Wcast-function-type-mismatch"
 #pragma GCC diagnostic ignored "-Wshorten-64-to-32"

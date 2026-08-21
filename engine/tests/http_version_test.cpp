@@ -7,11 +7,12 @@ using vayu::HttpVersion;
 TEST (HttpVersionDomain, EnumerationCoversTheWholeEnum) {
     // Every other test in this file iterates all_http_versions() rather than
     // the enum, so a member added to HttpVersion but forgotten here would slip
-    // past all of them. Nothing else catches it either: MSVC's
-    // missing-enumerator warnings (C4061/C4062) are off at /W4, and -Werror on
-    // GCC/Clang is gated behind VAYU_STRICT_BUILD, which CI does not set - so a
-    // forgotten member compiles clean and falls through to CURL_HTTP_VERSION_NONE.
-    // This count is the trip-wire that forces a look at the vector.
+    // past all of them. A forgotten member would trip -Wswitch in the
+    // to_string()/http_version_label() switches (they carry no default), but
+    // all_http_versions() is a hand-maintained vector, not a switch, so nothing
+    // the compiler emits catches a member missing from it - it just falls
+    // through to CURL_HTTP_VERSION_NONE. This count is the trip-wire that forces
+    // a look at the vector.
     EXPECT_EQ (vayu::all_http_versions ().size (), 3U);
 }
 

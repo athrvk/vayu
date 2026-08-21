@@ -450,12 +450,15 @@ void EventLoopWorker::run_loop () {
                 CURL* easy      = msg->easy_handle;
                 CURLcode result = msg->data.result;
 
-                std::unique_ptr<TransferData> data;
+                // Named for the transfer that just finished rather than `data`,
+                // which is the fetch phase's handle on the transfer being
+                // *submitted* and stays in scope here (MSVC C4456).
+                std::unique_ptr<TransferData> completed;
                 {
                     // No lock needed - private resource
                     auto it = active_transfers.find (easy);
                     if (it != active_transfers.end ()) {
-                        data = std::move (it->second);
+                        completed = std::move (it->second);
                         active_transfers.erase (it);
                         // Update atomic size
                         current_active_count.store (
@@ -463,12 +466,13 @@ void EventLoopWorker::run_loop () {
                     }
                 }
 
-                if (data) {
-                    auto response_result = extract_response (easy, data.get (), result);
-                    if (data->callback)
-                        data->callback (data->request_id, response_result);
-                    if (data->has_promise)
-                        data->promise.set_value (std::move (response_result));
+                if (completed) {
+                    auto response_result =
+                    extract_response (easy, completed.get (), result);
+                    if (completed->callback)
+                        completed->callback (completed->request_id, response_result);
+                    if (completed->has_promise)
+                        completed->promise.set_value (std::move (response_result));
                     local_processed.fetch_add (1, std::memory_order_relaxed);
                 }
 

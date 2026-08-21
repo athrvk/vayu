@@ -873,12 +873,12 @@ size_t MetricsCollector::memory_usage_bytes () const {
         if (!record.capture.has_value ()) {
             return 0;
         }
-        size_t bytes = record.capture->body.capacity () +
+        size_t record_bytes = record.capture->body.capacity () +
         record.capture->content_type.capacity ();
         for (const auto& [name, value] : record.capture->headers) {
-            bytes += name.capacity () + value.capacity ();
+            record_bytes += name.capacity () + value.capacity ();
         }
-        return bytes;
+        return record_bytes;
     };
 
     // Errors vector

@@ -16,6 +16,21 @@ option(VAYU_BUILD_ENGINE "Build daemon" ON)
 option(VAYU_USE_ASAN "Enable AddressSanitizer" OFF)
 option(VAYU_USE_TSAN "Enable ThreadSanitizer" OFF)
 
+# Treat compiler warnings as errors. Off for local dev so a work-in-progress
+# build is not blocked by a warning, on in CI so a warning cannot merge - the
+# warning set below is only a gate if something fails on it. #900 took the
+# inventory to zero; this is what keeps it there. CI passes -DVAYU_WERROR=ON;
+# the legacy VAYU_STRICT_BUILD environment variable still turns it on (default
+# only - an explicit -DVAYU_WERROR wins) so an existing local workflow keeps
+# working. See docs/engine/building.md.
+set(_vayu_werror_default OFF)
+if(DEFINED ENV{VAYU_STRICT_BUILD}
+   AND NOT "$ENV{VAYU_STRICT_BUILD}" STREQUAL ""
+   AND NOT "$ENV{VAYU_STRICT_BUILD}" STREQUAL "0")
+    set(_vayu_werror_default ON)
+endif()
+option(VAYU_WERROR "Treat compiler warnings as errors (CI gate)" ${_vayu_werror_default})
+
 # ============================================================================
 # C++ Standard and Compiler Settings
 # ============================================================================
@@ -71,7 +86,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         -Wall
         -Wextra
         -Wpedantic
-        $<$<BOOL:$ENV{VAYU_STRICT_BUILD}>:-Werror>
+        $<$<BOOL:${VAYU_WERROR}>:-Werror>
         -Wno-unused-parameter
         -Wconversion
         -Wsign-conversion
@@ -82,23 +97,43 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_compile_options(vayu_warnings INTERFACE
         /W4
+        # /WX is unconditional on MSVC and predates VAYU_WERROR: Windows CI has
+        # always built warnings-as-errors, so what keeps it green is the list
+        # below rather than a strict/lax toggle.
         /WX
         /permissive-
         /FS
+        # 4324: 'structure was padded due to alignas' - deliberate, on the
+        # cache-line-aligned SPSC queue members (spsc_queue.hpp); the padding
+        # is the point. Permanent.
         /wd4324
-        /wd4101
+        # 4100: 'unreferenced formal parameter' - the -Wno-unused-parameter
+        # counterpart above; interface signatures keep named parameters for
+        # documentation even where one leg does not use them. Permanent.
         /wd4100
-        /wd4456
-        /wd4244
+        # 4101 ('unreferenced local variable'), 4456 ('declaration hides
+        # previous local') and 4244 ('conversion, possible loss of data') used
+        # to be suppressed here and are not any more (issue #884). Each hid a
+        # real defect class - 4244 is precisely what -Wconversion catches on the
+        # GCC/Clang legs - and removing them found one: the `data` shadow in
+        # event_loop_worker.cpp, which no warning we enable elsewhere reports.
     )
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_SYSTEM_NAME MATCHES "Linux")
     target_compile_options(vayu_warnings INTERFACE
         -Wno-deprecated-declarations
-        -Wno-missing-designated-field-initializers
         -Wno-implicit-int-float-conversion
     )
+    # -Wno-missing-designated-field-initializers landed in Clang 19. Passing it
+    # to an older Clang is a -Wunknown-warning-option warning, which VAYU_WERROR
+    # turns into a build failure - so the suppression itself would break every
+    # strict build on Clang 18 (Ubuntu 24.04's default) rather than quieten it.
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19)
+        target_compile_options(vayu_warnings INTERFACE
+            -Wno-missing-designated-field-initializers
+        )
+    endif()
 endif()
 
 # ============================================================================
@@ -165,6 +200,18 @@ if(EXISTS ${QUICKJS_DIR}/CMakeLists.txt)
         # Vendored code builds with its own flags: no vayu warnings, no
         # clang-tidy (same treatment the old in-tree QuickJS build had).
         set_target_properties(qjs PROPERTIES C_CLANG_TIDY "" CXX_CLANG_TIDY "")
+        # ...and its *headers* are system headers to whoever includes them.
+        # Building the vendored sources quietly is only half the exemption: on
+        # a plain -I, a diagnostic inside quickjs.h is attributed to our
+        # translation unit and, under VAYU_WERROR, fails our build for third
+        # party code we do not maintain. macOS is where this bites - the SDK
+        # spells NAN as __builtin_nanf, so `v.u.float64 = NAN` in quickjs.h is
+        # a -Wdouble-promotion error there and nowhere else.
+        get_target_property(_qjs_include_dirs qjs INTERFACE_INCLUDE_DIRECTORIES)
+        if(_qjs_include_dirs)
+            set_target_properties(qjs PROPERTIES
+                INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_qjs_include_dirs}")
+        endif()
         set(QUICKJS_FOUND TRUE)
         message(STATUS "Found and configured QuickJS-NG at ${QUICKJS_DIR}")
     else()
@@ -192,7 +239,9 @@ if(EXISTS ${HDRHISTOGRAM_DIR}/src/hdr_histogram.c)
         ${HDRHISTOGRAM_DIR}/src/hdr_writer_reader_phaser.c
         ${HDRHISTOGRAM_DIR}/src/hdr_histogram_log_no_op.c
     )
-    target_include_directories(hdrhistogram PUBLIC ${HDRHISTOGRAM_DIR}/include)
+    # SYSTEM for the same reason as quickjs above: vendored headers must not
+    # fail a consumer's build under VAYU_WERROR.
+    target_include_directories(hdrhistogram SYSTEM PUBLIC ${HDRHISTOGRAM_DIR}/include)
     
     # Platform-specific threading
     if(NOT WIN32)
