@@ -56,6 +56,7 @@ import {
 	type BatchEntry,
 } from "@/services/importers/batch";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
+import { ImportProgressView, type ImportProgress } from "./ImportProgressView";
 import { MethodBadge } from "@/components/shared";
 
 type Tab = "file" | "url" | "paste";
@@ -101,6 +102,15 @@ export function ImportModal() {
 	const [reimports, setReimports] = useState<SpecReimportMatch[] | null>(null);
 	/** The bound-document lookup is a round trip - see `handleImport`. */
 	const [checkingBindings, setCheckingBindings] = useState(false);
+	/**
+	 * What the dialog is doing right now, or null when it is waiting on the user
+	 * (issue #882).
+	 *
+	 * `phase` alone could not carry this: `detecting` covered a download, a `$ref`
+	 * walk and N engine parses alike, and was read by nothing that renders - so
+	 * the File tab showed the untouched dropzone for the whole of a 13-file pick.
+	 */
+	const [progress, setProgress] = useState<ImportProgress | null>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const folderInputRef = useRef<HTMLInputElement>(null);
 	const { maxBytes: specMaxBytes } = useSpecDocumentLimit();
@@ -117,6 +127,7 @@ export function ImportModal() {
 		setPasteText("");
 		setUrl("");
 		setReimports(null);
+		setProgress(null);
 	};
 
 	const handleClose = () => {
@@ -165,8 +176,10 @@ export function ImportModal() {
 							},
 						}
 					: {}),
-			}
+			},
+			setProgress
 		);
+		setProgress(null);
 		setEntries(next);
 		// One document that failed is the whole import failing, and says so where
 		// it always did. Several is a ledger: the failures are rows in it, beside
@@ -192,7 +205,13 @@ export function ImportModal() {
 	// second writer to race with.
 	const redetect = (next: { importEnvironments: boolean; importScripts: boolean }) => {
 		if (phase !== "preview") return;
-		void reparseBatch(entries, next).then(setEntries);
+		// Reported like the first parse, because it *is* the first parse again -
+		// one engine round trip per file, which on a folder pick is a wait a
+		// checkbox click should not make look instant.
+		void reparseBatch(entries, next, setProgress).then((reparsed) => {
+			setProgress(null);
+			setEntries(reparsed);
+		});
 	};
 
 	/**
@@ -251,6 +270,7 @@ export function ImportModal() {
 			return;
 		}
 		setPhase("detecting");
+		setProgress({ stage: "reading" });
 		await runBatch(await Promise.all(picked.map(readDocument)));
 	};
 
@@ -259,10 +279,15 @@ export function ImportModal() {
 	// the detect path and then never read by anything that renders - the button
 	// stayed enabled and unchanged for the whole round-trip, so a second click
 	// fired a second fetch whose result raced the first.
-	const isFetching = phase === "detecting";
+	//
+	// It is now read by everything: the same phase disables the drop zone, the
+	// folder picker and the Paste button, none of which had a guard at all - a
+	// second drop mid-read raced the first exactly as a second fetch did - and it
+	// is what puts the progress panel on screen (issue #882).
+	const isBusy = phase === "detecting";
 
 	const handleFetchUrl = async () => {
-		if (isFetching) return;
+		if (isBusy) return;
 		setPhase("detecting");
 		try {
 			// No `maxBytes`: this box takes any format, and a Postman or
@@ -272,9 +297,15 @@ export function ImportModal() {
 			// The engine's transport ceiling stands behind the fetch instead
 			// (issue #784), and the bundler's own check still refuses an
 			// over-cap OpenAPI document once the format is known.
-			const { content } = await apiService.importFetch(url);
+			// The third argument is what asks the engine to stream its download
+			// (issue #882). Without it this route answers only once the whole body
+			// is buffered, which for an 8 MB spec is the frozen dialog this closes.
+			const { content } = await apiService.importFetch(url, undefined, (received) =>
+				setProgress({ stage: "fetching", ...received })
+			);
 			await runBatch([{ text: content, sourceUrl: url }]);
 		} catch (e) {
+			setProgress(null);
 			setError((e as Error).message);
 			setPhase("error");
 		}
@@ -336,6 +367,9 @@ export function ImportModal() {
 	const runImport = async () => {
 		if (applicable.length === 0) return;
 		const outcomes = new Map<string, BatchEntry["outcome"]>();
+		// The apply is one transaction per file and always was; the only sign of it
+		// used to be a button reading "Importing…" for all of them.
+		setProgress({ stage: "applying", done: 0, total: applicable.length });
 		for (const entry of applicable) {
 			const result = entry.result as ImportResult;
 			try {
@@ -360,7 +394,9 @@ export function ImportModal() {
 				// resolves that back to the name shown in the preview (issue #173).
 				outcomes.set(entry.id, { ok: false, message: importFailureMessage(e, result) });
 			}
+			setProgress({ stage: "applying", done: outcomes.size, total: applicable.length });
 		}
+		setProgress(null);
 		const failures = [...outcomes.values()].filter((o) => o && !o.ok);
 		if (failures.length === 0) {
 			handleClose();
@@ -445,11 +481,15 @@ export function ImportModal() {
 						 */
 						<button
 							type="button"
-							className="w-full cursor-pointer rounded-lg border-2 border-dashed border-rule surface-sunken px-6 py-9 text-center"
+							disabled={isBusy}
+							className="w-full cursor-pointer rounded-lg border-2 border-dashed border-rule surface-sunken px-6 py-9 text-center disabled:cursor-default disabled:opacity-60"
 							onClick={() => fileInputRef.current?.click()}
 							onDragOver={(e) => e.preventDefault()}
 							onDrop={(e) => {
 								e.preventDefault();
+								// A disabled <button> still receives drops, so the
+								// guard has to be stated here too.
+								if (isBusy) return;
 								// Every dropped file, not `files[0]`: the input had no
 								// `multiple` and this read one element, so a folder's
 								// worth of specs imported the first and discarded the
@@ -485,6 +525,7 @@ export function ImportModal() {
 							<Button
 								variant="outline"
 								size="sm"
+								disabled={isBusy}
 								onClick={() => folderInputRef.current?.click()}
 							>
 								<FolderOpen className="mr-1.5 h-3.5 w-3.5" />
@@ -535,10 +576,10 @@ export function ImportModal() {
 								}}
 								placeholder="https://petstore.swagger.io/v2/swagger.json"
 								className="flex-1"
-								disabled={isFetching}
+								disabled={isBusy}
 							/>
-							<Button onClick={handleFetchUrl} disabled={!url || isFetching}>
-								{isFetching ? "Fetching…" : "Fetch"}
+							<Button onClick={handleFetchUrl} disabled={!url || isBusy}>
+								{isBusy ? "Fetching…" : "Fetch"}
 							</Button>
 						</div>
 					)}
@@ -552,11 +593,26 @@ export function ImportModal() {
 							/>
 							<Button
 								onClick={() => void runBatch([{ text: pasteText }])}
-								disabled={!pasteText.trim()}
+								disabled={!pasteText.trim() || isBusy}
 								className="mt-2"
 							>
 								Detect &amp; Preview
 							</Button>
+						</div>
+					)}
+					{/*
+					 * Below the tab's own controls rather than instead of them: the
+					 * URL being downloaded is the context a user waiting on 8 MB
+					 * wants most, and replacing the row would also take away the
+					 * disabled Fetch button that says a fetch is already running.
+					 *
+					 * `progress` is null for the instant between the phase changing
+					 * and the first report, so the panel opens on a named busy bar
+					 * rather than flashing nothing.
+					 */}
+					{isBusy && (
+						<div className="mt-4">
+							<ImportProgressView progress={progress ?? { stage: "reading" }} />
 						</div>
 					)}
 					{phase === "error" && (
@@ -672,58 +728,66 @@ export function ImportModal() {
 				</Tabs>
 
 				{phase === "preview" && (
-					<div className="flex items-center justify-between gap-3 border-t border-rule px-5 py-4">
+					<div className="flex flex-col gap-3 border-t border-rule px-5 py-4">
 						{/*
-						 * One <label> each. These were two checkboxes inside a single
-						 * <label>: a label's control is its *first* labelable
-						 * descendant, so clicking the words "Import pre-request &
-						 * test scripts" toggled Import environments instead - and the
-						 * second checkbox had no label at all, shrinking its hit
-						 * target to the 13px box.
+						 * In the footer rather than over the list: the per-file
+						 * outcomes land on the ledger rows behind this, and covering
+						 * them would hide the very thing the apply is producing.
 						 */}
-						<div className="flex flex-col gap-1 text-[11px] text-muted-foreground">
-							<label className="flex w-fit items-center gap-1.5">
-								<input
-									type="checkbox"
-									checked={importEnvironments}
-									onChange={(e) => toggleEnvironments(e.target.checked)}
-								/>
-								Import environments &amp; variables
-							</label>
-							<label className="flex w-fit items-center gap-1.5">
-								<input
-									type="checkbox"
-									checked={importScripts}
-									onChange={(e) => toggleScripts(e.target.checked)}
-								/>
-								Import pre-request &amp; test scripts
-							</label>
-						</div>
-						<div className="flex gap-2">
-							<Button
-								variant="outline"
-								onClick={handleClose}
-								disabled={importMutation.isPending}
-							>
-								Cancel
-							</Button>
-							<Button
-								onClick={handleImport}
-								disabled={
-									importMutation.isPending ||
-									checkingBindings ||
-									applicable.length === 0
-								}
-							>
-								{importMutation.isPending || checkingBindings
-									? "Importing…"
-									: // The count only appears for a batch: it is what the
-										// button is about to do N times, and on one file it
-										// would just restate the preview.
-										applicable.length > 1
-										? `Import ${applicable.length} files →`
-										: "Import →"}
-							</Button>
+						{progress && <ImportProgressView progress={progress} />}
+						<div className="flex items-center justify-between gap-3">
+							{/*
+							 * One <label> each. These were two checkboxes inside a single
+							 * <label>: a label's control is its *first* labelable
+							 * descendant, so clicking the words "Import pre-request &
+							 * test scripts" toggled Import environments instead - and the
+							 * second checkbox had no label at all, shrinking its hit
+							 * target to the 13px box.
+							 */}
+							<div className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+								<label className="flex w-fit items-center gap-1.5">
+									<input
+										type="checkbox"
+										checked={importEnvironments}
+										onChange={(e) => toggleEnvironments(e.target.checked)}
+									/>
+									Import environments &amp; variables
+								</label>
+								<label className="flex w-fit items-center gap-1.5">
+									<input
+										type="checkbox"
+										checked={importScripts}
+										onChange={(e) => toggleScripts(e.target.checked)}
+									/>
+									Import pre-request &amp; test scripts
+								</label>
+							</div>
+							<div className="flex gap-2">
+								<Button
+									variant="outline"
+									onClick={handleClose}
+									disabled={importMutation.isPending}
+								>
+									Cancel
+								</Button>
+								<Button
+									onClick={handleImport}
+									disabled={
+										importMutation.isPending ||
+										checkingBindings ||
+										applicable.length === 0
+									}
+								>
+									{importMutation.isPending || checkingBindings
+										? "Importing…"
+										: // The count only appears for a batch: it is what the
+											// button is about to do N times, and on one file it
+											// would just restate the preview.
+											applicable.length > 1
+											? `Import ${applicable.length} files →`
+											: "Import →"}
+								</Button>
+							</div>
 						</div>
 					</div>
 				)}

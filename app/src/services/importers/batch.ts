@@ -128,6 +128,37 @@ export interface BatchIntake {
 	readSibling?: (specPath: string, refPath: string) => Promise<string>;
 }
 
+/**
+ * How far through a batch the work is (issue #882).
+ *
+ * Two stages, because they are two different waits: `bundling` follows each
+ * document's `$ref`s (disk, or the network), `parsing` is one engine round trip
+ * per document. Both totals are real counts of real work - `parsing`'s is the
+ * documents that will actually be parsed, which is fewer than the documents
+ * picked whenever one could not be read or was inlined into another. A total
+ * that included those would leave the bar permanently short of itself.
+ *
+ * File *reads* get no stage. They are local and effectively instant; a counter
+ * for them would be motion without information.
+ */
+export interface BatchProgress {
+	stage: "bundling" | "parsing";
+	done: number;
+	total: number;
+}
+
+/**
+ * Report progress, or throw it away for a caller that wants none.
+ *
+ * A zero total is silence rather than a `0 of 0` tick: a stage with no work in
+ * it is not a stage, and a bar for it would be a bar that can never move.
+ */
+function reporter(onProgress?: (progress: BatchProgress) => void) {
+	return (stage: BatchProgress["stage"], done: number, total: number): void => {
+		if (onProgress && total > 0) onProgress({ stage, done, total });
+	};
+}
+
 /** A parse or bundle failure, in the words the dialog shows. */
 function failureMessage(e: unknown): string {
 	if (e instanceof UnrecognisedFormatError) return "Unrecognised format";
@@ -188,8 +219,10 @@ interface BundledDocument {
 export async function detectBatch(
 	documents: BatchDocument[],
 	opts: ImportOptions,
-	intake: BatchIntake
+	intake: BatchIntake,
+	onProgress?: (progress: BatchProgress) => void
 ): Promise<BatchEntry[]> {
+	const report = reporter(onProgress);
 	const inBatch = new Map<string, string>();
 	for (const document of documents) {
 		if (document.readError) continue;
@@ -203,56 +236,69 @@ export async function detectBatch(
 	/** Batch keys some other document inlined, to the file that inlined it. */
 	const consumed = new Map<string, string>();
 
-	const bundles = await Promise.all(
-		documents.map(async (document): Promise<BundledDocument> => {
-			const key = batchKey(document);
-			const dir = dirOf(key);
-			const specPath = document.specPath ?? "";
-			const readSibling =
-				key || specPath
-					? async (refPath: string): Promise<string> => {
-							const siblingKey = joinRelative(dir, refPath);
-							const inBatchText = inBatch.get(siblingKey);
-							if (inBatchText !== undefined) {
-								// Only once it is known to have been used - a lookup that
-								// missed must not mark a file as somebody's sibling.
-								consumed.set(siblingKey, document.fileName ?? siblingKey);
-								return inBatchText;
-							}
-							if (!specPath || !intake.readSibling) {
-								throw new Error(`No file at ${refPath}`);
-							}
-							return intake.readSibling(specPath, refPath);
+	const bundleOne = async (document: BatchDocument): Promise<BundledDocument> => {
+		const key = batchKey(document);
+		const dir = dirOf(key);
+		const specPath = document.specPath ?? "";
+		const readSibling =
+			key || specPath
+				? async (refPath: string): Promise<string> => {
+						const siblingKey = joinRelative(dir, refPath);
+						const inBatchText = inBatch.get(siblingKey);
+						if (inBatchText !== undefined) {
+							// Only once it is known to have been used - a lookup that
+							// missed must not mark a file as somebody's sibling.
+							consumed.set(siblingKey, document.fileName ?? siblingKey);
+							return inBatchText;
 						}
-					: undefined;
+						if (!specPath || !intake.readSibling) {
+							throw new Error(`No file at ${refPath}`);
+						}
+						return intake.readSibling(specPath, refPath);
+					}
+				: undefined;
 
-			if (document.readError) {
-				return {
-					document,
-					raw: document.text,
-					unresolvedRefs: 0,
-					error: document.readError,
-				};
-			}
-			try {
-				const bundle = await bundleExternalRefs(document.text, {
-					maxBytes: intake.maxBytes,
-					...(document.sourceUrl ? { sourceUrl: document.sourceUrl } : {}),
-					fetchUrl: intake.fetchUrl,
-					...(readSibling ? { readSibling } : {}),
-				});
-				return { document, raw: bundle.text, unresolvedRefs: bundle.unresolvedRefs };
-			} catch (e) {
-				// Only the size cap throws; an unreachable ref is counted, not fatal.
-				// It is this file's failure and not the batch's - the other twelve
-				// specs in the folder have nothing to do with this one's size.
-				return {
-					document,
-					raw: document.text,
-					unresolvedRefs: 0,
-					error: failureMessage(e),
-				};
-			}
+		if (document.readError) {
+			return {
+				document,
+				raw: document.text,
+				unresolvedRefs: 0,
+				error: document.readError,
+			};
+		}
+		try {
+			const bundle = await bundleExternalRefs(document.text, {
+				maxBytes: intake.maxBytes,
+				...(document.sourceUrl ? { sourceUrl: document.sourceUrl } : {}),
+				fetchUrl: intake.fetchUrl,
+				...(readSibling ? { readSibling } : {}),
+			});
+			return { document, raw: bundle.text, unresolvedRefs: bundle.unresolvedRefs };
+		} catch (e) {
+			// Only the size cap throws; an unreachable ref is counted, not fatal.
+			// It is this file's failure and not the batch's - the other twelve
+			// specs in the folder have nothing to do with this one's size.
+			return {
+				document,
+				raw: document.text,
+				unresolvedRefs: 0,
+				error: failureMessage(e),
+			};
+		}
+	};
+
+	// Opened at zero, so the dialog has a bar before the first document finishes -
+	// which is exactly when a slow one leaves it with nothing to say.
+	report("bundling", 0, documents.length);
+	let bundled = 0;
+	const bundles = await Promise.all(
+		documents.map(async (document) => {
+			const bundle = await bundleOne(document);
+			// Ticked as each one lands rather than by walking a queue: the wave
+			// stays parallel, and serializing it for a tidier counter would trade a
+			// 13-file folder's wall time for a nicer-looking number.
+			report("bundling", ++bundled, documents.length);
+			return bundle;
 		})
 	);
 
@@ -269,15 +315,22 @@ export async function detectBatch(
 
 	// One wave for the whole batch rather than one file at a time: a 13-document
 	// folder pick is 13 parses, and sequentially that is 13 round trips.
+	//
+	// The total is what `skipParse` leaves, not `documents.length`: a file that
+	// could not be read, or that another document inlined, is never parsed.
+	const parseCount = bundles.filter((bundle) => !skipParse(bundle)).length;
+	report("parsing", 0, parseCount);
+	let parsedSoFar = 0;
 	const parsed = await Promise.all(
-		bundles.map(async (bundle) =>
-			skipParse(bundle)
-				? null
-				: await parseEntry(bundle.raw, opts, {
-						...bundle.document,
-						unresolvedRefs: bundle.unresolvedRefs,
-					})
-		)
+		bundles.map(async (bundle) => {
+			if (skipParse(bundle)) return null;
+			const result = await parseEntry(bundle.raw, opts, {
+				...bundle.document,
+				unresolvedRefs: bundle.unresolvedRefs,
+			});
+			report("parsing", ++parsedSoFar, parseCount);
+			return result;
+		})
 	);
 
 	return bundles.map((bundle, index) => {
@@ -351,8 +404,16 @@ async function parseEntry(
  */
 export async function reparseBatch(
 	entries: BatchEntry[],
-	opts: ImportOptions
+	opts: ImportOptions,
+	onProgress?: (progress: BatchProgress) => void
 ): Promise<BatchEntry[]> {
+	const report = reporter(onProgress);
+	// A toggle re-parses every entry that has one - the same round trip per file
+	// the first parse was - so it reports the same counter rather than looking
+	// instant and then blocking for a folder's worth of them.
+	const reparses = entries.filter((entry) => !entry.bundledInto && !entry.outcome).length;
+	report("parsing", 0, reparses);
+	let done = 0;
 	return await Promise.all(
 		entries.map(async (entry) => {
 			if (entry.bundledInto || entry.outcome) return entry;
@@ -361,6 +422,7 @@ export async function reparseBatch(
 				...(entry.sourceUrl ? { sourceUrl: entry.sourceUrl } : {}),
 				unresolvedRefs: entry.unresolvedRefs,
 			});
+			report("parsing", ++done, reparses);
 			// A file the user had unchecked stays unchecked; a toggle changes what is
 			// in each file, not which files the user asked for.
 			return { ...entry, ...parsed, included: parsed.result !== null && entry.included };

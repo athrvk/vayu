@@ -766,6 +766,39 @@ namespace import_fetch {
 /// the config entry's own maximum) so that raising that setting to its limit
 /// can never be silently narrowed by this one.
 constexpr size_t MAX_BYTES = 256ULL * 1024 * 1024;
+
+/// How rarely a streamed download's progress is worth saying out loud
+/// (issue #882).
+///
+/// The client reports every curl write - roughly every 16 KiB - which for a
+/// 10 MB spec is ~640 reports for a bar with a few hundred pixels to cross.
+/// Either bound releases an SSE frame: the byte one keeps a fast download's bar
+/// moving smoothly, and the time one keeps a slow one's from looking stalled.
+constexpr uint64_t PROGRESS_EVERY_BYTES = 256ULL * 1024;
+constexpr long PROGRESS_EVERY_MS        = 100;
+
+/// How long a fetch may sit below a trickle before it is abandoned, and what
+/// counts as a trickle (issue #882).
+///
+/// Replaces the 30s *total* this route inherited from `Request::timeout_ms`,
+/// which bounded a download's size rather than its health - 10 MB needed better
+/// than 340 KB/s just to arrive. 30s of near-silence is a dead transfer; 30s of
+/// steady bytes is a large file. The floor is deliberately near zero, because
+/// the question is whether anything is arriving at all and not whether it is
+/// arriving quickly: a genuinely slow link should finish, slowly.
+constexpr long STALL_TIMEOUT_MS            = 30000;
+constexpr long STALL_FLOOR_BYTES_PER_SEC   = 256;
+
+/// The three events a streamed `/import/fetch` emits (issue #882).
+///
+/// A wire contract, so it is stated once on each side rather than spelled out at
+/// the send and again at the read: the renderer mirrors these in
+/// `app/src/constants/import.ts`, and a name that drifted would leave a download
+/// reporting into a branch nothing takes - silently, because an unknown event is
+/// an event a reader skips.
+constexpr const char* EVENT_PROGRESS = "progress";
+constexpr const char* EVENT_RESULT   = "result";
+constexpr const char* EVENT_ERROR    = "error";
 } // namespace import_fetch
 
 /**

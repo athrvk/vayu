@@ -1918,6 +1918,29 @@ Gradient track (green→amber→red at 18% opacity), with absolute-positioned ne
 - A dot below it: `w-2 h-2 rounded-full mx-auto -mt-1` with `boxShadow: "0 0 0 2px hsl(var(--card))"` (creates the ring effect without Tailwind ring classes)
 - Value label + percentile label below
 
+### Progress Bar
+
+`components/ui/progress.tsx`, over `@radix-ui/react-progress`. Track
+`h-1.5 w-full overflow-hidden rounded-full surface-sunken`; fill
+`h-full rounded-full bg-primary`.
+
+Three choices worth stating, because each has a plausible wrong answer:
+
+- **`bg-primary`, not `bg-primary-fill`.** `--primary-fill` exists for solids
+  that carry a white label; a progress fill carries none, so it follows the
+  accent rule and brightens in dark like every other accent surface.
+- **`surface-sunken` for the track.** It is the one recessed fill that reads on a
+  card in both themes (1.356 / 1.343), and on `--muted` / `--accent` no border
+  token works at all - see the borders section.
+- **`rounded-full`, not a radius token.** A track is a pill at every roundedness
+  setting, which is that setting's documented fixed-radius exemption. A bare
+  `rounded` would pin it to 4px and fail `radius-token.test.tsx`.
+
+Determinate sets the fill's `width` and transitions it
+(`transition-[width] duration-200 ease-out`). Indeterminate is a `w-1/3` stripe
+crossing the track via `.progress-indeterminate` - growth from the start would
+read as a fraction, and there is no fraction to report.
+
 ---
 
 ## Tailwind Utility Reference

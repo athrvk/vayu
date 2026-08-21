@@ -1106,6 +1106,18 @@ export interface ImportFetchResponse {
 }
 
 /**
+ * How much of a URL import has arrived (issue #882).
+ *
+ * `total` is the upstream's `Content-Length`, and **null when it declared none** -
+ * a chunked response has no denominator. The dialog draws bytes received for
+ * that case rather than a percentage of a number nobody stated.
+ */
+export interface ImportFetchProgress {
+	received: number;
+	total: number | null;
+}
+
+/**
  * POST /import/apply - the whole parsed import in one atomic call.
  *
  * Items reference each other by opaque `tempId`s that never reach the database;

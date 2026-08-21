@@ -52,6 +52,19 @@ picked files ──▶ detectBatch() ──▶ parseImport() ──▶ assignTem
              bundle its $refs    → ImportResult      ids (c1/r1/e1)        POST /import/apply
 ```
 
+Each stage that waits reports how far through it is
+(issue [#882](https://github.com/athrvk/vayu/issues/882)). `detectBatch` and
+`reparseBatch` take an `onProgress` callback and tick as each document's promise
+lands - the waves stay parallel, so what advances is a counter, never a queue -
+and `ImportModal` adds the two stages either side of them: the URL download
+(bytes, streamed off `POST /import/fetch`) and the apply, which is one
+transaction per file and so counts files. Reading the picked files off disk gets
+a name but no counter: `FileReader` is local and effectively instant, and a
+number there would be motion without information. Every total is a real count of
+real work - `parsing`'s is the documents that will actually be parsed, which is
+fewer than the documents picked whenever one could not be read or was inlined
+into another.
+
 An agent has no dialog, so it takes the whole of that in one call:
 [`POST /import`](../../engine/api-reference.md#post-import) is the parse, the
 flattening and the apply together. The app deliberately does not use it - a

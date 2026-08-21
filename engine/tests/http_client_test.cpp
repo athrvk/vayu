@@ -10,8 +10,12 @@
 #include <httplib.h>
 
 #include <chrono>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "vayu/http/client.hpp"
 
@@ -22,6 +26,21 @@ namespace {
 // Local mock server that mimics the httpbin endpoints used by the tests.
 // Bound to a random port on 127.0.0.1 so tests never touch the network.
 // ---------------------------------------------------------------------------
+/// The `/sized` and `/unsized` body size, and the chunk `/unsized` hands out.
+/// Larger than curl's 16 KiB write buffer so a progress report has to be made
+/// of several calls rather than one - a single-call report would pass a test
+/// that only checked the final count.
+constexpr size_t SIZED_BYTES = 256 * 1024;
+constexpr size_t CHUNK_BYTES = 8 * 1024;
+
+/// `/dribbles` sends this much, in these pieces, ~120ms apart - so the whole
+/// transfer runs well past any stall window short enough to test with, while
+/// never actually stalling.
+constexpr size_t DRIBBLE_CHUNK = 4 * 1024;
+constexpr size_t DRIBBLE_BYTES = 40 * 1024;
+static_assert ((DRIBBLE_BYTES / DRIBBLE_CHUNK) * 120 > 300,
+"the dribble must outlast the 300ms total bound the tests set, or they prove nothing");
+
 class MockHttpBin {
     public:
     MockHttpBin () {
@@ -80,6 +99,55 @@ class MockHttpBin {
         svr_.Get ("/response-headers", [] (const httplib::Request&, httplib::Response& res) {
             res.set_header ("X-Custom", "test");
             res.set_content (R"({"X-Custom":"test"})", "application/json");
+        });
+
+        // GET /sized - a body big enough to arrive in several write-callback
+        // chunks, served with a Content-Length so the declared total is real.
+        svr_.Get ("/sized", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content (std::string (SIZED_BYTES, 'x'), "application/octet-stream");
+        });
+
+        // GET /stalls - sends a little, then nothing, forever. What a stall
+        // timeout has to catch and a total timeout catches far too late.
+        svr_.Get ("/stalls", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider ("application/octet-stream",
+            [] (size_t offset, httplib::DataSink& sink) {
+                if (offset == 0) {
+                    const std::string opener (1024, 'z');
+                    return sink.write (opener.data (), opener.size ());
+                }
+                std::this_thread::sleep_for (std::chrono::milliseconds (200));
+                return true; // Alive, and saying nothing.
+            });
+        });
+
+        // GET /dribbles - slow, but never stops. A download that a *total*
+        // timeout kills for being large rather than for being stuck.
+        svr_.Get ("/dribbles", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider ("application/octet-stream",
+            [] (size_t offset, httplib::DataSink& sink) {
+                if (offset >= DRIBBLE_BYTES) {
+                    sink.done ();
+                    return true;
+                }
+                std::this_thread::sleep_for (std::chrono::milliseconds (120));
+                const std::string chunk (DRIBBLE_CHUNK, 'd');
+                return sink.write (chunk.data (), chunk.size ());
+            });
+        });
+
+        // GET /unsized - the same bytes with no Content-Length at all, which is
+        // the case a progress report has no denominator for.
+        svr_.Get ("/unsized", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider ("application/octet-stream",
+            [] (size_t offset, httplib::DataSink& sink) {
+                if (offset >= SIZED_BYTES) {
+                    sink.done ();
+                    return true;
+                }
+                const std::string chunk (CHUNK_BYTES, 'y');
+                return sink.write (chunk.data (), chunk.size ());
+            });
         });
 
         port_   = svr_.bind_to_any_port ("127.0.0.1");
@@ -385,6 +453,173 @@ TEST_F (HttpClientTest, HandlesHttpMethods) {
         ASSERT_TRUE (result.is_ok ()) << "PATCH Error: " << result.error ().message;
         EXPECT_EQ (result.value ().status_code, 200);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Body progress reporting (issue #882)
+// ---------------------------------------------------------------------------
+//
+// `/import/fetch` streams a download's progress to the import dialog, and the
+// only place that knows a byte has arrived is the write callback. These assert
+// the report is made of the arrival rather than of the finished transfer: a
+// callback that fired once with the final count would be useless to a progress
+// bar, and is what a test checking only `received` at the end would accept.
+
+/// One `on_body_progress` call, as it was made.
+struct ProgressTick {
+    uint64_t received;
+    std::optional<uint64_t> total;
+};
+
+TEST_F (HttpClientTest, ReportsBodyProgressAsTheBytesArrive) {
+    std::vector<ProgressTick> ticks;
+    ClientConfig config;
+    config.on_body_progress = [&ticks] (uint64_t received, std::optional<uint64_t> total) {
+        ticks.push_back ({ received, total });
+        return true;
+    };
+    Client client (std::move (config));
+
+    auto result = client.get (mock_->url ("/sized"));
+    ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
+    ASSERT_EQ (result.value ().body.size (), SIZED_BYTES);
+
+    // Several calls, not one - the report has to track the arrival.
+    ASSERT_GT (ticks.size (), 1U);
+    EXPECT_EQ (ticks.back ().received, SIZED_BYTES);
+    // Monotonic, and each one counts the body buffered so far.
+    for (size_t i = 1; i < ticks.size (); ++i) {
+        EXPECT_GT (ticks[i].received, ticks[i - 1].received);
+    }
+}
+
+TEST_F (HttpClientTest, ReportsTheDeclaredTotalWhenTheServerDeclaresOne) {
+    std::vector<ProgressTick> ticks;
+    ClientConfig config;
+    config.on_body_progress = [&ticks] (uint64_t received, std::optional<uint64_t> total) {
+        ticks.push_back ({ received, total });
+        return true;
+    };
+    Client client (std::move (config));
+
+    ASSERT_TRUE (client.get (mock_->url ("/sized")).is_ok ());
+
+    ASSERT_FALSE (ticks.empty ());
+    // Content-Length arrives before the first body byte, so every tick has it.
+    for (const auto& tick : ticks) {
+        ASSERT_TRUE (tick.total.has_value ());
+        EXPECT_EQ (*tick.total, SIZED_BYTES);
+    }
+}
+
+TEST_F (HttpClientTest, ReportsNoTotalWhenTheServerDeclaresNone) {
+    std::vector<ProgressTick> ticks;
+    ClientConfig config;
+    config.on_body_progress = [&ticks] (uint64_t received, std::optional<uint64_t> total) {
+        ticks.push_back ({ received, total });
+        return true;
+    };
+    Client client (std::move (config));
+
+    auto result = client.get (mock_->url ("/unsized"));
+    ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
+
+    ASSERT_FALSE (ticks.empty ());
+    // A chunked response has no length to report, and a guessed one would be
+    // the fake percentage this whole feature refuses to draw.
+    for (const auto& tick : ticks) {
+        EXPECT_FALSE (tick.total.has_value ());
+    }
+}
+
+TEST_F (HttpClientTest, StopsTheTransferWhenTheProgressCallbackRefuses) {
+    uint64_t seen = 0;
+    ClientConfig config;
+    config.on_body_progress = [&seen] (uint64_t received, std::optional<uint64_t>) {
+        seen = received;
+        return false; // The listener is gone - stop reading.
+    };
+    Client client (std::move (config));
+
+    auto result = client.get (mock_->url ("/sized"));
+
+    // The transfer is abandoned, not completed: whoever asked for the bytes has
+    // stopped listening, and reading the remaining megabytes would be work for
+    // nobody. Reported as a failed response rather than a partial success.
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_TRUE (result.value ().has_error ());
+    EXPECT_LT (seen, SIZED_BYTES);
+}
+
+// ---------------------------------------------------------------------------
+// Stall timeout (issue #882)
+// ---------------------------------------------------------------------------
+//
+// `/import/fetch` used to die at the `Request::timeout_ms` default of 30s -
+// which is a bound on the transfer's *size*, not on its health: 10 MB needs
+// better than 340 KB/s to survive it. The progress bar made that visible and
+// absurd, filling to two thirds and then reporting a timeout on a download that
+// had never once stopped.
+//
+// The honest bound is a stall: abort when throughput stays under a floor for a
+// while, never for having taken a while. libcurl's low-speed options are exactly
+// that, and `max_response_bytes` already bounds the total.
+
+TEST_F (HttpClientTest, StallTimeoutAbortsATransferThatStopsSending) {
+    ClientConfig config;
+    config.stall_timeout_ms = 1000;
+    Client client (std::move (config));
+
+    const auto start = std::chrono::steady_clock::now ();
+    auto result      = client.get (mock_->url ("/stalls"));
+    const auto took  = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - start)
+    .count ();
+
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_TRUE (result.value ().has_error ());
+    // Killed by the stall window, not by the 30s total it replaced.
+    EXPECT_LT (took, 10000);
+}
+
+TEST_F (HttpClientTest, StallTimeoutReplacesTheTotalBoundRatherThanJoiningIt) {
+    // The behaviour change, stated as narrowly as it can be: `/dribbles` takes
+    // ~1.2s and never pauses, and the request states a total bound of 300ms.
+    //
+    // Both bounds together would leave the total deciding - which is the 30s
+    // wall `/import/fetch` inherited, and the reason a 10 MB spec needed better
+    // than 340 KB/s merely to arrive. So the total must not be applied at all.
+    Request request;
+    request.method     = HttpMethod::GET;
+    request.url        = mock_->url ("/dribbles");
+    request.timeout_ms = 300;
+
+    ClientConfig config;
+    config.stall_timeout_ms = 5000; // No gap in this transfer comes near it.
+    Client client (std::move (config));
+
+    auto result = client.send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
+    EXPECT_FALSE (result.value ().has_error ())
+    << "a live download must not be killed for taking longer than the total: "
+    << result.value ().error_message;
+    EXPECT_EQ (result.value ().body.size (), DRIBBLE_BYTES);
+}
+
+TEST_F (HttpClientTest, WithoutAStallTimeoutTheTotalBoundStillApplies) {
+    // The other half of the same statement, and what keeps every other caller's
+    // behaviour intact: a design send's timeout is a number the user typed.
+    Request request;
+    request.method     = HttpMethod::GET;
+    request.url        = mock_->url ("/dribbles");
+    request.timeout_ms = 300;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_TRUE (result.value ().has_error ());
+    EXPECT_EQ (result.value ().error_code, ErrorCode::Timeout);
 }
 
 } // namespace vayu::http

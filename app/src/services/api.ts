@@ -7,8 +7,9 @@
 
 // API Service Layer - All backend endpoints
 
-import { httpClient } from "./http-client";
+import { httpClient, ApiError } from "./http-client";
 import { API_ENDPOINTS } from "@/config/api-endpoints";
+import { IMPORT_FETCH_EVENTS } from "@/constants/import";
 import {
 	RequestTransformer,
 	CollectionTransformer,
@@ -61,6 +62,7 @@ import type {
 	GetConfigResponse,
 	UpdateConfigRequest,
 	GlobalsResponse,
+	ImportFetchProgress,
 	ImportFetchResponse,
 	ImportApplyRequest,
 	ImportParseRequest,
@@ -857,13 +859,64 @@ export const apiService = {
 	 * nothing and gets the engine's transport ceiling - a number no import may
 	 * exceed, deliberately not restated here so the two cannot drift. Over the
 	 * bound is a `413` whose message names it.
+	 *
+	 * @param onProgress called as the bytes arrive (issue #882). Its presence is
+	 * what asks the engine to stream: without it this is the buffered call it has
+	 * always been, which is what `ref-bundler` and the spec re-fetch want - they
+	 * have nowhere to draw a bar and no reason to pay for a stream. With it the
+	 * timeout becomes an *idle* one, so an 8 MB document arriving steadily is no
+	 * longer racing `proxiedRequestTimeoutMs`.
 	 */
-	async importFetch(url: string, maxBytes?: number): Promise<ImportFetchResponse> {
-		return await httpClient.post<ImportFetchResponse>(
-			API_ENDPOINTS.IMPORT_FETCH,
-			maxBytes === undefined ? { url } : { url, maxBytes },
-			{ timeout: proxiedRequestTimeoutMs() }
-		);
+	async importFetch(
+		url: string,
+		maxBytes?: number,
+		onProgress?: (progress: ImportFetchProgress) => void
+	): Promise<ImportFetchResponse> {
+		const body = maxBytes === undefined ? { url } : { url, maxBytes };
+		if (!onProgress) {
+			return await httpClient.post<ImportFetchResponse>(API_ENDPOINTS.IMPORT_FETCH, body, {
+				timeout: proxiedRequestTimeoutMs(),
+			});
+		}
+
+		for await (const message of httpClient.stream(API_ENDPOINTS.IMPORT_FETCH, body, {
+			idleTimeout: proxiedRequestTimeoutMs(),
+		})) {
+			// An engine that has never heard of streaming answered the same request
+			// the way it always has. Nothing was reported on the way, and there is
+			// nothing to report now - but the document is here, which is what the
+			// caller asked for.
+			if (message.kind === "buffered") {
+				return message.data as ImportFetchResponse;
+			}
+			if (message.event === IMPORT_FETCH_EVENTS.PROGRESS) {
+				onProgress(message.data as ImportFetchProgress);
+				continue;
+			}
+			if (message.event === IMPORT_FETCH_EVENTS.RESULT) {
+				return message.data as ImportFetchResponse;
+			}
+			if (message.event === IMPORT_FETCH_EVENTS.ERROR) {
+				// The only shape a streamed failure can arrive in: the status line
+				// went on the 200 that opened the stream, so the event carries the
+				// numeric status itself. Rethrown as the same `ApiError` the
+				// buffered call would have thrown, so one `catch` handles both.
+				const failure = message.data as {
+					status: number;
+					error: { code: string; message: string };
+				};
+				throw new ApiError(
+					failure.status,
+					failure.error.code,
+					failure.error.message,
+					failure
+				);
+			}
+		}
+
+		// The stream closed having said neither. Nothing was fetched, and calling
+		// that an empty document would hand the parser a file the user never had.
+		throw new Error("The engine's fetch ended without returning a document");
 	},
 
 	/**
