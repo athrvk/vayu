@@ -87,6 +87,19 @@ async function readApiError(response: Response): Promise<ApiError> {
 }
 
 /**
+ * The error a caller's own cancel raises (issue #884).
+ *
+ * Named `AbortError` because that is what the platform calls this and what a
+ * caller already checks for; a bespoke class would be a second vocabulary for
+ * the one thing `fetch` and every other cancellable API already agree on.
+ */
+function abortError(): Error {
+	const error = new Error("Aborted by the caller");
+	error.name = "AbortError";
+	return error;
+}
+
+/**
  * Split a buffer into whole SSE frames, keeping whatever is still incomplete.
  *
  * A `ReadableStream` hands over whatever arrived, not whole frames, so a frame
@@ -209,13 +222,35 @@ class HttpClient {
 	 * A response that is not a stream yields one `buffered` message instead of
 	 * being retried: the engine has already done the work, and asking again would
 	 * be asking for the same megabytes twice.
+	 *
+	 * @param options.signal the caller's own cancel (issue #884). Abandoning the
+	 * iteration already releases the stream, but a caller that is *not* iterating -
+	 * a dialog closing while an awaited helper sits in the loop on its behalf - has
+	 * no way to reach that, and the engine goes on downloading megabytes for
+	 * nobody. An abort through this raises an `AbortError`, kept distinct from the
+	 * idle stall's `Request timeout`: both end in an `AbortController`, and a
+	 * deliberate cancel reported as a timeout is a banner about a failure nobody
+	 * had.
 	 */
 	async *stream(
 		path: string,
 		body?: unknown,
-		options?: { idleTimeout?: number; headers?: Record<string, string> }
+		options?: {
+			idleTimeout?: number;
+			headers?: Record<string, string>;
+			signal?: AbortSignal;
+		}
 	): AsyncGenerator<StreamMessage> {
 		const controller = new AbortController();
+		const caller = options?.signal;
+		// Checked before the request is built, not only linked: a signal that was
+		// already aborted must not put a request on the wire that the next line
+		// would cancel - the engine would start a download and be hung up on.
+		if (caller?.aborted) {
+			throw abortError();
+		}
+		const onCallerAbort = () => controller.abort();
+		caller?.addEventListener("abort", onCallerAbort);
 		const idleTimeout = options?.idleTimeout || DEFAULT_REQUEST_TIMEOUT_MS;
 		let idleTimer = setTimeout(() => controller.abort(), idleTimeout);
 		const resetIdle = () => {
@@ -271,6 +306,11 @@ class HttpClient {
 			if (error instanceof ApiError) {
 				throw error;
 			}
+			// Which abort this was is not knowable from the error - `fetch` raises
+			// the same `AbortError` for both - only from which signal is set.
+			if (caller?.aborted) {
+				throw abortError();
+			}
 			if (error instanceof Error) {
 				if (error.name === "AbortError") {
 					throw new Error("Request timeout");
@@ -279,6 +319,7 @@ class HttpClient {
 			}
 			throw new Error("Unknown error occurred");
 		} finally {
+			caller?.removeEventListener("abort", onCallerAbort);
 			clearTimeout(idleTimer);
 			// Cancelling releases the socket, which is what makes the engine's SSE
 			// write fail and its transfer stop. Ignored on failure: the stream may

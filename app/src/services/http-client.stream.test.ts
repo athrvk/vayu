@@ -84,7 +84,10 @@ function jsonOf(payload: unknown) {
 }
 
 /** Everything the stream yielded, in order. */
-async function drain(path = "/import/fetch", options?: { idleTimeout?: number }) {
+async function drain(
+	path = "/import/fetch",
+	options?: { idleTimeout?: number; signal?: AbortSignal }
+) {
 	const seen = [];
 	for await (const message of httpClient.stream(path, { url: "http://x" }, options)) {
 		seen.push(message);
@@ -196,5 +199,42 @@ describe("httpClient.stream", () => {
 
 		const seen = await drain("/import/fetch", { idleTimeout: 300 });
 		expect(seen).toHaveLength(4);
+	});
+
+	it("stops when the caller aborts, and says so as an abort", async () => {
+		// Closing the import dialog has to stop the engine downloading, and the
+		// only thing that reaches it is this cancel. Distinct from the idle
+		// timeout on purpose: a deliberate abort surfaced as "Request timeout"
+		// would leave a banner about a failure nobody had.
+		const released = streamOf(["never arrives"], 10_000);
+		const controller = new AbortController();
+
+		const drained = drain("/import/fetch", { signal: controller.signal });
+		controller.abort();
+
+		await expect(drained).rejects.toThrow(
+			expect.objectContaining({ name: "AbortError" }) as Error
+		);
+		expect(released.value).toBe(true);
+	});
+
+	it("still calls an idle stall a timeout, not an abort", async () => {
+		// The other half of the same distinction. Both end in an AbortController,
+		// so only the caller's own signal tells them apart.
+		streamOf(["never arrives"], 10_000);
+
+		await expect(
+			drain("/import/fetch", { idleTimeout: 50, signal: new AbortController().signal })
+		).rejects.toThrow("Request timeout");
+	});
+
+	it("does not open the request at all when the signal is already aborted", async () => {
+		streamOf(['event: result\ndata: {"n":1}\n\n']);
+		const controller = new AbortController();
+		controller.abort();
+
+		await expect(drain("/import/fetch", { signal: controller.signal })).rejects.toThrow(
+			expect.objectContaining({ name: "AbortError" }) as Error
+		);
 	});
 });

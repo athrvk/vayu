@@ -860,6 +860,12 @@ export const apiService = {
 	 * exceed, deliberately not restated here so the two cannot drift. Over the
 	 * bound is a `413` whose message names it.
 	 *
+	 * @param signal cancels the download (issue #884). Only the streamed form takes
+	 * it: the buffered one is a single awaited POST whose caller has nothing to do
+	 * while it runs, where a streamed one may be running behind a dialog the user
+	 * has since closed - and then the engine is reading megabytes for nobody. An
+	 * abort raises an `AbortError` rather than resolving, so a caller can tell its
+	 * own cancel from a fetch that failed.
 	 * @param onProgress called as the bytes arrive (issue #882). Its presence is
 	 * what asks the engine to stream: without it this is the buffered call it has
 	 * always been, which is what `ref-bundler` and the spec re-fetch want - they
@@ -870,7 +876,8 @@ export const apiService = {
 	async importFetch(
 		url: string,
 		maxBytes?: number,
-		onProgress?: (progress: ImportFetchProgress) => void
+		onProgress?: (progress: ImportFetchProgress) => void,
+		signal?: AbortSignal
 	): Promise<ImportFetchResponse> {
 		const body = maxBytes === undefined ? { url } : { url, maxBytes };
 		if (!onProgress) {
@@ -881,6 +888,7 @@ export const apiService = {
 
 		for await (const message of httpClient.stream(API_ENDPOINTS.IMPORT_FETCH, body, {
 			idleTimeout: proxiedRequestTimeoutMs(),
+			...(signal ? { signal } : {}),
 		})) {
 			// An engine that has never heard of streaming answered the same request
 			// the way it always has. Nothing was reported on the way, and there is

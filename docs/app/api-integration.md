@@ -545,9 +545,17 @@ Two things `httpClient.stream` does that `request` cannot. Its timeout is an
 `proxiedRequestTimeoutMs` - what is bounded is the stall, not the transfer. And a
 response that comes back as buffered JSON yields one `buffered` message instead
 of failing, because the app and the engine sidecar are not updated together and
-an older engine answers this request the way it always has. Abandoning the
-iteration cancels the body stream, which is what makes the engine stop
-downloading when the import dialog closes.
+an older engine answers this request the way it always has.
+
+`importFetch` takes a fourth argument, an `AbortSignal`, and it is what actually
+stops a download (issue
+[#884](https://github.com/athrvk/vayu/issues/884)). Abandoning the iteration
+releases the stream, but a caller that is not itself iterating - a dialog closing
+while `importFetch` sits in the loop on its behalf - has no way to reach that, so
+0.22.0 shipped a transport that could cancel and a dialog that never asked it to.
+An abort raises an `AbortError`, deliberately distinct from the idle stall's
+`Request timeout`: both end in an `AbortController`, and a deliberate cancel
+reported as a timeout is an error banner about a failure nobody had.
 
 `applyImport` sends a whole parsed import - collections, requests, environments
 and **spec documents** - in one atomic call. Items reference each other by

@@ -129,4 +129,33 @@ describe("apiService.importFetch with progress", () => {
 			apiService.importFetch("http://x/spec.json", undefined, () => {})
 		).rejects.toThrow(/without/i);
 	});
+
+	it("passes the caller's cancel through to the stream", async () => {
+		streaming([event("result", { content: "{}", contentType: "application/json" })]);
+		const controller = new AbortController();
+
+		await apiService.importFetch("http://x/spec.json", undefined, () => {}, controller.signal);
+
+		expect(stream.mock.calls[0][2]).toMatchObject({ signal: controller.signal });
+	});
+
+	it("reports an abort as an abort, not as a stream that said nothing", async () => {
+		// A cancelled stream ends without a `result`, which is the same shape as a
+		// stream that finished having said nothing - and the two must not read the
+		// same way. "ended without returning a document" for a download the user
+		// themselves cancelled would be an error report about their own click.
+		stream.mockImplementation(async function* () {
+			yield event("progress", { received: 1024, total: 8192 });
+			const aborted = new Error("Aborted by the caller");
+			aborted.name = "AbortError";
+			throw aborted;
+		});
+
+		const failure = await apiService
+			.importFetch("http://x/spec.json", undefined, () => {})
+			.then(() => null)
+			.catch((e: unknown) => e as Error);
+
+		expect(failure?.name).toBe("AbortError");
+	});
 });
