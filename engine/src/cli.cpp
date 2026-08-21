@@ -20,6 +20,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/utils/diagnostics.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
@@ -68,6 +69,10 @@ For more information, visit: https://github.com/vayu/vayu
 )";
 }
 
+// `istreambuf_iterator` over a stream we just checked is open: GCC cannot see
+// that `rdbuf()` is non-null once inlined, and reports the buffer's `gptr()`
+// reads as potential null dereferences. See utils/diagnostics.hpp.
+VAYU_IGNORE_FALSE_NULL_DEREFERENCE
 std::string read_file (const std::string& path) {
     std::ifstream file (path);
     if (!file.is_open ()) {
@@ -84,6 +89,7 @@ std::string read_file (const std::string& path) {
 
     return content;
 }
+VAYU_DIAGNOSTIC_POP
 
 void print_response (const vayu::Response& response, bool color) {
     // Status line

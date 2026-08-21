@@ -206,9 +206,9 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
         [] (unsigned char c) { return std::tolower (c); });
         // Trim whitespace
         auto isspace_pred = [] (unsigned char c) { return std::isspace (c); };
-        while (!lowered.empty () && isspace_pred (lowered.front ()))
+        while (!lowered.empty () && isspace_pred (static_cast<unsigned char> (lowered.front ())))
             lowered.erase (lowered.begin ());
-        while (!lowered.empty () && isspace_pred (lowered.back ()))
+        while (!lowered.empty () && isspace_pred (static_cast<unsigned char> (lowered.back ())))
             lowered.pop_back ();
 
         if (lowered == "true" || lowered == "1" || lowered == "yes")
@@ -351,8 +351,10 @@ struct ExpectState {
     bool deep   = false;
     bool nested = false;
     // chai's second argument to `expect(value, message)`, empty when the script
-    // passed one argument. Read only by `throw_expect_failure`.
-    std::string message;
+    // passed one argument. Read only by `throw_expect_failure`. The `{}` keeps
+    // `create_expectation`'s two-field aggregate init, which assigns this
+    // separately, out of -Wmissing-field-initializers.
+    std::string message{};
 };
 
 JSClassID expect_class_id = 0;
@@ -1668,7 +1670,7 @@ JSValue expect_string (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
 }
 
 JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message) {
-    JSValue obj = JS_NewObjectClass (ctx, static_cast<int> (expect_class_id));
+    JSValue obj = JS_NewObjectClass (ctx, expect_class_id);
     if (JS_IsException (obj)) {
         return obj;
     }
@@ -2509,9 +2511,15 @@ JSAtom prop) {
     return -1;
 }
 
-JSClassExoticMethods response_chain_exotic = {
-    .get_own_property = response_chain_unknown_member,
-};
+// Value-initialized and then assigned rather than written as a designated
+// initializer: this is a QuickJS C struct, so it cannot carry default member
+// initializers, and naming one of its seven hooks leaves the other six as
+// -Wmissing-field-initializers warnings.
+JSClassExoticMethods response_chain_exotic = [] {
+    JSClassExoticMethods exotic{};
+    exotic.get_own_property = response_chain_unknown_member;
+    return exotic;
+}();
 
 JSClassDef response_chain_class = { .class_name = "ResponseAssertionChain",
     .finalizer                                  = nullptr,
@@ -2520,7 +2528,7 @@ JSClassDef response_chain_class = { .class_name = "ResponseAssertionChain",
     .exotic                                     = &response_chain_exotic };
 
 JSValue create_response_chain_object (JSContext* ctx) {
-    return JS_NewObjectClass (ctx, static_cast<int> (response_chain_class_id));
+    return JS_NewObjectClass (ctx, response_chain_class_id);
 }
 
 // Arms the unknown-member hook. Call once the object holds every member it is

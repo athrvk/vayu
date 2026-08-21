@@ -54,10 +54,10 @@ std::string read_file (const std::filesystem::path& path) {
  * delete the explanation. Scanning code and not prose is the honest version.
  *
  * Newlines are preserved so the remaining text keeps its shape. String literals
- * are not modelled: none of the scanned headers contains a `//` or `/*` inside
- * one, and the failure mode if one appeared would be over-stripping, i.e. a
- * lenient guard - which `TheGuardStillSeesTheVersionInCode` below is what
- * catches.
+ * are not modelled: none of the scanned headers opens a comment of either kind
+ * inside one, and the failure mode if one appeared would be over-stripping,
+ * i.e. a lenient guard - which `TheGuardStillSeesTheVersionInCode` below is
+ * what catches.
  */
 std::string strip_comments (const std::string& source) {
     std::string out;

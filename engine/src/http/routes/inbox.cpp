@@ -18,6 +18,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/managed_listener.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/diagnostics.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -56,6 +57,10 @@ bool is_valid_port (int port) {
  * than the last one winning: `Set-Cookie` and `Forwarded` legitimately repeat,
  * and a capture that showed one of two is a capture that lies.
  */
+// nlohmann's internal `swap` inlined into the object build: GCC cannot see that
+// a `basic_json` it just constructed holds a value, and reports the move as a
+// potential null dereference. See utils/diagnostics.hpp.
+VAYU_IGNORE_FALSE_NULL_DEREFERENCE
 nlohmann::json headers_to_json (const httplib::Headers& headers) {
     nlohmann::json out = nlohmann::json::object ();
     for (const auto& [name, value] : headers) {
@@ -67,6 +72,7 @@ nlohmann::json headers_to_json (const httplib::Headers& headers) {
     }
     return out;
 }
+VAYU_DIAGNOSTIC_POP
 
 /// The raw query string of a request target, without the '?'.
 std::string query_of (const std::string& target) {

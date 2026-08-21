@@ -28,6 +28,7 @@
 
 #include "vayu/http/routes.hpp"
 #include "vayu/runtime/script_engine.hpp"
+#include "vayu/utils/diagnostics.hpp"
 
 namespace vayu::http::routes {
 // Defined in scripting.cpp.
@@ -383,6 +384,9 @@ TEST (ScriptTypesTest, AListFieldDeclaresAnArrayOfItsElementType) {
  * and commit the result, so a change to the surface shows up as a diff in the
  * declarations the editor will serve.
  */
+// Reading the fixture through `istreambuf_iterator`: GCC cannot see that the
+// stream we just asserted `good()` on has a buffer. See utils/diagnostics.hpp.
+VAYU_IGNORE_FALSE_NULL_DEREFERENCE
 TEST (ScriptTypesTest, TheCheckedInDeclarationsMatchTheGenerator) {
     const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
     "tests" / "fixtures" / "script-typedefs.d.ts";
@@ -409,6 +413,7 @@ TEST (ScriptTypesTest, TheCheckedInDeclarationsMatchTheGenerator) {
     << "the checked-in declarations are stale. Regenerate with "
        "VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes";
 }
+VAYU_DIAGNOSTIC_POP
 
 // Documentation is what hover text renders; a `*/` inside it would close the
 // comment early and drop every declaration after it.

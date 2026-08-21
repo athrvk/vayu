@@ -796,7 +796,10 @@ struct Variable {
     bool secret  = false;
     bool enabled = true;
     std::string type = "string";
-    std::optional<int64_t> created_at;
+    // `{}` rather than a bare declaration so the ~43 aggregate initializations
+    // that stop short of this trailing field are not each a
+    // -Wmissing-field-initializers warning; absent still means "unknown age".
+    std::optional<int64_t> created_at{};
 
     bool operator== (const Variable&) const = default;
 };
@@ -1222,19 +1225,26 @@ struct MetricTick {
  * `build_monitor_sample_payload`).
  */
 struct MonitorSample {
-    int id;
+    // Every scalar is default-initialized: a default-constructed row whose id
+    // the caller never sets is copied into a vector by test and helper code,
+    // and reading an indeterminate `int` on the way is formally UB. The DB fills
+    // these on the read path, so zero is never a value anything believes.
+    int id = 0;
     std::string run_id;
-    int64_t timestamp;   // Unix ms - when the engine scraped it
-    std::string payload; // JSON object: {timestamp, series:{name: value}}
+    int64_t timestamp = 0; // Unix ms - when the engine scraped it
+    std::string payload;   // JSON object: {timestamp, series:{name: value}}
 };
 
 struct Result {
-    int id;
+    // Default-initialized for the reason on `MonitorSample` above - production
+    // fills `id` from the DB and the rest from the transfer, but a row built
+    // field-by-field and then copied used to read four indeterminate scalars.
+    int id = 0;
     std::string run_id;
-    int64_t timestamp;
-    int status_code;
+    int64_t timestamp = 0;
+    int status_code   = 0;
     std::string status_text; // Wire reason phrase, or canonical IANA text
-    double latency_ms;
+    double latency_ms = 0.0;
     std::string error;
     // JSON. Design mode stores the whole exchange here (request + response,
     // nested). A load run stores only the timing breakdown - never a body -
@@ -1386,8 +1396,11 @@ struct ConfigEntry {
     //
     // Declared after `updated_at` on purpose: the seeds aggregate-initialize
     // positionally up to that member, so every field added since is a trailing
-    // defaulted one set through a wrapper in `seed_default_config`.
-    std::optional<std::string> unit;
+    // defaulted one set through a wrapper in `seed_default_config`. The `{}` is
+    // load-bearing for the same reason: without a default member initializer,
+    // every one of those 53 positional seeds is a `-Wmissing-field-initializers`
+    // warning, and the cure belongs on the field rather than at each site.
+    std::optional<std::string> unit{};
 };
 
 /**
