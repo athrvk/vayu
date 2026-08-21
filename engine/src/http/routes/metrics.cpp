@@ -386,7 +386,7 @@ void register_metrics_routes (RouteContext& ctx) {
                             return false;
                         }
                     }
-                } catch (const std::exception& e) {
+                } catch (const std::exception&) {
                     break;
                 }
 

@@ -1768,7 +1768,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
                     db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
                     build_metric_tick_payload (sample).dump () });
-                } catch (const std::exception& e) {
+                } catch (const std::exception&) {
                     // Continue on error
                 }
 
