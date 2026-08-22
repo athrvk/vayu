@@ -860,7 +860,7 @@ export const apiService = {
 	 * exceed, deliberately not restated here so the two cannot drift. Over the
 	 * bound is a `413` whose message names it.
 	 *
-	 * @param signal cancels the download (issue #884). Only the streamed form takes
+	 * @param signal cancels the download (issue #893). Only the streamed form takes
 	 * it: the buffered one is a single awaited POST whose caller has nothing to do
 	 * while it runs, where a streamed one may be running behind a dialog the user
 	 * has since closed - and then the engine is reading megabytes for nobody. An

@@ -336,7 +336,7 @@ size_t row_index);
 [[nodiscard]] std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth);
 
 /**
- * `render_data_value` moved to `http/request_composer.hpp` (issue #885).
+ * `render_data_value` moved to `http/request_composer.hpp` (issue #890).
  *
  * It is the `data.` namespace's own spelling rule, and the namespace lives in
  * the composer beside `DATA_NAMESPACE_PREFIX` and `is_data_variable_name`. The

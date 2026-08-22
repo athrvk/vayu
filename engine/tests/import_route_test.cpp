@@ -47,10 +47,6 @@ namespace {
 /// refusal happened while the bytes were arriving.
 constexpr size_t CHUNK_BYTES         = 1024;
 
-/// `/slow` serves this much in these pieces, 20ms apart - ~1.3s of transfer at
-/// ~190 KB/s, below the ~340 KB/s a 30s total bound demands of a 10 MB file.
-constexpr size_t SLOW_CHUNK = 4 * 1024;
-constexpr size_t SLOW_BYTES = 256 * 1024;
 constexpr size_t CHUNKED_TOTAL_BYTES = 4 * 1024 * 1024;
 
 class MockSpecServer {
@@ -67,20 +63,6 @@ class MockSpecServer {
         });
         svr_.Get ("/large", [large_bytes] (const httplib::Request&, httplib::Response& res) {
             res.set_content (std::string (large_bytes, 'x'), "application/octet-stream");
-        });
-        // Steady but slow: every chunk arrives, none quickly. A total timeout
-        // kills this for its size; a stall timeout lets it finish.
-        svr_.Get ("/slow", [] (const httplib::Request&, httplib::Response& res) {
-            res.set_chunked_content_provider ("application/json",
-            [] (size_t offset, httplib::DataSink& sink) {
-                if (offset >= SLOW_BYTES) {
-                    sink.done ();
-                    return true;
-                }
-                std::this_thread::sleep_for (std::chrono::milliseconds (20));
-                const std::string chunk (SLOW_CHUNK, 's');
-                return sink.write (chunk.data (), chunk.size ());
-            });
         });
 
         // No Content-Length at all, so only the write callback can stop it.

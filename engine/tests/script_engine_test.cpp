@@ -3888,7 +3888,7 @@ TEST_F (ScriptEngineTest, IterationDataGetOnAnUnknownKeyIsUndefined) {
 }
 
 /**
- * `pm.variables.replaceIn` resolves the data namespace too (issue #885).
+ * `pm.variables.replaceIn` resolves the data namespace too (issue #890).
  *
  * It did not, and that made it the one template resolver in the product that
  * disagreed with the others about what `{{data.column}}` means. A URL, a header
@@ -3904,7 +3904,8 @@ TEST_F (ScriptEngineTest, IterationDataGetOnAnUnknownKeyIsUndefined) {
  * `replaceIn` is different in kind - it resolves a template, and this is a
  * token that template syntax has - which is why the fix stops here.
  *
- * Mutation-check: drop the row from the resolver and the first case fails.
+ * Mutation-check: drop the row from the resolver and the first case fails; teach
+ * `pm.variables.get` the same namespace and the last one does.
  */
 TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
     const nlohmann::json row{ { "userId", "1001" }, { "city", "Portland, OR" },
@@ -3941,11 +3942,26 @@ TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
             // called "".
             pm.expect(pm.variables.replaceIn("[{{data.}}]")).to.equal("[]");
         });
+
+        pm.test("the scope readers stay out of the namespace", function() {
+            // The other half of the decision this test's doc comment records:
+            // the fix stops at replaceIn, so `get`/`has`/`toObject` answer about
+            // the variable *scopes* even while a row is bound. Without a case
+            // here, extending them would be a silent change - `pm.iterationData`
+            // is the row's accessor, and a script that reached a column through
+            // both would have two spellings for one value.
+            pm.expect(typeof pm.variables.get("data.userId")).to.equal("undefined");
+            pm.expect(pm.variables.has("data.userId")).to.equal(false);
+            pm.expect(typeof pm.variables.toObject()["data.userId"]).to.equal("undefined");
+            // The row is genuinely bound - otherwise this case would pass for
+            // the wrong reason.
+            pm.expect(pm.iterationData.get("userId")).to.equal("1001");
+        });
     )JS",
     ctx);
 
     ASSERT_TRUE (result.success) << result.error_message;
-    ASSERT_EQ (result.tests.size (), 4u);
+    ASSERT_EQ (result.tests.size (), 5u);
     for (const auto& test : result.tests) {
         EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
     }

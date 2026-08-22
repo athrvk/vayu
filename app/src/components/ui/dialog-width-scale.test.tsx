@@ -14,7 +14,7 @@
  * them, and the most cramped of them held a data-file preview table. There are
  * now three: `lg` (512px) for a form or a decision, `xl` (576px) for a dialog
  * holding something with a shape of its own, and `2xl` (672px) for one whose job
- * is *browsing* that shape - the data-row picker, added by issue #887.
+ * is *browsing* that shape - the data-row picker, added by issue #892.
  *
  * The scale grows by widening it here with a reason, which is what the last
  * assertion's message asks for; it does not grow by a call site quietly taking a
@@ -78,7 +78,7 @@ const ALLOWED = new Set([
 	"max-w-xl",
 	"sm:max-w-xl",
 	// `2xl` (672px) is the browser size, opened for the data-row picker in
-	// issue #887 - see the rationale on `DialogContent`. It is the last size the
+	// issue #892 - see the rationale on `DialogContent`. It is the last size the
 	// scale takes: past it a modal is competing with a pane.
 	"max-w-2xl",
 	"sm:max-w-2xl",

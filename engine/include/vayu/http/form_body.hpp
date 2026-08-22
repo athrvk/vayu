@@ -130,7 +130,7 @@ namespace vayu::http {
  * into JSON cannot be left to libcurl's `x-www-form-urlencoded` default; `xml`
  * and `json` because the mode *is* the type.
  *
- * **`json` was absent until issue #884, and that was a bug rather than the
+ * **`json` was absent until issue #889, and that was a bug rather than the
  * restraint it read as.** The old rule here - "those clients own the header and
  * the request builder writes it" - was true of exactly one client. The request
  * builder does write the row, so a request authored in the UI went out
