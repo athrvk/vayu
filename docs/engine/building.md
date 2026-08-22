@@ -549,6 +549,48 @@ genuine instance of the same family across the whole engine, which is the entire
 value of having the flag on. A suppression that a code change could remove
 should be that code change instead.
 
+### Formatting
+
+`.clang-format` at the repository root governs `engine/{src,include,tests}`.
+`engine/vendor/` has a `DisableFormat: true` config of its own and is never
+touched.
+
+**Use clang-format 19.** It is pinned, in the `Engine formatting` job of
+`.github/workflows/pr-tests.yml` and in
+[CONTRIBUTING.md](https://github.com/athrvk/vayu/blob/master/CONTRIBUTING.md),
+and the pin is load-bearing rather than tidy-mindedness: 39 of the 285 engine
+sources format differently under clang-format 18 than under 19. Ubuntu 24.04
+ships 18 by default, so `apt install clang-format-19` - the same major the
+clang-tidy gate uses, so one LLVM install answers for both.
+
+```bash
+# Check, the way CI does
+clang-format-19 --style=file --dry-run -Werror \
+  $(git ls-files -- engine/src engine/include engine/tests | grep -E '\.(c|cpp|h|hpp)$')
+
+# Fix
+clang-format-19 --style=file -i <file>...
+```
+
+The gate checks the **whole tree**, not the changed lines - the opposite of the
+clang-tidy gate below, because formatting has no backlog to grandfather. Issue
+#886 replaced an imported 2015 template with a config derived by measurement,
+and bulk-formatted all 285 sources in one commit; that commit's SHA is in
+`.git-blame-ignore-revs`, so `git blame` on a formatted file still attributes
+lines to whoever wrote them:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs   # once, per clone
+```
+
+Two settings look like mistakes and are not; both are commented in
+`.clang-format` itself. `ColumnLimit: 80` is paired with
+`PenaltyExcessCharacter: 1`, which makes 80 a target rather than a wall -
+raising the limit made the bulk diff two to three times worse, because a wider
+limit re-joins line breaks the code chose by hand. And `ContinuationIndentWidth:
+0` wraps arguments to the enclosing block indent, which is what the engine's
+code is written to; changing it is a 257-file rewrite and is tracked separately.
+
 ### Static Analysis
 
 clang-tidy runs in two places, and both of them can stop a change:

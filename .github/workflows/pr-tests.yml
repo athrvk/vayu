@@ -141,6 +141,7 @@ jobs:
               - 'engine/**'
               - 'build.py'
               - 'VERSION'
+              - '.clang-format'
               - '.github/check-windows-deps.py'
               - '.github/workflows/pr-tests.yml'
             build_script:
@@ -682,6 +683,86 @@ jobs:
           require_tests: true
           fail_on_failure: false
 
+  # The clang-format gate (#886). A job of its own rather than a step of the
+  # engine matrix, for the reason `quality` is a job of its own: formatting is
+  # platform-independent and needs no compile database, so riding the engine job
+  # would put a two-second check behind a five-to-eleven-minute vcpkg build and
+  # then run it three times for one answer. Out here it reports in under a
+  # minute, beside the suites.
+  #
+  # **Whole tree, not changed lines** - the opposite of the clang-tidy gate one
+  # job up, and for the opposite reason. That gate is line-scoped because the
+  # engine carries a lint backlog older than any current diff. Formatting has no
+  # backlog: the bulk-format commit in `.git-blame-ignore-revs` left all 285
+  # non-vendor sources clean at the pinned version, so the strict check is the
+  # cheap one and it cannot fail a pull request for code it did not write.
+  #
+  # `engine/vendor/` is excluded by the roots below, and carries
+  # `DisableFormat: true` of its own besides.
+  engine-format:
+    name: Engine formatting
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      # 19, the same major the clang-tidy gate pins on Linux and the same one
+      # CONTRIBUTING.md tells contributors to install, so one LLVM answers for
+      # both checks and a local run means what this one means. It is not a free
+      # choice: 39 of the 285 engine sources format differently under 18 than
+      # under 19, so an unpinned `clang-format` would fail pull requests over
+      # whichever version a contributor's distribution happened to ship.
+      - name: Install clang-format 19
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-format-19
+
+      - name: Check engine formatting
+        shell: bash
+        run: |
+          # Asserted rather than trusted, on the pattern the clang-tidy step
+          # uses: apt could satisfy `clang-format-19` from a package that moved
+          # on, and a version this check did not expect is a wrong answer rather
+          # than a missing one.
+          major=$(clang-format-19 --version | grep -oE '[0-9]+' | head -1)
+          if [[ "$major" != "19" ]]; then
+            echo "::error::clang-format ${major:-(version unreadable)} is not the 19 this gate and CONTRIBUTING.md pin"
+            exit 1
+          fi
+
+          roots=(engine/src engine/include engine/tests)
+
+          # `git ls-files` rather than an enumerated list, so a source file
+          # added tomorrow is covered without anyone remembering to add it here.
+          # A read loop rather than `mapfile` only to match the engine job's
+          # idiom - this leg is Ubuntu-only, so the bash 3.2.57 constraint that
+          # forces it one job up does not apply here.
+          files=()
+          while IFS= read -r file; do
+            files+=("$file")
+          done < <(git ls-files -- "${roots[@]}" | grep -E '\.(c|cpp|h|hpp)$')
+
+          # The non-empty-scan proof this repository asks of every source
+          # scanning guard. A roots list that stopped matching - a directory
+          # renamed, a glob typo - would otherwise check nothing and report a
+          # pass, which is the one failure mode a formatting gate cannot survive
+          # quietly.
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::No engine sources matched ${roots[*]} - this gate scanned nothing, which is a failure and not a pass"
+            exit 1
+          fi
+          echo "- clang-format $major checked **${#files[@]}** engine source(s)" >> "$GITHUB_STEP_SUMMARY"
+
+          clang-format-19 --style=file --dry-run -Werror "${files[@]}"
+
   installer:
     name: Installer script on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -797,7 +878,7 @@ jobs:
     # filter cannot be read as "nothing to test". Without it, a broken `changes`
     # job skips everything, and "skipped" would pass this gate on a change
     # nobody ran.
-    needs: [changes, quality, app, engine, installer, build-script]
+    needs: [changes, quality, app, engine, engine-format, installer, build-script]
     if: always()
     # `actions: read` is what lets the download below reach this run's own
     # artifacts; everything else here reads job results, which need nothing.
@@ -882,6 +963,7 @@ jobs:
           check quality   "${{ needs.quality.result }}"
           check app       "${{ needs.app.result }}"
           check engine    "${{ needs.engine.result }}"
+          check engine-format "${{ needs['engine-format'].result }}"
           check installer "${{ needs.installer.result }}"
           check build-script "${{ needs['build-script'].result }}"
 

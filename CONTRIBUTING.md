@@ -97,7 +97,25 @@ vayu/
 
 - **Standard:** C++20
 - **Style:** Google C++ Style Guide (with modifications)
-- **Formatting:** clang-format (config in `.clang-format` if present)
+- **Formatting:** clang-format, **19 exactly**. `.clang-format` at the repository
+  root governs `engine/{src,include,tests}`; `engine/vendor/` is excluded by a
+  `DisableFormat: true` config of its own. The major is pinned because 39 of the
+  285 engine sources format differently under 18 than under 19 - Ubuntu 24.04
+  ships 18 by default, so `apt install clang-format-19`, which is also the major
+  the clang-tidy gate uses. Check the way CI does, or fix in place:
+
+  ```bash
+  clang-format-19 --style=file --dry-run -Werror \
+    $(git ls-files -- engine/src engine/include engine/tests | grep -E '\.(c|cpp|h|hpp)$')
+
+  clang-format-19 --style=file -i <file>...
+  ```
+
+  The `Engine formatting` job checks the **whole tree**, not just your changed
+  lines - the tree is clean, so there is no pre-existing noise to grandfather.
+  The bulk-format commit that made it clean is in `.git-blame-ignore-revs`; run
+  `git config blame.ignoreRevsFile .git-blame-ignore-revs` once per clone and
+  `git blame` keeps attributing lines to whoever wrote them.
 - **Linting:** clang-tidy, **19 or newer**. `engine/.clang-tidy` uses
   `ExcludeHeaderFilterRegex`, which landed in LLVM 19; an older binary rejects
   the config file outright and lints nothing. The `scripts/pre-commit` hook
