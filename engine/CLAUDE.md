@@ -16,7 +16,12 @@ engine/
 
 ## Conventions
 
-- Standard: C++20, `-Wall -Wextra -Wpedantic`
+- Standard: C++20, `-Wall -Wextra -Wpedantic`. What a *later* standard offers on
+  each platform is measured, not remembered: `scripts/cxx-feature-probe/` is a
+  standalone CMake project that compiles and links one tiny translation unit per
+  feature at a standard the engine has not adopted, and the `C++ feature probe`
+  workflow runs it on all three platforms plus `g++-14`. It gates nothing - see
+  `docs/engine/building.md`, and #901 for the recorded C++23 results.
 - Formatter: clang-format, **19 exactly** (`.clang-format` at repo root; the
   version is pinned because 39 of the 285 engine sources format differently
   under 18). **A difference is a failure now** (#886): the `Engine formatting`

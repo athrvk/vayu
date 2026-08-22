@@ -504,6 +504,38 @@ directly (`daemon.cpp`, `cli.cpp`, `http/client.cpp`, `http/server.cpp`,
 first. Including `vayu/version.hpp` from a `.cpp` is fine, and from a header only
 where that header is not itself broadly included.
 
+### The C++ standard, and the probe that answers a bump
+
+The engine is C++20 (`CMAKE_CXX_STANDARD 20`, `STANDARD_REQUIRED ON`). Raising
+that is a decision about the **worst compiler in the matrix**, not about the
+best: the three platforms ship library support years apart, so "C++23 has
+`std::expected`" is not a fact about the build until each of GCC, AppleClang and
+MSVC has been asked.
+
+`scripts/cxx-feature-probe/` asks them. It is a standalone CMake project - one
+tiny translation unit per feature, compiled *and linked* at a standard the
+engine has not adopted, reporting a per-feature table:
+
+```bash
+cmake -S scripts/cxx-feature-probe -B /tmp/probe                       # default compiler
+cmake -S scripts/cxx-feature-probe -B /tmp/probe -DCMAKE_CXX_COMPILER=g++-14
+cmake -S scripts/cxx-feature-probe -B /tmp/probe -DVAYU_PROBE_STANDARD=26
+```
+
+There is no build step; the table lands in the configure log and in
+`<build dir>/probe-results.md`. In CI it is the `C++ feature probe` workflow -
+four legs (Ubuntu on its default `g++` and on `g++-14`, macOS on AppleClang,
+Windows on MSVC), run from **Run workflow** and automatically on a pull request
+that changes the probe. It gates nothing: an unavailable feature is the answer,
+and the job stays green reporting it. The job fails only when the probe cannot
+measure - which it checks for, rather than assuming, by asserting that the
+requested dialect actually reached the compiler before it trusts a single
+verdict.
+
+Results are recorded on the issue that asked for them (#901 for C++23), not in
+the repository, so no checked-in file can drift out of date against a runner
+image that rolled last week. See `scripts/cxx-feature-probe/README.md`.
+
 ### Compiler warnings, and the three that are suppressed
 
 The engine builds **warning-clean** on Linux and macOS, and a release build is
