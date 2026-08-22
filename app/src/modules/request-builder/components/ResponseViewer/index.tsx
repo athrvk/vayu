@@ -304,7 +304,7 @@ export default function ResponseViewer() {
 					    when the right-hand group was just the actions; it matters now
 					    that the response's own facts live there.
 					 */}
-					<TabsList className="min-w-0 overflow-x-auto overflow-y-hidden flex-nowrap">
+					<TabsList className="min-w-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip">
 						<TabsTrigger value="body">
 							<TabLabel>Body</TabLabel>
 						</TabsTrigger>

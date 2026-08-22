@@ -1130,21 +1130,47 @@
  * Applying it globally makes thin the default and removes the chance to forget.
  * :where() keeps specificity at zero, so any element that genuinely needs a
  * different scrollbar can still override with a plain class.
+ *
+ * 6px is the floor for a content pane: the thumb is still a mouse target at
+ * that width, and it is the width `ScrollArea` renders too, so the app shows
+ * one thickness whichever of the two systems draws the bar. Narrower belongs
+ * only to a container that is not dragged - see `.scrollbar-strip` below.
  */
 @layer base {
-	:where(*) {
-		scrollbar-width: thin;
-		scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+	/*
+	 * The standards-track properties, for an engine that has no
+	 * ::-webkit-scrollbar - and behind an @supports guard, because in Chromium
+	 * they do not coexist with it.
+	 *
+	 * Since Chromium 121 a scroller that declares `scrollbar-width` or
+	 * `scrollbar-color` renders the *standard* scrollbar and ignores every
+	 * ::-webkit-scrollbar rule that applies to it. Declared globally on
+	 * `:where(*)`, that meant every scrollbar in the app: the block below set
+	 * 8px and the app drew Chromium's `thin`, which measures 10px - thicker
+	 * than the value in the stylesheet, and the reason the bars read heavy.
+	 * The `display: none` a Monaco input uses to hide its own scrollbar was
+	 * being ignored for the same reason. Measured on Chromium 141: a scroller
+	 * with `scrollbar-width: thin` and a 6px ::-webkit-scrollbar renders 10px;
+	 * the same scroller inside this guard renders 6px.
+	 *
+	 * So the guard is not defensive - it is what makes everything below load
+	 * bearing. Anything that sets `scrollbar-width` or `scrollbar-color` on an
+	 * element outside it silently turns that element's webkit rules off.
+	 */
+	@supports not selector(::-webkit-scrollbar) {
+		:where(*) {
+			scrollbar-width: thin;
+			scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+		}
 	}
 
 	/*
-	 * Chromium honours ::-webkit-scrollbar over scrollbar-width, and Electron is
-	 * Chromium, so these rules are the ones that actually render here. Styling
-	 * ::-webkit-scrollbar at all also drops the stepper arrows, which is why the
-	 * default-styled containers showed them and the styled ones did not.
+	 * Electron is Chromium, so these are the rules that actually render here.
+	 * Styling ::-webkit-scrollbar at all also drops the stepper arrows, which is
+	 * why the default-styled containers showed them and the styled ones did not.
 	 */
 	::-webkit-scrollbar {
-		@apply w-2 h-2;
+		@apply w-1.5 h-1.5;
 	}
 
 	::-webkit-scrollbar-track {
@@ -1162,6 +1188,39 @@
 	/* The corner where two scrollbars meet; unstyled it renders as a light patch. */
 	::-webkit-scrollbar-corner {
 		@apply bg-transparent;
+	}
+}
+
+@layer utilities {
+	/*
+	 * The one blessed override of the baseline above: a tab strip.
+	 *
+	 * `RequestTabs`, `ResponseViewer` and `CollectionDetail` scroll their
+	 * `TabsList` natively, so an overflowing tab row draws the baseline bar
+	 * straight under a 24px band
+	 * of tabs - a third of the strip's own height, for a control the user reaches
+	 * by clicking a tab. 4px with a thumb that appears on hover keeps the
+	 * affordance without the permanent rule.
+	 *
+	 * Hover, not always-visible, because the bar sits directly beneath the tabs:
+	 * at rest the strip reads as one band, and the pointer that could scroll it
+	 * is the pointer that reveals it. Chromium repaints scrollbar pseudo-elements
+	 * on the scroller's own `:hover`, so no JS is involved.
+	 *
+	 * 4px is below the 6px floor the baseline keeps for content panes - a strip
+	 * is dragged rarely and scrolled by wheel or by tab focus, so the smaller
+	 * target is the right trade here and the wrong one anywhere else.
+	 */
+	.scrollbar-strip::-webkit-scrollbar {
+		@apply w-1 h-1;
+	}
+
+	.scrollbar-strip::-webkit-scrollbar-thumb {
+		@apply bg-transparent;
+	}
+
+	.scrollbar-strip:hover::-webkit-scrollbar-thumb {
+		@apply bg-muted-foreground/30;
 	}
 }
 

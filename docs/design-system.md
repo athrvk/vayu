@@ -1966,7 +1966,8 @@ read as a fraction, and there is no fraction to report.
 | Method bg (GET) | `bg-method-get` (and `bg-method-post`, etc.) |
 | Mono font | `font-mono` |
 | Code font (utility) | `font-code` |
-| Thin scrollbar | `scrollbar-thin` |
+| Thin scrollbar | nothing - 6px is the global baseline (see [Scrollbar](#scrollbar)) |
+| Tab-strip scrollbar | `scrollbar-strip` (4px, thumb on hover) |
 | Variable color | `text-variable` or `.variable-highlight` |
 
 ### Never use
@@ -2017,14 +2018,64 @@ container gets them; there is nothing to remember and nothing to apply.
 
 ```css
 /* index.css, @layer base */
-:where(*) {
-	scrollbar-width: thin;
-	scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+@supports not selector(::-webkit-scrollbar) {
+	:where(*) {
+		scrollbar-width: thin;
+		scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+	}
 }
 ::-webkit-scrollbar {
-	@apply w-2 h-2;
+	@apply w-1.5 h-1.5;
 }
 ```
+
+**The `@supports` guard is load-bearing, not defensive.** Since Chromium 121 a
+scroller that declares `scrollbar-width` or `scrollbar-color` renders the
+_standard_ scrollbar and ignores every `::-webkit-scrollbar` rule that applies
+to it - the two systems do not compose. The properties were declared globally
+on `:where(*)`, so the whole webkit block below them was inert: the stylesheet
+said 8px and the app drew Chromium's `thin`, which measures 10px. That gap is
+the "scrollbars read too thick" report. Measured on Chromium 141: a scroller
+with `scrollbar-width: thin` and a 6px `::-webkit-scrollbar` renders **10px**;
+the same scroller with the standard properties behind the guard renders
+**6px**.
+
+So `scrollbar-width` and `scrollbar-color` belong nowhere outside that guard.
+Setting either on an element turns that element's webkit rules off, silently -
+the bar stays, at the wrong width, in the wrong colour.
+
+**6px, and 6px in both systems.** The baseline covers native `overflow` panes;
+Radix `ScrollArea` draws its own bar in the DOM instead, so `scroll-area.tsx`
+repeats the width and the `muted-foreground/30` thumb rather than inheriting
+them. The two shipped at 8px and 10px with different thumb colours - a
+`ScrollArea` sits beside plain scroll panes throughout the app, so the pair is
+read side by side and has to be one thickness. Change one and change the other.
+
+Do not take a content pane below 6px: the thumb stops being a mouse target.
+
+### Tab strips: `scrollbar-strip`
+
+A `TabsList` that scrolls natively (request builder, response viewer,
+collection detail) draws the baseline bar directly under a 24px band of tabs.
+The scoped utility takes those strips to 4px and hides the thumb until the
+strip is hovered:
+
+```css
+/* index.css, @layer utilities */
+.scrollbar-strip::-webkit-scrollbar {
+	@apply w-1 h-1;
+}
+.scrollbar-strip::-webkit-scrollbar-thumb {
+	@apply bg-transparent;
+}
+.scrollbar-strip:hover::-webkit-scrollbar-thumb {
+	@apply bg-muted-foreground/30;
+}
+```
+
+Chromium repaints scrollbar pseudo-elements on the scroller's own `:hover`, so
+the reveal costs no JS. This is the one blessed exception to the 6px floor: a
+strip is scrolled by wheel or by tab focus rather than dragged.
 
 This was a `.scrollbar-thin` class applied per element, and it drifted badly:
 **38 of the app's 44 scroll containers never got it**, so chunky
@@ -2041,9 +2092,10 @@ unfixable by discipline alone:
 `:where()` keeps specificity at zero, so an element that genuinely needs a
 different scrollbar can still override with a plain class.
 
-Chromium honours `::-webkit-scrollbar` over `scrollbar-width`, and Electron is
-Chromium, so the webkit rules are the ones that render here; `scrollbar-width`
-is the standards-track fallback.
+Electron is Chromium, so the webkit rules are the ones that render here;
+`scrollbar-width` is the standards-track fallback for an engine that has no
+such pseudo-element, which is why it sits behind the `@supports` guard above
+rather than beside the rules it would otherwise disable.
 
 ---
 
