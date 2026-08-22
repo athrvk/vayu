@@ -63,7 +63,7 @@ type Tab = "file" | "url" | "paste";
 type Phase = "idle" | "detecting" | "preview" | "error";
 
 /**
- * What one tab is showing and doing (issue #884).
+ * What one tab is showing and doing (issue #893).
  *
  * `entries` is one row per picked document, in pick order (issue #666). A single
  * file is this same list with one entry, so the URL and Paste tabs - single by
@@ -103,7 +103,7 @@ export function ImportModal() {
 
 	const [tab, setTab] = useState<Tab>("file");
 	/**
-	 * Every tab's state, side by side (issue #884).
+	 * Every tab's state, side by side (issue #893).
 	 *
 	 * These four used to be one `phase`, one `entries`, one `error` and one
 	 * `progress` for the whole dialog, and switching tab called a `reset()` over
@@ -143,7 +143,7 @@ export function ImportModal() {
 	const { maxBytes: specMaxBytes } = useSpecDocumentLimit();
 
 	/**
-	 * Which run of each tab is current (issue #884).
+	 * Which run of each tab is current (issue #893).
 	 *
 	 * A generation rather than an abort path per stage, because the writes are
 	 * what must stop and there are four kinds of them - the fetch, the detect, an
@@ -285,7 +285,7 @@ export function ImportModal() {
 	 * re-fetch from, and the toggles say nothing about where any of the bytes came
 	 * from.
 	 *
-	 * **Every tab holding a parse, not just the one on screen** (issue #884). The
+	 * **Every tab holding a parse, not just the one on screen** (issue #893). The
 	 * two options are dialog-wide while the entries are per-tab, so re-parsing
 	 * only the visible tab leaves the other one holding a parse made under the old
 	 * options - and importing it later would apply a setting the checkbox says is
@@ -406,7 +406,7 @@ export function ImportModal() {
 			// The third argument is what asks the engine to stream its download
 			// (issue #882). Without it this route answers only once the whole body
 			// is buffered, which for an 8 MB spec is the frozen dialog this closes.
-			// The fourth argument is this tab's cancel (issue #884). Without it the
+			// The fourth argument is this tab's cancel (issue #893). Without it the
 			// engine goes on reading a 10 MB document after the dialog that asked
 			// for it has closed.
 			const { content } = await apiService.importFetch(
@@ -827,7 +827,7 @@ export function ImportModal() {
 				<Tabs
 					value={tab}
 					// Switching tab shows the other tab, and that is all it does
-					// (issue #884). It used to `reset()` the one shared state, which
+					// (issue #893). It used to `reset()` the one shared state, which
 					// cleared the display of work that went right on running - and
 					// then landed under whichever tab was showing when it finished.
 					onValueChange={(v) => setTab(v as Tab)}

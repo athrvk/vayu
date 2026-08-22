@@ -327,7 +327,7 @@ describe("a drop", () => {
 
 	/**
 	 * Spring-loading answers "I want to drop *into* this folder", so only the
-	 * inside band arms it (issue #886).
+	 * inside band arms it (issue #891).
 	 *
 	 * It used to arm on any drop a folder row resolved, and the edge quarters
 	 * resolve to a drop *beside* the folder - they are the reorder bands, the

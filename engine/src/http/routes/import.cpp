@@ -198,6 +198,11 @@ std::optional<FetchRefusal> import_fetch_refusal (const std::string& request_bod
 
 } // namespace
 
+vayu::http::ClientConfig
+import_fetch_client_config (size_t max_bytes, const vayu::http::TransportPolicy& transport) {
+    return fetch_client_config (max_bytes, transport);
+}
+
 /**
  * Fetch the URL in `request_body` ({"url": "...", "maxBytes": 12345}) via libcurl.
  *
@@ -221,11 +226,6 @@ std::optional<FetchRefusal> import_fetch_refusal (const std::string& request_bod
  *                  importing a spec by URL work behind a proxy (issue #705).
  * @return {http_status, json_body}. Separated from the route for unit testing.
  */
-vayu::http::ClientConfig
-import_fetch_client_config (size_t max_bytes, const vayu::http::TransportPolicy& transport) {
-    return fetch_client_config (max_bytes, transport);
-}
-
 std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
 const vayu::http::TransportPolicy& transport) {
     auto target = read_fetch_target (request_body);

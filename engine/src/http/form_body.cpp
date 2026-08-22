@@ -192,7 +192,7 @@ std::string implied_content_type (const Body& body) {
     case BodyMode::JsonRpc: return "application/json";
     case BodyMode::Xml: return "application/xml";
     // `text` is the one content mode with no answer, and that is a decision
-    // rather than a gap (issue #884): `text/plain`, `text/csv`, a JWT and a
+    // rather than a gap (issue #889): `text/plain`, `text/csv`, a JWT and a
     // raw signature are all this mode, so the header is the author's to write.
     // `binary` is the same question with the same answer.
     default: return {};

@@ -272,7 +272,7 @@ Five Content-Type rules follow from the encoding:
 - `x-www-form-urlencoded` sets `Content-Type: application/x-www-form-urlencoded`
   **only when the request declares no Content-Type of its own** - an explicit
   header wins.
-- `json` sets `Content-Type: application/json` under the same rule (issue #884).
+- `json` sets `Content-Type: application/json` under the same rule (issue #889).
   It did **not** until then, and libcurl's default for a POST carrying a body is
   `application/x-www-form-urlencoded` - so a request whose `body.mode` said
   `json` went out declaring itself a form. The app's body panel wrote the header

@@ -88,7 +88,7 @@ const id      = pm.variables.replaceIn("{{$guid}}");
 const payload = pm.variables.replaceIn('{"user": "{{userId}}", "trace": "{{$guid}}"}');
 ```
 
-**`{{data.column}}` resolves here too** (issue #885), against the row bound to
+**`{{data.column}}` resolves here too** (issue #890), against the row bound to
 this iteration - the same row `pm.iterationData` reads. It did not before, and
 that made this the one template resolver in the product that disagreed with the
 others about what the token means: a URL, a header and a body all bind it, and

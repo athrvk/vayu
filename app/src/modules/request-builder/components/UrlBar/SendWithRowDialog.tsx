@@ -21,7 +21,7 @@
  * choose the input", which is exactly what this is. The caret carries Send's
  * own fill so the pair reads as one control rather than a seam.
  *
- * **A dialog, not a popover** (issue #887). It was a ~384px popover anchored
+ * **A dialog, not a popover** (issue #892). It was a ~384px popover anchored
  * under the caret, and every compromise in the old design came from that box:
  * a row was one truncated line with its column name printed in front of every
  * value (`userId=1001 email=ada@example.com plan=pro q…`), the list stopped at

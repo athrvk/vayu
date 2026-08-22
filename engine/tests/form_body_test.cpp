@@ -622,7 +622,7 @@ TEST (FormBodyRules, ContentTypeOwnership) {
     EXPECT_EQ (implied_content_type (empty), "");
     EXPECT_FALSE (content_type_is_engine_owned (empty));
 
-    // A JSON body implies application/json (issue #884). It did not, and
+    // A JSON body implies application/json (issue #889). It did not, and
     // libcurl's default for a POST with a body is
     // `application/x-www-form-urlencoded` - so a request whose mode says JSON,
     // whose editor highlights JSON and whose stored `bodyType` is `json` went

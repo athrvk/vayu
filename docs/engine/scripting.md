@@ -751,7 +751,7 @@ This is the one sanctioned way to `{{...}}` in a script: script *source* is
 never interpolated (issue #226, D16 - a rewrite cannot tell code from a string
 literal, and splicing values into source is an injection).
 
-**It resolves the reserved data namespace too** (issue #885), which composition
+**It resolves the reserved data namespace too** (issue #890), which composition
 deliberately does not: `resolve_template` leaves `{{data.column}}` written as it
 stands because a plan is composed once, before any row is bound, while this runs
 per step with the iteration's row in hand. A column the row does not carry is a
