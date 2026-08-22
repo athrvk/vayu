@@ -12,24 +12,54 @@
 
 #include <thread>
 
+#include "vayu/db/recovery.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
 
 namespace vayu::http::routes {
 
+/**
+ * The body of `GET /health`.
+ *
+ * Extracted from the handler so the `recovery` node can be tested without
+ * standing a server up - the node is a claim about the user's data, and the
+ * cases worth pinning are the two the caller cannot arrange over HTTP (a clean
+ * start and a wiped one).
+ *
+ * `recovery` is **absent** on a clean start rather than `null`, per the
+ * engine's usual absent-not-null rule: a client that has never seen the key has
+ * nothing to render, and the app's notice keys off its presence.
+ */
+nlohmann::json build_health_response (const vayu::db::Database& db) {
+    nlohmann::json response;
+    response["status"]  = "ok";
+    response["version"] = vayu::Version::string;
+    response["workers"] = std::thread::hardware_concurrency ();
+
+    if (const auto& recovery = db.recovery ()) {
+        nlohmann::json node;
+        node["outcome"] = vayu::db::to_string (recovery->outcome);
+        node["at"]      = recovery->at;
+        // The data directory, effectively - the app names it in the notice, and
+        // deriving it renderer-side would mean a second copy of where the
+        // engine keeps its database.
+        node["databasePath"] = db.path ();
+        response["recovery"] = node;
+    }
+    return response;
+}
+
 void register_health_routes (RouteContext& ctx) {
     /**
      * GET /health
-     * Returns server health status, version, and available worker threads.
+     * Returns server health status, version, available worker threads, and -
+     * only when this startup had to recover the database - what it did about it
+     * (issue #922).
      */
-    ctx.server.Get ("/health", [] (const httplib::Request&, httplib::Response& res) {
+    ctx.server.Get ("/health", [&ctx] (const httplib::Request&, httplib::Response& res) {
         vayu::utils::log_debug ("GET /health - Health check requested");
-        nlohmann::json response;
-        response["status"]  = "ok";
-        response["version"] = vayu::Version::string;
-        response["workers"] = std::thread::hardware_concurrency ();
-        res.set_content (response.dump (), "application/json");
+        res.set_content (build_health_response (ctx.db).dump (), "application/json");
     });
 
     /**

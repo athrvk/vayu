@@ -23,7 +23,7 @@ import { TIMING } from "@/config/timing";
  * Updates engine store with connection status
  */
 export function useHealthQuery() {
-	const { setEngineConnected, setEngineError } = useEngineStore();
+	const { setEngineConnected, setEngineError, setEngineRecovery } = useEngineStore();
 
 	const query = useQuery({
 		queryKey: queryKeys.health.status(),
@@ -39,6 +39,11 @@ export function useHealthQuery() {
 		if (query.isSuccess && query.data?.status === "ok") {
 			setEngineConnected(true);
 			setEngineError(null);
+			// Absent means a clean start, so it clears rather than being left
+			// alone - the engine that answered this poll is the authority on
+			// what its own startup did, including a different engine answering
+			// on the port after a restart.
+			setEngineRecovery(query.data.recovery ?? null);
 		} else if (query.isError) {
 			setEngineConnected(false);
 			const errorMessage =
@@ -52,6 +57,7 @@ export function useHealthQuery() {
 		query.error,
 		setEngineConnected,
 		setEngineError,
+		setEngineRecovery,
 	]);
 
 	return query;

@@ -23,6 +23,8 @@
 #include <string>
 #include <system_error>
 
+#include "vayu/db/recovery.hpp"
+
 namespace vayu::tests {
 
 /**
@@ -131,6 +133,13 @@ inline void remove_database_files (const std::string& path) {
             std::filesystem::remove (base + suffix, ec);
         }
     }
+    // The startup recovery marker (issue #922). Only a recovering start writes
+    // one, but it is listed here rather than in the one fixture that provokes
+    // one: a leaked marker is read by the *next* `Database` opened at this
+    // path, so a test that forgot it would hand a stale recovery record to an
+    // unrelated case.
+    std::error_code ec;
+    std::filesystem::remove (vayu::db::recovery_marker_path (path), ec);
 }
 
 } // namespace vayu::tests

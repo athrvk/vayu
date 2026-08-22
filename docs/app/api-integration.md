@@ -1304,9 +1304,21 @@ useHealthQuery() // Polls every TIMING.HEALTH_CHECK_INTERVAL_MS (30s)
 {
   status: "ok",
   version: "0.3.0",
-  workers: 8
+  workers: 8,
+  // Optional (issue #922): present only when this engine startup restored the
+  // database from its backup or deleted it as unrecoverable. Absent on a clean
+  // start, which is also what a genuine first run gives.
+  recovery?: {
+    outcome: "restored_from_backup" | "deleted_corrupt",
+    at: 1755870000000,   // epoch ms
+    databasePath: "/home/someone/.local/share/vayu/vayu.db"
+  }
 }
 ```
+
+`useHealthQuery` mirrors `recovery` onto `engine-store`, and `RecoveryBanner` is
+its only reader - it is the one thing that tells the user their data was
+restored or wiped.
 
 ### Engine Startup
 

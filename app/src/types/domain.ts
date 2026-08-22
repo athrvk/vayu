@@ -2135,10 +2135,33 @@ export interface RunSamplesResponse {
 	};
 }
 
+/**
+ * What the engine's startup did about a database it could not open (issue
+ * #922).
+ *
+ * `deleted_corrupt` is data loss: the database failed validation, no backup
+ * restored it, and it was deleted so the daemon would start rather than
+ * crash-loop. `restored_from_backup` is the recoverable half of the same
+ * branch.
+ */
+export interface EngineRecovery {
+	outcome: "restored_from_backup" | "deleted_corrupt";
+	/** Epoch milliseconds, as every engine timestamp is. */
+	at: number;
+	/** The database file the outcome happened to - the data directory, in effect. */
+	databasePath: string;
+}
+
 export interface EngineHealth {
 	status: "ok";
 	version: string;
-	uptime_seconds: number;
+	workers: number;
+	/**
+	 * Absent on a clean start, which is the ordinary case and the one a genuine
+	 * first run gives. Present only when this engine startup restored or deleted
+	 * the database - see `EngineRecovery`.
+	 */
+	recovery?: EngineRecovery;
 }
 
 export interface EngineConfig {

@@ -23,3 +23,4 @@ export { useLayoutStore, type DrawerView } from "./layout-store";
 export { useClientSettingsStore, SETTINGS_STORAGE_KEYS } from "./client-settings-store";
 export { useAppearanceStore } from "./appearance-store";
 export { useToastStore, type Toast, type ToastVariant } from "./toast-store";
+export { useRecoveryNoticeStore } from "./recovery-notice-store";

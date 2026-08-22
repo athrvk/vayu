@@ -684,6 +684,7 @@ Database::Database (const std::string& db_path) {
             vayu::utils::log_info (
             "Database restored from backup. Retrying...");
             // We assume the backup itself is valid, but let's verify in the final step or let it crash if backup is also bad
+            write_recovery_marker (db_path, RecoveryOutcome::RestoredFromBackup);
         } else {
             // No backup or restore failed.
             // If the file exists but checks failed, we might be in trouble.
@@ -694,12 +695,18 @@ Database::Database (const std::string& db_path) {
                 // We proceed to try to open it anyway (which will likely re-throw),
                 // or we could delete it to start fresh?
                 // Starting fresh is better than crashing loop for Vayu.
-                // TODO: Consider alerting user/admin about data loss.
                 vayu::utils::log_warning (
                 "Deleting corrupted database to start fresh...");
                 fs::remove (db_file);
                 fs::remove (db_file.string () + "-wal");
                 fs::remove (db_file.string () + "-shm");
+                // The marker is what tells the user their data is gone (issue
+                // #922). It has to be written by this branch rather than
+                // inferred later from an empty database, which is exactly what
+                // a genuine first run also looks like. It is written *after*
+                // the removal so a marker never claims a deletion that did not
+                // happen.
+                write_recovery_marker (db_path, RecoveryOutcome::DeletedCorrupt);
             }
         }
     } else {
@@ -715,12 +722,22 @@ Database::Database (const std::string& db_path) {
     impl_ = std::make_unique<Impl> (db_path);
     // sync_schema might throw if restore failed or backup was also bad
     impl_->storage.sync_schema ();
+
+    // 5. The recovery record this process reports. Read from the file rather
+    // than kept from the branch above, so a marker written by an *earlier*
+    // engine run that nothing polled still reaches a client - that survival is
+    // the whole reason the fact is on disk instead of in a member.
+    recovery_ = read_recovery_marker (db_path);
 }
 
 Database::~Database () = default;
 
 const std::string& Database::path () const {
     return impl_->opened_file;
+}
+
+const std::optional<RecoveryRecord>& Database::recovery () const {
+    return recovery_;
 }
 
 // Initialize database with optimized SQLite settings
