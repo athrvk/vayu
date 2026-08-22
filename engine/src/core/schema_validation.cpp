@@ -20,12 +20,12 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <unordered_set>
+#include <utility>
 #include <valijson/adapters/nlohmann_json_adapter.hpp>
 #include <valijson/schema.hpp>
 #include <valijson/schema_parser.hpp>
 #include <valijson/validator.hpp>
-#include <unordered_set>
-#include <utility>
 
 namespace vayu::core {
 

@@ -16,8 +16,8 @@
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/spec_binding.hpp"
-#include "vayu/http/routes.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 

@@ -583,7 +583,16 @@ lines to whoever wrote them:
 git config blame.ignoreRevsFile .git-blame-ignore-revs   # once, per clone
 ```
 
-Two settings look like mistakes and are not; both are commented in
+**Includes are sorted**, and the tree was already 99.8% sorted before the gate
+landed, so this costs nothing and is one fewer thing for a reviewer to check by
+hand. Exactly one include order in the engine is load-bearing and is pinned at
+the site rather than by disabling the sorter: `engine/src/platform/platform_windows.cpp`
+wraps `<windows.h>` / `<timeapi.h>` in `// clang-format off`, because
+`timeapi.h` uses types `windows.h` defines, does not compile standalone, and
+sorts first alphabetically - a break only the Windows CI leg would catch. Pin a
+second such case the same way; do not turn the sorter off for the tree.
+
+Two other settings look like mistakes and are not; both are commented in
 `.clang-format` itself. `ColumnLimit: 80` is paired with
 `PenaltyExcessCharacter: 1`, which makes 80 a target rather than a wall -
 raising the limit made the bulk diff two to three times worse, because a wider

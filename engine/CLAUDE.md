@@ -27,6 +27,11 @@ engine/
   settings (`ColumnLimit: 80` with `PenaltyExcessCharacter: 1`, and
   `ContinuationIndentWidth: 0`) are what the code is written to, not oversights;
   both are commented in the file. `engine/vendor/` sets `DisableFormat: true`.
+  **Includes are sorted**, with exactly one pinned exemption: the
+  `<windows.h>` / `<timeapi.h>` pair in `src/platform/platform_windows.cpp`,
+  wrapped in `// clang-format off` because timeapi.h needs windows.h's types
+  and sorts first alphabetically. If you hit a second such case, pin it at the
+  site the same way - do not turn the sorter off for the tree.
   Before editing the config, read the note at the top of it - a "tidier" value
   costs a five-figure-line rewrite.
 - Linter: clang-tidy (`.clang-tidy` configs in `engine/`, `engine/src/runtime/`,

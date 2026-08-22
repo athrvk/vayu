@@ -26,8 +26,15 @@
 #include <process.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+// clang-format off
+// The only include order in the engine that a sort would break, hence the one
+// exemption from `SortIncludes` (issue #886). timeapi.h uses MMRESULT, UINT and
+// WINAPI, which windows.h defines, so it does not compile standalone - and
+// alphabetically it sorts first. Nothing here catches that but the Windows CI
+// leg, which is why this is pinned rather than left to the sorter.
 #include <windows.h>
 #include <timeapi.h>
+// clang-format on
 
 #include <atomic>
 #include <fstream>

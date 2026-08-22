@@ -41,8 +41,8 @@
  * carried between them.
  */
 
-#include "vayu/core/openapi_document.hpp"
 #include "vayu/core/spec_diff.hpp"
+#include "vayu/core/openapi_document.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
 

@@ -58,20 +58,23 @@ PenaltyReturnTypeOnItsOwnLine: 20
 AllowShortCaseLabelsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: None
 
-# Comments and includes are left alone. Both carry meaning clang-format cannot
-# see: the engine's block comments are hand-wrapped prose that reflowing
-# scrambles, and include order here is deliberate.
+# Comments are left alone: the engine's block comments are hand-wrapped prose
+# that reflowing scrambles.
 #
-# `SortIncludes: Never` is worth almost nothing as diff avoidance - sorting
-# would touch 7 files and 18 lines. It is here for one of them.
-# `engine/src/platform/platform_windows.cpp` has an alphabetical Windows block
-# with exactly one hand-placed exception, `<timeapi.h>` after `<windows.h>`,
-# because timeapi.h uses types (MMRESULT, UINT, WINAPI) that windows.h defines
-# and does not compile standalone. Sorting emits it first and breaks the
-# Windows build - on the one leg a Linux or macOS run never compiles. The other
-# six are cosmetic.
+# Includes ARE sorted. The tree was already 99.8% sorted before this config
+# landed - turning the sorter on cost 7 files and 18 lines - so enforcing it is
+# nearly free and buys a guarantee no reviewer has to supply by hand.
+#
+# Exactly one include order in the engine is load-bearing, and it is pinned at
+# the site rather than by disabling the sorter everywhere:
+# `engine/src/platform/platform_windows.cpp` wraps `<windows.h>` /
+# `<timeapi.h>` in `// clang-format off` because timeapi.h uses types
+# (MMRESULT, UINT, WINAPI) that windows.h defines, does not compile standalone,
+# and sorts first alphabetically. Nothing catches that but the Windows CI leg.
+# If you find a second such case, pin it the same way - do not turn the sorter
+# off again for one file.
 ReflowComments: false
-SortIncludes: Never
+SortIncludes: CaseSensitive
 CommentPragmas: ''
 
 # Spacing.
