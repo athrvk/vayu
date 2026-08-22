@@ -25,7 +25,11 @@ export interface ErrorContext {
 }
 
 /**
- * Log error to console (and potentially to external service in the future)
+ * Log an error to the console, at the level its severity earns.
+ *
+ * The console is the whole of it. Vayu runs on the user's machine and ships no
+ * telemetry; sending errors anywhere else is a product decision nobody has
+ * made, not a wiring gap to be filled in passing.
  */
 export function logError(
 	error: Error,
@@ -62,9 +66,6 @@ export function logError(
 			console.info("[INFO]", logEntry);
 			break;
 	}
-
-	// TODO: In the future, send to external logging service
-	// Example: sendToLoggingService(logEntry);
 }
 
 /**

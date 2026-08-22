@@ -97,6 +97,7 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 			if (language !== "json") return;
 			const model = stubModel(VARIABLES_URI, value);
 			onMount?.({ getModel: () => model }, stubMonaco());
+			// Mount once, exactly as a real editor does.
 			// eslint-disable-next-line react-hooks/exhaustive-deps
 		}, []);
 		return <div data-testid={`editor-${language}`} />;

@@ -431,6 +431,10 @@ export function GraphQLBody({
 			clearTimeout(id);
 			useSchemaCache.getState().clearActiveTarget(schemaTarget);
 		};
+		// `targetKey` is `schemaTarget` serialized, which is the identity the
+		// comment above keys on; `schemaTarget` itself is rebuilt every render,
+		// so depending on it would re-introspect the same endpoint on every
+		// keystroke.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [targetKey]);
 
