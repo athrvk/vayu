@@ -2044,12 +2044,25 @@ So `scrollbar-width` and `scrollbar-color` belong nowhere outside that guard.
 Setting either on an element turns that element's webkit rules off, silently -
 the bar stays, at the wrong width, in the wrong colour.
 
-**6px, and 6px in both systems.** The baseline covers native `overflow` panes;
-Radix `ScrollArea` draws its own bar in the DOM instead, so `scroll-area.tsx`
-repeats the width and the `muted-foreground/30` thumb rather than inheriting
-them. The two shipped at 8px and 10px with different thumb colours - a
-`ScrollArea` sits beside plain scroll panes throughout the app, so the pair is
-read side by side and has to be one thickness. Change one and change the other.
+**6px, and 6px in all three systems.** The app draws scrollbars three ways, and
+only the first is reached by a stylesheet at all:
+
+| System | Where the width lives | Was |
+| ------ | --------------------- | --- |
+| Native `overflow` panes | `index.css`, the block above | 8px declared, 10px drawn |
+| Radix `ScrollArea` | `scroll-area.tsx` class list | 10px, `bg-border` thumb |
+| Monaco editors | `code-editor.tsx`, `SCROLLBAR_SIZE` in px | 14px vertical, 12px horizontal |
+
+They are read side by side - a body panel puts an editor, a `ScrollArea` and a
+plain scroll pane in one view - so all three carry one number. `ScrollArea`
+also repeats the baseline's `muted-foreground/30` thumb: `--border`, shadcn's
+default, is the same colour as `--card` in dark, which is an invisible thumb on
+the surface that component is usually laid over. Monaco renders its bars as its
+own DOM inside the editor and takes a **number**, not a class, which is why no
+sweep of the stylesheet can see it drift.
+
+`scrollbar-systems.test.ts` derives the two repeats from the CSS, so the three
+move together or the suite reddens.
 
 Do not take a content pane below 6px: the thumb stops being a mouse target.
 

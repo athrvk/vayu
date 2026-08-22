@@ -6,17 +6,18 @@
  */
 
 /**
- * `ScrollArea` is the app's second scrollbar, and it has to be the same width
- * as the first.
+ * The app draws scrollbars three ways, and they have to be one thickness.
  *
- * The baseline in `index.css` styles every native `overflow` pane; Radix draws
- * its bar as real DOM instead, so the width lives in two files that know
- * nothing about each other. They drifted the moment they were written - 8px
- * global against shadcn's 10px default - and the two are read side by side,
- * because a `ScrollArea` pane sits next to plain scroll panes all over the UI.
+ * The baseline in `index.css` styles every native `overflow` pane; Radix
+ * `ScrollArea` draws its bar as real DOM; Monaco renders its own inside the
+ * editor and takes a number, not a stylesheet. So the width lives in three
+ * files that know nothing about each other, and all three drifted apart the
+ * moment they were written - 8px global, shadcn's 10px, Monaco's 14px - while
+ * being read side by side, because an editor and a `ScrollArea` and a plain
+ * scroll pane routinely sit in the same panel.
  *
- * The expected width is derived from the CSS rather than written twice here,
- * so lowering the baseline without lowering the primitive reddens this instead
+ * Each expected width is derived from the CSS rather than written again here,
+ * so lowering the baseline without lowering the other two reddens this instead
  * of shipping a second thickness.
  *
  * Source-scanned, not rendered: vitest stubs CSS imports to `""`, so the
@@ -32,6 +33,17 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(here, "..", "..", "index.css"), "utf8");
 const primitive = readFileSync(join(here, "scroll-area.tsx"), "utf8");
+const editor = readFileSync(join(here, "code-editor.tsx"), "utf8");
+
+/**
+ * Tailwind's spacing step, which turns `w-1.5` into the px Monaco needs. The
+ * theme does not override `--spacing`, so it is the framework default of
+ * 0.25rem; if index.css ever declares one, that wins.
+ */
+const SPACING_PX = (() => {
+	const declared = css.match(/--spacing:\s*([\d.]+)rem/);
+	return (declared ? Number.parseFloat(declared[1]) : 0.25) * 16;
+})();
 
 /**
  * The `@apply` line of a `::-webkit-scrollbar` rule, by its selector prefix.
@@ -53,9 +65,10 @@ function thumbClasses(): string {
 }
 
 describe("scrollbar width", () => {
-	it("reads both sources", () => {
+	it("reads all three sources", () => {
 		expect(css.length).toBeGreaterThan(1000);
 		expect(primitive.length).toBeGreaterThan(500);
+		expect(editor.length).toBeGreaterThan(500);
 	});
 
 	it("gives ScrollArea the same width the native baseline uses", () => {
@@ -67,6 +80,19 @@ describe("scrollbar width", () => {
 
 		expect(primitive).toContain(`"h-full ${width}"`);
 		expect(primitive).toContain(`"${height} flex-col"`);
+	});
+
+	it("sizes Monaco's own scrollbars to the same width, in px", () => {
+		const [width] = scrollbarSize("").split(/\s+/);
+		const px = Number.parseFloat(width.replace(/^w-/, "")) * SPACING_PX;
+		expect(px).toBeGreaterThan(0);
+
+		// Monaco takes a number, so this is the one place the width is written
+		// as px rather than a class - and the one that cannot be checked by
+		// reading a stylesheet at runtime.
+		expect(editor).toMatch(new RegExp(`const SCROLLBAR_SIZE = ${px};`));
+		expect(editor).toContain("verticalScrollbarSize: SCROLLBAR_SIZE");
+		expect(editor).toContain("horizontalScrollbarSize: SCROLLBAR_SIZE");
 	});
 
 	it("keeps the ScrollArea thumb on the baseline's colour", () => {
