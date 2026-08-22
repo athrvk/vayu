@@ -60,8 +60,16 @@ AllowShortFunctionsOnASingleLine: None
 
 # Comments and includes are left alone. Both carry meaning clang-format cannot
 # see: the engine's block comments are hand-wrapped prose that reflowing
-# scrambles, and include order here is deliberate (a header that must come
-# first for a macro or a platform guard is not alphabetically first).
+# scrambles, and include order here is deliberate.
+#
+# `SortIncludes: Never` is worth almost nothing as diff avoidance - sorting
+# would touch 7 files and 18 lines. It is here for one of them.
+# `engine/src/platform/platform_windows.cpp` has an alphabetical Windows block
+# with exactly one hand-placed exception, `<timeapi.h>` after `<windows.h>`,
+# because timeapi.h uses types (MMRESULT, UINT, WINAPI) that windows.h defines
+# and does not compile standalone. Sorting emits it first and breaks the
+# Windows build - on the one leg a Linux or macOS run never compiles. The other
+# six are cosmetic.
 ReflowComments: false
 SortIncludes: Never
 CommentPragmas: ''
