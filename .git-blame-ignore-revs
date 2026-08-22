@@ -1,0 +1,16 @@
+# Commits that changed formatting only, and would otherwise make `git blame`
+# attribute every line they touched to whoever ran the formatter.
+#
+# Not read automatically - git only consults this file when a clone points at
+# it, so do this once per clone:
+#
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub's blame view honours the file without any such step.
+#
+# Add a commit here only if it is *purely* mechanical reformatting. A commit
+# that also changes behaviour must not be ignored, or the blame for that
+# behaviour disappears with it.
+
+# style(engine): bulk-format engine/{src,include,tests} at clang-format 19 (#886)
+1132ece2e334ec26c15a001a627e4d6839c4498d
