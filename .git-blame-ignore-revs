@@ -18,6 +18,12 @@
 # clang-tidy would otherwise re-parse the whole tree for a whitespace change.
 # So a commit listed here is excused from linting too - one more reason it must
 # be mechanical and nothing else.
+#
+# That much is checked rather than taken on trust (#916): the `Engine
+# formatting` job runs `scripts/ci/declared-reformat.sh check`, which re-runs
+# clang-format 19 over the parent of any commit listed here that a pull request
+# contains, and fails if the result is not what that commit holds. A commit that
+# reformats and also changes something is refused by name.
 
 # style(engine): bulk-format engine/{src,include,tests} at clang-format 19 (#886)
 1132ece2e334ec26c15a001a627e4d6839c4498d

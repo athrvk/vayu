@@ -175,8 +175,17 @@ jobs:
               - 'build.py'
               - 'VERSION'
               - '.clang-format'
+              - '.git-blame-ignore-revs'
               - '.github/check-windows-deps.py'
               - '.github/workflows/pr-tests.yml'
+              # Load-bearing for two engine gates rather than only lintable:
+              # the clang-tidy step takes its base from `declared-reformat.sh`
+              # and `Engine formatting` validates the declaration with it, so a
+              # change to the script - or to the suite that pins it - has to run
+              # them. A gate whose own inputs cannot trigger it is this
+              # repository's "written but never read" defect in wiring form.
+              - 'scripts/ci/**'
+              - 'scripts/test/declared-reformat_test.sh'
               - '!*.md'
               - '!**/*.md'
             build_script:
@@ -592,8 +601,8 @@ jobs:
       #
       # `HEAD^1` is the base side of the pull request's merge commit, which is
       # what actions/checkout leaves at HEAD for a `pull_request` event; hence
-      # `fetch-depth: 2` above, and the check below rather than a silent empty
-      # diff if that ever stops being true.
+      # the full history this job checks out above, and the check below rather
+      # than a silent empty diff if that ever stops being true.
       #
       # `-allow-no-checks` is for `engine/src/runtime/`, whose `.clang-tidy` sets
       # `Checks: '-*'`: without it clang-tidy calls an empty check list a usage
@@ -656,36 +665,19 @@ jobs:
           #
           # `.git-blame-ignore-revs` is the declaration, the same one `git
           # blame` reads: "this commit changed formatting and nothing else".
-          # Blame trusts it and so does this, which is a second reason a commit
-          # listed there must be mechanical and nothing else - the file says so.
+          # Blame trusts it; this does not, since #916 - the `Engine formatting`
+          # job proves a declared commit mechanical before this one skips
+          # anything on the strength of it. The selection rule lives in
+          # `scripts/ci/declared-reformat.sh` rather than here because that job
+          # has to pick the same commit this one does, and two copies of the
+          # rule would drift.
           #
           # The newest such commit wins, because a reformat rewrites whatever
           # preceded it. The cost is that a *real* commit placed before the
           # reformat in the same pull request is not linted here; that is the
           # right trade, since the formatter has rewritten those lines anyway,
           # and the alternative is the 168-complexity noise above.
-          ignored=()
-          if [[ -f .git-blame-ignore-revs ]]; then
-            while IFS= read -r line; do
-              line="${line%%#*}"
-              line="${line//[[:space:]]/}"
-              [[ -n "$line" ]] && ignored+=("$line")
-            done < .git-blame-ignore-revs
-          fi
-
-          # `git rev-list` lists newest first, so the first match is the newest.
-          # `--no-merges` because HEAD *is* a merge commit here - the one
-          # actions/checkout leaves for a pull_request event - and a merge
-          # authors no lines of its own.
-          base=HEAD^1
-          for rev in $(git rev-list --no-merges HEAD^1..HEAD); do
-            for ig in ${ignored[@]+"${ignored[@]}"}; do
-              if [[ "$rev" == "$ig" ]]; then
-                base="$rev"
-                break 2
-              fi
-            done
-          done
+          base=$(bash scripts/ci/declared-reformat.sh base HEAD^1 HEAD)
 
           changed=()
           while IFS= read -r file; do
@@ -895,10 +887,14 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      # Full history, for the same reason the engine job takes it: the
+      # declaration check below enumerates the pull request's own commits and
+      # reads the parent of one of them, and a shallow clone contains neither.
+      # Seconds against a job that has an apt install in it either way.
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       # 19, the same major the clang-tidy gate pins on Linux and the same one
       # CONTRIBUTING.md tells contributors to install, so one LLVM answers for
@@ -948,6 +944,51 @@ jobs:
           echo "- clang-format $major checked **${#files[@]}** engine source(s)" >> "$GITHUB_STEP_SUMMARY"
 
           clang-format-19 --style=file --dry-run -Werror "${files[@]}"
+
+      # The declaration the clang-tidy gate skips on (#916). That gate reads
+      # `.git-blame-ignore-revs` at the pull request's own HEAD and, until now,
+      # believed it: any commit on the author's branch could be listed and the
+      # gate would skip linting every change up to it. The mechanism built for
+      # #886's legitimate bulk format works identically for a commit that is not
+      # mechanical at all, and the only control was that the edit to the file
+      # shows up in the diff for a human to notice.
+      #
+      # What is checked is that re-running the pinned formatter over the
+      # declared commit's *parent* reproduces the commit byte for byte. Note
+      # that "the commit is format-clean" would not do: this job already proves
+      # every pull request's tip clean, so an author who runs the formatter
+      # satisfies that much while changing behaviour freely.
+      #
+      # Here rather than in the engine job's lint step because the check needs
+      # clang-format 19 and this job is the one that pins it - the Windows leg
+      # of that matrix has only its image's 20, which would report differences
+      # that are the formatter's rather than the commit's. Both jobs pick the
+      # commit with the same script, so they cannot disagree about which one is
+      # in question. Costs nothing on a pull request that declares nothing,
+      # which is nearly all of them; the real 149-file declaration validates in
+      # about three seconds.
+      - name: Validate any declared reformatting commit
+        shell: bash
+        run: |
+          # The assertion the lint step makes about the same two revisions, for
+          # the same reason: on an ordinary commit `HEAD^1` quietly becomes the
+          # previous commit, and a declaration made earlier in the pull request
+          # would go unexamined here while the lint step still skipped on it.
+          if ! git rev-parse --verify --quiet HEAD^2 > /dev/null; then
+            echo "::error::HEAD is not the pull request merge commit (it has no second parent), so HEAD^1 is not the base of this pull request"
+            exit 1
+          fi
+
+          bash scripts/ci/declared-reformat.sh check HEAD^1 HEAD
+
+      # The suite for the script above, riding this job because it is the one
+      # with a pinned clang-format 19 already stood up - the same reason the
+      # pre-commit hook's suite rides the installer job. It drives the real
+      # script against throwaway repositories, including the evasion this whole
+      # check exists to refuse.
+      - name: Test the reformatting-declaration check
+        shell: bash
+        run: bash scripts/test/declared-reformat_test.sh
 
   installer:
     name: Installer script on ${{ matrix.os }}

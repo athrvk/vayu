@@ -743,6 +743,42 @@ The contract runs the other way too: **do not list a commit in
 excuses it from linting as well as from blame. That rule is written in the file
 itself.
 
+**And it is checked, not trusted** (#916). The gate reads the file at the pull
+request's own HEAD, so listing a commit is something an author can do to their
+own branch - the mechanism built for #886's bulk format works identically for a
+commit that is not mechanical at all, and the only control used to be that the
+edit to the file shows up in the diff for a reviewer to notice. The
+`Engine formatting` job now validates any declaration the pull request contains,
+before the lint gate skips anything on the strength of it:
+
+```bash
+# What CI runs; the range is the pull request's base and its merge commit
+bash scripts/ci/declared-reformat.sh check HEAD^1 HEAD
+```
+
+For every engine source the declared commit modified, re-running clang-format 19
+over the **parent's** version of that file has to reproduce what the commit
+holds, byte for byte. That is stronger than asking whether the commit is
+format-clean, which would prove almost nothing here: the whole-tree gate above
+already leaves every pull request's tip clean, so an author who runs the
+formatter satisfies it while changing behaviour freely. A declaration also fails
+if it modifies no engine source at all, since it would then move the lint base -
+and excuse every engine change before it - for nothing. Files outside
+`engine/{src,include,tests}` are reported rather than failed over: clang-tidy
+never reads them, so the declaration cannot excuse them either. The real
+149-file declaration validates in about three seconds; a pull request that
+declares nothing pays nothing.
+
+The same script picks the base for the lint gate (`declared-reformat.sh base`),
+so the job that validates a commit and the job that skips on it cannot disagree
+about which commit is in question. `scripts/test/declared-reformat_test.sh` is
+its suite, and it runs in that job too.
+
+What remains trusted is narrower than it was, and is worth knowing: the skip
+moves the base wholesale, so a *genuine* mechanical reformat placed last in a
+pull request still excuses the commits before it, whether or not the formatter
+rewrote those files. That is the documented trade above; #932 tracks closing it.
+
 **CI lints on Linux and Windows**, not Linux alone. clang-tidy analyses a
 translation unit, so an `#ifdef _WIN32` branch is preprocessed away before a
 Linux run sees it - `platform.hpp`'s per-OS split and the Windows-only blocks in
