@@ -204,6 +204,46 @@ describe("useRovingTreeFocus", () => {
 		expect(menu).toHaveBeenCalledTimes(2);
 	});
 
+	/*
+	 * The macOS half of those two keys (#931). The key labelled "delete" on a Mac
+	 * keyboard reports "Backspace", and Mac keyboards have neither a Menu key nor
+	 * a usable F10 - so each of the three cases below is a path that fires on
+	 * Windows and did nothing at all on a Mac.
+	 *
+	 * These assert the *key*, never the host platform: the hook has no platform
+	 * branch, so both keys must work in one run wherever it happens to run.
+	 */
+	it("deletes on Backspace as well as Delete, since Mac delete is Backspace", () => {
+		render(<Tree expanded />);
+		byName("req-1").focus();
+
+		key("Backspace");
+		expect(del).toHaveBeenCalledTimes(1);
+
+		key("Delete");
+		expect(del).toHaveBeenCalledTimes(2);
+	});
+
+	it("opens the row menu on Shift+Enter, the Mac-reachable path", () => {
+		render(<Tree expanded />);
+		byName("demo").focus();
+
+		key("Enter", { shiftKey: true });
+		expect(menu).toHaveBeenCalledTimes(1);
+		// Shift+Enter is the menu, not a second way to open the row.
+		expect(activate).not.toHaveBeenCalled();
+	});
+
+	it("still activates on plain Enter and on Space", () => {
+		render(<Tree expanded />);
+		byName("demo").focus();
+
+		key("Enter");
+		key(" ");
+		expect(activate).toHaveBeenCalledTimes(2);
+		expect(menu).not.toHaveBeenCalled();
+	});
+
 	// F2 is the keyboard path to the rename control the ⋯ menu also offers.
 	it("renames the focused row with F2", () => {
 		render(<Tree expanded />);
