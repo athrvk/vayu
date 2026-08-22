@@ -177,7 +177,8 @@ All platforms script with the same vendored engine: QuickJS-NG
 
 - Requires Xcode Command Line Tools
 - The `scripts/pre-commit` hook prepends Homebrew's LLVM directory, so a
-  `brew install llvm` clang-tidy is found without touching `PATH` yourself
+  `brew install llvm` clang-tidy and clang-format are found without touching
+  `PATH` yourself
 
 ### Windows
 
@@ -571,6 +572,25 @@ clang-format-19 --style=file --dry-run -Werror \
 # Fix
 clang-format-19 --style=file -i <file>...
 ```
+
+It runs in two places, and both of them can stop a change:
+
+| Where | What it checks | What a difference does |
+|-------|----------------|------------------------|
+| `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **whole** of every staged `engine/{src,include,tests}` source | Refuses the commit |
+| `Engine formatting`, a job of its own in `.github/workflows/pr-tests.yml` | The **whole tree** under those three roots | Fails CI |
+
+Unlike the two clang-tidy gates below, these two agree on scope, because
+formatting has no backlog to grandfather - so the hook can be exactly as strict
+as CI and no stricter, which is what keeps `--no-verify` from becoming a reflex
+(#908). The hook looks for `clang-format-19` first and a plain `clang-format`
+second - `apt install clang-format-19` leaves the plain name at Ubuntu's 18,
+while Homebrew's LLVM 19 installs it under the plain name - and when neither is
+a 19 it says so and checks nothing, on the same reasoning as the clang-tidy
+probe: the pin is exact, so an answer from another major is a wrong answer
+rather than a missing one. `git clang-format --staged` is deliberately not used;
+it formats the changed lines, and a staged file it called clean could still fail
+this whole-file check.
 
 The gate checks the **whole tree**, not the changed lines - the opposite of the
 clang-tidy gate below, because formatting has no backlog to grandfather. Issue

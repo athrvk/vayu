@@ -111,6 +111,13 @@ vayu/
   clang-format-19 --style=file -i <file>...
   ```
 
+  The `scripts/pre-commit` hook runs the same check over the engine sources you
+  stage and refuses the commit on a difference, so the gate is reachable before
+  the push (#908). It looks for `clang-format-19` first and a plain
+  `clang-format` second, and skips - loudly, checking nothing - when neither is
+  a 19, because a check by another major is a wrong answer rather than a missing
+  one.
+
   The `Engine formatting` job checks the **whole tree**, not just your changed
   lines - the tree is clean, so there is no pre-existing noise to grandfather.
   The bulk-format commit that made it clean is in `.git-blame-ignore-revs`; run

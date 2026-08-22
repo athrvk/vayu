@@ -8,7 +8,8 @@ React UI, communicating over HTTP on port 9876.
 - **App** (`app/`): Electron + React + TypeScript, Apache-2.0
 - **`build.py`**: the single entry point for every build operation
 - **`VERSION`**: single source of truth for the version
-- **`scripts/`**: `pre-commit` (clang-tidy on staged C++), `install-git-hooks.sh`,
+- **`scripts/`**: `pre-commit` (clang-format and clang-tidy on staged C++),
+  `install-git-hooks.sh`,
   and `test/` (load-test fixtures + mock server, installer suites)
 
 This file holds only what applies to *every* session. Deeper material loads on
