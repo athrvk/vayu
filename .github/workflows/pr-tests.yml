@@ -527,13 +527,25 @@ jobs:
       - name: Lint changed engine sources
         shell: bash
         run: |
-          if ! git rev-parse --verify --quiet HEAD^1 > /dev/null; then
-            echo "::error::HEAD has no first parent - this step expects the pull request merge commit"
+          # Assert HEAD *is* the merge commit, by asking for the second parent.
+          # Checking that HEAD^1 merely exists is not the same thing and is worse
+          # than useless: on an ordinary commit it succeeds and silently makes
+          # the base the previous commit, so the gate would lint the last commit
+          # of the pull request and report a pass for the rest.
+          if ! git rev-parse --verify --quiet HEAD^2 > /dev/null; then
+            echo "::error::HEAD is not the pull request merge commit (it has no second parent), so HEAD^1 is not the base of this pull request"
             exit 1
           fi
 
           roots=(engine/src engine/include engine/tests)
-          mapfile -t changed < <(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
+
+          # A read loop rather than `mapfile`: `shell: bash` on the macOS runner
+          # is /bin/bash 3.2.57, where mapfile does not exist. The installer job
+          # names that trap already - it is the same one, one job over.
+          changed=()
+          while IFS= read -r file; do
+            changed+=("$file")
+          done < <(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
             | grep -E '\.(c|cpp|h|hpp)$' || true)
 
           # The non-empty-scan proof this repository asks of every source
