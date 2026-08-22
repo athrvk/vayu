@@ -139,11 +139,26 @@ export interface ImportMeta {
 	 * Shown in the import preview beside the request and folder counts.
 	 */
 	exampleCount: number;
-	// TODO: populated by parsers so the Preview can warn the user about lossy imports.
-	// Vayu is HTTP-only and has no OAuth execution path; WebSocket/gRPC are dropped and
-	// oauth2/digest/aws/ntlm auth is stored-but-not-executed. Surface both rather than
-	// letting items silently vanish. See ImportModal Preview state.
+	/**
+	 * What the import dropped, so the preview can warn about a lossy import
+	 * rather than letting items silently vanish. Vayu is HTTP-only, so
+	 * WebSocket and gRPC items are dropped outright.
+	 *
+	 * Every entry is stamped by the engine's parse (issue #877), including
+	 * `external_ref` - that count reaches it as `ImportSource.unresolvedRefs`,
+	 * because bundling runs before detection and no parser can know it. Read by
+	 * `lossSummary` / `noticeSummary` in `ImportModal.tsx`, which split the list
+	 * on `INFORMATIONAL_KINDS`: a loss is shown in destructive type, a notice in
+	 * muted.
+	 */
 	skipped: SkippedItem[];
+	/**
+	 * Requests whose auth Vayu stores but does not execute - digest, aws and
+	 * ntlm, the three the engine counts (`import_document.cpp`); oauth2 is not
+	 * among them, since `POST /oauth2/token` executes it. Counted rather than
+	 * skipped: the request imports and sends, only its credentials do not
+	 * travel. Shown by `lossSummary` beside the skip counts.
+	 */
 	nonExecutableAuth: number;
 	/**
 	 * Form-data file parts that arrived without a file to send. An OpenAPI spec

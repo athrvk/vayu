@@ -694,7 +694,9 @@ Database::Database (const std::string& db_path) {
                 // We proceed to try to open it anyway (which will likely re-throw),
                 // or we could delete it to start fresh?
                 // Starting fresh is better than crashing loop for Vayu.
-                // TODO: Consider alerting user/admin about data loss.
+                // Nothing outside this log line records that the user's
+                // data went away, so the app cannot tell them - carrying
+                // the fact across that boundary is issue #922.
                 vayu::utils::log_warning (
                 "Deleting corrupted database to start fresh...");
                 fs::remove (db_file);
