@@ -176,7 +176,8 @@ All platforms script with the same vendored engine: QuickJS-NG
 ### macOS
 
 - Requires Xcode Command Line Tools
-- Homebrew LLVM paths are automatically detected for clang-tidy
+- The `scripts/pre-commit` hook prepends Homebrew's LLVM directory, so a
+  `brew install llvm` clang-tidy is found without touching `PATH` yourself
 
 ### Windows
 
@@ -550,21 +551,62 @@ should be that code change instead.
 
 ### Static Analysis
 
-The pre-commit hook (`scripts/pre-commit`, installed by
-`bash scripts/install-git-hooks.sh`) needs **clang-tidy 19 or newer**:
-`engine/.clang-tidy` uses `ExcludeHeaderFilterRegex`, which landed in LLVM 19,
-and an older binary rejects the config file and lints nothing. The hook probes
-the version and warns loudly instead of exiting clean over an empty scan; CI
-lints on a current toolchain either way.
+clang-tidy runs in two places, and both of them can stop a change:
 
-Enable clang-tidy in `CMakeLists.txt` (commented out by default):
+| Where | What it lints | What a finding does |
+|-------|---------------|---------------------|
+| `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | Whole staged `.c/.cpp/.h/.hpp` files | Refuses the commit |
+| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of `engine/{src,include,tests}` sources, on Linux | Fails CI |
 
-```cmake
-find_program(CLANG_TIDY_EXE NAMES "clang-tidy")
-if(CLANG_TIDY_EXE)
-    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-endif()
+A finding is a failure because `engine/.clang-tidy` sets
+`WarningsAsErrors: '*'`; with that empty, clang-tidy prints every diagnostic it
+found and still exits 0. That single setting is what both places read their
+verdict from - do not re-state it as a `--warnings-as-errors` flag at a call
+site, or the two can disagree about what counts.
+
+**CI gates the changed lines, not the changed files**, through LLVM's own
+`clang-tidy-diff.py`. The engine had never been linted, so most files carry
+findings older than any current diff - `openapi_drafts.cpp` answered with nine
+on an untouched tree. Gating whole files would fail a pull request for code it
+did not write, in every file it happened to open. New code is held to the config
+from its first line; the backlog is paid down by whoever edits those lines.
+
+The pre-commit hook is the stricter of the two: it lints whole staged files, so
+it reports the backlog as well. That is deliberate for a local early warning you
+can skip with `git commit --no-verify`, and it is why a hook refusal is not by
+itself a merge blocker. Issue #902 tracks aligning the two.
+
+Both pass `--allow-no-checks`, for `engine/src/runtime/` - its `.clang-tidy`
+disables every check, and clang-tidy calls an empty check list a usage error
+rather than a clean run, so the one exempt directory would otherwise be the only
+one that fails.
+
+Both need **clang-tidy 19 or newer**: `engine/.clang-tidy` uses
+`ExcludeHeaderFilterRegex`, which landed in LLVM 19, and an older binary rejects
+the config file and lints nothing. CI pins the major (`clang-tidy-19`) for the
+reason the installer job pins shellcheck - findings move between releases, and
+an unpinned linter can redden a pull request that changed nothing. The hook
+probes the version and warns loudly instead of exiting clean over an empty scan;
+a contributor without a current clang-tidy loses the early warning, not the
+check.
+
+To lint by hand, point clang-tidy at a configured build tree:
+
+```bash
+python build.py -e                       # writes engine/build/compile_commands.json
+clang-tidy-19 --allow-no-checks -p engine/build engine/src/http/routes.cpp
+
+# Or exactly what CI does, against your own changes:
+git diff -U0 master... -- engine/src engine/include engine/tests \
+  | clang-tidy-diff-19.py -clang-tidy-binary clang-tidy-19 \
+      -p1 -path engine/build -quiet -allow-no-checks -j "$(nproc)"
 ```
+
+clang-tidy is deliberately **not** wired into the build itself. A
+`CMAKE_CXX_CLANG_TIDY` block sat commented out in `engine/CMakeLists.txt` for
+years: a lint that runs only when someone uncomments it never runs, and
+uncommenting it re-lints the whole tree on every build. Issue #885 removed it in
+favour of the two gates above.
 
 ## Troubleshooting
 

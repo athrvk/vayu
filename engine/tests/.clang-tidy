@@ -1,4 +1,8 @@
 ---
+# A gtest body is a long straight-line run of arrange/act/assert with no
+# extracted helpers on purpose - a test that factors its own setup away stops
+# reading as the specification it is. The check counts that shape as complexity
+# and has no remedy for it that leaves the test readable.
 Checks: '-readability-function-cognitive-complexity'
 InheritParentConfig: true
 ...

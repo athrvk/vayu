@@ -10,9 +10,13 @@
  * @brief QuickJS-based JavaScript scripting engine implementation
  *
  * This file interfaces with QuickJS C library and uses different coding conventions.
+ *
+ * Nothing here is linted: `engine/src/runtime/.clang-tidy` turns every check off
+ * for this directory, with the reason. There used to be a file-wide
+ * NOLINTBEGIN/NOLINTEND pair saying the same thing a second way (#885) - two
+ * mechanisms for one exemption, the weaker of which silently stops covering the
+ * file the moment a function is moved out of it.
  */
-
-// NOLINTBEGIN
 
 #include "vayu/runtime/script_engine.hpp"
 
@@ -5526,5 +5530,3 @@ std::string ScriptEngine::version () {
 #endif // VAYU_HAS_QUICKJS
 
 } // namespace vayu::runtime
-
-// NOLINTEND

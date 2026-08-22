@@ -365,10 +365,14 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
 
     steps:
+      # Depth 2 rather than 1, for `HEAD^1` alone: the clang-tidy step below
+      # diffs the pull request against the base side of the merge commit
+      # actions/checkout leaves at HEAD, and that parent is the second commit.
+      # One extra object, on every leg because the checkout is shared.
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          fetch-depth: 2
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -470,6 +474,76 @@ jobs:
         working-directory: engine
         shell: bash
         run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine/test-results.xml" < /dev/null
+
+      # The clang-tidy gate (#885). It rides this job rather than standing up its
+      # own because it needs `compile_commands.json` and a configured tree - a
+      # separate job would pay the vcpkg install and the configure a second time
+      # for a check that takes seconds against a warm build. Linux only: these
+      # diagnostics are the config's, not the platform's, and running the same
+      # checks over the same files three times says nothing new. After ctest, so
+      # a genuine regression is reported before a lint finding is.
+      #
+      # **It lints the changed lines, not the changed files.** The engine had
+      # never been linted, so most files carry findings that predate the diff -
+      # `openapi_drafts.cpp` alone answered with nine on a tree nobody had
+      # touched. Gating on whole files would fail a pull request for code it did
+      # not write, in every file it happened to open, which ends one of two ways:
+      # unrelated refactors smuggled into every diff, or the gate turned off. New
+      # code is held to the config from its first line, and the backlog is paid
+      # down by whoever edits it. `clang-tidy-diff.py` is LLVM's own driver for
+      # exactly this - the line ranges come out of the diff and go in as
+      # `--line-filter`, so nothing here reimplements them.
+      #
+      # `HEAD^1` is the base side of the pull request's merge commit, which is
+      # what actions/checkout leaves at HEAD for a `pull_request` event; hence
+      # `fetch-depth: 2` above, and the check below rather than a silent empty
+      # diff if that ever stops being true.
+      #
+      # `-allow-no-checks` is for `engine/src/runtime/`, whose `.clang-tidy` sets
+      # `Checks: '-*'`: without it clang-tidy calls an empty check list a usage
+      # error and exits 1, so the directory that is meant to be exempt would be
+      # the one that fails. `-clang-tidy-binary` because the driver otherwise
+      # calls whatever plain `clang-tidy` resolves to, which on this image is 18.
+      #
+      # Pinned to a major, for the reason the `installer` job pins shellcheck:
+      # findings move between clang-tidy releases, so an unpinned linter can
+      # redden a pull request that changed nothing. 19 is the floor
+      # `engine/.clang-tidy` needs (`ExcludeHeaderFilterRegex`) and the version
+      # CONTRIBUTING.md tells contributors to install, so a local run and this
+      # one answer the same.
+      - name: Lint changed engine sources
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if ! git rev-parse --verify --quiet HEAD^1 > /dev/null; then
+            echo "::error::HEAD has no first parent - this step expects the pull request merge commit"
+            exit 1
+          fi
+
+          roots=(engine/src engine/include engine/tests)
+          mapfile -t changed < <(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
+            | grep -E '\.(c|cpp|h|hpp)$' || true)
+
+          # The non-empty-scan proof this repository asks of every source
+          # scanning guard: name what is about to be linted, so a step that
+          # silently narrowed to nothing cannot read as a pass.
+          if [[ ${#changed[@]} -eq 0 ]]; then
+            echo "- clang-tidy: no engine sources changed, nothing to lint" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "- clang-tidy linted the changed lines of **${#changed[@]}** engine source(s):"
+            printf '  - `%s`\n' "${changed[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          sudo apt-get install -y --no-install-recommends clang-tidy-19
+          clang-tidy-19 --version
+
+          git diff -U0 HEAD^1 HEAD -- "${roots[@]}" \
+            | clang-tidy-diff-19.py \
+                -clang-tidy-binary clang-tidy-19 \
+                -p1 -path engine/build-release \
+                -quiet -allow-no-checks -j "$(nproc)"
 
       # `always()` so a suite that ran and failed is still reported - but on its
       # own that also reports a *pass* for a job that never got as far as

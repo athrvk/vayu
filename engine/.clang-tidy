@@ -11,7 +11,38 @@ Checks: '
   -readability-identifier-length,
   -readability-magic-numbers
 '
-WarningsAsErrors: ''
+# Why each of the five above is off. They were unexplained for as long as this
+# file has existed, which is what makes them relitigable - none is a hard call,
+# and a line each is cheaper than having the argument twice.
+#
+#   bugprone-easily-swappable-parameters
+#     Fires on any two adjacent parameters of the same type. Nearly every
+#     `(host, path)`, `(name, value)` and `(from, to)` in the engine is one, and
+#     the check's own remedy - strong typedefs on every pair - is a rewrite of
+#     the whole surface, not a fix for a defect anybody has hit here.
+#   modernize-use-trailing-return-type
+#     `auto f() -> T` is a style this codebase does not use. Turning it on
+#     rewrites every declaration in the tree and settles nothing.
+#   readability-convert-member-functions-to-static
+#     Proposes making a member static whenever its body happens not to touch
+#     `this`. On a public class that is an API change decided by an
+#     implementation detail, and the next commit that reads a field reverses it.
+#   readability-identifier-length
+#     `i`, `n`, `it`, `os` in a three-line scope are idiomatic and clearer than
+#     the names the check would demand.
+#   readability-magic-numbers
+#     The engine is full of protocol constants (status codes, ports, curl
+#     option values) and test literals. Naming each at its single use site moves
+#     the number away from what it means.
+
+# A finding is a failure, in one place. Both consumers of this config read their
+# verdict from clang-tidy's exit status - the `scripts/pre-commit` hook and the
+# `Lint changed engine sources` step in `.github/workflows/pr-tests.yml` - and
+# with this empty, clang-tidy exits 0 having printed every diagnostic it found.
+# That is the shape issue #885 was filed about: three layers of linting, none of
+# which could stop anything. Set here rather than as a `--warnings-as-errors`
+# flag at each call site so the two cannot disagree about what counts.
+WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/(?:src|include|tests)/.*'
 ExcludeHeaderFilterRegex: '.*/vendor/.*'
 FormatStyle: file
