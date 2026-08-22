@@ -629,7 +629,16 @@ jobs:
           while IFS= read -r file; do
             relevant+=("$file")
           done < <(
-            for rev in $(git rev-list HEAD^1..HEAD); do
+            # `--no-merges` is load-bearing, not tidiness. HEAD *is* a merge
+            # commit here - the one actions/checkout leaves for a pull_request
+            # event - and it is inside this range, so without the flag the loop
+            # asks `git diff HEAD^ HEAD`, whose first parent is the base. That
+            # is the entire pull request in one diff, which re-admits every file
+            # the skip just excluded and silently restores the behaviour this
+            # step exists to avoid. Measured on #886: 152 selected with merges
+            # in the range, 7 without. A merge commit authors no lines of its
+            # own, so dropping them loses nothing.
+            for rev in $(git rev-list --no-merges HEAD^1..HEAD); do
               skip=
               for ig in ${ignored[@]+"${ignored[@]}"}; do
                 [[ "$rev" == "$ig" ]] && skip=1 && break
