@@ -27,7 +27,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 function deferred() {
@@ -54,12 +54,15 @@ const gate = vi.hoisted(() => ({
 	signals: [] as (AbortSignal | undefined)[],
 	/** Every `importEnvironments` value the parse was asked for. */
 	parseOptions: [] as boolean[],
+	/** Whether an apply is in flight, for the cases about what that closes. */
+	applying: false,
 }));
 
 vi.mock("@/queries/import", () => ({
 	useImportMutation: () => ({
+		// Read per render, not captured: the hook body runs again on every one.
 		mutateAsync: vi.fn().mockResolvedValue(undefined),
-		isPending: false,
+		isPending: gate.applying,
 	}),
 }));
 
@@ -96,6 +99,14 @@ vi.mock("@/services/api", async () => {
 				if (title === "Broken") {
 					throw new ApiError(400, "BAD_REQUEST", "Unrecognised format");
 				}
+				// The one thing the parse's *own* options leave on screen, so a
+				// preview says which parse produced it and not merely that one did.
+				// The engine does the same thing - `ImportModal.environments.test`
+				// mirrors the same rule - and the count is what the preview prints.
+				const environments =
+					payload.importEnvironments === false
+						? []
+						: [{ name: "Imported env", description: "", variables: {} }];
 				return {
 					collections: [
 						{
@@ -113,14 +124,14 @@ vi.mock("@/services/api", async () => {
 							requests: [],
 						},
 					],
-					environments: [],
+					environments,
 					globals: {},
 					meta: {
 						format: "OpenAPI 3.0",
 						...(payload.fileName ? { fileName: payload.fileName } : {}),
 						requestCount: 0,
 						folderCount: 0,
-						environmentCount: 0,
+						environmentCount: environments.length,
 						globalCount: 0,
 						exampleCount: 0,
 						skipped: [],
@@ -178,6 +189,7 @@ beforeEach(() => {
 	gate.fetchTicks = [];
 	gate.signals = [];
 	gate.parseOptions = [];
+	gate.applying = false;
 	useImportModalStore.setState({ isOpen: true });
 });
 
@@ -284,6 +296,67 @@ describe("an option toggle reaches every tab that holds a parse", () => {
 		// means importing it later with a setting the checkbox says is off.
 		await waitFor(() => expect(gate.parseOptions.length).toBe(2));
 		expect(gate.parseOptions).toEqual([false, false]);
+	});
+});
+
+/**
+ * A re-parse is a real engine round trip per file and the checkboxes stay live
+ * for the whole of it, so two toggles inside one round trip are two writers for
+ * one tab. They must not be peers: the second toggle is what the checkboxes now
+ * show, so it owns the entries however late the first one lands (issue #895).
+ *
+ * Not cosmetic. `importScripts` is baked in at parse time and ignored at apply
+ * (`orchestrator.ts:60-61`), so entries from the losing parse import a setting
+ * the checkbox says is off.
+ */
+describe("a toggle supersedes the re-parse already running", () => {
+	it("settles on the last toggle, whichever parse resolves last", async () => {
+		renderModal();
+		dropFiles({ name: "a.json", text: fileSpec });
+		// Both options start on, and the fixture's environment is what says so.
+		await waitFor(() => expect(screen.getByText(/1 environments/)).toBeInTheDocument());
+
+		// Toggle 1, held: scripts off, environments still on.
+		const first = deferred();
+		gate.parse = first;
+		fireEvent.click(screen.getByText(/Import pre-request & test scripts/i));
+
+		// Toggle 2, held separately: environments off as well. This is the state
+		// the checkboxes are left in, so it is the state the entries must show.
+		const second = deferred();
+		gate.parse = second;
+		fireEvent.click(screen.getByText(/Import environments & variables/i));
+
+		second.resolve();
+		await waitFor(() => expect(screen.getByText(/0 environments/)).toBeInTheDocument());
+
+		// The loser lands last. Sharing one generation, its patch passes
+		// `patchTab`'s check and wins the entries - a preview parsed with
+		// environments off, under a checkbox that says they are on.
+		first.resolve();
+		// A macrotask: every microtask of that late chain - the parse, the batch's
+		// `Promise.all`, the patch it must not make - has run before the assert.
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		});
+
+		expect(screen.getByText(/0 environments/)).toBeInTheDocument();
+		expect(screen.queryByText(/1 environments/)).not.toBeInTheDocument();
+	});
+
+	it("closes the toggles while an apply is in flight", async () => {
+		// Superseding is safe for a re-parse and not for an apply: `runImport`
+		// captured its generation before the first file went out, so a toggle
+		// under it would drop the write that reports which files failed. It is
+		// also the one moment a toggle cannot change the outcome - each file is
+		// sent with the options the apply started with.
+		gate.applying = true;
+		renderModal();
+		dropFiles({ name: "a.json", text: fileSpec });
+		await waitFor(() => expect(screen.getByText("From File")).toBeInTheDocument());
+
+		expect(screen.getByLabelText(/Import environments & variables/i)).toBeDisabled();
+		expect(screen.getByLabelText(/Import pre-request & test scripts/i)).toBeDisabled();
 	});
 });
 
