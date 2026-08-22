@@ -48,7 +48,7 @@ JMeter's classic constraint is its concurrency model: one thread per virtual
 user, on a JVM, which means the load generator's own resource profile becomes
 something you tune before you can trust the numbers - heap size, thread ramp,
 and the standing advice to run without the GUI because the GUI itself distorts
-the result. Vayu's engine is a multi-worker libcurl event loop in C++20, so
+the result. Vayu's engine is a multi-worker libcurl event loop in C++23, so
 concurrency is not threads, and it runs as a **sidecar process** next to the UI
 rather than inside it. That is the architectural reason you can watch a live
 dashboard *while* the run saturates a target: the renderer never shares a thread

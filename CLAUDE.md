@@ -1,10 +1,10 @@
 # Vayu - Claude Code Guide
 
 Vayu is a high-performance API testing and load-testing platform. It uses a
-**sidecar architecture**: a C++20 engine (daemon) runs alongside an Electron +
+**sidecar architecture**: a C++23 engine (daemon) runs alongside an Electron +
 React UI, communicating over HTTP on port 9876.
 
-- **Engine** (`engine/`): C++20, CMake + vcpkg, AGPL-3.0
+- **Engine** (`engine/`): C++23, CMake + vcpkg, AGPL-3.0
 - **App** (`app/`): Electron + React + TypeScript, Apache-2.0
 - **`build.py`**: the single entry point for every build operation
 - **`VERSION`**: single source of truth for the version
@@ -44,7 +44,8 @@ python build.py -t            # Build with tests enabled
 cd app && pnpm run electron:dev   # Run the app
 ```
 
-Prerequisites: CMake >= 3.25, Ninja, a C++20 compiler, Node.js >= 20.19 (22 LTS
+Prerequisites: CMake >= 3.25, Ninja, a C++23 compiler (GCC 13+, Clang 19+ on
+libstdc++, MSVC 2022+), Node.js >= 20.19 (22 LTS
 recommended, see `app/.nvmrc`), pnpm >= 10, and vcpkg with `$VCPKG_ROOT` set on
 Linux/macOS. On Linux and macOS also `autoconf`, `autoconf-archive`, `automake`
 and `libtool` - vcpkg builds libsodium from source there and runs `autoreconf`

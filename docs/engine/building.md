@@ -29,10 +29,16 @@ python build.py --test-only
 ## Prerequisites
 
 - **CMake**: 3.25 or higher
-- **C++ Compiler**: C++20 compatible
-  - Clang 15+ (recommended)
-  - GCC 12+
-  - MSVC 2022+ (Windows)
+- **C++ Compiler**: C++23 capable, which since #901 means the library, not just
+  the dialect flag
+  - GCC 13+ (13.3 is what CI builds on)
+  - Clang 19+ against libstdc++ - clang 18 compiles C++23 but cannot see
+    libstdc++'s `<expected>`, which is gated behind a concepts macro it does not
+    advertise; against libc++ it is fine from 18
+  - AppleClang as shipped with a current Xcode (CI measures 21)
+  - MSVC 2022+ (Windows; CI measures 19.51)
+
+  These are measurements, not folklore - see the feature probe below.
 - **vcpkg**: Package manager (auto-detected or install separately)
 - **Ninja**: Build system (optional, but recommended for faster builds)
 - **Autotools** (Linux and macOS only): `autoconf`, `autoconf-archive`,
@@ -504,6 +510,54 @@ directly (`daemon.cpp`, `cli.cpp`, `http/client.cpp`, `http/server.cpp`,
 first. Including `vayu/version.hpp` from a `.cpp` is fine, and from a header only
 where that header is not itself broadly included.
 
+### The C++ standard, and the probe that answers a bump
+
+The engine is C++23 (`CMAKE_CXX_STANDARD 23`, `STANDARD_REQUIRED ON`), raised
+from 20 by issue #901. Raising it is a decision about the **worst compiler in
+the matrix**, not about the best: the three platforms ship library support years
+apart, so "C++23 has `std::expected`" was not a fact about the build until each
+of GCC, AppleClang and MSVC had been asked.
+
+What the measurement settled, and what it means for the floor:
+
+| | Ubuntu `g++` 13.3 | macOS AppleClang 21 | Windows MSVC 19.51 |
+|---|---|---|---|
+| `std::expected` | yes | yes | yes |
+| `std::optional` (monadic) | yes | yes | yes |
+| `std::format` (C++20) | yes | yes | yes |
+| `std::move_only_function` | yes | **no** | yes |
+
+The engine uses the first three. It does **not** use `std::move_only_function`,
+however much `thread_pool.hpp`'s `std::function` queue would like to - libc++
+has not shipped it, so on macOS it does not exist. Ubuntu pins no compiler: its
+default GCC covers everything the engine adopted, and `g++-14` adds only
+features that are not on the list (`std::print`, `std::ranges::to`, deducing
+`this`). Re-run the probe before reaching for anything not in the table.
+
+`scripts/cxx-feature-probe/` asks them. It is a standalone CMake project - one
+tiny translation unit per feature, compiled *and linked* at a standard the
+engine has not adopted, reporting a per-feature table:
+
+```bash
+cmake -S scripts/cxx-feature-probe -B /tmp/probe                       # default compiler
+cmake -S scripts/cxx-feature-probe -B /tmp/probe -DCMAKE_CXX_COMPILER=g++-14
+cmake -S scripts/cxx-feature-probe -B /tmp/probe -DVAYU_PROBE_STANDARD=26
+```
+
+There is no build step; the table lands in the configure log and in
+`<build dir>/probe-results.md`. In CI it is the `C++ feature probe` workflow -
+four legs (Ubuntu on its default `g++` and on `g++-14`, macOS on AppleClang,
+Windows on MSVC), run from **Run workflow** and automatically on a pull request
+that changes the probe. It gates nothing: an unavailable feature is the answer,
+and the job stays green reporting it. The job fails only when the probe cannot
+measure - which it checks for, rather than assuming, by asserting that the
+requested dialect actually reached the compiler before it trusts a single
+verdict.
+
+Results are recorded on the issue that asked for them (#901 for C++23), not in
+the repository, so no checked-in file can drift out of date against a runner
+image that rolled last week. See `scripts/cxx-feature-probe/README.md`.
+
 ### Compiler warnings, and the three that are suppressed
 
 The engine builds **warning-clean** on Linux and macOS, and a release build is
@@ -708,6 +762,17 @@ Both pass `--allow-no-checks`, for `engine/src/runtime/` - its `.clang-tidy`
 disables every check, and clang-tidy calls an empty check list a usage error
 rather than a clean run, so the one exempt directory would otherwise be the only
 one that fails.
+
+**A changed header is an input on Linux only.** `compile_commands.json` has one
+entry per translation unit and none for a `.hpp`, so clang-tidy synthesises a
+command for a header handed to it directly. On Linux that command still finds
+libstdc++; on Windows it does not find the MSVC STL, and the result is the whole
+standard library failing to parse - `no template named 'optional' in namespace
+'std'` - which `WarningsAsErrors: '*'` turns into a failed job. The Windows leg
+therefore lints translation units only. Little is lost, because
+`HeaderFilterRegex` reports findings *inside* a header through every translation
+unit that includes it; what is not covered there is a pull request that changes
+a header and no `.cpp`. Issue #930 carries the flags that would fix it properly.
 
 ### The precompiled header
 

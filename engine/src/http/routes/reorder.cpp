@@ -37,7 +37,7 @@ namespace {
 constexpr size_t MAX_REORDER_ENTRIES = 10000;
 
 /** A 400 about the payload as a whole. */
-std::pair<int, nlohmann::json> body_error (const std::string& message) {
+RouteError body_error (const std::string& message) {
     return { 400, error_body (400, message) };
 }
 
@@ -76,24 +76,24 @@ struct Move {
 };
 
 /** Reads and validates `type`, the one field both entry shapes share. */
-std::optional<std::pair<int, nlohmann::json>>
-read_kind (const nlohmann::json& entry, const std::string& at, Kind& out) {
+RouteResult read_kind (const nlohmann::json& entry, const std::string& at, Kind& out) {
     if (!entry.is_object ()) {
-        return body_error ("Invalid " + at + ": must be an object");
+        return std::unexpected (body_error ("Invalid " + at + ": must be an object"));
     }
     if (!entry.contains ("type") || !entry["type"].is_string ()) {
-        return body_error ("Invalid " + at + ": 'type' must be \"collection\" or \"request\"");
+        return std::unexpected (body_error (
+        "Invalid " + at + R"(: 'type' must be "collection" or "request")"));
     }
     const std::string type = entry["type"].get<std::string> ();
     if (type == "collection") {
         out = Kind::Collection;
-        return std::nullopt;
+        return {};
     }
     if (type == "request") {
         out = Kind::Request;
-        return std::nullopt;
+        return {};
     }
-    return body_error ("Invalid " + at + ": unknown type '" + type + "'");
+    return std::unexpected (body_error ("Invalid " + at + ": unknown type '" + type + "'"));
 }
 
 /**
@@ -107,39 +107,43 @@ read_kind (const nlohmann::json& entry, const std::string& at, Kind& out) {
  * writes rows that cannot see each other yet. Nothing here is bulk-created, so a
  * scope that resolves to no row is a client bug, not an ordering artifact.
  */
-std::optional<std::pair<int, nlohmann::json>>
+RouteResult
 read_scope (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Scope& out) {
     const std::string at = "normalize entry at index " + std::to_string (index);
-    if (auto err = read_kind (entry, at, out.kind)) {
-        return err;
+    if (auto outcome = read_kind (entry, at, out.kind); !outcome) {
+        return outcome;
     }
     if (out.kind == Kind::Collection) {
         if (!entry.contains ("parentId")) {
-            return body_error ("Invalid " +
-            at + ": 'parentId' must be stated (null normalizes the root collections)");
+            return std::unexpected (body_error ("Invalid " +
+            at + ": 'parentId' must be stated (null normalizes the root collections)"));
         }
         const auto& parent = entry["parentId"];
         if (parent.is_null ()) {
             out.parent = std::nullopt;
-            return std::nullopt;
+            return {};
         }
         if (!parent.is_string ()) {
-            return body_error ("Invalid " + at + ": 'parentId' must be a string or null");
+            return std::unexpected (
+            body_error ("Invalid " + at + ": 'parentId' must be a string or null"));
         }
         out.parent = parent.get<std::string> ();
         if (!db.get_collection (*out.parent).has_value ()) {
-            return body_error ("Collection '" + *out.parent + "' does not exist");
+            return std::unexpected (
+            body_error ("Collection '" + *out.parent + "' does not exist"));
         }
-        return std::nullopt;
+        return {};
     }
     if (!entry.contains ("collectionId") || !entry["collectionId"].is_string ()) {
-        return body_error ("Invalid " + at + ": 'collectionId' must be a string");
+        return std::unexpected (
+        body_error ("Invalid " + at + ": 'collectionId' must be a string"));
     }
     out.collection = entry["collectionId"].get<std::string> ();
     if (!db.get_collection (out.collection).has_value ()) {
-        return body_error ("Collection '" + out.collection + "' does not exist");
+        return std::unexpected (
+        body_error ("Collection '" + out.collection + "' does not exist"));
     }
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -151,27 +155,29 @@ read_scope (vayu::db::Database& db, const nlohmann::json& entry, size_t index, S
  * the single-row endpoints use - absent keeps the current owner, present states
  * a move - except that a stated owner must exist, for the reason in `read_scope`.
  */
-std::optional<std::pair<int, nlohmann::json>>
+RouteResult
 read_move (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Move& out) {
     const std::string at = "move at index " + std::to_string (index);
-    if (auto err = read_kind (entry, at, out.kind)) {
-        return err;
+    if (auto outcome = read_kind (entry, at, out.kind); !outcome) {
+        return outcome;
     }
     if (!entry.contains ("id") || !entry["id"].is_string () ||
     entry["id"].get<std::string> ().empty ()) {
-        return body_error ("Invalid " + at + ": 'id' must be a non-empty string");
+        return std::unexpected (
+        body_error ("Invalid " + at + ": 'id' must be a non-empty string"));
     }
     out.id = entry["id"].get<std::string> ();
 
     if (!entry.contains ("order") || !entry["order"].is_number_integer () ||
     entry["order"].get<int64_t> () < 0) {
-        return body_error ("Invalid " + at + ": 'order' must be a non-negative integer");
+        return std::unexpected (
+        body_error ("Invalid " + at + ": 'order' must be a non-negative integer"));
     }
     out.order = entry["order"].get<int> ();
 
     if (out.kind == Kind::Collection) {
         if (!db.get_collection (out.id).has_value ()) {
-            return body_error ("Collection '" + out.id + "' does not exist");
+            return std::unexpected (body_error ("Collection '" + out.id + "' does not exist"));
         }
         if (entry.contains ("parentId")) {
             out.states_owner   = true;
@@ -181,29 +187,33 @@ read_move (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Mo
             } else if (parent.is_string ()) {
                 out.parent = parent.get<std::string> ();
                 if (!db.get_collection (*out.parent).has_value ()) {
-                    return body_error ("Collection '" + *out.parent + "' does not exist");
+                    return std::unexpected (
+                    body_error ("Collection '" + *out.parent + "' does not exist"));
                 }
             } else {
-                return body_error ("Invalid " + at + ": 'parentId' must be a string or null");
+                return std::unexpected (body_error (
+                "Invalid " + at + ": 'parentId' must be a string or null"));
             }
         }
-        return std::nullopt;
+        return {};
     }
 
     if (!db.get_request (out.id).has_value ()) {
-        return body_error ("Request '" + out.id + "' does not exist");
+        return std::unexpected (body_error ("Request '" + out.id + "' does not exist"));
     }
     if (entry.contains ("collectionId")) {
         if (!entry["collectionId"].is_string ()) {
-            return body_error ("Invalid " + at + ": 'collectionId' must be a string");
+            return std::unexpected (
+            body_error ("Invalid " + at + ": 'collectionId' must be a string"));
         }
         out.states_owner = true;
         out.collection   = entry["collectionId"].get<std::string> ();
         if (!db.get_collection (out.collection).has_value ()) {
-            return body_error ("Collection '" + out.collection + "' does not exist");
+            return std::unexpected (
+            body_error ("Collection '" + out.collection + "' does not exist"));
         }
     }
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -225,8 +235,7 @@ read_move (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Mo
  * explicitly tolerated by `validate_parent_assignment`) from hanging the
  * validator.
  */
-std::optional<std::pair<int, nlohmann::json>>
-reject_post_move_cycles (vayu::db::Database& db, const std::vector<Move>& moves) {
+RouteResult reject_post_move_cycles (vayu::db::Database& db, const std::vector<Move>& moves) {
     std::unordered_map<std::string, std::optional<std::string>> parent_of;
     for (const auto& c : db.get_collections ()) {
         parent_of[c.id] = c.parent_id;
@@ -242,14 +251,15 @@ reject_post_move_cycles (vayu::db::Database& db, const std::vector<Move>& moves)
             continue;
         }
         if (move.parent.has_value () && *move.parent == move.id) {
-            return body_error ("Collection '" + move.id + "' cannot be its own parent");
+            return std::unexpected (
+            body_error ("Collection '" + move.id + "' cannot be its own parent"));
         }
         std::unordered_set<std::string> seen;
         std::optional<std::string> cursor = move.parent;
         while (cursor.has_value ()) {
             if (*cursor == move.id) {
-                return body_error (
-                "Cannot move collection '" + move.id + "' into its own descendant");
+                return std::unexpected (body_error ("Cannot move collection '" +
+                move.id + "' into its own descendant"));
             }
             if (!seen.insert (*cursor).second) {
                 break; // Pre-existing corrupt cycle; bounded, and not this batch's.
@@ -261,7 +271,7 @@ reject_post_move_cycles (vayu::db::Database& db, const std::vector<Move>& moves)
             cursor = next->second;
         }
     }
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -380,7 +390,7 @@ std::pair<int, nlohmann::json> reorder_locked (vayu::db::Database& db,
 const nlohmann::json& body,
 const std::function<void ()>& before_write) {
     if (!body.is_object ()) {
-        return body_error ("Body must be a JSON object");
+        return as_response (body_error ("Body must be a JSON object"));
     }
 
     const nlohmann::json empty     = nlohmann::json::array ();
@@ -388,29 +398,31 @@ const std::function<void ()>& before_write) {
     const nlohmann::json* norm_in  = &empty;
     if (body.contains ("moves") && !body["moves"].is_null ()) {
         if (!body["moves"].is_array ()) {
-            return body_error ("Invalid 'moves': must be an array");
+            return as_response (
+            body_error ("Invalid 'moves': must be an array"));
         }
         moves_in = &body["moves"];
     }
     if (body.contains ("normalize") && !body["normalize"].is_null ()) {
         if (!body["normalize"].is_array ()) {
-            return body_error ("Invalid 'normalize': must be an array");
+            return as_response (
+            body_error ("Invalid 'normalize': must be an array"));
         }
         norm_in = &body["normalize"];
     }
 
     const size_t total = moves_in->size () + norm_in->size ();
     if (total > MAX_REORDER_ENTRIES) {
-        return body_error ("Reorder too large: " + std::to_string (total) +
-        " entries exceeds the limit of " + std::to_string (MAX_REORDER_ENTRIES) + " per call");
+        return as_response (body_error ("Reorder too large: " + std::to_string (total) +
+        " entries exceeds the limit of " + std::to_string (MAX_REORDER_ENTRIES) + " per call"));
     }
 
     std::vector<Scope> scopes;
     scopes.reserve (norm_in->size ());
     for (size_t i = 0; i < norm_in->size (); ++i) {
         Scope scope;
-        if (auto err = read_scope (db, (*norm_in)[i], i, scope)) {
-            return *err;
+        if (auto outcome = read_scope (db, (*norm_in)[i], i, scope); !outcome) {
+            return as_response (outcome.error ());
         }
         scopes.push_back (std::move (scope));
     }
@@ -420,20 +432,20 @@ const std::function<void ()>& before_write) {
     std::unordered_set<std::string> claimed;
     for (size_t i = 0; i < moves_in->size (); ++i) {
         Move move;
-        if (auto err = read_move (db, (*moves_in)[i], i, move)) {
-            return *err;
+        if (auto outcome = read_move (db, (*moves_in)[i], i, move); !outcome) {
+            return as_response (outcome.error ());
         }
         // Two positions for one row is not a resolvable batch - whichever won
         // would be an accident of iteration order, and the client that sent it
         // has a bug the 400 names.
         if (!claimed.insert (move.id).second) {
-            return body_error ("Duplicate move for '" + move.id + "'");
+            return as_response (body_error ("Duplicate move for '" + move.id + "'"));
         }
         moves.push_back (std::move (move));
     }
 
-    if (auto err = reject_post_move_cycles (db, moves)) {
-        return *err;
+    if (auto outcome = reject_post_move_cycles (db, moves); !outcome) {
+        return as_response (outcome.error ());
     }
 
     const int64_t now = now_ms ();

@@ -44,7 +44,7 @@ in both PEM-pair and PKCS#12 form. Detail:
 
 Bruno's collection runner executes your requests in sequence on a Node.js
 runtime - correct for a functional suite, and not built to be a load generator.
-Vayu's engine is a separate C++20 process driving a multi-worker libcurl event
+Vayu's engine is a separate C++23 process driving a multi-worker libcurl event
 loop, which is why a single laptop reaches **tens of thousands of req/s** and why
 the interface stays smooth while it does: the renderer never shares a thread with
 the request load. On a loopback target the engine measured **56,880 req/s**,

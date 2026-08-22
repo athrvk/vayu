@@ -693,6 +693,46 @@ jobs:
           done < <(git diff --name-only "$base" HEAD -- "${roots[@]}" \
             | grep -E '\.(c|cpp|h|hpp)$' || true)
 
+          # Windows cannot lint a *header* as an input, so it does not try.
+          #
+          # `compile_commands.json` holds one entry per translation unit and so
+          # none for a `.hpp`; clang-tidy synthesises a command for a file it
+          # cannot look up. On Linux that synthesised command still finds the
+          # standard library. On Windows it does not find the MSVC one, and the
+          # result is not a lint finding but a parse failure of the whole STL -
+          # `no template named 'optional' in namespace 'std'` at every
+          # `std::optional` in `types.hpp`, twenty errors deep, before any check
+          # runs. `WarningsAsErrors: '*'` turns that into a failed engine job.
+          # Measured on #926, where the same run linted every changed `.cpp`
+          # cleanly on the same runner and failed only on the two headers.
+          #
+          # What is lost is smaller than it looks: `HeaderFilterRegex` in
+          # engine/.clang-tidy already reports diagnostics *inside* a header
+          # through every translation unit that includes it, so a header changed
+          # alongside its consumers is still linted here. What is genuinely not
+          # covered on this leg is a pull request that changes a header and no
+          # `.cpp` at all. #930 has the flags that would let clang-tidy parse
+          # the MSVC STL directly, which is the real fix; this keeps the gate
+          # honest on the other two legs in the meantime rather than turning it
+          # off everywhere.
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            headers=()
+            translation_units=()
+            for file in ${changed[@]+"${changed[@]}"}; do
+              case "$file" in
+                *.h | *.hpp) headers+=("$file") ;;
+                *) translation_units+=("$file") ;;
+              esac
+            done
+            if [[ ${#headers[@]} -gt 0 ]]; then
+              {
+                echo "- clang-tidy (Windows): **${#headers[@]}** changed header(s) are not linted as inputs here - the synthesised command cannot parse the MSVC standard library (#930). They are still linted through the translation units that include them:"
+                printf '  - `%s`\n' "${headers[@]}"
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            changed=(${translation_units[@]+"${translation_units[@]}"})
+          fi
+
           # The non-empty-scan proof this repository asks of every source
           # scanning guard: name what is about to be linted, so a step that
           # silently narrowed to nothing cannot read as a pass.

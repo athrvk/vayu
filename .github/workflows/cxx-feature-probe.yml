@@ -1,0 +1,118 @@
+name: C++ feature probe
+
+# The toolchain floor, measured rather than remembered (issue #901, phase 0).
+#
+# A standard bump is a decision about the *worst* compiler in the matrix, and
+# the matrix is three vendors whose library support lands years apart -
+# libstdc++ ships std::expected in GCC 13, clang 18 on the same libstdc++
+# cannot see it, and AppleClang and MSVC answer for themselves. Nobody can hold
+# that table in their head, and a table written down in an issue is out of date
+# the next time a runner image rolls. So it is a job: one tiny translation unit
+# per feature, compiled at the probed standard on every CI platform, reporting
+# what exists where.
+#
+# It gates nothing. The feature verdicts never fail the job - a "no" is the
+# answer, not an error - and the job stays green while reporting one. What does
+# fail it is the probe being unable to measure at all (see the dialect
+# self-check in scripts/cxx-feature-probe/CMakeLists.txt), because a broken
+# instrument reporting "no" nine times looks exactly like a verdict.
+#
+# `paths:` here is safe in the way pr-tests.yml explains it is not there: that
+# workflow owns the required `CI gate` check, so a run it never starts leaves a
+# pull request unmergeable. This one is required by nothing. A pull request
+# that does not touch the probe has nothing to learn from running it, and the
+# standard question comes up about once a language version.
+on:
+  workflow_dispatch:
+    inputs:
+      standard:
+        description: 'C++ standard to probe (23, 26, ...)'
+        required: false
+        default: '23'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'scripts/cxx-feature-probe/**'
+      - '.github/workflows/cxx-feature-probe.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    # Minutes, not tens of minutes: this configures a CMake project with no
+    # dependencies and builds nothing. The timeout is a runaway guard.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The three legs the engine actually ships on, each on the compiler
+          # its pr-tests.yml counterpart uses by default...
+          - os: ubuntu-latest
+            label: Ubuntu / default g++
+          - os: macos-latest
+            label: macOS / AppleClang
+          - os: windows-latest
+            label: Windows / MSVC
+          # ...plus the one alternative #901 names as a live decision: if
+          # ubuntu's default GCC fails a feature phase 2 wants, the choice is
+          # between pinning this compiler on the runner and dropping the
+          # feature. That is only answerable with both columns in front of you.
+          - os: ubuntu-latest
+            label: Ubuntu / g++-14
+            cxx: g++-14
+            apt: g++-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install the compiler this leg probes
+        if: matrix.apt != ''
+        # `|| true`: "the image does not offer this compiler" is a result the
+        # probe step reports, not a job failure. Failing here would answer the
+        # pinning question with a red X instead of with a table.
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y --no-install-recommends ${{ matrix.apt }} || true
+
+      - name: Probe
+        shell: bash
+        env:
+          LABEL: ${{ matrix.label }}
+          PROBE_CXX: ${{ matrix.cxx }}
+          # Empty on a pull_request run, where the default below applies.
+          STANDARD: ${{ inputs.standard }}
+        run: |
+          set -euo pipefail
+          standard="${STANDARD:-23}"
+
+          echo "### ${LABEL}" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "${PROBE_CXX:-}" ] && ! command -v "$PROBE_CXX" >/dev/null 2>&1; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "\`$PROBE_CXX\` is not available on this runner image, so nothing was probed." \
+              >> "$GITHUB_STEP_SUMMARY"
+            echo "$PROBE_CXX is not available on this runner image."
+            exit 0
+          fi
+
+          args=(-S scripts/cxx-feature-probe -B probe-build -DVAYU_PROBE_STANDARD="$standard")
+          if [ -n "${PROBE_CXX:-}" ]; then
+            args+=(-DCMAKE_CXX_COMPILER="$PROBE_CXX")
+          fi
+
+          cmake "${args[@]}"
+
+          {
+            echo ""
+            cat probe-build/probe-results.md
+          } >> "$GITHUB_STEP_SUMMARY"

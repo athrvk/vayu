@@ -47,7 +47,7 @@ works: *does it still work at a thousand a second?* That is a second tool - k6,
 JMeter, or the Postman collection runner at a fraction of the throughput - which
 means a second config, a second copy of the endpoint, and a context switch every
 time. In Vayu the load tester points at the request you already built. The
-engine is a multi-worker libcurl event loop in C++20, running as a sidecar
+engine is a multi-worker libcurl event loop in C++23, running as a sidecar
 process so the UI never shares a thread with the request load, and it sustains
 **tens of thousands of req/s** while the dashboard streams percentiles live.
 The numbers, the method, and a one-command reproduction are on the

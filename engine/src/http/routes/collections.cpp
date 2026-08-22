@@ -24,10 +24,9 @@
 namespace vayu::http::routes {
 
 /**
- * Testable core of the parent-id validation for POST /collections, returning
- * an error response {http_status, json_body} when the proposed parent would
- * form a cycle in the collection tree, or std::nullopt when the assignment is
- * legal.
+ * Testable core of the parent-id validation for POST /collections. Fails with
+ * the error response to send when the proposed parent would form a cycle in the
+ * collection tree, and succeeds when the assignment is legal.
  *
  * Two shapes are rejected, both with 400:
  *   - Self-parent (`parentId == id`): a collection cannot be its own parent.
@@ -47,23 +46,21 @@ namespace vayu::http::routes {
  * collections_route_test.cpp. The error body is built by `error_body`, like
  * every other error the engine emits.
  */
-std::optional<std::pair<int, nlohmann::json>> validate_parent_assignment (
-vayu::db::Database& db,
+RouteResult validate_parent_assignment (vayu::db::Database& db,
 const std::string& id,
 const std::optional<std::string>& parent_id) {
     if (!parent_id.has_value ()) {
-        return std::nullopt; // No parent -> no cycle possible.
+        return {}; // No parent -> no cycle possible.
     }
     if (*parent_id == id) {
-        return std::make_pair (400, error_body (400, "A collection cannot be its own parent"));
+        return route_error (400, "A collection cannot be its own parent");
     }
 
     std::unordered_set<std::string> visited;
     std::optional<std::string> cursor = parent_id;
     while (cursor.has_value ()) {
         if (*cursor == id) {
-            return std::make_pair (400,
-            error_body (400, "Cannot move a collection into its own descendant"));
+            return route_error (400, "Cannot move a collection into its own descendant");
         }
         if (!visited.insert (*cursor).second) {
             break; // Already seen -> pre-existing corrupt cycle; stop, bounded.
@@ -74,7 +71,7 @@ const std::optional<std::string>& parent_id) {
         }
         cursor = ancestor->parent_id;
     }
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -122,53 +119,46 @@ constexpr size_t MAX_DATA_SCHEMA_COLUMN_CHARS = 256;
  * with `is_create=true` while the payload's parents are still unwritten, so a
  * check that reached for another record would refuse a legal bulk import.
  */
-static std::optional<std::pair<int, nlohmann::json>> validate_data_schema (
-const nlohmann::json& schema) {
+static RouteResult validate_data_schema (const nlohmann::json& schema) {
     if (schema.contains ("columns")) {
         const auto& columns = schema["columns"];
         if (!columns.is_array ()) {
-            return std::make_pair (400,
-            error_body (400, "Invalid 'dataSchema.columns': must be an array of strings"));
+            return route_error (400, "Invalid 'dataSchema.columns': must be an array of strings");
         }
         if (columns.size () > MAX_DATA_SCHEMA_COLUMNS) {
-            return std::make_pair (400,
-            error_body (400,
+            return route_error (400,
             "Invalid 'dataSchema.columns': " + std::to_string (columns.size ()) +
-            " columns, over the limit of " + std::to_string (MAX_DATA_SCHEMA_COLUMNS)));
+            " columns, over the limit of " + std::to_string (MAX_DATA_SCHEMA_COLUMNS));
         }
         std::unordered_set<std::string> seen;
         for (const auto& column : columns) {
             if (!column.is_string ()) {
-                return std::make_pair (400,
-                error_body (400, "Invalid 'dataSchema.columns': every column must be a string"));
+                return route_error (400,
+                "Invalid 'dataSchema.columns': every column must be a string");
             }
             const auto name = column.get<std::string> ();
             if (name.empty ()) {
-                return std::make_pair (400,
-                error_body (400, "Invalid 'dataSchema.columns': a column name cannot be empty"));
+                return route_error (400,
+                "Invalid 'dataSchema.columns': a column name cannot be empty");
             }
             if (name.size () > MAX_DATA_SCHEMA_COLUMN_CHARS) {
-                return std::make_pair (400,
-                error_body (400,
+                return route_error (400,
                 "Invalid 'dataSchema.columns': a column name is longer than " +
-                std::to_string (MAX_DATA_SCHEMA_COLUMN_CHARS) + " characters"));
+                std::to_string (MAX_DATA_SCHEMA_COLUMN_CHARS) + " characters");
             }
             if (!seen.insert (name).second) {
-                return std::make_pair (400,
-                error_body (400,
-                "Invalid 'dataSchema.columns': duplicate column '" + name + "'"));
+                return route_error (400,
+                "Invalid 'dataSchema.columns': duplicate column '" + name + "'");
             }
         }
     }
     if (schema.contains ("declaredAt") && !schema["declaredAt"].is_number ()) {
-        return std::make_pair (400,
-        error_body (400, "Invalid 'dataSchema.declaredAt': must be a number"));
+        return route_error (400, "Invalid 'dataSchema.declaredAt': must be a number");
     }
     if (schema.contains ("fileName") && !schema["fileName"].is_string ()) {
-        return std::make_pair (400,
-        error_body (400, "Invalid 'dataSchema.fileName': must be a string"));
+        return route_error (400, "Invalid 'dataSchema.fileName': must be a string");
     }
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -188,27 +178,23 @@ const nlohmann::json& schema) {
  * `reject_unbindable_spec`'s, called by each write path with whatever it knows
  * is about to exist.
  */
-static std::optional<std::pair<int, nlohmann::json>> validate_openapi_binding (
-const nlohmann::json& binding) {
+static RouteResult validate_openapi_binding (const nlohmann::json& binding) {
     if (binding.empty ()) {
-        return std::nullopt; // Unbound; nothing to check.
+        return {}; // Unbound; nothing to check.
     }
     if (!binding.contains ("specId") || !binding["specId"].is_string () ||
     binding["specId"].get<std::string> ().empty ()) {
-        return std::make_pair (400,
-        error_body (400,
+        return route_error (400,
         "Invalid 'openapi.specId': a binding must name a stored spec "
-        "(send openapi: {} or null to unbind)"));
+        "(send openapi: {} or null to unbind)");
     }
     if (binding.contains ("specHash") && !binding["specHash"].is_string ()) {
-        return std::make_pair (
-        400, error_body (400, "Invalid 'openapi.specHash': must be a string"));
+        return route_error (400, "Invalid 'openapi.specHash': must be a string");
     }
     if (binding.contains ("syncedAt") && !binding["syncedAt"].is_number ()) {
-        return std::make_pair (
-        400, error_body (400, "Invalid 'openapi.syncedAt': must be a number"));
+        return route_error (400, "Invalid 'openapi.syncedAt': must be a number");
     }
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -218,17 +204,17 @@ const nlohmann::json& binding) {
  * between them is `is_create`.
  *
  * Returns an error response when a no-default field (`name`) is missing or
- * null, or when the proposed parent would form a cycle; nullopt on success.
+ * null, or when the proposed parent would form a cycle.
  *
  * Declared in routes.hpp because `POST /import/apply` applies the same fields to
  * every collection in a bulk payload (issue #96).
  */
-std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (vayu::db::Database& db,
+RouteResult apply_collection_fields (vayu::db::Database& db,
 vayu::db::Collection& c,
 const nlohmann::json& json,
 bool is_create) {
-    if (auto err = apply_required_string_field (json, "name", c.name, is_create)) {
-        return err;
+    if (auto outcome = apply_required_string_field (json, "name", c.name, is_create); !outcome) {
+        return outcome;
     }
 
     apply_string_field (json, "description", c.description, "", is_create);
@@ -257,39 +243,43 @@ bool is_create) {
         c.order = next_sibling_order (db, c.parent_id, c.id);
     }
 
-    if (auto err = apply_json_field (json, "variables", c.variables, "{}", is_create)) {
-        return err;
+    if (auto outcome = apply_json_field (json, "variables", c.variables, "{}", is_create);
+    !outcome) {
+        return outcome;
     }
     // Collection auth is never 'inherit' - a collection is the root of a chain.
-    if (auto err = apply_json_field (json, "auth", c.auth, R"({"mode":"none"})", is_create)) {
-        return err;
+    if (auto outcome = apply_json_field (json, "auth", c.auth, R"({"mode":"none"})", is_create);
+    !outcome) {
+        return outcome;
     }
     apply_string_field (json, "preRequestScript", c.pre_request_script, "", is_create);
     apply_string_field (json, "postRequestScript", c.post_request_script, "", is_create);
 
     // The declared data contract (issue #599). `{}` is "no contract", which is
     // what both an absent field on create and an explicit null on update mean.
-    if (auto err = apply_json_field (json, "dataSchema", c.data_schema, "{}", is_create)) {
-        return err;
+    if (auto outcome = apply_json_field (json, "dataSchema", c.data_schema, "{}", is_create);
+    !outcome) {
+        return outcome;
     }
     // Shape is `apply_json_field`'s; contents are this one's. Only a value the
     // caller actually sent is checked - a stored schema is left alone, so an
     // update that says nothing about it cannot be refused by it.
     if (json.contains ("dataSchema") && json["dataSchema"].is_object ()) {
-        if (auto err = validate_data_schema (json["dataSchema"])) {
-            return err;
+        if (auto outcome = validate_data_schema (json["dataSchema"]); !outcome) {
+            return outcome;
         }
     }
 
     // The OpenAPI binding (issue #637). `{}` is "bound to nothing", which both
     // an absent field on create and an explicit null on update mean - so
     // unbinding is `{"openapi": null}` and needs no verb of its own.
-    if (auto err = apply_json_field (json, "openapi", c.openapi, "{}", is_create)) {
-        return err;
+    if (auto outcome = apply_json_field (json, "openapi", c.openapi, "{}", is_create);
+    !outcome) {
+        return outcome;
     }
     if (json.contains ("openapi") && json["openapi"].is_object ()) {
-        if (auto err = validate_openapi_binding (json["openapi"])) {
-            return err;
+        if (auto outcome = validate_openapi_binding (json["openapi"]); !outcome) {
+            return outcome;
         }
     }
 
@@ -297,10 +287,10 @@ bool is_create) {
     // or reparent into a descendant) before they reach the DB - a cycle makes
     // cascade delete loop forever under the global mutex. Cycle/self checks
     // only; parent existence is not required (import creates in bulk).
-    if (auto err = validate_parent_assignment (db, c.id, c.parent_id)) {
-        return err;
+    if (auto outcome = validate_parent_assignment (db, c.id, c.parent_id); !outcome) {
+        return outcome;
     }
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -320,8 +310,8 @@ bool is_create) {
  */
 std::pair<int, nlohmann::json>
 create_collection_response (vayu::db::Database& db, const nlohmann::json& json) {
-    if (auto err = reject_client_supplied_id (json)) {
-        return *err;
+    if (auto outcome = reject_client_supplied_id (json); !outcome) {
+        return as_response (outcome.error ());
     }
     const std::string id = vayu::utils::generate_id ("col_");
 
@@ -334,8 +324,8 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
     c.created_at = now_ms ();
     c.updated_at = now_ms ();
 
-    if (auto err = apply_collection_fields (db, c, json, /*is_create=*/true)) {
-        return *err;
+    if (auto outcome = apply_collection_fields (db, c, json, /*is_create=*/true); !outcome) {
+        return as_response (outcome.error ());
     }
 
     // The spec check and the write are one composite, so they are one lock
@@ -348,8 +338,8 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
     // bulk import binds specs it is about to write - see its declaration.
     std::pair<int, nlohmann::json> result;
     db.with_lock ([&] {
-        if (auto err = reject_unbindable_spec (db, c.openapi, {})) {
-            result = *err;
+        if (auto outcome = reject_unbindable_spec (db, c.openapi, {}); !outcome) {
+            result = as_response (outcome.error ());
             return;
         }
         stamp_binding_from_store (db, c.openapi);
@@ -372,8 +362,8 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
 std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json) {
-    if (auto err = reject_mismatched_body_id (json, id)) {
-        return *err;
+    if (auto outcome = reject_mismatched_body_id (json, id); !outcome) {
+        return as_response (outcome.error ());
     }
     auto existing = db.get_collection (id);
     if (!existing) {
@@ -381,8 +371,8 @@ const nlohmann::json& json) {
     }
 
     vayu::db::Collection c = *existing;
-    if (auto err = apply_collection_fields (db, c, json, /*is_create=*/false)) {
-        return *err;
+    if (auto outcome = apply_collection_fields (db, c, json, /*is_create=*/false); !outcome) {
+        return as_response (outcome.error ());
     }
     c.updated_at = now_ms ();
 
@@ -395,8 +385,8 @@ const nlohmann::json& json) {
     std::pair<int, nlohmann::json> result;
     db.with_lock ([&] {
         if (json.contains ("openapi")) {
-            if (auto err = reject_unbindable_spec (db, c.openapi, {})) {
-                result = *err;
+            if (auto outcome = reject_unbindable_spec (db, c.openapi, {}); !outcome) {
+                result = as_response (outcome.error ());
                 return;
             }
             stamp_binding_from_store (db, c.openapi);

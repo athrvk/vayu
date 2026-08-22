@@ -43,12 +43,11 @@ constexpr int MAX_HTTP_STATUS = 599;
  * /requests/gone/examples/exa_1` must answer "no such request" rather than
  * silently reading an example whose owner has been deleted.
  */
-std::optional<std::pair<int, nlohmann::json>>
-reject_missing_request (vayu::db::Database& db, const std::string& request_id) {
+RouteResult reject_missing_request (vayu::db::Database& db, const std::string& request_id) {
     if (db.get_request (request_id).has_value ()) {
-        return std::nullopt;
+        return {};
     }
-    return std::make_pair (404, error_body (404, "Request not found"));
+    return route_error (404, "Request not found");
 }
 
 /**
@@ -58,16 +57,16 @@ reject_missing_request (vayu::db::Database& db, const std::string& request_id) {
  * from this path's point of view the resource genuinely does not exist, and
  * saying otherwise would leak which ids are taken.
  */
-std::optional<std::pair<int, nlohmann::json>> load_owned_example (vayu::db::Database& db,
+RouteResult load_owned_example (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id,
 vayu::db::RequestExample& out) {
     auto stored = db.get_request_example (example_id);
     if (!stored || stored->request_id != request_id) {
-        return std::make_pair (404, error_body (404, "Example not found"));
+        return route_error (404, "Example not found");
     }
     out = *stored;
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -99,8 +98,7 @@ bool order_is_defaulted (const nlohmann::json& json) {
  * `import` would hand a user-saved example to the next spec sync to overwrite,
  * and a typo is a payload bug worth naming rather than absorbing.
  */
-std::optional<std::pair<int, nlohmann::json>>
-apply_origin_field (const nlohmann::json& json, std::string& out, bool is_create) {
+RouteResult apply_origin_field (const nlohmann::json& json, std::string& out, bool is_create) {
     namespace example_bounds = vayu::core::constants::request_example;
     const std::string default_origin{ example_bounds::ORIGIN_IMPORT };
 
@@ -108,24 +106,23 @@ apply_origin_field (const nlohmann::json& json, std::string& out, bool is_create
         if (is_create) {
             out = default_origin;
         }
-        return std::nullopt;
+        return {};
     }
     if (json["origin"].is_null ()) {
         out = default_origin;
-        return std::nullopt;
+        return {};
     }
     if (json["origin"].is_string ()) {
         const std::string candidate = json["origin"].get<std::string> ();
         if (candidate == example_bounds::ORIGIN_IMPORT ||
         candidate == example_bounds::ORIGIN_USER) {
             out = candidate;
-            return std::nullopt;
+            return {};
         }
     }
-    return std::make_pair (400,
-    error_body (400,
+    return route_error (400,
     std::string ("Invalid 'origin': must be '") + example_bounds::ORIGIN_IMPORT +
-    "' or '" + example_bounds::ORIGIN_USER + "'"));
+    "' or '" + example_bounds::ORIGIN_USER + "'");
 }
 
 } // namespace
@@ -149,30 +146,29 @@ apply_origin_field (const nlohmann::json& json, std::string& out, bool is_create
  * Declared in routes.hpp because `POST /import/apply` applies the same fields
  * to every example nested in a bulk payload.
  */
-std::optional<std::pair<int, nlohmann::json>>
-apply_request_example_fields (vayu::db::RequestExample& x, const nlohmann::json& json, bool is_create) {
-    if (auto err = apply_required_string_field (json, "name", x.name, is_create)) {
-        return err;
+RouteResult apply_request_example_fields (vayu::db::RequestExample& x,
+const nlohmann::json& json,
+bool is_create) {
+    if (auto outcome = apply_required_string_field (json, "name", x.name, is_create); !outcome) {
+        return outcome;
     }
 
     apply_int_field (json, "status", x.status, 200, is_create);
     if (x.status < MIN_HTTP_STATUS || x.status > MAX_HTTP_STATUS) {
-        return std::make_pair (400,
-        error_body (400,
+        return route_error (400,
         "Invalid 'status': " + std::to_string (x.status) + " is not an HTTP status code (" +
-        std::to_string (MIN_HTTP_STATUS) + "-" + std::to_string (MAX_HTTP_STATUS) + ")"));
+        std::to_string (MIN_HTTP_STATUS) + "-" + std::to_string (MAX_HTTP_STATUS) + ")");
     }
 
-    if (auto err = apply_key_value_field (json, "headers", x.headers, is_create)) {
-        return err;
+    if (auto outcome = apply_key_value_field (json, "headers", x.headers, is_create); !outcome) {
+        return outcome;
     }
 
     apply_string_field (json, "body", x.body, "", is_create);
     if (x.body.size () > vayu::core::constants::request_example::MAX_BODY_BYTES) {
-        return std::make_pair (400,
-        error_body (400,
+        return route_error (400,
         "Example body is " + std::to_string (x.body.size ()) + " bytes, over the " +
-        std::to_string (vayu::core::constants::request_example::MAX_BODY_BYTES) + "-byte limit"));
+        std::to_string (vayu::core::constants::request_example::MAX_BODY_BYTES) + "-byte limit");
     }
 
     apply_string_field (json, "contentType", x.content_type, "", is_create);
@@ -194,8 +190,8 @@ apply_request_example_fields (vayu::db::RequestExample& x, const nlohmann::json&
  */
 std::pair<int, nlohmann::json> list_request_examples_response (vayu::db::Database& db,
 const std::string& request_id) {
-    if (auto err = reject_missing_request (db, request_id)) {
-        return *err;
+    if (auto outcome = reject_missing_request (db, request_id); !outcome) {
+        return as_response (outcome.error ());
     }
     nlohmann::json out = nlohmann::json::array ();
     for (const auto& x : db.get_request_examples (request_id)) {
@@ -216,11 +212,11 @@ const std::string& request_id) {
 std::pair<int, nlohmann::json> create_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
 const nlohmann::json& json) {
-    if (auto err = reject_client_supplied_id (json)) {
-        return *err;
+    if (auto outcome = reject_client_supplied_id (json); !outcome) {
+        return as_response (outcome.error ());
     }
-    if (auto err = reject_missing_request (db, request_id)) {
-        return *err;
+    if (auto outcome = reject_missing_request (db, request_id); !outcome) {
+        return as_response (outcome.error ());
     }
 
     const auto limit = vayu::core::constants::request_example::MAX_PER_REQUEST;
@@ -243,8 +239,8 @@ const nlohmann::json& json) {
     x.created_at = now_ms ();
     x.updated_at = x.created_at;
 
-    if (auto err = apply_request_example_fields (x, json, /*is_create=*/true)) {
-        return *err;
+    if (auto outcome = apply_request_example_fields (x, json, /*is_create=*/true); !outcome) {
+        return as_response (outcome.error ());
     }
     if (order_is_defaulted (json)) {
         x.order = next_example_order (db, request_id);
@@ -262,19 +258,19 @@ std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Databa
 const std::string& request_id,
 const std::string& example_id,
 const nlohmann::json& json) {
-    if (auto err = reject_mismatched_body_id (json, example_id)) {
-        return *err;
+    if (auto outcome = reject_mismatched_body_id (json, example_id); !outcome) {
+        return as_response (outcome.error ());
     }
-    if (auto err = reject_missing_request (db, request_id)) {
-        return *err;
+    if (auto outcome = reject_missing_request (db, request_id); !outcome) {
+        return as_response (outcome.error ());
     }
     vayu::db::RequestExample x;
-    if (auto err = load_owned_example (db, request_id, example_id, x)) {
-        return *err;
+    if (auto outcome = load_owned_example (db, request_id, example_id, x); !outcome) {
+        return as_response (outcome.error ());
     }
 
-    if (auto err = apply_request_example_fields (x, json, /*is_create=*/false)) {
-        return *err;
+    if (auto outcome = apply_request_example_fields (x, json, /*is_create=*/false); !outcome) {
+        return as_response (outcome.error ());
     }
     x.updated_at = now_ms ();
 
@@ -300,12 +296,12 @@ const nlohmann::json& json) {
 std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id) {
-    if (auto err = reject_missing_request (db, request_id)) {
-        return *err;
+    if (auto outcome = reject_missing_request (db, request_id); !outcome) {
+        return as_response (outcome.error ());
     }
     vayu::db::RequestExample x;
-    if (auto err = load_owned_example (db, request_id, example_id, x)) {
-        return *err;
+    if (auto outcome = load_owned_example (db, request_id, example_id, x); !outcome) {
+        return as_response (outcome.error ());
     }
 
     if (x.origin == vayu::core::constants::request_example::ORIGIN_IMPORT) {

@@ -213,7 +213,7 @@ the tree, variables, auth and scripts.
 
 ## How it fits together
 
-Vayu is a **sidecar**: the Electron + React UI talks to a C++20 daemon over HTTP
+Vayu is a **sidecar**: the Electron + React UI talks to a C++23 daemon over HTTP
 on `127.0.0.1:9876`. That split is why the interface stays responsive while the
 engine saturates a target - and why the engine can be driven on its own, from the
 [command line](engine/cli.md) or by a coding agent over
@@ -283,7 +283,7 @@ persists.
 
 ## Reference
 
-**Engine** - the C++20 daemon: execution, load generation, persistence, scripting.
+**Engine** - the C++23 daemon: execution, load generation, persistence, scripting.
 
 | Document | Covers |
 |---|---|

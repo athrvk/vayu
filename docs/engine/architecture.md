@@ -64,6 +64,32 @@ The HTTP server handles all API requests from the Electron UI. It runs on `127.0
 - Server-Sent Events (SSE) for real-time metrics streaming
 - Single-threaded request handling (non-blocking I/O)
 
+#### How a route says no
+
+Two shapes, and the difference between them is the point:
+
+- A **testable core** - `create_collection_response`, `import_apply_response` -
+  returns `std::pair<int, nlohmann::json>`. Success and failure are both
+  something to send, so the pair is the *response*, and the handler around it
+  only writes it to the wire. `error_response (status, message)` builds the
+  failing one.
+- A **field applier or guard** - `apply_json_field`, `reject_client_supplied_id`,
+  `apply_request_fields` - returns `RouteResult`, which is
+  `std::expected<void, RouteError>`: nothing on success, and on failure the
+  `{status, body}` the caller should answer with. `route_error (status, message)`
+  builds the refusal; `as_response` turns one into the pair a core returns.
+
+These used to be `std::optional<std::pair<int, nlohmann::json>>`, where an
+*empty* optional meant success (issue #901). That reads backwards at every call
+site - `if (err)` is the failure path, `return std::nullopt` means "fine" - and
+a dropped return value silently means "no error", which is why the two most
+dangerous of them carried `[[nodiscard]]` by hand. `std::expected` puts the
+direction in the type: `if (auto outcome = f (...); !outcome) return outcome;`
+propagates, and the response is reachable only through `.error ()`.
+
+All error bodies, either way, come from `error_body` - one shape,
+`{"error": {"code", "message"}}`, which the app's http-client reads.
+
 ### Listeners
 
 This is the engine's whole listener inventory. The management API is the only long-lived one;

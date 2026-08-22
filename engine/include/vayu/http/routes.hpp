@@ -10,6 +10,8 @@
 #include <httplib.h>
 
 #include <chrono>
+#include <expected>
+#include <format>
 #include <functional>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -112,6 +114,68 @@ error_body (int status, const std::string& message, std::string_view code = {}) 
     const std::string error_code =
     code.empty () ? default_error_code (status) : std::string (code);
     return nlohmann::json{ { "error", { { "code", error_code }, { "message", message } } } };
+}
+
+/**
+ * The response a refusal produces: the HTTP status, and the body to send with
+ * it.
+ *
+ * Named fields rather than a `std::pair`, because `error->first` at a call site
+ * says nothing about which half is the status - and a helper that builds the
+ * pair by hand can put a 400 in one half and a 500-shaped body in the other.
+ * `route_error` below builds both from one status, so they cannot disagree.
+ */
+struct RouteError {
+    int status = 500;
+    nlohmann::json body;
+};
+
+/**
+ * "Did what it was asked, or here is the response to send instead."
+ *
+ * Every field applier and every guard below returns this. It used to be
+ * `std::optional<std::pair<int, nlohmann::json>>`, where an *empty* optional
+ * meant success - a shape that reads backwards at every call site (`if (err)`
+ * on the failure path, `return std::nullopt` to mean "fine") and that lets a
+ * dropped return value pass silently for "no error". With `std::expected` the
+ * type carries which way is up: `if (!result) return result;` propagates, and
+ * `result.error()` is the only way to reach the response.
+ */
+using RouteResult = std::expected<void, RouteError>;
+
+/**
+ * Build the refusal. One status in, and both halves of the error come out of
+ * it - the duplication that used to spell the status twice
+ * (`std::make_pair (400, error_body (400, ...))`) is gone with it.
+ */
+[[nodiscard]] inline std::unexpected<RouteError>
+route_error (int status, const std::string& message, std::string_view code = {}) {
+    return std::unexpected (
+    RouteError{ .status = status, .body = error_body (status, message, code) });
+}
+
+/**
+ * The `{status, body}` pair a testable route core answers with, built from a
+ * refusal one of the helpers produced.
+ *
+ * The cores return the *response* - success or failure, both are something to
+ * send - so they keep the pair; only the helpers that mean "nothing to report
+ * unless it went wrong" carry `RouteResult`. This is the one seam between the
+ * two, spelled out rather than left as `{ e.status, e.body }` at thirty sites.
+ */
+[[nodiscard]] inline std::pair<int, nlohmann::json> as_response (const RouteError& error) {
+    return { error.status, error.body };
+}
+
+/**
+ * The refusal a core answers with directly, without a helper in between - the
+ * pair-shaped counterpart of `route_error`, and here for the same reason:
+ * `{ 400, error_body (400, ...) }` spells the status twice and the two halves
+ * can drift.
+ */
+[[nodiscard]] inline std::pair<int, nlohmann::json>
+error_response (int status, const std::string& message, std::string_view code = {}) {
+    return { status, error_body (status, message, code) };
 }
 
 /**
@@ -227,8 +291,7 @@ bool is_create) {
  * `[[nodiscard]]` because dropping the returned error is exactly the silent
  * acceptance this helper exists to prevent.
  */
-[[nodiscard]] inline std::optional<std::pair<int, nlohmann::json>>
-apply_json_field (const nlohmann::json& json,
+[[nodiscard]] inline RouteResult apply_json_field (const nlohmann::json& json,
 const char* key,
 std::string& out,
 const char* default_value,
@@ -237,62 +300,61 @@ bool is_create) {
         if (is_create) {
             out = default_value;
         }
-        return std::nullopt;
+        return {};
     }
     const auto& value = json[key];
     if (value.is_null ()) {
         out = default_value;
-        return std::nullopt;
+        return {};
     }
     if (!value.is_object ()) {
-        return std::make_pair (400,
-        error_body (400, std::string ("Invalid '") + key + "': must be a JSON object"));
+        return route_error (400, std::format ("Invalid '{}': must be a JSON object", key));
     }
     out = value.dump ();
-    return std::nullopt;
+    return {};
 }
 
 /**
  * Same rule for a field stored as a dumped **array** of KeyValueEntry
  * (`params` / `headers` on a request, `headers` on a saved example). A null
  * resets to `[]`; a present value must be an array whose every entry carries
- * string `key`/`value` and boolean `enabled`. Returns the 400 body on a
- * malformed entry, nullopt otherwise.
+ * string `key`/`value` and boolean `enabled`. Returns the 400 on a malformed
+ * entry.
  *
  * Here rather than in requests.cpp because saved examples store the same shape
  * and must validate it the same way - a second copy would drift the moment the
  * entry shape gains a field.
  */
-[[nodiscard]] inline std::optional<std::pair<int, nlohmann::json>>
+[[nodiscard]] inline RouteResult
 apply_key_value_field (const nlohmann::json& json, const char* key, std::string& out, bool is_create) {
     if (!json.contains (key)) {
         if (is_create) {
             out = "[]";
         }
-        return std::nullopt;
+        return {};
     }
     const auto& value = json[key];
     if (value.is_null ()) {
         out = "[]";
-        return std::nullopt;
+        return {};
     }
     if (!value.is_array ()) {
-        return std::make_pair (400,
-        error_body (400, std::string ("Invalid '") + key + "': must be an array of {key, value, enabled}"));
+        return route_error (
+        400, std::format ("Invalid '{}': must be an array of {{key, value, enabled}}", key));
     }
     for (size_t i = 0; i < value.size (); ++i) {
         const auto& entry = value[i];
         if (!entry.contains ("key") || !entry["key"].is_string () ||
         !entry.contains ("value") || !entry["value"].is_string () ||
         !entry.contains ("enabled") || !entry["enabled"].is_boolean ()) {
-            return std::make_pair (400,
-            error_body (400,
-            std::string ("Invalid ") + key + " entry at index " + std::to_string (i) +
-            ": missing required field (key, value, or enabled)"));
+            return route_error (400,
+            std::format ("Invalid {} entry at index {}: missing required field "
+                         "(key, value, or enabled)",
+            key, i));
         }
     }
     out = value.dump ();
-    return std::nullopt;
+    return {};
 }
 
 /** Same rule for a boolean field. A non-boolean, non-null value is ignored. */
@@ -361,8 +423,7 @@ inline std::string http_version_valid_list () {
  * drift apart - a hand-written accept-list here would be exactly the risk
  * `all_http_versions()` exists to prevent.
  */
-inline std::optional<std::pair<int, nlohmann::json>> apply_http_version_field (
-const nlohmann::json& json,
+inline RouteResult apply_http_version_field (const nlohmann::json& json,
 const char* key,
 std::string& out,
 const std::string& seed,
@@ -371,11 +432,11 @@ bool is_create) {
         if (is_create) {
             out = seed;
         }
-        return std::nullopt;
+        return {};
     }
     if (json[key].is_null ()) {
         out = seed;
-        return std::nullopt;
+        return {};
     }
 
     if (json[key].is_string ()) {
@@ -385,41 +446,41 @@ bool is_create) {
         // deserialize_request and the config seed accept.
         if (vayu::http_version_from_string (candidate).has_value ()) {
             out = candidate;
-            return std::nullopt;
+            return {};
         }
-        return std::make_pair (400,
-        error_body (400,
-        std::string ("Invalid '") + key + "': '" + candidate +
-        "' is not a valid HTTP version. Valid values: " + http_version_valid_list ()));
+        return route_error (400,
+        std::format (
+        "Invalid '{}': '{}' is not a valid HTTP version. Valid values: {}", key,
+        candidate, http_version_valid_list ()));
     }
 
-    return std::make_pair (400,
-    error_body (400,
-    std::string ("Invalid '") + key +
-    "': must be a string. Valid values: " + http_version_valid_list ()));
+    return route_error (400,
+    std::format ("Invalid '{}': must be a string. Valid values: {}", key,
+    http_version_valid_list ()));
 }
 
 /**
  * A field with no default: absent on create and `null` on either verb are both
- * 400s, because there is nothing to fall back to. Returns the error response
- * body, or nullopt when the value is acceptable (including "absent on update",
- * which keeps the stored value).
+ * 400s, because there is nothing to fall back to. Succeeds when the value is
+ * acceptable, "absent on update" (which keeps the stored value) included.
  */
-inline std::optional<std::pair<int, nlohmann::json>>
-apply_required_string_field (const nlohmann::json& json, const char* key, std::string& out, bool is_create) {
+inline RouteResult apply_required_string_field (const nlohmann::json& json,
+const char* key,
+std::string& out,
+bool is_create) {
     if (!json.contains (key)) {
         if (is_create) {
-            return std::make_pair (400,
-            error_body (400, std::string ("Missing required field: ") + key));
+            return route_error (400, std::format ("Missing required field: {}", key));
         }
-        return std::nullopt; // Absent on update -> keep.
+        return {}; // Absent on update -> keep.
     }
     if (json[key].is_null ()) {
-        return std::make_pair (400,
-        error_body (400, std::string ("Invalid '") + key + "': null is not allowed (this field has no default)"));
+        return route_error (400,
+        std::format (
+        "Invalid '{}': null is not allowed (this field has no default)", key));
     }
     out = json[key].get<std::string> ();
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -435,15 +496,13 @@ apply_required_string_field (const nlohmann::json& json, const char* key, std::s
  * is exactly the caller this catches, and accepting `{"id": null}` would leave
  * it believing the field is honoured.
  */
-inline std::optional<std::pair<int, nlohmann::json>> reject_client_supplied_id (
-const nlohmann::json& json) {
+inline RouteResult reject_client_supplied_id (const nlohmann::json& json) {
     if (!json.contains ("id")) {
-        return std::nullopt;
+        return {};
     }
-    return std::make_pair (400,
-    error_body (400,
+    return route_error (400,
     "id is assigned by the engine; omit it "
-    "(bulk import: POST /import/apply)"));
+    "(bulk import: POST /import/apply)");
 }
 
 /**
@@ -456,16 +515,16 @@ const nlohmann::json& json) {
  * Runs before the record lookup, so the answer to a malformed body does not
  * depend on whether the target happens to exist.
  */
-inline std::optional<std::pair<int, nlohmann::json>>
-reject_mismatched_body_id (const nlohmann::json& json, const std::string& path_id) {
+inline RouteResult reject_mismatched_body_id (const nlohmann::json& json,
+const std::string& path_id) {
     if (!json.contains ("id")) {
-        return std::nullopt;
+        return {};
     }
     if (json["id"].is_string () && json["id"].get<std::string> () == path_id) {
-        return std::nullopt;
+        return {};
     }
-    return std::make_pair (400,
-    error_body (400, "Body 'id' must match the id in the path ('" + path_id + "') or be omitted"));
+    return route_error (400,
+    std::format ("Body 'id' must match the id in the path ('{}') or be omitted", path_id));
 }
 
 /**
@@ -475,30 +534,31 @@ reject_mismatched_body_id (const nlohmann::json& json, const std::string& path_i
  * re-deriving the null-vs-absent rule or the per-field validation - a second
  * copy would drift the moment a field is added.
  *
- * Each returns an error response {http_status, json_body} when a no-default
- * field is missing or null (or, for collections, when the proposed parent would
- * form a cycle), and nullopt on success. `is_create` selects the absent-field
- * behaviour; see the rule above. Defined in collections.cpp / requests.cpp /
- * environments.cpp.
+ * Each fails with the response to send when a no-default field is missing or
+ * null (or, for collections, when the proposed parent would form a cycle).
+ * `is_create` selects the absent-field behaviour; see the rule above. Defined
+ * in collections.cpp / requests.cpp / environments.cpp.
  */
-std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (vayu::db::Database& db,
+RouteResult apply_collection_fields (vayu::db::Database& db,
 vayu::db::Collection& c,
 const nlohmann::json& json,
 bool is_create);
-std::optional<std::pair<int, nlohmann::json>> apply_request_fields (vayu::db::Database& db,
+RouteResult apply_request_fields (vayu::db::Database& db,
 vayu::db::Request& r,
 const nlohmann::json& json,
 bool is_create);
-std::optional<std::pair<int, nlohmann::json>>
-apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, bool is_create);
+RouteResult apply_environment_fields (vayu::db::Environment& e,
+const nlohmann::json& json,
+bool is_create);
 /**
  * Saved example responses (issue #481) follow the same rule, and the same
  * shared-applier reason: `POST /import/apply` writes examples nested under
  * their request item, so both paths must agree on what a field means and where
  * the body cap sits. Defined in examples.cpp.
  */
-std::optional<std::pair<int, nlohmann::json>>
-apply_request_example_fields (vayu::db::RequestExample& x, const nlohmann::json& json, bool is_create);
+RouteResult apply_request_example_fields (vayu::db::RequestExample& x,
+const nlohmann::json& json,
+bool is_create);
 
 /**
  * Hex-encoded SHA-256 of an OpenAPI document's text (issue #637) - what
@@ -655,7 +715,7 @@ struct SpecComparison {
  * the only failure left here is a binding naming a document the store no longer
  * holds, returned as the `409` both routes give it. Defined in spec_diff.cpp.
  */
-std::optional<std::pair<int, nlohmann::json>> compare_bound_spec (vayu::db::Database& db,
+RouteResult compare_bound_spec (vayu::db::Database& db,
 const std::vector<vayu::db::Collection>& collections,
 const std::unordered_set<std::string>& subtree,
 const std::string& spec_id,
@@ -705,7 +765,7 @@ const vayu::Response& response);
  * write in the same transaction; every path but import passes an empty set.
  * Defined in specs.cpp.
  */
-std::optional<std::pair<int, nlohmann::json>> reject_unbindable_spec (vayu::db::Database& db,
+RouteResult reject_unbindable_spec (vayu::db::Database& db,
 const std::string& openapi,
 const std::unordered_set<std::string>& pending);
 

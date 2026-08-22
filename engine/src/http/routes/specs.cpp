@@ -275,24 +275,24 @@ const vayu::Response& response) {
  * write path passes an empty set, because everything it may bind is already
  * stored.
  */
-std::optional<std::pair<int, nlohmann::json>> reject_unbindable_spec (vayu::db::Database& db,
+RouteResult reject_unbindable_spec (vayu::db::Database& db,
 const std::string& openapi,
 const std::unordered_set<std::string>& pending) {
     std::string spec_id;
     try {
         const auto parsed = nlohmann::json::parse (openapi);
         if (!parsed.is_object ()) {
-            return std::nullopt;
+            return {};
         }
         spec_id = parsed.value ("specId", std::string ());
     } catch (const std::exception&) {
-        return std::nullopt; // Not a binding; the applier already had its say.
+        return {}; // Not a binding; the applier already had its say.
     }
     if (spec_id.empty () || pending.contains (spec_id) ||
     db.get_spec_document (spec_id).has_value ()) {
-        return std::nullopt;
+        return {};
     }
-    return std::make_pair (400, error_body (400, "Spec '" + spec_id + "' does not exist"));
+    return route_error (400, "Spec '" + spec_id + "' does not exist");
 }
 
 /**
@@ -337,8 +337,8 @@ void stamp_binding_from_store (vayu::db::Database& db, std::string& openapi) {
  */
 std::pair<int, nlohmann::json>
 create_spec_document_response (vayu::db::Database& db, const nlohmann::json& json) {
-    if (auto err = reject_client_supplied_id (json)) {
-        return *err;
+    if (auto outcome = reject_client_supplied_id (json); !outcome) {
+        return as_response (outcome.error ());
     }
     for (const char* derived : { "hash", "fetchedAt" }) {
         if (json.contains (derived)) {
@@ -347,8 +347,9 @@ create_spec_document_response (vayu::db::Database& db, const nlohmann::json& jso
     }
 
     std::string content;
-    if (auto err = apply_required_string_field (json, "content", content, /*is_create=*/true)) {
-        return *err;
+    if (auto outcome = apply_required_string_field (json, "content", content, /*is_create=*/true);
+    !outcome) {
+        return as_response (outcome.error ());
     }
     if (content.empty ()) {
         return { 400, error_body (400, "Invalid 'content': an empty document is not a spec") };
