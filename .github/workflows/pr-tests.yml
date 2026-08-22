@@ -344,12 +344,20 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         include:
+          # VAYU_WERROR turns the GCC/Clang warning set into build errors, on
+          # both legs that use it (issue #884) - a warning that only one
+          # compiler emits is exactly the kind this gate exists to catch, so
+          # gating Linux alone would leave Clang-only diagnostics unwatched.
+          # Windows needs no flag: MSVC builds /WX unconditionally.
           - os: ubuntu-latest
             preset: linux-prod
+            configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
           - os: windows-latest
             preset: windows-prod
+            configureArgs: "['-DVAYU_BUILD_TESTS=ON']"
           - os: macos-latest
             preset: macos-prod
+            configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
     timeout-minutes: 60
     env:
       VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
@@ -436,7 +444,7 @@ jobs:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
-          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+          configurePresetAdditionalArgs: "${{ matrix.configureArgs }}"
 
       # The engine must depend on nothing outside Windows itself. ctest below
       # runs on a runner that already has the Visual C++ redistributable, so it

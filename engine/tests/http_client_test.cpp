@@ -62,7 +62,7 @@ class MockHttpBin {
         });
 
         // GET /redirect/1 - one redirect to /get
-        svr_.Get ("/redirect/1", [this] (const httplib::Request&, httplib::Response& res) {
+        svr_.Get ("/redirect/1", [] (const httplib::Request&, httplib::Response& res) {
             res.set_redirect ("/get", 302);
         });
 

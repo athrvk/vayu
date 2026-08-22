@@ -1146,10 +1146,10 @@ void register_execution_routes (RouteContext& ctx) {
                 (response.has_error () ? vayu::RunStatus::Failed :
                                          vayu::RunStatus::Completed);
 
-                const bool has_scripts = !post_request_script.empty () ||
+                const bool has_script_output = !post_request_script.empty () ||
                 !pre_script_result.tests.empty () ||
                 !pre_script_result.console_output.empty () || !pre_script_result.success;
-                if (has_scripts) {
+                if (has_script_output) {
                     // Guarded as a whole: a script surface that threw where
                     // `execute_script` does not catch - building the runtime,
                     // applying a cookie write - must not cost the run its

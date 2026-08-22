@@ -736,15 +736,15 @@ Result<std::vector<FormField>> parse_form_fields (const Json& body_json, BodyMod
         for (const auto& [name, target] :
         { std::pair<const char*, std::string*>{ "src", &field.src },
         { "fileName", &field.file_name }, { "contentType", &field.content_type } }) {
-            const auto entry = item.find (name);
-            if (entry == item.end () || entry->is_null ()) {
+            const auto member = item.find (name);
+            if (member == item.end () || member->is_null ()) {
                 continue;
             }
-            if (!entry->is_string ()) {
+            if (!member->is_string ()) {
                 return Error{ ErrorCode::InternalError,
                     std::string{ "Body field '" } + name + "' must be a string" };
             }
-            *target = entry->get<std::string> ();
+            *target = member->get<std::string> ();
         }
         // A text part carrying a file's source is ambiguous in the one direction
         // that matters: the caller pointed at a file and nothing would send it.

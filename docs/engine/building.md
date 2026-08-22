@@ -116,6 +116,9 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug -DVAYU_USE_ASAN=ON
 
 # Enable ThreadSanitizer (debug builds)
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DVAYU_USE_TSAN=ON
+
+# Treat compiler warnings as errors (what CI does)
+cmake -B build -DVAYU_WERROR=ON
 ```
 
 ## Build Outputs
@@ -515,6 +518,19 @@ cmake --build --preset linux-prod --clean-first 2>&1 | grep -c 'warning:'
 The flags are on `vayu_warnings` in `engine/CMakeLists.txt` - `-Wall -Wextra
 -Wpedantic` plus `-Wconversion`, `-Wsign-conversion`, `-Wdouble-promotion`,
 `-Wformat=2` and `-Wnull-dereference` on GCC and clang, `/W4 /WX` on MSVC.
+
+**A warning fails the build in CI** (`VAYU_WERROR`, default `OFF`). The engine
+job passes `-DVAYU_WERROR=ON` on the Linux and macOS legs, which adds `-Werror`;
+Windows needs no flag, because MSVC has always built `/WX`. It is off by default
+so a work-in-progress local build is not blocked by a warning - run the count
+above, or configure with `-DVAYU_WERROR=ON` to get exactly what CI gets. Setting
+the legacy `VAYU_STRICT_BUILD` environment variable to a truthy value turns it on
+too, so an existing local workflow keeps working. Both GCC/clang legs are gated
+rather than only Linux: a diagnostic one compiler emits and the other does not is
+precisely what the gate is for - the macOS SDK spells `NAN` as `__builtin_nanf`,
+which made a line in vendored `quickjs.h` a `-Wdouble-promotion` error there and
+nowhere else (vendored headers are `SYSTEM` includes now, so third-party code
+cannot fail our build).
 
 Three GCC 13 diagnostics fire only on code the engine did not write, and those
 are suppressed - narrowly, one function at a time, through the macros in
