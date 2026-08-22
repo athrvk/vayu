@@ -88,9 +88,6 @@ format_json() {
     fi
 }
 
-# Track if we've seen the complete event
-COMPLETE_SEEN=false
-
 # Function to stream from an SSE endpoint
 # Returns 0 if successfully streamed data, 1 otherwise
 stream_sse() {

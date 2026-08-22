@@ -236,6 +236,35 @@ violation, an unformatted file or a type error fails CI. Where a rule genuinely
 cannot be satisfied, suppress it on the single line with a comment saying why -
 an unexplained `eslint-disable` is treated as a defect.
 
+### Shell and Python (tooling)
+
+The installer, the git hook, the test harnesses and `build.py` are the
+repository's third language pair, and CI lints both on its `Script lint` job:
+
+```bash
+shellcheck $(git ls-files '*.sh' 'scripts/pre-commit' | grep -v '^engine/vendor/')
+ruff check $(git ls-files '*.py')
+```
+
+Two things are worth knowing before you run those locally:
+
+- **The versions are pinned** - shellcheck **v0.10.0** and ruff **0.15.8**, the
+  same builds the job installs. Both tools change their findings between
+  releases (shellcheck has twice failed here on a rule the other distribution's
+  build does not emit, once under a renumbered code), so an unpinned local run
+  can disagree with CI in either direction.
+- **The file lists come from `git ls-files`**, not from a list in the workflow.
+  A script added anywhere in the tree is linted the day it lands, without an
+  edit to CI - which is the point: the enumerated list this replaced had drifted
+  to five of the twelve tracked shell scripts.
+
+ruff runs on its **default** rules. A finding is a fix, not a suppression,
+unless the code cannot be written another way. Bare `except:` in particular is
+a defect rather than a style question here: it swallows `KeyboardInterrupt`, so
+a Ctrl-C during one of `build.py`'s slow toolchain probes is eaten instead of
+aborting the build. Catch what the call can actually raise - for a subprocess
+probe that is `(OSError, subprocess.SubprocessError)`.
+
 ## Testing
 
 ### Engine (C++)
