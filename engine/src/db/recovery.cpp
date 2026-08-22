@@ -115,7 +115,7 @@ std::optional<RecoveryRecord> read_recovery_marker (const std::string& db_path) 
         return std::nullopt;
     }
 
-    return RecoveryRecord{ *outcome, at_field->get<int64_t> () };
+    return RecoveryRecord{ .outcome = *outcome, .at = at_field->get<int64_t> () };
 }
 
 } // namespace vayu::db
