@@ -627,6 +627,21 @@ it reports the backlog as well. That is deliberate for a local early warning you
 can skip with `git commit --no-verify`, and it is why a hook refusal is not by
 itself a merge blocker. Issue #902 tracks aligning the two.
 
+**Commits listed in `.git-blame-ignore-revs` are skipped.** The gate reads the
+same file `git blame` does, and for the same reason: a commit declared to be
+pure reformatting did not write new code, so re-linting it says nothing. This
+is not only a tidiness argument. Line scoping bounds the *diagnostics*
+clang-tidy reports, not the number of translation units it must parse - and a
+reformat touches a line in every file it rewrites. #886's 149-file bulk-format
+commit made the gate try to analyse 152 translation units in one run and killed
+the job at its 60-minute timeout; with the skip it analyses the 7 that actually
+changed. What was skipped is named in the job summary, never dropped silently.
+
+The contract runs the other way too: **do not list a commit in
+`.git-blame-ignore-revs` unless it is purely mechanical**, because doing so now
+excuses it from linting as well as from blame. That rule is written in the file
+itself.
+
 **CI lints on Linux and Windows**, not Linux alone. clang-tidy analyses a
 translation unit, so an `#ifdef _WIN32` branch is preprocessed away before a
 Linux run sees it - `platform.hpp`'s per-OS split and the Windows-only blocks in

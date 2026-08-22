@@ -11,6 +11,13 @@
 # Add a commit here only if it is *purely* mechanical reformatting. A commit
 # that also changes behaviour must not be ignored, or the blame for that
 # behaviour disappears with it.
+#
+# This file is load-bearing for CI as well as for blame: the `Lint changed
+# engine sources` step in .github/workflows/pr-tests.yml skips the commits
+# listed here, because a reformat touches a line in every file it rewrites and
+# clang-tidy would otherwise re-parse the whole tree for a whitespace change.
+# So a commit listed here is excused from linting too - one more reason it must
+# be mechanical and nothing else.
 
 # style(engine): bulk-format engine/{src,include,tests} at clang-format 19 (#886)
 1132ece2e334ec26c15a001a627e4d6839c4498d

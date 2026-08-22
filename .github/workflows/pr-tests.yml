@@ -366,14 +366,17 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
 
     steps:
-      # Depth 2 rather than 1, for `HEAD^1` alone: the clang-tidy step below
-      # diffs the pull request against the base side of the merge commit
-      # actions/checkout leaves at HEAD, and that parent is the second commit.
-      # One extra object, on every leg because the checkout is shared.
+      # Full history, not depth 2. Depth 2 was enough while the clang-tidy step
+      # below only needed `HEAD^1` - the base side of the merge commit
+      # actions/checkout leaves at HEAD. It now also enumerates the pull
+      # request's own commits, to skip the ones the repository has declared to
+      # be pure reformatting (see that step), and a shallow clone does not
+      # contain them. A full clone of this repository costs seconds against a
+      # job that runs for minutes.
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -559,22 +562,85 @@ jobs:
           # A read loop rather than `mapfile`: `shell: bash` on the macOS runner
           # is /bin/bash 3.2.57, where mapfile does not exist. The installer job
           # names that trap already - it is the same one, one job over.
-          changed=()
+          # Commits the repository has already declared to be pure reformatting
+          # are skipped, reading the same `.git-blame-ignore-revs` that `git
+          # blame` reads. A whitespace change is not new code, and linting it as
+          # though it were does not merely waste time - it is why #886's
+          # 149-file bulk-format commit killed this job at its 60-minute
+          # timeout with four clang-tidy processes still running. Line scoping
+          # bounds the *diagnostics* clang-tidy reports; it does not bound the
+          # number of translation units it has to parse, and a reformat touches
+          # a line in every file. On that pull request this cut the set from 152
+          # sources to 7, which is the 7 that actually changed.
+          #
+          # Declaring the commit in `.git-blame-ignore-revs` is the contract:
+          # the file already means "this commit changed formatting and nothing
+          # else", blame trusts it, and so does this. A commit that is not
+          # purely mechanical must not be listed there - that rule is stated in
+          # the file itself, and this step is now a second reason it matters.
+          ignored=()
+          if [[ -f .git-blame-ignore-revs ]]; then
+            while IFS= read -r line; do
+              line="${line%%#*}"
+              line="${line//[[:space:]]/}"
+              [[ -n "$line" ]] && ignored+=("$line")
+            done < .git-blame-ignore-revs
+          fi
+
+          # Note this collects the *files* those commits touched and then diffs
+          # them across the whole pull request, rather than concatenating the
+          # per-commit diffs. `clang-tidy-diff.py` maps hunk line numbers onto
+          # the working tree, which is HEAD - an intermediate commit's line
+          # numbers do not survive later commits, so feeding its diff would
+          # filter the wrong lines. A file touched by both a formatting commit
+          # and a real one is linted over its whole diff, which errs toward
+          # linting more rather than less.
+          relevant=()
           while IFS= read -r file; do
-            changed+=("$file")
-          done < <(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
-            | grep -E '\.(c|cpp|h|hpp)$' || true)
+            relevant+=("$file")
+          done < <(
+            for rev in $(git rev-list HEAD^1..HEAD); do
+              skip=
+              for ig in ${ignored[@]+"${ignored[@]}"}; do
+                [[ "$rev" == "$ig" ]] && skip=1 && break
+              done
+              [[ -n "$skip" ]] || git diff --name-only "$rev^" "$rev" -- "${roots[@]}"
+            done | sort -u | grep -E '\.(c|cpp|h|hpp)$' || true
+          )
+
+          changed=()
+          if [[ ${#relevant[@]} -gt 0 ]]; then
+            while IFS= read -r file; do
+              changed+=("$file")
+            done < <(git diff --name-only HEAD^1 HEAD -- ${relevant[@]+"${relevant[@]}"} \
+              | grep -E '\.(c|cpp|h|hpp)$' || true)
+          fi
 
           # The non-empty-scan proof this repository asks of every source
           # scanning guard: name what is about to be linted, so a step that
           # silently narrowed to nothing cannot read as a pass.
+          #
+          # What was skipped is reported rather than dropped quietly, on the
+          # repository's no-silent-caps rule: a narrowed scan that reads as a
+          # clean pass is the failure this summary exists to prevent.
+          all_changed=$(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
+            | grep -cE '\.(c|cpp|h|hpp)$' || true)
+          skipped=$(( all_changed - ${#changed[@]} ))
+
           if [[ ${#changed[@]} -eq 0 ]]; then
-            echo "- clang-tidy: no engine sources changed, nothing to lint" >> "$GITHUB_STEP_SUMMARY"
+            if [[ $skipped -gt 0 ]]; then
+              echo "- clang-tidy: nothing to lint - all **$skipped** changed engine source(s) were touched only by commits listed in \`.git-blame-ignore-revs\` (reformatting)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- clang-tidy: no engine sources changed, nothing to lint" >> "$GITHUB_STEP_SUMMARY"
+            fi
             exit 0
           fi
           {
             echo "- clang-tidy linted the changed lines of **${#changed[@]}** engine source(s):"
             printf '  - `%s`\n' "${changed[@]}"
+            if [[ $skipped -gt 0 ]]; then
+              echo "  - (**$skipped** further source(s) skipped: touched only by commits listed in \`.git-blame-ignore-revs\`)"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Installed here rather than in a step of its own so a pull request
@@ -653,7 +719,10 @@ jobs:
             exit 1
           fi
 
-          git diff -U0 HEAD^1 HEAD -- "${roots[@]}" \
+          # `"${changed[@]}"`, not `"${roots[@]}"`: the roots would re-admit the
+          # sources that only a declared formatting commit touched, undoing the
+          # skip computed above.
+          git diff -U0 HEAD^1 HEAD -- "${changed[@]}" \
             | "$python" "$tidy_diff" \
                 -clang-tidy-binary "$tidy" \
                 -p1 -path engine/build-release \
