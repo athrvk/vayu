@@ -49,7 +49,7 @@ using json = nlohmann::ordered_json;
 // The JavaScript the renderer's parsers are written in - `prop`, truthiness,
 // `JSON.stringify`, `encodeURIComponent`, `appendParamsToUrl`. Shared with the
 // draft builder (`openapi_drafts.cpp`) rather than copied.
-using namespace js; // NOLINT(google-build-using-namespace)
+using namespace js;
 
 /**
  * A document that claimed a format and then contradicted it.

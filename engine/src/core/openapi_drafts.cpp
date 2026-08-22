@@ -63,7 +63,7 @@ using json = nlohmann::ordered_json;
 // `JSON.stringify`'s number and string forms, `encodeURIComponent`,
 // `appendParamsToUrl`. Shared with the import (issue #877) rather than kept
 // here, so the two readers of a foreign document cannot drift apart.
-using namespace js; // NOLINT(google-build-using-namespace)
+using namespace js;
 
 /// `tally.add(kind)` for a caller that may not be keeping one - the sync diff
 /// asks for drafts and has no preview to report a loss to.

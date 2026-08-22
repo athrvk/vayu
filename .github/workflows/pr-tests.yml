@@ -365,10 +365,14 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
 
     steps:
+      # Depth 2 rather than 1, for `HEAD^1` alone: the clang-tidy step below
+      # diffs the pull request against the base side of the merge commit
+      # actions/checkout leaves at HEAD, and that parent is the second commit.
+      # One extra object, on every leg because the checkout is shared.
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          fetch-depth: 2
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -470,6 +474,189 @@ jobs:
         working-directory: engine
         shell: bash
         run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine/test-results.xml" < /dev/null
+
+      # The clang-tidy gate (#885). It rides this job rather than standing up its
+      # own because it needs `compile_commands.json` and a configured tree - a
+      # separate job would pay the vcpkg install and the configure a second time
+      # for a check that takes seconds against a warm build. After ctest, so a
+      # genuine regression is reported before a lint finding is.
+      #
+      # **On Linux and Windows, not Linux alone**, for the reason `VAYU_WERROR`
+      # is set on two legs above: a diagnostic only one platform can emit is
+      # exactly what a gate is for. clang-tidy analyses a *translation unit*, so
+      # an `#ifdef _WIN32` branch is preprocessed away before the Linux run sees
+      # a token - `platform.hpp`'s per-OS split and the Windows-only blocks in
+      # `client.cpp`, `event_loop_worker.cpp` and `temp_database.hpp` were code
+      # no lint could reach until the Windows leg ran.
+      #
+      # macOS is excluded, and it is the one exclusion here that is not a
+      # choice: clang-tidy 19.1.7 and 20.1.8 both die there with SIGILL - an
+      # `llvm_unreachable` trap - part way through the two heaviest translation
+      # units, which lint clean on both other legs. Upstream clang cannot parse
+      # that runner's AppleClang 21 SDK, and two consecutive majors failing the
+      # same way is not a version ladder worth climbing here. The coverage lost
+      # is small and measured: the engine's entire macOS-conditional surface is
+      # four `#define`s in `platform.hpp` with no statement in them, so what is
+      # actually missed is `clang-analyzer-*` over shared code as compiled
+      # against libc++. Issue #906 carries the evidence and the ways back in.
+      #
+      # **It lints the changed lines, not the changed files.** The engine had
+      # never been linted, so most files carry findings that predate the diff -
+      # `openapi_drafts.cpp` alone answered with nine on a tree nobody had
+      # touched. Gating on whole files would fail a pull request for code it did
+      # not write, in every file it happened to open, which ends one of two ways:
+      # unrelated refactors smuggled into every diff, or the gate turned off. New
+      # code is held to the config from its first line, and the backlog is paid
+      # down by whoever edits it. `clang-tidy-diff.py` is LLVM's own driver for
+      # exactly this - the line ranges come out of the diff and go in as
+      # `--line-filter`, so nothing here reimplements them.
+      #
+      # `HEAD^1` is the base side of the pull request's merge commit, which is
+      # what actions/checkout leaves at HEAD for a `pull_request` event; hence
+      # `fetch-depth: 2` above, and the check below rather than a silent empty
+      # diff if that ever stops being true.
+      #
+      # `-allow-no-checks` is for `engine/src/runtime/`, whose `.clang-tidy` sets
+      # `Checks: '-*'`: without it clang-tidy calls an empty check list a usage
+      # error and exits 1, so the directory that is meant to be exempt would be
+      # the one that fails. `-clang-tidy-binary` because the driver otherwise
+      # calls whatever plain `clang-tidy` resolves to, which on the Linux image
+      # is 18 - old enough to reject `engine/.clang-tidy` outright.
+      #
+      # The two legs run different clang-tidy versions, and neither is a free
+      # choice. Linux pins 19 from apt, which is what CONTRIBUTING.md tells
+      # contributors to install, so a local run and this one answer the same.
+      # Windows takes the 20.1.8 its image already ships: chocolatey refuses to
+      # downgrade to 19 ("A newer version of llvm is already installed"), and
+      # using the image's copy costs no install time.
+      #
+      # 19 is the floor `engine/.clang-tidy` needs (`ExcludeHeaderFilterRegex`),
+      # and it is asserted below rather than trusted, because an image is a pin
+      # somebody else controls. The cost of the spread is that a finding on one
+      # leg alone may be a version difference rather than a platform one - worth
+      # knowing when you read a failure, and much cheaper than having no
+      # coverage of the per-OS branches at all.
+      #
+      # `-j 0` rather than a CPU count: the driver reads 0 as
+      # `multiprocessing.cpu_count()`, and `nproc` does not exist on macOS.
+      - name: Lint changed engine sources
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          # Assert HEAD *is* the merge commit, by asking for the second parent.
+          # Checking that HEAD^1 merely exists is not the same thing and is worse
+          # than useless: on an ordinary commit it succeeds and silently makes
+          # the base the previous commit, so the gate would lint the last commit
+          # of the pull request and report a pass for the rest.
+          if ! git rev-parse --verify --quiet HEAD^2 > /dev/null; then
+            echo "::error::HEAD is not the pull request merge commit (it has no second parent), so HEAD^1 is not the base of this pull request"
+            exit 1
+          fi
+
+          roots=(engine/src engine/include engine/tests)
+
+          # A read loop rather than `mapfile`: `shell: bash` on the macOS runner
+          # is /bin/bash 3.2.57, where mapfile does not exist. The installer job
+          # names that trap already - it is the same one, one job over.
+          changed=()
+          while IFS= read -r file; do
+            changed+=("$file")
+          done < <(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
+            | grep -E '\.(c|cpp|h|hpp)$' || true)
+
+          # The non-empty-scan proof this repository asks of every source
+          # scanning guard: name what is about to be linted, so a step that
+          # silently narrowed to nothing cannot read as a pass.
+          if [[ ${#changed[@]} -eq 0 ]]; then
+            echo "- clang-tidy: no engine sources changed, nothing to lint" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "- clang-tidy linted the changed lines of **${#changed[@]}** engine source(s):"
+            printf '  - `%s`\n' "${changed[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Installed here rather than in a step of its own so a pull request
+          # that changed no engine source pays for none of it. Each package
+          # brings LLVM's own `clang-tidy-diff.py` with the binary, at a path
+          # that differs per packager - which is the whole of the per-platform
+          # difference below.
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get install -y --no-install-recommends clang-tidy-19
+              tidy=clang-tidy-19
+              tidy_diff=/usr/bin/clang-tidy-diff-19.py
+              python=python3
+              ;;
+            Windows)
+              # Nothing to install: the image ships LLVM 20.1.8, and asking
+              # chocolatey for 19.1.1 failed outright rather than downgrading
+              # ("A newer version of llvm is already installed").
+              tidy="/c/Program Files/LLVM/bin/clang-tidy.exe"
+              tidy_diff="/c/Program Files/LLVM/share/clang/clang-tidy-diff.py"
+              python=python
+              ;;
+            *)
+              echo "::error::No clang-tidy 19 recipe for $RUNNER_OS"
+              exit 1
+              ;;
+          esac
+
+          # Named before anything depends on it: a clang-tidy that resolved to
+          # the wrong place would otherwise surface as an unrelated shell error.
+          "$tidy" --version
+
+          # The floor, asserted rather than assumed. Two of the three legs take
+          # whatever LLVM their runner image ships, so an image that rolled
+          # backwards would lint with a binary that cannot read
+          # `engine/.clang-tidy` at all - which is issue #659's silent empty
+          # scan arriving by a new route.
+          major="$("$tidy" --version | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p' | head -1)"
+          if [[ -z "$major" ]] || [[ "$major" -lt 19 ]]; then
+            echo "::error::clang-tidy ${major:-(version unreadable)} is below the 19 that engine/.clang-tidy requires"
+            exit 1
+          fi
+
+          # clang-tidy replays the compile command, precompiled header and all -
+          # and that PCH was written by the *build's* compiler, not by
+          # clang-tidy's clang. On Linux it is a GCC `.gch` ("not a clang PCH
+          # file"); on macOS it is an AppleClang PCH in a format Homebrew's
+          # clang 19 refuses ("newer PCH format that cannot be read"). Under the
+          # prod presets' -Werror / /WX both are hard errors raised before any
+          # check filter, and neither carries a line the diff filter could
+          # match, so every file fails.
+          #
+          # Regenerating the compile database without the PCH is the fix that
+          # does not depend on knowing each compiler's PCH flag spelling. It is
+          # safe to do in place: ctest has already run, so nothing needs this
+          # build tree again. The sources parse without it; CMake's PCH is a
+          # build-time accelerator here, not something they lean on.
+          #
+          # `VCPKG_MANIFEST_INSTALL=OFF` is what keeps that cheap, and it is not
+          # optional: the vcpkg toolchain re-runs the manifest install on every
+          # configure, which measured **563 seconds** here - nine and a half
+          # minutes added to the engine job for a lint step that takes under a
+          # minute. Skipping it costs nothing, because the dependencies this
+          # tree was built against are already installed in it; the reconfigure
+          # then takes 0.2s and the vcpkg include paths survive untouched.
+          cmake -S engine -B engine/build-release \
+            -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
+            -DVCPKG_MANIFEST_INSTALL=OFF
+          if grep -q cmake_pch engine/build-release/compile_commands.json; then
+            echo "::error::compile_commands.json still references a precompiled header"
+            exit 1
+          fi
+
+          if [[ ! -f "$tidy_diff" ]]; then
+            echo "::error::clang-tidy-diff.py not found at $tidy_diff"
+            exit 1
+          fi
+
+          git diff -U0 HEAD^1 HEAD -- "${roots[@]}" \
+            | "$python" "$tidy_diff" \
+                -clang-tidy-binary "$tidy" \
+                -p1 -path engine/build-release \
+                -quiet -allow-no-checks -j 0
 
       # `always()` so a suite that ran and failed is still reported - but on its
       # own that also reports a *pass* for a job that never got as far as

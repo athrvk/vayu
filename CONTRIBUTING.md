@@ -102,8 +102,14 @@ vayu/
   `ExcludeHeaderFilterRegex`, which landed in LLVM 19; an older binary rejects
   the config file outright and lints nothing. The `scripts/pre-commit` hook
   probes the version and says so rather than passing silently - if you see that
-  warning, install a newer clang-tidy (Ubuntu 24.04 ships 18 by default) or
-  lean on CI, which lints on a current toolchain.
+  warning, install a newer clang-tidy (Ubuntu 24.04 ships 18 by default;
+  `apt install clang-tidy-19` is what CI uses) or lean on CI, which lints the
+  engine sources your pull request changes on clang-tidy 19. A finding fails in
+  both places - the hook refuses the commit, CI fails the engine job - but they
+  are scoped differently: CI gates the **lines** your pull request changes,
+  while the hook lints whole staged files and so also reports findings that were
+  already there. See
+  [Static Analysis](docs/engine/building.md#static-analysis).
 
 #### Naming Conventions
 

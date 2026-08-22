@@ -176,7 +176,8 @@ All platforms script with the same vendored engine: QuickJS-NG
 ### macOS
 
 - Requires Xcode Command Line Tools
-- Homebrew LLVM paths are automatically detected for clang-tidy
+- The `scripts/pre-commit` hook prepends Homebrew's LLVM directory, so a
+  `brew install llvm` clang-tidy is found without touching `PATH` yourself
 
 ### Windows
 
@@ -550,21 +551,110 @@ should be that code change instead.
 
 ### Static Analysis
 
-The pre-commit hook (`scripts/pre-commit`, installed by
-`bash scripts/install-git-hooks.sh`) needs **clang-tidy 19 or newer**:
-`engine/.clang-tidy` uses `ExcludeHeaderFilterRegex`, which landed in LLVM 19,
-and an older binary rejects the config file and lints nothing. The hook probes
-the version and warns loudly instead of exiting clean over an empty scan; CI
-lints on a current toolchain either way.
+clang-tidy runs in two places, and both of them can stop a change:
 
-Enable clang-tidy in `CMakeLists.txt` (commented out by default):
+| Where | What it lints | What a finding does |
+|-------|---------------|---------------------|
+| `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | Whole staged `.c/.cpp/.h/.hpp` files | Refuses the commit |
+| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of `engine/{src,include,tests}` sources, on all three platforms | Fails CI |
 
-```cmake
-find_program(CLANG_TIDY_EXE NAMES "clang-tidy")
-if(CLANG_TIDY_EXE)
-    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-endif()
+A finding is a failure because `engine/.clang-tidy` sets
+`WarningsAsErrors: '*'`; with that empty, clang-tidy prints every diagnostic it
+found and still exits 0. That single setting is what both places read their
+verdict from - do not re-state it as a `--warnings-as-errors` flag at a call
+site, or the two can disagree about what counts.
+
+**CI gates the changed lines, not the changed files**, through LLVM's own
+`clang-tidy-diff.py`. The engine had never been linted, so most files carry
+findings older than any current diff - `openapi_drafts.cpp` answered with nine
+on an untouched tree. Gating whole files would fail a pull request for code it
+did not write, in every file it happened to open. New code is held to the config
+from its first line; the backlog is paid down by whoever edits those lines.
+
+The pre-commit hook is the stricter of the two: it lints whole staged files, so
+it reports the backlog as well. That is deliberate for a local early warning you
+can skip with `git commit --no-verify`, and it is why a hook refusal is not by
+itself a merge blocker. Issue #902 tracks aligning the two.
+
+**CI lints on Linux and Windows**, not Linux alone. clang-tidy analyses a
+translation unit, so an `#ifdef _WIN32` branch is preprocessed away before a
+Linux run sees it - `platform.hpp`'s per-OS split and the Windows-only blocks in
+`client.cpp`, `event_loop_worker.cpp` and `temp_database.hpp` are code a
+Linux-only lint could never reach.
+
+**macOS is excluded**, and not by choice: clang-tidy 19.1.7 and 20.1.8 both die
+there with SIGILL - an `llvm_unreachable` trap - part way through the two
+heaviest translation units, which lint clean on both other legs. Upstream clang
+cannot parse that runner's AppleClang 21 SDK. What that loses is small and
+measured: the engine's entire macOS-conditional surface is four `#define`s in
+`platform.hpp` with no statement in them, so what is actually missed is
+`clang-analyzer-*` over shared code as compiled against libc++. Issue #906
+carries the evidence and the ways back in.
+
+Both pass `--allow-no-checks`, for `engine/src/runtime/` - its `.clang-tidy`
+disables every check, and clang-tidy calls an empty check list a usage error
+rather than a clean run, so the one exempt directory would otherwise be the only
+one that fails.
+
+### The precompiled header
+
+The engine builds with a PCH, and clang-tidy replays the compile command that
+uses it - but that PCH was written by the *build's* compiler. On Linux it is a
+GCC `.gch` ("not a clang PCH file"); on macOS it is an AppleClang PCH that
+Homebrew's clang 19 rejects as "a newer PCH format". Under the prod presets'
+`-Werror` / `/WX` both are hard errors raised before any check filter, and
+neither carries a line the diff filter could match, so every file fails.
+
+The two gates handle it differently, on purpose:
+
+- **CI** regenerates `compile_commands.json` with
+  `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON` before linting. That needs no
+  knowledge of any compiler's PCH flags and is the only thing that fixes the
+  macOS case. It is safe in place because ctest has already run, and it takes
+  under a second.
+- **The hook** sets `ExtraArgs: ['-Wno-ignored-gch']` in `engine/.clang-tidy`
+  instead, which silences the GCC case only. Reconfiguring your build tree from
+  a git hook would throw away your next incremental build.
+
+Either way clang-tidy falls back to including the header as text and analyses
+exactly the same translation unit.
+
+Both need **clang-tidy 19 or newer**: `engine/.clang-tidy` uses
+`ExcludeHeaderFilterRegex`, which landed in LLVM 19, and an older binary rejects
+the config file and lints nothing. The hook probes the version and warns loudly
+instead of exiting clean over an empty scan; a contributor without a current
+clang-tidy loses the early warning, not the check.
+
+CI's version differs per leg, and none of it is a free choice:
+
+| Leg | clang-tidy | Why |
+|-----|-----------|-----|
+| Linux | 19, from apt | What CONTRIBUTING.md tells contributors to install, so a local run and CI answer the same |
+| Windows | 20.1.8, shipped by the image | chocolatey refuses to downgrade from the preinstalled version, and the image's copy costs no install time |
+
+The step asserts the 19 floor rather than trusting it, because a runner image
+is a pin somebody else controls. The cost of the spread is that a finding on one
+leg alone may be a version difference rather than a platform one - worth knowing
+when you read a failure, and much cheaper than having no coverage of the per-OS
+branches at all.
+
+To lint by hand, point clang-tidy at a configured build tree:
+
+```bash
+python build.py -e                       # writes engine/build/compile_commands.json
+clang-tidy-19 --allow-no-checks -p engine/build engine/src/http/routes.cpp
+
+# Or exactly what CI does, against your own changes:
+git diff -U0 master... -- engine/src engine/include engine/tests \
+  | clang-tidy-diff-19.py -clang-tidy-binary clang-tidy-19 \
+      -p1 -path engine/build -quiet -allow-no-checks -j "$(nproc)"
 ```
+
+clang-tidy is deliberately **not** wired into the build itself. A
+`CMAKE_CXX_CLANG_TIDY` block sat commented out in `engine/CMakeLists.txt` for
+years: a lint that runs only when someone uncomments it never runs, and
+uncommenting it re-lints the whole tree on every build. Issue #885 removed it in
+favour of the two gates above.
 
 ## Troubleshooting
 

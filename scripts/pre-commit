@@ -32,17 +32,30 @@ fi
 
 # Version probe, before any file is linted. Said loudly and once: the failure this
 # replaces was silent, and a contributor on 18 had no way to tell "clean" from
-# "never ran". CI lints on a current toolchain either way, so this stays a skip
-# rather than a refusal to commit.
+# "never ran". The `Lint changed engine sources` step in
+# .github/workflows/pr-tests.yml lints the same files on clang-tidy 19 before a
+# pull request can merge, so this stays a skip rather than a refusal to commit -
+# a missing or old local toolchain costs a contributor nothing but the early
+# warning.
 CLANG_TIDY_VERSION=$(clang-tidy --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 CLANG_TIDY_MAJOR=${CLANG_TIDY_VERSION%%.*}
 if [ -z "$CLANG_TIDY_MAJOR" ] || [ "$CLANG_TIDY_MAJOR" -lt "$MIN_CLANG_TIDY_MAJOR" ] 2>/dev/null; then
     echo "WARNING: clang-tidy ${CLANG_TIDY_VERSION:-(unknown version)} cannot read engine/.clang-tidy."
     echo "         It uses ExcludeHeaderFilterRegex, which needs clang-tidy >= ${MIN_CLANG_TIDY_MAJOR}."
     echo "         NOTHING WAS LINTED. Install a newer clang-tidy (e.g. 'apt install clang-tidy-19')"
-    echo "         or rely on CI, which lints on a current toolchain."
+    echo "         or rely on CI, which lints the same files on clang-tidy 19."
     exit 0
 fi
+
+# What makes this hook a gate rather than a report. clang-tidy is invoked once
+# per file and each invocation's status is kept, so one bad file does not stop
+# the rest from being linted and does not get lost either - the old loop
+# discarded every status and ended in an unconditional `exit 0`, so a
+# contributor with the hook installed and a current clang-tidy could commit code
+# it had just flagged (issue #885). The status is only meaningful because
+# `engine/.clang-tidy` sets `WarningsAsErrors: '*'`; with that empty, clang-tidy
+# prints its findings and exits 0.
+STATUS=0
 
 # Run clang-tidy
 for FILE in $FILES; do
@@ -59,13 +72,30 @@ for FILE in $FILES; do
     echo "Linting $FILE..."
     # We need compilation database for clang-tidy to work correctly with includes
     # Assuming build directory is engine/build
+    # --allow-no-checks is for engine/src/runtime/, whose .clang-tidy sets
+    # `Checks: '-*'`. Without it clang-tidy treats an empty check list as a usage
+    # error and exits 1, so now that this loop reads the exit status the one
+    # directory that is meant to be exempt would be the only one that refuses a
+    # commit. Needs clang-tidy 19, which the probe above has already required.
     if [ -f "engine/build/compile_commands.json" ]; then
-        clang-tidy -p engine/build "$FILE"
+        clang-tidy --allow-no-checks -p engine/build "$FILE" || STATUS=1
     else
         echo "Warning: compile_commands.json not found in engine/build. clang-tidy might report false positives."
         # Fallback: try to include common directories
-        clang-tidy "$FILE" -- -Iengine/include -Iengine/vendor/quickjs-ng
+        clang-tidy --allow-no-checks "$FILE" -- -Iengine/include -Iengine/vendor/quickjs-ng || STATUS=1
     fi
 done
+
+if [ "$STATUS" -ne 0 ]; then
+    echo
+    echo "clang-tidy reported findings in the staged files above; the commit was refused."
+    echo "Fix them, or mark a deliberate exception with a NOLINT comment naming the check."
+    echo
+    echo "This hook lints whole staged files, so it also reports findings that were"
+    echo "already there. CI gates the lines your pull request changes, so a finding on"
+    echo "code you did not touch will not block the merge (issue #902)."
+    echo "To commit anyway: git commit --no-verify"
+    exit 1
+fi
 
 exit 0

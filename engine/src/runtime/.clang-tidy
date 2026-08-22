@@ -1,4 +1,11 @@
 ---
-# QuickJS integration - disable all checks
+# QuickJS integration - disable all checks. This directory is glue against a C
+# library with its own conventions, and holding it to the engine's style rules
+# produces a diagnostic per line and no defect.
+#
+# A consequence worth knowing before you invoke clang-tidy on a file here by
+# hand: an empty check list is a *usage error* to clang-tidy, so it prints its
+# help and exits 1 rather than reporting nothing. Pass `--allow-no-checks`,
+# which is what the pre-commit hook and the CI lint step both do.
 Checks: '-*'
 ...

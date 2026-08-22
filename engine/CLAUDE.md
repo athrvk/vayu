@@ -19,7 +19,27 @@ engine/
 - Standard: C++20, `-Wall -Wextra -Wpedantic`
 - Formatter: clang-format (`.clang-format` at repo root)
 - Linter: clang-tidy (`.clang-tidy` configs in `engine/`, `engine/src/runtime/`,
-  `engine/tests/`)
+  `engine/tests/`), **19 or newer** - the root config uses
+  `ExcludeHeaderFilterRegex`, which an older binary rejects outright. **A
+  finding is a failure now** (#885): `WarningsAsErrors: '*'` in
+  `engine/.clang-tidy` is the one place that says so, and both consumers read
+  their verdict from clang-tidy's exit status - the pre-commit hook refuses the
+  commit, and the `Lint changed engine sources` step in `pr-tests.yml` fails the
+  engine job **on Linux and Windows** - a `#ifdef _WIN32` branch is
+  preprocessed away before a Linux run sees it, so gating Linux alone left
+  `platform.hpp`'s per-OS split and the Windows-only blocks in `client.cpp` /
+  `event_loop_worker.cpp` / `temp_database.hpp` unlinted. macOS is excluded
+  because clang-tidy 19 *and* 20 both SIGILL there on the AppleClang 21 SDK
+  (#906); the only macOS-conditional code is four `#define`s, so what is lost is
+  `clang-analyzer-*` over shared code under libc++. **CI gates the changed
+  *lines***, through LLVM's
+  `clang-tidy-diff.py`: the tree had never been linted and most files carry
+  findings older than any diff, so whole-file gating would fail a pull request
+  for code it did not write. The hook is the stricter one (whole staged files);
+  #902 tracks aligning them. Nothing lints at *build*
+  time: the commented-out `CMAKE_CXX_CLANG_TIDY` block went with #885, because a
+  lint that runs when someone uncomments it never runs. See
+  `docs/engine/building.md`.
 - Install the git pre-commit hook: `bash scripts/install-git-hooks.sh`
 - vcpkg manages all C++ dependencies - do not add one without updating
   `engine/vcpkg.json`. **In the cloud dev environment, adding one needs a second

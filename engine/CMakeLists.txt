@@ -58,22 +58,20 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # Static Analysis
 # ============================================================================
 
-# Add common Homebrew paths for LLVM on macOS
-if(APPLE)
-    list(APPEND CMAKE_PROGRAM_PATH "/opt/homebrew/opt/llvm/bin" "/usr/local/opt/llvm/bin")
-endif()
-
-# Uncomment the following lines to enable clang-tidy static analysis
-
-# find_program(CLANG_TIDY_EXE NAMES "clang-tidy")
-
-# if(CLANG_TIDY_EXE)
-#     message(STATUS "clang-tidy found: ${CLANG_TIDY_EXE}")
-#     # Set clang-tidy for all C++ targets created after this point
-#     set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-# else()
-#     message(WARNING "clang-tidy not found. Static analysis will be disabled.")
-# endif()
+# clang-tidy is deliberately not wired into the build (#885). There used to be a
+# commented-out `CMAKE_CXX_CLANG_TIDY` block here, and it was the third of three
+# layers that could not stop anything: a lint that runs only when someone
+# uncomments it is a lint that never runs, and uncommenting it re-lints the whole
+# tree on every build, including the vendored sources the configs exclude. The
+# `CMAKE_PROGRAM_PATH` append that pointed `find_program` at Homebrew's LLVM on
+# macOS went with it - nothing here looks for a program any more, and the hook
+# does its own PATH prepend.
+#
+# The two layers that do bind are the `scripts/pre-commit` hook, which lints
+# staged files and refuses the commit on a finding, and the `Lint changed engine
+# sources` step in .github/workflows/pr-tests.yml, which lints the sources a pull
+# request changes before it can merge. `CMAKE_EXPORT_COMPILE_COMMANDS` above is
+# what both of them read the compile flags from. See docs/engine/building.md.
 
 # ============================================================================
 # Compiler Warnings
