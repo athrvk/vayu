@@ -22,7 +22,10 @@ engine/
   under 18). **A difference is a failure now** (#886): the `Engine formatting`
   job in `pr-tests.yml` runs `--dry-run -Werror` over the whole of
   `engine/{src,include,tests}` - whole tree, unlike the clang-tidy gate, because
-  the bulk-format commit left no backlog to grandfather. The config was derived
+  the bulk-format commit left no backlog to grandfather. `scripts/pre-commit`
+  runs the same check over the engine sources a commit stages and refuses it on
+  a difference (#908), so the two agree on scope; without a clang-format 19 it
+  skips loudly rather than answering from another major. The config was derived
   by measuring the bulk diff each setting produces, so its two odd-looking
   settings (`ColumnLimit: 80` with `PenaltyExcessCharacter: 1`, and
   `ContinuationIndentWidth: 0`) are what the code is written to, not oversights;

@@ -1,11 +1,16 @@
 #!/bin/bash
 
-# Run clang-tidy on the staged C++ changes. What it looks at - the lines this
-# commit changes, or whole files under VAYU_TIDY_FULL - is announced below, once
-# the staged set is known.
-echo "Running clang-tidy on staged C++ changes..."
+# Two checks over the staged C++ changes, each mirroring a CI gate that can fail
+# a pull request: clang-format over whole staged engine sources (issue #908),
+# then clang-tidy over the lines this commit changes - or whole files under
+# VAYU_TIDY_FULL, announced below once the staged set is known.
+#
+# Neither is stricter than the gate it mirrors, which is the property that keeps
+# `--no-verify` from becoming a reflex: a refusal here is a merge blocker seen
+# early, never a local rule of its own.
 
-# Add common Homebrew paths for LLVM on macOS to ensure clang-tidy is found
+# Add common Homebrew paths for LLVM on macOS to ensure clang-tidy and
+# clang-format are found - one LLVM install carries both.
 if [ -d "/opt/homebrew/opt/llvm/bin" ]; then
     export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 elif [ -d "/usr/local/opt/llvm/bin" ]; then
@@ -26,10 +31,112 @@ if [ -z "$FILES" ]; then
     exit 0
 fi
 
+# The formatting half (issue #908). The `Engine formatting` job is two seconds
+# of work that used to be reachable only after a push and a CI round trip; this
+# runs the same check, on the same major, over the sources this commit stages.
+#
+# **Whole files, not changed lines** - the opposite of the clang-tidy pass below
+# and for the opposite reason. The bulk-format commit in `.git-blame-ignore-revs`
+# left the tree clean at the pinned version, so formatting has no backlog to
+# grandfather and file scope already agrees with CI's tree scope.
+#
+# `git clang-format --staged` ships beside clang-format and was the primitive to
+# reuse here; it is the wrong one, because it formats the *changed lines*. A
+# staged file it called clean could still fail CI's whole-file check - the
+# asymmetry #902 removed from the tidy pass, reintroduced at the other end.
+#
+# Files are read from the working tree, as the tidy pass reads them, rather than
+# from the index: a hook that reported on blobs the working tree no longer
+# matches would name lines the author cannot see in their editor.
+CLANG_FORMAT_MAJOR=19
+
+FORMAT_STATUS=0
+FORMAT_FILES=()
+for FILE in $FILES; do
+    case "$FILE" in
+        engine/src/* | engine/include/* | engine/tests/*) ;;
+        # Everything else, `engine/vendor/` included - it carries
+        # `DisableFormat: true` of its own and CI's gate does not reach it either.
+        *) continue ;;
+    esac
+    if [ ! -f "$FILE" ]; then
+        continue
+    fi
+    FORMAT_FILES+=("$FILE")
+done
+
+# Nothing engine-side staged: no probe, no message. An app-only commit has no
+# business hearing about the C++ formatter.
+if [ ${#FORMAT_FILES[@]} -gt 0 ]; then
+    # Discovery before the probe, and under both names, because the two ways to
+    # have a 19 look different: `apt install clang-format-19`, which is what
+    # CONTRIBUTING.md tells an Ubuntu contributor to run, leaves plain
+    # `clang-format` at the distribution's 18, while Homebrew's LLVM 19 installs
+    # it as `clang-format`.
+    CLANG_FORMAT=
+    NEAREST_CLANG_FORMAT=
+    for CANDIDATE in "clang-format-${CLANG_FORMAT_MAJOR}" clang-format; do
+        if ! command -v "$CANDIDATE" &> /dev/null; then
+            continue
+        fi
+        CANDIDATE_VERSION=$("$CANDIDATE" --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)
+        NEAREST_CLANG_FORMAT="$CANDIDATE ${CANDIDATE_VERSION:-(unknown version)}"
+        if [ "${CANDIDATE_VERSION%%.*}" = "$CLANG_FORMAT_MAJOR" ]; then
+            CLANG_FORMAT="$CANDIDATE"
+            break
+        fi
+    done
+
+    if [ -z "$CLANG_FORMAT" ]; then
+        # A skip rather than a refusal, on the same reasoning as the clang-tidy
+        # probe below - and a loud one, because this pin is *exact*: 39 of the
+        # 285 engine sources format differently under 18 than under 19, so a
+        # check run by another major is a wrong answer rather than a missing one.
+        echo "WARNING: no clang-format ${CLANG_FORMAT_MAJOR} found${NEAREST_CLANG_FORMAT:+ (nearest: ${NEAREST_CLANG_FORMAT})}."
+        echo "         The engine's format is pinned to ${CLANG_FORMAT_MAJOR} exactly; another major disagrees"
+        echo "         with the gate about 39 of the 285 engine sources."
+        echo "         NOTHING WAS FORMAT-CHECKED. Install it ('apt install clang-format-${CLANG_FORMAT_MAJOR}',"
+        echo "         'brew install llvm@${CLANG_FORMAT_MAJOR}') or rely on CI, whose 'Engine formatting'"
+        echo "         job checks the whole tree on ${CLANG_FORMAT_MAJOR}."
+    else
+        echo "Checking ${#FORMAT_FILES[@]} staged engine source(s) with ${CLANG_FORMAT}..."
+        # The exit status is the verdict, and `-Werror` is what makes there be
+        # one: without it clang-format prints the replacements it would make and
+        # exits 0 - the same shape as the discarded clang-tidy status of issue
+        # #885. Nothing may swallow this status.
+        "$CLANG_FORMAT" --style=file --dry-run -Werror "${FORMAT_FILES[@]}" || FORMAT_STATUS=1
+    fi
+fi
+
+# The one way out of this hook, so that a verdict is reported where it will be
+# read - last, under whatever else ran - and so that no exit can lose one. The
+# clang-tidy pass below has three legitimate early exits (no clang-tidy, one too
+# old to read the config, a deletions-only change); none of them is a reason to
+# forget that clang-format already refused this commit.
+STATUS=0
+end_hook() {
+    if [ "$FORMAT_STATUS" -ne 0 ]; then
+        echo
+        echo "clang-format ${CLANG_FORMAT_MAJOR} would rewrite the staged engine sources named"
+        echo "above; the commit was refused. Fix them in place:"
+        echo "    ${CLANG_FORMAT} --style=file -i <file>..."
+        echo "The 'Engine formatting' job checks the same files the same way, so this is a"
+        echo "merge blocker you are seeing early. To commit anyway: git commit --no-verify"
+    fi
+    if [ "$STATUS" -ne 0 ] || [ "$FORMAT_STATUS" -ne 0 ]; then
+        exit 1
+    fi
+    exit 0
+}
+
+# What it looks at - the lines this commit changes, or whole files under
+# VAYU_TIDY_FULL - is announced below, once the staged set is known.
+echo "Running clang-tidy on staged C++ changes..."
+
 # Check if clang-tidy is installed
 if ! command -v clang-tidy &> /dev/null; then
     echo "clang-tidy not found. Skipping linting."
-    exit 0
+    end_hook
 fi
 
 # Version probe, before any file is linted. Said loudly and once: the failure this
@@ -46,7 +153,7 @@ if [ -z "$CLANG_TIDY_MAJOR" ] || [ "$CLANG_TIDY_MAJOR" -lt "$MIN_CLANG_TIDY_MAJO
     echo "         It uses ExcludeHeaderFilterRegex, which needs clang-tidy >= ${MIN_CLANG_TIDY_MAJOR}."
     echo "         NOTHING WAS LINTED. Install a newer clang-tidy (e.g. 'apt install clang-tidy-19')"
     echo "         or rely on CI, which lints the same lines on clang-tidy 19."
-    exit 0
+    end_hook
 fi
 
 # Turns one file's staged hunk headers into clang-tidy `--line-filter` ranges.
@@ -133,7 +240,7 @@ else
 
     if [ -z "$SCOPED_FILES" ]; then
         echo "Staged C++ changes add no lines (deletions only); nothing to lint."
-        exit 0
+        end_hook
     fi
 
     LINT_FILES="$SCOPED_FILES"
@@ -148,8 +255,8 @@ fi
 # contributor with the hook installed and a current clang-tidy could commit code
 # it had just flagged (issue #885). The status is only meaningful because
 # `engine/.clang-tidy` sets `WarningsAsErrors: '*'`; with that empty, clang-tidy
-# prints its findings and exits 0.
-STATUS=0
+# prints its findings and exits 0. `STATUS` is declared beside `end_hook` above,
+# which is where it is finally read.
 
 # Run clang-tidy
 for FILE in $LINT_FILES; do
@@ -215,7 +322,6 @@ if [ "$STATUS" -ne 0 ]; then
         echo "staged files instead, backlog included: VAYU_TIDY_FULL=1 git commit"
     fi
     echo "To commit anyway: git commit --no-verify"
-    exit 1
 fi
 
-exit 0
+end_hook
