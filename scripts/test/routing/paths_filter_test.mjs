@@ -39,9 +39,10 @@ const WORKFLOW = path.join(REPO_ROOT, ".github", "workflows", "pr-tests.yml");
 // is what makes `engine/**` match `engine/.clang-tidy`.
 const MATCH_OPTIONS = { dot: true };
 
-// The action's package.json pins `picomatch: ^2.3.1`, so this package pins 2.x
-// too. A major bump on either side changes glob behaviour, and a test matching
-// under different rules than CI proves nothing - hence the ref check below.
+// The action's package.json depends on `picomatch: ^2.3.1`, so this package
+// pins 2.3.2 - the patched release that range resolves to, and the same major.
+// A major bump on either side changes glob behaviour, and a test matching under
+// different rules than CI proves nothing - hence the ref check below.
 const EXPECTED_USES = "dorny/paths-filter@v4";
 
 let passed = 0;
