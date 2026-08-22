@@ -106,10 +106,7 @@ class TreeOrderTest : public ::testing::Test {
         db_->create_collection (c);
     }
 
-    void seed_request (const std::string& id,
-    const std::string& collection_id,
-    int order,
-    int64_t created_at) {
+    void seed_request (const std::string& id, const std::string& collection_id, int order, int64_t created_at) {
         vayu::db::Request r;
         r.id            = id;
         r.collection_id = collection_id;
@@ -196,8 +193,8 @@ TEST_F (TreeOrderTest, CollectionsFollowTheConformanceOrder) {
         const std::string name = c["name"].get<std::string> ();
         std::vector<std::string> expected;
         for (const auto& row : c["rows"]) {
-            seed_collection (row["id"].get<std::string> (), row["order"].get<int> (),
-            row["createdAt"].get<int64_t> ());
+            seed_collection (row["id"].get<std::string> (),
+            row["order"].get<int> (), row["createdAt"].get<int64_t> ());
         }
         for (const auto& id : c["expected"]) {
             expected.push_back (id.get<std::string> ());
@@ -224,8 +221,8 @@ TEST_F (TreeOrderTest, EditingATiedRequestDoesNotMoveIt) {
 
     // A rename is an INSERT OR REPLACE, which hands the row a fresh rowid. With
     // the rowid as the tiebreak this moved "req-a" to the end of the tie group.
-    const auto [status, body] = vayu::http::routes::update_request_response (*db_,
-    "req-a", json{ { "name", "Renamed" } });
+    const auto [status, body] = vayu::http::routes::update_request_response (
+    *db_, "req-a", json{ { "name", "Renamed" } });
     ASSERT_EQ (status, 200) << body.dump ();
 
     EXPECT_EQ (request_ids (HOLDER), before);
@@ -237,8 +234,8 @@ TEST_F (TreeOrderTest, EditingATiedCollectionDoesNotMoveIt) {
     const std::vector<std::string> before{ "col-a", "col-b" };
     ASSERT_EQ (collection_ids (), before);
 
-    const auto [status, body] = vayu::http::routes::update_collection_response (*db_,
-    "col-a", json{ { "name", "Renamed" } });
+    const auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col-a", json{ { "name", "Renamed" } });
     ASSERT_EQ (status, 200) << body.dump ();
 
     EXPECT_EQ (collection_ids (), before);
@@ -247,8 +244,8 @@ TEST_F (TreeOrderTest, EditingATiedCollectionDoesNotMoveIt) {
 // --- Request create appends ---------------------------------------------------
 
 TEST_F (TreeOrderTest, FirstRequestInACollectionGetsOrderZero) {
-    const auto [status, body] =
-    vayu::http::routes::create_request_response (*db_, request_body (HOLDER, "First"));
+    const auto [status, body] = vayu::http::routes::create_request_response (
+    *db_, request_body (HOLDER, "First"));
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"].get<int> (), 0);
 }
@@ -258,8 +255,8 @@ TEST_F (TreeOrderTest, ACreatedRequestAppendsAfterItsSiblings) {
     seed_request ("req-1", HOLDER, /*order=*/1, /*created_at=*/2000);
     seed_request ("req-2", HOLDER, /*order=*/2, /*created_at=*/3000);
 
-    const auto [status, body] =
-    vayu::http::routes::create_request_response (*db_, request_body (HOLDER, "Appended"));
+    const auto [status, body] = vayu::http::routes::create_request_response (
+    *db_, request_body (HOLDER, "Appended"));
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"].get<int> (), 3);
     EXPECT_EQ (request_ids (HOLDER).back (), body["id"].get<std::string> ());
@@ -269,8 +266,8 @@ TEST_F (TreeOrderTest, TheAppendedOrderIsPerCollectionNotGlobal) {
     seed_collection ("col-other", /*order=*/1, /*created_at=*/1);
     seed_request ("req-x", "col-other", /*order=*/9, /*created_at=*/1000);
 
-    const auto [status, body] =
-    vayu::http::routes::create_request_response (*db_, request_body (HOLDER, "Fresh"));
+    const auto [status, body] = vayu::http::routes::create_request_response (
+    *db_, request_body (HOLDER, "Fresh"));
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"].get<int> (), 0);
 }
@@ -280,7 +277,8 @@ TEST_F (TreeOrderTest, AnExplicitOrderOnCreateIsHonoured) {
 
     json body_json     = request_body (HOLDER, "Pinned");
     body_json["order"] = 42;
-    const auto [status, body] = vayu::http::routes::create_request_response (*db_, body_json);
+    const auto [status, body] =
+    vayu::http::routes::create_request_response (*db_, body_json);
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"].get<int> (), 42);
 }
@@ -290,7 +288,8 @@ TEST_F (TreeOrderTest, ANullOrderOnCreateAppends) {
 
     json body_json     = request_body (HOLDER, "Defaulted");
     body_json["order"] = nullptr;
-    const auto [status, body] = vayu::http::routes::create_request_response (*db_, body_json);
+    const auto [status, body] =
+    vayu::http::routes::create_request_response (*db_, body_json);
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"].get<int> (), 5);
 }
@@ -298,10 +297,11 @@ TEST_F (TreeOrderTest, ANullOrderOnCreateAppends) {
 // --- A write cannot strand a row ----------------------------------------------
 
 TEST_F (TreeOrderTest, CreatingUnderAMissingCollectionIs400) {
-    const auto [status, body] =
-    vayu::http::routes::create_request_response (*db_, request_body ("col-nope", "Orphan"));
+    const auto [status, body] = vayu::http::routes::create_request_response (
+    *db_, request_body ("col-nope", "Orphan"));
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("col-nope"), std::string::npos)
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("col-nope"),
+    std::string::npos)
     << body.dump ();
     // Nothing persisted: the 400 is a rejection, not a rejection-after-write.
     EXPECT_TRUE (db_->get_requests_in_collection ("col-nope").empty ());
@@ -310,8 +310,8 @@ TEST_F (TreeOrderTest, CreatingUnderAMissingCollectionIs400) {
 TEST_F (TreeOrderTest, MovingToAMissingCollectionIs400AndKeepsTheRowWhereItWas) {
     seed_request ("req-a", HOLDER, /*order=*/0, /*created_at=*/1000);
 
-    const auto [status, body] = vayu::http::routes::update_request_response (*db_,
-    "req-a", json{ { "collectionId", "col-nope" } });
+    const auto [status, body] = vayu::http::routes::update_request_response (
+    *db_, "req-a", json{ { "collectionId", "col-nope" } });
     EXPECT_EQ (status, 400) << body.dump ();
     EXPECT_EQ (request_ids (HOLDER), (std::vector<std::string>{ "req-a" }));
 }
@@ -321,12 +321,12 @@ TEST_F (TreeOrderTest, AnUpdateThatStatesNoCollectionStillWritesAStrandedRow) {
     // by a PUT that moves it somewhere real - rather than becoming unwritable.
     seed_request ("req-stranded", "col-gone", /*order=*/0, /*created_at=*/1000);
 
-    const auto renamed = vayu::http::routes::update_request_response (*db_,
-    "req-stranded", json{ { "name", "Still editable" } });
+    const auto renamed = vayu::http::routes::update_request_response (
+    *db_, "req-stranded", json{ { "name", "Still editable" } });
     EXPECT_EQ (renamed.first, 200) << renamed.second.dump ();
 
-    const auto repaired = vayu::http::routes::update_request_response (*db_,
-    "req-stranded", json{ { "collectionId", HOLDER } });
+    const auto repaired = vayu::http::routes::update_request_response (
+    *db_, "req-stranded", json{ { "collectionId", HOLDER } });
     ASSERT_EQ (repaired.first, 200) << repaired.second.dump ();
     EXPECT_EQ (request_ids (HOLDER), (std::vector<std::string>{ "req-stranded" }));
 }
@@ -339,8 +339,8 @@ TEST_F (TreeOrderTest, MovingARequestToAnotherCollectionAppendsThere) {
     seed_request ("req-there-1", "col-target", /*order=*/1, /*created_at=*/2000);
     seed_request ("req-moving", HOLDER, /*order=*/0, /*created_at=*/3000);
 
-    const auto [status, body] = vayu::http::routes::update_request_response (*db_,
-    "req-moving", json{ { "collectionId", "col-target" } });
+    const auto [status, body] = vayu::http::routes::update_request_response (
+    *db_, "req-moving", json{ { "collectionId", "col-target" } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"].get<int> (), 2);
     EXPECT_EQ (request_ids ("col-target"),
@@ -352,8 +352,8 @@ TEST_F (TreeOrderTest, AMoveThatStatesAnOrderKeepsIt) {
     seed_request ("req-there", "col-target", /*order=*/5, /*created_at=*/1000);
     seed_request ("req-moving", HOLDER, /*order=*/0, /*created_at=*/2000);
 
-    const auto [status, body] = vayu::http::routes::update_request_response (*db_,
-    "req-moving", json{ { "collectionId", "col-target" }, { "order", 3 } });
+    const auto [status, body] = vayu::http::routes::update_request_response (
+    *db_, "req-moving", json{ { "collectionId", "col-target" }, { "order", 3 } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"].get<int> (), 3);
 }
@@ -361,8 +361,8 @@ TEST_F (TreeOrderTest, AMoveThatStatesAnOrderKeepsIt) {
 TEST_F (TreeOrderTest, AnUpdateWithinTheSameCollectionKeepsItsOrder) {
     seed_request ("req-a", HOLDER, /*order=*/7, /*created_at=*/1000);
 
-    const auto [status, body] = vayu::http::routes::update_request_response (*db_,
-    "req-a", json{ { "name", "Renamed" } });
+    const auto [status, body] = vayu::http::routes::update_request_response (
+    *db_, "req-a", json{ { "name", "Renamed" } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"].get<int> (), 7);
 }
@@ -373,8 +373,8 @@ TEST_F (TreeOrderTest, ReparentingACollectionAppendsAmongItsNewSiblings) {
     seed_collection ("col-child-1", /*order=*/1, /*created_at=*/3, "col-parent");
     seed_collection ("col-moving", /*order=*/0, /*created_at=*/4);
 
-    const auto [status, body] = vayu::http::routes::update_collection_response (*db_,
-    "col-moving", json{ { "parentId", "col-parent" } });
+    const auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col-moving", json{ { "parentId", "col-parent" } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"].get<int> (), 2);
 }
@@ -384,8 +384,8 @@ TEST_F (TreeOrderTest, AReparentThatStatesAnOrderKeepsIt) {
     seed_collection ("col-child", /*order=*/0, /*created_at=*/2, "col-parent");
     seed_collection ("col-moving", /*order=*/0, /*created_at=*/3);
 
-    const auto [status, body] = vayu::http::routes::update_collection_response (*db_,
-    "col-moving", json{ { "parentId", "col-parent" }, { "order", 0 } });
+    const auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col-moving", json{ { "parentId", "col-parent" }, { "order", 0 } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"].get<int> (), 0);
 }
@@ -397,8 +397,8 @@ TEST_F (TreeOrderTest, MovingACollectionToTheRootAppendsAmongTheRoots) {
 
     // Explicit JSON null on parentId is how a client says "move to the root";
     // absent would mean "keep the parent".
-    const auto [status, body] = vayu::http::routes::update_collection_response (*db_,
-    "col-nested", json{ { "parentId", nullptr } });
+    const auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col-nested", json{ { "parentId", nullptr } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_TRUE (body["parentId"].is_null ()) << body.dump ();
     // HOLDER (order 0), col-root-0 (0) and col-root-1 (1) are the stored roots.
@@ -424,8 +424,8 @@ TEST_F (TreeOrderTest, AnExplicitNullOrderOnUpdateAppendsRatherThanCollidingOnZe
 
     // "Reset to the default" - and this field's default is "append", which is
     // what create does. It used to reset to 0 and tie with the first sibling.
-    const auto [status, body] = vayu::http::routes::update_collection_response (*db_,
-    "col-a", json{ { "order", nullptr } });
+    const auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col-a", json{ { "order", nullptr } });
     ASSERT_EQ (status, 200) << body.dump ();
     // HOLDER (0), col-b (1) and col-c (2) are the other roots; col-a itself is
     // excluded from the scan, so it lands one past the highest of those.
@@ -437,8 +437,8 @@ TEST_F (TreeOrderTest, ACreatedCollectionStillAppendsAmongItsSiblings) {
     seed_collection ("col-root-0", /*order=*/0, /*created_at=*/1);
     seed_collection ("col-root-1", /*order=*/3, /*created_at=*/2);
 
-    const auto [status, body] = vayu::http::routes::create_collection_response (*db_,
-    json{ { "name", "Appended" } });
+    const auto [status, body] = vayu::http::routes::create_collection_response (
+    *db_, json{ { "name", "Appended" } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"].get<int> (), 4);
 }

@@ -32,9 +32,8 @@ namespace vayu::http::detail {
  */
 inline std::string redact_header_line (const std::string& line) {
     static constexpr std::array<std::string_view, 7> kSensitive = {
-        "authorization",  "proxy-authorization",  "cookie",
-        "set-cookie",     "www-authenticate",     "proxy-authenticate",
-        "authentication-info"
+        "authorization", "proxy-authorization", "cookie", "set-cookie",
+        "www-authenticate", "proxy-authenticate", "authentication-info"
     };
 
     const auto colon = line.find (':');
@@ -50,12 +49,10 @@ inline std::string redact_header_line (const std::string& line) {
         return line;
     }
     name = name.substr (first, last - first + 1);
-    std::transform (name.begin (), name.end (), name.begin (), [] (unsigned char c) {
-        return static_cast<char> (std::tolower (c));
-    });
+    std::transform (name.begin (), name.end (), name.begin (),
+    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
 
-    const bool sensitive =
-    std::any_of (kSensitive.begin (), kSensitive.end (),
+    const bool sensitive = std::any_of (kSensitive.begin (), kSensitive.end (),
     [&name] (std::string_view s) { return name == s; });
 
     if (!sensitive) {

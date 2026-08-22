@@ -106,11 +106,13 @@ TEST (OpenApiDocumentRead, ReadsJson) {
 }
 
 TEST (OpenApiDocumentRead, ReadsTheSameDocumentWrittenAsYaml) {
-    const auto as_json = read_ok (R"({"openapi":"3.0.0","info":{"title":"Pets"},)"
-                                  R"("paths":{"/pets":{"get":{"operationId":"listPets"}}}})");
-    const auto as_yaml = read_ok ("openapi: \"3.0.0\"\n"
-                                  "info:\n  title: Pets\n"
-                                  "paths:\n  /pets:\n    get:\n      operationId: listPets\n");
+    const auto as_json =
+    read_ok (R"({"openapi":"3.0.0","info":{"title":"Pets"},)"
+             R"("paths":{"/pets":{"get":{"operationId":"listPets"}}}})");
+    const auto as_yaml =
+    read_ok ("openapi: \"3.0.0\"\n"
+             "info:\n  title: Pets\n"
+             "paths:\n  /pets:\n    get:\n      operationId: listPets\n");
     EXPECT_EQ (as_json, as_yaml);
 }
 
@@ -119,8 +121,10 @@ TEST (OpenApiDocumentRead, KeepsMappingKeysInDocumentOrder) {
     // renderer could not keep, because a JavaScript object sorts integer-like
     // keys numerically ahead of everything else, so `{404, 200}` reached the
     // store as `200, 404`.
-    const auto document = read_ok ("responses:\n  404: {}\n  200: {}\n  default: {}\n");
-    EXPECT_EQ (keys_of (document["responses"]), (std::vector<std::string>{ "404", "200", "default" }));
+    const auto document =
+    read_ok ("responses:\n  404: {}\n  200: {}\n  default: {}\n");
+    EXPECT_EQ (keys_of (document["responses"]),
+    (std::vector<std::string>{ "404", "200", "default" }));
 }
 
 TEST (OpenApiDocumentRead, TurnsEveryKeyIntoText) {
@@ -131,9 +135,10 @@ TEST (OpenApiDocumentRead, TurnsEveryKeyIntoText) {
 }
 
 TEST (OpenApiDocumentRead, TypesPlainScalarsLikeJsYamlsCoreSchema) {
-    const auto document = read_ok ("a: null\nb: ~\nc: true\nd: FALSE\ne: 42\nf: -7\n"
-                                   "g: 0x1f\nh: 3.5\ni: 1e3\nj: plain text\nk:\n"
-                                   "l: 2020-01-01\nm: .inf\n");
+    const auto document =
+    read_ok ("a: null\nb: ~\nc: true\nd: FALSE\ne: 42\nf: -7\n"
+             "g: 0x1f\nh: 3.5\ni: 1e3\nj: plain text\nk:\n"
+             "l: 2020-01-01\nm: .inf\n");
     EXPECT_TRUE (document["a"].is_null ());
     EXPECT_TRUE (document["b"].is_null ());
     EXPECT_EQ (document["c"], true);
@@ -157,7 +162,8 @@ TEST (OpenApiDocumentRead, AQuotedScalarIsAlwaysAString) {
     // The measured reason this reader types scalars itself rather than taking a
     // library's opinion: yaml-cpp reports this same document's `"2.0"` as the
     // number 2.0, and `swagger: "2.0"` is what Swagger detection turns on.
-    const auto document = read_ok ("swagger: \"2.0\"\nversion: '1.0'\nport: 8080\n");
+    const auto document =
+    read_ok ("swagger: \"2.0\"\nversion: '1.0'\nport: 8080\n");
     EXPECT_EQ (document["swagger"], "2.0");
     EXPECT_TRUE (document["swagger"].is_string ());
     EXPECT_EQ (document["version"], "1.0");
@@ -166,7 +172,8 @@ TEST (OpenApiDocumentRead, AQuotedScalarIsAlwaysAString) {
 }
 
 TEST (OpenApiDocumentRead, ExpandsAnAlias) {
-    const auto document = read_ok ("base: &b\n  description: shared\npaths:\n  /a: *b\n");
+    const auto document =
+    read_ok ("base: &b\n  description: shared\npaths:\n  /a: *b\n");
     EXPECT_EQ (document["paths"]["/a"]["description"], "shared");
 }
 
@@ -190,7 +197,8 @@ TEST (OpenApiDocumentRead, AnExplicitKeyWrittenAfterAMergeStillWins) {
 }
 
 TEST (OpenApiDocumentRead, MergesASequenceOfSourcesEarliestFirst) {
-    const auto document = read_ok ("b1: &b1 {a: 1}\nb2: &b2 {a: 2, z: 9}\nx:\n  <<: [*b1, *b2]\n");
+    const auto document =
+    read_ok ("b1: &b1 {a: 1}\nb2: &b2 {a: 2, z: 9}\nx:\n  <<: [*b1, *b2]\n");
     EXPECT_EQ (document["x"]["a"], 1);
     EXPECT_EQ (document["x"]["z"], 9);
 }
@@ -224,13 +232,14 @@ TEST (OpenApiDocumentRead, RefusesAnAliasBombWithinItsBudget) {
     // input, which is why the reader expands aliases itself - and its budget,
     // one node per byte of the document plus a floor, refuses this in 4ms where
     // an unbudgeted walk of the same bytes took 7.9 seconds and gigabytes.
-    const std::string bomb = "a: &a [\"x\",\"x\",\"x\",\"x\",\"x\",\"x\",\"x\",\"x\",\"x\"]\n"
-                             "b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]\n"
-                             "c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]\n"
-                             "d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]\n"
-                             "e: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d]\n"
-                             "f: &f [*e,*e,*e,*e,*e,*e,*e,*e,*e]\n"
-                             "g: [*f,*f,*f,*f,*f,*f,*f,*f,*f]\n";
+    const std::string bomb =
+    "a: &a [\"x\",\"x\",\"x\",\"x\",\"x\",\"x\",\"x\",\"x\",\"x\"]\n"
+    "b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]\n"
+    "c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]\n"
+    "d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]\n"
+    "e: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d]\n"
+    "f: &f [*e,*e,*e,*e,*e,*e,*e,*e,*e]\n"
+    "g: [*f,*f,*f,*f,*f,*f,*f,*f,*f]\n";
     const auto result = read_document (bomb);
     EXPECT_FALSE (result.ok ());
     EXPECT_NE (result.error.find ("expands"), std::string::npos) << result.error;
@@ -256,16 +265,18 @@ TEST (OpenApiDocumentRead, EmptyTextIsNotADocument) {
 // ============================================================================
 
 TEST (DeclaredOperations, MatchesTheCrossLanguageFixture) {
-    const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "tests" /
-    "fixtures" / "declared-operations-conformance.json";
+    const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
+    "tests" / "fixtures" / "declared-operations-conformance.json";
     std::ifstream in (path);
     ASSERT_TRUE (in.good ()) << "fixture missing: " << path;
     const json fixture = json::parse (in);
-    ASSERT_FALSE (fixture["cases"].empty ()) << "a fixture with no cases asserts nothing";
+    ASSERT_FALSE (fixture["cases"].empty ())
+    << "a fixture with no cases asserts nothing";
 
     for (const auto& fixture_case : fixture["cases"]) {
-        const auto name     = fixture_case["name"].get<std::string> ();
-        const auto document = read_document (fixture_case["document"].get<std::string> ());
+        const auto name = fixture_case["name"].get<std::string> ();
+        const auto document =
+        read_document (fixture_case["document"].get<std::string> ());
         ASSERT_TRUE (document.ok ()) << name << ": " << document.error;
         EXPECT_EQ (rows_of (declared_operations_of (document.root)), fixture_case["operations"])
         << name;
@@ -299,7 +310,8 @@ TEST (DeclaredOperations, AcceptsSwaggerWrittenAsANumber) {
     // `swagger: 2.0` unquoted is a number in YAML and in JSON alike, and
     // generated documents write it both ways - the renderer's detector takes
     // either, so this one must too or a document imports with no coverage.
-    const auto document = read_ok ("swagger: 2.0\npaths:\n  /pets:\n    get:\n      responses:\n        200: {}\n");
+    const auto document = read_ok ("swagger: 2.0\npaths:\n  /pets:\n    get:\n "
+                                   "     responses:\n        200: {}\n");
     const auto declared = declared_operations_of (document);
     ASSERT_EQ (declared.size (), 1U);
     EXPECT_EQ (declared[0].path, "/pets");
@@ -308,9 +320,10 @@ TEST (DeclaredOperations, AcceptsSwaggerWrittenAsANumber) {
 TEST (DeclaredOperations, APathItemRefThatResolvesToNothingDropsThePath) {
     // Not an error: an unresolvable ref is one the user has already been told
     // about at import, and one bad path must not cost the document its index.
-    const auto document = read_ok (R"({"openapi":"3.1.0","paths":{)"
-                                   R"("/gone":{"$ref":"./other.yaml#/Shared"},)"
-                                   R"("/here":{"get":{"operationId":"here","responses":{}}}}})");
+    const auto document =
+    read_ok (R"({"openapi":"3.1.0","paths":{)"
+             R"("/gone":{"$ref":"./other.yaml#/Shared"},)"
+             R"("/here":{"get":{"operationId":"here","responses":{}}}}})");
     const auto declared = declared_operations_of (document);
     ASSERT_EQ (declared.size (), 1U);
     EXPECT_EQ (declared[0].path, "/here");
@@ -319,16 +332,18 @@ TEST (DeclaredOperations, APathItemRefThatResolvesToNothingDropsThePath) {
 TEST (DeclaredOperations, FollowsAJsonPointersEscapes) {
     // `~1` is `/` and `~0` is `~`, so a hoisted path item keyed by a path can be
     // pointed at. Getting this wrong drops every operation under such a path.
-    const auto document = read_ok (R"({"openapi":"3.1.0","paths":{)"
-                                   R"("/pets":{"$ref":"#/components/pathItems/~1pets~0x"}},)"
-                                   R"("components":{"pathItems":{"/pets~x":{"get":{"operationId":"listPets","responses":{}}}}}})");
+    const auto document = read_ok (
+    R"({"openapi":"3.1.0","paths":{)"
+    R"("/pets":{"$ref":"#/components/pathItems/~1pets~0x"}},)"
+    R"("components":{"pathItems":{"/pets~x":{"get":{"operationId":"listPets","responses":{}}}}}})");
     const auto declared = declared_operations_of (document);
     ASSERT_EQ (declared.size (), 1U);
     EXPECT_EQ (declared[0].operation_id, "listPets");
 }
 
 TEST (DeclaredOperations, AnEmptyOperationIdIsNoIdentity) {
-    const auto document = read_ok (R"({"openapi":"3.0.0","paths":{"/a":{"get":{"operationId":"","responses":{}}}}})");
+    const auto document = read_ok (
+    R"({"openapi":"3.0.0","paths":{"/a":{"get":{"operationId":"","responses":{}}}}})");
     const auto declared = declared_operations_of (document);
     ASSERT_EQ (declared.size (), 1U);
     EXPECT_TRUE (declared[0].operation_id.empty ());
@@ -358,7 +373,8 @@ TEST (DeriveSpecIndexes, StoresWhatTheDocumentDeclares) {
 TEST (DeriveSpecIndexes, ADocumentDeclaringNothingStoresNoIndex) {
     // "" is "no index", which a report spells as coverage not measured - not as
     // a contract with no operations in it.
-    const auto index = derive_spec_indexes (R"({"info":{"name":"Team"},"item":[]})", INDEX_CAP);
+    const auto index =
+    derive_spec_indexes (R"({"info":{"name":"Team"},"item":[]})", INDEX_CAP);
     ASSERT_TRUE (index.ok ()) << index.error;
     EXPECT_TRUE (index.operations.empty ());
     EXPECT_TRUE (index.response_schemas.empty ());
@@ -382,7 +398,8 @@ TEST (DeriveSpecIndexes, RefusesADocumentDeclaringMoreOperationsThanARunMayCarry
 TEST (DeriveSpecIndexes, AnUnreadableDocumentIsAnErrorRatherThanAnEmptyIndex) {
     const auto index = derive_spec_indexes ("openapi: [3.0.0\n", INDEX_CAP);
     EXPECT_FALSE (index.ok ());
-    EXPECT_NE (index.error.find ("Invalid 'content'"), std::string::npos) << index.error;
+    EXPECT_NE (index.error.find ("Invalid 'content'"), std::string::npos)
+    << index.error;
 }
 
 // ============================================================================
@@ -407,9 +424,9 @@ json schema_index_of (const std::string& document) {
 json translated (const json& schema) {
     json document = json::parse (
     R"({"openapi":"3.0.0","paths":{"/x":{"get":{"responses":{"200":{"content":{"application/json":{}}}}}}}})");
-    document["paths"]["/x"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] =
-    schema;
-    const json index = schema_index_of (document.dump ());
+    document["paths"]["/x"]["get"]["responses"]["200"]["content"]
+            ["application/json"]["schema"] = schema;
+    const json index                       = schema_index_of (document.dump ());
     EXPECT_FALSE (index.is_null ()) << document.dump ();
     return index["operations"][0]["responses"][0]["schema"];
 }
@@ -424,8 +441,8 @@ TEST (ResponseSchemas, TurnsNullableIntoAUnionWithNull) {
     // which is worse than no verdict.
     const json union_string = { { "type", json::array ({ "string", "null" }) } };
     EXPECT_EQ (translated (json{ { "type", "string" }, { "nullable", true } }), union_string);
-    EXPECT_EQ (
-    translated (json{ { "type", json::array ({ "string", "null" }) }, { "nullable", true } }),
+    EXPECT_EQ (translated (json{ { "type", json::array ({ "string", "null" }) },
+               { "nullable", true } }),
     union_string);
 }
 
@@ -461,10 +478,11 @@ TEST (ResponseSchemas, DropsOpenApisOwnVocabulary) {
 
 TEST (ResponseSchemas, TranslatesThroughEverySubschemaPosition) {
     const json nullable_string = { { "type", "string" }, { "nullable", true } };
-    const json union_string    = { { "type", json::array ({ "string", "null" }) } };
-    EXPECT_EQ (translated (json{ { "type", "object" },
-               { "properties", { { "a", nullable_string } } }, { "items", nullable_string },
-               { "allOf", json::array ({ nullable_string }) }, { "not", nullable_string } }),
+    const json union_string = { { "type", json::array ({ "string", "null" }) } };
+    EXPECT_EQ (
+    translated (json{ { "type", "object" },
+    { "properties", { { "a", nullable_string } } }, { "items", nullable_string },
+    { "allOf", json::array ({ nullable_string }) }, { "not", nullable_string } }),
     (json{ { "type", "object" }, { "properties", { { "a", union_string } } },
     { "items", union_string }, { "allOf", json::array ({ union_string }) },
     { "not", union_string } }));
@@ -497,9 +515,8 @@ TEST (ResponseSchemas, ASchemaThatIsNotOneDeclaresNothingCheckable) {
     // and storing the row would put a value in the index no reader can use.
     // Skipped like an absent schema rather than refusing the whole document over
     // one malformed response.
-    EXPECT_TRUE (schema_index_of (
-    R"({"openapi":"3.0.0","paths":{"/x":{"get":{"responses":{"200":{"content":)"
-    R"({"application/json":{"schema":"not a schema"}}}}}}}})")
+    EXPECT_TRUE (schema_index_of (R"({"openapi":"3.0.0","paths":{"/x":{"get":{"responses":{"200":{"content":)"
+                                  R"({"application/json":{"schema":"not a schema"}}}}}}}})")
     .is_null ());
 }
 
@@ -527,8 +544,7 @@ TEST (ResponseSchemas, KeepsEveryMediaTypeWithTheStatusPatternVerbatim) {
 TEST (ResponseSchemas, SkipsAMediaTypeThatDeclaresNoSchema) {
     // An absent schema is not an empty one: `{}` would validate everything and
     // report a body as matching a contract that never described it.
-    EXPECT_TRUE (schema_index_of (
-    R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{"content":{"text/plain":{}}}}}}}})")
+    EXPECT_TRUE (schema_index_of (R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{"content":{"text/plain":{}}}}}}}})")
     .is_null ());
 }
 
@@ -550,9 +566,8 @@ TEST (ResponseSchemas, ReadsThroughAResponseThatIsItselfARef) {
     const json index = schema_index_of (RESPONSES_IN_COMPONENTS);
     ASSERT_FALSE (index.is_null ());
     EXPECT_EQ (index["operations"][0]["responses"],
-    json::parse (
-    R"([{"status":"200","contentType":"application/json","schema":{"$ref":"#/components/schemas/repo"}},)"
-    R"({"status":"404","contentType":"application/json","schema":{"$ref":"#/components/schemas/basic_error"}}])"))
+    json::parse (R"([{"status":"200","contentType":"application/json","schema":{"$ref":"#/components/schemas/repo"}},)"
+                 R"({"status":"404","contentType":"application/json","schema":{"$ref":"#/components/schemas/basic_error"}}])"))
     << index.dump ();
 }
 
@@ -659,7 +674,8 @@ TEST (ResponseSchemas, CarriesTheSubtreesARefCanPointIntoTranslated) {
     // `components.responses` is not carried: a schema `$ref` resolves to a
     // schema, so nothing in the index can point at it, and it is pure weight
     // against the byte cap the index shares with the document.
-    EXPECT_FALSE (index["refRoots"]["components"].contains ("responses")) << index.dump ();
+    EXPECT_FALSE (index["refRoots"]["components"].contains ("responses"))
+    << index.dump ();
 }
 
 TEST (ResponseSchemas, CarriesSwaggerDefinitionsAndTheBundlersInlinedFiles) {
@@ -708,7 +724,8 @@ TEST (DeriveSpecIndexes, ADocumentWhereNothingDeclaresASchemaStoresNoSchemaIndex
     const auto index = derive_spec_indexes (
     R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{}}}}}})", INDEX_CAP);
     ASSERT_TRUE (index.ok ()) << index.error;
-    EXPECT_FALSE (index.operations.empty ()) << "the document does declare an operation";
+    EXPECT_FALSE (index.operations.empty ())
+    << "the document does declare an operation";
     EXPECT_TRUE (index.response_schemas.empty ());
 }
 
@@ -739,8 +756,10 @@ TEST (DeriveSpecIndexes, RefusesASchemaIndexOverTheCapNamingBothNumbers) {
     R"({"content":{"application/json":{"schema":{"type":"object"}}}}}}}}})",
     /*index_cap=*/10);
     EXPECT_FALSE (index.ok ());
-    EXPECT_NE (index.error.find ("over the limit of 10"), std::string::npos) << index.error;
-    EXPECT_NE (index.error.find ("maxSpecDocumentBytes"), std::string::npos) << index.error;
+    EXPECT_NE (index.error.find ("over the limit of 10"), std::string::npos)
+    << index.error;
+    EXPECT_NE (index.error.find ("maxSpecDocumentBytes"), std::string::npos)
+    << index.error;
 }
 
 TEST (DeriveSpecIndexes, ADocumentNestingPastTheDepthBoundIsRefusedAsJsonToo) {
@@ -762,8 +781,8 @@ TEST (DeriveSpecIndexes, ADocumentNestingPastTheDepthBoundIsRefusedAsJsonToo) {
     document += "}}}}}}}}";
 
     const auto index = derive_spec_indexes (document, INDEX_CAP);
-    EXPECT_FALSE (index.ok ()) << "a document nesting " << depth
-                               << " levels deep must not be read at all";
+    EXPECT_FALSE (index.ok ())
+    << "a document nesting " << depth << " levels deep must not be read at all";
     EXPECT_NE (index.error.find ("nests deeper"), std::string::npos) << index.error;
 }
 
@@ -780,10 +799,12 @@ TEST (DeriveSpecIndexes, TheDerivedIndexIsWhatValidationThenReads) {
     ASSERT_TRUE (index.ok ()) << index.error;
 
     const auto parsed = vayu::core::ResponseSchemaIndex::parse (index.response_schemas);
-    ASSERT_TRUE (parsed.has_value ()) << "the engine's own index must parse back";
-    const auto verdict = parsed->check (
-    R"({"operationId":"getPet","method":"GET","path":"/pets/{petId}"})", 200,
-    "application/json", R"({"name":null})");
+    ASSERT_TRUE (parsed.has_value ())
+    << "the engine's own index must parse back";
+    const auto verdict =
+    parsed->check (R"({"operationId":"getPet","method":"GET","path":"/pets/{petId}"})",
+    200, "application/json", R"({"name":null})");
     EXPECT_TRUE (verdict.checked);
-    EXPECT_TRUE (verdict.valid) << "a null the document permits is not a failure";
+    EXPECT_TRUE (verdict.valid)
+    << "a null the document permits is not a failure";
 }

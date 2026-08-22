@@ -66,7 +66,8 @@ class OAuth2AuthorizeManager {
     start (vayu::db::Database& db, const nlohmann::json& config, const std::string& mode);
 
     // Embedded mode: complete the attempt from the captured callback URL.
-    AuthorizeStatus complete (vayu::db::Database& db, const std::string& attempt_id,
+    AuthorizeStatus complete (vayu::db::Database& db,
+    const std::string& attempt_id,
     const std::string& callback_url);
 
     AuthorizeStatus status (const std::string& attempt_id);
@@ -85,7 +86,9 @@ class OAuth2AuthorizeManager {
  * Build the IdP authorization URL for a config (exposed for unit testing).
  */
 std::string build_authorize_url (const nlohmann::json& config,
-const std::string& state, const std::string& code_challenge,
-const std::string& redirect_uri, bool pkce);
+const std::string& state,
+const std::string& code_challenge,
+const std::string& redirect_uri,
+bool pkce);
 
 } // namespace vayu::http

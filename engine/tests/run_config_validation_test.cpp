@@ -342,10 +342,10 @@ TEST (RunConfigValidation, StreamIsAcceptedOnALoadRun) {
 }
 
 TEST (RunConfigValidation, StreamIsAcceptedWithExplicitCaps) {
-    auto config                    = valid_config ();
-    config["stream"]               = true;
-    config["maxStreamDurationMs"]  = 30000;
-    config["maxStreamEvents"]      = 200;
+    auto config                   = valid_config ();
+    config["stream"]              = true;
+    config["maxStreamDurationMs"] = 30000;
+    config["maxStreamEvents"]     = 200;
     EXPECT_FALSE (validate_run_config (config).has_value ());
 }
 
@@ -358,9 +358,9 @@ TEST (RunConfigValidation, ACapOutOfRangeIsRejected) {
     config["maxStreamEvents"] = 0;
     expect_rejected (config, "maxStreamEvents");
 
-    auto slow                     = valid_config ();
-    slow["stream"]                = true;
-    slow["maxStreamDurationMs"]   = 10; // below MIN_STREAM_DURATION_MS
+    auto slow                   = valid_config ();
+    slow["stream"]              = true;
+    slow["maxStreamDurationMs"] = 10; // below MIN_STREAM_DURATION_MS
     expect_rejected (slow, "maxStreamDurationMs");
 }
 
@@ -480,7 +480,7 @@ TEST (RunConfigValidation, AConfigWithoutThresholdsIsStillValid) {
 }
 
 TEST (RunConfigValidation, AValidThresholdsObjectIsAccepted) {
-    auto config          = valid_config ();
+    auto config = valid_config ();
     config["thresholds"] = { { "latencyP99Ms", 50 }, { "maxErrorRatePct", 0.1 } };
     EXPECT_FALSE (validate_run_config (config).has_value ());
 }
@@ -512,7 +512,8 @@ TEST (RunConfigValidation, AConfigWithoutAMonitorIsStillValid) {
 
 TEST (RunConfigValidation, AValidMonitorBlockIsAccepted) {
     auto config       = valid_config ();
-    config["monitor"] = { { "url", "http://127.0.0.1:9100/metrics" }, { "intervalMs", 1000 },
+    config["monitor"] = { { "url", "http://127.0.0.1:9100/metrics" },
+        { "intervalMs", 1000 },
         { "series", nlohmann::json::array ({ "node_cpu_seconds_total" }) } };
     EXPECT_FALSE (validate_run_config (config).has_value ());
 }
@@ -525,8 +526,8 @@ TEST (RunConfigValidation, AMonitorWithoutSeriesIsRejectedByTheRunRoute) {
 
 TEST (RunConfigValidation, AMonitorIntervalOutOfRangeIsRejectedByTheRunRoute) {
     auto config       = valid_config ();
-    config["monitor"] = { { "url", "http://127.0.0.1:9100/metrics" }, { "intervalMs", 10 },
-        { "series", nlohmann::json::array ({ "up" }) } };
+    config["monitor"] = { { "url", "http://127.0.0.1:9100/metrics" },
+        { "intervalMs", 10 }, { "series", nlohmann::json::array ({ "up" }) } };
     expect_rejected (config, "monitor.intervalMs");
 }
 
@@ -539,16 +540,16 @@ TEST (RunConfigValidation, AMonitorIntervalOutOfRangeIsRejectedByTheRunRoute) {
 // is one the engine accepts.
 
 TEST (RunConfigValidation, AValidCapacityConfigIsAccepted) {
-    auto config             = valid_config ();
-    config["mode"]          = "capacity";
-    config["sloMs"]         = 250;
-    config["stepDuration"]  = "5s";
+    auto config            = valid_config ();
+    config["mode"]         = "capacity";
+    config["sloMs"]        = 250;
+    config["stepDuration"] = "5s";
     EXPECT_FALSE (validate_run_config (config).has_value ());
 }
 
 TEST (RunConfigValidation, AnUnparseableStepDurationIsRejected) {
     for (const nlohmann::json& bad : { nlohmann::json (5000), nlohmann::json ("soon"),
-    nlohmann::json ("0s"), nlohmann::json ("-1s"), nlohmann::json (true) }) {
+         nlohmann::json ("0s"), nlohmann::json ("-1s"), nlohmann::json (true) }) {
         auto config            = valid_config ();
         config["stepDuration"] = bad;
         expect_rejected (config, "stepDuration");
@@ -571,8 +572,8 @@ TEST (RunConfigValidation, ANullStepDurationIsAcceptedAsAbsent) {
 }
 
 TEST (RunConfigValidation, AnOutOfRangeSloIsRejected) {
-    for (const nlohmann::json& bad :
-    { nlohmann::json (0), nlohmann::json (-1), nlohmann::json (60001), nlohmann::json ("fast") }) {
+    for (const nlohmann::json& bad : { nlohmann::json (0), nlohmann::json (-1),
+         nlohmann::json (60001), nlohmann::json ("fast") }) {
         auto config     = valid_config ();
         config["sloMs"] = bad;
         expect_rejected (config, "sloMs");

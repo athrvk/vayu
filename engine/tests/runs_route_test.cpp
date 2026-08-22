@@ -33,18 +33,21 @@ using nlohmann::json;
 namespace vayu::http::routes {
 // Defined in runs.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json> get_runs_response (vayu::db::Database& db,
-const vayu::db::RunFilter& filter, int64_t limit, int64_t offset);
+const vayu::db::RunFilter& filter,
+int64_t limit,
+int64_t offset);
 
 // Defined in runs.cpp; builds the GET /runs/:id/report `configuration`
 // object from an already-parsed config_snapshot, extracted so it is testable
 // without the report handler's DB/metrics dependencies.
 nlohmann::json build_run_report_config (const nlohmann::json& config);
 // Defined in runs.cpp; returns {http_status, json_body}.
-std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
-const std::string& run_id);
-// Defined in runs.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json>
-set_run_baseline_response (vayu::db::Database& db, const std::string& run_id, const std::string& body);
+run_report_response (vayu::db::Database& db, const std::string& run_id);
+// Defined in runs.cpp; returns {http_status, json_body}.
+std::pair<int, nlohmann::json> set_run_baseline_response (vayu::db::Database& db,
+const std::string& run_id,
+const std::string& body);
 } // namespace vayu::http::routes
 
 namespace {
@@ -68,11 +71,11 @@ class RunsRouteTest : public ::testing::Test {
 
     struct RunSpec {
         std::string id;
-        vayu::RunType type            = vayu::RunType::Load;
-        vayu::RunStatus status        = vayu::RunStatus::Completed;
-        int64_t start_time            = 0;
+        vayu::RunType type                    = vayu::RunType::Load;
+        vayu::RunStatus status                = vayu::RunStatus::Completed;
+        int64_t start_time                    = 0;
         std::optional<std::string> request_id = std::nullopt;
-        std::string config_snapshot   = R"({"url":"https://x.test/","method":"GET"})";
+        std::string config_snapshot = R"({"url":"https://x.test/","method":"GET"})";
     };
 
     void seed (const RunSpec& s) {
@@ -222,8 +225,7 @@ TEST_F (RunsRouteTest, SummaryHttpVersionDefaultsToAutoOnNullOrAbsent) {
 // itself stays off the row: it is the size of the plan, and the row is the part
 // that has to stay cheap as history grows.
 TEST_F (RunsRouteTest, SummaryCarriesScenarioDescriptorWithoutTheStepManifest) {
-    seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario,
-    .config_snapshot = R"({"scenario":{"source":"collection","collectionId":"col_1",
+    seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario, .config_snapshot = R"({"scenario":{"source":"collection","collectionId":"col_1",
     "recursive":true,"iterations":3,"dataRowCount":0,
     "steps":[{"index":0,"requestId":"req_1","name":"login","method":"POST","url":"https://a/login"},
              {"index":1,"requestId":"req_2","name":"checkout","method":"GET","url":"https://a/cart"}]}})" });
@@ -341,7 +343,7 @@ TEST_F (RunsRouteTest, FilterByType) {
     seed ({ .id = "run_design", .type = vayu::RunType::Design, .start_time = 1 });
 
     vayu::db::RunFilter f;
-    f.type = vayu::RunType::Design;
+    f.type         = vayu::RunType::Design;
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 50, 0);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_EQ (body["data"][0]["id"], "run_design");
@@ -353,7 +355,7 @@ TEST_F (RunsRouteTest, FilterByStatus) {
     seed ({ .id = "run_fail", .status = vayu::RunStatus::Failed, .start_time = 1 });
 
     vayu::db::RunFilter f;
-    f.status = vayu::RunStatus::Failed;
+    f.status       = vayu::RunStatus::Failed;
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 50, 0);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_EQ (body["data"][0]["id"], "run_fail");
@@ -365,7 +367,7 @@ TEST_F (RunsRouteTest, FilterByRequestId) {
     seed ({ .id = "run_3", .start_time = 2, .request_id = std::nullopt });
 
     vayu::db::RunFilter f;
-    f.request_id = "req_A";
+    f.request_id   = "req_A";
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 50, 0);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_EQ (body["data"][0]["id"], "run_1");
@@ -374,11 +376,10 @@ TEST_F (RunsRouteTest, FilterByRequestId) {
 
 TEST_F (RunsRouteTest, FilterByQSubstringOverSnapshot) {
     seed ({ .id = "run_users", .config_snapshot = R"({"url":"https://api/users"})" });
-    seed ({ .id = "run_orders", .start_time = 1,
-    .config_snapshot = R"({"url":"https://api/orders"})" });
+    seed ({ .id = "run_orders", .start_time = 1, .config_snapshot = R"({"url":"https://api/orders"})" });
 
     vayu::db::RunFilter f;
-    f.q = "orders";
+    f.q            = "orders";
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 50, 0);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_EQ (body["data"][0]["id"], "run_orders");
@@ -391,9 +392,12 @@ std::string scenario_snapshot (const std::string& collection_id) {
 }
 
 TEST_F (RunsRouteTest, FilterByCollectionIdMatchesOnlyThatCollectionsRuns) {
-    seed ({ .id = "run_mine", .type = vayu::RunType::Scenario,
+    seed ({ .id      = "run_mine",
+    .type            = vayu::RunType::Scenario,
     .config_snapshot = scenario_snapshot ("col_A") });
-    seed ({ .id = "run_theirs", .type = vayu::RunType::Scenario, .start_time = 1,
+    seed ({ .id      = "run_theirs",
+    .type            = vayu::RunType::Scenario,
+    .start_time      = 1,
     .config_snapshot = scenario_snapshot ("col_B") });
 
     vayu::db::RunFilter f;
@@ -409,16 +413,21 @@ TEST_F (RunsRouteTest, FilterByCollectionIdMatchesOnlyThatCollectionsRuns) {
 // happens to contain the collection id is what a substring search would have
 // returned, and is the reason this is not `q`.
 TEST_F (RunsRouteTest, NonScenarioRunsNeverMatchACollectionId) {
-    seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario,
+    seed ({ .id      = "run_scenario",
+    .type            = vayu::RunType::Scenario,
     .config_snapshot = scenario_snapshot ("col_A") });
-    seed ({ .id = "run_design", .type = vayu::RunType::Design, .start_time = 1,
+    seed ({ .id      = "run_design",
+    .type            = vayu::RunType::Design,
+    .start_time      = 1,
     .config_snapshot = R"({"url":"https://api/col_A","method":"GET"})" });
-    seed ({ .id = "run_load", .type = vayu::RunType::Load, .start_time = 2,
+    seed ({ .id      = "run_load",
+    .type            = vayu::RunType::Load,
+    .start_time      = 2,
     .config_snapshot = R"({"url":"https://api/x","comment":"col_A"})" });
 
     vayu::db::RunFilter f;
     f.collection_id = "col_A";
-    auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 50, 0);
+    auto [_, body]  = vayu::http::routes::get_runs_response (*db_, f, 50, 0);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_EQ (body["data"][0]["id"], "run_scenario");
 }
@@ -426,7 +435,8 @@ TEST_F (RunsRouteTest, NonScenarioRunsNeverMatchACollectionId) {
 // An id nothing ran is a legitimate question with an empty answer - a
 // collection that has never been run is the section's ordinary first state.
 TEST_F (RunsRouteTest, UnknownCollectionIdIsAnEmptyPageNotAnError) {
-    seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario,
+    seed ({ .id      = "run_scenario",
+    .type            = vayu::RunType::Scenario,
     .config_snapshot = scenario_snapshot ("col_A") });
 
     vayu::db::RunFilter f;
@@ -444,7 +454,9 @@ TEST_F (RunsRouteTest, UnknownCollectionIdIsAnEmptyPageNotAnError) {
 // perfectly readable.
 TEST_F (RunsRouteTest, AMalformedSnapshotDoesNotBreakTheCollectionFilter) {
     seed ({ .id = "run_bad", .config_snapshot = "not valid json {{{" });
-    seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario, .start_time = 1,
+    seed ({ .id      = "run_scenario",
+    .type            = vayu::RunType::Scenario,
+    .start_time      = 1,
     .config_snapshot = scenario_snapshot ("col_A") });
 
     vayu::db::RunFilter f;
@@ -457,20 +469,26 @@ TEST_F (RunsRouteTest, AMalformedSnapshotDoesNotBreakTheCollectionFilter) {
 
 // The filter is one term among the others, not a mode that replaces them.
 TEST_F (RunsRouteTest, CollectionIdComposesWithTypeStatusAndLimit) {
-    seed ({ .id = "keep", .type = vayu::RunType::Scenario,
-    .status = vayu::RunStatus::Completed, .config_snapshot = scenario_snapshot ("col_A") });
-    seed ({ .id = "wrong_status", .type = vayu::RunType::Scenario,
-    .status = vayu::RunStatus::Failed, .start_time = 1,
+    seed ({ .id      = "keep",
+    .type            = vayu::RunType::Scenario,
+    .status          = vayu::RunStatus::Completed,
     .config_snapshot = scenario_snapshot ("col_A") });
-    seed ({ .id = "wrong_collection", .type = vayu::RunType::Scenario,
-    .status = vayu::RunStatus::Completed, .start_time = 2,
+    seed ({ .id      = "wrong_status",
+    .type            = vayu::RunType::Scenario,
+    .status          = vayu::RunStatus::Failed,
+    .start_time      = 1,
+    .config_snapshot = scenario_snapshot ("col_A") });
+    seed ({ .id      = "wrong_collection",
+    .type            = vayu::RunType::Scenario,
+    .status          = vayu::RunStatus::Completed,
+    .start_time      = 2,
     .config_snapshot = scenario_snapshot ("col_B") });
 
     vayu::db::RunFilter f;
     f.collection_id = "col_A";
     f.type          = vayu::RunType::Scenario;
     f.status        = vayu::RunStatus::Completed;
-    auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 1, 0);
+    auto [_, body]  = vayu::http::routes::get_runs_response (*db_, f, 1, 0);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_EQ (body["data"][0]["id"], "keep");
     EXPECT_EQ (body["pagination"]["total"], 1);
@@ -479,20 +497,28 @@ TEST_F (RunsRouteTest, CollectionIdComposesWithTypeStatusAndLimit) {
 // `limit=1` off a DESC-ordered list is how the context bar asks for "the last
 // run of this collection", so the newest row has to be the one it gets.
 TEST_F (RunsRouteTest, CollectionIdKeepsNewestFirstSoLimitOneIsTheLastRun) {
-    seed ({ .id = "older", .type = vayu::RunType::Scenario, .start_time = 100,
+    seed ({ .id      = "older",
+    .type            = vayu::RunType::Scenario,
+    .start_time      = 100,
     .config_snapshot = scenario_snapshot ("col_A") });
-    seed ({ .id = "newest", .type = vayu::RunType::Scenario, .start_time = 300,
+    seed ({ .id      = "newest",
+    .type            = vayu::RunType::Scenario,
+    .start_time      = 300,
     .config_snapshot = scenario_snapshot ("col_A") });
-    seed ({ .id = "middle", .type = vayu::RunType::Scenario, .start_time = 200,
+    seed ({ .id      = "middle",
+    .type            = vayu::RunType::Scenario,
+    .start_time      = 200,
     .config_snapshot = scenario_snapshot ("col_A") });
     // Newest of all, and not ours: an unfiltered `limit=1` returns this one, so
     // the assertion below fails on a filter that does not filter.
-    seed ({ .id = "newest_elsewhere", .type = vayu::RunType::Scenario, .start_time = 400,
+    seed ({ .id      = "newest_elsewhere",
+    .type            = vayu::RunType::Scenario,
+    .start_time      = 400,
     .config_snapshot = scenario_snapshot ("col_B") });
 
     vayu::db::RunFilter f;
     f.collection_id = "col_A";
-    auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 1, 0);
+    auto [_, body]  = vayu::http::routes::get_runs_response (*db_, f, 1, 0);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_EQ (body["data"][0]["id"], "newest");
     // The page is one row of three, not one row of one.
@@ -503,11 +529,16 @@ TEST_F (RunsRouteTest, CollectionIdKeepsNewestFirstSoLimitOneIsTheLastRun) {
 // count_runs and get_runs_paginated read the same WHERE - a filter that only
 // one of them understood would page correctly and report a wrong total.
 TEST_F (RunsRouteTest, DbCountAgreesWithTheCollectionFilter) {
-    seed ({ .id = "a", .type = vayu::RunType::Scenario,
+    seed ({ .id      = "a",
+    .type            = vayu::RunType::Scenario,
     .config_snapshot = scenario_snapshot ("col_A") });
-    seed ({ .id = "b", .type = vayu::RunType::Scenario, .start_time = 1,
+    seed ({ .id      = "b",
+    .type            = vayu::RunType::Scenario,
+    .start_time      = 1,
     .config_snapshot = scenario_snapshot ("col_A") });
-    seed ({ .id = "c", .type = vayu::RunType::Scenario, .start_time = 2,
+    seed ({ .id      = "c",
+    .type            = vayu::RunType::Scenario,
+    .start_time      = 2,
     .config_snapshot = scenario_snapshot ("col_B") });
 
     vayu::db::RunFilter f;
@@ -518,17 +549,25 @@ TEST_F (RunsRouteTest, DbCountAgreesWithTheCollectionFilter) {
 }
 
 TEST_F (RunsRouteTest, FiltersCombine) {
-    seed ({ .id = "keep", .type = vayu::RunType::Design,
-    .status = vayu::RunStatus::Completed, .request_id = "req_X" });
-    seed ({ .id = "wrong_status", .type = vayu::RunType::Design,
-    .status = vayu::RunStatus::Failed, .start_time = 1, .request_id = "req_X" });
-    seed ({ .id = "wrong_type", .type = vayu::RunType::Load,
-    .status = vayu::RunStatus::Completed, .start_time = 2, .request_id = "req_X" });
+    seed ({ .id = "keep",
+    .type       = vayu::RunType::Design,
+    .status     = vayu::RunStatus::Completed,
+    .request_id = "req_X" });
+    seed ({ .id = "wrong_status",
+    .type       = vayu::RunType::Design,
+    .status     = vayu::RunStatus::Failed,
+    .start_time = 1,
+    .request_id = "req_X" });
+    seed ({ .id = "wrong_type",
+    .type       = vayu::RunType::Load,
+    .status     = vayu::RunStatus::Completed,
+    .start_time = 2,
+    .request_id = "req_X" });
 
     vayu::db::RunFilter f;
-    f.type       = vayu::RunType::Design;
-    f.status     = vayu::RunStatus::Completed;
-    f.request_id = "req_X";
+    f.type         = vayu::RunType::Design;
+    f.status       = vayu::RunStatus::Completed;
+    f.request_id   = "req_X";
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, f, 1, 0);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_EQ (body["data"][0]["id"], "keep");
@@ -612,30 +651,30 @@ TEST (RunReportConfigTest, OmitsFollowRedirectsAndMaxRedirectsWhenAbsent) {
 // The whole-run results a completed load run stores on its row.
 vayu::core::RunSummaryInputs summary_inputs () {
     vayu::core::RunSummaryInputs inputs;
-    inputs.total_requests    = 100;
-    inputs.rps               = 50.0;
-    inputs.send_rate         = 51.0;
-    inputs.throughput        = 49.5;
-    inputs.test_duration_s   = 2.0;
-    inputs.setup_overhead_s  = 0.25;
-    inputs.peak_concurrency  = 8;
-    inputs.dropped_requests  = 2;
-    inputs.queue_wait_avg_ms = 1.5;
-    inputs.bytes_sent        = 1024;
-    inputs.bytes_received    = 8192;
-    inputs.status_codes      = { { 200, 90 }, { 500, 7 }, { 0, 3 } };
-    inputs.latency.min       = 1.0;
-    inputs.latency.max       = 90.0;
-    inputs.latency.p50       = 10.0;
-    inputs.latency.p75       = 15.0;
-    inputs.latency.p90       = 20.0;
-    inputs.latency.p95       = 25.0;
-    inputs.latency.p99       = 30.0;
-    inputs.latency.p999      = 35.0;
-    inputs.latency_avg_ms    = 12.5;
+    inputs.total_requests          = 100;
+    inputs.rps                     = 50.0;
+    inputs.send_rate               = 51.0;
+    inputs.throughput              = 49.5;
+    inputs.test_duration_s         = 2.0;
+    inputs.setup_overhead_s        = 0.25;
+    inputs.peak_concurrency        = 8;
+    inputs.dropped_requests        = 2;
+    inputs.queue_wait_avg_ms       = 1.5;
+    inputs.bytes_sent              = 1024;
+    inputs.bytes_received          = 8192;
+    inputs.status_codes            = { { 200, 90 }, { 500, 7 }, { 0, 3 } };
+    inputs.latency.min             = 1.0;
+    inputs.latency.max             = 90.0;
+    inputs.latency.p50             = 10.0;
+    inputs.latency.p75             = 15.0;
+    inputs.latency.p90             = 20.0;
+    inputs.latency.p95             = 25.0;
+    inputs.latency.p99             = 30.0;
+    inputs.latency.p999            = 35.0;
+    inputs.latency_avg_ms          = 12.5;
     inputs.http_version_downgraded = 4;
-    inputs.tests             = vayu::core::ScriptValidationTotals{ 10, 9, 1 };
-    inputs.retention         = vayu::core::SamplingRetention{ 4, 300, 12, 900 };
+    inputs.tests     = vayu::core::ScriptValidationTotals{ 10, 9, 1 };
+    inputs.retention = vayu::core::SamplingRetention{ 4, 300, 12, 900 };
     return inputs;
 }
 
@@ -650,8 +689,8 @@ TEST_F (RunsRouteTest, ReportMissingRunIs404) {
 // A completed run reports from its stored summary - no metric rows involved.
 TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     seed ({ .id = "run_sum", .start_time = 1000 });
-    db_->update_run_summary (
-    "run_sum", vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+    db_->update_run_summary ("run_sum",
+    vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
 
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_sum");
     ASSERT_EQ (status, 200);
@@ -929,9 +968,9 @@ TEST_F (RunsRouteTest, ReportCarriesTheSchemaValidationBlockTheRunComputed) {
     passed.checked = true;
     passed.valid   = true;
     vayu::core::ValidationVerdict broke;
-    broke.checked        = true;
-    broke.valid          = false;
-    broke.failures       = { vayu::core::SchemaFailure{ "/id", "expected integer" } };
+    broke.checked  = true;
+    broke.valid    = false;
+    broke.failures = { vayu::core::SchemaFailure{ "/id", "expected integer" } };
     broke.failures_total = 1;
     vayu::core::ValidationVerdict skipped;
     skipped.reason = vayu::core::UncheckedReason::BodyNotJson;
@@ -941,7 +980,7 @@ TEST_F (RunsRouteTest, ReportCarriesTheSchemaValidationBlockTheRunComputed) {
     totals.record (broke, "get pet", 200);
     totals.record (skipped, "get pet", 500);
 
-    auto inputs             = summary_inputs ();
+    auto inputs = summary_inputs ();
     inputs.schema_validation = vayu::core::build_sampled_validation_payload (totals);
     db_->update_run_summary (
     "run_schema", vayu::core::build_run_summary_payload (inputs).dump ());
@@ -980,8 +1019,8 @@ TEST_F (RunsRouteTest, ReportOmitsSchemaValidationForARunThatCheckedNothing) {
 
     seed ({ .id = "run_empty_schema", .start_time = 1000 });
     auto empty              = summary_inputs ();
-    empty.schema_validation = nlohmann::json{ { "sampled", 0 }, { "checked", 0 },
-        { "valid", 0 }, { "failed", 0 } };
+    empty.schema_validation = nlohmann::json{ { "sampled", 0 },
+        { "checked", 0 }, { "valid", 0 }, { "failed", 0 } };
     db_->update_run_summary (
     "run_empty_schema", vayu::core::build_run_summary_payload (empty).dump ());
 
@@ -996,9 +1035,9 @@ TEST_F (RunsRouteTest, ReportOmitsSchemaValidationForARunThatCheckedNothing) {
 // binding, so a reader can say which document a coverage block was computed
 // against - and an unbound run echoes nothing at all.
 TEST_F (RunsRouteTest, ReportEchoesTheSpecTheRunWasPlannedAgainst) {
-    seed ({ .id = "run_openapi", .start_time = 1000,
-    .config_snapshot =
-    R"({"url":"https://x.test/","scenario":{"collectionId":"col_1","openapi":{"specId":"spec_1","specHash":"abc"}}})" });
+    seed ({ .id = "run_openapi",
+    .start_time = 1000,
+    .config_snapshot = R"({"url":"https://x.test/","scenario":{"collectionId":"col_1","openapi":{"specId":"spec_1","specHash":"abc"}}})" });
 
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_openapi");
     ASSERT_EQ (status, 200);
@@ -1006,7 +1045,8 @@ TEST_F (RunsRouteTest, ReportEchoesTheSpecTheRunWasPlannedAgainst) {
     EXPECT_EQ (body["metadata"]["openapi"]["specId"].get<std::string> (), "spec_1");
     EXPECT_EQ (body["metadata"]["openapi"]["specHash"].get<std::string> (), "abc");
 
-    seed ({ .id = "run_unbound", .start_time = 1000,
+    seed ({ .id = "run_unbound",
+    .start_time = 1000,
     .config_snapshot = R"({"url":"https://x.test/","scenario":{"collectionId":"col_1"}})" });
     auto [unbound_status, unbound] =
     vayu::http::routes::run_report_response (*db_, "run_unbound");
@@ -1048,8 +1088,7 @@ TEST_F (RunsRouteTest, ReportCarriesTheAuthRefreshSection) {
     ASSERT_EQ (auth["refreshes"].size (), 1u);
     EXPECT_DOUBLE_EQ (auth["refreshes"][0]["atSeconds"].get<double> (), 3620.4);
     EXPECT_EQ (auth["refreshFailures"].get<size_t> (), 1u);
-    EXPECT_EQ (auth["lastError"].get<std::string> (),
-    "oauth2_provider_error: invalid_grant");
+    EXPECT_EQ (auth["lastError"].get<std::string> (), "oauth2_provider_error: invalid_grant");
 }
 
 // A run that could not refresh at all keeps the section out entirely - and so
@@ -1060,8 +1099,8 @@ TEST_F (RunsRouteTest, ReportOmitsAuthWhenTheRunCouldNotRefresh) {
     seed ({ .id = "run_no_auth_section", .start_time = 1000 });
     auto inputs = summary_inputs ();
     inputs.auth = std::nullopt;
-    db_->update_run_summary (
-    "run_no_auth_section", vayu::core::build_run_summary_payload (inputs).dump ());
+    db_->update_run_summary ("run_no_auth_section",
+    vayu::core::build_run_summary_payload (inputs).dump ());
 
     auto [status, body] =
     vayu::http::routes::run_report_response (*db_, "run_no_auth_section");
@@ -1083,8 +1122,8 @@ TEST_F (RunsRouteTest, ReportCarriesWhatTheCapacitySearchFound) {
     search.max_concurrency = 256;
     const std::vector<vayu::core::CapacityWindow> levels{ { 8, 900.0, 12.0 },
         { 16, 1700.0, 20.0 }, { 32, 1750.0, 180.0 }, { 32, 1720.0, 210.0 } };
-    inputs.capacity = vayu::core::summarize_capacity (search, levels,
-    vayu::core::capacity_stop::SLO_EXCEEDED);
+    inputs.capacity = vayu::core::summarize_capacity (
+    search, levels, vayu::core::capacity_stop::SLO_EXCEEDED);
     db_->update_run_summary (
     "run_capacity", vayu::core::build_run_summary_payload (inputs).dump ());
 
@@ -1116,8 +1155,8 @@ TEST_F (RunsRouteTest, ReportOmitsTheKneeWhenNoLevelBreached) {
 
     vayu::core::CapacityConfig search;
     search.slo_ms   = 100.0;
-    inputs.capacity = vayu::core::summarize_capacity (search, { { 8, 900.0, 12.0 } },
-    vayu::core::capacity_stop::CAP_REACHED);
+    inputs.capacity = vayu::core::summarize_capacity (
+    search, { { 8, 900.0, 12.0 } }, vayu::core::capacity_stop::CAP_REACHED);
     db_->update_run_summary (
     "run_capacity_cap", vayu::core::build_run_summary_payload (inputs).dump ());
 
@@ -1247,8 +1286,8 @@ TEST_F (RunsRouteTest, RunWithNoSummaryReportsFromSampledResults) {
 TEST_F (RunsRouteTest, BaselinePutPinsTheRunAndAnswersTheUpdatedRow) {
     seed ({ .id = "run_a", .start_time = 100 });
 
-    auto [status, body] =
-    vayu::http::routes::set_run_baseline_response (*db_, "run_a", R"({"baseline":true})");
+    auto [status, body] = vayu::http::routes::set_run_baseline_response (
+    *db_, "run_a", R"({"baseline":true})");
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["id"], "run_a");
     EXPECT_TRUE (body["baseline"].get<bool> ());
@@ -1258,16 +1297,16 @@ TEST_F (RunsRouteTest, BaselinePutPinsTheRunAndAnswersTheUpdatedRow) {
 
     EXPECT_TRUE (db_->get_run ("run_a")->baseline);
 
-    auto [unpin_status, unpin_body] =
-    vayu::http::routes::set_run_baseline_response (*db_, "run_a", R"({"baseline":false})");
+    auto [unpin_status, unpin_body] = vayu::http::routes::set_run_baseline_response (
+    *db_, "run_a", R"({"baseline":false})");
     ASSERT_EQ (unpin_status, 200);
     EXPECT_FALSE (unpin_body["baseline"].get<bool> ());
     EXPECT_FALSE (db_->get_run ("run_a")->baseline);
 }
 
 TEST_F (RunsRouteTest, BaselinePutOnAMissingRunIs404) {
-    auto [status, body] =
-    vayu::http::routes::set_run_baseline_response (*db_, "no_such_run", R"({"baseline":true})");
+    auto [status, body] = vayu::http::routes::set_run_baseline_response (
+    *db_, "no_such_run", R"({"baseline":true})");
     EXPECT_EQ (status, 404);
     EXPECT_EQ (body["error"]["message"], "Run not found");
 }
@@ -1284,7 +1323,8 @@ TEST_F (RunsRouteTest, BaselinePutRejectsABodyWithoutABoolean) {
         vayu::http::routes::set_run_baseline_response (*db_, "run_a", body);
         EXPECT_EQ (status, 400) << "accepted: " << body;
     }
-    EXPECT_FALSE (db_->get_run ("run_a")->baseline) << "a rejected body still wrote";
+    EXPECT_FALSE (db_->get_run ("run_a")->baseline)
+    << "a rejected body still wrote";
 }
 
 TEST_F (RunsRouteTest, ListRowsCarryTheBaselineFlag) {
@@ -1304,7 +1344,8 @@ TEST_F (RunsRouteTest, ListFiltersToBaselinesAndBackAgain) {
 
     vayu::db::RunFilter only_baselines;
     only_baselines.baseline = true;
-    auto [status, body] = vayu::http::routes::get_runs_response (*db_, only_baselines, 50, 0);
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, only_baselines, 50, 0);
     ASSERT_EQ (status, 200);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_EQ (body["data"][0]["id"], "pinned");

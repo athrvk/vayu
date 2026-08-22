@@ -44,8 +44,10 @@ class SlowMockServer {
                              "# TYPE vayu_test_cpu counter\n"
                              "vayu_test_cpu{cpu=\"0\"} 1.5\n"
                              "vayu_test_cpu{cpu=\"1\"} 2.5\n"
-                             "vayu_test_rss_bytes " + std::to_string (n * 1000) + "\n"
-                             "vayu_test_unused 7\n",
+                             "vayu_test_rss_bytes " +
+            std::to_string (n * 1000) +
+            "\n"
+            "vayu_test_unused 7\n",
             "text/plain");
         });
         // The same numbers as a flat JSON object, for `format: "json"`.
@@ -65,7 +67,8 @@ class SlowMockServer {
             std::this_thread::sleep_for (std::chrono::milliseconds (VITALS_SLOW_DELAY_MS));
             const int n = ++scrapes;
             res.set_content ("vayu_test_cpu 4\n"
-                             "vayu_test_rss_bytes " + std::to_string (n * 1000) + "\n",
+                             "vayu_test_rss_bytes " +
+            std::to_string (n * 1000) + "\n",
             "text/plain");
         });
 

@@ -79,7 +79,8 @@ class ImportApplyRouteTest : public ::testing::Test {
         for (const auto& c : db_->get_collections ()) {
             requests += db_->get_requests_in_collection (c.id).size ();
         }
-        return db_->get_collections ().size () + requests + db_->get_environments ().size ();
+        return db_->get_collections ().size () + requests +
+        db_->get_environments ().size ();
     }
 
     static json collection_item (const std::string& temp_id, const std::string& name) {
@@ -120,7 +121,7 @@ TEST_F (ImportApplyRouteTest, MapsEveryTempIdToAPrefixedEngineId) {
 TEST_F (ImportApplyRouteTest, WiresANestedTreeThroughRealIds) {
     // Deliberately out of order: the child precedes its parent, and the request
     // precedes the collection that owns it. Forward references must resolve.
-    json child  = collection_item ("c2", "child");
+    json child            = collection_item ("c2", "child");
     child["parentTempId"] = "c1";
     json body{ { "requests", json::array ({ request_item ("r1", "c2", "in child") }) },
         { "collections", json::array ({ child, collection_item ("c1", "root") }) } };
@@ -146,14 +147,15 @@ TEST_F (ImportApplyRouteTest, WiresANestedTreeThroughRealIds) {
 
 TEST_F (ImportApplyRouteTest, AppliesTheSameFieldDefaultsAsPerItemCreate) {
     json collection = collection_item ("c1", "root");
-    collection["variables"] = json{ { "base", { { "value", "1" }, { "enabled", true } } } };
-    json request            = request_item ("r1", "c1", "get");
-    request["body"]         = json{ { "mode", "json" }, { "content", "{}" } };
-    request["bodyType"]     = "json";
+    collection["variables"] =
+    json{ { "base", { { "value", "1" }, { "enabled", true } } } };
+    json request        = request_item ("r1", "c1", "get");
+    request["body"]     = json{ { "mode", "json" }, { "content", "{}" } };
+    request["bodyType"] = "json";
 
     auto [status, response] = import_apply_response (*db_,
     json{ { "collections", json::array ({ collection }) },
-        { "requests", json::array ({ request }) } });
+    { "requests", json::array ({ request }) } });
     ASSERT_EQ (status, 200) << response.dump ();
 
     auto stored_collection = db_->get_collection (response["idMap"]["c1"]);
@@ -188,8 +190,8 @@ TEST_F (ImportApplyRouteTest, AppendsSiblingsInPayloadOrderWhenOrderIsOmitted) {
 }
 
 TEST_F (ImportApplyRouteTest, AnExplicitOrderIsHonoured) {
-    json first        = collection_item ("c1", "a");
-    first["order"]    = 7;
+    json first     = collection_item ("c1", "a");
+    first["order"] = 7;
     auto [status, response] =
     import_apply_response (*db_, json{ { "collections", json::array ({ first }) } });
     ASSERT_EQ (status, 200) << response.dump ();
@@ -214,12 +216,13 @@ TEST_F (ImportApplyRouteTest, WritesNothingWhenOneItemIsInvalid) {
 
     auto [status, response] = import_apply_response (*db_,
     json{ { "collections", json::array ({ collection_item ("c1", "root") }) },
-        { "requests", json::array ({ request_item ("r1", "c1", "fine"), bad_request }) },
-        { "environments", json::array ({ json{ { "tempId", "e1" }, { "name", "Prod" } } }) } });
+    { "requests", json::array ({ request_item ("r1", "c1", "fine"), bad_request }) },
+    { "environments", json::array ({ json{ { "tempId", "e1" }, { "name", "Prod" } } }) } });
 
     EXPECT_EQ (status, 400);
     EXPECT_EQ (response["error"]["item"], "r2");
-    EXPECT_NE (response["error"]["message"].get<std::string> ().find ("method"), std::string::npos);
+    EXPECT_NE (response["error"]["message"].get<std::string> ().find ("method"),
+    std::string::npos);
     EXPECT_EQ (stored_rows (), 0u); // the valid items must not have landed either
 }
 
@@ -227,8 +230,8 @@ TEST_F (ImportApplyRouteTest, RejectsANullNameThatHasNoDefault) {
     json collection    = collection_item ("c1", "root");
     collection["name"] = nullptr;
 
-    auto [status, response] =
-    import_apply_response (*db_, json{ { "collections", json::array ({ collection }) } });
+    auto [status, response] = import_apply_response (
+    *db_, json{ { "collections", json::array ({ collection }) } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (response["error"]["item"], "c1");
     EXPECT_EQ (stored_rows (), 0u);
@@ -242,8 +245,8 @@ TEST_F (ImportApplyRouteTest, RejectsAWrongTypedFieldWithA400NotA500) {
     json collection    = collection_item ("c1", "root");
     collection["name"] = 42;
 
-    auto [status, response] =
-    import_apply_response (*db_, json{ { "collections", json::array ({ collection }) } });
+    auto [status, response] = import_apply_response (
+    *db_, json{ { "collections", json::array ({ collection }) } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (response["error"]["item"], "c1");
     EXPECT_EQ (stored_rows (), 0u);
@@ -257,7 +260,9 @@ TEST_F (ImportApplyRouteTest, RejectsAnUnknownParentTempId) {
     json{ { "collections", json::array ({ collection_item ("c1", "root"), child }) } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (response["error"]["item"], "c2");
-    EXPECT_NE (response["error"]["message"].get<std::string> ().find ("parentTempId"), std::string::npos);
+    EXPECT_NE (
+    response["error"]["message"].get<std::string> ().find ("parentTempId"),
+    std::string::npos);
     EXPECT_EQ (stored_rows (), 0u);
 }
 
@@ -273,7 +278,7 @@ TEST_F (ImportApplyRouteTest, RejectsARequestWhoseOwnerIsNotACollection) {
     // An environment's temp id is in the same namespace but is not a collection.
     auto [status, response] = import_apply_response (*db_,
     json{ { "environments", json::array ({ json{ { "tempId", "e1" }, { "name", "Prod" } } }) },
-        { "requests", json::array ({ request_item ("r1", "e1", "wrong owner") }) } });
+    { "requests", json::array ({ request_item ("r1", "e1", "wrong owner") }) } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (response["error"]["item"], "r1");
     EXPECT_EQ (stored_rows (), 0u);
@@ -288,7 +293,8 @@ TEST_F (ImportApplyRouteTest, RejectsACycleInParentTempIds) {
     auto [status, response] =
     import_apply_response (*db_, json{ { "collections", json::array ({ a, b }) } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (response["error"]["message"].get<std::string> ().find ("Cycle"), std::string::npos);
+    EXPECT_NE (response["error"]["message"].get<std::string> ().find ("Cycle"),
+    std::string::npos);
     EXPECT_EQ (stored_rows (), 0u);
 }
 
@@ -306,10 +312,11 @@ TEST_F (ImportApplyRouteTest, RejectsASelfParent) {
 TEST_F (ImportApplyRouteTest, RejectsADuplicateTempId) {
     auto [status, response] = import_apply_response (*db_,
     json{ { "collections", json::array ({ collection_item ("c1", "a") }) },
-        { "environments", json::array ({ json{ { "tempId", "c1" }, { "name", "clash" } } }) } });
+    { "environments", json::array ({ json{ { "tempId", "c1" }, { "name", "clash" } } }) } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (response["error"]["item"], "c1");
-    EXPECT_NE (response["error"]["message"].get<std::string> ().find ("Duplicate"), std::string::npos);
+    EXPECT_NE (
+    response["error"]["message"].get<std::string> ().find ("Duplicate"), std::string::npos);
     EXPECT_EQ (stored_rows (), 0u);
 }
 
@@ -317,7 +324,8 @@ TEST_F (ImportApplyRouteTest, RejectsAMissingTempId) {
     auto [status, response] = import_apply_response (*db_,
     json{ { "collections", json::array ({ json{ { "name", "no temp id" } } }) } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (response["error"]["message"].get<std::string> ().find ("tempId"), std::string::npos);
+    EXPECT_NE (response["error"]["message"].get<std::string> ().find ("tempId"),
+    std::string::npos);
     EXPECT_EQ (stored_rows (), 0u);
 }
 
@@ -325,10 +333,12 @@ TEST_F (ImportApplyRouteTest, RejectsAClientSuppliedId) {
     json collection  = collection_item ("c1", "root");
     collection["id"] = "col_mine";
 
-    auto [status, response] =
-    import_apply_response (*db_, json{ { "collections", json::array ({ collection }) } });
+    auto [status, response] = import_apply_response (
+    *db_, json{ { "collections", json::array ({ collection }) } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (response["error"]["message"].get<std::string> ().find ("'id' is not accepted"), std::string::npos);
+    EXPECT_NE (response["error"]["message"].get<std::string> ().find (
+               "'id' is not accepted"),
+    std::string::npos);
     EXPECT_EQ (stored_rows (), 0u);
 }
 
@@ -336,7 +346,8 @@ TEST_F (ImportApplyRouteTest, RejectsANonArraySection) {
     auto [status, response] =
     import_apply_response (*db_, json{ { "collections", "not an array" } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (response["error"]["message"].get<std::string> ().find ("collections"), std::string::npos);
+    EXPECT_NE (
+    response["error"]["message"].get<std::string> ().find ("collections"), std::string::npos);
     EXPECT_EQ (stored_rows (), 0u);
 }
 
@@ -348,7 +359,8 @@ TEST_F (ImportApplyRouteTest, EnforcesTheItemCap) {
     auto [status, response] =
     import_apply_response (*db_, json{ { "collections", collections } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (response["error"]["message"].get<std::string> ().find ("too large"), std::string::npos);
+    EXPECT_NE (
+    response["error"]["message"].get<std::string> ().find ("too large"), std::string::npos);
     EXPECT_EQ (stored_rows (), 0u);
 }
 
@@ -357,7 +369,7 @@ TEST_F (ImportApplyRouteTest, AnAbsentSectionMeansNone) {
     // null-vs-absent rule the resource writes follow.
     auto [status, response] = import_apply_response (*db_,
     json{ { "collections", json::array ({ collection_item ("c1", "root") }) },
-        { "requests", nullptr } });
+    { "requests", nullptr } });
     ASSERT_EQ (status, 200) << response.dump ();
     EXPECT_EQ (response["idMap"].size (), 1u);
     EXPECT_EQ (stored_rows (), 1u);
@@ -407,7 +419,8 @@ TEST_F (ImportApplyRouteTest, RejectsAnObjectFieldGivenANonObject) {
 
             auto [status, response] = import_apply_response (*db_, body);
             EXPECT_EQ (status, 400) << c.field << " = " << bad_shape.dump ();
-            EXPECT_NE (response["error"]["message"].get<std::string> ().find (c.field), std::string::npos)
+            EXPECT_NE (response["error"]["message"].get<std::string> ().find (c.field),
+            std::string::npos)
             << "the 400 must name the offending field, got " << response.dump ();
             EXPECT_EQ (stored_rows (), 0u) << c.field << " = " << bad_shape.dump ();
         }
@@ -420,7 +433,7 @@ TEST_F (ImportApplyRouteTest, CarriesADeclaredDataContractThroughTheSharedApplie
     // because the alternative is a per-route copy that drifts. Validation is
     // the same one too: a bad contract is a 400 that writes nothing, with the
     // parents of this payload still unwritten when the check runs.
-    json good      = collection_item ("c1", "root");
+    json good          = collection_item ("c1", "root");
     good["dataSchema"] = json{ { "columns", json::array ({ "id", "email" }) },
         { "declaredAt", 1700000000000 } };
 
@@ -429,14 +442,16 @@ TEST_F (ImportApplyRouteTest, CarriesADeclaredDataContractThroughTheSharedApplie
     ASSERT_EQ (status, 200) << response.dump ();
     auto stored = db_->get_collection (response["idMap"]["c1"]);
     ASSERT_TRUE (stored.has_value ());
-    EXPECT_EQ (json::parse (stored->data_schema)["columns"], json::array ({ "id", "email" }));
+    EXPECT_EQ (json::parse (stored->data_schema)["columns"],
+    json::array ({ "id", "email" }));
 
     json bad          = collection_item ("c2", "also root");
     bad["dataSchema"] = json{ { "columns", json::array ({ "id", "id" }) } };
     auto [bad_status, bad_response] =
     import_apply_response (*db_, json{ { "collections", json::array ({ bad }) } });
     EXPECT_EQ (bad_status, 400) << bad_response.dump ();
-    EXPECT_NE (bad_response["error"]["message"].get<std::string> ().find ("dataSchema.columns"),
+    EXPECT_NE (bad_response["error"]["message"].get<std::string> ().find (
+               "dataSchema.columns"),
     std::string::npos)
     << bad_response.dump ();
 }
@@ -444,7 +459,8 @@ TEST_F (ImportApplyRouteTest, CarriesADeclaredDataContractThroughTheSharedApplie
 TEST_F (ImportApplyRouteTest, PerItemCreateStillWorksForThirdPartyClients) {
     // The bulk endpoint replaces the app's usage of POST /collections, not the
     // public create API - removing that is #97.
-    auto [status, body] = create_collection_response (*db_, json{ { "name", "by hand" } });
+    auto [status, body] =
+    create_collection_response (*db_, json{ { "name", "by hand" } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["id"].get<std::string> ().rfind ("col_", 0), 0u);
     EXPECT_TRUE (db_->get_collection (body["id"]).has_value ());

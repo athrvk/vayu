@@ -116,8 +116,8 @@ R"("/owners":{"get":{"operationId":"listOwners","responses":{"200":{}}}}}})";
 
 /// An operation neither fetched document declares - a request stamped with it is
 /// a *removal*, which a safe apply must leave standing.
-const nlohmann::json DELETE_PET =
-nlohmann::json{ { "operationId", "deletePet" }, { "method", "DELETE" }, { "path", "/pets/{petId}" } };
+const nlohmann::json DELETE_PET = nlohmann::json{ { "operationId", "deletePet" },
+    { "method", "DELETE" }, { "path", "/pets/{petId}" } };
 
 /// The identities `FETCHED_DOC` declares, as a request's stamp records them -
 /// which is how a refresh finds the responses the document documents for it.
@@ -139,7 +139,7 @@ class SpecSyncRouteTest : public ::testing::Test {
         root_       = create_collection (json{ { "name", "Pets API" } });
         auto [status, body] = routes::update_collection_response (*db_, root_,
         json{ { "openapi",
-            json{ { "specId", bound_spec_ }, { "specHash", "seed" }, { "syncedAt", 1 } } } });
+        json{ { "specId", bound_spec_ }, { "specHash", "seed" }, { "syncedAt", 1 } } } });
         EXPECT_EQ (status, 200) << body.dump ();
     }
     void TearDown () override {
@@ -163,7 +163,8 @@ class SpecSyncRouteTest : public ::testing::Test {
         return response.value ("id", std::string{});
     }
 
-    std::string create_request (const std::string& collection_id, const json& extra = json::object ()) {
+    std::string create_request (const std::string& collection_id,
+    const json& extra = json::object ()) {
         json body = { { "collectionId", collection_id }, { "name", "list pets" },
             { "method", "GET" }, { "url", "https://example.test/pets" } };
         body.update (extra);
@@ -218,17 +219,17 @@ class SpecSyncRouteTest : public ::testing::Test {
 // ---------------------------------------------------------------------------
 
 TEST_F (SpecSyncRouteTest, AppliesCreateUpdateAndDeleteInOneCall) {
-    const std::string gone   = create_request (root_, json{ { "name", "list owners" } });
+    const std::string gone = create_request (root_, json{ { "name", "list owners" } });
     const std::string stayed = create_request (root_, json{ { "name", "list pets" } });
 
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{
-        { "collections", json::array ({ json{ { "tempId", "t_col" }, { "name", "owners" } } }) },
-        { "create", json::array ({ json{ { "tempId", "t_req" }, { "collectionTempId", "t_col" },
-            { "name", "list owners" }, { "method", "GET" },
-            { "url", "https://example.test/owners" } } }) },
-        { "update", json::array ({ json{ { "id", stayed }, { "name", "list every pet" } } }) },
-        { "delete", json::array ({ gone }) } }));
+    body (json{ { "collections",
+                json::array ({ json{ { "tempId", "t_col" }, { "name", "owners" } } }) },
+    { "create",
+    json::array ({ json{ { "tempId", "t_req" }, { "collectionTempId", "t_col" }, { "name", "list owners" },
+    { "method", "GET" }, { "url", "https://example.test/owners" } } }) },
+    { "update", json::array ({ json{ { "id", stayed }, { "name", "list every pet" } } }) },
+    { "delete", json::array ({ gone }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
 
     // Every id the engine minted, and no temp id anywhere near the store.
@@ -281,14 +282,16 @@ TEST_F (SpecSyncRouteTest, SyncingReclaimsTheDocumentTheBindingLeftBehind) {
     // moment ago, and a document that new is treated as a bind in flight.
     auto seeded = db_->get_spec_document (bound_spec_);
     ASSERT_TRUE (seeded.has_value ());
-    seeded->fetched_at -= vayu::core::constants::database::SPEC_DOCUMENT_SWEEP_GRACE_MS + 1000;
+    seeded->fetched_at -=
+    vayu::core::constants::database::SPEC_DOCUMENT_SWEEP_GRACE_MS + 1000;
     db_->save_spec_document (*seeded);
 
     auto [status, response] = routes::spec_sync_response (*db_, body ());
     ASSERT_EQ (status, 200) << response.dump ();
 
     EXPECT_FALSE (db_->get_spec_document (bound_spec_).has_value ())
-    << "the superseded document outlived the sync that moved the binding off it";
+    << "the superseded document outlived the sync that moved the binding off "
+       "it";
     // What the binding names now is untouched, which is the half that would make
     // a too-eager sweep catastrophic rather than merely wasteful.
     auto live = db_->get_spec_document (response["specId"].get<std::string> ());
@@ -301,7 +304,8 @@ TEST_F (SpecSyncRouteTest, SyncingReclaimsTheDocumentTheBindingLeftBehind) {
 TEST_F (SpecSyncRouteTest, SyncingKeepsASupersededDocumentARunStillNames) {
     auto seeded = db_->get_spec_document (bound_spec_);
     ASSERT_TRUE (seeded.has_value ());
-    seeded->fetched_at -= vayu::core::constants::database::SPEC_DOCUMENT_SWEEP_GRACE_MS + 1000;
+    seeded->fetched_at -=
+    vayu::core::constants::database::SPEC_DOCUMENT_SWEEP_GRACE_MS + 1000;
     db_->save_spec_document (*seeded);
 
     // The shape a scenario run's manifest stamps into its snapshot.
@@ -310,9 +314,10 @@ TEST_F (SpecSyncRouteTest, SyncingKeepsASupersededDocumentARunStillNames) {
     run.type            = vayu::RunType::Scenario;
     run.status          = vayu::RunStatus::Completed;
     run.start_time      = 1000;
-    run.config_snapshot = json{ { "scenario",
-    json{ { "collectionId", root_ }, { "openapi", json{ { "specId", bound_spec_ } } } } } }
-                          .dump ();
+    run.config_snapshot = json{
+        { "scenario",
+        json{ { "collectionId", root_ }, { "openapi", json{ { "specId", bound_spec_ } } } } }
+    }.dump ();
     db_->create_run (run);
 
     auto [status, response] = routes::spec_sync_response (*db_, body ());
@@ -327,10 +332,10 @@ TEST_F (SpecSyncRouteTest, CreatedRequestsAppendAfterTheCollectionsExistingOnes)
 
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "create",
-        json::array ({ json{ { "tempId", "a" }, { "collectionId", root_ }, { "name", "a" },
-                          { "method", "GET" }, { "url", "https://example.test/a" } },
-            json{ { "tempId", "b" }, { "collectionId", root_ }, { "name", "b" },
-                { "method", "GET" }, { "url", "https://example.test/b" } } }) } }));
+    json::array ({ json{ { "tempId", "a" }, { "collectionId", root_ }, { "name", "a" },
+                   { "method", "GET" }, { "url", "https://example.test/a" } },
+    json{ { "tempId", "b" }, { "collectionId", root_ }, { "name", "b" },
+    { "method", "GET" }, { "url", "https://example.test/b" } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
 
     // Consecutive slots after the stored one - two rows sharing an `order` would
@@ -350,11 +355,11 @@ TEST_F (SpecSyncRouteTest, OneBadItemWritesNothingAtAll) {
 
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "create",
-        json::array ({ json{ { "tempId", "good" }, { "collectionId", root_ }, { "name", "good" },
-                          { "method", "GET" }, { "url", "https://example.test/good" } },
-            // No `url`, which the shared applier requires on create.
-            json{ { "tempId", "bad" }, { "collectionId", root_ }, { "name", "bad" },
-                { "method", "GET" } } }) } }));
+    json::array ({ json{ { "tempId", "good" }, { "collectionId", root_ }, { "name", "good" },
+                   { "method", "GET" }, { "url", "https://example.test/good" } },
+    // No `url`, which the shared applier requires on create.
+    json{ { "tempId", "bad" }, { "collectionId", root_ }, { "name", "bad" },
+    { "method", "GET" } } }) } }));
     ASSERT_EQ (status, 400) << response.dump ();
     EXPECT_EQ (response["error"]["item"].get<std::string> (), "bad");
 
@@ -371,11 +376,12 @@ TEST_F (SpecSyncRouteTest, ADeletionRollsBackWithTheRestOfTheBatch) {
 
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "delete", json::array ({ doomed }) },
-        { "update", json::array ({ json{ { "id", "req_never" }, { "name", "x" } } }) } }));
+    { "update", json::array ({ json{ { "id", "req_never" }, { "name", "x" } } }) } }));
     ASSERT_EQ (status, 409) << response.dump ();
 
     EXPECT_TRUE (db_->get_request (doomed).has_value ())
-    << "a delete that shared a payload with a failing update must not have happened";
+    << "a delete that shared a payload with a failing update must not have "
+       "happened";
     EXPECT_EQ (binding ()["specId"].get<std::string> (), bound_spec_);
 }
 
@@ -384,11 +390,14 @@ TEST_F (SpecSyncRouteTest, ADeletionRollsBackWithTheRestOfTheBatch) {
 // ---------------------------------------------------------------------------
 
 TEST_F (SpecSyncRouteTest, RefusesToUpdateARequestOutsideTheSyncedCollection) {
-    const std::string other_root = create_collection (json{ { "name", "Somebody else" } });
-    const std::string stranger   = create_request (other_root, json{ { "name", "not yours" } });
+    const std::string other_root =
+    create_collection (json{ { "name", "Somebody else" } });
+    const std::string stranger =
+    create_request (other_root, json{ { "name", "not yours" } });
 
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "update", json::array ({ json{ { "id", stranger }, { "name", "taken" } } }) } }));
+    body (json{ { "update",
+    json::array ({ json{ { "id", stranger }, { "name", "taken" } } }) } }));
     ASSERT_EQ (status, 400) << response.dump ();
     EXPECT_EQ (response["error"]["item"].get<std::string> (), stranger);
 
@@ -398,31 +407,35 @@ TEST_F (SpecSyncRouteTest, RefusesToUpdateARequestOutsideTheSyncedCollection) {
 }
 
 TEST_F (SpecSyncRouteTest, RefusesToDeleteARequestOutsideTheSyncedCollection) {
-    const std::string other_root = create_collection (json{ { "name", "Somebody else" } });
-    const std::string stranger   = create_request (other_root);
+    const std::string other_root =
+    create_collection (json{ { "name", "Somebody else" } });
+    const std::string stranger = create_request (other_root);
 
-    auto [status, response] =
-    routes::spec_sync_response (*db_, body (json{ { "delete", json::array ({ stranger }) } }));
+    auto [status, response] = routes::spec_sync_response (
+    *db_, body (json{ { "delete", json::array ({ stranger }) } }));
     ASSERT_EQ (status, 400) << response.dump ();
     EXPECT_TRUE (db_->get_request (stranger).has_value ());
 }
 
 TEST_F (SpecSyncRouteTest, ReachesARequestInANestedTagFolder) {
-    const std::string folder = create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
+    const std::string folder =
+    create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
     const std::string nested = create_request (folder, json{ { "name", "list pets" } });
 
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "update", json::array ({ json{ { "id", nested }, { "name", "renamed" } } }) } }));
+    body (json{ { "update",
+    json::array ({ json{ { "id", nested }, { "name", "renamed" } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
     EXPECT_EQ (db_->get_request (nested)->name, "renamed");
 }
 
 TEST_F (SpecSyncRouteTest, RefusesAFolderParentedOutsideTheSyncedCollection) {
-    const std::string other_root = create_collection (json{ { "name", "Somebody else" } });
+    const std::string other_root =
+    create_collection (json{ { "name", "Somebody else" } });
 
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "collections", json::array ({ json{ { "tempId", "t" }, { "name", "pets" },
-                     { "parentId", other_root } } }) } }));
+    body (json{ { "collections",
+    json::array ({ json{ { "tempId", "t" }, { "name", "pets" }, { "parentId", other_root } } }) } }));
     ASSERT_EQ (status, 400) << response.dump ();
     EXPECT_EQ (db_->get_collections ().size (), 2u);
 }
@@ -436,14 +449,15 @@ TEST_F (SpecSyncRouteTest, RefusesAFolderParentedOutsideTheSyncedCollection) {
 // ---------------------------------------------------------------------------
 
 TEST_F (SpecSyncRouteTest, WritesTheDocumentsResponsesAndKeepsTheUsersOwnExamples) {
-    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
+    const std::string request =
+    create_request (root_, json{ { "specOperation", LIST_PETS } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_USER, 0);
     const std::string replaced =
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 1);
 
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "update",
-        json::array ({ json{ { "id", request }, { "examples", true } } }) } }));
+    json::array ({ json{ { "id", request }, { "examples", true } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
 
     auto rows = db_->get_request_examples (request);
@@ -451,7 +465,8 @@ TEST_F (SpecSyncRouteTest, WritesTheDocumentsResponsesAndKeepsTheUsersOwnExample
     // beside the row the user saved. Mutation check: hand `rows_for` the wrong
     // operation and the statuses redden; replace `refresh_examples` with "delete
     // everything" and the user's row goes with it.
-    ASSERT_EQ (rows.size (), 3u) << "expected the user's row plus the document's 200 and 404";
+    ASSERT_EQ (rows.size (), 3u)
+    << "expected the user's row plus the document's 200 and 404";
     EXPECT_EQ (rows[0].origin, vayu::core::constants::request_example::ORIGIN_USER);
     EXPECT_EQ (rows[1].status, 200);
     EXPECT_EQ (rows[1].order, 1);
@@ -465,7 +480,8 @@ TEST_F (SpecSyncRouteTest, WritesTheDocumentsResponsesAndKeepsTheUsersOwnExample
 // write, and the imported rows still go. "The document documents nothing here"
 // is a real state, and it is the one the empty list used to spell.
 TEST_F (SpecSyncRouteTest, ADocumentedNothingRemovesTheImportedExamplesOnly) {
-    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
+    const std::string request =
+    create_request (root_, json{ { "specOperation", LIST_PETS } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_USER, 0);
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 1);
 
@@ -480,11 +496,13 @@ TEST_F (SpecSyncRouteTest, ADocumentedNothingRemovesTheImportedExamplesOnly) {
 }
 
 TEST_F (SpecSyncRouteTest, AnAbsentExamplesDecisionLeavesEveryExampleAlone) {
-    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
+    const std::string request =
+    create_request (root_, json{ { "specOperation", LIST_PETS } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0);
 
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "update", json::array ({ json{ { "id", request }, { "name", "renamed" } } }) } }));
+    body (json{ { "update",
+    json::array ({ json{ { "id", request }, { "name", "renamed" } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
     EXPECT_EQ (db_->get_request_examples (request).size (), 1u);
 }
@@ -494,12 +512,13 @@ TEST_F (SpecSyncRouteTest, AnAbsentExamplesDecisionLeavesEveryExampleAlone) {
 // than by leaving keys out. Mutation check: treat a `false` as a refresh and the
 // seeded imported row is replaced by the document's two.
 TEST_F (SpecSyncRouteTest, AFalseExamplesDecisionLeavesEveryExampleAlone) {
-    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
+    const std::string request =
+    create_request (root_, json{ { "specOperation", LIST_PETS } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 500);
 
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "update",
-        json::array ({ json{ { "id", request }, { "examples", false } } }) } }));
+    json::array ({ json{ { "id", request }, { "examples", false } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
 
     auto rows = db_->get_request_examples (request);
@@ -513,12 +532,13 @@ TEST_F (SpecSyncRouteTest, AFalseExamplesDecisionLeavesEveryExampleAlone) {
 // route now exists to prevent. Mutation check: accept an array again and the
 // 400 becomes a 200 with a row for a status `FETCHED_DOC` never mentions.
 TEST_F (SpecSyncRouteTest, RefusesAnExampleListWhereADecisionBelongs) {
-    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
+    const std::string request =
+    create_request (root_, json{ { "specOperation", LIST_PETS } });
 
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "update", json::array ({ json{ { "id", request },
-                     { "examples", json::array ({ json{ { "name", "418 - Invented" },
-                         { "status", 418 } } }) } } }) } }));
+    body (json{ { "update",
+    json::array ({ json{ { "id", request },
+    { "examples", json::array ({ json{ { "name", "418 - Invented" }, { "status", 418 } } }) } } }) } }));
     ASSERT_EQ (status, 400) << response.dump ();
     EXPECT_EQ (db_->get_request_examples (request).size (), 0u);
 }
@@ -528,18 +548,18 @@ TEST_F (SpecSyncRouteTest, RefusesAnExampleListWhereADecisionBelongs) {
 // silently left alone: the caller asked for a refresh, and a route that answered
 // 200 having done nothing would report a sync that did not happen.
 TEST_F (SpecSyncRouteTest, RefusesARefreshForARequestTheDocumentDoesNotDeclare) {
-    const std::string stranger = create_request (root_,
-    json{ { "specOperation", json{ { "method", "GET" }, { "path", "/nowhere" } } } });
+    const std::string stranger  = create_request (root_,
+     json{ { "specOperation", json{ { "method", "GET" }, { "path", "/nowhere" } } } });
     const std::string unstamped = create_request (root_);
 
     auto [missing, missing_body] = routes::spec_sync_response (*db_,
     body (json{ { "update",
-        json::array ({ json{ { "id", stranger }, { "examples", true } } }) } }));
+    json::array ({ json{ { "id", stranger }, { "examples", true } } }) } }));
     EXPECT_EQ (missing, 400) << missing_body.dump ();
 
     auto [unnamed, unnamed_body] = routes::spec_sync_response (*db_,
     body (json{ { "update",
-        json::array ({ json{ { "id", unstamped }, { "examples", true } } }) } }));
+    json::array ({ json{ { "id", unstamped }, { "examples", true } } }) } }));
     EXPECT_EQ (unnamed, 400) << unnamed_body.dump ();
 }
 
@@ -548,24 +568,26 @@ TEST_F (SpecSyncRouteTest, RefusesARefreshForARequestTheDocumentDoesNotDeclare) 
 // is nothing behind it to leave alone.
 TEST_F (SpecSyncRouteTest, ACreatedRequestGetsTheResponsesTheDocumentDocuments) {
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "create", json::array ({ json{ { "tempId", "t_req" },
-        { "collectionId", root_ }, { "name", "list owners" }, { "method", "GET" },
-        { "url", "https://example.test/owners" }, { "specOperation", LIST_OWNERS } } }) } }));
+    body (json{ { "create",
+    json::array ({ json{ { "tempId", "t_req" }, { "collectionId", root_ },
+    { "name", "list owners" }, { "method", "GET" }, { "url", "https://example.test/owners" },
+    { "specOperation", LIST_OWNERS } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
 
     const auto created = response["idMap"]["t_req"].get<std::string> ();
     auto rows          = db_->get_request_examples (created);
-    ASSERT_EQ (rows.size (), 1u) << "the 200 `FETCHED_DOC` declares for listOwners";
+    ASSERT_EQ (rows.size (), 1u)
+    << "the 200 `FETCHED_DOC` declares for listOwners";
     EXPECT_EQ (rows[0].status, 200);
     EXPECT_EQ (rows[0].origin, vayu::core::constants::request_example::ORIGIN_IMPORT);
 }
 
 TEST_F (SpecSyncRouteTest, RefusesACreatedRequestThatStatesItsOwnExamples) {
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "create", json::array ({ json{ { "tempId", "t_req" },
-        { "collectionId", root_ }, { "name", "list owners" }, { "method", "GET" },
-        { "url", "https://example.test/owners" }, { "specOperation", LIST_OWNERS },
-        { "examples", json::array ({ json{ { "name", "418" }, { "status", 418 } } }) } } }) } }));
+    body (json{ { "create",
+    json::array ({ json{ { "tempId", "t_req" }, { "collectionId", root_ }, { "name", "list owners" },
+    { "method", "GET" }, { "url", "https://example.test/owners" }, { "specOperation", LIST_OWNERS },
+    { "examples", json::array ({ json{ { "name", "418" }, { "status", 418 } } }) } } }) } }));
     ASSERT_EQ (status, 400) << response.dump ();
     EXPECT_EQ (db_->get_requests_in_collection (root_).size (), 0u);
 }
@@ -577,10 +599,11 @@ TEST_F (SpecSyncRouteTest, RefusesACreatedRequestThatStatesItsOwnExamples) {
 // `suppressed_statuses` skip in `build_example_rows` and the deleted 404 comes
 // back, reddening both size assertions.
 TEST_F (SpecSyncRouteTest, ADeletedImportedExampleIsNotWrittenBackByALaterSync) {
-    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
+    const std::string request =
+    create_request (root_, json{ { "specOperation", LIST_PETS } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 200);
-    const std::string unwanted =
-    seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 1, 404);
+    const std::string unwanted = seed_example (
+    request, vayu::core::constants::request_example::ORIGIN_IMPORT, 1, 404);
 
     auto [deleted, delete_body] =
     routes::delete_request_example_response (*db_, request, unwanted);
@@ -589,8 +612,8 @@ TEST_F (SpecSyncRouteTest, ADeletedImportedExampleIsNotWrittenBackByALaterSync) 
     // A rename with its examples ticked: the document declares both statuses, so
     // without the tombstone rule both would come back.
     auto [status, response] = routes::spec_sync_response (*db_,
-    body (json{ { "update", json::array ({ json{ { "id", request }, { "name", "renamed" },
-                     { "examples", true } } }) } }));
+    body (json{ { "update",
+    json::array ({ json{ { "id", request }, { "name", "renamed" }, { "examples", true } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
 
     auto rows = db_->get_request_examples (request);
@@ -606,9 +629,10 @@ TEST_F (SpecSyncRouteTest, ADeletedImportedExampleIsNotWrittenBackByALaterSync) 
 // reword - and a name-keyed tombstone would then miss, resurrecting exactly
 // what this fix makes durable (issue #722).
 TEST_F (SpecSyncRouteTest, ARewordedDescriptionDoesNotBringADeletedExampleBack) {
-    const std::string request = create_request (root_, json{ { "specOperation", LIST_PETS } });
-    const std::string unwanted =
-    seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 404);
+    const std::string request =
+    create_request (root_, json{ { "specOperation", LIST_PETS } });
+    const std::string unwanted = seed_example (
+    request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 404);
     ASSERT_EQ (routes::delete_request_example_response (*db_, request, unwanted).first, 200);
 
     // The re-fetched document rewords the 404 it declares, which moves the name
@@ -637,25 +661,26 @@ TEST_F (SpecSyncRouteTest, AnUnknownCollectionIsA404AndAnUnboundOneA400) {
 
 TEST_F (SpecSyncRouteTest, RejectsAClientSuppliedIdAndAClientComputedHash) {
     auto [with_id, id_body] = routes::spec_sync_response (*db_,
-    body (json{ { "create", json::array ({ json{ { "tempId", "t" }, { "id", "req_mine" },
-                     { "collectionId", root_ }, { "name", "n" }, { "method", "GET" },
-                     { "url", "https://example.test/n" } } }) } }));
+    body (json{ { "create",
+    json::array ({ json{ { "tempId", "t" }, { "id", "req_mine" }, { "collectionId", root_ },
+    { "name", "n" }, { "method", "GET" }, { "url", "https://example.test/n" } } }) } }));
     EXPECT_EQ (with_id, 400) << id_body.dump ();
 
     auto [with_hash, hash_body] = routes::spec_sync_response (*db_,
     json{ { "collectionId", root_ },
-        { "spec", json{ { "content", FETCHED_DOC }, { "hash", "deadbeef" } } } });
+    { "spec", json{ { "content", FETCHED_DOC }, { "hash", "deadbeef" } } } });
     EXPECT_EQ (with_hash, 400) << hash_body.dump ();
     EXPECT_EQ (binding ()["specId"].get<std::string> (), bound_spec_);
 }
 
 TEST_F (SpecSyncRouteTest, RefusesToMoveARequestWhileUpdatingIt) {
     const std::string request = create_request (root_);
-    const std::string folder = create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
+    const std::string folder =
+    create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
 
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "update",
-        json::array ({ json{ { "id", request }, { "collectionId", folder } } }) } }));
+    json::array ({ json{ { "id", request }, { "collectionId", folder } } }) } }));
     ASSERT_EQ (status, 400) << response.dump ();
     EXPECT_EQ (db_->get_request (request)->collection_id, root_);
 }
@@ -665,7 +690,7 @@ TEST_F (SpecSyncRouteTest, RefusesTheSameRequestTwiceInOnePayload) {
 
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "update", json::array ({ json{ { "id", request }, { "name", "a" } } }) },
-        { "delete", json::array ({ request }) } }));
+    { "delete", json::array ({ request }) } }));
     ASSERT_EQ (status, 400) << response.dump ();
     EXPECT_TRUE (db_->get_request (request).has_value ());
 }
@@ -673,8 +698,8 @@ TEST_F (SpecSyncRouteTest, RefusesTheSameRequestTwiceInOnePayload) {
 TEST_F (SpecSyncRouteTest, DeletingARequestThatIsAlreadyGoneIsNotAFailure) {
     // The asked-for state is "not there", and it is not there. Refusing would
     // make a re-tried sync fail on the half that already succeeded.
-    auto [status, response] =
-    routes::spec_sync_response (*db_, body (json{ { "delete", json::array ({ "req_ghost" }) } }));
+    auto [status, response] = routes::spec_sync_response (
+    *db_, body (json{ { "delete", json::array ({ "req_ghost" }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
     EXPECT_EQ (response["deleted"].get<int> (), 0);
     EXPECT_NE (binding ()["specId"].get<std::string> (), bound_spec_);
@@ -807,8 +832,8 @@ TEST_F (SpecSyncRouteTest, ASyncLeavesAnOlderRunsStoredCoverageAlone) {
  */
 
 TEST_F (SpecSyncRouteTest, PolicyCreatesWhatTheDocumentAddedAndDeletesNothing) {
-    const std::string stamped =
-    create_request (root_, json{ { "name", "listPets" }, { "specOperation", LIST_PETS } });
+    const std::string stamped = create_request (
+    root_, json{ { "name", "listPets" }, { "specOperation", LIST_PETS } });
     // Stamped with an operation no fetched document declares - a removal, and the
     // one thing a safe apply may never act on.
     const std::string orphaned = create_request (root_,
@@ -830,8 +855,9 @@ TEST_F (SpecSyncRouteTest, PolicyCreatesWhatTheDocumentAddedAndDeletesNothing) {
     const auto created = db_->get_requests_in_collection (root_);
     const auto folders = db_->get_collections ();
     const auto owners  = std::find_if (folders.begin (), folders.end (),
-    [&] (const vayu::db::Collection& c) { return c.name == "owners"; });
-    ASSERT_NE (owners, folders.end ()) << "the tag folder an import files this under";
+     [&] (const vayu::db::Collection& c) { return c.name == "owners"; });
+    ASSERT_NE (owners, folders.end ())
+    << "the tag folder an import files this under";
     ASSERT_EQ (owners->parent_id.value_or (""), root_);
     const auto filed = db_->get_requests_in_collection (owners->id);
     ASSERT_EQ (filed.size (), 1u);
@@ -847,13 +873,13 @@ TEST_F (SpecSyncRouteTest, PolicyWritesAFieldOnlyTheDocumentMoved) {
     // - this fixture's requests point at `example.test` - which makes the case
     // sharper: one request, one field written and one left alone, decided field
     // by field rather than row by row.
-    const std::string stamped =
-    create_request (root_, json{ { "name", "listPets" }, { "specOperation", LIST_PETS } });
+    const std::string stamped = create_request (
+    root_, json{ { "name", "listPets" }, { "specOperation", LIST_PETS } });
     const std::string edited_url = db_->get_request (stamped)->url;
 
     auto [status, response] = routes::spec_sync_response (*db_,
-    json{ { "collectionId", root_ }, { "spec", json{ { "content", REWORDED_PETS_DOC } } },
-        { "policy", "safe" } });
+    json{ { "collectionId", root_ },
+    { "spec", json{ { "content", REWORDED_PETS_DOC } } }, { "policy", "safe" } });
     ASSERT_EQ (status, 200) << response.dump ();
 
     EXPECT_EQ (response["updated"].get<size_t> (), 1u);
@@ -875,12 +901,12 @@ TEST_F (SpecSyncRouteTest, PolicyLeavesAFieldSomebodyEditedExactlyAsTheyLeftIt) 
      * request. Dropping the `user_touched` guard in `safe_spec_apply` reddens
      * this: the name becomes "List all the pets" and somebody's work is gone.
      */
-    const std::string edited =
-    create_request (root_, json{ { "name", "My pets call" }, { "specOperation", LIST_PETS } });
+    const std::string edited = create_request (
+    root_, json{ { "name", "My pets call" }, { "specOperation", LIST_PETS } });
 
     auto [status, response] = routes::spec_sync_response (*db_,
-    json{ { "collectionId", root_ }, { "spec", json{ { "content", REWORDED_PETS_DOC } } },
-        { "policy", "safe" } });
+    json{ { "collectionId", root_ },
+    { "spec", json{ { "content", REWORDED_PETS_DOC } } }, { "policy", "safe" } });
     ASSERT_EQ (status, 200) << response.dump ();
 
     auto after = db_->get_request (edited);
@@ -895,15 +921,16 @@ TEST_F (SpecSyncRouteTest, PolicyLeavesAFieldSomebodyEditedExactlyAsTheyLeftIt) 
     EXPECT_EQ (response["skipped"]["fields"].get<size_t> (), 2u);
     // The document still landed - catching a collection up to a contract is a
     // real sync even when no row moves.
-    EXPECT_EQ (binding ()["specId"].get<std::string> (), response["specId"].get<std::string> ());
+    EXPECT_EQ (binding ()["specId"].get<std::string> (),
+    response["specId"].get<std::string> ());
 }
 
 TEST_F (SpecSyncRouteTest, PolicyRefusesAPayloadThatAlsoStatesRows) {
     // Two answers to one question. There is no reading of "the safe ticks, plus
     // these" that is not a guess, so it is refused rather than merged.
     for (const char* section : { "collections", "create", "update", "delete" }) {
-        json payload = body (json{ { "policy", "safe" } });
-        payload[section] = json::array ();
+        json payload            = body (json{ { "policy", "safe" } });
+        payload[section]        = json::array ();
         auto [status, response] = routes::spec_sync_response (*db_, payload);
         EXPECT_EQ (status, 400) << section << ": " << response.dump ();
         EXPECT_NE (response["error"]["message"].get<std::string> ().find (section),
@@ -927,7 +954,7 @@ TEST_F (SpecSyncRouteTest, AnExplicitPayloadIsToldNothingAboutWhatAPolicyWouldHa
 
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "update",
-        json::array ({ json{ { "id", stayed }, { "name", "list every pet" } } }) } }));
+    json::array ({ json{ { "id", stayed }, { "name", "list every pet" } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
 
     EXPECT_FALSE (response.contains ("skipped"));

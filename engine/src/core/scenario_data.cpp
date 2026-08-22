@@ -558,7 +558,7 @@ std::string escape_xml_cdata (const std::string& text) {
     out.reserve (text.size ());
     size_t cursor = 0;
     for (size_t found = text.find (CLOSER); found != std::string::npos;
-         found        = text.find (CLOSER, cursor)) {
+    found             = text.find (CLOSER, cursor)) {
         out.append (text, cursor, found - cursor);
         out += SPLIT;
         cursor = found + CLOSER.size ();
@@ -771,7 +771,8 @@ size_t row_index) {
         return DataBindResult{ true, {} };
     }
 
-    if (auto bound = apply_auth_data_template (auth, tmpl, row, row_index); !bound.ok) {
+    if (auto bound = apply_auth_data_template (auth, tmpl, row, row_index);
+    !bound.ok) {
         return bound;
     }
 

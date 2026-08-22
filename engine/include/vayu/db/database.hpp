@@ -271,7 +271,7 @@ class Database {
     const std::vector<Request>& requests,
     const std::vector<Environment>& environments,
     const std::vector<RequestExample>& examples = {},
-    const std::vector<SpecDocument>& specs = {});
+    const std::vector<SpecDocument>& specs      = {});
 
     /**
      * @brief Persist a whole batch reorder in one transaction (issue #365).
@@ -369,7 +369,8 @@ class Database {
     // Paginated, filtered run list ordered start_time DESC (newest first) - the
     // only order the UI uses. count_runs returns the total matching @p filter
     // (ignoring limit/offset) for the pagination envelope.
-    std::vector<Run> get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset);
+    std::vector<Run>
+    get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset);
     int64_t count_runs (const RunFilter& filter);
     void delete_run (const std::string& id);
 
@@ -432,7 +433,8 @@ class Database {
     // Metric ticks - one wide row per tick; the current time-series storage.
     void add_metric_tick (const MetricTick& tick);
     // Ordered (timestamp, id) so a page boundary never splits a tick.
-    std::vector<MetricTick> get_metric_ticks_paginated (const std::string& run_id, int64_t limit, int64_t offset);
+    std::vector<MetricTick>
+    get_metric_ticks_paginated (const std::string& run_id, int64_t limit, int64_t offset);
     std::vector<MetricTick> get_metric_ticks_since (const std::string& run_id, int64_t last_id);
     int64_t count_metric_ticks (const std::string& run_id);
 
@@ -488,9 +490,8 @@ class Database {
     // Captured response bodies for a run's sampled results. Deliberately not
     // reachable from get_results: the report path loads and parses every
     // result row for a run, and this is exactly the data it must not pay for.
-    std::vector<ResultBody> get_result_bodies_paginated (const std::string& run_id,
-    int64_t limit,
-    int64_t offset);
+    std::vector<ResultBody>
+    get_result_bodies_paginated (const std::string& run_id, int64_t limit, int64_t offset);
     int64_t count_result_bodies (const std::string& run_id);
     /// The stored bytes of a blob, or `""` when the id is 0 or unknown.
     std::string get_body_blob_content (int blob_id);

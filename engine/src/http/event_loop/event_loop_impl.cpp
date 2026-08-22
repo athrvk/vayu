@@ -104,8 +104,8 @@ EventLoopStats EventLoopImpl::stats () const {
 }
 
 size_t EventLoopImpl::submit (const Request& request, RequestCallback callback, ProgressCallback progress) {
-    auto data          = std::make_unique<TransferData> ();
-    data->request_id   = next_request_id.fetch_add (1, std::memory_order_relaxed);
+    auto data        = std::make_unique<TransferData> ();
+    data->request_id = next_request_id.fetch_add (1, std::memory_order_relaxed);
     data->submitted_at = std::chrono::steady_clock::now ();
     data->request      = request;
     data->callback     = std::move (callback);
@@ -117,8 +117,8 @@ size_t EventLoopImpl::submit (const Request& request, RequestCallback callback, 
 }
 
 RequestHandle EventLoopImpl::submit_async (const Request& request) {
-    auto data          = std::make_unique<TransferData> ();
-    data->request_id   = next_request_id.fetch_add (1, std::memory_order_relaxed);
+    auto data        = std::make_unique<TransferData> ();
+    data->request_id = next_request_id.fetch_add (1, std::memory_order_relaxed);
     data->submitted_at = std::chrono::steady_clock::now ();
     data->request      = request;
     data->has_promise  = true;

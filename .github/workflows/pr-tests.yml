@@ -149,6 +149,7 @@ jobs:
               - 'engine/**'
               - 'build.py'
               - 'VERSION'
+              - '.clang-format'
               - '.github/check-windows-deps.py'
               - '.github/workflows/pr-tests.yml'
             build_script:
@@ -381,21 +382,31 @@ jobs:
           - os: macos-latest
             preset: macos-prod
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
-    timeout-minutes: 60
+    # 90, not 60. A normal pull request finishes this job in 5-11 minutes, so
+    # the timeout is a runaway guard rather than a budget - but a pull request
+    # that touches a large number of engine sources makes the clang-tidy step
+    # dominate, because clang-tidy parses a whole translation unit per changed
+    # file no matter how few of its lines changed. #886's 149-file reformat hit
+    # the old 60 on Linux and Windows alike with clang-tidy still running. The
+    # headroom is for that shape of change; nothing routine goes near it.
+    timeout-minutes: 90
     env:
       VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       SCCACHE_GHA_ENABLED: 'true'
 
     steps:
-      # Depth 2 rather than 1, for `HEAD^1` alone: the clang-tidy step below
-      # diffs the pull request against the base side of the merge commit
-      # actions/checkout leaves at HEAD, and that parent is the second commit.
-      # One extra object, on every leg because the checkout is shared.
+      # Full history, not depth 2. Depth 2 was enough while the clang-tidy step
+      # below only needed `HEAD^1` - the base side of the merge commit
+      # actions/checkout leaves at HEAD. It now also enumerates the pull
+      # request's own commits, to skip the ones the repository has declared to
+      # be pure reformatting (see that step), and a shallow clone does not
+      # contain them. A full clone of this repository costs seconds against a
+      # job that runs for minutes.
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -581,22 +592,87 @@ jobs:
           # A read loop rather than `mapfile`: `shell: bash` on the macOS runner
           # is /bin/bash 3.2.57, where mapfile does not exist. The installer job
           # names that trap already - it is the same one, one job over.
+          # Where the diff starts. Normally the base, `HEAD^1` - but if this
+          # pull request contains a commit the repository has declared to be
+          # pure reformatting, the diff starts at that commit instead.
+          #
+          # A reformat rewrites a line in every file it touches, which defeats
+          # line scoping twice over. It makes clang-tidy parse a whole
+          # translation unit per reformatted file - #886's 149-file bulk-format
+          # commit asked for 152 of them and killed this job at its timeout with
+          # clang-tidy still running - and for the files that *are* linted it
+          # widens the line filter to nearly the whole file, so every
+          # pre-existing finding in them surfaces. Both are the failure mode
+          # line scoping exists to prevent: a pull request failed for code it
+          # did not write. Measured on #886, starting from the base: 152 sources
+          # and findings up to "cognitive complexity of 168". Starting from the
+          # bulk-format commit: the same 7 sources that really changed, 23
+          # lines, clean.
+          #
+          # `.git-blame-ignore-revs` is the declaration, the same one `git
+          # blame` reads: "this commit changed formatting and nothing else".
+          # Blame trusts it and so does this, which is a second reason a commit
+          # listed there must be mechanical and nothing else - the file says so.
+          #
+          # The newest such commit wins, because a reformat rewrites whatever
+          # preceded it. The cost is that a *real* commit placed before the
+          # reformat in the same pull request is not linted here; that is the
+          # right trade, since the formatter has rewritten those lines anyway,
+          # and the alternative is the 168-complexity noise above.
+          ignored=()
+          if [[ -f .git-blame-ignore-revs ]]; then
+            while IFS= read -r line; do
+              line="${line%%#*}"
+              line="${line//[[:space:]]/}"
+              [[ -n "$line" ]] && ignored+=("$line")
+            done < .git-blame-ignore-revs
+          fi
+
+          # `git rev-list` lists newest first, so the first match is the newest.
+          # `--no-merges` because HEAD *is* a merge commit here - the one
+          # actions/checkout leaves for a pull_request event - and a merge
+          # authors no lines of its own.
+          base=HEAD^1
+          for rev in $(git rev-list --no-merges HEAD^1..HEAD); do
+            for ig in ${ignored[@]+"${ignored[@]}"}; do
+              if [[ "$rev" == "$ig" ]]; then
+                base="$rev"
+                break 2
+              fi
+            done
+          done
+
           changed=()
           while IFS= read -r file; do
             changed+=("$file")
-          done < <(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
+          done < <(git diff --name-only "$base" HEAD -- "${roots[@]}" \
             | grep -E '\.(c|cpp|h|hpp)$' || true)
 
           # The non-empty-scan proof this repository asks of every source
           # scanning guard: name what is about to be linted, so a step that
           # silently narrowed to nothing cannot read as a pass.
+          #
+          # What was skipped is reported rather than dropped quietly, on the
+          # repository's no-silent-caps rule: a narrowed scan that reads as a
+          # clean pass is the failure this summary exists to prevent.
+          all_changed=$(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
+            | grep -cE '\.(c|cpp|h|hpp)$' || true)
+          skipped=$(( all_changed - ${#changed[@]} ))
+
           if [[ ${#changed[@]} -eq 0 ]]; then
-            echo "- clang-tidy: no engine sources changed, nothing to lint" >> "$GITHUB_STEP_SUMMARY"
+            if [[ $skipped -gt 0 ]]; then
+              echo "- clang-tidy: nothing to lint - all **$skipped** changed engine source(s) were touched only by commits listed in \`.git-blame-ignore-revs\` (reformatting)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- clang-tidy: no engine sources changed, nothing to lint" >> "$GITHUB_STEP_SUMMARY"
+            fi
             exit 0
           fi
           {
-            echo "- clang-tidy linted the changed lines of **${#changed[@]}** engine source(s):"
+            echo "- clang-tidy linted the changed lines of **${#changed[@]}** engine source(s), against \`$(git rev-parse --short "$base")\`:"
             printf '  - `%s`\n' "${changed[@]}"
+            if [[ $skipped -gt 0 ]]; then
+              echo "  - (**$skipped** further source(s) skipped: changed only by the reformatting commit declared in \`.git-blame-ignore-revs\`)"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Installed here rather than in a step of its own so a pull request
@@ -675,7 +751,10 @@ jobs:
             exit 1
           fi
 
-          git diff -U0 HEAD^1 HEAD -- "${roots[@]}" \
+          # `"${changed[@]}"`, not `"${roots[@]}"`: the roots would re-admit the
+          # sources that only a declared formatting commit touched, undoing the
+          # skip computed above.
+          git diff -U0 "$base" HEAD -- "${changed[@]}" \
             | "$python" "$tidy_diff" \
                 -clang-tidy-binary "$tidy" \
                 -p1 -path engine/build-release \
@@ -704,6 +783,86 @@ jobs:
           check_name: 'C++ Tests (${{ matrix.os }})'
           require_tests: true
           fail_on_failure: false
+
+  # The clang-format gate (#886). A job of its own rather than a step of the
+  # engine matrix, for the reason `quality` is a job of its own: formatting is
+  # platform-independent and needs no compile database, so riding the engine job
+  # would put a two-second check behind a five-to-eleven-minute vcpkg build and
+  # then run it three times for one answer. Out here it reports in under a
+  # minute, beside the suites.
+  #
+  # **Whole tree, not changed lines** - the opposite of the clang-tidy gate one
+  # job up, and for the opposite reason. That gate is line-scoped because the
+  # engine carries a lint backlog older than any current diff. Formatting has no
+  # backlog: the bulk-format commit in `.git-blame-ignore-revs` left all 285
+  # non-vendor sources clean at the pinned version, so the strict check is the
+  # cheap one and it cannot fail a pull request for code it did not write.
+  #
+  # `engine/vendor/` is excluded by the roots below, and carries
+  # `DisableFormat: true` of its own besides.
+  engine-format:
+    name: Engine formatting
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      # 19, the same major the clang-tidy gate pins on Linux and the same one
+      # CONTRIBUTING.md tells contributors to install, so one LLVM answers for
+      # both checks and a local run means what this one means. It is not a free
+      # choice: 39 of the 285 engine sources format differently under 18 than
+      # under 19, so an unpinned `clang-format` would fail pull requests over
+      # whichever version a contributor's distribution happened to ship.
+      - name: Install clang-format 19
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-format-19
+
+      - name: Check engine formatting
+        shell: bash
+        run: |
+          # Asserted rather than trusted, on the pattern the clang-tidy step
+          # uses: apt could satisfy `clang-format-19` from a package that moved
+          # on, and a version this check did not expect is a wrong answer rather
+          # than a missing one.
+          major=$(clang-format-19 --version | grep -oE '[0-9]+' | head -1)
+          if [[ "$major" != "19" ]]; then
+            echo "::error::clang-format ${major:-(version unreadable)} is not the 19 this gate and CONTRIBUTING.md pin"
+            exit 1
+          fi
+
+          roots=(engine/src engine/include engine/tests)
+
+          # `git ls-files` rather than an enumerated list, so a source file
+          # added tomorrow is covered without anyone remembering to add it here.
+          # A read loop rather than `mapfile` only to match the engine job's
+          # idiom - this leg is Ubuntu-only, so the bash 3.2.57 constraint that
+          # forces it one job up does not apply here.
+          files=()
+          while IFS= read -r file; do
+            files+=("$file")
+          done < <(git ls-files -- "${roots[@]}" | grep -E '\.(c|cpp|h|hpp)$')
+
+          # The non-empty-scan proof this repository asks of every source
+          # scanning guard. A roots list that stopped matching - a directory
+          # renamed, a glob typo - would otherwise check nothing and report a
+          # pass, which is the one failure mode a formatting gate cannot survive
+          # quietly.
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::No engine sources matched ${roots[*]} - this gate scanned nothing, which is a failure and not a pass"
+            exit 1
+          fi
+          echo "- clang-format $major checked **${#files[@]}** engine source(s)" >> "$GITHUB_STEP_SUMMARY"
+
+          clang-format-19 --style=file --dry-run -Werror "${files[@]}"
 
   installer:
     name: Installer script on ${{ matrix.os }}
@@ -885,7 +1044,7 @@ jobs:
     # filter cannot be read as "nothing to test". Without it, a broken `changes`
     # job skips everything, and "skipped" would pass this gate on a change
     # nobody ran.
-    needs: [changes, quality, app, engine, installer, build-script, scripts]
+    needs: [changes, quality, app, engine, engine-format, installer, build-script, scripts]
     if: always()
     # `actions: read` is what lets the download below reach this run's own
     # artifacts; everything else here reads job results, which need nothing.
@@ -970,6 +1129,7 @@ jobs:
           check quality   "${{ needs.quality.result }}"
           check app       "${{ needs.app.result }}"
           check engine    "${{ needs.engine.result }}"
+          check engine-format "${{ needs['engine-format'].result }}"
           check installer "${{ needs.installer.result }}"
           check build-script "${{ needs['build-script'].result }}"
           check scripts   "${{ needs.scripts.result }}"

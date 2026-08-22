@@ -129,15 +129,15 @@ struct ReportExtras {
     bool status_codes_overridden = false;
     // Script-validation tallies; `has_tests` false leaves the report's
     // testValidation section out entirely.
-    bool has_tests     = false;
-    int tests_sampled  = 0;
-    int tests_passed   = 0;
-    int tests_failed   = 0;
+    bool has_tests    = false;
+    int tests_sampled = 0;
+    int tests_passed  = 0;
+    int tests_failed  = 0;
     // The run's verdict against its declared budgets. `has_thresholds` false is
     // a run that declared none (or one recorded before budgets existed), which
     // leaves thresholdValidation out entirely - a run that declared nothing did
     // not pass zero checks, it was never judged.
-    bool has_thresholds = false;
+    bool has_thresholds      = false;
     size_t thresholds_passed = 0;
     size_t thresholds_failed = 0;
     // Per-budget rows verbatim from the summary, already in the report's
@@ -148,7 +148,7 @@ struct ReportExtras {
     // a non-expiring or query-placed token, or an engine older than mid-run
     // refresh), which is not the same as a run that watched and never needed to
     // - so the section is left out rather than reported as zero refreshes.
-    bool has_auth = false;
+    bool has_auth                 = false;
     nlohmann::json auth_refreshes = nlohmann::json::array ();
     size_t auth_refresh_failures  = 0;
     std::string auth_last_error;
@@ -208,7 +208,7 @@ struct ReportExtras {
     // (per-series min/max/avg plus the sample and gap counts). `has_monitor`
     // false leaves the section out entirely - a run that configured no monitor
     // did not measure a target reporting zeros.
-    bool has_monitor = false;
+    bool has_monitor       = false;
     nlohmann::json monitor = nlohmann::json::object ();
     // How many of this run's transfers asked for HTTP/2 and negotiated
     // something older. Not a performance number - it is what tells the reader
@@ -334,13 +334,13 @@ ReportExtras& extras) {
     try {
         summary = nlohmann::json::parse (summary_json);
     } catch (...) {
-        vayu::utils::log_warning (
-        "Run summary is not valid JSON; reporting from the sampled results alone");
+        vayu::utils::log_warning ("Run summary is not valid JSON; reporting "
+                                  "from the sampled results alone");
         return;
     }
     if (!summary.is_object ()) {
-        vayu::utils::log_warning (
-        "Run summary is not an object; reporting from the sampled results alone");
+        vayu::utils::log_warning ("Run summary is not an object; reporting "
+                                  "from the sampled results alone");
         return;
     }
 
@@ -374,8 +374,8 @@ ReportExtras& extras) {
         read_number (latency, "p999", report.latency_p999);
     }
 
-    if (summary.contains ("status_codes") && summary["status_codes"].is_object () &&
-    !summary["status_codes"].empty ()) {
+    if (summary.contains ("status_codes") &&
+    summary["status_codes"].is_object () && !summary["status_codes"].empty ()) {
         report.status_codes.clear ();
         extras.status_codes_overridden = true;
         for (const auto& [code_str, count] : summary["status_codes"].items ()) {
@@ -400,8 +400,8 @@ ReportExtras& extras) {
     }
 
     if (summary.contains ("scenario") && summary["scenario"].is_object ()) {
-        extras.has_scenario   = true;
-        const auto& scenario  = summary["scenario"];
+        extras.has_scenario  = true;
+        const auto& scenario = summary["scenario"];
         read_number (scenario, "iterations", extras.iterations);
         read_number (scenario, "iterations_completed", extras.iterations_completed);
         read_number (scenario, "steps_executed", extras.steps_executed);
@@ -489,10 +489,10 @@ ReportExtras& extras) {
         // The checks are the section: a stored object with no readable rows
         // says nothing a reader can act on, so it is treated as absent rather
         // than reported as a run that passed and failed nothing.
-        if (thresholds.contains ("checks") && thresholds["checks"].is_array () &&
-        !thresholds["checks"].empty ()) {
-            extras.has_thresholds    = true;
-            extras.threshold_checks  = thresholds["checks"];
+        if (thresholds.contains ("checks") &&
+        thresholds["checks"].is_array () && !thresholds["checks"].empty ()) {
+            extras.has_thresholds   = true;
+            extras.threshold_checks = thresholds["checks"];
             read_number (thresholds, "passed", extras.thresholds_passed);
             read_number (thresholds, "failed", extras.thresholds_failed);
         }
@@ -509,13 +509,13 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run) {
     row["status"]    = vayu::to_string (run.status);
     row["startTime"] = run.start_time;
     row["endTime"]   = run.end_time;
-    row["requestId"] =
-    run.request_id.has_value () ? nlohmann::json (*run.request_id) : nlohmann::json (nullptr);
+    row["requestId"] = run.request_id.has_value () ? nlohmann::json (*run.request_id) :
+                                                     nlohmann::json (nullptr);
     row["environmentId"] = run.environment_id.has_value () ?
     nlohmann::json (*run.environment_id) :
     nlohmann::json (nullptr);
-    row["baseline"] = run.baseline;
-    row["summary"]  = build_run_summary (run.config_snapshot);
+    row["baseline"]      = run.baseline;
+    row["summary"]       = build_run_summary (run.config_snapshot);
     return row;
 }
 
@@ -538,7 +538,9 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run) {
  * the route's try/catch (500).
  */
 std::pair<int, nlohmann::json> get_runs_response (vayu::db::Database& db,
-const vayu::db::RunFilter& filter, int64_t limit, int64_t offset) {
+const vayu::db::RunFilter& filter,
+int64_t limit,
+int64_t offset) {
     const int64_t total = db.count_runs (filter);
     auto runs           = db.get_runs_paginated (filter, limit, offset);
 
@@ -566,11 +568,12 @@ const vayu::db::RunFilter& filter, int64_t limit, int64_t offset) {
     }
 
     nlohmann::json response;
-    response["data"]                   = std::move (data);
-    response["pagination"]["total"]    = total;
-    response["pagination"]["limit"]    = limit;
-    response["pagination"]["offset"]   = offset;
-    response["pagination"]["hasMore"]  = (offset + static_cast<int64_t> (runs.size ())) < total;
+    response["data"]                 = std::move (data);
+    response["pagination"]["total"]  = total;
+    response["pagination"]["limit"]  = limit;
+    response["pagination"]["offset"] = offset;
+    response["pagination"]["hasMore"] =
+    (offset + static_cast<int64_t> (runs.size ())) < total;
     response["pagination"]["returned"] = runs.size ();
     return { 200, response };
 }
@@ -591,15 +594,17 @@ const vayu::db::RunFilter& filter, int64_t limit, int64_t offset) {
  * envelope is the `{data, pagination}` shape GET /runs and GET /runs/:id/metrics
  * already use.
  */
-std::pair<int, nlohmann::json>
-run_samples_response (vayu::db::Database& db, const std::string& run_id, int64_t limit, int64_t offset) {
+std::pair<int, nlohmann::json> run_samples_response (vayu::db::Database& db,
+const std::string& run_id,
+int64_t limit,
+int64_t offset) {
     auto run = db.get_run (run_id);
     if (!run) {
         return { 404, error_body (404, "Run not found") };
     }
 
     const int64_t total = db.count_result_bodies (run_id);
-    auto rows           = db.get_result_bodies_paginated (run_id, limit, offset);
+    auto rows = db.get_result_bodies_paginated (run_id, limit, offset);
 
     // Read once for the page, not once per streamed row: the caps are what the
     // reader's own settings say now, and a page whose rows were bounded by two
@@ -635,8 +640,9 @@ run_samples_response (vayu::db::Database& db, const std::string& run_id, int64_t
         } else {
             auto cached = blob_cache.find (row.blob_id);
             if (cached == blob_cache.end ()) {
-                cached =
-                blob_cache.emplace (row.blob_id, db.get_body_blob_content (row.blob_id)).first;
+                cached = blob_cache
+                         .emplace (row.blob_id, db.get_body_blob_content (row.blob_id))
+                         .first;
             }
             response["body"] = cached->second;
             if (row.truncated) {
@@ -667,11 +673,11 @@ run_samples_response (vayu::db::Database& db, const std::string& run_id, int64_t
     }
 
     nlohmann::json body;
-    body["data"]                   = std::move (data);
-    body["pagination"]["total"]    = total;
-    body["pagination"]["limit"]    = limit;
-    body["pagination"]["offset"]   = offset;
-    body["pagination"]["hasMore"]  = (offset + static_cast<int64_t> (rows.size ())) < total;
+    body["data"]                 = std::move (data);
+    body["pagination"]["total"]  = total;
+    body["pagination"]["limit"]  = limit;
+    body["pagination"]["offset"] = offset;
+    body["pagination"]["hasMore"] = (offset + static_cast<int64_t> (rows.size ())) < total;
     body["pagination"]["returned"] = rows.size ();
     return { 200, body };
 }
@@ -712,8 +718,9 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
  * 200 carries the updated row in the same shape `GET /runs` lists, so a client
  * can patch its cached row from the response instead of re-listing.
  */
-std::pair<int, nlohmann::json>
-set_run_baseline_response (vayu::db::Database& db, const std::string& run_id, const std::string& body) {
+std::pair<int, nlohmann::json> set_run_baseline_response (vayu::db::Database& db,
+const std::string& run_id,
+const std::string& body) {
     nlohmann::json parsed;
     try {
         parsed = nlohmann::json::parse (body);
@@ -781,7 +788,8 @@ int64_t stop_wait_ms) {
                 "DELETE /runs/:id - Run did not settle within " +
                 std::to_string (stop_wait_ms) + "ms, refusing to delete: " + run_id);
                 return { 409,
-                    error_body (409, "Run is still stopping; it was not deleted. Retry once it "
+                    error_body (409,
+                    "Run is still stopping; it was not deleted. Retry once it "
                     "reports a terminal status.") };
             }
             std::this_thread::sleep_for (std::chrono::milliseconds (20));
@@ -807,8 +815,8 @@ int64_t stop_wait_ms) {
  * Extracted so the wiring is covered without an in-process HTTP server - see
  * runs_route_test.cpp. Exceptions propagate to the route's try/catch (500).
  */
-std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
-const std::string& run_id) {
+std::pair<int, nlohmann::json>
+run_report_response (vayu::db::Database& db, const std::string& run_id) {
     auto run = db.get_run (run_id);
     if (!run) {
         return { 404, error_body (404, "Run not found") };
@@ -925,9 +933,9 @@ const std::string& run_id) {
         // the collection points at today. Absent for an unbound run, which is
         // how the manifest stores it - #629's coverage block reads this.
         if (auto scenario = config.find ("scenario");
-            scenario != config.end () && scenario->is_object ()) {
+        scenario != config.end () && scenario->is_object ()) {
             if (auto openapi = scenario->find ("openapi");
-                openapi != scenario->end () && openapi->is_object ()) {
+            openapi != scenario->end () && openapi->is_object ()) {
                 metadata["openapi"] = *openapi;
             }
         }
@@ -936,39 +944,35 @@ const std::string& run_id) {
 
     nlohmann::json json_report;
     json_report["metadata"] = metadata;
-    json_report["summary"] = { { "totalRequests", report.total_requests },
-        { "successfulRequests", report.successful_requests },
-        { "failedRequests", report.failed_requests },
-        { "errorRate", report.error_rate },
-        { "totalDurationSeconds", report.total_duration_s },
-        { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
-        { "sendRate", report.send_rate }, { "throughput", report.throughput },
-        { "setupOverhead", report.setup_overhead_s },
-        { "peakConcurrency", static_cast<size_t> (extras.peak_concurrency) },
-        { "droppedRequests", static_cast<size_t> (extras.dropped_total) },
-        { "avgQueueWaitMs", extras.queue_wait_avg },
-        { "bytesSent", static_cast<size_t> (extras.bytes_sent) },
-        { "bytesReceived", static_cast<size_t> (extras.bytes_received) },
-        // Sits in `summary` rather than `metadata.configuration` on purpose:
-        // configuration is what was asked for, and this is what happened.
-        // LoadTestDetail reads both and only trusts the requested-protocol
-        // label when this is 0.
-        { "httpVersionDowngraded", static_cast<size_t> (extras.http_version_downgraded) },
-        { "throughputBytesPerSec", report.total_duration_s > 0 ?
-        extras.bytes_received / report.total_duration_s :
-        0.0 } };
-    json_report["latency"]     = { { "min", report.latency_min },
-            { "max", report.latency_max }, { "avg", report.latency_avg },
-            { "median", report.latency_p50 }, { "p50", report.latency_p50 },
-            { "p75", report.latency_p75 }, { "p90", report.latency_p90 },
-            { "p95", report.latency_p95 }, { "p99", report.latency_p99 },
-            { "p999", report.latency_p999 } };
+    json_report["summary"]  = { { "totalRequests", report.total_requests },
+         { "successfulRequests", report.successful_requests },
+         { "failedRequests", report.failed_requests }, { "errorRate", report.error_rate },
+         { "totalDurationSeconds", report.total_duration_s },
+         { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
+         { "sendRate", report.send_rate }, { "throughput", report.throughput },
+         { "setupOverhead", report.setup_overhead_s },
+         { "peakConcurrency", static_cast<size_t> (extras.peak_concurrency) },
+         { "droppedRequests", static_cast<size_t> (extras.dropped_total) },
+         { "avgQueueWaitMs", extras.queue_wait_avg },
+         { "bytesSent", static_cast<size_t> (extras.bytes_sent) },
+         { "bytesReceived", static_cast<size_t> (extras.bytes_received) },
+         // Sits in `summary` rather than `metadata.configuration` on purpose:
+         // configuration is what was asked for, and this is what happened.
+         // LoadTestDetail reads both and only trusts the requested-protocol
+         // label when this is 0.
+         { "httpVersionDowngraded", static_cast<size_t> (extras.http_version_downgraded) },
+         { "throughputBytesPerSec",
+        report.total_duration_s > 0 ? extras.bytes_received / report.total_duration_s : 0.0 } };
+    json_report["latency"] = { { "min", report.latency_min }, { "max", report.latency_max },
+        { "avg", report.latency_avg }, { "median", report.latency_p50 },
+        { "p50", report.latency_p50 }, { "p75", report.latency_p75 },
+        { "p90", report.latency_p90 }, { "p95", report.latency_p95 },
+        { "p99", report.latency_p99 }, { "p999", report.latency_p999 } };
     json_report["statusCodes"] = report.status_codes;
 
     if (target_rps > 0) {
         json_report["rateControl"] = { { "targetRps", report.target_rps },
-            { "actualRps", report.actual_rps },
-            { "achievement", report.rps_achievement } };
+            { "actualRps", report.actual_rps }, { "achievement", report.rps_achievement } };
     }
 
     nlohmann::json errors_obj;
@@ -1038,11 +1042,9 @@ const std::string& run_id) {
     if (extras.has_scenario) {
         json_report["scenario"] = { { "iterations", extras.iterations },
             { "iterationsCompleted", extras.iterations_completed },
-            { "stepsExecuted", extras.steps_executed },
-            { "passed", extras.steps_passed }, { "failed", extras.steps_failed },
-            { "skipped", extras.steps_skipped },
-            { "errored", extras.steps_errored },
-            { "stepsStored", extras.steps_stored },
+            { "stepsExecuted", extras.steps_executed }, { "passed", extras.steps_passed },
+            { "failed", extras.steps_failed }, { "skipped", extras.steps_skipped },
+            { "errored", extras.steps_errored }, { "stepsStored", extras.steps_stored },
             { "stepsDropped", extras.steps_dropped } };
         // Added only when the run actually has them, so a design-mode run's
         // section keeps the exact shape the app already renders.
@@ -1064,8 +1066,7 @@ const std::string& run_id) {
 
     if (extras.has_tests) {
         json_report["testValidation"] = { { "samplesTested", extras.tests_sampled },
-            { "testsPassed", extras.tests_passed },
-            { "testsFailed", extras.tests_failed },
+            { "testsPassed", extras.tests_passed }, { "testsFailed", extras.tests_failed },
             { "successRate",
             extras.tests_sampled > 0 ?
             (static_cast<double> (extras.tests_passed) * 100.0 /
@@ -1104,8 +1105,7 @@ const std::string& run_id) {
     // rather than stored so it cannot contradict the counts printed next to it.
     if (extras.has_thresholds) {
         json_report["thresholdValidation"] = { { "checks", extras.threshold_checks },
-            { "passed", extras.thresholds_passed },
-            { "failed", extras.thresholds_failed },
+            { "passed", extras.thresholds_passed }, { "failed", extras.thresholds_failed },
             { "verdict", extras.thresholds_failed == 0 ? "passed" : "failed" } };
     }
 
@@ -1184,8 +1184,8 @@ void register_run_routes (RouteContext& ctx) {
      * external scripts keep working. Any recognised param opts into the envelope.
      */
     ctx.server.Get ("/runs", [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const bool wants_envelope = req.has_param ("limit") || req.has_param ("offset") ||
-        req.has_param ("type") || req.has_param ("status") ||
+        const bool wants_envelope = req.has_param ("limit") ||
+        req.has_param ("offset") || req.has_param ("type") || req.has_param ("status") ||
         req.has_param ("requestId") || req.has_param ("collectionId") ||
         req.has_param ("q") || req.has_param ("baseline");
 
@@ -1235,7 +1235,8 @@ void register_run_routes (RouteContext& ctx) {
         if (req.has_param ("type"))
             filter.type = vayu::parse_run_type (req.get_param_value ("type"));
         if (req.has_param ("status"))
-            filter.status = vayu::parse_run_status (req.get_param_value ("status"));
+            filter.status =
+            vayu::parse_run_status (req.get_param_value ("status"));
         if (req.has_param ("requestId"))
             filter.request_id = req.get_param_value ("requestId");
         if (req.has_param ("collectionId"))
@@ -1253,11 +1254,11 @@ void register_run_routes (RouteContext& ctx) {
                 filter.baseline = false;
         }
 
-        vayu::utils::log_info ("GET /runs - Listing runs (limit=" +
-        std::to_string (limit) + ", offset=" + std::to_string (offset) + ")");
+        vayu::utils::log_info ("GET /runs - Listing runs (limit=" + std::to_string (limit) +
+        ", offset=" + std::to_string (offset) + ")");
         try {
             auto [status, body] = get_runs_response (ctx.db, filter, limit, offset);
-            res.status          = status;
+            res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error ("GET /runs - Error: " + std::string (e.what ()));
@@ -1269,8 +1270,8 @@ void register_run_routes (RouteContext& ctx) {
      * GET /runs/:runId  (alias: GET /run/:runId, deprecated)
      * Retrieves details for a specific test run by its ID.
      */
-    httplib::Server::Handler get_run =
-    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler get_run = [&ctx] (const httplib::Request& req,
+                                       httplib::Response& res) {
         std::string run_id = req.matches[1];
         vayu::utils::log_info ("GET /runs/:id - Fetching run: " + run_id);
         try {
@@ -1307,8 +1308,8 @@ void register_run_routes (RouteContext& ctx) {
      * run is stopped first and only deleted once its worker has settled; see
      * delete_run_response.
      */
-    httplib::Server::Handler delete_run =
-    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler delete_run = [&ctx] (const httplib::Request& req,
+                                          httplib::Response& res) {
         std::string run_id = req.matches[1];
         vayu::utils::log_info ("DELETE /runs/:id - Deleting run: " + run_id);
         try {
@@ -1344,7 +1345,7 @@ void register_run_routes (RouteContext& ctx) {
         vayu::utils::log_info ("PUT /runs/:id/baseline - Run: " + run_id);
         try {
             auto [status, body] = set_run_baseline_response (ctx.db, run_id, req.body);
-            res.status          = status;
+            res.status = status;
             res.set_content (body.dump (), "application/json");
             if (status == 404) {
                 vayu::utils::log_warning (
@@ -1361,8 +1362,8 @@ void register_run_routes (RouteContext& ctx) {
      * POST /runs/:runId/stop  (alias: POST /run/:runId/stop, deprecated)
      * Stops a running load test.
      */
-    httplib::Server::Handler stop_run =
-    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler stop_run = [&ctx] (const httplib::Request& req,
+                                        httplib::Response& res) {
         std::string run_id = req.matches[1];
         vayu::utils::log_info ("POST /runs/:id/stop - Stopping run: " + run_id);
         try {
@@ -1405,8 +1406,8 @@ void register_run_routes (RouteContext& ctx) {
                 // gives a graceful stop. A transfer notices within one progress
                 // callback, so this all but always settles at once.
                 auto stream = ctx.sse_manager.get (run_id);
-                const auto deadline = std::chrono::steady_clock::now () +
-                std::chrono::seconds (5);
+                const auto deadline =
+                std::chrono::steady_clock::now () + std::chrono::seconds (5);
                 while (stream && !stream->closed () &&
                 std::chrono::steady_clock::now () < deadline) {
                     std::this_thread::sleep_for (std::chrono::milliseconds (10));
@@ -1415,8 +1416,8 @@ void register_run_routes (RouteContext& ctx) {
 
                 nlohmann::json response;
                 response["runId"]  = run_id;
-                response["status"] = to_string (settled ? vayu::RunStatus::Stopped :
-                                                          vayu::RunStatus::Running);
+                response["status"] = to_string (
+                settled ? vayu::RunStatus::Stopped : vayu::RunStatus::Running);
                 response["message"] = settled ?
                 "Stream stopped" :
                 "Stop signalled; the stream has not settled yet";
@@ -1473,8 +1474,8 @@ void register_run_routes (RouteContext& ctx) {
      * GET /runs/:runId/report  (alias: GET /run/:runId/report, deprecated)
      * Retrieves a detailed statistical report for a specific test run.
      */
-    httplib::Server::Handler get_run_report =
-    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler get_run_report = [&ctx] (const httplib::Request& req,
+                                              httplib::Response& res) {
         std::string run_id = req.matches[1];
         vayu::utils::log_info (
         "GET /runs/:id/report - Generating report for run: " + run_id);
@@ -1508,7 +1509,8 @@ void register_run_routes (RouteContext& ctx) {
     ctx.server.Get (R"(/runs/([^/]+)/samples)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string run_id = req.matches[1];
-        vayu::utils::log_info ("GET /runs/:id/samples - Fetching captured samples for run: " + run_id);
+        vayu::utils::log_info (
+        "GET /runs/:id/samples - Fetching captured samples for run: " + run_id);
 
         int64_t limit = 50;
         if (req.has_param ("limit")) {

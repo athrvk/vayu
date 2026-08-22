@@ -502,8 +502,8 @@ Json serialize (const vayu::db::Request& r) {
     // unparseable blob reads as null for the same reason the blocks above
     // degrade to their defaults.
     json["specOperation"] = spec_operation_node (r.spec_operation);
-    json["updatedAt"]         = r.updated_at;
-    json["createdAt"]         = r.created_at;
+    json["updatedAt"]     = r.updated_at;
+    json["createdAt"]     = r.created_at;
     return json;
 }
 
@@ -613,17 +613,18 @@ vayu::Environment parse_variables (const std::string& json_str) {
                     var.value = it->get<std::string> ();
                 }
                 if (auto it = value.find ("enabled");
-                    it != value.end () && it->is_boolean ()) {
+                it != value.end () && it->is_boolean ()) {
                     var.enabled = it->get<bool> ();
                 }
-                if (auto it = value.find ("secret"); it != value.end () && it->is_boolean ()) {
+                if (auto it = value.find ("secret");
+                it != value.end () && it->is_boolean ()) {
                     var.secret = it->get<bool> ();
                 }
                 if (auto it = value.find ("type"); it != value.end () && it->is_string ()) {
                     var.type = it->get<std::string> ();
                 }
                 if (auto it = value.find ("createdAt");
-                    it != value.end () && it->is_number ()) {
+                it != value.end () && it->is_number ()) {
                     var.created_at = it->get<int64_t> ();
                 }
                 env[key] = std::move (var);
@@ -642,7 +643,7 @@ std::string serialize_variables (const vayu::Environment& env) {
         obj[key]["value"]   = var.value;
         obj[key]["enabled"] = var.enabled;
         obj[key]["secret"]  = var.secret;
-        obj[key]["type"]    = var.type.empty () ? std::string{ "string" } : var.type;
+        obj[key]["type"] = var.type.empty () ? std::string{ "string" } : var.type;
         if (var.created_at.has_value ()) {
             obj[key]["createdAt"] = *var.created_at;
         }
@@ -703,11 +704,11 @@ Result<std::vector<FormField>> parse_form_fields (const Json& body_json, BodyMod
         FormField field;
         field.key = key->get<std::string> ();
         if (const auto value = item.find ("value");
-            value != item.end () && value->is_string ()) {
+        value != item.end () && value->is_string ()) {
             field.value = value->get<std::string> ();
         }
         if (const auto enabled = item.find ("enabled");
-            enabled != item.end () && enabled->is_boolean ()) {
+        enabled != item.end () && enabled->is_boolean ()) {
             field.enabled = enabled->get<bool> ();
         }
 
@@ -990,8 +991,8 @@ Json serialize (const ScriptResult& result) {
 
     Json console = Json::array ();
     for (const auto& entry : result.console_output) {
-        console.push_back ({ { "level", to_string (entry.level) },
-        { "message", entry.message } });
+        console.push_back (
+        { { "level", to_string (entry.level) }, { "message", entry.message } });
     }
     json["consoleOutput"] = console;
 
@@ -1191,8 +1192,7 @@ std::string sanitize_config_snapshot (const std::string& body) {
     // secret names, no future auth field (client secrets, tokens, private keys)
     // can leak into the persisted snapshot.
     if (parsed.is_object ()) {
-        if (auto it = parsed.find ("auth");
-            it != parsed.end () && it->is_object ()) {
+        if (auto it = parsed.find ("auth"); it != parsed.end () && it->is_object ()) {
             const std::string mode = it->value ("mode", std::string{ "none" });
             *it                    = Json::object ({ { "mode", mode } });
         }

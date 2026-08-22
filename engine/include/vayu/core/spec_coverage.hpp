@@ -96,8 +96,8 @@ parse_declared_operations (const std::string& stored);
  * and quietly ignored at run end - a client that sends a malformed index has a
  * bug, and the write is the only place that can name it.
  */
-[[nodiscard]] std::optional<std::string>
-validate_operations_index (const nlohmann::json& operations);
+[[nodiscard]] std::optional<std::string> validate_operations_index (
+const nlohmann::json& operations);
 
 /**
  * @brief The one declared status pattern @p status answers to, most specific
@@ -185,9 +185,9 @@ class CoverageTally {
 
     private:
     /// Slot layout of one step's counter array.
-    static constexpr size_t FIRST_STATUS = 100;
-    static constexpr size_t LAST_STATUS  = 599;
-    static constexpr size_t STATUS_SLOTS = LAST_STATUS - FIRST_STATUS + 1;
+    static constexpr size_t FIRST_STATUS   = 100;
+    static constexpr size_t LAST_STATUS    = 599;
+    static constexpr size_t STATUS_SLOTS   = LAST_STATUS - FIRST_STATUS + 1;
     static constexpr size_t TRANSPORT_SLOT = STATUS_SLOTS;
     static constexpr size_t OTHER_SLOT     = STATUS_SLOTS + 1;
     static constexpr size_t SLOTS          = STATUS_SLOTS + 2;

@@ -90,7 +90,7 @@ TEST_F (MetricsCollectorTest, CalculatesPercentilesCorrectly) {
 
     // HdrHistogram has ~0.1% precision at 3 significant figures
     // Use 1% tolerance for percentile assertions to account for histogram bucketing
-    constexpr double tolerance = 1.0;  // 1ms tolerance
+    constexpr double tolerance = 1.0; // 1ms tolerance
 
     EXPECT_NEAR (percentiles.min, 1.0, tolerance);
     EXPECT_NEAR (percentiles.max, 100.0, tolerance);
@@ -144,7 +144,7 @@ TEST_F (MetricsCollectorTest, SampleWindowReflectsRecordedInterval) {
 
     auto window = collector->sample_window_percentiles ();
 
-    constexpr double tolerance = 1.0;  // 1ms - HdrHistogram bucketing
+    constexpr double tolerance = 1.0; // 1ms - HdrHistogram bucketing
     EXPECT_NEAR (window.min, 1.0, tolerance);
     EXPECT_NEAR (window.max, 100.0, tolerance);
     EXPECT_NEAR (window.p50, 50.0, tolerance);
@@ -178,7 +178,7 @@ TEST_F (MetricsCollectorTest, WindowedTracksRecentWhileCumulativeFlattens) {
     for (int i = 0; i < 1000; ++i) {
         collector->record_success (200, 10.0, 0.0);
     }
-    (void) collector->sample_window_percentiles ();
+    (void)collector->sample_window_percentiles ();
 
     // Now the server degrades: a second interval of slow responses.
     for (int i = 0; i < 1000; ++i) {
@@ -191,7 +191,7 @@ TEST_F (MetricsCollectorTest, WindowedTracksRecentWhileCumulativeFlattens) {
     // percentile chart tracks current load instead of the all-time distribution.
     auto cumulative = collector->calculate_percentiles ();
     EXPECT_NEAR (window.p50, 500.0, 5.0);
-    EXPECT_LT (cumulative.p50, window.p50);  // cumulative median dragged down by fast half
+    EXPECT_LT (cumulative.p50, window.p50); // cumulative median dragged down by fast half
 }
 
 TEST_F (MetricsCollectorTest, GetCurrentStatsPrefersWindowedPercentiles) {
@@ -220,7 +220,7 @@ TEST_F (MetricsCollectorTest, SampleWindowSafeUnderConcurrentWriters) {
     // Writers record while the producer samples the window - the phaser must keep
     // this race-free (resolves D8 for the windowed source). Assert correctness of
     // the cumulative count and that sampling never crashes.
-    constexpr int kThreads = 4;
+    constexpr int kThreads   = 4;
     constexpr int kPerThread = 5000;
     std::atomic<bool> stop{ false };
 
@@ -236,17 +236,18 @@ TEST_F (MetricsCollectorTest, SampleWindowSafeUnderConcurrentWriters) {
 
     // Sample repeatedly from this (single reader) thread while writers run.
     while (!stop.load ()) {
-        (void) collector->sample_window_percentiles ();
+        (void)collector->sample_window_percentiles ();
         bool all_done = collector->total_requests () >=
         static_cast<size_t> (kThreads * kPerThread);
-        if (all_done) stop.store (true);
+        if (all_done)
+            stop.store (true);
     }
 
-    for (auto& w : writers) w.join ();
-    (void) collector->sample_window_percentiles ();
+    for (auto& w : writers)
+        w.join ();
+    (void)collector->sample_window_percentiles ();
 
-    EXPECT_EQ (collector->total_requests (),
-    static_cast<size_t> (kThreads * kPerThread));
+    EXPECT_EQ (collector->total_requests (), static_cast<size_t> (kThreads * kPerThread));
 }
 
 // ============================================================================
@@ -294,7 +295,7 @@ TEST_F (MetricsCollectorTest, StatusDistributionSumsToTotalRequests) {
     collector->record_error (vayu::ErrorCode::DnsError, "d");
 
     auto distribution = collector->status_code_distribution ();
-    size_t sum = 0;
+    size_t sum        = 0;
     for (const auto& [code, count] : distribution)
         sum += count;
 
@@ -413,14 +414,15 @@ TEST_F (MetricsCollectorTest, HistogramLosesNoSamplesUnderConcurrentWriters) {
         // counts[] slots as well as on total_count.
         writers.emplace_back ([this, t] () {
             for (int i = 0; i < kPerThread; ++i) {
-                collector->record_success (200, 1.0 + static_cast<double> ((i + t) % 50), 0.0);
+                collector->record_success (
+                200, 1.0 + static_cast<double> ((i + t) % 50), 0.0);
             }
         });
     }
-    for (auto& w : writers) w.join ();
+    for (auto& w : writers)
+        w.join ();
 
-    EXPECT_EQ (collector->latency_count (),
-    static_cast<int64_t> (kThreads) * kPerThread);
+    EXPECT_EQ (collector->latency_count (), static_cast<int64_t> (kThreads) * kPerThread);
 }
 
 // total_requests_ and total_errors_ are independent relaxed atomics that
@@ -745,8 +747,8 @@ TEST (MetricsCollectorReserveGuard, HugeExpectedRequestsDoesNotThrow) {
     // ceilings can now be raised to.
     config.expected_requests    = 103'680'000'000ULL;
     config.store_success_traces = true;
-    config.max_success_results  = 0; // take the derived branch, not the default cap
-    config.success_sample_rate  = 1; // 100% sampling: the largest derived reserve
+    config.max_success_results = 0; // take the derived branch, not the default cap
+    config.success_sample_rate = 1; // 100% sampling: the largest derived reserve
 
     std::unique_ptr<MetricsCollector> collector;
     ASSERT_NO_THROW (
@@ -1001,7 +1003,8 @@ namespace {
 
 /// A completion's phase breakdown, spelled out so a test reads as the five
 /// numbers it is asserting on rather than as five positional doubles.
-vayu::Timing phase_timing (double dns, double connect, double tls, double first_byte, double download) {
+vayu::Timing
+phase_timing (double dns, double connect, double tls, double first_byte, double download) {
     vayu::Timing timing;
     timing.dns_ms        = dns;
     timing.connect_ms    = connect;
@@ -1025,7 +1028,8 @@ constexpr size_t kDownload  = static_cast<size_t> (TimingPhase::Download);
 TEST_F (MetricsCollectorTest, PhaseValuesLandInTheirOwnHistogram) {
     for (int i = 0; i < 100; ++i) {
         const auto timing = phase_timing (1.0, 10.0, 100.0, 200.0, 4.0);
-        collector->record_success (200, 315.0, 0.0, "", SuccessTraceReason::None, nullptr, &timing);
+        collector->record_success (
+        200, 315.0, 0.0, "", SuccessTraceReason::None, nullptr, &timing);
     }
 
     auto phases = collector->phase_percentiles ();
@@ -1054,11 +1058,13 @@ TEST_F (MetricsCollectorTest, PhasePercentilesSeparateTailFromBody) {
     // than the behaviour it is here for.
     for (int i = 0; i < 95; ++i) {
         const auto timing = phase_timing (0.0, 0.0, 0.0, 5.0, 1.0);
-        collector->record_success (200, 6.0, 0.0, "", SuccessTraceReason::None, nullptr, &timing);
+        collector->record_success (
+        200, 6.0, 0.0, "", SuccessTraceReason::None, nullptr, &timing);
     }
     for (int i = 0; i < 5; ++i) {
         const auto slow = phase_timing (0.0, 3.0, 50.0, 5.0, 1.0);
-        collector->record_success (200, 59.0, 0.0, "", SuccessTraceReason::None, nullptr, &slow);
+        collector->record_success (
+        200, 59.0, 0.0, "", SuccessTraceReason::None, nullptr, &slow);
     }
 
     auto phases = collector->phase_percentiles ();
@@ -1114,8 +1120,8 @@ TEST_F (MetricsCollectorTest, PhaseHistogramsSafeUnderConcurrentWriters) {
         writers.emplace_back ([this] () {
             for (int i = 0; i < kPerThread; ++i) {
                 const auto timing = phase_timing (1.0, 2.0, 3.0, 4.0, 5.0);
-                collector->record_success (200, 15.0, 0.0, "",
-                SuccessTraceReason::None, nullptr, &timing);
+                collector->record_success (
+                200, 15.0, 0.0, "", SuccessTraceReason::None, nullptr, &timing);
             }
         });
     }

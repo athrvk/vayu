@@ -27,8 +27,7 @@ TEST (Encoding, Base64Rfc4648Vectors) {
 
 TEST (Encoding, Base64BasicCredentials) {
     // Classic HTTP Basic example: "Aladdin:open sesame".
-    EXPECT_EQ (base64_encode ("Aladdin:open sesame"),
-    "QWxhZGRpbjpvcGVuIHNlc2FtZQ==");
+    EXPECT_EQ (base64_encode ("Aladdin:open sesame"), "QWxhZGRpbjpvcGVuIHNlc2FtZQ==");
 }
 
 TEST (Encoding, Base64HandlesEmbeddedNulAndHighBytes) {
@@ -64,10 +63,10 @@ TEST (Encoding, UrlDecodeBasicAndPlus) {
 // A malformed percent-escape must pass through literally, never throw - the
 // decoder runs on attacker-influenced callback query strings and token bodies.
 TEST (Encoding, UrlDecodeToleratesMalformedEscapes) {
-    EXPECT_EQ (url_decode ("%zz"), "%zz");     // non-hex digits
-    EXPECT_EQ (url_decode ("%1"), "%1");       // truncated at end of string
-    EXPECT_EQ (url_decode ("%"), "%");         // lone percent
-    EXPECT_EQ (url_decode ("a%2"), "a%2");     // truncated escape after text
+    EXPECT_EQ (url_decode ("%zz"), "%zz"); // non-hex digits
+    EXPECT_EQ (url_decode ("%1"), "%1");   // truncated at end of string
+    EXPECT_EQ (url_decode ("%"), "%");     // lone percent
+    EXPECT_EQ (url_decode ("a%2"), "a%2"); // truncated escape after text
     EXPECT_EQ (url_decode ("%g0state"), "%g0state");
 }
 
@@ -80,8 +79,7 @@ TEST (Encoding, UrlEncodeDecodeRoundTrip) {
 TEST (Encoding, FormEncodeOrdersAndEscapes) {
     EXPECT_EQ (form_encode ({ { "grant_type", "client_credentials" } }),
     "grant_type=client_credentials");
-    EXPECT_EQ (
-    form_encode ({ { "grant_type", "client_credentials" }, { "scope", "a b" } }),
+    EXPECT_EQ (form_encode ({ { "grant_type", "client_credentials" }, { "scope", "a b" } }),
     "grant_type=client_credentials&scope=a%20b");
     EXPECT_EQ (form_encode ({}), "");
 }

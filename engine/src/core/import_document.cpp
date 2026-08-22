@@ -108,10 +108,11 @@ json map_key_values (const json* rows) {
             continue;
         }
         json entry;
-        entry["key"]     = as_string (prop (record, "key"));
-        entry["value"]   = normalize_vars (as_string (prop (record, "value")));
+        entry["key"]   = as_string (prop (record, "key"));
+        entry["value"] = normalize_vars (as_string (prop (record, "value")));
         const json* disabled = prop (record, "disabled");
-        entry["enabled"] = !(disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ());
+        entry["enabled"] =
+        !(disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ());
         if (const json* description = prop (record, "description"); truthy (description)) {
             entry["description"] = as_string (description);
         }
@@ -137,16 +138,17 @@ json to_var_record (const json* vars) {
         // JavaScript truthiness on both, not a boolean test.
         bool enabled = true;
         if (const json* disabled = prop (record, "disabled");
-            disabled != nullptr && !disabled->is_null ()) {
+        disabled != nullptr && !disabled->is_null ()) {
             enabled = !truthy (disabled);
         } else if (const json* declared = prop (record, "enabled");
-                   declared != nullptr && !declared->is_null ()) {
+        declared != nullptr && !declared->is_null ()) {
             enabled = truthy (declared);
         }
         json value;
         value["value"]   = normalize_vars (as_string (prop (record, "value")));
         value["enabled"] = enabled;
-        if (const std::string* type = as_str (prop (record, "type")); type != nullptr && *type == "secret") {
+        if (const std::string* type = as_str (prop (record, "type"));
+        type != nullptr && *type == "secret") {
             value["secret"] = true;
         }
         out[as_string (prop (record, "key"))] = std::move (value);
@@ -161,7 +163,8 @@ std::string file_base_name (const std::string& path) {
     if (begin == std::string::npos) {
         return {};
     }
-    const std::string trimmed = path.substr (begin, path.find_last_not_of (" \t\n\r\f\v") - begin + 1);
+    const std::string trimmed =
+    path.substr (begin, path.find_last_not_of (" \t\n\r\f\v") - begin + 1);
     const size_t cut = trimmed.find_last_of ("/\\");
     return cut == std::string::npos ? trimmed : trimmed.substr (cut + 1);
 }
@@ -196,7 +199,8 @@ json imported_file_part (json entry, const std::string& src, const std::string* 
 /// Depth-first over a draft tree's requests, for the two counts the preview
 /// promises - read off the drafts rather than tallied as they are built, so the
 /// number and the rows cannot disagree.
-template <typename Visit> void walk_requests (const json& collections, Visit visit) {
+template <typename Visit>
+void walk_requests (const json& collections, Visit visit) {
     for (const json& collection : collections) {
         for (const json& request : collection.at ("requests")) {
             visit (request);
@@ -214,7 +218,7 @@ int unattached_file_parts (const json& collections) {
             return;
         }
         for (const json& field : body.at ("fields")) {
-            const json* type = prop (&field, "type");
+            const json* type       = prop (&field, "type");
             const std::string* src = as_str (prop (&field, "src"));
             if (type != nullptr && *type == "file" && (src == nullptr || src->empty ())) {
                 count += 1;
@@ -228,7 +232,8 @@ int unattached_file_parts (const json& collections) {
 int count_examples (const json& collections) {
     int count = 0;
     walk_requests (collections, [&count] (const json& request) {
-        if (const json* examples = prop (&request, "examples"); examples != nullptr && examples->is_array ()) {
+        if (const json* examples = prop (&request, "examples");
+        examples != nullptr && examples->is_array ()) {
             count += static_cast<int> (examples->size ());
         }
     });
@@ -260,20 +265,23 @@ std::string required_content_type (const std::string& mode) {
  * declaring one, since it is not sent.
  */
 json with_required_content_type (json headers, const json& body) {
-    const std::string required = required_content_type (body.at ("mode").get<std::string> ());
+    const std::string required =
+    required_content_type (body.at ("mode").get<std::string> ());
     if (required.empty ()) {
         return headers;
     }
     for (const json& header : headers) {
         const std::string key = walk::lower (header.at ("key").get<std::string> ());
-        const size_t begin    = key.find_first_not_of (" \t\n\r\f\v");
-        const std::string trimmed =
-        begin == std::string::npos ? std::string () : key.substr (begin, key.find_last_not_of (" \t\n\r\f\v") - begin + 1);
+        const size_t begin        = key.find_first_not_of (" \t\n\r\f\v");
+        const std::string trimmed = begin == std::string::npos ?
+        std::string () :
+        key.substr (begin, key.find_last_not_of (" \t\n\r\f\v") - begin + 1);
         if (trimmed == "content-type" && truthy (prop (&header, "enabled"))) {
             return headers;
         }
     }
-    headers.push_back ({ { "key", "Content-Type" }, { "value", required }, { "enabled", true } });
+    headers.push_back (
+    { { "key", "Content-Type" }, { "value", required }, { "enabled", true } });
     return headers;
 }
 
@@ -307,7 +315,8 @@ std::string nv (const json* value) {
     if (value == nullptr || value->is_null ()) {
         return {};
     }
-    return normalize_vars (value->is_string () ? value->get<std::string> () : js_string_of (*value));
+    return normalize_vars (
+    value->is_string () ? value->get<std::string> () : js_string_of (*value));
 }
 
 std::string nv (const std::string& value) {
@@ -326,7 +335,7 @@ json default_oauth2_config () {
 
 /// Client credentials are never in an OpenAPI document; seed placeholders.
 json openapi_oauth2_base () {
-    json config           = default_oauth2_config ();
+    json config            = default_oauth2_config ();
     config["clientId"]     = "{{clientId}}";
     config["clientSecret"] = "{{clientSecret}}";
     return config;
@@ -362,12 +371,15 @@ std::map<std::string, std::string> auth_detail (const json* node) {
 }
 
 /// `d.key` with JavaScript's "absent is undefined", which `nv` reads as "".
-const std::string* detail_of (const std::map<std::string, std::string>& detail, const char* key) {
+const std::string*
+detail_of (const std::map<std::string, std::string>& detail, const char* key) {
     const auto found = detail.find (key);
     return found == detail.end () ? nullptr : &found->second;
 }
 
-bool detail_is (const std::map<std::string, std::string>& detail, const char* key, const char* value) {
+bool detail_is (const std::map<std::string, std::string>& detail,
+const char* key,
+const char* value) {
     const std::string* found = detail_of (detail, key);
     return found != nullptr && *found == value;
 }
@@ -389,8 +401,8 @@ json map_postman_oauth2 (const std::map<std::string, std::string>& detail) {
         const std::string* value = detail_of (detail, key);
         return value != nullptr && !value->empty ();
     };
-    if (!stated ("grant_type") && !stated ("accessTokenUrl") && !stated ("authUrl") &&
-    stated ("accessToken")) {
+    if (!stated ("grant_type") && !stated ("accessTokenUrl") &&
+    !stated ("authUrl") && stated ("accessToken")) {
         return json{ { "mode", "bearer" }, { "token", detail_text (detail, "accessToken") } };
     }
 
@@ -416,23 +428,24 @@ json map_postman_oauth2 (const std::map<std::string, std::string>& detail) {
         pkce = true;
     }
 
-    json config                    = default_oauth2_config ();
-    config["grantType"]            = grant_type;
-    config["pkce"]                 = pkce;
-    config["authorizationUrl"]     = detail_text (detail, "authUrl");
-    config["accessTokenUrl"]       = detail_text (detail, "accessTokenUrl");
-    config["refreshTokenUrl"]      = detail_text (detail, "refreshTokenUrl");
-    config["callbackUrl"]          = detail_text (detail, "redirect_uri");
-    config["clientId"]             = detail_text (detail, "clientId");
-    config["clientSecret"]         = detail_text (detail, "clientSecret");
-    config["scope"]                = detail_text (detail, "scope");
-    config["username"]             = detail_text (detail, "username");
-    config["password"]             = detail_text (detail, "password");
-    config["credentialsPlacement"] = detail_is (detail, "client_authentication", "body") ?
-    "body" :
-    "basic_auth_header";
-    config["tokenPlacement"] = detail_is (detail, "addTokenTo", "queryParams") ? "query" : "header";
-    config["headerPrefix"] = stated ("headerPrefix") ? detail_text (detail, "headerPrefix") : "Bearer";
+    json config                = default_oauth2_config ();
+    config["grantType"]        = grant_type;
+    config["pkce"]             = pkce;
+    config["authorizationUrl"] = detail_text (detail, "authUrl");
+    config["accessTokenUrl"]   = detail_text (detail, "accessTokenUrl");
+    config["refreshTokenUrl"]  = detail_text (detail, "refreshTokenUrl");
+    config["callbackUrl"]      = detail_text (detail, "redirect_uri");
+    config["clientId"]         = detail_text (detail, "clientId");
+    config["clientSecret"]     = detail_text (detail, "clientSecret");
+    config["scope"]            = detail_text (detail, "scope");
+    config["username"]         = detail_text (detail, "username");
+    config["password"]         = detail_text (detail, "password");
+    config["credentialsPlacement"] =
+    detail_is (detail, "client_authentication", "body") ? "body" : "basic_auth_header";
+    config["tokenPlacement"] =
+    detail_is (detail, "addTokenTo", "queryParams") ? "query" : "header";
+    config["headerPrefix"] =
+    stated ("headerPrefix") ? detail_text (detail, "headerPrefix") : "Bearer";
     // Postman's "useBrowser" is authorize-via-system-browser; embedded is the
     // inverse of it.
     config["useEmbeddedBrowser"] = detail_is (detail, "useBrowser", "false");
@@ -443,7 +456,7 @@ json map_postman_oauth2 (const std::map<std::string, std::string>& detail) {
 json map_insomnia_oauth2 (const json* auth) {
     std::string grant_type = "client_credentials";
     const json* use_pkce   = prop (auth, "usePkce");
-    bool pkce              = use_pkce != nullptr && use_pkce->is_boolean () && use_pkce->get<bool> ();
+    bool pkce = use_pkce != nullptr && use_pkce->is_boolean () && use_pkce->get<bool> ();
     if (const std::string* declared = as_str (prop (auth, "grantType"))) {
         if (*declared == "authorization_code") {
             grant_type = "authorization_code";
@@ -472,7 +485,9 @@ json map_insomnia_oauth2 (const json* auth) {
     config["resource"]         = nv (prop (auth, "resource"));
     const json* in_body        = prop (auth, "credentialsInBody");
     config["credentialsPlacement"] =
-    (in_body != nullptr && in_body->is_boolean () && in_body->get<bool> ()) ? "body" : "basic_auth_header";
+    (in_body != nullptr && in_body->is_boolean () && in_body->get<bool> ()) ?
+    "body" :
+    "basic_auth_header";
     // Insomnia's "Token Prefix". Vayu executes OAuth2, so an unread prefix
     // would send "Bearer" and 401.
     const json* token_prefix = prop (auth, "tokenPrefix");
@@ -583,7 +598,8 @@ json map_postman_auth (const json* auth) {
         // A `type` that is not a string names no scheme, so nothing can be sent.
         return json{ { "mode", "none" } };
     }
-    const std::map<std::string, std::string> detail = auth_detail (prop (node, type->c_str ()));
+    const std::map<std::string, std::string> detail =
+    auth_detail (prop (node, type->c_str ()));
 
     if (*type == "bearer") {
         return json{ { "mode", "bearer" }, { "token", detail_text (detail, "token") } };
@@ -608,7 +624,8 @@ json map_postman_auth (const json* auth) {
         for (const auto& [key, value] : detail) {
             config[key] = value;
         }
-        return json{ { "mode", *type == "awsv4" ? "aws" : *type }, { "config", std::move (config) } };
+        return json{ { "mode", *type == "awsv4" ? "aws" : *type },
+            { "config", std::move (config) } };
     }
     if (*type == "inherit") {
         return json{ { "mode", "inherit" } };
@@ -623,9 +640,9 @@ json map_postman_auth (const json* auth) {
 /// The seven methods Vayu executes. Anything else - Postman lets a user type a
 /// verb - imports as `GET`, which is the renderer's answer too.
 std::string to_method (const json* declared) {
-    static constexpr std::array<const char*, 7> METHODS = { "GET", "POST", "PUT", "PATCH",
-        "DELETE", "HEAD", "OPTIONS" };
-    const std::string upper = walk::upper (
+    static constexpr std::array<const char*, 7> METHODS = { "GET", "POST",
+        "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" };
+    const std::string upper                             = walk::upper (
     declared == nullptr || declared->is_null () ? std::string ("GET") : as_string (declared));
     return std::any_of (METHODS.begin (), METHODS.end (),
            [&upper] (const char* method) { return upper == method; }) ?
@@ -659,7 +676,8 @@ std::string graphql_content (const json* graphql) {
         return "{}";
     }
     json out = *graphql;
-    if (const json* declared = prop (&out, "variables"); declared != nullptr && declared->is_string ()) {
+    if (const json* declared = prop (&out, "variables");
+    declared != nullptr && declared->is_string ()) {
         const std::string text = declared->get<std::string> ();
         const size_t begin     = text.find_first_not_of (" \t\n\r\f\v");
         if (begin == std::string::npos) {
@@ -699,7 +717,7 @@ json formdata_fields (const json* rows, PostmanCounts& counts) {
             }
             continue;
         }
-        const json* src   = prop (&row, "src");
+        const json* src = prop (&row, "src");
         std::vector<std::string> paths;
         if (src != nullptr && src->is_array ()) {
             for (const json& entry : *src) {
@@ -707,7 +725,8 @@ json formdata_fields (const json* rows, PostmanCounts& counts) {
                     paths.push_back (entry.get<std::string> ());
                 }
             }
-        } else if (src != nullptr && src->is_string () && !src->get_ref<const std::string&> ().empty ()) {
+        } else if (src != nullptr && src->is_string () &&
+        !src->get_ref<const std::string&> ().empty ()) {
             paths.push_back (src->get<std::string> ());
         }
         if (mapped.empty () || paths.empty ()) {
@@ -736,7 +755,8 @@ json raw_body (const std::string& content, const std::string* language) {
     }
     // No explicit language: sniff JSON.
     const json parsed = json::parse (content, nullptr, false);
-    return json{ { "mode", parsed.is_discarded () ? "text" : "json" }, { "content", content } };
+    return json{ { "mode", parsed.is_discarded () ? "text" : "json" },
+        { "content", content } };
 }
 
 json pm_body (const json* body, PostmanCounts& counts) {
@@ -756,10 +776,12 @@ json pm_body (const json* body, PostmanCounts& counts) {
             { "fields", map_key_values (prop (node, "urlencoded")) } };
     }
     if (named == "formdata") {
-        return json{ { "mode", "form-data" }, { "fields", formdata_fields (prop (node, "formdata"), counts) } };
+        return json{ { "mode", "form-data" },
+            { "fields", formdata_fields (prop (node, "formdata"), counts) } };
     }
     if (named == "graphql") {
-        return json{ { "mode", "graphql" }, { "content", graphql_content (as_record (prop (node, "graphql"))) } };
+        return json{ { "mode", "graphql" },
+            { "content", graphql_content (as_record (prop (node, "graphql"))) } };
     }
     if (named == "file") {
         counts.skipped_file_body += 1;
@@ -815,7 +837,8 @@ std::string safe_decode (const std::string& text) {
             out += text[at];
             continue;
         }
-        if (at + 2 >= text.size () || std::isxdigit (static_cast<unsigned char> (text[at + 1])) == 0 ||
+        if (at + 2 >= text.size () ||
+        std::isxdigit (static_cast<unsigned char> (text[at + 1])) == 0 ||
         std::isxdigit (static_cast<unsigned char> (text[at + 2])) == 0) {
             return text;
         }
@@ -827,21 +850,23 @@ std::string safe_decode (const std::string& text) {
 
 /// `queryEntries(query)`: a `k=v&k2=v2` string as rows, decoded and normalized.
 json query_entries (const std::string& query) {
-    json out = json::array ();
+    json out     = json::array ();
     size_t start = 0;
     while (start <= query.size ()) {
-        const size_t amp = query.find ('&', start);
-        const std::string pair =
-        query.substr (start, amp == std::string::npos ? std::string::npos : amp - start);
+        const size_t amp       = query.find ('&', start);
+        const std::string pair = query.substr (
+        start, amp == std::string::npos ? std::string::npos : amp - start);
         start = amp == std::string::npos ? query.size () + 1 : amp + 1;
         if (pair.empty ()) {
             continue; // `.filter(Boolean)`
         }
         const size_t equals = pair.find ('=');
-        const std::string key = equals == std::string::npos ? pair : pair.substr (0, equals);
-        const std::string value = equals == std::string::npos ? std::string () : pair.substr (equals + 1);
+        const std::string key =
+        equals == std::string::npos ? pair : pair.substr (0, equals);
+        const std::string value =
+        equals == std::string::npos ? std::string () : pair.substr (equals + 1);
         out.push_back ({ { "key", safe_decode (key) },
-            { "value", normalize_vars (safe_decode (value)) }, { "enabled", true } });
+        { "value", normalize_vars (safe_decode (value)) }, { "enabled", true } });
     }
     return out;
 }
@@ -854,13 +879,14 @@ std::pair<std::string, json> pm_url (const json* url) {
         if (question == std::string::npos) {
             return { normalize_vars (text), json::array () };
         }
-        return { normalize_vars (text.substr (0, question)), query_entries (text.substr (question + 1)) };
+        return { normalize_vars (text.substr (0, question)),
+            query_entries (text.substr (question + 1)) };
     }
     const std::string* declared = as_str (prop (url, "raw"));
-    const std::string raw       = declared == nullptr ? std::string () : *declared;
-    const size_t question       = raw.find ('?');
-    const std::string base      = question == std::string::npos ? raw : raw.substr (0, question);
-    json structured             = map_key_values (prop (url, "query"));
+    const std::string raw = declared == nullptr ? std::string () : *declared;
+    const size_t question = raw.find ('?');
+    const std::string base = question == std::string::npos ? raw : raw.substr (0, question);
+    json structured = map_key_values (prop (url, "query"));
     // `query[]` wins when it has anything - it carries disabled state and
     // descriptions that `raw` cannot. Falling back to `raw` matters for
     // hand-written or script-generated collections that populate only `raw`.
@@ -911,11 +937,12 @@ void pm_redirects (const json* item, json& request) {
     if (behavior == nullptr) {
         return;
     }
-    if (const json* follow = prop (behavior, "followRedirects"); follow != nullptr && follow->is_boolean ()) {
+    if (const json* follow = prop (behavior, "followRedirects");
+    follow != nullptr && follow->is_boolean ()) {
         request["followRedirects"] = follow->get<bool> ();
     }
-    if (const json* limit = prop (behavior, "maxRedirects");
-        limit != nullptr && limit->is_number () && std::isfinite (limit->get<double> ())) {
+    if (const json* limit = prop (behavior, "maxRedirects"); limit != nullptr &&
+    limit->is_number () && std::isfinite (limit->get<double> ())) {
         request["maxRedirects"] = *limit;
     }
 }
@@ -929,7 +956,7 @@ void pm_redirects (const json* item, json& request) {
  * shows for one.
  */
 json pm_examples (const json* item, PostmanCounts& counts) {
-    json out = json::array ();
+    json out              = json::array ();
     const json* responses = prop (item, "response");
     if (responses == nullptr || !responses->is_array ()) {
         return out;
@@ -940,9 +967,9 @@ json pm_examples (const json* item, PostmanCounts& counts) {
             counts.skipped_malformed += 1;
             continue;
         }
-        json headers            = map_key_values (prop (saved, "header"));
-        const json* code        = prop (saved, "code");
-        const json* name        = prop (saved, "name");
+        json headers     = map_key_values (prop (saved, "header"));
+        const json* code = prop (saved, "code");
+        const json* name = prop (saved, "name");
         std::string content_type;
         for (const json& header : headers) {
             if (walk::lower (header.at ("key").get<std::string> ()) == "content-type") {
@@ -951,46 +978,51 @@ json pm_examples (const json* item, PostmanCounts& counts) {
             }
         }
         const std::string* body = as_str (prop (saved, "body"));
-        out.push_back ({ { "name", name == nullptr || name->is_null () ? "Example" : as_string (name) },
-            { "status",
-            code != nullptr && code->is_number () && std::isfinite (code->get<double> ()) ? *code : json (200) },
-            { "headers", std::move (headers) }, { "body", body == nullptr ? "" : *body },
-            // Only from the recorded header. Postman also writes
-            // `_postman_previewlanguage`, but that is an editor mode rather
-            // than a media type.
-            { "contentType", content_type } });
+        out.push_back (
+        { { "name", name == nullptr || name->is_null () ? "Example" : as_string (name) },
+        { "status",
+        code != nullptr && code->is_number () && std::isfinite (code->get<double> ()) ?
+        *code :
+        json (200) },
+        { "headers", std::move (headers) }, { "body", body == nullptr ? "" : *body },
+        // Only from the recorded header. Postman also writes
+        // `_postman_previewlanguage`, but that is an editor mode rather
+        // than a media type.
+        { "contentType", content_type } });
     }
     return out;
 }
 
 json pm_request (const json* item, PostmanCounts& counts) {
-    const json* declared = as_record (prop (item, "request"));
-    const json empty     = json::object ();
-    const json* rq       = declared == nullptr ? &empty : declared;
-    auto [url, params]   = pm_url (prop (rq, "url"));
-    json auth            = map_postman_auth (prop (rq, "auth"));
+    const json* declared   = as_record (prop (item, "request"));
+    const json empty       = json::object ();
+    const json* rq         = declared == nullptr ? &empty : declared;
+    auto [url, params]     = pm_url (prop (rq, "url"));
+    json auth              = map_postman_auth (prop (rq, "auth"));
     const std::string mode = auth.at ("mode").get<std::string> ();
     if (mode == "digest" || mode == "aws" || mode == "ntlm") {
         counts.non_executable += 1;
     }
     counts.requests += 1;
     const std::vector<const json*> events = pm_events (item);
-    json body     = pm_body (prop (rq, "body"), counts);
-    json examples = pm_examples (item, counts);
+    json body                             = pm_body (prop (rq, "body"), counts);
+    json examples                         = pm_examples (item, counts);
 
     const std::string* description = as_str (prop (rq, "description"));
     const std::string* nested = as_str (prop (prop (rq, "description"), "content"));
-    const json* name          = prop (item, "name");
+    const json* name = prop (item, "name");
 
     json request;
-    request["name"]        = name == nullptr || name->is_null () ? "Untitled" : as_string (name);
-    request["description"] = description != nullptr ? *description : (nested != nullptr ? *nested : "");
-    request["method"]      = to_method (prop (rq, "method"));
-    request["url"]         = url;
-    request["params"]      = params;
-    request["headers"]     = with_required_content_type (map_key_values (prop (rq, "header")), body);
-    request["body"]        = std::move (body);
-    request["auth"]        = std::move (auth);
+    request["name"] = name == nullptr || name->is_null () ? "Untitled" : as_string (name);
+    request["description"] =
+    description != nullptr ? *description : (nested != nullptr ? *nested : "");
+    request["method"] = to_method (prop (rq, "method"));
+    request["url"]    = url;
+    request["params"] = params;
+    request["headers"] =
+    with_required_content_type (map_key_values (prop (rq, "header")), body);
+    request["body"] = std::move (body);
+    request["auth"] = std::move (auth);
     request["preRequestScript"] =
     counts.options.import_scripts ? join_exec (pm_event (events, "prerequest")) : "";
     request["postRequestScript"] =
@@ -1030,7 +1062,8 @@ json pm_folder (const json* node, PostmanCounts& counts) {
                 counts.skipped_malformed += 1;
                 continue;
             }
-            if (const json* nested = prop (entry, "item"); nested != nullptr && nested->is_array ()) {
+            if (const json* nested = prop (entry, "item");
+            nested != nullptr && nested->is_array ()) {
                 counts.folders += 1;
                 children.push_back (pm_folder (entry, counts));
             } else if (truthy (prop (entry, "request"))) {
@@ -1039,7 +1072,7 @@ json pm_folder (const json* node, PostmanCounts& counts) {
         }
     }
 
-    const json* info = as_record (prop (node, "info"));
+    const json* info        = as_record (prop (node, "info"));
     const json* description = prop (info, "description");
     if (description == nullptr || description->is_null ()) {
         description = prop (node, "description");
@@ -1053,10 +1086,12 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     const std::vector<const json*> events = pm_events (node);
 
     json collection;
-    collection["name"] = name == nullptr || name->is_null () ? "Imported Collection" : as_string (name);
-    collection["description"] = text != nullptr ? *text : (nested != nullptr ? *nested : "");
-    collection["variables"]   = to_var_record (prop (node, "variable"));
-    collection["auth"]        = collection_auth (prop (node, "auth"));
+    collection["name"] =
+    name == nullptr || name->is_null () ? "Imported Collection" : as_string (name);
+    collection["description"] =
+    text != nullptr ? *text : (nested != nullptr ? *nested : "");
+    collection["variables"] = to_var_record (prop (node, "variable"));
+    collection["auth"]      = collection_auth (prop (node, "auth"));
     collection["preRequestScript"] =
     counts.options.import_scripts ? join_exec (pm_event (events, "prerequest")) : "";
     collection["postRequestScript"] =
@@ -1068,10 +1103,11 @@ json pm_folder (const json* node, PostmanCounts& counts) {
 
 json parse_postman (const json& parsed, const ImportOptions& options, const char* format) {
     PostmanCounts counts;
-    counts.options       = options;
-    const json empty     = json::object ();
-    json collections     = json::array ();
-    collections.push_back (pm_folder (as_record (&parsed) == nullptr ? &empty : &parsed, counts));
+    counts.options   = options;
+    const json empty = json::object ();
+    json collections = json::array ();
+    collections.push_back (
+    pm_folder (as_record (&parsed) == nullptr ? &empty : &parsed, counts));
 
     ImportTally tally;
     tally.add ("file_body", counts.skipped_file_body);
@@ -1115,8 +1151,9 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
     // the draft carries nothing and the counts report 0, so the preview shows
     // what will actually be created. The one toggle covers both scopes - it
     // reads "Import environments & variables", and globals are variables.
-    const json variables =
-    options.import_environments ? to_var_record (prop (&parsed, "values")) : json::object ();
+    const json variables = options.import_environments ?
+    to_var_record (prop (&parsed, "values")) :
+    json::object ();
 
     json environments = json::array ();
     if (!globals && options.import_environments) {
@@ -1132,9 +1169,9 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
     const json scope = globals ? variables : json::object ();
 
     json meta;
-    meta["format"]           = globals ? "Postman Globals" : "Postman Environment";
-    meta["requestCount"]     = 0;
-    meta["folderCount"]      = 0;
+    meta["format"]       = globals ? "Postman Globals" : "Postman Environment";
+    meta["requestCount"] = 0;
+    meta["folderCount"]  = 0;
     meta["environmentCount"] = static_cast<int> (environments.size ());
     meta["globalCount"]      = static_cast<int> (scope.size ());
     // An environment or globals export has no requests, so no examples and no
@@ -1144,8 +1181,9 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
     meta["nonExecutableAuth"]   = 0;
     meta["unattachedFileParts"] = 0;
 
-    return json{ { "collections", json::array () }, { "environments", std::move (environments) },
-        { "globals", scope }, { "meta", std::move (meta) } };
+    return json{ { "collections", json::array () },
+        { "environments", std::move (environments) }, { "globals", scope },
+        { "meta", std::move (meta) } };
 }
 
 // ---------------------------------------------------------------------------
@@ -1189,7 +1227,7 @@ json kv_row (const json& row) {
         mapped["disabled"] = *disabled;
     }
     if (const std::string* description = as_str (prop (record, "description"));
-        description != nullptr && !description->empty ()) {
+    description != nullptr && !description->empty ()) {
         mapped["description"] = *description;
     }
     return mapped;
@@ -1215,18 +1253,18 @@ json kv_rows (const json* rows) {
  * schemes are case-insensitive (RFC 7235 s2.1).
  */
 json insomnia_bearer (const json* auth) {
-    const std::string token  = nv (as_string (prop (auth, "token")));
-    std::string prefix       = nv (as_string (prop (auth, "prefix")));
-    const size_t begin       = prefix.find_first_not_of (" \t\n\r\f\v");
-    prefix = begin == std::string::npos ?
-    std::string () :
-    prefix.substr (begin, prefix.find_last_not_of (" \t\n\r\f\v") - begin + 1);
+    const std::string token = nv (as_string (prop (auth, "token")));
+    std::string prefix      = nv (as_string (prop (auth, "prefix")));
+    const size_t begin      = prefix.find_first_not_of (" \t\n\r\f\v");
+    prefix                  = begin == std::string::npos ?
+                     std::string () :
+                     prefix.substr (begin, prefix.find_last_not_of (" \t\n\r\f\v") - begin + 1);
     if (!prefix.empty () && walk::lower (prefix) != "bearer") {
         std::string value = prefix + " " + token;
         const size_t last = value.find_last_not_of (" \t\n\r\f\v");
-        value             = last == std::string::npos ? std::string () : value.substr (0, last + 1);
-        return json{ { "mode", "apikey" }, { "key", "Authorization" }, { "value", value },
-            { "in", "header" } };
+        value = last == std::string::npos ? std::string () : value.substr (0, last + 1);
+        return json{ { "mode", "apikey" }, { "key", "Authorization" },
+            { "value", value }, { "in", "header" } };
     }
     return json{ { "mode", "bearer" }, { "token", token } };
 }
@@ -1245,7 +1283,8 @@ json insomnia_config (const json* node) {
 json insomnia_auth (const json* auth, InsomniaCounts& counts) {
     const json* node     = as_record (auth);
     const json* disabled = prop (node, "disabled");
-    const bool off = disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ();
+    const bool off =
+    disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ();
     if (node == nullptr || !truthy (prop (node, "type")) || off) {
         return off ? json{ { "mode", "none" } } : json{ { "mode", "inherit" } };
     }
@@ -1255,7 +1294,8 @@ json insomnia_auth (const json* auth, InsomniaCounts& counts) {
         return insomnia_bearer (node);
     }
     if (named == "basic") {
-        return json{ { "mode", "basic" }, { "username", nv (as_string (prop (node, "username"))) },
+        return json{ { "mode", "basic" },
+            { "username", nv (as_string (prop (node, "username"))) },
             { "password", nv (as_string (prop (node, "password"))) } };
     }
     if (named == "apikey") {
@@ -1327,9 +1367,11 @@ std::string to_graphql_envelope (const std::string& body) {
     if (begin == std::string::npos) {
         return js_json_compact (json{ { "query", "" } });
     }
-    const std::string trimmed = body.substr (begin, body.find_last_not_of (" \t\n\r\f\v") - begin + 1);
+    const std::string trimmed =
+    body.substr (begin, body.find_last_not_of (" \t\n\r\f\v") - begin + 1);
     const json parsed = json::parse (trimmed, nullptr, false);
-    if (!parsed.is_discarded () && parsed.is_object () && as_str (prop (&parsed, "query")) != nullptr) {
+    if (!parsed.is_discarded () && parsed.is_object () &&
+    as_str (prop (&parsed, "query")) != nullptr) {
         return trimmed; // Already an envelope; do not double-wrap it.
     }
     return js_json_compact (json{ { "query", body } });
@@ -1343,10 +1385,12 @@ std::string to_graphql_envelope (const std::string& body) {
  * it is dropped and counted instead of vanishing.
  */
 json unlisted_body (const json* body, InsomniaCounts& counts) {
-    if (const std::string* text = as_str (prop (body, "text")); text != nullptr && !text->empty ()) {
+    if (const std::string* text = as_str (prop (body, "text"));
+    text != nullptr && !text->empty ()) {
         return json{ { "mode", "text" }, { "content", normalize_vars (*text) } };
     }
-    if (const std::string* name = as_str (prop (body, "fileName")); name != nullptr && !name->empty ()) {
+    if (const std::string* name = as_str (prop (body, "fileName"));
+    name != nullptr && !name->empty ()) {
         counts.file_body += 1;
     }
     return json{ { "mode", "none" } };
@@ -1364,11 +1408,13 @@ json insomnia_body (const json* body, InsomniaCounts& counts) {
     if (declared != nullptr && !declared->is_null () && !declared->is_string ()) {
         throw MalformedImport ("`body.mimeType` must be a string");
     }
-    std::string mime = declared != nullptr && declared->is_string () ? declared->get<std::string> () : "";
+    std::string mime =
+    declared != nullptr && declared->is_string () ? declared->get<std::string> () : "";
     if (const size_t semicolon = mime.find (';'); semicolon != std::string::npos) {
         mime = mime.substr (0, semicolon);
     }
-    if (const size_t begin = mime.find_first_not_of (" \t\n\r\f\v"); begin == std::string::npos) {
+    if (const size_t begin = mime.find_first_not_of (" \t\n\r\f\v");
+    begin == std::string::npos) {
         mime.clear ();
     } else {
         mime = mime.substr (begin, mime.find_last_not_of (" \t\n\r\f\v") - begin + 1);
@@ -1392,8 +1438,10 @@ json insomnia_body (const json* body, InsomniaCounts& counts) {
         return json{ { "mode", "xml" }, { "content", text } };
     }
     if (mime == "application/x-www-form-urlencoded") {
-        const json rows = kv_rows (rows_or_throw (prop (node, "params"), "`body.params`"));
-        return json{ { "mode", "x-www-form-urlencoded" }, { "fields", map_key_values (&rows) } };
+        const json rows =
+        kv_rows (rows_or_throw (prop (node, "params"), "`body.params`"));
+        return json{ { "mode", "x-www-form-urlencoded" },
+            { "fields", map_key_values (&rows) } };
     }
     if (mime == "multipart/form-data") {
         const json* rows = rows_or_throw (prop (node, "params"), "`body.params`");
@@ -1429,7 +1477,8 @@ json to_env_vars (const json* data) {
         return out;
     }
     for (auto entry = data->begin (); entry != data->end (); ++entry) {
-        out[entry.key ()] = json{ { "value", normalize_vars (as_string (&entry.value ())) },
+        out[entry.key ()] =
+        json{ { "value", normalize_vars (as_string (&entry.value ())) },
             { "enabled", true } };
     }
     return out;
@@ -1457,21 +1506,23 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
     if (declared != nullptr && !declared->is_null () && !declared->is_array ()) {
         throw MalformedImport ("`resources` must be an array");
     }
-    const json empty          = json::array ();
-    const json& resources     = declared == nullptr || declared->is_null () ? empty : *declared;
+    const json empty = json::array ();
+    const json& resources = declared == nullptr || declared->is_null () ? empty : *declared;
     std::map<std::string, std::vector<const json*>> by_parent;
     for (size_t at = 0; at < resources.size (); ++at) {
         if (!resources[at].is_object ()) {
             throw MalformedImport ("`resources[" + std::to_string (at) + "]` must be an object");
         }
-        by_parent[resource_key (prop (&resources[at], "parentId"))].push_back (&resources[at]);
+        by_parent[resource_key (prop (&resources[at], "parentId"))].push_back (
+        &resources[at]);
     }
 
     InsomniaCounts counts;
     counts.options = options;
     ImportTally tally;
 
-    const auto children_of = [&by_parent] (const json* node) -> const std::vector<const json*>& {
+    const auto children_of = [&by_parent] (
+                             const json* node) -> const std::vector<const json*>& {
         static const std::vector<const json*> NONE;
         const auto found = by_parent.find (resource_key (prop (node, "_id")));
         return found == by_parent.end () ? NONE : found->second;
@@ -1484,23 +1535,28 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
     const auto build_request = [&counts] (const json* resource) {
         counts.requests += 1;
         json body = insomnia_body (prop (resource, "body"), counts);
-        const json params = kv_rows (rows_or_throw (prop (resource, "parameters"), "`parameters`"));
-        const json headers = kv_rows (rows_or_throw (prop (resource, "headers"), "`headers`"));
+        const json params =
+        kv_rows (rows_or_throw (prop (resource, "parameters"), "`parameters`"));
+        const json headers =
+        kv_rows (rows_or_throw (prop (resource, "headers"), "`headers`"));
         const json* description = prop (resource, "description");
 
         json request;
-        request["name"]        = resource_name (resource, "Untitled");
-        request["description"] = description == nullptr || description->is_null () ? json ("") : *description;
-        request["method"]      = to_method (prop (resource, "method"));
-        request["url"]         = normalize_vars (as_string (prop (resource, "url")));
-        request["params"]      = map_key_values (&params);
-        request["headers"]     = with_required_content_type (map_key_values (&headers), body);
-        request["body"]        = std::move (body);
-        request["auth"]        = insomnia_auth (prop (resource, "authentication"), counts);
-        request["preRequestScript"] =
-        counts.options.import_scripts ? as_string (prop (resource, "preRequestScript")) : "";
-        request["postRequestScript"] =
-        counts.options.import_scripts ? as_string (prop (resource, "afterResponseScript")) : "";
+        request["name"] = resource_name (resource, "Untitled");
+        request["description"] =
+        description == nullptr || description->is_null () ? json ("") : *description;
+        request["method"] = to_method (prop (resource, "method"));
+        request["url"]    = normalize_vars (as_string (prop (resource, "url")));
+        request["params"] = map_key_values (&params);
+        request["headers"] = with_required_content_type (map_key_values (&headers), body);
+        request["body"] = std::move (body);
+        request["auth"] = insomnia_auth (prop (resource, "authentication"), counts);
+        request["preRequestScript"]  = counts.options.import_scripts ?
+         as_string (prop (resource, "preRequestScript")) :
+         "";
+        request["postRequestScript"] = counts.options.import_scripts ?
+        as_string (prop (resource, "afterResponseScript")) :
+        "";
         insomnia_redirects (resource, request);
         return request;
     };
@@ -1535,12 +1591,15 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
         const json* description = prop (node, "description");
 
         json collection;
-        collection["name"]        = resource_name (node, "Imported");
-        collection["description"] = description == nullptr || description->is_null () ? json ("") : *description;
-        collection["variables"] =
-        workspace ? to_env_vars (as_record (prop (node, "environment"))) : json::object ();
+        collection["name"] = resource_name (node, "Imported");
+        collection["description"] =
+        description == nullptr || description->is_null () ? json ("") : *description;
+        collection["variables"] = workspace ?
+        to_env_vars (as_record (prop (node, "environment"))) :
+        json::object ();
         // Collections never inherit.
-        collection["auth"] = auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
+        collection["auth"] =
+        auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
         // Insomnia 9.3+ lets a folder carry scripts, and its v4 export writes
         // model fields verbatim - so these are the request-level key names. An
         // export that spells them differently reads as absent.
@@ -1586,23 +1645,23 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
                     // not emptiness: an environment deliberately named "" keeps
                     // that name on both sides.
                     const json* named = prop (base, "name");
-                    const json name = named == nullptr || named->is_null () ?
-                    resource_name (workspace, "Environment") :
-                    *named;
-                    environments.push_back ({ { "name", name }, { "description", "" },
-                        { "variables", base_vars } });
+                    const json name   = named == nullptr || named->is_null () ?
+                      resource_name (workspace, "Environment") :
+                      *named;
+                    environments.push_back ({ { "name", name },
+                    { "description", "" }, { "variables", base_vars } });
                     continue;
                 }
                 for (const json* sub : subs) {
                     // `{...baseVars, ...subVars}`: a key the sub-env restates
                     // keeps the base's position and takes the sub's value.
-                    json merged            = base_vars;
-                    const json sub_vars    = to_env_vars (as_record (prop (sub, "data")));
+                    json merged = base_vars;
+                    const json sub_vars = to_env_vars (as_record (prop (sub, "data")));
                     for (auto entry = sub_vars.begin (); entry != sub_vars.end (); ++entry) {
                         merged[entry.key ()] = entry.value ();
                     }
                     environments.push_back ({ { "name", resource_name (sub, "Environment") },
-                        { "description", "" }, { "variables", std::move (merged) } });
+                    { "description", "" }, { "variables", std::move (merged) } });
                 }
             }
         }
@@ -1643,7 +1702,8 @@ bool has_scheme (const std::string& url) {
         if (ch == ':') {
             return true;
         }
-        if (std::isalnum (static_cast<unsigned char> (ch)) == 0 && ch != '+' && ch != '.' && ch != '-') {
+        if (std::isalnum (static_cast<unsigned char> (ch)) == 0 && ch != '+' &&
+        ch != '.' && ch != '-') {
             return false;
         }
     }
@@ -1663,9 +1723,9 @@ std::string remove_dot_segments (const std::string& path) {
     std::vector<std::string> segments;
     size_t start = 0;
     while (start <= path.size ()) {
-        const size_t slash = path.find ('/', start);
-        const std::string segment =
-        path.substr (start, slash == std::string::npos ? std::string::npos : slash - start);
+        const size_t slash        = path.find ('/', start);
+        const std::string segment = path.substr (
+        start, slash == std::string::npos ? std::string::npos : slash - start);
         const bool last = slash == std::string::npos;
         start           = last ? path.size () + 1 : slash + 1;
 
@@ -1701,18 +1761,20 @@ std::string remove_dot_segments (const std::string& path) {
  * when @p base is not absolute, which is `new URL`'s `TypeError` and which the
  * caller reports as an unresolved base rather than guessing a host.
  */
-std::optional<std::string> resolve_url (const std::string& reference, const std::string& base) {
+std::optional<std::string>
+resolve_url (const std::string& reference, const std::string& base) {
     if (!has_scheme (base)) {
         return std::nullopt;
     }
-    const size_t colon         = base.find (':');
-    const std::string scheme   = base.substr (0, colon + 1);
+    const size_t colon       = base.find (':');
+    const std::string scheme = base.substr (0, colon + 1);
     std::string authority;
     std::string base_path = base.substr (colon + 1);
     if (base_path.rfind ("//", 0) == 0) {
         const size_t end = base_path.find_first_of ("/?#", 2);
-        authority        = base_path.substr (0, end == std::string::npos ? std::string::npos : end);
-        base_path        = end == std::string::npos ? std::string () : base_path.substr (end);
+        authority =
+        base_path.substr (0, end == std::string::npos ? std::string::npos : end);
+        base_path = end == std::string::npos ? std::string () : base_path.substr (end);
     }
     // The base's query and fragment take no part in resolving a reference.
     if (const size_t cut = base_path.find_first_of ("?#"); cut != std::string::npos) {
@@ -1732,7 +1794,9 @@ std::optional<std::string> resolve_url (const std::string& reference, const std:
         return scheme + authority + (base_path.empty () ? "/" : base_path) + reference;
     } else {
         const size_t slash = base_path.find_last_of ('/');
-        path = (slash == std::string::npos ? std::string ("/") : base_path.substr (0, slash + 1)) + reference;
+        path               = (slash == std::string::npos ? std::string ("/") :
+                                                           base_path.substr (0, slash + 1)) +
+        reference;
     }
     // A query or fragment on the reference rides along untouched.
     std::string tail;
@@ -1773,7 +1837,8 @@ bool has_unresolved_template (const std::string& url) {
  * one. Anything still unresolvable is kept exactly as written and counted - a
  * base the user can see is unfinished beats a host Vayu invented.
  */
-std::string resolve_server_url (const json* server, const std::string& source_url, ImportTally& tally) {
+std::string
+resolve_server_url (const json* server, const std::string& source_url, ImportTally& tally) {
     const std::string* declared = as_str (prop (server, "url"));
     if (declared == nullptr || declared->empty ()) {
         return {};
@@ -1793,14 +1858,15 @@ std::string resolve_server_url (const json* server, const std::string& source_ur
             ++at;
             continue;
         }
-        const std::string name  = declared->substr (at + 1, close - at - 1);
-        const json* value       = prop (as_record (prop (variables, name)), "default");
+        const std::string name = declared->substr (at + 1, close - at - 1);
+        const json* value = prop (as_record (prop (variables, name)), "default");
         // A default is `string` per the specification; a number or boolean is
         // what a hand-written document produces and reads the same on the wire.
         if (value == nullptr || value->is_structured () || value->is_null ()) {
             substituted += declared->substr (at, close - at + 1);
         } else {
-            substituted += value->is_string () ? value->get<std::string> () : js_string_of (*value);
+            substituted += value->is_string () ? value->get<std::string> () :
+                                                 js_string_of (*value);
         }
         at = close + 1;
     }
@@ -1831,7 +1897,7 @@ json scheme_to_auth_v3 (const json* scheme) {
     if (node == nullptr || !truthy (prop (node, "type"))) {
         return json{ { "mode", "none" } };
     }
-    const json* type   = prop (node, "type");
+    const json* type        = prop (node, "type");
     const json* scheme_name = prop (node, "scheme");
     if (*type == "http" && scheme_name != nullptr && *scheme_name == "bearer") {
         return json{ { "mode", "bearer" }, { "token", "" } };
@@ -1842,7 +1908,8 @@ json scheme_to_auth_v3 (const json* scheme) {
     if (*type == "apiKey") {
         const std::string* name = as_str (prop (node, "name"));
         const json* in          = prop (node, "in");
-        return json{ { "mode", "apikey" }, { "key", name == nullptr ? "" : *name }, { "value", "" },
+        return json{ { "mode", "apikey" },
+            { "key", name == nullptr ? "" : *name }, { "value", "" },
             { "in", in != nullptr && *in == "query" ? "query" : "header" } };
     }
     if (*type == "oauth2") {
@@ -1864,7 +1931,8 @@ json scheme_to_auth_v2 (const json* scheme) {
     if (*type == "apiKey") {
         const std::string* name = as_str (prop (node, "name"));
         const json* in          = prop (node, "in");
-        return json{ { "mode", "apikey" }, { "key", name == nullptr ? "" : *name }, { "value", "" },
+        return json{ { "mode", "apikey" },
+            { "key", name == nullptr ? "" : *name }, { "value", "" },
             { "in", in != nullptr && *in == "query" ? "query" : "header" } };
     }
     if (*type == "oauth2") {
@@ -1911,7 +1979,8 @@ json draft_body (const DraftBody& body) {
             json row = draft_row (field, /*with_description=*/false);
             // A document names the upload, never the file, so the part imports
             // with no path and the user attaches one (#425).
-            fields.push_back (field.file ? imported_file_part (std::move (row), "", nullptr) : row);
+            fields.push_back (
+            field.file ? imported_file_part (std::move (row), "", nullptr) : row);
         }
         return json{ { "mode", body.mode }, { "fields", std::move (fields) } };
     }
@@ -1933,12 +2002,12 @@ json draft_request (const SpecRequestDraft& entry) {
     for (const DraftExample& example : draft.examples) {
         json rows = json::array ();
         if (example.documented) {
-            rows.push_back ({ { "key", "Content-Type" }, { "value", example.content_type },
-                { "enabled", true } });
+            rows.push_back ({ { "key", "Content-Type" },
+            { "value", example.content_type }, { "enabled", true } });
         }
-        examples.push_back ({ { "name", example.name }, { "status", example.status },
-            { "headers", std::move (rows) }, { "body", example.body },
-            { "contentType", example.content_type } });
+        examples.push_back ({ { "name", example.name },
+        { "status", example.status }, { "headers", std::move (rows) },
+        { "body", example.body }, { "contentType", example.content_type } });
     }
 
     json request;
@@ -1960,8 +2029,8 @@ json draft_request (const SpecRequestDraft& entry) {
         if (!entry.operation.operation_id.empty ()) {
             operation["operationId"] = entry.operation.operation_id;
         }
-        operation["method"]       = entry.operation.method;
-        operation["path"]         = entry.operation.path;
+        operation["method"]      = entry.operation.method;
+        operation["path"]        = entry.operation.path;
         request["specOperation"] = std::move (operation);
     }
     return request;
@@ -1977,7 +2046,8 @@ json draft_request (const SpecRequestDraft& entry) {
  */
 class OperationFolders {
     public:
-    explicit OperationFolders (const json* declared_tags) : declared_tags_ (declared_tags) {
+    explicit OperationFolders (const json* declared_tags)
+    : declared_tags_ (declared_tags) {
     }
 
     void place (json request, const std::string& name, bool from_tag) {
@@ -2056,12 +2126,14 @@ class OperationFolders {
     const json* declared_tags_;
     std::vector<std::string> order_;
     std::map<std::string, json> folders_;
-    json root_ = json::array ();
+    json root_   = json::array ();
     bool tagged_ = false;
     bool pathed_ = false;
 };
 
-json parse_openapi (const json& document, const std::string& raw, const ImportSource& source,
+json parse_openapi (const json& document,
+const std::string& raw,
+const ImportSource& source,
 walk::Dialect dialect) {
     ImportTally tally;
     const bool v3 = dialect == walk::Dialect::V3;
@@ -2069,20 +2141,26 @@ walk::Dialect dialect) {
     std::string base_url;
     const json* schemes = nullptr;
     if (v3) {
-        base_url = resolve_server_url (array_at (prop (&document, "servers"), 0), source.source_url, tally);
-        schemes  = as_record (prop (as_record (prop (&document, "components")), "securitySchemes"));
+        base_url = resolve_server_url (
+        array_at (prop (&document, "servers"), 0), source.source_url, tally);
+        schemes = as_record (
+        prop (as_record (prop (&document, "components")), "securitySchemes"));
     } else {
         // 2.0 states its base as three fields rather than a server URL. A
         // `basePath` of exactly `/` adds nothing, and a document with no `host`
         // has no base at all - `{{baseUrl}}` is then simply not a variable, and
         // every request's URL starts with the token unresolved, which is what
         // the renderer did too.
-        const std::string* wire_scheme    = as_str (array_at (prop (&document, "schemes"), 0));
-        const std::string* declared_base  = as_str (prop (&document, "basePath"));
+        const std::string* wire_scheme =
+        as_str (array_at (prop (&document, "schemes"), 0));
+        const std::string* declared_base = as_str (prop (&document, "basePath"));
         const std::string base_path =
-        declared_base != nullptr && *declared_base != "/" ? *declared_base : std::string ();
-        if (const std::string* host = as_str (prop (&document, "host")); host != nullptr && !host->empty ()) {
-            base_url = (wire_scheme == nullptr ? "https" : *wire_scheme) + "://" + *host + base_path;
+        declared_base != nullptr && *declared_base != "/" ? *declared_base :
+                                                            std::string ();
+        if (const std::string* host = as_str (prop (&document, "host"));
+        host != nullptr && !host->empty ()) {
+            base_url = (wire_scheme == nullptr ? "https" : *wire_scheme) +
+            "://" + *host + base_path;
         }
         schemes = as_record (prop (&document, "securityDefinitions"));
     }
@@ -2093,7 +2171,7 @@ walk::Dialect dialect) {
         folders.place (draft_request (entry), entry.folder, entry.folder_from_tag);
     }
 
-    const json* info        = as_record (prop (&document, "info"));
+    const json* info         = as_record (prop (&document, "info"));
     const std::string* title = as_str (prop (info, "title"));
     const std::string* about = as_str (prop (info, "description"));
     const json* scheme = primary_scheme (schemes, prop (&document, "security"));
@@ -2102,9 +2180,9 @@ walk::Dialect dialect) {
     root["name"]        = title == nullptr ? "Imported API" : *title;
     root["description"] = about == nullptr ? "" : *about;
     root["variables"]   = base_url.empty () ?
-    json::object () :
-    json{ { "baseUrl", { { "value", base_url }, { "enabled", true } } } };
-    root["auth"]              = v3 ? scheme_to_auth_v3 (scheme) : scheme_to_auth_v2 (scheme);
+      json::object () :
+      json{ { "baseUrl", { { "value", base_url }, { "enabled", true } } } };
+    root["auth"] = v3 ? scheme_to_auth_v3 (scheme) : scheme_to_auth_v2 (scheme);
     root["preRequestScript"]  = "";
     root["postRequestScript"] = "";
     root["children"]          = folders.children ();
@@ -2134,8 +2212,9 @@ walk::Dialect dialect) {
     meta["nonExecutableAuth"]   = 0;
     meta["unattachedFileParts"] = unattached_file_parts (collections);
 
-    return json{ { "collections", std::move (collections) }, { "environments", json::array () },
-        { "globals", json::object () }, { "meta", std::move (meta) } };
+    return json{ { "collections", std::move (collections) },
+        { "environments", json::array () }, { "globals", json::object () },
+        { "meta", std::move (meta) } };
 }
 
 // ---------------------------------------------------------------------------
@@ -2143,7 +2222,8 @@ walk::Dialect dialect) {
 // ---------------------------------------------------------------------------
 
 bool is_postman_v21 (const json& parsed) {
-    const std::string* schema = as_str (prop (as_record (prop (&parsed, "info")), "schema"));
+    const std::string* schema =
+    as_str (prop (as_record (prop (&parsed, "info")), "schema"));
     return schema != nullptr && schema->find ("v2.1.0") != std::string::npos;
 }
 
@@ -2176,8 +2256,8 @@ std::optional<bool> postman_variable_scope (const json& parsed) {
 bool is_insomnia_v4 (const json& parsed) {
     const json* type   = prop (&parsed, "_type");
     const json* format = prop (&parsed, "__export_format");
-    return type != nullptr && *type == "export" && format != nullptr && format->is_number () &&
-    format->get<double> () == 4.0;
+    return type != nullptr && *type == "export" && format != nullptr &&
+    format->is_number () && format->get<double> () == 4.0;
 }
 
 /**
@@ -2239,23 +2319,26 @@ void carry (const json& from, json& to, const char* key) {
  * One request draft as the fields a write carries
  * (`requestFieldsFromDraft`), plus where it lands.
  */
-json apply_request (const json& draft, const std::string& temp_id,
-const std::string& collection_temp_id, int order) {
+json apply_request (const json& draft,
+const std::string& temp_id,
+const std::string& collection_temp_id,
+int order) {
     json item;
-    item["tempId"]            = temp_id;
-    item["collectionTempId"]  = collection_temp_id;
-    item["name"]              = draft.at ("name");
-    item["description"]       = draft.at ("description");
-    item["method"]            = draft.at ("method");
-    item["url"]               = draft.at ("url");
-    item["params"]            = draft.at ("params");
-    item["headers"]           = draft.at ("headers");
-    item["body"]              = draft.at ("body");
-    item["bodyType"]          = draft.at ("body").at ("mode"); // the engine never derives this
+    item["tempId"]           = temp_id;
+    item["collectionTempId"] = collection_temp_id;
+    item["name"]             = draft.at ("name");
+    item["description"]      = draft.at ("description");
+    item["method"]           = draft.at ("method");
+    item["url"]              = draft.at ("url");
+    item["params"]           = draft.at ("params");
+    item["headers"]          = draft.at ("headers");
+    item["body"]             = draft.at ("body");
+    item["bodyType"] = draft.at ("body").at ("mode"); // the engine never derives this
     item["auth"]              = draft.at ("auth");
     item["preRequestScript"]  = draft.at ("preRequestScript");
     item["postRequestScript"] = draft.at ("postRequestScript");
-    for (const char* optional : { "followRedirects", "maxRedirects", "examples", "specOperation" }) {
+    for (const char* optional :
+    { "followRedirects", "maxRedirects", "examples", "specOperation" }) {
         carry (draft, item, optional);
     }
     item["order"] = order;
@@ -2273,8 +2356,13 @@ const std::string& collection_temp_id, int order) {
  * by tie lottery. Everything below a root keeps its explicit index - those
  * parents are new in this payload, so there is nothing to collide with.
  */
-void flatten (const json& draft, const std::string* parent_temp_id, const int* order,
-TempIds& ids, json& collections, json& requests, json& specs) {
+void flatten (const json& draft,
+const std::string* parent_temp_id,
+const int* order,
+TempIds& ids,
+json& collections,
+json& requests,
+json& specs) {
     const std::string temp_id = "c" + std::to_string (++ids.collection);
 
     // The spec document, when this collection was parsed from one, as its own
@@ -2293,10 +2381,11 @@ TempIds& ids, json& collections, json& requests, json& specs) {
     }
 
     json collection;
-    collection["tempId"]       = temp_id;
-    collection["parentTempId"] = parent_temp_id == nullptr ? json (nullptr) : json (*parent_temp_id);
-    collection["name"]         = draft.at ("name");
-    collection["description"]  = draft.at ("description");
+    collection["tempId"] = temp_id;
+    collection["parentTempId"] =
+    parent_temp_id == nullptr ? json (nullptr) : json (*parent_temp_id);
+    collection["name"]        = draft.at ("name");
+    collection["description"] = draft.at ("description");
     if (order != nullptr) {
         collection["order"] = *order;
     }
@@ -2311,8 +2400,8 @@ TempIds& ids, json& collections, json& requests, json& specs) {
 
     const json& own = draft.at ("requests");
     for (size_t at = 0; at < own.size (); ++at) {
-        requests.push_back (apply_request (own[at], "r" + std::to_string (++ids.request), temp_id,
-        static_cast<int> (at)));
+        requests.push_back (apply_request (own[at],
+        "r" + std::to_string (++ids.request), temp_id, static_cast<int> (at)));
     }
     const json& children = draft.at ("children");
     for (size_t at = 0; at < children.size (); ++at) {
@@ -2323,8 +2412,9 @@ TempIds& ids, json& collections, json& requests, json& specs) {
 
 } // namespace
 
-ImportParse
-parse_import (const std::string& text, const ImportOptions& options, const ImportSource& source) {
+ImportParse parse_import (const std::string& text,
+const ImportOptions& options,
+const ImportSource& source) {
     ImportParse parsed;
 
     // One read, through the engine's one reader: JSON first and YAML second,
@@ -2357,7 +2447,7 @@ parse_import (const std::string& text, const ImportOptions& options, const Impor
         } else if (is_insomnia_v4 (document)) {
             parsed.result = parse_insomnia (document, options);
         } else if (const walk::Dialect dialect = walk::spec_dialect (document);
-                   dialect != walk::Dialect::None) {
+        dialect != walk::Dialect::None) {
             parsed.result = parse_openapi (document, text, source, dialect);
             query_joined  = true;
         } else {
@@ -2381,7 +2471,8 @@ parse_import (const std::string& text, const ImportOptions& options, const Impor
     if (!source.source_url.empty ()) {
         // What a spec document records about its own origin. A format that
         // produced none has nowhere to put it, so this is a no-op for one.
-        for (nlohmann::ordered_json& collection : parsed.result.at ("collections")) {
+        for (nlohmann::ordered_json& collection :
+        parsed.result.at ("collections")) {
             if (collection.contains ("spec")) {
                 collection["spec"]["sourceUrl"] = source.source_url;
             }
@@ -2414,8 +2505,8 @@ nlohmann::ordered_json import_apply_payload (const nlohmann::ordered_json& resul
     }
 
     return nlohmann::ordered_json{ { "collections", std::move (collections) },
-        { "requests", std::move (requests) }, { "environments", std::move (environments) },
-        { "specs", std::move (specs) } };
+        { "requests", std::move (requests) },
+        { "environments", std::move (environments) }, { "specs", std::move (specs) } };
 }
 
 } // namespace vayu::core

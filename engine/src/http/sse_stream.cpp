@@ -244,9 +244,9 @@ bool body_complete) {
     // The wire count, not the parsed one: a body cut by the capture budget
     // still delivered every event the counter saw, and reporting the shorter
     // number would make a truncated capture read as a shorter stream.
-    node["totalEvents"] = total_events;
-    node["eventsTruncated"] =
-    !body_complete || total_events > static_cast<int64_t> (node["items"].size ());
+    node["totalEvents"]     = total_events;
+    node["eventsTruncated"] = !body_complete ||
+    total_events > static_cast<int64_t> (node["items"].size ());
     return node;
 }
 
@@ -457,8 +457,8 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     // Until #705 this path set no proxy option at all, so a configured proxy
     // covered every send and every load run and silently skipped streams. The
     // shared applier is what makes that unrepeatable.
-    if (const ClientCertRule* certificate = detail::apply_transport_policy (
-        curl, request.transport, request.request.verify_ssl, request.request.url)) {
+    if (const ClientCertRule* certificate = detail::apply_transport_policy (curl,
+        request.transport, request.request.verify_ssl, request.request.url)) {
         response.client_certificate = client_cert_label (*certificate);
     }
     curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
@@ -522,8 +522,8 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         // rather than a deadline on a healthy stream.
         reason = SseEndReason::Idle;
     } else if (result != CURLE_OK) {
-        reason                 = SseEndReason::Error;
-        const Error error      = detail::curl_to_error (curl, result, error_buffer);
+        reason            = SseEndReason::Error;
+        const Error error = detail::curl_to_error (curl, result, error_buffer);
         response.status_code   = 0;
         response.status_text   = vayu::http::status_text (0);
         response.error_code    = error.code;

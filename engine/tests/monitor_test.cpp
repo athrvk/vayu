@@ -288,13 +288,12 @@ TEST (PrometheusParser, ReadsPlainAndLabelledSamples) {
 }
 
 TEST (PrometheusParser, SkipsCommentsBlankLinesAndNonFiniteValues) {
-    const std::string body =
-    "\n"
-    "   # a comment that mentions wanted 5\n"
-    "wanted NaN\n"
-    "also_wanted +Inf\n"
-    "third_wanted 4\r\n"                // CRLF: exposition files often are
-    "fourth_wanted 12 1700000000000\n"; // trailing timestamp
+    const std::string body = "\n"
+                             "   # a comment that mentions wanted 5\n"
+                             "wanted NaN\n"
+                             "also_wanted +Inf\n"
+                             "third_wanted 4\r\n" // CRLF: exposition files often are
+                             "fourth_wanted 12 1700000000000\n"; // trailing timestamp
     auto values = parse_prometheus_exposition (
     body, { "wanted", "also_wanted", "third_wanted", "fourth_wanted" });
 

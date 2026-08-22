@@ -35,9 +35,13 @@ using nlohmann::json;
 namespace vayu::http::routes {
 // Defined in metrics.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
-const std::string& run_id, int64_t limit, int64_t offset);
+const std::string& run_id,
+int64_t limit,
+int64_t offset);
 std::pair<int, nlohmann::json> run_monitor_series_response (vayu::db::Database& db,
-const std::string& run_id, int64_t limit, int64_t offset);
+const std::string& run_id,
+int64_t limit,
+int64_t offset);
 } // namespace vayu::http::routes
 
 namespace {
@@ -208,8 +212,7 @@ TEST_F (StatsRouteTest, TickPaginationNeverSplitsATick) {
         add_tick (id, sample.timestamp, vayu::core::build_metric_tick_payload (sample));
     }
 
-    auto [status, body] =
-    vayu::http::routes::run_time_series_response (*db_, id, 2, 0);
+    auto [status, body] = vayu::http::routes::run_time_series_response (*db_, id, 2, 0);
     EXPECT_EQ (status, 200);
     ASSERT_EQ (body["data"].size (), 2u);
 

@@ -5,8 +5,8 @@
 
 #include "vayu/core/refill_deficit.hpp"
 
-#include <gtest/gtest.h>
 #include <cstddef>
+#include <gtest/gtest.h>
 #include <limits>
 
 using vayu::core::compute_refill_deficit;

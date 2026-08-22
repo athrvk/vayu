@@ -102,7 +102,7 @@ class Sampler {
 
     /// `sampleSchema(schema, resolveRef)`.
     [[nodiscard]] json sample (const json* schema) const {
-        return walk (schema, 0, SeenRefs {});
+        return walk (schema, 0, SeenRefs{});
     }
 
     /**
@@ -125,13 +125,14 @@ class Sampler {
         if (!sampled.is_object ()) {
             return fields;
         }
-        const json* properties = as_record (prop (resolve_to_schema (schema, 0, SeenRefs {}), "properties"));
+        const json* properties =
+        as_record (prop (resolve_to_schema (schema, 0, SeenRefs{}), "properties"));
         for (auto entry = sampled.begin (); entry != sampled.end (); ++entry) {
             DraftField field;
             field.key     = entry.key ();
             field.value   = "";
             field.enabled = true;
-            field.file    = is_binary (prop (properties, entry.key ()), 0, SeenRefs {});
+            field.file = is_binary (prop (properties, entry.key ()), 0, SeenRefs{});
             fields.push_back (std::move (field));
         }
         return fields;
@@ -232,7 +233,7 @@ class Sampler {
         }
         // 3.1 replaced the singular `example` with an `examples` array.
         if (const json* examples = prop (node, "examples");
-            examples != nullptr && examples->is_array () && !examples->empty ()) {
+        examples != nullptr && examples->is_array () && !examples->empty ()) {
             return (*examples)[0];
         }
 
@@ -252,8 +253,10 @@ class Sampler {
                 // below, exactly as it matches no `case` there.
                 type = "null";
                 for (const json& member : *declared) {
-                    if (!(member.is_string () && member.get_ref<const std::string&> () == "null")) {
-                        type = member.is_string () ? member.get<std::string> () : std::string ();
+                    if (!(member.is_string () &&
+                        member.get_ref<const std::string&> () == "null")) {
+                        type = member.is_string () ? member.get<std::string> () :
+                                                     std::string ();
                         break;
                     }
                 }
@@ -328,14 +331,17 @@ std::optional<std::string> param_value_text (const json* declared) {
 }
 
 /// `declaredParamRow(name, declared, required, description)`.
-DraftField declared_param_row (std::string name, const json* declared, const json* required,
+DraftField declared_param_row (std::string name,
+const json* declared,
+const json* required,
 const std::string* description) {
     DraftField row;
     row.key   = std::move (name);
     row.value = param_value_text (declared).value_or ("");
     // `required === true`, strictly: a document writing `required: "true"` has
     // said something the importer does not act on.
-    row.enabled = (required != nullptr && required->is_boolean () && required->get<bool> ()) ||
+    row.enabled =
+    (required != nullptr && required->is_boolean () && required->get<bool> ()) ||
     !row.value.empty ();
     if (description != nullptr) {
         row.description = *description;
@@ -358,26 +364,28 @@ const json* parameter_list (const json* parameters) {
  * already holds replaces the value and keeps the insertion order, and the rows
  * reach the draft - and the URL's query - in that order.
  */
-std::vector<const json*> merged_parameters (const json& document, const json* path_item,
-const json* operation, ImportTally* tally) {
+std::vector<const json*> merged_parameters (const json& document,
+const json* path_item,
+const json* operation,
+ImportTally* tally) {
     std::vector<const json*> ordered;
     std::unordered_map<std::string, size_t> position;
 
     // The path item's own `parameters` are counted by the walk, once per path;
     // this is the operation's half of the same rule.
     if (const json* declared = prop (operation, "parameters");
-        declared != nullptr && !declared->is_null () && !declared->is_array ()) {
+    declared != nullptr && !declared->is_null () && !declared->is_array ()) {
         tally_add (tally, "malformed_spec");
     }
     for (const json* list : { parameter_list (prop (path_item, "parameters")),
-             parameter_list (prop (operation, "parameters")) }) {
+         parameter_list (prop (operation, "parameters")) }) {
         if (list == nullptr) {
             continue;
         }
         for (const json& parameter : *list) {
             const std::string* ref = as_str (prop (&parameter, "$ref"));
-            const json* resolved =
-            as_record (ref != nullptr ? walk::resolve_ref (document, *ref) : &parameter);
+            const json* resolved   = as_record (
+            ref != nullptr ? walk::resolve_ref (document, *ref) : &parameter);
             if (resolved == nullptr) {
                 continue;
             }
@@ -387,7 +395,7 @@ const json* operation, ImportTally* tally) {
                 continue;
             }
             const std::string key = js_string_of (*in) + ":" + js_string_of (*name);
-            const auto found      = position.find (key);
+            const auto found = position.find (key);
             if (found == position.end ()) {
                 position.emplace (key, ordered.size ());
                 ordered.push_back (resolved);
@@ -444,9 +452,9 @@ bool is_version_segment (const std::string& segment) {
 std::string path_folder_name (const std::string& path) {
     size_t start = 0;
     while (start <= path.size ()) {
-        const size_t slash = path.find ('/', start);
-        const std::string segment =
-        path.substr (start, slash == std::string::npos ? std::string::npos : slash - start);
+        const size_t slash        = path.find ('/', start);
+        const std::string segment = path.substr (
+        start, slash == std::string::npos ? std::string::npos : slash - start);
         if (slash == std::string::npos) {
             start = path.size () + 1;
         } else {
@@ -529,7 +537,8 @@ const json* declared_param_value_v3 (const Sampler& sampler, const json* param) 
         return named;
     }
     const json* schema = as_record (sampler.deref (prop (param, "schema")));
-    if (const json* example = prop (schema, "example"); example != nullptr && !example->is_null ()) {
+    if (const json* example = prop (schema, "example");
+    example != nullptr && !example->is_null ()) {
         return example;
     }
     return prop (schema, "default");
@@ -539,8 +548,8 @@ const json* declared_param_value_v3 (const Sampler& sampler, const json* param) 
 DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally* tally) {
     DraftBody body;
     const std::string* ref = as_str (prop (request_body, "$ref"));
-    const json* resolved   = ref != nullptr ? sampler.deref (request_body) : request_body;
-    const json* content    = as_record (prop (resolved, "content"));
+    const json* resolved = ref != nullptr ? sampler.deref (request_body) : request_body;
+    const json* content = as_record (prop (resolved, "content"));
     if (content == nullptr) {
         return body; // No `requestBody` at all: nothing was lost.
     }
@@ -569,8 +578,8 @@ DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally
             continue;
         }
         const bool multipart = std::string_view (type) == "multipart/form-data";
-        body.mode            = multipart ? "form-data" : "x-www-form-urlencoded";
-        body.fields          = sampler.form_fields (prop (declared, "schema"));
+        body.mode   = multipart ? "form-data" : "x-www-form-urlencoded";
+        body.fields = sampler.form_fields (prop (declared, "schema"));
         // A document names the upload, never the file - the part imports with no
         // path and the user attaches one. Only under multipart: urlencoded has no
         // file form on the wire, so a `format: binary` there is a document that
@@ -656,7 +665,8 @@ response_example (const std::string& code, const json* response, ImportTally* ta
         return std::nullopt;
     }
     if (code.size () != 3 ||
-    !std::all_of (code.begin (), code.end (), [] (unsigned char c) { return std::isdigit (c) != 0; })) {
+    !std::all_of (code.begin (), code.end (),
+    [] (unsigned char c) { return std::isdigit (c) != 0; })) {
         tally_add (tally, "example_no_status");
         return std::nullopt;
     }
@@ -672,7 +682,7 @@ response_example (const std::string& code, const json* response, ImportTally* ta
     // does not. The status leads because that is what a reader scans a list of
     // examples for.
     const std::string* description = as_str (prop (node, "description"));
-    example.name         = description == nullptr ? code : code + " - " + *description;
+    example.name = description == nullptr ? code : code + " - " + *description;
     example.status       = status;
     example.documented   = found.has_value ();
     example.content_type = found ? found->content_type : std::string ();
@@ -693,8 +703,8 @@ examples_v3 (const Sampler& sampler, const json* responses, ImportTally* tally) 
         // a document that declares its errors once and names them everywhere
         // leaves (issue #714).
         const json* response = sampler.deref (&entry.value ());
-        auto example = response_example (entry.key (), response, tally,
-        [&] (const json& node) -> std::optional<ExamplePayload> {
+        auto example         = response_example (entry.key (), response, tally,
+                [&] (const json& node) -> std::optional<ExamplePayload> {
             const json* content = as_record (prop (&node, "content"));
             if (content == nullptr) {
                 return std::nullopt;
@@ -738,8 +748,10 @@ examples_v3 (const Sampler& sampler, const json* responses, ImportTally* tally) 
  * operation's `produces`, falling back to the document's, because a 2.0
  * response does not name its own.
  */
-std::vector<DraftExample>
-examples_v2 (const json& document, const Sampler& sampler, const json* operation, ImportTally* tally) {
+std::vector<DraftExample> examples_v2 (const json& document,
+const Sampler& sampler,
+const json* operation,
+ImportTally* tally) {
     std::vector<DraftExample> out;
     const json* map = as_record (prop (operation, "responses"));
     if (map == nullptr) {
@@ -753,7 +765,8 @@ examples_v2 (const json& document, const Sampler& sampler, const json* operation
     std::vector<std::string> produces;
     if (declared != nullptr && declared->is_array ()) {
         for (const json& entry : *declared) {
-            produces.push_back (entry.is_string () ? entry.get<std::string> () : std::string ());
+            produces.push_back (
+            entry.is_string () ? entry.get<std::string> () : std::string ());
         }
     }
     std::optional<std::string> json_produced;
@@ -771,10 +784,11 @@ examples_v2 (const json& document, const Sampler& sampler, const json* operation
 
     for (auto entry = map->begin (); entry != map->end (); ++entry) {
         const json* response = sampler.deref (&entry.value ());
-        auto example = response_example (entry.key (), response, tally,
-        [&] (const json& node) -> std::optional<ExamplePayload> {
-            const std::string content_type = json_produced ? *json_produced :
-            (produces.empty () ? std::string ("application/json") : produces.front ());
+        auto example         = response_example (entry.key (), response, tally,
+                [&] (const json& node) -> std::optional<ExamplePayload> {
+            const std::string content_type = json_produced ?
+                    *json_produced :
+                    (produces.empty () ? std::string ("application/json") : produces.front ());
             if (const json* documented = as_record (prop (&node, "examples"))) {
                 // `declared[contentType] ?? declared["application/json"]`, then
                 // `!== undefined` - so an explicitly documented `null` is a body
@@ -783,7 +797,7 @@ examples_v2 (const json& document, const Sampler& sampler, const json* operation
                 const json* value = prop (documented, content_type);
                 if (value == nullptr || value->is_null ()) {
                     const json* plain = prop (documented, "application/json");
-                    value = plain != nullptr ? plain : value;
+                    value             = plain != nullptr ? plain : value;
                 }
                 if (value != nullptr) {
                     return ExamplePayload{ example_body_text (*value), content_type };
@@ -857,15 +871,17 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
     const Sampler sampler (document);
 
     walk::WalkNotes notes;
-    for (walk::WalkedOperation& walked : walk::walk_operations (document, tally == nullptr ? nullptr : &notes)) {
+    for (walk::WalkedOperation& walked :
+    walk::walk_operations (document, tally == nullptr ? nullptr : &notes)) {
         if (!walked.identified && !include_unidentified) {
             continue;
         }
-        const json* operation = walked.node;
+        const json* operation   = walked.node;
         const std::string& path = walked.identity.path;
 
         SpecRequestDraft entry;
-        std::tie (entry.folder, entry.folder_from_tag) = folder_of (prop (operation, "tags"), path);
+        std::tie (entry.folder, entry.folder_from_tag) =
+        folder_of (prop (operation, "tags"), path);
 
         DraftRequest& draft = entry.draft;
         if (const std::string* summary = as_str (prop (operation, "summary"))) {
@@ -884,9 +900,11 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         draft.method = walked.identity.method;
 
         std::vector<DraftField> form_fields;
-        for (const json* parameter : merged_parameters (document, walked.path_item, operation, tally)) {
-            const json* name_node  = prop (parameter, "name");
-            const std::string name = name_node == nullptr ? std::string () : js_string_of (*name_node);
+        for (const json* parameter :
+        merged_parameters (document, walked.path_item, operation, tally)) {
+            const json* name_node = prop (parameter, "name");
+            const std::string name =
+            name_node == nullptr ? std::string () : js_string_of (*name_node);
             const std::string* in  = as_str (prop (parameter, "in"));
             const std::string kind = in == nullptr ? std::string () : *in;
             const json* required   = prop (parameter, "required");
@@ -898,7 +916,8 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
                 // 2.0 states a non-body parameter's value inline as `default`;
                 // it has no `example` keyword (that arrived with 3.x).
                 prop (parameter, "default");
-                draft.params.push_back (declared_param_row (name, value, required, description));
+                draft.params.push_back (
+                declared_param_row (name, value, required, description));
             } else if (kind == "header") {
                 if (is_self_produced_header (name)) {
                     continue;
@@ -911,14 +930,15 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
                 draft.headers.push_back (declared_param_row (name, value, required, nullptr));
             } else if (dialect == walk::Dialect::V2 && kind == "body") {
                 const json* schema = prop (parameter, "schema");
-                const json sample = truthy (schema) ? sampler.sample (schema) : json::object ();
+                const json sample =
+                truthy (schema) ? sampler.sample (schema) : json::object ();
                 draft.body.content = js_json_text (sample);
-                draft.body.mode    = "json"; // Corrected below against `consumes`.
+                draft.body.mode = "json"; // Corrected below against `consumes`.
             } else if (dialect == walk::Dialect::V2 && kind == "formData") {
                 DraftField field;
-                field.key  = name;
+                field.key                   = name;
                 const std::string* declared = as_str (prop (parameter, "type"));
-                field.file                  = declared != nullptr && *declared == "file";
+                field.file = declared != nullptr && *declared == "file";
                 form_fields.push_back (std::move (field));
             } else if (dialect == walk::Dialect::V3 && kind == "cookie") {
                 // Dropped - a request's cookies come from the jar - and counted
@@ -954,19 +974,20 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
                 // wire form, so a document declaring one under a urlencoded-only
                 // `consumes` contradicts itself; multipart is the half of that
                 // contradiction which can carry the field.
-                const bool urlencoded =
-                std::any_of (consumes.begin (), consumes.end (), [] (const std::string& type) {
+                const bool urlencoded = std::any_of (consumes.begin (),
+                consumes.end (), [] (const std::string& type) {
                     return media_type (type) == "application/x-www-form-urlencoded";
                 });
-                const bool multipart =
-                std::any_of (consumes.begin (), consumes.end (), [] (const std::string& type) {
+                const bool multipart  = std::any_of (consumes.begin (),
+                 consumes.end (), [] (const std::string& type) {
                     return media_type (type) == "multipart/form-data";
                 });
-                const bool has_file = std::any_of (form_fields.begin (), form_fields.end (),
+                const bool has_file =
+                std::any_of (form_fields.begin (), form_fields.end (),
                 [] (const DraftField& field) { return field.file; });
-                draft.body.mode = (urlencoded && !multipart && !has_file) ?
-                "x-www-form-urlencoded" :
-                "form-data";
+                draft.body.mode    = (urlencoded && !multipart && !has_file) ?
+                   "x-www-form-urlencoded" :
+                   "form-data";
                 draft.body.content = "";
                 draft.body.fields  = std::move (form_fields);
             }
@@ -978,7 +999,8 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         examples_v3 (sampler, prop (operation, "responses"), tally) :
         examples_v2 (document, sampler, operation, tally);
 
-        draft.url = append_params ("{{baseUrl}}" + normalize_path_templates (path), draft.params);
+        draft.url =
+        append_params ("{{baseUrl}}" + normalize_path_templates (path), draft.params);
 
         entry.identified = walked.identified;
         entry.operation  = std::move (walked.identity);
@@ -1016,10 +1038,10 @@ void ImportTally::add (std::string_view kind, int count) {
 nlohmann::ordered_json ImportTally::items () const {
     // The order `SkippedItem["kind"]` declares, so that two walks of one
     // document produce one list whatever order they met the losses in.
-    static constexpr std::array<const char*, 15> ORDER = { "websocket", "grpc", "api_spec",
-        "unit_test", "file_body", "malformed_item", "unsupported_method", "malformed_spec",
-        "example_no_status", "default_response", "external_ref", "duplicate_operation_id",
-        "cookie_param", "unmapped_body", "unresolved_base_url" };
+    static constexpr std::array<const char*, 15> ORDER = { "websocket", "grpc",
+        "api_spec", "unit_test", "file_body", "malformed_item", "unsupported_method",
+        "malformed_spec", "example_no_status", "default_response", "external_ref",
+        "duplicate_operation_id", "cookie_param", "unmapped_body", "unresolved_base_url" };
 
     nlohmann::ordered_json items = nlohmann::ordered_json::array ();
     for (const char* kind : ORDER) {

@@ -109,17 +109,17 @@ TEST (SpecCoverageIndex, AMalformedIndexIsRefusedAtTheWriteRatherThanIgnoredLate
     validate_operations_index (nlohmann::json::parse (R"([{"method": "GET"}])")).has_value ());
     EXPECT_TRUE (validate_operations_index (
     nlohmann::json::parse (R"([{"method": "GET", "path": "/a", "responses": "200"}])"))
-                 .has_value ());
+    .has_value ());
     EXPECT_TRUE (validate_operations_index (
     nlohmann::json::parse (R"([{"method": "GET", "path": "/a", "responses": [200]}])"))
-                 .has_value ());
-    // `responses` is optional: an operation may genuinely declare none.
-    EXPECT_FALSE (
-    validate_operations_index (nlohmann::json::parse (R"([{"method": "GET", "path": "/a"}])"))
     .has_value ());
-    EXPECT_FALSE (validate_operations_index (nlohmann::json::parse (
-    R"([{"operationId": "listPets", "method": "GET", "path": "/a", "responses": ["2XX"]}])"))
-                  .has_value ());
+    // `responses` is optional: an operation may genuinely declare none.
+    EXPECT_FALSE (validate_operations_index (
+    nlohmann::json::parse (R"([{"method": "GET", "path": "/a"}])"))
+    .has_value ());
+    EXPECT_FALSE (validate_operations_index (
+    nlohmann::json::parse (R"([{"operationId": "listPets", "method": "GET", "path": "/a", "responses": ["2XX"]}])"))
+    .has_value ());
 }
 
 // ============================================================================
@@ -149,12 +149,11 @@ TEST (SpecCoverageIndex, AnOperationIdWinsOverThePathItWasRenamedFrom) {
 // ============================================================================
 
 TEST (SpecCoverage, DeclaredResponsesArePartitionedIntoHitAndMissed) {
-    const std::vector<DeclaredOperation> declared{
-        op ("listPets", "GET", "/pets", { "200", "404", "default" })
-    };
+    const std::vector<DeclaredOperation> declared{ op (
+    "listPets", "GET", "/pets", { "200", "404", "default" }) };
     OperationObservation seen;
-    seen.sent       = 3;
-    seen.statuses   = { { 200, 2 }, { 500, 1 } };
+    seen.sent           = 3;
+    seen.statuses       = { { 200, 2 }, { 500, 1 } };
     const auto coverage = build_coverage_payload (declared, { seen }, 0);
 
     const auto row = row_for (coverage, "/pets");
@@ -174,9 +173,8 @@ TEST (SpecCoverage, AStatusHitsTheMostSpecificPatternAndLeavesTheRangeUnhit) {
     // The document declared two distinct responses; a run that only ever
     // produced 200 produced one of them. Counting `2XX` as hit as well would
     // report a promise the run never exercised.
-    const std::vector<DeclaredOperation> declared{
-        op ("listPets", "GET", "/pets", { "200", "2XX" })
-    };
+    const std::vector<DeclaredOperation> declared{ op (
+    "listPets", "GET", "/pets", { "200", "2XX" }) };
     OperationObservation seen;
     seen.sent           = 1;
     seen.statuses       = { { 200, 1 } };
@@ -188,8 +186,8 @@ TEST (SpecCoverage, AStatusHitsTheMostSpecificPatternAndLeavesTheRangeUnhit) {
 
     // 204 answers to no exact pattern, so the range takes it.
     OperationObservation other;
-    other.sent      = 1;
-    other.statuses  = { { 204, 1 } };
+    other.sent        = 1;
+    other.statuses    = { { 204, 1 } };
     const auto second = build_coverage_payload (declared, { other }, 0);
     EXPECT_EQ (row_for (second, "/pets")["declaredHit"], nlohmann::json::array ({ "2XX" }));
 }

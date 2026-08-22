@@ -509,12 +509,12 @@ TEST_F (ScenarioLoadTest, ALoadRunCountsEveryCompletionAgainstItsOperation) {
     listed.path         = "/pets";
     listed.responses    = { "200", "404" };
     vayu::core::DeclaredOperation never;
-    never.operation_id                  = "deletePet";
-    never.method                        = "DELETE";
-    never.path                          = "/pets/{petId}";
-    never.responses                     = { "204" };
-    execution.spec.spec_id              = "spec_1";
-    execution.spec.declared_operations  = { listed, never };
+    never.operation_id                 = "deletePet";
+    never.method                       = "DELETE";
+    never.path                         = "/pets/{petId}";
+    never.responses                    = { "204" };
+    execution.spec.spec_id             = "spec_1";
+    execution.spec.declared_operations = { listed, never };
 
     const json config = { { "mode", "iterations" }, { "iterations", 3 },
         { "concurrency", 1 } };
@@ -1165,10 +1165,10 @@ std::string schema_index_for (const std::vector<json>& schemas) {
     json operations = json::array ();
     for (size_t i = 0; i < schemas.size (); ++i) {
         operations.push_back (json{ { "operationId", "step" + std::to_string (i) },
-            { "method", "GET" }, { "path", "/s" + std::to_string (i) },
-            { "responses", json::array ({ json{ { "status", "200" },
-                              { "contentType", "application/json" },
-                              { "schema", schemas[i] } } }) } });
+        { "method", "GET" }, { "path", "/s" + std::to_string (i) },
+        { "responses",
+        json::array ({ json{ { "status", "200" },
+        { "contentType", "application/json" }, { "schema", schemas[i] } } }) } });
     }
     return json{ { "refRoots", json::object () }, { "operations", operations } }.dump ();
 }
@@ -1177,14 +1177,14 @@ std::string schema_index_for (const std::vector<json>& schemas) {
 /// the run the index those operations are declared in.
 void bind_to_schemas (vayu::core::ScenarioExecution& execution,
 const std::vector<json>& schemas) {
-    execution.spec.spec_id   = "spec_1";
-    execution.spec.spec_hash = "hash_1";
+    execution.spec.spec_id          = "spec_1";
+    execution.spec.spec_hash        = "hash_1";
     execution.spec.response_schemas = schema_index_for (schemas);
     for (size_t i = 0; i < execution.plan.steps.size (); ++i) {
-        execution.plan.steps[i].spec_operation =
-        json{ { "operationId", "step" + std::to_string (i) }, { "method", "GET" },
-            { "path", "/s" + std::to_string (i) } }
-        .dump ();
+        execution.plan.steps[i].spec_operation = json{
+            { "operationId", "step" + std::to_string (i) }, { "method", "GET" },
+            { "path", "/s" + std::to_string (i) }
+        }.dump ();
     }
 }
 
@@ -1342,5 +1342,6 @@ TEST_F (ScenarioLoadTest, ARunWhoseSamplesWereThinnedStillReportsHonestly) {
     EXPECT_LT (totals.sampled, 16u)
     << "16 completions into a 4-sample budget must have been thinned";
     EXPECT_GT (context_->metrics_collector->response_samples_dropped (), 0u)
-    << "what was thinned must be reported, or the tallies read as the whole run";
+    << "what was thinned must be reported, or the tallies read as the whole "
+       "run";
 }

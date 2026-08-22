@@ -1,8 +1,11 @@
-# Build directories
+# Build directories. A glob rather than the four names that used to be listed
+# here (build-test, build-release, build-asan): a second build tree is now
+# something the documented workflow asks for - clang-tidy needs a compile
+# database generated with -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON, which is a
+# separate directory - and an enumerated list silently fails to cover whatever
+# a contributor names theirs.
 build/
-build-test/
-build-release/
-build-asan/
+build-*/
 cmake-build-*/
 out/
 data/

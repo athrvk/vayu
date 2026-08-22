@@ -243,8 +243,8 @@ struct CertificateAndKey {
         // 0 / 0 is "the library's default algorithm", read at build time rather
         // than pinned here: the point is to be what today's OpenSSL emits, and
         // a hardcoded NID would freeze this at what today happens to mean.
-        tls_detail::Pkcs12Ptr bundle (PKCS12_create (passphrase.c_str (), "vayu-test-client",
-        key.get (), certificate.get (), nullptr, 0, 0, 0, 0, 0));
+        tls_detail::Pkcs12Ptr bundle (PKCS12_create (passphrase.c_str (),
+        "vayu-test-client", key.get (), certificate.get (), nullptr, 0, 0, 0, 0, 0));
         if (!bundle) {
             tls_detail::fail ("could not build a PKCS#12 bundle");
         }

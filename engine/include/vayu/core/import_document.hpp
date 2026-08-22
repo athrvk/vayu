@@ -112,8 +112,9 @@ struct ImportParse {
  *              it stores and a re-serialization would make every YAML spec
  *              drift on its first sync.
  */
-[[nodiscard]] ImportParse
-parse_import (const std::string& text, const ImportOptions& options, const ImportSource& source);
+[[nodiscard]] ImportParse parse_import (const std::string& text,
+const ImportOptions& options,
+const ImportSource& source);
 
 /**
  * @brief An `ImportResult` as the `POST /import/apply` payload that persists it.
@@ -145,6 +146,7 @@ parse_import (const std::string& text, const ImportOptions& options, const Impor
  * they stay a separate write - see `POST /import`, which does it last and for
  * the reason the orchestrator does.
  */
-[[nodiscard]] nlohmann::ordered_json import_apply_payload (const nlohmann::ordered_json& result);
+[[nodiscard]] nlohmann::ordered_json import_apply_payload (
+const nlohmann::ordered_json& result);
 
 } // namespace vayu::core

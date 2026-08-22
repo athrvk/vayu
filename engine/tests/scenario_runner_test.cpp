@@ -380,8 +380,8 @@ class ScenarioRunnerTest : public ::testing::Test {
     /// A helper rather than the call spelled out at each site: five tests want
     /// this handle, and a hand-written sixth would reach for `get_run` exactly
     /// as these did.
-    [[nodiscard]] std::shared_ptr<vayu::core::RunContext>
-    context_for (const std::string& run_id) {
+    [[nodiscard]] std::shared_ptr<vayu::core::RunContext> context_for (
+    const std::string& run_id) {
         auto context = manager_.get_run_or_retained (run_id);
         EXPECT_TRUE (context != nullptr) << "No context for run " << run_id;
         return context;
@@ -1580,7 +1580,8 @@ TEST_F (ScenarioRunnerTest, APreRequestAssertionIsListedCountedAndNamedTogether)
     // The step the list sits beside: failed, named by the assertion that
     // failed it - the outcome this list could not account for before.
     EXPECT_EQ (trace["outcome"].get<std::string> (), "failed");
-    EXPECT_NE (rows[0].error.find ("token was issued"), std::string::npos) << rows[0].error;
+    EXPECT_NE (rows[0].error.find ("token was issued"), std::string::npos)
+    << rows[0].error;
 
     // And the live half counts what the stored list holds, so a run being
     // watched does not renumber itself when its rows arrive.

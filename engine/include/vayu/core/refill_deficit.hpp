@@ -22,9 +22,8 @@ namespace vayu::core {
  *                          time-bounded modes; M - requests_sent for iterations)
  * @return number of requests to submit this tick (>= 0)
  */
-[[nodiscard]] inline size_t compute_refill_deficit (size_t target,
-size_t in_flight,
-size_t budget_remaining) {
+[[nodiscard]] inline size_t
+compute_refill_deficit (size_t target, size_t in_flight, size_t budget_remaining) {
     size_t need = target > in_flight ? target - in_flight : 0;
     return std::min (need, budget_remaining);
 }

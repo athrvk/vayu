@@ -384,7 +384,7 @@ TEST_F (PlanAuthRefreshTest, InertForEveryUnrefreshableShape) {
         const json auth = { { "mode", "bearer" }, { "token", "static" } };
         EXPECT_FALSE (vayu::http::plan_auth_refresh (
         request_with ("Bearer static"), auth, db.get ())
-                      .has_value ());
+        .has_value ());
     }
     {
         // A token with no expiry cannot outlive anything.

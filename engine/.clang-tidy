@@ -35,26 +35,18 @@ Checks: '
 #     option values) and test literals. Naming each at its single use site moves
 #     the number away from what it means.
 
-# For the pre-commit hook, which lints against whatever build tree you already
-# have. The engine builds with a precompiled header, and on a GCC build that
-# `.gch` is not one clang can read, so clang-tidy replaying the compile command
-# says "precompiled header ... was ignored because it is not a clang PCH file"
-# on every file. It then falls back to including the header as text and analyses
-# exactly the same translation unit, so the diagnostic is noise about the build
-# tree rather than a fact about the code - and a hook that prints it once per
-# staged file is a hook people stop reading.
+# No `ExtraArgs` here, deliberately (issue #912). `-Wno-ignored-gch` used to
+# live on this line, for the pre-commit hook's benefit. It broke CI for every
+# pull request that changed a header: `compile_commands.json` has one entry per
+# *translation unit* and therefore none for a `.hpp`, and on the fallback
+# command clang-tidy synthesises for a file it cannot look up, the `ExtraArgs`
+# entry arrives in input position - `error: no such file or directory:
+# '-Wno-ignored-gch'`, which `WarningsAsErrors: '*'` below turns into a failed
+# job. The flag now lives on the hook's own command line, which is the only
+# consumer that ever needed it; `scripts/pre-commit` carries the reasoning.
 #
-# It has to be a compiler flag: with -Werror in the compile command clang raises
-# it as a hard error before any check filter is consulted, so a
-# `-clang-diagnostic-ignored-gch` entry in the check list above does nothing.
-#
-# CI does not rely on this. It regenerates `compile_commands.json` with
-# `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON` before linting, which is the fix that
-# holds for every compiler - macOS produces a *clang* PCH that Homebrew's
-# clang 19 still rejects as "a newer PCH format", which no `-Wno-` flag covers.
-# The hook does not do that, because reconfiguring someone's build tree from a
-# git hook would throw away their next incremental build.
-ExtraArgs: ['-Wno-ignored-gch']
+# The general rule this is an instance of: a setting in this file is read by
+# both consumers, so anything only one of them needs belongs at its call site.
 
 # A finding is a failure, in one place. Both consumers of this config read their
 # verdict from clang-tidy's exit status - the `scripts/pre-commit` hook and the

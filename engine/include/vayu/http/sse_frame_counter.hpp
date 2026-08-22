@@ -113,7 +113,7 @@ class SseFrameCounter {
     enum class FieldMatch : std::uint8_t { Matching, MatchedName, Decided };
 
     void advance_field_match (char c) {
-        static constexpr char FIELD[] = "data";
+        static constexpr char FIELD[]          = "data";
         static constexpr std::size_t FIELD_LEN = 4;
 
         if (field_match_ == FieldMatch::MatchedName) {
@@ -160,12 +160,12 @@ class SseFrameCounter {
         resolve_line ();
     }
 
-    std::size_t events_    = 0;
-    bool pending_cr_       = false;
-    bool line_empty_       = true;
-    bool frame_has_data_   = false;
-    bool line_is_data_     = false;
-    std::uint8_t matched_  = 0;
+    std::size_t events_     = 0;
+    bool pending_cr_        = false;
+    bool line_empty_        = true;
+    bool frame_has_data_    = false;
+    bool line_is_data_      = false;
+    std::uint8_t matched_   = 0;
     FieldMatch field_match_ = FieldMatch::Matching;
 };
 

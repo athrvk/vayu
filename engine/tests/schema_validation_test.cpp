@@ -40,9 +40,9 @@ const std::string& status       = "200",
 const std::string& content_type = "application/json",
 const json& ref_roots           = json::object ()) {
     json index;
-    index["refRoots"]  = ref_roots;
-    index["operations"] = json::array ({ json{ { "operationId", "getPet" },
-    { "method", "GET" }, { "path", "/pets/{petId}" },
+    index["refRoots"]   = ref_roots;
+    index["operations"] = json::array (
+    { json{ { "operationId", "getPet" }, { "method", "GET" }, { "path", "/pets/{petId}" },
     { "responses",
     json::array ({ json{ { "status", status }, { "contentType", content_type },
     { "schema", schema } } }) } } });
@@ -109,8 +109,7 @@ TEST (ResponseSchemaIndexTest, InvalidBodyFailsAndNamesWhere) {
     const auto index = ResponseSchemaIndex::parse (one_operation_index (pet_schema ()));
     ASSERT_TRUE (index.has_value ());
 
-    const auto verdict =
-    index->check (GET_PET, 200, "application/json", R"({"id":"one"})");
+    const auto verdict = index->check (GET_PET, 200, "application/json", R"({"id":"one"})");
     EXPECT_TRUE (verdict.checked);
     EXPECT_FALSE (verdict.valid);
     ASSERT_FALSE (verdict.failures.empty ());
@@ -130,19 +129,19 @@ TEST (ResponseSchemaIndexTest, ContentTypeParametersAreIgnored) {
     const auto index = ResponseSchemaIndex::parse (one_operation_index (pet_schema ()));
     ASSERT_TRUE (index.has_value ());
 
-    const auto verdict = index->check (GET_PET, 200,
-    "application/json; charset=utf-8", R"({"id":1,"name":"Rex"})");
+    const auto verdict = index->check (
+    GET_PET, 200, "application/json; charset=utf-8", R"({"id":1,"name":"Rex"})");
     EXPECT_TRUE (verdict.checked);
     EXPECT_TRUE (verdict.valid);
 }
 
 TEST (ResponseSchemaIndexTest, ExactStatusWinsOverARange) {
     json index;
-    index["operations"] = json::array ({ json{ { "operationId", "getPet" },
-    { "method", "GET" }, { "path", "/pets/{petId}" },
+    index["operations"] = json::array (
+    { json{ { "operationId", "getPet" }, { "method", "GET" }, { "path", "/pets/{petId}" },
     { "responses",
     json::array ({ json{ { "status", "2XX" }, { "contentType", "application/json" },
-    { "schema", json{ { "type", "string" } } } },
+                   { "schema", json{ { "type", "string" } } } },
     json{ { "status", "200" }, { "contentType", "application/json" },
     { "schema", json{ { "type", "object" } } } } }) } } });
 
@@ -161,15 +160,15 @@ TEST (ResponseSchemaIndexTest, RangeAndDefaultAnswerWhenNothingExactDoes) {
     const auto ranged =
     ResponseSchemaIndex::parse (one_operation_index (pet_schema (), "2XX"));
     ASSERT_TRUE (ranged.has_value ());
-    EXPECT_EQ (ranged->check (GET_PET, 201, "application/json", R"({"id":1,"name":"a"})")
-               .matched_status,
+    EXPECT_EQ (
+    ranged->check (GET_PET, 201, "application/json", R"({"id":1,"name":"a"})").matched_status,
     "2XX");
 
     const auto fallback =
     ResponseSchemaIndex::parse (one_operation_index (pet_schema (), "default"));
     ASSERT_TRUE (fallback.has_value ());
-    EXPECT_EQ (fallback->check (GET_PET, 503, "application/json", R"({"id":1,"name":"a"})")
-               .matched_status,
+    EXPECT_EQ (
+    fallback->check (GET_PET, 503, "application/json", R"({"id":1,"name":"a"})").matched_status,
     "default");
 }
 
@@ -196,8 +195,8 @@ TEST (ResponseSchemaIndexTest, EveryUncheckableCaseNamesItself) {
     EXPECT_EQ (*verdict.reason, UncheckedReason::NoOperation);
 
     // An identity the document does not declare.
-    verdict = index->check (R"({"method":"GET","path":"/ghosts"})", 200,
-    "application/json", body);
+    verdict = index->check (
+    R"({"method":"GET","path":"/ghosts"})", 200, "application/json", body);
     EXPECT_EQ (*verdict.reason, UncheckedReason::OperationNotDeclared);
 
     // A status nothing covers.
@@ -223,9 +222,9 @@ TEST (ResponseSchemaIndexTest, IdentityResolvesByOperationIdBeforeMethodAndPath)
     const auto index = ResponseSchemaIndex::parse (one_operation_index (pet_schema ()));
     ASSERT_TRUE (index.has_value ());
 
-    const auto verdict = index->check (
-    R"({"operationId":"getPet","method":"GET","path":"/v2/pets/{petId}"})", 200,
-    "application/json", R"({"id":1,"name":"Rex"})");
+    const auto verdict =
+    index->check (R"({"operationId":"getPet","method":"GET","path":"/v2/pets/{petId}"})",
+    200, "application/json", R"({"id":1,"name":"Rex"})");
     EXPECT_TRUE (verdict.checked);
     EXPECT_TRUE (verdict.valid);
 }
@@ -241,13 +240,15 @@ TEST (ResponseSchemaIndexTest, OneUnusableRowDoesNotCostTheDocumentItsIndex) {
     json index;
     index["operations"] = json::array ({ json{ { "path", "/pets" } }, // no method
     json{ { "operationId", "getPet" }, { "method", "GET" }, { "path", "/pets/{petId}" },
-    { "responses", json::array ({ json{ { "status", "200" },
+    { "responses",
+    json::array ({ json{ { "status", "200" },
     { "contentType", "application/json" }, { "schema", pet_schema () } } }) } } });
 
     const auto parsed = ResponseSchemaIndex::parse (index.dump ());
     ASSERT_TRUE (parsed.has_value ());
     EXPECT_EQ (parsed->size (), 1u);
-    EXPECT_TRUE (parsed->check (GET_PET, 200, "application/json", R"({"id":1,"name":"a"})").checked);
+    EXPECT_TRUE (
+    parsed->check (GET_PET, 200, "application/json", R"({"id":1,"name":"a"})").checked);
 }
 
 // ─── Shared ref roots ───────────────────────────────────────────────────────
@@ -259,8 +260,9 @@ TEST (ResponseSchemaRefTest, RefsResolveThroughTheSharedRoots) {
         "Tag": {"type":"object","required":["name"],
                 "properties":{"name":{"type":"string"}}}
     }}})");
-    const auto index = ResponseSchemaIndex::parse (one_operation_index (
-    json::parse (R"({"$ref":"#/components/schemas/Pet"})"), "200", "application/json", ref_roots));
+    const auto index     = ResponseSchemaIndex::parse (
+    one_operation_index (json::parse (R"({"$ref":"#/components/schemas/Pet"})"),
+        "200", "application/json", ref_roots));
     ASSERT_TRUE (index.has_value ());
 
     // Nested through two refs - the assertion that reddens if the shared roots
@@ -281,8 +283,9 @@ TEST (ResponseSchemaRefTest, ARecursiveSchemaTerminates) {
                  "properties":{"name":{"type":"string"},
                                "child":{"$ref":"#/components/schemas/Node"}}}
     }}})");
-    const auto index = ResponseSchemaIndex::parse (one_operation_index (
-    json::parse (R"({"$ref":"#/components/schemas/Node"})"), "200", "application/json", ref_roots));
+    const auto index     = ResponseSchemaIndex::parse (
+    one_operation_index (json::parse (R"({"$ref":"#/components/schemas/Node"})"),
+        "200", "application/json", ref_roots));
     ASSERT_TRUE (index.has_value ());
 
     const auto verdict = index->check (GET_PET, 200, "application/json",
@@ -300,7 +303,7 @@ TEST (SchemaDialectTest, UnevaluatedKeywordsAreNamedAndCounted) {
         "unevaluatedProperties": false,
         "allOf": [{"prefixItems": [{"type": "string"}]}]
     })");
-    const auto found = collect_unevaluated_keywords (schema, json::object ());
+    const auto found  = collect_unevaluated_keywords (schema, json::object ());
 
     std::map<std::string, size_t> by_name (found.begin (), found.end ());
     EXPECT_EQ (by_name["unevaluatedProperties"], 1u);
@@ -311,13 +314,13 @@ TEST (SchemaDialectTest, AnUnevaluatedKeywordRidesTheVerdictOfACleanBody) {
     // The case this disclosure exists for: the body passes *because* the
     // keyword forbidding it was never evaluated. Silence here would report a
     // contract as met that was never fully read.
-    const auto schema = json::parse (R"({
+    const auto schema  = json::parse (R"({
         "type": "object",
         "properties": {"a": {"type": "string"}},
         "unevaluatedProperties": false
     })");
-    const auto verdict =
-    validate_body_against_schema (schema, json::object (), json::parse (R"({"a":"x","b":1})"));
+    const auto verdict = validate_body_against_schema (
+    schema, json::object (), json::parse (R"({"a":"x","b":1})"));
 
     EXPECT_TRUE (verdict.checked);
     EXPECT_TRUE (verdict.valid);
@@ -348,7 +351,7 @@ TEST (SchemaDialectTest, KeywordsAreFoundThroughRefsAndCyclesTerminate) {
                  "unevaluatedProperties": false,
                  "properties": {"child": {"$ref": "#/components/schemas/Node"}}}
     }}})");
-    const auto found = collect_unevaluated_keywords (
+    const auto found     = collect_unevaluated_keywords (
     json::parse (R"({"$ref":"#/components/schemas/Node"})"), ref_roots);
 
     ASSERT_EQ (found.size (), 1u);
@@ -360,9 +363,8 @@ TEST (SchemaDialectTest, AnOpenApiKeywordThatSurvivedExtractionIsDisclosed) {
     // away when it extracts. One arriving here means that normalisation missed
     // a case, and disclosing it is what keeps the miss from reading as a body
     // that simply failed its type.
-    const auto schema =
-    json::parse (R"({"type":"string","nullable":true})");
-    const auto found = collect_unevaluated_keywords (schema, json::object ());
+    const auto schema = json::parse (R"({"type":"string","nullable":true})");
+    const auto found  = collect_unevaluated_keywords (schema, json::object ());
 
     ASSERT_EQ (found.size (), 1u);
     EXPECT_EQ (found.front ().first, "nullable");
@@ -393,8 +395,8 @@ TEST (SchemaValidationBoundsTest, FailuresAreCappedAndTheTotalStaysHonest) {
 }
 
 TEST (SchemaValidationBoundsTest, AFailureMessageIsBounded) {
-    const json schema{ { "type", "object" }, { "properties",
-    json{ { "a", json{ { "type", "integer" } } } } } };
+    const json schema{ { "type", "object" },
+        { "properties", json{ { "a", json{ { "type", "integer" } } } } } };
     const json body{ { "a", std::string (5000, 'x') } };
 
     const auto verdict = validate_body_against_schema (schema, json::object (), body);
@@ -407,8 +409,8 @@ TEST (SchemaValidationBoundsTest, ASchemaTheValidatorRefusesIsUncheckedNotInvali
     // A schema that cannot be loaded means the contract could not be read. The
     // response did not fail it - nothing checked it.
     const json schema{ { "type", "not-a-type" } };
-    const auto verdict =
-    validate_body_against_schema (schema, json::object (), json::parse (R"({"a":1})"));
+    const auto verdict = validate_body_against_schema (
+    schema, json::object (), json::parse (R"({"a":1})"));
 
     EXPECT_FALSE (verdict.checked);
     ASSERT_TRUE (verdict.reason.has_value ());
@@ -425,7 +427,7 @@ ValidationVerdict checked_verdict (bool valid) {
     verdict.checked = true;
     verdict.valid   = valid;
     if (!valid) {
-        verdict.failures      = { SchemaFailure{ "/id", "expected integer" } };
+        verdict.failures       = { SchemaFailure{ "/id", "expected integer" } };
         verdict.failures_total = 1;
     }
     return verdict;
@@ -586,7 +588,8 @@ TEST (SampledValidationPayloadTest, TheDenominatorAndTheTalliesAreAllWritten) {
  * passes forever.
  */
 TEST (SchemaValidationHotPathTest, NoValidationIsReachableFromTheCompletionPath) {
-    const std::filesystem::path root = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src";
+    const std::filesystem::path root =
+    std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src";
     ASSERT_TRUE (std::filesystem::exists (root));
 
     // The files a *load* completion runs through: the strategy's per-completion

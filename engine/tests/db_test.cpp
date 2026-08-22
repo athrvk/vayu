@@ -330,10 +330,10 @@ TEST_F (DatabaseTest, SeedRehomesAnAuditedEntryWithoutResettingItsValue) {
 }
 
 TEST_F (DatabaseTest, SeedRemovesTheSweepRetiredEntries) {
-    const std::vector<std::string> retired = { "maxConnections", "tcpKeepAliveIdle",
-        "tcpKeepAliveInterval", "statsInterval", "maxJsonFieldSize",
-        "sseConnectTimeout", "sseMaxRetry", "sseSendLastEventId", "dbTempStore",
-        "dbMmapSize", "dbWalAutocheckpoint" };
+    const std::vector<std::string> retired = { "maxConnections",
+        "tcpKeepAliveIdle", "tcpKeepAliveInterval", "statsInterval",
+        "maxJsonFieldSize", "sseConnectTimeout", "sseMaxRetry",
+        "sseSendLastEventId", "dbTempStore", "dbMmapSize", "dbWalAutocheckpoint" };
 
     Database db (TEST_DB_PATH);
     db.init ();
@@ -370,7 +370,7 @@ TEST_F (DatabaseTest, SeedRemovesTheSweepRetiredEntries) {
 // also the restart the entry's flag demands.
 TEST_F (DatabaseTest, CacheSizeConfigReachesTheConnection) {
     constexpr int kConfigured = 128 * 1024 * 1024;
-    constexpr int kDefault    = vayu::core::constants::database::CACHE_SIZE_BYTES;
+    constexpr int kDefault = vayu::core::constants::database::CACHE_SIZE_BYTES;
     static_assert (kConfigured != kDefault, "the test value must differ from the default");
 
     {
@@ -385,7 +385,8 @@ TEST_F (DatabaseTest, CacheSizeConfigReachesTheConnection) {
         db.save_config_entry (*entry);
 
         EXPECT_EQ (db.applied_cache_size_bytes (), kDefault)
-        << "the running engine keeps the old size - that is what requiresRestart means";
+        << "the running engine keeps the old size - that is what "
+           "requiresRestart means";
     }
 
     Database reopened (TEST_DB_PATH);
@@ -620,9 +621,8 @@ TEST_F (DatabaseTest, ImportedActiveEnvironmentAlsoDeactivatesTheStoredOne) {
 // rely on which. Named explicitly rather than counted, because sqlite also
 // creates sqlite_autoindex_* entries of its own.
 const std::vector<std::string> EXPECTED_INDEXES = { "idx_metric_ticks_run_id",
-    "idx_results_run_id", "idx_requests_collection_id",
-    "idx_collections_parent_id", "idx_runs_start_time",
-    "idx_result_bodies_run_id", "idx_body_blobs_run_id",
+    "idx_results_run_id", "idx_requests_collection_id", "idx_collections_parent_id",
+    "idx_runs_start_time", "idx_result_bodies_run_id", "idx_body_blobs_run_id",
     // Examples are read only by request id - the list route and both cascades -
     // so this one backs every access the table has.
     "idx_request_examples_request_id" };
@@ -671,9 +671,8 @@ bool table_exists (const std::string& path, const std::string& table_name) {
     }
 
     sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2 (handle,
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", -1,
-        &stmt, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2 (handle, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+        -1, &stmt, nullptr) != SQLITE_OK) {
         ADD_FAILURE () << "could not query sqlite_master: " << sqlite3_errmsg (handle);
         sqlite3_close (handle);
         return false;
@@ -882,14 +881,15 @@ TEST_F (DatabaseTest, DropsTheLegacyMetricsTableFromAPreUpgradeDatabase) {
         sqlite3* handle = nullptr;
         ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
         char* err = nullptr;
-        ASSERT_EQ (sqlite3_exec (handle,
-                   "CREATE TABLE metrics (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                   "run_id TEXT NOT NULL, timestamp INTEGER NOT NULL, "
-                   "name TEXT NOT NULL, value REAL NOT NULL, labels TEXT NOT NULL);"
-                   "CREATE INDEX idx_metrics_run_id ON metrics (run_id);"
-                   "INSERT INTO metrics (run_id, timestamp, name, value, labels) "
-                   "VALUES ('run_pre_upgrade', 1, 'total_requests', 7.0, '');",
-                   nullptr, nullptr, &err),
+        ASSERT_EQ (
+        sqlite3_exec (handle,
+        "CREATE TABLE metrics (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "run_id TEXT NOT NULL, timestamp INTEGER NOT NULL, "
+        "name TEXT NOT NULL, value REAL NOT NULL, labels TEXT NOT NULL);"
+        "CREATE INDEX idx_metrics_run_id ON metrics (run_id);"
+        "INSERT INTO metrics (run_id, timestamp, name, value, labels) "
+        "VALUES ('run_pre_upgrade', 1, 'total_requests', 7.0, '');",
+        nullptr, nullptr, &err),
         SQLITE_OK)
         << (err != nullptr ? err : "(no message)");
         sqlite3_free (err);
@@ -1274,7 +1274,8 @@ TEST_F (DatabaseTest, SetRunBaselineTogglesAndPersists) {
 
         auto stored = db.get_run ("run_1");
         ASSERT_TRUE (stored.has_value ());
-        EXPECT_FALSE (stored->baseline) << "a run is not a baseline until pinned";
+        EXPECT_FALSE (stored->baseline)
+        << "a run is not a baseline until pinned";
 
         auto pinned = db.set_run_baseline ("run_1", true);
         ASSERT_TRUE (pinned.has_value ());
@@ -1638,7 +1639,8 @@ TEST (ScratchDatabaseCleanup, RemovesEveryFileAnOpenedDatabaseLeavesBehind) {
     // The scan must have seen something, or "nothing left over" below is
     // vacuously true - the failure mode CLAUDE.md calls out for source guards.
     const auto written = leftovers ();
-    ASSERT_FALSE (written.empty ()) << "the database wrote nothing; the test proves nothing";
+    ASSERT_FALSE (written.empty ())
+    << "the database wrote nothing; the test proves nothing";
     EXPECT_TRUE (written.count ("test_scratch.db.bak"))
     << "no backup was written, so this run would not catch a missing `.bak`";
 

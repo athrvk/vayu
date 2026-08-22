@@ -27,8 +27,8 @@ using nlohmann::json;
 
 namespace vayu::http::routes {
 // Declared in config.cpp; returns {http_status, json_body}.
-std::pair<int, nlohmann::json> apply_config_update (vayu::db::Database& db,
-const std::string& body);
+std::pair<int, nlohmann::json>
+apply_config_update (vayu::db::Database& db, const std::string& body);
 } // namespace vayu::http::routes
 
 namespace {
@@ -60,15 +60,16 @@ TEST_F (ConfigRouteTest, InvalidJsonIs400WithReason) {
     auto [status, body] = vayu::http::routes::apply_config_update (*db_, "not json");
     EXPECT_EQ (status, 400);
     EXPECT_EQ (body["error"]["code"], "invalid_config");
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Invalid JSON"),
-    std::string::npos);
+    EXPECT_NE (
+    body["error"]["message"].get<std::string> ().find ("Invalid JSON"), std::string::npos);
 }
 
 TEST_F (ConfigRouteTest, InvalidRequestFormatIs400) {
     auto [status, body] = vayu::http::routes::apply_config_update (*db_, R"({"foo":"bar"})");
     EXPECT_EQ (status, 400);
     EXPECT_EQ (body["error"]["code"], "invalid_config");
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Invalid request format"),
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find (
+               "Invalid request format"),
     std::string::npos);
 }
 
@@ -83,8 +84,8 @@ TEST_F (ConfigRouteTest, UnknownKeyNamesTheKey) {
 
 TEST_F (ConfigRouteTest, OutOfRangeReportsBoundAndValue) {
     // "workers" is seeded as an integer with min 1 / max 128.
-    auto [status, body] = vayu::http::routes::apply_config_update (
-    *db_, R"({"entries":{"workers":"999"}})");
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"999"}})");
     EXPECT_EQ (status, 400);
     const auto message = body["error"]["message"].get<std::string> ();
     EXPECT_NE (message.find ("workers"), std::string::npos);
@@ -93,8 +94,8 @@ TEST_F (ConfigRouteTest, OutOfRangeReportsBoundAndValue) {
 }
 
 TEST_F (ConfigRouteTest, NonIntegerReportsType) {
-    auto [status, body] = vayu::http::routes::apply_config_update (
-    *db_, R"({"entries":{"workers":"abc"}})");
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"abc"}})");
     EXPECT_EQ (status, 400);
     const auto message = body["error"]["message"].get<std::string> ();
     EXPECT_NE (message.find ("workers"), std::string::npos);
@@ -113,8 +114,8 @@ TEST_F (ConfigRouteTest, InvalidValueDoesNotPersist) {
 }
 
 TEST_F (ConfigRouteTest, ValidUpdateSucceedsAndPersists) {
-    auto [status, body] = vayu::http::routes::apply_config_update (
-    *db_, R"({"entries":{"workers":"4"}})");
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"4"}})");
     EXPECT_EQ (status, 200);
     EXPECT_TRUE (body["success"].get<bool> ());
 
@@ -124,8 +125,8 @@ TEST_F (ConfigRouteTest, ValidUpdateSucceedsAndPersists) {
 }
 
 TEST_F (ConfigRouteTest, SingleUpdateFormatSucceeds) {
-    auto [status, body] = vayu::http::routes::apply_config_update (
-    *db_, R"({"key":"workers","value":"8"})");
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"key":"workers","value":"8"})");
     EXPECT_EQ (status, 200);
     EXPECT_TRUE (body["success"].get<bool> ());
 
@@ -321,8 +322,7 @@ TEST_F (ConfigRouteTest, NoSeededLabelOrDescriptionSpellsOutTheRestartRequiremen
         EXPECT_EQ (entry.label.find ("Requires Restart"), std::string::npos)
         << "entry '" << entry.key << "' states the restart requirement in its "
         << "label";
-        EXPECT_EQ (entry.description.find ("require engine restart"),
-        std::string::npos)
+        EXPECT_EQ (entry.description.find ("require engine restart"), std::string::npos)
         << "entry '" << entry.key << "' states the restart requirement in its "
         << "description";
         if (entry.requires_restart) {
@@ -343,10 +343,9 @@ TEST_F (ConfigRouteTest, NoSeededLabelSpellsOutMaxMinOrCarriesAUnit) {
     // A parenthesised label tail is only a breach when it names a unit -
     // "(Per Worker)" is a scope qualifier and stays. Kept as the units this
     // catalogue actually measures in, so a new one is added deliberately.
-    const std::set<std::string> units = { "ms", "s", "sec", "secs", "second",
-        "seconds", "m", "min", "mins", "minute", "minutes", "h", "hr", "hour",
-        "hours", "day", "days", "b", "kb", "mb", "gb", "byte", "bytes", "rps",
-        "req/s", "%" };
+    const std::set<std::string> units = { "ms", "s", "sec", "secs", "second", "seconds",
+        "m", "min", "mins", "minute", "minutes", "h", "hr", "hour", "hours", "day",
+        "days", "b", "kb", "mb", "gb", "byte", "bytes", "rps", "req/s", "%" };
 
     auto entries = db_->get_all_config_entries ();
     ASSERT_GT (entries.size (), 20u)
@@ -363,11 +362,10 @@ TEST_F (ConfigRouteTest, NoSeededLabelSpellsOutMaxMinOrCarriesAUnit) {
         if (entry.label.size () > 2 && entry.label.back () == ')') {
             const auto open = entry.label.rfind ('(');
             if (open != std::string::npos) {
-                std::string tail = entry.label.substr (
-                open + 1, entry.label.size () - open - 2);
+                std::string tail =
+                entry.label.substr (open + 1, entry.label.size () - open - 2);
                 for (auto& c : tail) {
-                    c = static_cast<char> (std::tolower (
-                    static_cast<unsigned char> (c)));
+                    c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
                 }
                 EXPECT_EQ (units.count (tail), 0u)
                 << "entry '" << entry.key << "' carries its unit in the label; "
@@ -384,9 +382,8 @@ TEST_F (ConfigRouteTest, AdvancedFlagsExactlyTheRecordedInternals) {
     // #703 added the five below the original six, by a heuristic that is
     // citable in review: if an entry's own description has to say "only if" or
     // "only for", the entry has declared itself advanced.
-    const std::set<std::string> expected = { "dbBusyTimeout",
-        "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs",
-        "oauth2RefreshPollIntervalMs", "inboxLivePollIntervalMs",
+    const std::set<std::string> expected = { "dbBusyTimeout", "oauth2RefreshRetryMs",
+        "oauth2RefreshRetryMaxMs", "oauth2RefreshPollIntervalMs", "inboxLivePollIntervalMs",
         "sseIdleTimeoutMs", "oauth2RefreshMinIntervalMs", "maxStepsPerIteration",
         "monitorScrapeTimeoutMs", "liveMaxRetainedTicks", "scriptStackSize" };
 
@@ -431,8 +428,8 @@ TEST_F (ConfigRouteTest, KeywordsSerializeAsAnArrayWithAndWithoutTerms) {
     json seeded = find_entry (body, "dbCacheSize");
     ASSERT_TRUE (seeded.contains ("keywords"));
     ASSERT_TRUE (seeded["keywords"].is_array ());
-    EXPECT_NE (std::find (seeded["keywords"].begin (), seeded["keywords"].end (),
-               json ("ram")),
+    EXPECT_NE (
+    std::find (seeded["keywords"].begin (), seeded["keywords"].end (), json ("ram")),
     seeded["keywords"].end ())
     << "dbCacheSize lost the term a user arrives with for it";
 
@@ -476,8 +473,7 @@ TEST_F (ConfigRouteTest, SeededKeywordsNeverRepeatWordsTheEntryAlreadyCarries) {
             ASSERT_TRUE (term.is_string ())
             << "entry '" << entry.key << "' has a non-string keyword";
             const std::string needle = lowered (term.get<std::string> ());
-            EXPECT_FALSE (needle.empty ())
-            << "entry '" << entry.key << "' has an empty keyword";
+            EXPECT_FALSE (needle.empty ()) << "entry '" << entry.key << "' has an empty keyword";
             EXPECT_EQ (haystack.find (needle), std::string::npos)
             << "entry '" << entry.key << "' repeats '" << needle
             << "', which its key, label or description already carries - the "
@@ -584,13 +580,14 @@ TEST_F (ConfigRouteTest, SeededDescriptionsDoNotRestateTheUnitTheInputCarries) {
         ++with_unit;
         const std::string description = lowered (entry.description);
         for (const char* clause : { "in milliseconds", "in seconds", "in bytes",
-                 "in days", "in minutes", "in hours" }) {
+             "in days", "in minutes", "in hours" }) {
             EXPECT_EQ (description.find (clause), std::string::npos)
             << "entry '" << entry.key << "' says '" << clause
             << "', which its input's suffix already says";
         }
     }
-    EXPECT_GT (with_unit, 0u) << "no entry declares a unit - nothing was checked";
+    EXPECT_GT (with_unit, 0u)
+    << "no entry declares a unit - nothing was checked";
 }
 
 // A write must not flatten metadata it does not carry. POST /config sends only
@@ -630,8 +627,7 @@ TEST_F (ConfigRouteTest, EverySeededEntrySitsInADeclaredCategory) {
     // Kept in step with app/src/types/domain.ts (EngineSettingsCategory) and
     // app/src/modules/settings/engine-categories.ts.
     const std::set<std::string> declared = { "general_engine", "network_performance",
-        "services", "observability", "data_retention", "limits",
-        "scripting_sandbox" };
+        "services", "observability", "data_retention", "limits", "scripting_sandbox" };
 
     auto entries = db_->get_all_config_entries ();
     ASSERT_GT (entries.size (), 20u)
@@ -682,8 +678,8 @@ TEST_F (ConfigRouteTest, TheAuditedEntriesSitOnTheShelfThatCoversThem) {
         { "defaultHttpVersion", "network_performance" },
         // Every ceiling a rejection message names, on one shelf.
         { "maxScenarioSteps", "limits" }, { "maxScenarioDataRows", "limits" },
-        { "maxScenarioDataBytes", "limits" }, { "maxSpecDocumentBytes", "limits" },
-        { "maxStepsPerIteration", "limits" },
+        { "maxScenarioDataBytes", "limits" },
+        { "maxSpecDocumentBytes", "limits" }, { "maxStepsPerIteration", "limits" },
         // Not retention: it fails an oversized load-run read in flight and
         // stores nothing.
         { "maxResponseBodyBytes", "limits" },
@@ -694,11 +690,10 @@ TEST_F (ConfigRouteTest, TheAuditedEntriesSitOnTheShelfThatCoversThem) {
         { "phaseHistograms", "observability" },
         // Five of Network & connectivity's eight entries were OAuth; the Dock
         // files an OAuth issuer under Services and so does this.
-        { "oauth2RefreshLeadMs", "services" },
-        { "oauth2RefreshMinIntervalMs", "services" },
-        { "oauth2RefreshRetryMs", "services" },
-        { "oauth2RefreshRetryMaxMs", "services" },
-        { "oauth2RefreshPollIntervalMs", "services" } };
+        { "oauth2RefreshLeadMs", "services" }, { "oauth2RefreshMinIntervalMs", "services" },
+        { "oauth2RefreshRetryMs", "services" }, { "oauth2RefreshRetryMaxMs", "services" },
+        { "oauth2RefreshPollIntervalMs", "services" }
+    };
 
     for (const auto& [key, category] : placed) {
         auto entry = db_->get_config_entry (key);
@@ -735,7 +730,8 @@ TEST_F (ConfigRouteTest, MovedEntriesStayFindableByTheWordsTheyAreSoughtWith) {
         { "oauth2RefreshMinIntervalMs", { "oauth", "token" } },
         { "oauth2RefreshRetryMs", { "oauth", "token" } },
         { "oauth2RefreshRetryMaxMs", { "oauth", "token" } },
-        { "oauth2RefreshPollIntervalMs", { "oauth", "refresh" } } };
+        { "oauth2RefreshPollIntervalMs", { "oauth", "refresh" } }
+    };
 
     auto lowered = [] (std::string text) {
         for (auto& c : text) {
@@ -817,8 +813,8 @@ TEST_F (ConfigRouteTest, ClearingTheUrlWhileManualIs400) {
                .first,
     200);
 
-    auto [status, body] = vayu::http::routes::apply_config_update (
-    *db_, R"({"entries":{"proxyUrl":""}})");
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"proxyUrl":""}})");
     EXPECT_EQ (status, 400) << body.dump ();
     EXPECT_EQ (db_->get_config_string ("proxyUrl", ""), "http://proxy.example:8080")
     << "a rejected batch must write nothing";

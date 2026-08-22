@@ -549,6 +549,57 @@ genuine instance of the same family across the whole engine, which is the entire
 value of having the flag on. A suppression that a code change could remove
 should be that code change instead.
 
+### Formatting
+
+`.clang-format` at the repository root governs `engine/{src,include,tests}`.
+`engine/vendor/` has a `DisableFormat: true` config of its own and is never
+touched.
+
+**Use clang-format 19.** It is pinned, in the `Engine formatting` job of
+`.github/workflows/pr-tests.yml` and in
+[CONTRIBUTING.md](https://github.com/athrvk/vayu/blob/master/CONTRIBUTING.md),
+and the pin is load-bearing rather than tidy-mindedness: 39 of the 285 engine
+sources format differently under clang-format 18 than under 19. Ubuntu 24.04
+ships 18 by default, so `apt install clang-format-19` - the same major the
+clang-tidy gate uses, so one LLVM install answers for both.
+
+```bash
+# Check, the way CI does
+clang-format-19 --style=file --dry-run -Werror \
+  $(git ls-files -- engine/src engine/include engine/tests | grep -E '\.(c|cpp|h|hpp)$')
+
+# Fix
+clang-format-19 --style=file -i <file>...
+```
+
+The gate checks the **whole tree**, not the changed lines - the opposite of the
+clang-tidy gate below, because formatting has no backlog to grandfather. Issue
+#886 replaced an imported 2015 template with a config derived by measurement,
+and bulk-formatted all 285 sources in one commit; that commit's SHA is in
+`.git-blame-ignore-revs`, so `git blame` on a formatted file still attributes
+lines to whoever wrote them:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs   # once, per clone
+```
+
+**Includes are sorted**, and the tree was already 99.8% sorted before the gate
+landed, so this costs nothing and is one fewer thing for a reviewer to check by
+hand. Exactly one include order in the engine is load-bearing and is pinned at
+the site rather than by disabling the sorter: `engine/src/platform/platform_windows.cpp`
+wraps `<windows.h>` / `<timeapi.h>` in `// clang-format off`, because
+`timeapi.h` uses types `windows.h` defines, does not compile standalone, and
+sorts first alphabetically - a break only the Windows CI leg would catch. Pin a
+second such case the same way; do not turn the sorter off for the tree.
+
+Two other settings look like mistakes and are not; both are commented in
+`.clang-format` itself. `ColumnLimit: 80` is paired with
+`PenaltyExcessCharacter: 1`, which makes 80 a target rather than a wall -
+raising the limit made the bulk diff two to three times worse, because a wider
+limit re-joins line breaks the code chose by hand. And `ContinuationIndentWidth:
+0` wraps arguments to the enclosing block indent, which is what the engine's
+code is written to; changing it is a 257-file rewrite and is tracked separately.
+
 ### Static Analysis
 
 clang-tidy runs in two places, and both of them can stop a change:
@@ -575,6 +626,21 @@ The pre-commit hook is the stricter of the two: it lints whole staged files, so
 it reports the backlog as well. That is deliberate for a local early warning you
 can skip with `git commit --no-verify`, and it is why a hook refusal is not by
 itself a merge blocker. Issue #902 tracks aligning the two.
+
+**Commits listed in `.git-blame-ignore-revs` are skipped.** The gate reads the
+same file `git blame` does, and for the same reason: a commit declared to be
+pure reformatting did not write new code, so re-linting it says nothing. This
+is not only a tidiness argument. Line scoping bounds the *diagnostics*
+clang-tidy reports, not the number of translation units it must parse - and a
+reformat touches a line in every file it rewrites. #886's 149-file bulk-format
+commit made the gate try to analyse 152 translation units in one run and killed
+the job at its 60-minute timeout; with the skip it analyses the 7 that actually
+changed. What was skipped is named in the job summary, never dropped silently.
+
+The contract runs the other way too: **do not list a commit in
+`.git-blame-ignore-revs` unless it is purely mechanical**, because doing so now
+excuses it from linting as well as from blame. That rule is written in the file
+itself.
 
 **CI lints on Linux and Windows**, not Linux alone. clang-tidy analyses a
 translation unit, so an `#ifdef _WIN32` branch is preprocessed away before a
@@ -612,9 +678,19 @@ The two gates handle it differently, on purpose:
   knowledge of any compiler's PCH flags and is the only thing that fixes the
   macOS case. It is safe in place because ctest has already run, and it takes
   under a second.
-- **The hook** sets `ExtraArgs: ['-Wno-ignored-gch']` in `engine/.clang-tidy`
-  instead, which silences the GCC case only. Reconfiguring your build tree from
-  a git hook would throw away your next incremental build.
+- **The hook** passes `--extra-arg=-Wno-ignored-gch` on its own clang-tidy
+  command line instead, which silences the GCC case only. Reconfiguring your
+  build tree from a git hook would throw away your next incremental build.
+
+  It is on the command line and **not** in `engine/.clang-tidy`, where it used
+  to sit (issue #912). That file is read by both gates, and there the flag broke
+  the one that never needed it: `compile_commands.json` has one entry per
+  translation unit and so none for a `.hpp`, and on the command clang-tidy
+  synthesises for a file it cannot look up, an `ExtraArgs` entry arrives in
+  input position - `error: no such file or directory: '-Wno-ignored-gch'`,
+  which `WarningsAsErrors: '*'` turns into a failed engine job for any pull
+  request that touched a header. Anything only one gate needs belongs at that
+  gate's call site.
 
 Either way clang-tidy falls back to including the header as text and analyses
 exactly the same translation unit.

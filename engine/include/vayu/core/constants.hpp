@@ -786,8 +786,8 @@ constexpr long PROGRESS_EVERY_MS        = 100;
 /// steady bytes is a large file. The floor is deliberately near zero, because
 /// the question is whether anything is arriving at all and not whether it is
 /// arriving quickly: a genuinely slow link should finish, slowly.
-constexpr long STALL_TIMEOUT_MS            = 30000;
-constexpr long STALL_FLOOR_BYTES_PER_SEC   = 256;
+constexpr long STALL_TIMEOUT_MS          = 30000;
+constexpr long STALL_FLOOR_BYTES_PER_SEC = 256;
 
 /// The three events a streamed `/import/fetch` emits (issue #882).
 ///

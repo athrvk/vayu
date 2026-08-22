@@ -80,12 +80,12 @@ json examples_of (const std::vector<vayu::core::DraftExample>& examples) {
     for (const auto* example : sorted) {
         json headers = json::array ();
         if (example->documented) {
-            headers.push_back ({ { "key", "Content-Type" }, { "value", example->content_type },
-            { "enabled", true } });
+            headers.push_back ({ { "key", "Content-Type" },
+            { "value", example->content_type }, { "enabled", true } });
         }
-        out.push_back ({ { "name", example->name }, { "status", example->status },
-        { "headers", std::move (headers) }, { "body", example->body },
-        { "contentType", example->content_type } });
+        out.push_back ({ { "name", example->name },
+        { "status", example->status }, { "headers", std::move (headers) },
+        { "body", example->body }, { "contentType", example->content_type } });
     }
     return out;
 }
@@ -118,8 +118,8 @@ std::string key_of (const SpecRequestDraft& draft) {
     return draft.operation.method + " " + draft.operation.path;
 }
 
-const SpecRequestDraft&
-find_draft (const std::vector<SpecRequestDraft>& drafts, const std::string& key) {
+const SpecRequestDraft& find_draft (const std::vector<SpecRequestDraft>& drafts,
+const std::string& key) {
     for (const SpecRequestDraft& draft : drafts) {
         if (key_of (draft) == key) {
             return draft;
@@ -135,28 +135,31 @@ find_draft (const std::vector<SpecRequestDraft>& drafts, const std::string& key)
 // ---------------------------------------------------------------------------
 
 TEST (SpecRequestDrafts, MatchesTheRenderersImportParsersOnTheSharedFixture) {
-    const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "tests" /
-    "fixtures" / "spec-request-drafts-conformance.json";
+    const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
+    "tests" / "fixtures" / "spec-request-drafts-conformance.json";
     std::ifstream in (path);
     ASSERT_TRUE (in.good ()) << "fixture missing: " << path;
     const json fixture = json::parse (in);
     // A fixture that failed to load reads as a suite of passing tests.
-    ASSERT_FALSE (fixture["cases"].empty ()) << "a fixture with no cases asserts nothing";
+    ASSERT_FALSE (fixture["cases"].empty ())
+    << "a fixture with no cases asserts nothing";
 
     size_t compared = 0;
     for (const auto& fixture_case : fixture["cases"]) {
         const auto name = fixture_case["name"].get<std::string> ();
-        const auto document = read_document (fixture_case["document"].get<std::string> ());
+        const auto document =
+        read_document (fixture_case["document"].get<std::string> ());
         ASSERT_TRUE (document.ok ()) << name << ": " << document.error;
-        const std::vector<SpecRequestDraft> drafts = spec_request_drafts_of (document.root);
+        const std::vector<SpecRequestDraft> drafts =
+        spec_request_drafts_of (document.root);
         ASSERT_EQ (drafts.size (), fixture_case["drafts"].size ()) << name;
 
         // Keyed rather than ordered: the engine walks the document while
         // `readSpecOperations` walks the collection tree it built (root
         // requests, then tag folders). Two orders both sides agree about.
         for (const auto& expected : fixture_case["drafts"]) {
-            const std::string key =
-            expected["method"].get<std::string> () + " " + expected["path"].get<std::string> ();
+            const std::string key = expected["method"].get<std::string> () +
+            " " + expected["path"].get<std::string> ();
             EXPECT_EQ (as_json (find_draft (drafts, key)), expected) << name << ": " << key;
             compared += 1;
         }
@@ -174,7 +177,8 @@ TEST (SpecRequestDrafts, ADocumentThatIsNotAContractBuildsNoDrafts) {
     // contract. Building drafts from it would offer a sync of a document that
     // declares no operations - and every one of them would read as removed.
     EXPECT_TRUE (drafts_of (R"({"info": {"name": "P"}, "item": []})").empty ());
-    EXPECT_TRUE (drafts_of (R"({"openapi": "2.0", "paths": {"/a": {"get": {}}}})").empty ());
+    EXPECT_TRUE (
+    drafts_of (R"({"openapi": "2.0", "paths": {"/a": {"get": {}}}})").empty ());
     EXPECT_TRUE (drafts_of ("[]").empty ());
 }
 
@@ -265,7 +269,8 @@ TEST (SpecRequestDrafts, SamplesARecursiveSchemaWithoutRunningForever) {
     ASSERT_EQ (drafts.size (), 1u);
     EXPECT_EQ (drafts[0].draft.body.mode, "json");
     EXPECT_EQ (drafts[0].draft.body.content,
-    "{\n  \"left\": {\n    \"id\": \"\"\n  },\n  \"right\": {\n    \"id\": \"\"\n  },\n  \"self\": {}\n}");
+    "{\n  \"left\": {\n    \"id\": \"\"\n  },\n  \"right\": {\n    \"id\": "
+    "\"\"\n  },\n  \"self\": {}\n}");
 }
 
 TEST (SpecRequestDrafts, WritesTheQueryTheWayARequestBuiltInTheAppCarriesIt) {
@@ -311,7 +316,7 @@ TEST (SpecRequestDrafts, DropsTheHeadersARequestProducesForItself) {
 TEST (SpecRequestDrafts, ReadsTheSameDocumentTheSameWayInYamlAndInJson) {
     // The stored bytes are whatever arrived, and a document Vayu imported as
     // YAML must diff against the same drafts its JSON form would produce.
-    const std::string yaml = R"(openapi: "3.0.1"
+    const std::string yaml      = R"(openapi: "3.0.1"
 paths:
   /pets/{petId}:
     get:
@@ -339,8 +344,8 @@ paths:
           "type": "object", "properties": { "count": {"type": "integer"} } } } } }
       } } }
     })";
-    const auto from_yaml = drafts_of (yaml);
-    const auto from_json = drafts_of (json_text);
+    const auto from_yaml        = drafts_of (yaml);
+    const auto from_json        = drafts_of (json_text);
     ASSERT_EQ (from_yaml.size (), 1u);
     ASSERT_EQ (from_json.size (), 1u);
     EXPECT_EQ (as_json (from_yaml[0]), as_json (from_json[0]));
@@ -369,7 +374,8 @@ TEST (SpecRequestDrafts, WritesAWholeNumberTheWayJavaScriptDoes) {
     // and `1e-07` for one JavaScript writes with a bare exponent.
     EXPECT_EQ (drafts[0].draft.body.content,
     "{\n  \"whole\": 4,\n  \"fraction\": 1.5,\n  \"negative\": -7,"
-    "\n  \"huge\": 100000000000000000000,\n  \"huger\": 1e+21,\n  \"tiny\": 1e-7\n}");
+    "\n  \"huge\": 100000000000000000000,\n  \"huger\": 1e+21,\n  \"tiny\": "
+    "1e-7\n}");
 }
 
 TEST (SpecRequestDrafts, FilesAnOperationWhereAnImportWouldHavePutIt) {

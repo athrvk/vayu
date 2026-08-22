@@ -40,7 +40,7 @@ ScenarioResolution invalid (std::string reason) {
 std::string compose_error_message (const nlohmann::json& body) {
     if (auto error = body.find ("error"); error != body.end () && error->is_object ()) {
         if (auto message = error->find ("message");
-            message != error->end () && message->is_string ()) {
+        message != error->end () && message->is_string ()) {
             return message->get<std::string> ();
         }
     }
@@ -73,7 +73,8 @@ std::string declared_columns_hint (const vayu::db::Collection& collection) {
     } catch (const std::exception&) {
         return {};
     }
-    if (!schema.is_object () || !schema.contains ("columns") || !schema["columns"].is_array ()) {
+    if (!schema.is_object () || !schema.contains ("columns") ||
+    !schema["columns"].is_array ()) {
         return {};
     }
     std::string names;
@@ -193,7 +194,7 @@ std::vector<nlohmann::json>& rows_out) {
     out.collection_id = collection_id->get<std::string> ();
 
     if (auto recursive = scenario.find ("recursive");
-        recursive != scenario.end () && !recursive->is_null ()) {
+    recursive != scenario.end () && !recursive->is_null ()) {
         if (!recursive->is_boolean ()) {
             return "'scenario.recursive' must be a boolean (got " +
             std::string (recursive->type_name ()) + ")";
@@ -254,7 +255,7 @@ std::vector<nlohmann::json>& rows_out) {
     // An explicit count wins and the row index wraps; absent, a data set sets
     // it to its row count (Postman's default) and everything else runs once.
     if (auto iterations = scenario.find ("iterations");
-        iterations != scenario.end () && !iterations->is_null ()) {
+    iterations != scenario.end () && !iterations->is_null ()) {
         constexpr double max_iterations =
         static_cast<double> (std::numeric_limits<int>::max ());
         const bool usable = iterations->is_number () &&
@@ -453,20 +454,21 @@ const ScenarioResolveOptions& options) {
                 "no row to bind to and would reach the wire written as it "
                 "stands - run the collection with a data file, or remove the "
                 "token from the request (or from the variable value it was "
-                "written into)." + declared_columns_hint (*collection));
+                "written into)." +
+                declared_columns_hint (*collection));
             }
         }
 
         ScenarioStep step;
-        step.index         = index;
-        step.request_id    = row.id;
-        step.name          = row.name;
-        step.request       = std::move (built.request);
-        step.pre_script    = vayu::http::read_pre_request_script (payload);
-        step.post_script   = vayu::http::read_post_request_script (payload);
-        step.stored_url    = row.url;
+        step.index          = index;
+        step.request_id     = row.id;
+        step.name           = row.name;
+        step.request        = std::move (built.request);
+        step.pre_script     = vayu::http::read_pre_request_script (payload);
+        step.post_script    = vayu::http::read_post_request_script (payload);
+        step.stored_url     = row.url;
         step.spec_operation = row.spec_operation.value_or (std::string ());
-        step.data_template = std::move (data_template);
+        step.data_template  = std::move (data_template);
         // Only ever reached with rows behind it: the refusal above returns for
         // a credential token in a run that has no data set, so a deferred step
         // cannot arrive at an executor with no row to bind.

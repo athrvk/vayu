@@ -209,7 +209,8 @@ build_step_breakdown (const ScenarioPlan& plan, const StepHistograms& steps);
  */
 struct ScenarioLoadState {
     ScenarioLoadState (size_t step_count, size_t virtual_users, CoverageTally coverage)
-    : steps (step_count), coverage (std::move (coverage)), virtual_users (virtual_users) {
+    : steps (step_count), coverage (std::move (coverage)),
+      virtual_users (virtual_users) {
     }
 
     StepHistograms steps;

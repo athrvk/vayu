@@ -118,12 +118,12 @@ struct CapacityDecision {
  * holds no clock. @ref summarize_capacity takes the reason from the caller for
  * the same reason.
  */
-[[nodiscard]] CapacityDecision
-decide_next_level (const CapacityConfig& config, const std::vector<CapacityWindow>& history);
+[[nodiscard]] CapacityDecision decide_next_level (const CapacityConfig& config,
+const std::vector<CapacityWindow>& history);
 
 /// The answer a capacity run exists to give, plus the audit trail behind it.
 struct CapacitySummary {
-    double slo_ms           = 0.0;
+    double slo_ms = 0.0;
     std::string stop_reason;
     /// The highest level that stayed inside the SLO, and what it did there.
     /// Absent when the very first level already breached - the search never

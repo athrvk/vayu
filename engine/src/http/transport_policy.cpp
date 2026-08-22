@@ -130,7 +130,7 @@ std::string read_file (const std::filesystem::path& path) {
 std::filesystem::path system_ca_bundle_path () {
     for (const char* variable : { "CURL_CA_BUNDLE", "SSL_CERT_FILE" }) {
         if (const char* value = std::getenv (variable);
-            value != nullptr && value[0] != '\0') {
+        value != nullptr && value[0] != '\0') {
             std::error_code ec;
             if (std::filesystem::is_regular_file (value, ec)) {
                 return { value };
@@ -383,7 +383,8 @@ std::optional<ClientCertFormat> sniff_client_cert_format (std::string_view path)
     // ahead of a PEM block, and small enough that a wrong path costs one page.
     std::array<char, 4096> head{};
     file.read (head.data (), static_cast<std::streamsize> (head.size ()));
-    const std::string_view leading (head.data (), static_cast<std::size_t> (file.gcount ()));
+    const std::string_view leading (
+    head.data (), static_cast<std::size_t> (file.gcount ()));
     if (leading.empty ()) {
         return std::nullopt;
     }
@@ -416,7 +417,7 @@ std::string_view key_path) {
     // would be a hostname no transfer can ever equal, which is exactly the
     // "registered and silently never used" state this registry exists to end.
     if (const std::string_view labels = is_wildcard_host (host) ? host.substr (2) : host;
-        labels.find ('*') != std::string_view::npos) {
+    labels.find ('*') != std::string_view::npos) {
         return std::string (
         "a wildcard host is written '*.example.com' - one leading '*.' and "
         "the domain it answers for, with no other '*'");
@@ -431,20 +432,24 @@ std::string_view key_path) {
     // a registry entry that cannot match is indistinguishable from a feature
     // that does not work.
     if (host.find ("://") != std::string_view::npos) {
-        return std::string ("host must not carry a scheme - register 'api.example.com', "
-                            "not 'https://api.example.com'");
+        return std::string (
+        "host must not carry a scheme - register 'api.example.com', "
+        "not 'https://api.example.com'");
     }
     if (host.find ('/') != std::string_view::npos) {
         return std::string ("host must not carry a path");
     }
     // An IPv6 literal is stored bracketless (the form `parse_authority` yields),
     // so a colon is only ever an attempt at a port - which has its own field.
-    if (host.find (':') != std::string_view::npos && host.find (']') == std::string_view::npos &&
+    if (host.find (':') != std::string_view::npos &&
+    host.find (']') == std::string_view::npos &&
     std::count (host.begin (), host.end (), ':') == 1) {
         return std::string ("host must not carry a port - use the port field");
     }
-    if (host.find ('[') != std::string_view::npos || host.find (']') != std::string_view::npos) {
-        return std::string ("an IPv6 host is registered without brackets, e.g. '::1'");
+    if (host.find ('[') != std::string_view::npos ||
+    host.find (']') != std::string_view::npos) {
+        return std::string (
+        "an IPv6 host is registered without brackets, e.g. '::1'");
     }
 
     if (port && (*port < 1 || *port > 65535)) {
@@ -456,8 +461,9 @@ std::string_view key_path) {
     // because a card that keeps asking for a key file the format does not have
     // is a dead end (#833). Clearing it is `keyPath: null` on the update.
     if (format == ClientCertFormat::Pkcs12 && !key_path.empty () && !is_blank (key_path)) {
-        return std::string ("a PKCS#12 entry names no key file - the bundle carries the key, "
-                            "so clear the key file or register the certificate as PEM");
+        return std::string (
+        "a PKCS#12 entry names no key file - the bundle carries the key, "
+        "so clear the key file or register the certificate as PEM");
     }
 
     // Both files are checked *here*, at the moment the user can still fix the
@@ -465,11 +471,14 @@ std::string_view key_path) {
     // `CURLE_SSL_CERTPROBLEM` against the endpoint and says nothing about which
     // setting named a file that is not there. A PKCS#12 row has one file to
     // check, which is the whole difference the format makes here.
-    std::vector<std::pair<const char*, std::string_view>> files{ { "certificate file", cert_path } };
+    std::vector<std::pair<const char*, std::string_view>> files{
+        { "certificate file", cert_path }
+    };
     if (format == ClientCertFormat::Pem) {
         if (key_path.empty () || is_blank (key_path)) {
-            return std::string ("key file is empty - a PEM certificate keeps its key in a "
-                                "second file (only a PKCS#12 bundle carries its own)");
+            return std::string (
+            "key file is empty - a PEM certificate keeps its key in a "
+            "second file (only a PKCS#12 bundle carries its own)");
         }
         files.emplace_back ("key file", key_path);
     }
@@ -494,8 +503,7 @@ std::string_view key_path) {
     // shallowness `ca_pem_rejection` is written with. What this catches is the
     // mistake that otherwise surfaces as libcurl's own parse error against the
     // endpoint - a `.p12` registered as a PEM pair, or the reverse.
-    if (const auto actual = sniff_client_cert_format (cert_path);
-        actual && *actual != format) {
+    if (const auto actual = sniff_client_cert_format (cert_path); actual && *actual != format) {
         return "certificate file '" + std::string (cert_path) + "' is " +
         std::string (to_string (*actual)) + ", but the entry declares " +
         std::string (to_string (format));
@@ -634,20 +642,21 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
         // behalf.
         const auto format = client_cert_format_from_string (row.cert_format);
         if (!format) {
-            vayu::utils::log_error ("Client certificate '" + row.id + "' for host '" + row.host +
-            "' declares an unknown format '" + row.cert_format +
-            "'; requests to that host will be sent without it");
+            vayu::utils::log_error ("Client certificate '" + row.id +
+            "' for host '" + row.host + "' declares an unknown format '" +
+            row.cert_format + "'; requests to that host will be sent without it");
             continue;
         }
-        if (const auto rejection =
-            client_cert_rejection (row.host, row.port, *format, row.cert_path, row.key_path)) {
+        if (const auto rejection = client_cert_rejection (
+            row.host, row.port, *format, row.cert_path, row.key_path)) {
             // The routes refuse this shape, so only a hand-edited row or a file
             // that has moved since it was registered reaches here. Named rather
             // than swallowed, and named *now*: the alternative is a handshake
             // failure against the endpoint, which is precisely the "the API is
             // down" misdiagnosis this epic exists to end.
-            vayu::utils::log_error ("Client certificate '" + row.id + "' for host '" + row.host +
-            "' is unusable (" + *rejection + "); requests to that host will be sent without it");
+            vayu::utils::log_error ("Client certificate '" + row.id +
+            "' for host '" + row.host + "' is unusable (" + *rejection +
+            "); requests to that host will be sent without it");
             continue;
         }
         ClientCertRule rule;
@@ -708,8 +717,8 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
             // proxy support for reaches this. Named rather than swallowed, for
             // the reason the manual arm below is: the alternative is every
             // request going direct while Settings names a proxy.
-            vayu::utils::log_error ("Config 'proxySystemUrl' is unusable (" + *rejection +
-            "); falling back to the environment for 'system' proxy mode");
+            vayu::utils::log_error ("Config 'proxySystemUrl' is unusable (" +
+            *rejection + "); falling back to the environment for 'system' proxy mode");
             return policy;
         }
         policy.proxy_url = resolved;

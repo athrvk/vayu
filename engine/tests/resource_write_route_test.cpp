@@ -362,20 +362,24 @@ TEST_F (ResourceWriteRouteTest, CollectionDataSchemaRoundTripsAndFollowsTheNullR
     // The whole point of storing the contract on the row: it has to survive the
     // trip, and it has to obey the same null-vs-absent rule as every sibling
     // field, because "Clear" is only expressible as an explicit null.
-    auto [create_status, created] = create_collection_response (*db_, json{ { "name", "N" } });
+    auto [create_status, created] =
+    create_collection_response (*db_, json{ { "name", "N" } });
     ASSERT_EQ (create_status, 200);
     const std::string id = created["id"];
     EXPECT_TRUE (created["dataSchema"].is_object ());
-    EXPECT_TRUE (created["dataSchema"].empty ()) << "absent on create means no contract";
+    EXPECT_TRUE (created["dataSchema"].empty ())
+    << "absent on create means no contract";
 
     const json schema{ { "columns", json::array ({ "id", "email" }) },
         { "declaredAt", 1700000000000 }, { "fileName", "users.csv" } };
-    auto [set_status, set] = update_collection_response (*db_, id, json{ { "dataSchema", schema } });
+    auto [set_status, set] =
+    update_collection_response (*db_, id, json{ { "dataSchema", schema } });
     ASSERT_EQ (set_status, 200);
     EXPECT_EQ (set["dataSchema"], schema);
 
     // Absent -> keep. A rename must not silently drop the contract.
-    auto [keep_status, keep] = update_collection_response (*db_, id, json{ { "name", "Renamed" } });
+    auto [keep_status, keep] =
+    update_collection_response (*db_, id, json{ { "name", "Renamed" } });
     ASSERT_EQ (keep_status, 200);
     EXPECT_EQ (keep["dataSchema"], schema) << "absent means keep";
 
@@ -400,13 +404,13 @@ TEST_F (ResourceWriteRouteTest, CollectionDataSchemaContentsAreValidated) {
         { json{ { "columns", json::array ({ "id", "" }) } }, "columns" },
         { json{ { "columns", json::array ({ "id", "id" }) } }, "columns" },
         { json{ { "columns", json::array ({ std::string (257, 'x') }) } }, "columns" },
-        { json{ { "columns", json::array ({ "id" }) }, { "declaredAt", "yesterday" } },
-        "declaredAt" },
+        { json{ { "columns", json::array ({ "id" }) }, { "declaredAt", "yesterday" } }, "declaredAt" },
         { json{ { "columns", json::array ({ "id" }) }, { "fileName", 7 } }, "fileName" },
     };
 
     for (const auto& [schema, names] : bad) {
-        auto [status, body] = update_collection_response (*db_, id, json{ { "dataSchema", schema } });
+        auto [status, body] =
+        update_collection_response (*db_, id, json{ { "dataSchema", schema } });
         EXPECT_EQ (status, 400) << schema.dump ();
         EXPECT_NE (body["error"]["message"].get<std::string> ().find (names), std::string::npos)
         << body["error"]["message"];
@@ -415,7 +419,7 @@ TEST_F (ResourceWriteRouteTest, CollectionDataSchemaContentsAreValidated) {
     }
 
     // Over the column-count cap, built rather than listed above.
-    json many = json::object ();
+    json many       = json::object ();
     many["columns"] = json::array ();
     for (int i = 0; i <= 1024; ++i) {
         many["columns"].push_back ("c" + std::to_string (i));
@@ -423,7 +427,8 @@ TEST_F (ResourceWriteRouteTest, CollectionDataSchemaContentsAreValidated) {
     auto [many_status, many_body] =
     update_collection_response (*db_, id, json{ { "dataSchema", many } });
     EXPECT_EQ (many_status, 400);
-    EXPECT_NE (many_body["error"]["message"].get<std::string> ().find ("1024"), std::string::npos);
+    EXPECT_NE (many_body["error"]["message"].get<std::string> ().find ("1024"),
+    std::string::npos);
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionDataSchemaAcceptsAContractWithoutOptionalFields) {
@@ -431,9 +436,9 @@ TEST_F (ResourceWriteRouteTest, CollectionDataSchemaAcceptsAContractWithoutOptio
     // canonical "no contract" - neither may be turned into a refusal by the
     // contents check, which only ever looks at what is present.
     for (const json& fine : { json::object (), json{ { "columns", json::array ({ "id" }) } },
-             json{ { "columns", json::array () } } }) {
-        auto [status, body] =
-        create_collection_response (*db_, json{ { "name", "N" }, { "dataSchema", fine } });
+         json{ { "columns", json::array () } } }) {
+        auto [status, body] = create_collection_response (
+        *db_, json{ { "name", "N" }, { "dataSchema", fine } });
         EXPECT_EQ (status, 200) << fine.dump ();
         EXPECT_EQ (body["dataSchema"], fine);
     }
@@ -567,7 +572,8 @@ TEST_F (ResourceWriteRouteTest, RequestStreamFlagRoundTrips) {
     EXPECT_TRUE (keep["stream"].get<bool> ());
 
     // Null -> reset to the default.
-    auto [reset_status, reset] = update_request_response (*db_, id, json{ { "stream", nullptr } });
+    auto [reset_status, reset] =
+    update_request_response (*db_, id, json{ { "stream", nullptr } });
     ASSERT_EQ (reset_status, 200);
     EXPECT_FALSE (reset["stream"].get<bool> ());
 

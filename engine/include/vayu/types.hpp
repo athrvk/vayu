@@ -98,9 +98,8 @@ inline std::optional<HttpMethod> parse_method (const std::string& str) {
  */
 struct CaseInsensitiveLess {
     bool operator() (const std::string& a, const std::string& b) const {
-        return std::lexicographical_compare (
-        a.begin (), a.end (), b.begin (), b.end (),
-        [] (unsigned char c1, unsigned char c2) {
+        return std::lexicographical_compare (a.begin (), a.end (), b.begin (),
+        b.end (), [] (unsigned char c1, unsigned char c2) {
             return std::tolower (c1) < std::tolower (c2);
         });
     }
@@ -126,7 +125,17 @@ using Headers = std::map<std::string, std::string, CaseInsensitiveLess>;
  * Both carry their content as `Body::fields`, never as `Body::content` - see
  * `vayu/http/form_body.hpp` for the wire encoding of each.
  */
-enum class BodyMode { None, Json, Text, Form, FormData, Binary, GraphQL, JsonRpc, Xml };
+enum class BodyMode {
+    None,
+    Json,
+    Text,
+    Form,
+    FormData,
+    Binary,
+    GraphQL,
+    JsonRpc,
+    Xml
+};
 
 /**
  * @brief What a `form-data` part carries: typed text, or a file from disk.
@@ -306,16 +315,16 @@ struct Request {
  * @brief Timing breakdown for a request
  */
 struct Timing {
-    double total_ms      = 0.0;  // perceived latency: submit → completion (after Plan 1)
-    double wire_ms       = 0.0;  // pure CURLINFO_TOTAL_TIME (DNS + TCP + TLS + send + recv)
-    double queue_wait_ms = 0.0;  // total_ms − wire_ms (generator-side overhead, clamped >= 0)
+    double total_ms = 0.0; // perceived latency: submit → completion (after Plan 1)
+    double wire_ms = 0.0; // pure CURLINFO_TOTAL_TIME (DNS + TCP + TLS + send + recv)
+    double queue_wait_ms = 0.0; // total_ms − wire_ms (generator-side overhead, clamped >= 0)
     double dns_ms        = 0.0;
     double connect_ms    = 0.0;
     double tls_ms        = 0.0;
     double first_byte_ms = 0.0;
     double download_ms   = 0.0;
-    size_t bytes_down    = 0; // CURLINFO_SIZE_DOWNLOAD_T + response header bytes (wire)
-    size_t bytes_up      = 0; // CURLINFO_SIZE_UPLOAD_T + request header bytes (wire)
+    size_t bytes_down = 0; // CURLINFO_SIZE_DOWNLOAD_T + response header bytes (wire)
+    size_t bytes_up = 0; // CURLINFO_SIZE_UPLOAD_T + request header bytes (wire)
 };
 
 // ============================================================================
@@ -793,8 +802,8 @@ struct ScriptResult {
  */
 struct Variable {
     std::string value;
-    bool secret  = false;
-    bool enabled = true;
+    bool secret      = false;
+    bool enabled     = true;
     std::string type = "string";
     // `{}` rather than a bare declaration so the ~43 aggregate initializations
     // that stop short of this trailing field are not each a
@@ -850,7 +859,13 @@ inline std::optional<RunType> parse_run_type (const std::string& str) {
  * published metric tick and stops itself. Every other member's target is a
  * pure function of elapsed time.
  */
-enum class LoadTestType { ConstantRps, ConstantConcurrency, RampUp, Iterations, Capacity };
+enum class LoadTestType {
+    ConstantRps,
+    ConstantConcurrency,
+    RampUp,
+    Iterations,
+    Capacity
+};
 
 inline const char* to_string (LoadTestType type) {
     switch (type) {
@@ -913,10 +928,10 @@ struct Collection {
     std::string id;
     std::optional<std::string> parent_id;
     std::string name;
-    std::string description;  // TEXT NOT NULL DEFAULT ''
-    std::string variables;    // JSON - Collection-scoped variables
-    std::string auth;         // JSON - Auth config (mode + fields), never 'inherit'
-    std::string pre_request_script;  // JS - runs before every request in this collection
+    std::string description; // TEXT NOT NULL DEFAULT ''
+    std::string variables;   // JSON - Collection-scoped variables
+    std::string auth; // JSON - Auth config (mode + fields), never 'inherit'
+    std::string pre_request_script; // JS - runs before every request in this collection
     std::string post_request_script; // JS - runs after every request in this collection
     // JSON - the data contract this collection declares (issue #599):
     // {"columns":[...], "declaredAt": ms, "fileName"?: "users.csv"}. `{}` means
@@ -942,14 +957,14 @@ struct Request {
     std::string description; // TEXT NOT NULL DEFAULT ''
     HttpMethod method;
     std::string url;
-    std::string params;    // JSON array of KeyValueEntry: [{key,value,enabled,description?}]
-    std::string headers;   // JSON array of KeyValueEntry
-    std::string body;      // JSON discriminated union: {mode,content?} | {mode,fields?}
+    std::string params; // JSON array of KeyValueEntry: [{key,value,enabled,description?}]
+    std::string headers; // JSON array of KeyValueEntry
+    std::string body; // JSON discriminated union: {mode,content?} | {mode,fields?}
     std::string body_type; // Denormalized: equals body.mode for queryability
-    std::string auth;      // JSON - RequestAuth (mode + fields, may be 'inherit')
+    std::string auth; // JSON - RequestAuth (mode + fields, may be 'inherit')
     std::string pre_request_script;  // JS Code
     std::string post_request_script; // JS Code (Tests)
-    int order;             // INTEGER NOT NULL DEFAULT 0 - position within collection
+    int order; // INTEGER NOT NULL DEFAULT 0 - position within collection
     // Execution options. Mirror the fields of the executable vayu::Request so a
     // saved request keeps the redirect policy the user chose. The in-struct
     // defaults match the column defaults, so a default-constructed row and a row
@@ -1005,9 +1020,9 @@ struct RequestExample {
     std::string id;
     std::string request_id;
     std::string name;
-    int status = 200;         // HTTP status the example represents
-    std::string headers;      // JSON array of KeyValueEntry
-    std::string body;         // Response body, verbatim
+    int status = 200;    // HTTP status the example represents
+    std::string headers; // JSON array of KeyValueEntry
+    std::string body;    // Response body, verbatim
     std::string content_type; // Denormalized from `headers` by the client that wrote it
     /**
      * Position among the request's examples, exactly like `Request::order`
@@ -1211,7 +1226,7 @@ struct Run {
 struct MetricTick {
     int id;
     std::string run_id;
-    int64_t timestamp;  // Unix ms - the tick's single wall-clock sample
+    int64_t timestamp;   // Unix ms - the tick's single wall-clock sample
     std::string payload; // JSON object (see build_metric_tick_payload)
 };
 
@@ -1265,7 +1280,7 @@ struct Result {
 struct BodyBlob {
     int id;
     std::string run_id;
-    std::string hash;    // lowercase hex SHA-256 of `content` (vayu::core::body_digest)
+    std::string hash; // lowercase hex SHA-256 of `content` (vayu::core::body_digest)
     std::string content; // the stored bytes, already truncated to the per-body cap
 };
 
@@ -1279,13 +1294,13 @@ struct BodyBlob {
 struct ResultBody {
     int result_id; // PK, and the `results.id` this exchange belongs to
     std::string run_id;
-    std::string headers;   // JSON object of response headers
+    std::string headers; // JSON object of response headers
     // 0 when no body was stored: the response had none, it was binary, or the
     // run's capture budget was spent. `body_bytes` and the flags say which.
     int blob_id;
-    int64_t body_bytes;    // size of the body as received, before truncation
-    bool truncated;        // stored bytes are a prefix of `body_bytes`
-    bool is_binary;        // stored as a descriptor; `blob_id` is 0
+    int64_t body_bytes; // size of the body as received, before truncation
+    bool truncated;     // stored bytes are a prefix of `body_bytes`
+    bool is_binary;     // stored as a descriptor; `blob_id` is 0
     std::string content_type;
     /**
      * Events the transfer delivered, when it was a bounded stream
@@ -1419,13 +1434,13 @@ struct Globals {
  * byte-identical with the app's computeOAuth2CacheKey.
  */
 struct OAuthToken {
-    std::string cache_key;     // PK
+    std::string cache_key; // PK
     std::string access_token;
     std::string token_type;    // "Bearer" when the provider omits it
     std::string refresh_token; // "" = none
     std::string scope;
-    int64_t expires_in;   // seconds; 0 = non-expiring
-    int64_t created_at;   // ms epoch
+    int64_t expires_in; // seconds; 0 = non-expiring
+    int64_t created_at; // ms epoch
     std::string raw_response; // provider JSON (truncated); debugging only, never logged
 };
 

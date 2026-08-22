@@ -165,8 +165,7 @@ curl_off_t /*ulnow*/) {
     // A non-zero return is the documented abort (CURLE_ABORTED_BY_CALLBACK);
     // `stream_cap_reached` is what makes the completion read it as the stream's
     // intended end rather than as a failure.
-    if (data->stream_bounds &&
-    std::chrono::steady_clock::now () >= data->stream_deadline) {
+    if (data->stream_bounds && std::chrono::steady_clock::now () >= data->stream_deadline) {
         data->stream_cap_reached = true;
         return 1;
     }

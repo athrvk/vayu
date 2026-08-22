@@ -28,8 +28,8 @@ using nlohmann::json;
 
 namespace vayu::http::routes {
 // Defined in requests.cpp; returns {http_status, json_body}.
-std::pair<int, nlohmann::json> get_request_response (vayu::db::Database& db,
-const std::string& id);
+std::pair<int, nlohmann::json>
+get_request_response (vayu::db::Database& db, const std::string& id);
 // Defined in requests.cpp; returns the GET /requests JSON array body.
 std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id);
 } // namespace vayu::http::routes

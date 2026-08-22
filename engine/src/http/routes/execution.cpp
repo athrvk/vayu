@@ -22,11 +22,11 @@
 #include <string>
 
 #include "vayu/core/constants.hpp"
-#include "vayu/core/schema_validation.hpp"
 #include "vayu/core/monitor.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_plan.hpp"
+#include "vayu/core/schema_validation.hpp"
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
@@ -91,7 +91,7 @@ const std::optional<std::string>& request_id) {
     if (request_id && !request_id->empty ()) {
         try {
             if (auto stored = db.get_request (*request_id);
-                stored && !stored->name.empty ()) {
+            stored && !stored->name.empty ()) {
                 resolved.name = stored->name;
             }
         } catch (const std::exception& e) {
@@ -266,16 +266,16 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
     // A cap on a non-streaming payload is refused too. It reads as a bound the
     // caller expects to apply, and silently ignoring it is how an unbounded run
     // gets mistaken for a capped one.
-    const auto read_cap = [&json, &flag] (const char* key, int64_t low, int64_t high,
-                          std::optional<int64_t>& out) {
+    const auto read_cap = [&json, &flag] (const char* key, int64_t low,
+                          int64_t high, std::optional<int64_t>& out) {
         const auto field = json.find (key);
         if (field == json.end () || field->is_null ()) {
             return true;
         }
         if (!field->is_number_integer ()) {
-            flag.ok = false;
-            flag.error = std::string ("'") + key + "' must be an integer (got " +
-            field->type_name () + ")";
+            flag.ok    = false;
+            flag.error = std::string ("'") + key +
+            "' must be an integer (got " + field->type_name () + ")";
             return false;
         }
         const int64_t value = field->get<int64_t> ();
@@ -314,20 +314,22 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
 
     if (!flag.value) {
         if (flag.max_duration_ms || flag.max_events) {
-            flag.ok    = false;
-            flag.error = "'maxStreamDurationMs' and 'maxStreamEvents' apply to a "
-                         "streaming request only - set 'stream': true, or drop them";
+            flag.ok = false;
+            flag.error =
+            "'maxStreamDurationMs' and 'maxStreamEvents' apply to a "
+            "streaming request only - set 'stream': true, or drop them";
         }
         return flag;
     }
 
     const auto transient = json.find ("transient");
     if (transient != json.end () && transient->is_boolean () && transient->get<bool> ()) {
-        flag.ok    = false;
-        flag.error = "'stream' and 'transient' cannot be combined: a stream is "
-                     "identified by its run row - that is what the events URL "
-                     "names, what carries its status, and what stopping it finds "
-                     "- and a transient execution creates none";
+        flag.ok = false;
+        flag.error =
+        "'stream' and 'transient' cannot be combined: a stream is "
+        "identified by its run row - that is what the events URL "
+        "names, what carries its status, and what stopping it finds "
+        "- and a transient execution creates none";
         return flag;
     }
 
@@ -471,14 +473,14 @@ const NumericRunField& field) {
 // with an optional ms/s/m/h unit. Absent or null is always fine - every such
 // field has a default. Shared by `duration` and `stepDuration` rather than
 // copied, so the two cannot drift into accepting different spellings.
-std::optional<std::string> check_duration_field (const nlohmann::json& config, const char* key) {
+std::optional<std::string>
+check_duration_field (const nlohmann::json& config, const char* key) {
     if (!config.contains (key) || config[key].is_null ()) {
         return std::nullopt;
     }
     const auto& value = config[key];
     if (!value.is_string ()) {
-        return std::string ("'") + key +
-        "' must be a string with a unit, e.g. \"60s\" (got " +
+        return std::string ("'") + key + "' must be a string with a unit, e.g. \"60s\" (got " +
         std::string (value.type_name ()) + ")";
     }
     // Accept an optional unit: the unit-aware parser is #126's, and a bare
@@ -539,7 +541,7 @@ const vayu::ScriptResult& post_script_result) {
      * as the run happened.
      */
     nlohmann::json test_results = nlohmann::json::array ();
-    const auto append_tests = [&test_results] (const char* source,
+    const auto append_tests     = [&test_results] (const char* source,
                               const std::vector<vayu::TestResult>& tests) {
         for (const auto& test : tests) {
             nlohmann::json test_json;
@@ -627,8 +629,8 @@ const nlohmann::json& scripts) {
         // the configured limit so one large exchange cannot bloat the DB forever.
         // When a body is cut, cap_trace_bodies records bodyTruncated/bodyBytes.
         nlohmann::json trace = build_result_trace (request, response);
-        const auto max_trace_body_bytes = static_cast<size_t> (db.get_config_int (
-        "maxTraceBodyBytes",
+        const auto max_trace_body_bytes =
+        static_cast<size_t> (db.get_config_int ("maxTraceBodyBytes",
         static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
         vayu::json::cap_trace_bodies (trace, max_trace_body_bytes);
 
@@ -668,7 +670,8 @@ const nlohmann::json& scripts) {
 
         // A stream names its own terminal status: one the user stopped is
         // `Stopped`, which neither the response nor the error flag can say.
-        auto status = stream ? stream->status :
+        auto status = stream ?
+        stream->status :
         (has_error ? vayu::RunStatus::Failed : vayu::RunStatus::Completed);
         db.update_run_status_with_retry (*run_id, status);
 
@@ -721,7 +724,8 @@ const vayu::core::MonitorLimits& monitor_limits) {
     // rather than ignored: a caller that sends it believes this run will leave
     // no trace, and it is about to leave a large one.
     if (config.contains ("transient") && !config["transient"].is_null ()) {
-        return "'transient' is not valid on a run - it applies to POST /execute "
+        return "'transient' is not valid on a run - it applies to POST "
+               "/execute "
                "only, because a run is identified by the row it creates";
     }
 
@@ -804,9 +808,8 @@ const vayu::core::MonitorLimits& monitor_limits) {
     // failure this whole function is here to prevent. Absent and `null` both
     // mean "use the default", matching the null-vs-absent rule the resource
     // routes follow.
-    for (const char* key :
-    { "phase_histograms", "save_timing_breakdown", "capture_response_bodies",
-    "stream_metrics", "failOnSchemaError" }) {
+    for (const char* key : { "phase_histograms", "save_timing_breakdown",
+         "capture_response_bodies", "stream_metrics", "failOnSchemaError" }) {
         const auto it = config.find (key);
         if (it != config.end () && !it->is_null () && !it->is_boolean ()) {
             return "'" + std::string (key) + "' must be a boolean (got " +
@@ -843,8 +846,8 @@ void register_execution_routes (RouteContext& ctx) {
      * - 200: Request was processed (check response body for server status/errors)
      * - 400: Invalid request format (malformed JSON, missing required fields)
      */
-    httplib::Server::Handler execute_request =
-    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler execute_request = [&ctx] (const httplib::Request& req,
+                                               httplib::Response& res) {
         // Absent for a transient execution (issue #382): no row exists to
         // record against, and every recording step below keys off that.
         std::optional<std::string> run_id;
@@ -910,10 +913,10 @@ void register_execution_routes (RouteContext& ctx) {
         // failure is surfaced after the run exists (below). Credentials
         // carrying a `{{data.*}}` are the one case the build leaves alone - the
         // bind below applies them once the row has reached them.
-        const int request_timeout_ms = resolve_request_timeout_ms (
-        json, ctx.db.get_config_int (
+        const int request_timeout_ms = resolve_request_timeout_ms (json,
+        ctx.db.get_config_int (
         "defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
-        auto built = vayu::http::build_request (
+        auto built                   = vayu::http::build_request (
         json, &ctx.db, request_timeout_ms, row_auth.resolution);
         if (built.parse_failed) {
             vayu::utils::log_warning ("POST /execute - Invalid request format");
@@ -935,8 +938,8 @@ void register_execution_routes (RouteContext& ctx) {
                 // scenario executors bind theirs: the row reaches them before
                 // `apply_auth` encodes them onto the request. A no-op for the
                 // ordinary send, whose auth the build already applied.
-                bound = vayu::core::bind_auth_row (
-                built.request, row_auth.auth, row_auth.credentials, *data_row.value, 0);
+                bound = vayu::core::bind_auth_row (built.request, row_auth.auth,
+                row_auth.credentials, *data_row.value, 0);
             }
             if (!bound.ok) {
                 vayu::utils::log_warning ("POST /execute - " + bound.error);
@@ -977,21 +980,22 @@ void register_execution_routes (RouteContext& ctx) {
             send_error (res, 400, resolved_name.error);
             return;
         }
-        const std::optional<std::string> script_request_name = std::move (resolved_name.name);
+        const std::optional<std::string> script_request_name =
+        std::move (resolved_name.name);
 
         // The persisted half of the run row, skipped entirely when the caller
         // asked for a transient execution. The config snapshot is built here
         // rather than above because it is storage, not scope: sanitizing a
         // payload nobody will store is work with no reader.
         if (!transient.value) {
-            run.id              = vayu::utils::generate_id ("run_");
+            run.id = vayu::utils::generate_id ("run_");
             run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
-            run_id              = run.id;
+            run_id = run.id;
         }
 
         // Log request details
-        vayu::utils::log_info ("POST /execute - Design Mode: run_id=" +
-        run_id.value_or ("none (transient)") +
+        vayu::utils::log_info (
+        "POST /execute - Design Mode: run_id=" + run_id.value_or ("none (transient)") +
         ", method=" + json.value ("method", "UNKNOWN") +
         ", url=" + json.value ("url", "UNKNOWN") +
         ", request_id=" + run.request_id.value_or ("none") +
@@ -1003,7 +1007,8 @@ void register_execution_routes (RouteContext& ctx) {
             try {
                 ctx.db.create_run (run);
             } catch (const std::exception& e) {
-                vayu::utils::log_error ("Failed to create run: " + std::string (e.what ()));
+                vayu::utils::log_error (
+                "Failed to create run: " + std::string (e.what ()));
                 send_error (res, 400, "Failed to create run record");
                 return;
             }
@@ -1130,21 +1135,18 @@ void register_execution_routes (RouteContext& ctx) {
             // script runs on the worker thread once the stream has terminated,
             // long after this handler's frame - and its row must be the one the
             // pre-request script and the transfer used.
-            spec.on_complete = [&db = ctx.db, &jar = ctx.cookie_jar, id = *run_id,
-                               cookie_scope, run, script_config, post_request_script,
-                               request_name = script_request_name, scopes,
-                               iteration_data = data_row.value, transport,
-                               pre_script_result] (const vayu::Request& sent,
-                               const vayu::Response& response,
-                               const vayu::http::SseStreamContext& context) mutable {
+            spec.on_complete =
+            [&db = ctx.db, &jar = ctx.cookie_jar, id = *run_id, cookie_scope, run,
+            script_config, post_request_script, request_name = script_request_name,
+            scopes, iteration_data = data_row.value, transport,
+            pre_script_result] (const vayu::Request& sent, const vayu::Response& response,
+            const vayu::http::SseStreamContext& context) mutable {
                 StreamRecord record;
                 nlohmann::json scripts = nlohmann::json::object ();
                 record.events = vayu::http::stream_trace_node (context);
-                record.status =
-                context.end_reason () == vayu::http::SseEndReason::Stopped ?
+                record.status = context.end_reason () == vayu::http::SseEndReason::Stopped ?
                 vayu::RunStatus::Stopped :
-                (response.has_error () ? vayu::RunStatus::Failed :
-                                         vayu::RunStatus::Completed);
+                (response.has_error () ? vayu::RunStatus::Failed : vayu::RunStatus::Completed);
 
                 const bool has_script_output = !post_request_script.empty () ||
                 !pre_script_result.tests.empty () ||
@@ -1182,8 +1184,7 @@ void register_execution_routes (RouteContext& ctx) {
                             // already captured, exactly as on the buffered path.
                             jar.apply (cookie_scope, post_cookie_writes);
                         }
-                        scripts = build_script_result_node (
-                        pre_script_result, post_script_result);
+                        scripts = build_script_result_node (pre_script_result, post_script_result);
                     } catch (const std::exception& e) {
                         vayu::utils::log_error (
                         "Stream post-request script failed: " + std::string (e.what ()));
@@ -1197,8 +1198,7 @@ void register_execution_routes (RouteContext& ctx) {
                 // No verdict: a stream's body is an event stream, not a
                 // document any response schema describes (see the contract on
                 // the parameter).
-                record_design_result (
-                db, id, sent, response, &record, std::nullopt, scripts);
+                record_design_result (db, id, sent, response, &record, std::nullopt, scripts);
             };
 
             auto context = ctx.sse_manager.start (std::move (spec));
@@ -1246,7 +1246,7 @@ void register_execution_routes (RouteContext& ctx) {
         inputs.request_name = script_request_name;
         // Read at the point of use, so a settings change applies to the next
         // send without a restart (issue #705).
-        inputs.transport    = vayu::http::resolve_transport_policy (ctx.db);
+        inputs.transport = vayu::http::resolve_transport_policy (ctx.db);
         if (data_row.value) {
             inputs.iteration_data = &*data_row.value;
             // Row 0 of 1: a send-with-row *is* an iteration, and the one it is
@@ -1257,7 +1257,7 @@ void register_execution_routes (RouteContext& ctx) {
             inputs.iteration       = 0;
             inputs.iteration_count = 1;
         }
-        auto exchange       = execute_exchange (script_engine, ctx.cookie_jar,
+        auto exchange = execute_exchange (script_engine, ctx.cookie_jar,
         cookie_scope, scopes, std::move (inputs), ctx.verbose);
 
         // What the contract says this response should have been (#628).
@@ -1288,8 +1288,7 @@ void register_execution_routes (RouteContext& ctx) {
         // Engine returns 200 - the server's status is in the response body
         res.status = 200;
         res.set_content (
-        build_response_json (exchange.response, scripts, validation).dump (2),
-        "application/json");
+        build_response_json (exchange.response, scripts, validation).dump (2), "application/json");
     };
     ctx.server.Post ("/execute", execute_request);
     ctx.server.Post ("/request", deprecated_alias (execute_request));
@@ -1302,8 +1301,8 @@ void register_execution_routes (RouteContext& ctx) {
      * - 202: Load test accepted and started
      * - 400: Invalid request format
      */
-    httplib::Server::Handler start_load_test =
-    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler start_load_test = [&ctx] (const httplib::Request& req,
+                                               httplib::Response& res) {
         // Parse JSON
         nlohmann::json json;
         try {
@@ -1398,7 +1397,7 @@ void register_execution_routes (RouteContext& ctx) {
         if (is_scenario) {
             vayu::core::ScenarioResolveOptions options;
             if (auto it = json.find ("environmentId");
-                it != json.end () && it->is_string ()) {
+            it != json.end () && it->is_string ()) {
                 options.environment_id = it->get<std::string> ();
             }
             options.timeout_ms = resolve_request_timeout_ms (json,
@@ -1426,7 +1425,7 @@ void register_execution_routes (RouteContext& ctx) {
             scenario_manifest = vayu::core::build_scenario_manifest (
             resolved.request, resolved.plan, resolved.spec);
 
-            auto execution     = std::make_shared<vayu::core::ScenarioExecution> ();
+            auto execution = std::make_shared<vayu::core::ScenarioExecution> ();
             execution->request = std::move (resolved.request);
             execution->plan    = std::move (resolved.plan);
             // The manifest above was built before this move, and from
@@ -1440,8 +1439,8 @@ void register_execution_routes (RouteContext& ctx) {
             execution->spec    = std::move (resolved.spec);
             scenario_execution = std::move (execution);
 
-            vayu::utils::log_info ("POST /runs - Scenario: collection=" +
-            scenario_execution->request.collection_id +
+            vayu::utils::log_info (
+            "POST /runs - Scenario: collection=" + scenario_execution->request.collection_id +
             ", steps=" + std::to_string (scenario_execution->plan.steps.size ()) +
             ", iterations=" + std::to_string (scenario_execution->request.iterations));
         }
@@ -1449,7 +1448,7 @@ void register_execution_routes (RouteContext& ctx) {
         // Create run record
         std::string run_id = vayu::utils::generate_id ("run_");
         vayu::db::Run run;
-        run.id     = run_id;
+        run.id = run_id;
         // A scenario *load* run is a load run whose target happens to be a
         // sequence: it publishes metric ticks, reports RPS and percentiles, and
         // stores no per-step `results` rows - so `Scenario`, which is what the
@@ -1460,11 +1459,10 @@ void register_execution_routes (RouteContext& ctx) {
         // collection ran.
         run.type = (is_scenario && !is_scenario_load) ? vayu::RunType::Scenario :
                                                         vayu::RunType::Load;
-        run.status = vayu::RunStatus::Pending;
+        run.status          = vayu::RunStatus::Pending;
         run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
         if (is_scenario) {
-            run.config_snapshot =
-            scenario_snapshot (run.config_snapshot, scenario_manifest);
+            run.config_snapshot = scenario_snapshot (run.config_snapshot, scenario_manifest);
         }
         seed_run_times (run, now_ms ());
 
@@ -1492,15 +1490,15 @@ void register_execution_routes (RouteContext& ctx) {
             ", iterations=" + std::to_string (scenario_execution->request.iterations) +
             ", environment_id=" + run.environment_id.value_or ("none"));
         } else {
-        vayu::utils::log_info ("POST /runs - Load Test: run_id=" + run_id +
-        ", mode=" + json.value ("mode", "unspecified") +
-        ", method=" + json.value ("method", "UNKNOWN") +
-        ", url=" + json.value ("url", "UNKNOWN") + ", duration=" + duration_str +
-        ", iterations=" + std::to_string (json.value ("iterations", 0)) +
-        ", rps=" + std::to_string (json.value ("rps", json.value ("targetRps", 0))) +
-        ", concurrency=" + std::to_string (json.value ("concurrency", 1)) +
-        ", request_id=" + run.request_id.value_or ("none") +
-        ", environment_id=" + run.environment_id.value_or ("none"));
+            vayu::utils::log_info ("POST /runs - Load Test: run_id=" + run_id +
+            ", mode=" + json.value ("mode", "unspecified") +
+            ", method=" + json.value ("method", "UNKNOWN") +
+            ", url=" + json.value ("url", "UNKNOWN") + ", duration=" + duration_str +
+            ", iterations=" + std::to_string (json.value ("iterations", 0)) +
+            ", rps=" + std::to_string (json.value ("rps", json.value ("targetRps", 0))) +
+            ", concurrency=" + std::to_string (json.value ("concurrency", 1)) +
+            ", request_id=" + run.request_id.value_or ("none") +
+            ", environment_id=" + run.environment_id.value_or ("none"));
         }
 
         // Pre-flight auth: reject an unauthorizable run before creating it, and
@@ -1510,15 +1508,15 @@ void register_execution_routes (RouteContext& ctx) {
         // already failed resolution with a 400 - so this is the single-request
         // path's check alone.
         if (!is_scenario) {
-            auto preflight =
-            vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
+            auto preflight = vayu::http::preflight_auth (
+            json.value ("auth", nlohmann::json ()), ctx.db);
             if (!preflight.ok) {
-                vayu::utils::log_warning ("POST /runs - Auth pre-flight failed: " +
-                preflight.message);
-                res.status =
-                (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
+                vayu::utils::log_warning (
+                "POST /runs - Auth pre-flight failed: " + preflight.message);
+                res.status = (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
                 res.set_content (
-                error_body (res.status, preflight.message, preflight.detail_code).dump (),
+                error_body (res.status, preflight.message, preflight.detail_code)
+                .dump (),
                 "application/json");
                 return;
             }
@@ -1542,8 +1540,8 @@ void register_execution_routes (RouteContext& ctx) {
         // sequential runner needs the cookie jar, which is why only it is
         // handed one.
         const bool started = (is_scenario && !is_scenario_load) ?
-        ctx.run_manager.start_scenario_run (run_id, json, scenario_execution,
-        ctx.db, ctx.cookie_jar, ctx.verbose) :
+        ctx.run_manager.start_scenario_run (
+        run_id, json, scenario_execution, ctx.db, ctx.cookie_jar, ctx.verbose) :
         ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose,
         is_scenario_load ? scenario_execution : nullptr);
         if (!started) {
@@ -1554,7 +1552,8 @@ void register_execution_routes (RouteContext& ctx) {
         nlohmann::json response;
         response["runId"]   = run_id;
         response["status"]  = to_string (vayu::RunStatus::Pending);
-        response["message"] = is_scenario_load ? "Scenario load test started" :
+        response["message"] = is_scenario_load ?
+        "Scenario load test started" :
         (is_scenario ? "Collection run started" : "Load test started");
 
         res.status = 202;

@@ -57,12 +57,14 @@ std::string normalize (const std::string& path, bool path_templates) {
         if (path.compare (i, 2, "{{") == 0) {
             const auto close = path.find ("}}", i + 2);
             if (close != std::string::npos) {
-                const std::string name = trimmed (std::string_view (path).substr (i + 2, close - i - 2));
+                const std::string name =
+                trimmed (std::string_view (path).substr (i + 2, close - i - 2));
                 const bool ok = !name.empty () &&
                 std::all_of (name.begin (), name.end (), is_simple_var_char);
                 if (ok) {
                     // `_.x` is Insomnia's spelling of the same variable.
-                    const std::string bare = name.rfind ("_.", 0) == 0 ? name.substr (2) : name;
+                    const std::string bare =
+                    name.rfind ("_.", 0) == 0 ? name.substr (2) : name;
                     out += "{{" + bare + "}}";
                     i = close + 2;
                     continue;
@@ -73,9 +75,9 @@ std::string normalize (const std::string& path, bool path_templates) {
             continue;
         }
         if (path_templates && path[i] == '{') {
-            const auto close = path.find ('}', i + 1);
-            const bool doubled = close != std::string::npos && close + 1 < path.size () &&
-            path[close + 1] == '}';
+            const auto close   = path.find ('}', i + 1);
+            const bool doubled = close != std::string::npos &&
+            close + 1 < path.size () && path[close + 1] == '}';
             if (close != std::string::npos && close > i + 1 && !doubled) {
                 const std::string_view name (path.data () + i + 1, close - i - 1);
                 if (std::all_of (name.begin (), name.end (), is_path_template_char)) {

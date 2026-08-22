@@ -452,8 +452,8 @@ TEST (FormBodyRules, RendersTheDeclaredFilenameRatherThanThePath) {
     // discloses this machine's layout to anything the script logs.
     EXPECT_EQ (render_form_data_parts ({ file_field ("f", "/home/ada/secret-dir/report.pdf") }),
     "f=@report.pdf");
-    EXPECT_EQ (
-    render_form_data_parts ({ file_field ("f", "C:\\Users\\ada\\report.pdf") }), "f=@report.pdf");
+    EXPECT_EQ (render_form_data_parts ({ file_field ("f", "C:\\Users\\ada\\report.pdf") }),
+    "f=@report.pdf");
     // An explicit name overrides the basename, exactly as curl_mime_filename
     // overrides what curl_mime_filedata declared.
     EXPECT_EQ (render_form_data_parts ({ file_field ("f", "/tmp/tmp123.bin", "report.pdf") }),

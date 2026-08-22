@@ -51,7 +51,8 @@ int64_t now_ms () {
 
 TEST (MockParseStart, RequiresACollectionAndDefaultsTheRest) {
     MockStartRequest out;
-    ASSERT_FALSE (vayu::http::parse_mock_start (json{ { "collectionId", "col_1" } }, out).has_value ());
+    ASSERT_FALSE (
+    vayu::http::parse_mock_start (json{ { "collectionId", "col_1" } }, out).has_value ());
     EXPECT_EQ (out.collection_id, "col_1");
     EXPECT_EQ (out.port, 0);
     EXPECT_EQ (out.latency_ms, 0);
@@ -60,17 +61,20 @@ TEST (MockParseStart, RequiresACollectionAndDefaultsTheRest) {
     // A mock with no collection has nothing to serve, so absence is a 400
     // rather than a listener that 404s everything.
     EXPECT_TRUE (vayu::http::parse_mock_start (json::object (), out).has_value ());
-    EXPECT_TRUE (vayu::http::parse_mock_start (json{ { "collectionId", "" } }, out).has_value ());
-    EXPECT_TRUE (vayu::http::parse_mock_start (json{ { "collectionId", 7 } }, out).has_value ());
+    EXPECT_TRUE (
+    vayu::http::parse_mock_start (json{ { "collectionId", "" } }, out).has_value ());
+    EXPECT_TRUE (
+    vayu::http::parse_mock_start (json{ { "collectionId", 7 } }, out).has_value ());
     EXPECT_TRUE (vayu::http::parse_mock_start (json ("not an object"), out).has_value ());
 }
 
 TEST (MockParseStart, ReadsAndBoundsEveryTuningField) {
     MockStartRequest out;
-    ASSERT_FALSE (vayu::http::parse_mock_start (json{ { "collectionId", "col_1" },
-                  { "port", 41234 }, { "latencyMs", 25 }, { "errorRatePct", 10 } },
-                  out)
-                  .has_value ());
+    ASSERT_FALSE (
+    vayu::http::parse_mock_start (json{ { "collectionId", "col_1" }, { "port", 41234 },
+                                  { "latencyMs", 25 }, { "errorRatePct", 10 } },
+    out)
+    .has_value ());
     EXPECT_EQ (out.port, 41234);
     EXPECT_EQ (out.latency_ms, 25);
     EXPECT_EQ (out.error_rate_pct, 10);
@@ -79,14 +83,15 @@ TEST (MockParseStart, ReadsAndBoundsEveryTuningField) {
     // with no delay when one was asked for is a mock doing something other than
     // what its caller configured.
     const json base = { { "collectionId", "col_1" } };
-    for (const json& bad :
-    { json{ { "port", -1 } }, json{ { "port", 70000 } }, json{ { "latencyMs", -1 } },
-    json{ { "latencyMs", mock_constants::MAX_LATENCY_MS + 1 } },
-    json{ { "errorRatePct", -1 } }, json{ { "errorRatePct", 101 } },
-    json{ { "latencyMs", "fast" } } }) {
+    for (const json& bad : { json{ { "port", -1 } }, json{ { "port", 70000 } },
+         json{ { "latencyMs", -1 } },
+         json{ { "latencyMs", mock_constants::MAX_LATENCY_MS + 1 } },
+         json{ { "errorRatePct", -1 } }, json{ { "errorRatePct", 101 } },
+         json{ { "latencyMs", "fast" } } }) {
         json body = base;
         body.update (bad);
-        EXPECT_TRUE (vayu::http::parse_mock_start (body, out).has_value ()) << body.dump ();
+        EXPECT_TRUE (vayu::http::parse_mock_start (body, out).has_value ())
+        << body.dump ();
     }
 }
 
@@ -125,7 +130,8 @@ TEST (MockPathTemplate, MatchesTheSharedConformanceFixture) {
 }
 
 TEST (MockPathTemplate, SegmentsMarkTemplatesAsWildcards) {
-    const auto segments = vayu::http::mock_path_segments ("/users/{{userId}}/pets");
+    const auto segments =
+    vayu::http::mock_path_segments ("/users/{{userId}}/pets");
     ASSERT_EQ (segments.size (), 3u);
     EXPECT_FALSE (segments[0].templated);
     EXPECT_EQ (segments[0].literal, "users");
@@ -247,7 +253,8 @@ TEST_F (MockServerTest, TheTableCoversTheWholeCollectionSubtree) {
         EXPECT_TRUE (route.has_response) << route.request_id;
     }
     EXPECT_NE (std::find (served.begin (), served.end (), "GET /health"), served.end ());
-    EXPECT_NE (std::find (served.begin (), served.end (), "GET /pets/{{petId}}"), served.end ());
+    EXPECT_NE (std::find (served.begin (), served.end (), "GET /pets/{{petId}}"),
+    served.end ());
     EXPECT_NE (std::find (served.begin (), served.end (), "POST /pets"), served.end ());
     EXPECT_NE (std::find (served.begin (), served.end (), "GET /toys"), served.end ());
 
@@ -282,7 +289,8 @@ TEST_F (MockServerTest, ARequestWithNoExampleStaysInTheTableAsUnservable) {
     EXPECT_EQ (match.miss, MockMissKind::NoExample);
     const auto body = vayu::http::mock_miss_body (routes, match, "GET", "/pets");
     EXPECT_EQ (body["error"]["code"], "mock_no_example");
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("req_list"), std::string::npos);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("req_list"),
+    std::string::npos);
 }
 
 TEST_F (MockServerTest, DisabledExampleHeadersAreNotServedAndDuplicatesSurvive) {
@@ -304,8 +312,8 @@ TEST_F (MockServerTest, DisabledExampleHeadersAreNotServedAndDuplicatesSurvive) 
 TEST_F (MockServerTest, AnExampleWithNoContentTypeColumnFallsBackToItsHeader) {
     seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
     seed_example ("exa_list", "req_list", 200, "[]", /*content_type=*/"",
-    json::array ({ json{ { "key", "content-type" }, { "value", "application/hal+json" },
-    { "enabled", true } } }));
+    json::array ({ json{ { "key", "content-type" },
+    { "value", "application/hal+json" }, { "enabled", true } } }));
 
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
@@ -317,17 +325,18 @@ TEST_F (MockServerTest, ALiteralRouteBeatsATemplatedOneWhateverOrderTheyWereWrit
     // own `order` decides), so taking the first match rather than the most
     // specific one would give the wildcard both paths and shadow the literal
     // permanently.
-    seed_request ("req_one", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets/{petId}",
-    "Get pet", /*order=*/0);
+    seed_request ("req_one", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/pets/{petId}", "Get pet", /*order=*/0);
     seed_example ("exa_one", "req_one", 200, "wildcard", "text/plain");
-    seed_request ("req_mine", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets/mine",
-    "My pets", /*order=*/1);
+    seed_request ("req_mine", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/pets/mine", "My pets", /*order=*/1);
     seed_example ("exa_mine", "req_mine", 200, "literal", "text/plain");
 
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 2u);
-    ASSERT_EQ (routes[0].path_template, "/pets/{{petId}}") << "the wildcard must come first";
-    const auto mine   = vayu::http::resolve_mock_route (routes, "GET", "/pets/mine");
+    ASSERT_EQ (routes[0].path_template, "/pets/{{petId}}")
+    << "the wildcard must come first";
+    const auto mine = vayu::http::resolve_mock_route (routes, "GET", "/pets/mine");
     ASSERT_TRUE (mine.route_index.has_value ());
     EXPECT_EQ (routes[*mine.route_index].response.body, "literal");
 
@@ -347,7 +356,7 @@ TEST_F (MockServerTest, AMethodMismatchIsNamedRatherThanReportedAsAMissingPath) 
     EXPECT_EQ (match.allowed_methods[0], "GET");
     EXPECT_EQ (match.allowed_methods[1], "POST");
 
-    const auto body    = vayu::http::mock_miss_body (routes, match, "DELETE", "/pets");
+    const auto body = vayu::http::mock_miss_body (routes, match, "DELETE", "/pets");
     const auto message = body["error"]["message"].get<std::string> ();
     EXPECT_EQ (body["error"]["code"], "mock_method_mismatch");
     EXPECT_NE (message.find ("GET, POST"), std::string::npos) << message;
@@ -362,9 +371,9 @@ TEST_F (MockServerTest, AnUnknownPathSaysSoAndCountsWhatIsServed) {
     EXPECT_EQ (match.miss, MockMissKind::NoPath);
     EXPECT_FALSE (match.matched_route.has_value ());
 
-    const auto message =
-    vayu::http::mock_miss_body (routes, match, "GET", "/orders/1")["error"]["message"]
-    .get<std::string> ();
+    const auto message = vayu::http::mock_miss_body (
+    routes, match, "GET", "/orders/1")["error"]["message"]
+                         .get<std::string> ();
     EXPECT_NE (message.find ("/orders/1"), std::string::npos) << message;
     EXPECT_NE (message.find ("3 served"), std::string::npos) << message;
 }
@@ -372,7 +381,8 @@ TEST_F (MockServerTest, AnUnknownPathSaysSoAndCountsWhatIsServed) {
 TEST_F (MockServerTest, ATrailingSlashIsTheSameRoute) {
     seed_pet_store ();
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
-    EXPECT_TRUE (vayu::http::resolve_mock_route (routes, "GET", "/pets/").route_index.has_value ());
+    EXPECT_TRUE (
+    vayu::http::resolve_mock_route (routes, "GET", "/pets/").route_index.has_value ());
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +401,7 @@ TEST_F (MockServerTest, StartRefusesACollectionThatCannotBeServed) {
     // A collection with no requests would bind a port and 404 everything, which
     // is never what the caller meant.
     MockStartRequest empty;
-    empty.collection_id = "col_root";
+    empty.collection_id  = "col_root";
     const auto no_routes = manager.start (*db_, empty);
     EXPECT_FALSE (no_routes.ok);
     EXPECT_EQ (no_routes.http_status, 400);
@@ -412,7 +422,8 @@ TEST_F (MockServerTest, AStartedMockServesItsExamplesAndReportsItsTable) {
     EXPECT_EQ (started.info.collection_name, "Pet Store");
     EXPECT_EQ (started.info.route_count, 4);
     EXPECT_EQ (started.info.routes_without_example, 1);
-    EXPECT_EQ (started.info.url, "http://127.0.0.1:" + std::to_string (started.info.port));
+    EXPECT_EQ (
+    started.info.url, "http://127.0.0.1:" + std::to_string (started.info.port));
 
     httplib::Client client ("127.0.0.1", started.info.port);
     client.set_connection_timeout (2);
@@ -473,9 +484,9 @@ TEST_F (MockServerTest, LatencyAndTheTwoExactErrorRates) {
     slow_client.set_read_timeout (5);
     const auto before   = std::chrono::steady_clock::now ();
     const auto answered = slow_client.Get ("/pets");
-    const auto elapsed  = std::chrono::duration_cast<std::chrono::milliseconds> (
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::steady_clock::now () - before)
-    .count ();
+                         .count ();
     ASSERT_TRUE (answered);
     EXPECT_EQ (answered->status, 200);
     // A bound assert, not an equality: the sleep is a floor and the scheduler
@@ -529,7 +540,8 @@ TEST_F (MockServerTest, StopEndsTheListenerAndDropsTheRecord) {
 
     httplib::Client client ("127.0.0.1", port);
     client.set_connection_timeout (1);
-    EXPECT_FALSE (client.Get ("/pets")) << "the listener is still accepting after stop";
+    EXPECT_FALSE (client.Get ("/pets"))
+    << "the listener is still accepting after stop";
 }
 
 TEST_F (MockServerTest, TeardownWhileALatentResponseIsInFlightStillJoins) {
@@ -597,8 +609,8 @@ TEST_F (MockServerTest, ALoadRunCanTargetAMockEndToEnd) {
     db_->create_run (row);
 
     const json config = { { "mode", "constant_rps" }, { "duration", "2s" },
-        { "targetRps", 20.0 }, { "url", started.info.url + "/pets" }, { "method", "GET" },
-        { "timeout", 5000 }, { "workers", 1 } };
+        { "targetRps", 20.0 }, { "url", started.info.url + "/pets" },
+        { "method", "GET" }, { "timeout", 5000 }, { "workers", 1 } };
 
     vayu::core::RunManager run_manager;
     ASSERT_TRUE (run_manager.start_run (row.id, config, *db_, false));

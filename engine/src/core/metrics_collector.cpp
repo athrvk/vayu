@@ -80,12 +80,10 @@ MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorC
 
     // Initialize HdrHistogram for lock-free latency recording
     // 3 significant figures = ~0.1% precision, max 1 hour in microseconds
-    int result = hdr_init (
-        1,  // Minimum value (1 microsecond)
-        constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,  // Maximum value (1 hour in microseconds)
-        constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,  // Significant figures
-        &latency_histogram_
-    );
+    int result = hdr_init (1, // Minimum value (1 microsecond)
+    constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US, // Maximum value (1 hour in microseconds)
+    constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES, // Significant figures
+    &latency_histogram_);
     if (result != 0 || latency_histogram_ == nullptr) {
         throw std::runtime_error ("Failed to initialize HdrHistogram");
     }
@@ -93,11 +91,10 @@ MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorC
     // Windowed (rolling) percentile source. Same value range / precision as the
     // cumulative histogram, but sampled-and-reset per tick so live percentiles
     // reflect the recent window instead of the all-time distribution.
-    int interval_result = hdr_interval_recorder_init_all (
-        &interval_recorder_,
-        1,  // Minimum value (1 microsecond)
-        constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
-        constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES);
+    int interval_result = hdr_interval_recorder_init_all (&interval_recorder_,
+    1, // Minimum value (1 microsecond)
+    constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
+    constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES);
     if (interval_result != 0) {
         hdr_close (latency_histogram_);
         latency_histogram_ = nullptr;
@@ -138,7 +135,8 @@ MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorC
             &stream_events_histogram_) != 0) {
             stream_events_histogram_ = nullptr;
             vayu::utils::log_warning ("Run " + run_id_ +
-            ": failed to initialize the stream event histogram; the report will "
+            ": failed to initialize the stream event histogram; the report "
+            "will "
             "carry event totals only");
         }
     }
@@ -228,8 +226,8 @@ bool MetricsCollector::claim_status_exemplar (int status_code) {
     const int slot = (status_code >= 0 && status_code < STATUS_CODE_SLOTS - 1) ?
     status_code :
     STATUS_CODE_SLOTS - 1;
-    const size_t claimed =
-    exemplar_claims_[static_cast<size_t> (slot)].fetch_add (1, std::memory_order_relaxed);
+    const size_t claimed = exemplar_claims_[static_cast<size_t> (slot)].fetch_add (
+    1, std::memory_order_relaxed);
     return claimed < constants::metrics_collector::EXEMPLARS_PER_STATUS;
 }
 
@@ -298,7 +296,8 @@ const Timing* phases) {
     // tears min/max under concurrent writers.
     // Convert milliseconds to microseconds for histogram precision
     int64_t latency_us = static_cast<int64_t> (latency_ms * 1000.0);
-    if (latency_us < 1) latency_us = 1;  // Minimum 1 microsecond
+    if (latency_us < 1)
+        latency_us = 1; // Minimum 1 microsecond
     hdr_record_value_atomic (latency_histogram_, latency_us);
     // Also feed the rolling-window recorder for the live per-tick percentiles.
     hdr_interval_recorder_record_value_atomic (&interval_recorder_, latency_us);
@@ -571,16 +570,14 @@ const Response* capture_source) {
             record.capture    = std::move (captured);
             errors_.push_back (std::move (record));
         } else {
-            first_drop =
-            errors_dropped_.fetch_add (1, std::memory_order_relaxed) == 0;
+            first_drop = errors_dropped_.fetch_add (1, std::memory_order_relaxed) == 0;
         }
     }
 
     // Log once, outside the lock, so a capped run leaves a trace instead of
     // silently truncating its error list.
     if (first_drop) {
-        vayu::utils::log_warning (
-        "Run " + run_id_ + ": error store full at " +
+        vayu::utils::log_warning ("Run " + run_id_ + ": error store full at " +
         std::to_string (config_.max_errors) +
         " records; further errors are counted but not stored");
     }
@@ -603,8 +600,8 @@ MetricsCollector::Percentiles MetricsCollector::calculate_percentiles () {
     };
 
     result.count = static_cast<size_t> (latency_histogram_->total_count);
-    result.min  = us_to_ms (hdr_min (latency_histogram_));
-    result.max  = us_to_ms (hdr_max (latency_histogram_));
+    result.min   = us_to_ms (hdr_min (latency_histogram_));
+    result.max   = us_to_ms (hdr_max (latency_histogram_));
     result.p50  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 50.0));
     result.p75  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 75.0));
     result.p90  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 90.0));
@@ -631,7 +628,7 @@ MetricsCollector::phase_percentiles () const {
 
     std::array<Percentiles, TIMING_PHASE_COUNT> result;
     for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
-        auto* histogram  = phase_histograms_[i];
+        auto* histogram = phase_histograms_[i];
         result[i].count = static_cast<size_t> (histogram->total_count);
         result[i].min   = us_to_ms (hdr_min (histogram));
         result[i].max   = us_to_ms (hdr_max (histogram));
@@ -684,16 +681,16 @@ std::optional<MetricsCollector::StreamTotals> MetricsCollector::stream_totals ()
     totals.capped       = stream_capped_.load (std::memory_order_relaxed);
 
     if (stream_events_histogram_ != nullptr && stream_events_histogram_->total_count > 0) {
-        auto* h = stream_events_histogram_;
+        auto* h             = stream_events_histogram_;
         totals.events.count = static_cast<size_t> (h->total_count);
         totals.events.min   = static_cast<double> (hdr_min (h));
         totals.events.max   = static_cast<double> (hdr_max (h));
-        totals.events.p50   = static_cast<double> (hdr_value_at_percentile (h, 50.0));
-        totals.events.p75   = static_cast<double> (hdr_value_at_percentile (h, 75.0));
-        totals.events.p90   = static_cast<double> (hdr_value_at_percentile (h, 90.0));
-        totals.events.p95   = static_cast<double> (hdr_value_at_percentile (h, 95.0));
-        totals.events.p99   = static_cast<double> (hdr_value_at_percentile (h, 99.0));
-        totals.events.p999  = static_cast<double> (hdr_value_at_percentile (h, 99.9));
+        totals.events.p50 = static_cast<double> (hdr_value_at_percentile (h, 50.0));
+        totals.events.p75 = static_cast<double> (hdr_value_at_percentile (h, 75.0));
+        totals.events.p90 = static_cast<double> (hdr_value_at_percentile (h, 90.0));
+        totals.events.p95 = static_cast<double> (hdr_value_at_percentile (h, 95.0));
+        totals.events.p99 = static_cast<double> (hdr_value_at_percentile (h, 99.0));
+        totals.events.p999 = static_cast<double> (hdr_value_at_percentile (h, 99.9));
     }
     return totals;
 }
@@ -712,7 +709,7 @@ MetricsCollector::Percentiles MetricsCollector::sample_window_percentiles () {
     // pointer is owned by the recorder and valid until the next sample.
     struct hdr_histogram* interval = hdr_interval_recorder_sample (&interval_recorder_);
     if (interval == nullptr || interval->total_count == 0) {
-        return result;  // empty window → zeros
+        return result; // empty window → zeros
     }
 
     auto us_to_ms = [] (int64_t us) -> double {
@@ -720,14 +717,14 @@ MetricsCollector::Percentiles MetricsCollector::sample_window_percentiles () {
     };
 
     result.count = static_cast<size_t> (interval->total_count);
-    result.min  = us_to_ms (hdr_min (interval));
-    result.max  = us_to_ms (hdr_max (interval));
-    result.p50  = us_to_ms (hdr_value_at_percentile (interval, 50.0));
-    result.p75  = us_to_ms (hdr_value_at_percentile (interval, 75.0));
-    result.p90  = us_to_ms (hdr_value_at_percentile (interval, 90.0));
-    result.p95  = us_to_ms (hdr_value_at_percentile (interval, 95.0));
-    result.p99  = us_to_ms (hdr_value_at_percentile (interval, 99.0));
-    result.p999 = us_to_ms (hdr_value_at_percentile (interval, 99.9));
+    result.min   = us_to_ms (hdr_min (interval));
+    result.max   = us_to_ms (hdr_max (interval));
+    result.p50   = us_to_ms (hdr_value_at_percentile (interval, 50.0));
+    result.p75   = us_to_ms (hdr_value_at_percentile (interval, 75.0));
+    result.p90   = us_to_ms (hdr_value_at_percentile (interval, 90.0));
+    result.p95   = us_to_ms (hdr_value_at_percentile (interval, 95.0));
+    result.p99   = us_to_ms (hdr_value_at_percentile (interval, 99.0));
+    result.p999  = us_to_ms (hdr_value_at_percentile (interval, 99.9));
 
     return result;
 }
@@ -747,8 +744,8 @@ void MetricsCollector::record_status_code (int status_code) {
 std::map<int, size_t> MetricsCollector::status_code_distribution () const {
     std::map<int, size_t> result;
     for (int code = 0; code < STATUS_CODE_SLOTS; ++code) {
-        size_t count =
-        status_code_counts_[static_cast<size_t> (code)].load (std::memory_order_relaxed);
+        size_t count = status_code_counts_[static_cast<size_t> (code)].load (
+        std::memory_order_relaxed);
         if (count > 0) {
             result[code] = count;
         }
@@ -778,8 +775,8 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
 
         db::PendingResultBody pending;
         pending.result_index = batch.size () - 1;
-        pending.headers = nlohmann::json (exchange.headers)
-                          .dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
+        pending.headers =
+        nlohmann::json (exchange.headers).dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
         pending.body_bytes    = exchange.body_bytes;
         pending.truncated     = exchange.truncated;
         pending.content_type  = exchange.content_type;
@@ -873,8 +870,8 @@ size_t MetricsCollector::memory_usage_bytes () const {
         if (!record.capture.has_value ()) {
             return 0;
         }
-        size_t record_bytes = record.capture->body.capacity () +
-        record.capture->content_type.capacity ();
+        size_t record_bytes =
+        record.capture->body.capacity () + record.capture->content_type.capacity ();
         for (const auto& [name, value] : record.capture->headers) {
             record_bytes += name.capacity () + value.capacity ();
         }
@@ -886,7 +883,8 @@ size_t MetricsCollector::memory_usage_bytes () const {
         std::lock_guard<std::mutex> lock (errors_mutex_);
         bytes += errors_.capacity () * sizeof (ResultRecord);
         for (const auto& e : errors_) {
-            bytes += e.error_message.capacity () + e.trace_data.capacity () + capture_bytes (e);
+            bytes += e.error_message.capacity () + e.trace_data.capacity () +
+            capture_bytes (e);
         }
     }
 
@@ -966,10 +964,10 @@ const Percentiles* window_percentiles) const {
         else if (code >= 500 && code < 600)
             s5xx += count;
     }
-    stats["status2xx"]       = s2xx;
-    stats["status3xx"]       = s3xx;
-    stats["status4xx"]       = s4xx;
-    stats["status5xx"]       = s5xx;
+    stats["status2xx"] = s2xx;
+    stats["status3xx"] = s3xx;
+    stats["status4xx"] = s4xx;
+    stats["status5xx"] = s5xx;
     stats["droppedRequests"] = dropped_requests_.load (std::memory_order_relaxed);
     stats["avgQueueWaitMs"] = average_queue_wait ();
 

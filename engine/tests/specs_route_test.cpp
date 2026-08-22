@@ -225,7 +225,8 @@ TEST_F (SpecsRouteTest, RefusesADocumentOverTheConfiguredCapNamingBothNumbers) {
     // Below the compiled default, so this proves the *live* config entry is what
     // the write reads - not the constant.
     auto entry = db_->get_config_entry ("maxSpecDocumentBytes");
-    ASSERT_TRUE (entry.has_value ()) << "the cap must be a seeded, user-visible knob";
+    ASSERT_TRUE (entry.has_value ())
+    << "the cap must be a seeded, user-visible knob";
     entry->value = "64";
     db_->save_config_entry (*entry);
     const std::string oversized (128, 'x');
@@ -281,7 +282,8 @@ TEST_F (SpecsRouteTest, SpecMetaCarriesTheSameValuesAsTheFullDocumentWithoutTheH
 
     // Bytes as the engine counts them - the same measure the write cap refuses
     // by, so the number beside a document is in the unit of its limit.
-    EXPECT_EQ (meta["contentBytes"].get<size_t> (), std::string (PETSTORE_SCHEMAS).size ());
+    EXPECT_EQ (
+    meta["contentBytes"].get<size_t> (), std::string (PETSTORE_SCHEMAS).size ());
 
     // Every other key is the full read's answer, value for value: the two are
     // one row seen two ways, and a client that reads `sourceUrl` from the cheap
@@ -346,7 +348,8 @@ TEST_F (SpecsRouteTest, DeleteSucceedsOnceTheCollectionUnbinds) {
     routes::update_collection_response (*db_, col_id, json{ { "openapi", nullptr } });
     ASSERT_EQ (unbound, 200) << unbound_body.dump ();
     EXPECT_TRUE (unbound_body["openapi"].is_object ());
-    EXPECT_TRUE (unbound_body["openapi"].empty ()) << "`{}` is how unbound is spelled";
+    EXPECT_TRUE (unbound_body["openapi"].empty ())
+    << "`{}` is how unbound is spelled";
 
     auto [status, body] = routes::delete_spec_document_response (*db_, spec_id);
     EXPECT_EQ (status, 200) << body.dump ();
@@ -371,15 +374,14 @@ TEST_F (SpecsRouteTest, RejectsABindingThatNamesNoSpec) {
     // An object that is not empty is a binding, and a binding without a specId
     // names nothing - it would read back as a bound collection nobody can
     // resolve.
-    auto [status, body] = routes::create_collection_response (*db_,
-    json{ { "name", "Pets" }, { "openapi", { { "syncedAt", 5 } } } });
+    auto [status, body] = routes::create_collection_response (
+    *db_, json{ { "name", "Pets" }, { "openapi", { { "syncedAt", 5 } } } });
     EXPECT_EQ (status, 400) << body.dump ();
 
-    for (const auto& bad :
-    { json{ { "specId", spec_id }, { "specHash", 7 } },
-    json{ { "specId", spec_id }, { "syncedAt", "yesterday" } } }) {
-        auto [bad_status, bad_body] = routes::create_collection_response (*db_,
-        json{ { "name", "Pets" }, { "openapi", bad } });
+    for (const auto& bad : { json{ { "specId", spec_id }, { "specHash", 7 } },
+         json{ { "specId", spec_id }, { "syncedAt", "yesterday" } } }) {
+        auto [bad_status, bad_body] = routes::create_collection_response (
+        *db_, json{ { "name", "Pets" }, { "openapi", bad } });
         EXPECT_EQ (bad_status, 400) << bad_body.dump ();
     }
 }
@@ -388,20 +390,21 @@ TEST_F (SpecsRouteTest, RejectsABindingToASpecThatDoesNotExist) {
     auto [created, created_body] = routes::create_collection_response (*db_,
     json{ { "name", "Pets" }, { "openapi", { { "specId", "spec_ghost" } } } });
     ASSERT_EQ (created, 400) << created_body.dump ();
-    EXPECT_NE (created_body["error"]["message"].get<std::string> ().find ("spec_ghost"),
+    EXPECT_NE (
+    created_body["error"]["message"].get<std::string> ().find ("spec_ghost"),
     std::string::npos);
 
     // And on update, which is the path a bind-from-here flow actually uses.
     const std::string col_id = create_collection (json{ { "name", "Pets" } });
-    auto [updated, updated_body] = routes::update_collection_response (*db_, col_id,
-    json{ { "openapi", { { "specId", "spec_ghost" } } } });
+    auto [updated, updated_body] = routes::update_collection_response (
+    *db_, col_id, json{ { "openapi", { { "specId", "spec_ghost" } } } });
     EXPECT_EQ (updated, 400) << updated_body.dump ();
 }
 
 TEST_F (SpecsRouteTest, AnUpdateThatSaysNothingAboutTheBindingKeepsIt) {
     const std::string spec_id = store_spec ();
-    const std::string col_id  = create_collection (
-    json{ { "name", "Pets" }, { "openapi", { { "specId", spec_id }, { "syncedAt", 42 } } } });
+    const std::string col_id  = create_collection (json{ { "name", "Pets" },
+     { "openapi", { { "specId", spec_id }, { "syncedAt", 42 } } } });
 
     auto [status, body] =
     routes::update_collection_response (*db_, col_id, json{ { "name", "Pets v2" } });
@@ -513,9 +516,10 @@ TEST_F (SpecsRouteTest, StartupLeavesABindingWhoseDocumentIsGoneUntouched) {
 
 TEST_F (SpecsRouteTest, OperationIdentityReadsBackIdenticallyThroughBothSerializers) {
     const std::string col_id = create_collection (json{ { "name", "Pets" } });
-    const json operation     = { { "operationId", "listPets" }, { "method", "GET" },
+    const json operation = { { "operationId", "listPets" }, { "method", "GET" },
         { "path", "/pets/{petId}" } };
-    const std::string req_id = create_request (col_id, json{ { "specOperation", operation } });
+    const std::string req_id =
+    create_request (col_id, json{ { "specOperation", operation } });
 
     // The single-request route (`serialize`).
     auto [status, single] = routes::get_request_response (*db_, req_id);
@@ -563,8 +567,8 @@ TEST_F (SpecsRouteTest, OperationIdentityIsUnsetByAnExplicitNullOnUpdate) {
     ASSERT_EQ (kept, 200) << kept_body.dump ();
     EXPECT_FALSE (kept_body["specOperation"].is_null ()) << "absent means keep";
 
-    auto [reset, reset_body] =
-    routes::update_request_response (*db_, req_id, json{ { "specOperation", nullptr } });
+    auto [reset, reset_body] = routes::update_request_response (
+    *db_, req_id, json{ { "specOperation", nullptr } });
     ASSERT_EQ (reset, 200) << reset_body.dump ();
     EXPECT_TRUE (reset_body["specOperation"].is_null ());
     EXPECT_FALSE (db_->get_request (req_id)->spec_operation.has_value ())
@@ -573,13 +577,13 @@ TEST_F (SpecsRouteTest, OperationIdentityIsUnsetByAnExplicitNullOnUpdate) {
 
 TEST_F (SpecsRouteTest, RejectsAnOperationIdentityThatIsNotOne) {
     const std::string col_id = create_collection (json{ { "name", "Pets" } });
-    const json bad[] = {
-        json ("GET /pets"),                                     // not an object
-        json{ { "operationId", "listPets" } },                  // no method/path
-        json{ { "method", "GET" } },                            // no path
-        json{ { "path", "/pets" } },                            // no method
-        json{ { "method", "" }, { "path", "/pets" } },          // empty method
-        json{ { "method", "GET" }, { "path", "pets" } },        // not a template path
+    const json bad[]         = {
+        json ("GET /pets"),                            // not an object
+        json{ { "operationId", "listPets" } },         // no method/path
+        json{ { "method", "GET" } },                   // no path
+        json{ { "path", "/pets" } },                   // no method
+        json{ { "method", "" }, { "path", "/pets" } }, // empty method
+        json{ { "method", "GET" }, { "path", "pets" } }, // not a template path
         json{ { "method", "GET" }, { "path", "https://x/p" } }, // a concrete URL
         json{ { "method", "GET" }, { "path", "/pets" }, { "operationId", 7 } },
     };
@@ -596,15 +600,17 @@ TEST_F (SpecsRouteTest, RejectsAnOperationIdentityThatIsNotOne) {
 // ---------------------------------------------------------------------------
 
 TEST_F (SpecsRouteTest, ImportWritesSpecsAndResolvesABindingThroughTheTempIdMap) {
-    json payload = { { "specs", { { { "tempId", "s1" }, { "content", PETSTORE },
-                                   { "sourceUrl", "https://example.test/openapi.json" } } } },
-        { "collections", { { { "tempId", "c1" }, { "name", "Pets" },
-                             { "openapi", { { "specTempId", "s1" }, { "syncedAt", 9 } } } } } },
+    json payload = { { "specs",
+                     { { { "tempId", "s1" }, { "content", PETSTORE },
+                     { "sourceUrl", "https://example.test/openapi.json" } } } },
+        { "collections",
+        { { { "tempId", "c1" }, { "name", "Pets" },
+        { "openapi", { { "specTempId", "s1" }, { "syncedAt", 9 } } } } } },
         { "requests",
-            { { { "tempId", "r1" }, { "collectionTempId", "c1" }, { "name", "list" },
-                { "method", "GET" }, { "url", "https://example.test/pets" },
-                { "specOperation", { { "operationId", "listPets" },
-                                       { "method", "GET" }, { "path", "/pets" } } } } } } };
+        { { { "tempId", "r1" }, { "collectionTempId", "c1" }, { "name", "list" },
+        { "method", "GET" }, { "url", "https://example.test/pets" },
+        { "specOperation",
+        { { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } } } } };
 
     auto [status, body] = routes::import_apply_response (*db_, payload);
     ASSERT_EQ (status, 200) << body.dump ();
@@ -634,14 +640,14 @@ TEST_F (SpecsRouteTest, ImportWritesSpecsAndResolvesABindingThroughTheTempIdMap)
     auto stored_req = db_->get_request (body["idMap"]["r1"].get<std::string> ());
     ASSERT_TRUE (stored_req.has_value ());
     ASSERT_TRUE (stored_req->spec_operation.has_value ());
-    EXPECT_EQ (json::parse (*stored_req->spec_operation)["operationId"].get<std::string> (),
-    "listPets");
+    EXPECT_EQ (
+    json::parse (*stored_req->spec_operation)["operationId"].get<std::string> (), "listPets");
 }
 
 TEST_F (SpecsRouteTest, ImportMayBindASpecThatIsAlreadyStored) {
     const std::string spec_id = store_spec ();
-    json payload = { { "collections", { { { "tempId", "c1" }, { "name", "Pets" },
-                                          { "openapi", { { "specId", spec_id } } } } } } };
+    json payload              = { { "collections",
+                 { { { "tempId", "c1" }, { "name", "Pets" }, { "openapi", { { "specId", spec_id } } } } } } };
 
     auto [status, body] = routes::import_apply_response (*db_, payload);
     ASSERT_EQ (status, 200) << body.dump ();
@@ -718,10 +724,10 @@ TEST_F (SpecsRouteTest, ABindingWithNoVersionIsNamedRatherThanBlamedOnTheDocumen
 }
 
 TEST_F (SpecsRouteTest, ImportRefusesAnUnresolvableBindingAndWritesNothing) {
-    for (const auto& binding : { json{ { "specTempId", "nobody" } },
-         json{ { "specId", "spec_ghost" } } }) {
-        json payload = { { "collections",
-            { { { "tempId", "c1" }, { "name", "Pets" }, { "openapi", binding } } } } };
+    for (const auto& binding :
+    { json{ { "specTempId", "nobody" } }, json{ { "specId", "spec_ghost" } } }) {
+        json payload        = { { "collections",
+               { { { "tempId", "c1" }, { "name", "Pets" }, { "openapi", binding } } } } };
         auto [status, body] = routes::import_apply_response (*db_, payload);
         EXPECT_EQ (status, 400) << binding.dump () << " -> " << body.dump ();
         EXPECT_TRUE (db_->get_collections ().empty ())
@@ -732,8 +738,8 @@ TEST_F (SpecsRouteTest, ImportRefusesAnUnresolvableBindingAndWritesNothing) {
 TEST_F (SpecsRouteTest, ImportRefusesABindingThatNamesTheSpecTwoWays) {
     json payload = { { "specs", { { { "tempId", "s1" }, { "content", PETSTORE } } } },
         { "collections",
-            { { { "tempId", "c1" }, { "name", "Pets" },
-                { "openapi", { { "specTempId", "s1" }, { "specId", "spec_other" } } } } } } };
+        { { { "tempId", "c1" }, { "name", "Pets" },
+        { "openapi", { { "specTempId", "s1" }, { "specId", "spec_other" } } } } } } };
     auto [status, body] = routes::import_apply_response (*db_, payload);
     EXPECT_EQ (status, 400) << body.dump ();
     EXPECT_TRUE (db_->get_spec_document (std::string ()).has_value () == false);
@@ -744,7 +750,8 @@ TEST_F (SpecsRouteTest, ImportRefusesAnEngineComputedFieldOnASpecItem) {
     for (const char* field : { "hash", "fetchedAt" }) {
         json item = { { "tempId", "s1" }, { "content", PETSTORE } };
         item[field] = field == std::string ("fetchedAt") ? json (1) : json ("spoofed");
-        auto [status, body] = routes::import_apply_response (*db_, json{ { "specs", { item } } });
+        auto [status, body] =
+        routes::import_apply_response (*db_, json{ { "specs", { item } } });
         EXPECT_EQ (status, 400) << field << ": " << body.dump ();
     }
 }
@@ -757,7 +764,7 @@ TEST_F (SpecsRouteTest, ABoundCollectionsRunStampsTheSpecIdAndHash) {
     const std::string spec_id = store_spec ();
     const std::string hash    = routes::spec_content_hash (PETSTORE);
     const std::string col_id  = create_collection (json{ { "name", "Pets" },
-    { "openapi", { { "specId", spec_id }, { "specHash", hash } } } });
+     { "openapi", { { "specId", spec_id }, { "specHash", hash } } } });
     create_request (col_id);
 
     vayu::core::ScenarioResolveOptions options;
@@ -765,13 +772,13 @@ TEST_F (SpecsRouteTest, ABoundCollectionsRunStampsTheSpecIdAndHash) {
     options.limits.max_steps      = 10;
     options.limits.max_data_rows  = 10;
     options.limits.max_data_bytes = 4096;
-    auto resolved = vayu::core::resolve_scenario (*db_,
-    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
+    auto resolved                 = vayu::core::resolve_scenario (*db_,
+                    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
     ASSERT_TRUE (resolved.ok) << resolved.error;
     ASSERT_TRUE (resolved.spec.bound ());
 
-    const json manifest = vayu::core::build_scenario_manifest (resolved.request,
-    resolved.plan, resolved.spec);
+    const json manifest = vayu::core::build_scenario_manifest (
+    resolved.request, resolved.plan, resolved.spec);
     ASSERT_TRUE (manifest.contains ("openapi")) << manifest.dump ();
     EXPECT_EQ (manifest["openapi"]["specId"].get<std::string> (), spec_id);
     EXPECT_EQ (manifest["openapi"]["specHash"].get<std::string> (), hash);
@@ -786,13 +793,13 @@ TEST_F (SpecsRouteTest, AnUnboundCollectionsRunStampsNothingAtAll) {
     options.limits.max_steps      = 10;
     options.limits.max_data_rows  = 10;
     options.limits.max_data_bytes = 4096;
-    auto resolved = vayu::core::resolve_scenario (*db_,
-    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
+    auto resolved                 = vayu::core::resolve_scenario (*db_,
+                    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
     ASSERT_TRUE (resolved.ok) << resolved.error;
     EXPECT_FALSE (resolved.spec.bound ());
 
-    const json manifest = vayu::core::build_scenario_manifest (resolved.request,
-    resolved.plan, resolved.spec);
+    const json manifest = vayu::core::build_scenario_manifest (
+    resolved.request, resolved.plan, resolved.spec);
     // Absent, not null and not `{}` - one answer with one spelling, which is
     // what #629's coverage block branches on.
     EXPECT_FALSE (manifest.contains ("openapi")) << manifest.dump ();
@@ -802,7 +809,7 @@ TEST_F (SpecsRouteTest, TheStampRecordsWhatTheRunWasPlannedAgainstNotTheLatestBi
     const std::string spec_id = store_spec ();
     const std::string hash    = routes::spec_content_hash (PETSTORE);
     const std::string col_id  = create_collection (json{ { "name", "Pets" },
-    { "openapi", { { "specId", spec_id }, { "specHash", hash } } } });
+     { "openapi", { { "specId", spec_id }, { "specHash", hash } } } });
     create_request (col_id);
 
     vayu::core::ScenarioResolveOptions options;
@@ -810,11 +817,11 @@ TEST_F (SpecsRouteTest, TheStampRecordsWhatTheRunWasPlannedAgainstNotTheLatestBi
     options.limits.max_steps      = 10;
     options.limits.max_data_rows  = 10;
     options.limits.max_data_bytes = 4096;
-    auto resolved = vayu::core::resolve_scenario (*db_,
-    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
+    auto resolved                 = vayu::core::resolve_scenario (*db_,
+                    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
     ASSERT_TRUE (resolved.ok) << resolved.error;
-    const json manifest = vayu::core::build_scenario_manifest (resolved.request,
-    resolved.plan, resolved.spec);
+    const json manifest = vayu::core::build_scenario_manifest (
+    resolved.request, resolved.plan, resolved.spec);
 
     // Unbind afterwards: a run is a record of what ran, so the manifest already
     // built must not change under it.
@@ -845,15 +852,16 @@ TEST_F (SpecsRouteTest, AStoredDocumentsIndexIsTheOneTheEngineReadOffIt) {
 TEST_F (SpecsRouteTest, ADocumentThatCannotBeReadIsRefusedRatherThanStoredUnreadable) {
     // Storing it would leave a row every later reader - coverage, the sync, an
     // export - can do nothing with, and none of them is a place to find out.
-    auto [status, body] = routes::create_spec_document_response (*db_,
-    json{ { "content", "openapi: [3.1.0\npaths: {\n" } });
+    auto [status, body] = routes::create_spec_document_response (
+    *db_, json{ { "content", "openapi: [3.1.0\npaths: {\n" } });
     EXPECT_EQ (status, 400) << body.dump ();
     EXPECT_NE (body["error"]["message"].get<std::string> ().find ("content"), std::string::npos)
     << body.dump ();
 }
 
 TEST_F (SpecsRouteTest, ADocumentWithNoIndexReadsBackNullRatherThanAnEmptyContract) {
-    auto [read_status, read] = routes::get_spec_document_response (*db_, store_spec (NOT_A_SPEC));
+    auto [read_status, read] =
+    routes::get_spec_document_response (*db_, store_spec (NOT_A_SPEC));
     ASSERT_EQ (read_status, 200) << read.dump ();
     // Null, not `[]`: "stored before coverage existed" and "declares nothing"
     // are different answers, and only the first leaves the report's block out.
@@ -868,7 +876,7 @@ TEST_F (SpecsRouteTest, ACallerSuppliedIndexIsRefusedOnEveryPathThatStoresOne) {
     const json index = json::array ({ { { "method", "GET" }, { "path", "/pets" } } });
 
     for (const char* field : { "operations", "responseSchemas" }) {
-        json body = { { "content", PETSTORE } };
+        json body   = { { "content", PETSTORE } };
         body[field] = index;
         auto [status, response] = routes::create_spec_document_response (*db_, body);
         EXPECT_EQ (status, 400) << field << ": " << response.dump ();
@@ -887,8 +895,8 @@ TEST_F (SpecsRouteTest, TheSchemaIndexIsDerivedBesideTheOperationIndexOnBothWrit
     // The other half of what `bind_spec` waits on (issue #860): a document
     // stored by an agent that sends nothing but bytes still validates responses,
     // because the engine translated its schemas out of OpenAPI's dialect itself.
-    auto [status, body] =
-    routes::create_spec_document_response (*db_, json{ { "content", PETSTORE_SCHEMAS } });
+    auto [status, body] = routes::create_spec_document_response (
+    *db_, json{ { "content", PETSTORE_SCHEMAS } });
     ASSERT_EQ (status, 200) << body.dump ();
     auto [read_status, read] =
     routes::get_spec_document_response (*db_, body.value ("id", std::string{}));
@@ -898,8 +906,8 @@ TEST_F (SpecsRouteTest, TheSchemaIndexIsDerivedBesideTheOperationIndexOnBothWrit
     auto [import_status, imported] = routes::import_apply_response (*db_,
     json{ { "specs", { { { "tempId", "s1" }, { "content", PETSTORE_SCHEMAS } } } } });
     ASSERT_EQ (import_status, 200) << imported.dump ();
-    auto [bulk_status, bulk] =
-    routes::get_spec_document_response (*db_, imported["idMap"]["s1"].get<std::string> ());
+    auto [bulk_status, bulk] = routes::get_spec_document_response (
+    *db_, imported["idMap"]["s1"].get<std::string> ());
     ASSERT_EQ (bulk_status, 200) << bulk.dump ();
     EXPECT_EQ (bulk["responseSchemas"], PETSTORE_SCHEMA_INDEX)
     << "one helper for all three writers, or a document describes different "
@@ -937,8 +945,8 @@ TEST_F (SpecsRouteTest, AResolvedPlanCarriesTheBoundDocumentsOperations) {
     ASSERT_EQ (status, 200) << stored.dump ();
     const std::string spec_id = stored.value ("id", std::string{});
     const std::string col_id  = create_collection (json{ { "name", "Pets" },
-    { "openapi", { { "specId", spec_id },
-    { "specHash", routes::spec_content_hash (PETSTORE) } } } });
+     { "openapi",
+     { { "specId", spec_id }, { "specHash", routes::spec_content_hash (PETSTORE) } } } });
     create_request (col_id);
 
     auto resolved = resolve (col_id);
@@ -964,7 +972,8 @@ TEST_F (SpecsRouteTest, ABindingWhoseHashHasMovedIsNotMeasuredRatherThanMismeasu
     routes::create_spec_document_response (*db_, json{ { "content", PETSTORE } });
     ASSERT_EQ (status, 200) << stored.dump ();
     const std::string col_id = create_collection (json{ { "name", "Pets" },
-    { "openapi", { { "specId", stored.value ("id", std::string{}) },
+    { "openapi",
+    { { "specId", stored.value ("id", std::string{}) },
     { "specHash", "a-hash-this-document-never-had" } } } });
     create_request (col_id);
 
@@ -1002,8 +1011,8 @@ std::string* root_out = nullptr) {
     if (root_out != nullptr) {
         *root_out = root_id;
     }
-    auto [tag_status, tag] = routes::create_collection_response (db,
-    json{ { "name", "pets" }, { "parentId", root_id } });
+    auto [tag_status, tag] = routes::create_collection_response (
+    db, json{ { "name", "pets" }, { "parentId", root_id } });
     EXPECT_EQ (tag_status, 200) << tag.dump ();
     return tag.value ("id", std::string{});
 }
@@ -1013,8 +1022,8 @@ TEST_F (SpecsRouteTest, ATagSubCollectionRunIsMeasuredAgainstTheRootsContract) {
     // created, the requests are one level down, and running that tag folder used
     // to resolve `{}` - no coverage, no schema validation, and an absent block
     // is indistinguishable from "never bound".
-    auto [status, stored] =
-    routes::create_spec_document_response (*db_, json{ { "content", PETSTORE_SCHEMAS } });
+    auto [status, stored] = routes::create_spec_document_response (
+    *db_, json{ { "content", PETSTORE_SCHEMAS } });
     ASSERT_EQ (status, 200) << stored.dump ();
     const std::string spec_id = stored.value ("id", std::string{});
     const std::string hash    = routes::spec_content_hash (PETSTORE_SCHEMAS);
@@ -1026,7 +1035,8 @@ TEST_F (SpecsRouteTest, ATagSubCollectionRunIsMeasuredAgainstTheRootsContract) {
 
     auto resolved = resolve (tag_id);
     ASSERT_TRUE (resolved.ok) << resolved.error;
-    ASSERT_TRUE (resolved.spec.bound ()) << "the root's binding answers for its subtree";
+    ASSERT_TRUE (resolved.spec.bound ())
+    << "the root's binding answers for its subtree";
     EXPECT_EQ (resolved.spec.spec_id, spec_id);
     EXPECT_EQ (resolved.spec.spec_hash, hash);
     EXPECT_FALSE (resolved.spec.schema_reason.has_value ())
@@ -1044,8 +1054,8 @@ TEST_F (SpecsRouteTest, ATagSubCollectionRunIsMeasuredAgainstTheRootsContract) {
 
     // And the run says whose contract it was measured against, because most of
     // those 618 operations being uncovered is scoped-run truth, not catastrophe.
-    const json manifest = vayu::core::build_scenario_manifest (resolved.request,
-    resolved.plan, resolved.spec);
+    const json manifest = vayu::core::build_scenario_manifest (
+    resolved.request, resolved.plan, resolved.spec);
     ASSERT_TRUE (manifest.contains ("openapi")) << manifest.dump ();
     EXPECT_EQ (manifest["openapi"]["specId"].get<std::string> (), spec_id);
     EXPECT_TRUE (manifest["openapi"].value ("inherited", false)) << manifest.dump ();
@@ -1054,15 +1064,15 @@ TEST_F (SpecsRouteTest, ATagSubCollectionRunIsMeasuredAgainstTheRootsContract) {
 TEST_F (SpecsRouteTest, ACollectionCarryingItsOwnBindingDisclosesNothingToDisclose) {
     const std::string spec_id = store_spec ();
     const std::string col_id  = create_collection (json{ { "name", "Pets" },
-    { "openapi", { { "specId", spec_id },
-    { "specHash", routes::spec_content_hash (PETSTORE) } } } });
+     { "openapi",
+     { { "specId", spec_id }, { "specHash", routes::spec_content_hash (PETSTORE) } } } });
     create_request (col_id);
 
     auto resolved = resolve (col_id);
     ASSERT_TRUE (resolved.ok) << resolved.error;
     EXPECT_FALSE (resolved.spec.inherited);
-    const json manifest = vayu::core::build_scenario_manifest (resolved.request,
-    resolved.plan, resolved.spec);
+    const json manifest = vayu::core::build_scenario_manifest (
+    resolved.request, resolved.plan, resolved.spec);
     // Absent rather than `false`, the rule every other finding in the report
     // follows: carried only where it happened.
     EXPECT_FALSE (manifest["openapi"].contains ("inherited")) << manifest.dump ();
@@ -1092,13 +1102,13 @@ TEST_F (SpecsRouteTest, TheDesignPathAndTheScenarioPathResolveOneBinding) {
     ASSERT_EQ (bind_status, 200) << bound.dump ();
     // One level deeper again, so neither path is answering from the collection
     // the binding sits on.
-    auto [leaf_status, leaf] = routes::create_collection_response (*db_,
-    json{ { "name", "pets/{petId}" }, { "parentId", tag_id } });
+    auto [leaf_status, leaf] = routes::create_collection_response (
+    *db_, json{ { "name", "pets/{petId}" }, { "parentId", tag_id } });
     ASSERT_EQ (leaf_status, 200) << leaf.dump ();
     const std::string leaf_id = leaf.value ("id", std::string{});
     const std::string req_id  = create_request (leaf_id,
-    json{ { "specOperation",
-    { { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
+     json{ { "specOperation",
+     { { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
 
     auto resolved = resolve (leaf_id);
     ASSERT_TRUE (resolved.ok) << resolved.error;
@@ -1115,13 +1125,15 @@ TEST_F (SpecsRouteTest, TheDesignPathAndTheScenarioPathResolveOneBinding) {
     ASSERT_TRUE (design.reason.has_value ())
     << "a clean index here means the design walk took the root's binding";
     EXPECT_EQ (*design.reason, *resolved.spec.schema_reason)
-    << "the two paths must resolve one binding, or a Send and a run of the same "
+    << "the two paths must resolve one binding, or a Send and a run of the "
+       "same "
        "request disagree about what it is measured against";
 }
 
 TEST_F (SpecsRouteTest, ADocumentThatDeclaresNoOperationReportsNoCoverageRatherThanZero) {
     const std::string col_id = create_collection (json{ { "name", "Pets" },
-    { "openapi", { { "specId", store_spec (NOT_A_SPEC) },
+    { "openapi",
+    { { "specId", store_spec (NOT_A_SPEC) },
     { "specHash", routes::spec_content_hash (NOT_A_SPEC) } } } });
     create_request (col_id);
 

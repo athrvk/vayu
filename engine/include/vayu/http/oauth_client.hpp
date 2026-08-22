@@ -26,8 +26,8 @@ namespace vayu::http::oauth {
  */
 struct TokenError {
     int http_status = 500; // 400 | 401 | 409 | 502
-    std::string code;      // "oauth2_invalid_config" | "oauth2_interactive_required"
-                           // | "oauth2_provider_error" | "oauth2_network_error"
+    std::string code; // "oauth2_invalid_config" | "oauth2_interactive_required"
+                      // | "oauth2_provider_error" | "oauth2_network_error"
     std::string message;
     int provider_status = 0;
     // `{}` rather than bare declarations: every construction here is a
@@ -72,9 +72,10 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms 
  * performs a fresh grant. `authorization_code` requires `interactive` and
  * fails with 409 oauth2_interactive_required without it.
  */
-std::variant<vayu::db::OAuthToken, TokenError>
-acquire_token (vayu::db::Database& db, const nlohmann::json& config,
-bool force_refresh, const std::optional<InteractiveExchange>& interactive);
+std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database& db,
+const nlohmann::json& config,
+bool force_refresh,
+const std::optional<InteractiveExchange>& interactive);
 
 /**
  * @brief Public JSON shape of a cached token (never includes the refresh token

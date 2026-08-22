@@ -39,8 +39,9 @@ namespace vayu::core {
 namespace {
 
 /// Field order for display - the request builder's own top-to-bottom order.
-constexpr std::array<SpecField, 7> FIELDS = { SpecField::Name, SpecField::Description,
-    SpecField::Method, SpecField::Url, SpecField::Params, SpecField::Headers, SpecField::Body };
+constexpr std::array<SpecField, 7> FIELDS = { SpecField::Name,
+    SpecField::Description, SpecField::Method, SpecField::Url,
+    SpecField::Params, SpecField::Headers, SpecField::Body };
 
 /// Long enough to recognise a value by, short enough to sit in a list row.
 constexpr size_t DISPLAY_MAX = 120;
@@ -53,9 +54,8 @@ struct FieldValue {
 
 std::string upper (std::string_view text) {
     std::string out (text);
-    std::transform (out.begin (), out.end (), out.begin (), [] (unsigned char c) {
-        return static_cast<char> (std::toupper (c));
-    });
+    std::transform (out.begin (), out.end (), out.begin (),
+    [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
     return out;
 }
 
@@ -78,7 +78,8 @@ std::string truncate (const std::string& value) {
     collapsed.reserve (value.size ());
     bool in_space = false;
     for (const char c : value) {
-        const bool space = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+        const bool space = c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
+        c == '\f' || c == '\v';
         if (space) {
             in_space = true;
             continue;
@@ -133,7 +134,8 @@ FieldValue rows_value (const std::vector<DraftField>& entries) {
         if (!joined.empty ()) {
             joined += ", ";
         }
-        std::string row = entry.value.empty () ? entry.key : entry.key + "=" + entry.value;
+        std::string row =
+        entry.value.empty () ? entry.key : entry.key + "=" + entry.value;
         if (!entry.description.empty ()) {
             row += " (" + entry.description + ")";
         }
@@ -181,18 +183,18 @@ const DraftBody& body) {
         // identity: both sides are a stored method, which the engine parses
         // case-sensitively and serialises from an enum, so a lower-case verb is
         // a state no write can reach and normalising for it would guard nothing.
-        text_value (method), text_value (url), rows_value (params), rows_value (headers),
-        body_value (body) };
+        text_value (method), text_value (url), rows_value (params),
+        rows_value (headers), body_value (body) };
 }
 
 FieldValues field_values_of (const ComparableRequest& request) {
-    return field_values (request.name, request.description, request.method, request.url,
-    request.params, request.headers, request.body);
+    return field_values (request.name, request.description, request.method,
+    request.url, request.params, request.headers, request.body);
 }
 
 FieldValues field_values_of (const DraftRequest& draft) {
-    return field_values (draft.name, draft.description, draft.method, draft.url, draft.params,
-    draft.headers, draft.body);
+    return field_values (draft.name, draft.description, draft.method, draft.url,
+    draft.params, draft.headers, draft.body);
 }
 
 /** `GET /pets/{}` - the key an identity is followed by when its id cannot be. */
@@ -210,8 +212,8 @@ std::string path_key (const DeclaredOperation& operation) {
  * uses.
  */
 bool same_operation (const DeclaredOperation& a, const DeclaredOperation& b) {
-    return a.operation_id == b.operation_id && upper (a.method) == upper (b.method) &&
-    a.path == b.path;
+    return a.operation_id == b.operation_id &&
+    upper (a.method) == upper (b.method) && a.path == b.path;
 }
 
 /**
@@ -252,14 +254,15 @@ class DraftIndex {
      *   no exact match the id is still followed: that is the ordinary rename,
      *   where the document moved the path and the id is all there is left.
      */
-    [[nodiscard]] std::optional<std::pair<size_t, IdentityMatch>>
-    lookup (const DeclaredOperation& operation,
+    [[nodiscard]] std::optional<std::pair<size_t, IdentityMatch>> lookup (
+    const DeclaredOperation& operation,
     const std::unordered_set<std::string>& ambiguous_ids,
     const std::vector<SpecRequestDraft>& entries) const {
-        const std::string key       = path_key (operation);
-        const auto by_path          = by_path_.find (key);
-        const bool has_path         = by_path != by_path_.end ();
-        if (!operation.operation_id.empty () && ambiguous_ids.count (operation.operation_id) == 0) {
+        const std::string key = path_key (operation);
+        const auto by_path    = by_path_.find (key);
+        const bool has_path   = by_path != by_path_.end ();
+        if (!operation.operation_id.empty () &&
+        ambiguous_ids.count (operation.operation_id) == 0) {
             const auto by_id = by_operation_id_.find (operation.operation_id);
             if (by_id != by_operation_id_.end () &&
             (!has_path || path_key (entries[by_id->second].operation) == key)) {
@@ -286,7 +289,8 @@ class DraftIndex {
  * requests claim identifies neither of them. They are followed by path here,
  * which is the same refusal-to-guess the matcher binds by.
  */
-std::unordered_set<std::string> ids_more_than_one_request_claims (const std::vector<ComparableRequest>& requests) {
+std::unordered_set<std::string> ids_more_than_one_request_claims (
+const std::vector<ComparableRequest>& requests) {
     std::unordered_set<std::string> seen;
     std::unordered_set<std::string> repeated;
     for (const ComparableRequest& request : requests) {
@@ -313,10 +317,11 @@ std::unordered_set<std::string> ids_more_than_one_request_claims (const std::vec
 std::vector<SpecFieldDiff> diff_fields (const ComparableRequest& request,
 const DraftRequest& next,
 const DraftRequest* previous) {
-    const FieldValues current = field_values_of (request);
-    const FieldValues fetched = field_values_of (next);
-    const std::optional<FieldValues> bound =
-    previous == nullptr ? std::nullopt : std::optional<FieldValues> (field_values_of (*previous));
+    const FieldValues current              = field_values_of (request);
+    const FieldValues fetched              = field_values_of (next);
+    const std::optional<FieldValues> bound = previous == nullptr ?
+    std::nullopt :
+    std::optional<FieldValues> (field_values_of (*previous));
 
     std::vector<SpecFieldDiff> out;
     for (size_t i = 0; i < FIELDS.size (); ++i) {
@@ -324,10 +329,11 @@ const DraftRequest* previous) {
             continue;
         }
         SpecFieldDiff field;
-        field.field        = FIELDS[i];
-        field.current      = current[i].display;
-        field.next         = fetched[i].display;
-        field.user_touched = bound.has_value () && current[i].compare != (*bound)[i].compare;
+        field.field   = FIELDS[i];
+        field.current = current[i].display;
+        field.next    = fetched[i].display;
+        field.user_touched =
+        bound.has_value () && current[i].compare != (*bound)[i].compare;
         out.push_back (std::move (field));
     }
     return out;
@@ -354,7 +360,8 @@ const std::vector<ComparableRequest>& requests) {
     const DraftIndex fetched_index (fetched);
     const std::optional<DraftIndex> bound_index =
     bound == nullptr ? std::nullopt : std::optional<DraftIndex> (*bound);
-    const std::unordered_set<std::string> ambiguous_ids = ids_more_than_one_request_claims (requests);
+    const std::unordered_set<std::string> ambiguous_ids =
+    ids_more_than_one_request_claims (requests);
 
     SpecDiff diff;
     std::vector<bool> claimed (fetched.size (), false);
@@ -376,7 +383,8 @@ const std::vector<ComparableRequest>& requests) {
 
         const DraftRequest* previous = nullptr;
         if (bound_index) {
-            if (const auto entry = bound_index->lookup (bound_operation, ambiguous_ids, *bound)) {
+            if (const auto entry =
+                bound_index->lookup (bound_operation, ambiguous_ids, *bound)) {
                 previous = &(*bound)[entry->first].draft;
             }
         }

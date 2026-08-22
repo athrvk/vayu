@@ -126,9 +126,8 @@ const ResultAnnotations& annotations) {
         // `maxStoredErrors`. Passing the response rather than a copy keeps the
         // body-sized work inside the collector, after it has decided to keep
         // the record (see MetricsCollector::record_error).
-        context->metrics_collector->record_error (response.error_code,
-        response.error_message, error_json.dump (),
-        context->capture_response_bodies ? &response : nullptr);
+        context->metrics_collector->record_error (response.error_code, response.error_message,
+        error_json.dump (), context->capture_response_bodies ? &response : nullptr);
         context->metrics_collector->record_bytes (
         response.timing.bytes_up, response.timing.bytes_down);
     } else {
@@ -171,7 +170,8 @@ const ResultAnnotations& annotations) {
             // whichever budget claims it, the record is stored, and the
             // exemplar's real job (capturing a body for it) is decided
             // separately below.
-            trace_reason = is_slow ? SuccessTraceReason::Slow :
+            trace_reason = is_slow ?
+            SuccessTraceReason::Slow :
             (sampled ? SuccessTraceReason::Sampled : SuccessTraceReason::Exemplar);
 
             nlohmann::json timing_json = { { "totalMs", response.timing.total_ms },
@@ -204,8 +204,8 @@ const ResultAnnotations& annotations) {
         // decided: `trace_data` carries these same five numbers for the ~1% of
         // completions something retains, and the histograms are how the other
         // 99% reach the report.
-        context->metrics_collector->record_success (response.status_code, latency,
-        response.timing.queue_wait_ms, trace_data, trace_reason,
+        context->metrics_collector->record_success (response.status_code,
+        latency, response.timing.queue_wait_ms, trace_data, trace_reason,
         capture_body ? &response : nullptr, &response.timing);
         context->metrics_collector->record_bytes (
         response.timing.bytes_up, response.timing.bytes_down);
@@ -302,8 +302,8 @@ const std::function<void ()>& submit_one,
 const std::function<size_t (int64_t)>& target_fn,
 const std::function<size_t ()>& budget_fn,
 const std::function<bool (int64_t)>& should_continue) {
-    using clock = std::chrono::steady_clock;
-    auto start  = clock::now ();
+    using clock     = std::chrono::steady_clock;
+    auto start      = clock::now ();
     auto elapsed_ms = [&start] () {
         return std::chrono::duration_cast<std::chrono::milliseconds> (clock::now () - start)
         .count ();
@@ -488,8 +488,7 @@ class ConstantLoadStrategy : public LoadStrategy {
             };
 
             maintain_concurrency (
-            context, submit_one,
-            [concurrency] (int64_t) { return concurrency; },      // target(t) = N
+            context, submit_one, [concurrency] (int64_t) { return concurrency; }, // target(t) = N
             [] () { return std::numeric_limits<size_t>::max (); }, // unbounded budget
             [duration_ms] (int64_t el) { return el < duration_ms; }); // stop at duration
         }
@@ -525,18 +524,17 @@ class IterationsLoadStrategy : public LoadStrategy {
         };
 
         maintain_concurrency (
-        context, submit_one,
-        [concurrency] (int64_t) { return concurrency; },     // target = N
-        [context, iterations] () -> size_t {                 // budget = M - sent
+        context, submit_one, [concurrency] (int64_t) { return concurrency; }, // target = N
+        [context, iterations] () -> size_t { // budget = M - sent
             size_t sent = context->requests_sent.load ();
             return sent < iterations ? iterations - sent : 0;
         },
-        [context, iterations] (int64_t) {                    // stop at M
+        [context, iterations] (int64_t) { // stop at M
             return context->requests_sent.load () < iterations;
         });
 
-        vayu::utils::log_info (
-        "Submitted " + std::to_string (context->requests_sent.load ()) + " requests");
+        vayu::utils::log_info ("Submitted " +
+        std::to_string (context->requests_sent.load ()) + " requests");
     }
 };
 
@@ -661,9 +659,13 @@ class CapacitySearch {
 
         const CapacityDecision decision = decide_next_level (config_, history_);
         switch (decision.action) {
-        case CapacityAction::Stop: stop_reason_ = decision.stop_reason; return false;
+        case CapacityAction::Stop:
+            stop_reason_ = decision.stop_reason;
+            return false;
         case CapacityAction::Hold:
-        case CapacityAction::StepUp: open_level (decision.next_concurrency, elapsed_ms); return true;
+        case CapacityAction::StepUp:
+            open_level (decision.next_concurrency, elapsed_ms);
+            return true;
         }
         return true;
     }
@@ -747,18 +749,19 @@ class CapacityLoadStrategy : public LoadStrategy {
 
         const int64_t deadline_ms =
         duration_field_ms (config, "duration", constants::capacity::DEADLINE_MS);
-        const int64_t step_ms = duration_field_ms (config, "stepDuration",
-        constants::capacity::STEP_DURATION_MS);
+        const int64_t step_ms = duration_field_ms (
+        config, "stepDuration", constants::capacity::STEP_DURATION_MS);
         const CapacityConfig capacity_config =
         capacity_config_from (config, step_ms, deadline_ms);
 
         vayu::utils::log_info ("Starting Capacity Discovery Load Test");
-        vayu::utils::log_info ("  SLO: p99 < " + std::to_string (capacity_config.slo_ms) + " ms");
+        vayu::utils::log_info (
+        "  SLO: p99 < " + std::to_string (capacity_config.slo_ms) + " ms");
         vayu::utils::log_info (
         "  Step duration: " + std::to_string (capacity_config.step_duration_ms) + " ms");
-        vayu::utils::log_info ("  Concurrency: " +
-        std::to_string (capacity_config.start_concurrency) + " -> " +
-        std::to_string (capacity_config.max_concurrency));
+        vayu::utils::log_info (
+        "  Concurrency: " + std::to_string (capacity_config.start_concurrency) +
+        " -> " + std::to_string (capacity_config.max_concurrency));
         vayu::utils::log_info ("  Deadline: " + std::to_string (deadline_ms) + " ms");
 
         auto submit_one = [&context, &db, &request] () {
@@ -779,9 +782,8 @@ class CapacityLoadStrategy : public LoadStrategy {
         // Written before this frame returns, and read by execute_load_test
         // after it - same thread, so the summary sees a complete search.
         context->capacity = search.finish ();
-        vayu::utils::log_info (
-        "Capacity search stopped: " + context->capacity->stop_reason + " (" +
-        std::to_string (context->capacity->levels.size ()) + " levels measured)");
+        vayu::utils::log_info ("Capacity search stopped: " + context->capacity->stop_reason +
+        " (" + std::to_string (context->capacity->levels.size ()) + " levels measured)");
     }
 };
 
@@ -807,7 +809,8 @@ std::unique_ptr<LoadStrategy> LoadStrategy::create (const nlohmann::json& config
     case LoadTestType::Iterations:
         return std::make_unique<IterationsLoadStrategy> ();
     case LoadTestType::RampUp: return std::make_unique<RampUpLoadStrategy> ();
-    case LoadTestType::Capacity: return std::make_unique<CapacityLoadStrategy> ();
+    case LoadTestType::Capacity:
+        return std::make_unique<CapacityLoadStrategy> ();
     }
 
     return std::make_unique<ConstantLoadStrategy> ();

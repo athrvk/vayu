@@ -124,7 +124,8 @@ class IdentityFile {
         std::error_code ec;
         std::filesystem::remove (path_, ec);
     }
-    IdentityFile (IdentityFile&& other) noexcept : path_ (std::move (other.path_)) {
+    IdentityFile (IdentityFile&& other) noexcept
+    : path_ (std::move (other.path_)) {
         other.path_.clear ();
     }
     IdentityFile (const IdentityFile&)            = delete;
@@ -301,8 +302,8 @@ TEST (MutualTlsBackend, ClassifiesTheBackendsThisRepoCanBeBuiltAgainst) {
     // and would only be caught by the Windows leg - the rule that a
     // per-platform branch must not be asserted only where it happens to apply.
     EXPECT_EQ (vayu::tests::client_identity_formats ("OpenSSL/3.6.3"),
-    (std::vector<ClientIdentityFormat>{ ClientIdentityFormat::PemPair,
-    ClientIdentityFormat::Pkcs12 }));
+    (std::vector<ClientIdentityFormat>{
+    ClientIdentityFormat::PemPair, ClientIdentityFormat::Pkcs12 }));
     EXPECT_EQ (vayu::tests::client_identity_formats ("Schannel"),
     (std::vector<ClientIdentityFormat>{ ClientIdentityFormat::Pkcs12 }));
     // A PEM pair is the shape Schannel takes *no* file in, which is the whole
@@ -565,7 +566,8 @@ TEST_P (MutualTlsTest, AnEntryThatNamesNoFormatIsReadOffTheFileAndStillConnects)
     if (!client.key_path ().empty ()) {
         payload["keyPath"] = client.key_path ();
     }
-    const auto [status, created] = routes::create_client_certificate_response (*db_, payload);
+    const auto [status, created] =
+    routes::create_client_certificate_response (*db_, payload);
     ASSERT_EQ (status, 200) << created.dump ();
     EXPECT_EQ (created["certFormat"], vayu::tests::client_identity_format_name (format ()));
 

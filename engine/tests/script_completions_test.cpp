@@ -163,10 +163,10 @@ TEST (ScriptCompletions, EveryOfferedResponseStatusClassExistsInTheRuntime) {
         // Whether the assertion passes against this response is beside the
         // point; only "the runtime has no such member" is a list defect.
         const std::string script = "pm.test(\"t\", function() { " + insert + "; });";
-        auto result              = engine.execute_test (script, request, response, env);
+        auto result = engine.execute_test (script, request, response, env);
         ASSERT_EQ (result.tests.size (), 1u) << script;
-        EXPECT_EQ (result.tests[0].error_message.find ("not a supported assertion"),
-        std::string::npos)
+        EXPECT_EQ (
+        result.tests[0].error_message.find ("not a supported assertion"), std::string::npos)
         << label << " is offered but the runtime does not implement it";
     }
 
@@ -198,7 +198,7 @@ TEST (ScriptCompletions, EveryOfferedHeaderMemberIsCallableInTheRuntime) {
     int offered = 0;
     for (const auto& item : completions) {
         const std::string label = item.value ("label", std::string{});
-        const bool is_member = label.rfind ("pm.request.headers.", 0) == 0 ||
+        const bool is_member    = label.rfind ("pm.request.headers.", 0) == 0 ||
         label.rfind ("pm.response.headers.", 0) == 0 ||
         label == "pm.response.reason" || label == "pm.response.size";
         if (!is_member) {
@@ -206,15 +206,15 @@ TEST (ScriptCompletions, EveryOfferedHeaderMemberIsCallableInTheRuntime) {
         }
         offered++;
 
-        const std::string script =
-        "pm.environment.set('t', typeof " + label + ");";
+        const std::string script = "pm.environment.set('t', typeof " + label + ");";
         auto result = engine.execute_test (script, request, response, env);
         ASSERT_TRUE (result.success) << label << ": " << result.error_message;
         EXPECT_EQ (env["t"].value, "function")
         << label << " is offered as a call but the runtime does not implement it";
     }
 
-    EXPECT_GE (offered, 7) << "the header accessors are missing from the completion list";
+    EXPECT_GE (offered, 7)
+    << "the header accessors are missing from the completion list";
 }
 
 // Same guard for both cookie surfaces (#301): `pm.response.cookies.*`, the
@@ -244,13 +244,14 @@ TEST (ScriptCompletions, EveryOfferedCookieMemberIsCallableInTheRuntime) {
         offered++;
 
         const std::string script = "pm.environment.set('t', typeof " + label + ");";
-        auto result              = engine.execute_test (script, request, response, env);
+        auto result = engine.execute_test (script, request, response, env);
         ASSERT_TRUE (result.success) << label << ": " << result.error_message;
         EXPECT_EQ (env["t"].value, "function")
         << label << " is offered as a call but the runtime does not implement it";
     }
 
-    EXPECT_GE (offered, 6) << "the cookie accessors are missing from the completion list";
+    EXPECT_GE (offered, 6)
+    << "the cookie accessors are missing from the completion list";
 }
 
 // The guard above is offered-implies-callable only, so a method the runtime
@@ -386,7 +387,8 @@ TEST (ScriptCompletions, EveryOfferedExpectMatcherExistsInTheRuntime) {
         }
         const std::string chain = match.substr (1);
         const size_t split      = chain.rfind ('.');
-        const std::string prefix = split == std::string::npos ? "" : chain.substr (0, split);
+        const std::string prefix =
+        split == std::string::npos ? "" : chain.substr (0, split);
         const std::string member =
         split == std::string::npos ? chain : chain.substr (split + 1);
         offered++;
@@ -395,12 +397,13 @@ TEST (ScriptCompletions, EveryOfferedExpectMatcherExistsInTheRuntime) {
         // A function must be callable; a chainer or terminal getter only has to
         // be a declared own property of the object it hangs off.
         const std::string check = item.value ("kind", 0) == KIND_FUNCTION ?
-        "if (typeof " + target + "[\"" + member + "\"] !== \"function\") { throw new Error(\"missing\"); }" :
+        "if (typeof " + target + "[\"" + member +
+        "\"] !== \"function\") { throw new Error(\"missing\"); }" :
         "if (!Object.getOwnPropertyDescriptor(" + target + ", \"" + member +
         "\")) { throw new Error(\"missing\"); }";
 
         const std::string script = "pm.test(\"t\", function() { " + check + " });";
-        auto result              = engine.execute_test (script, request, response, env);
+        auto result = engine.execute_test (script, request, response, env);
         ASSERT_EQ (result.tests.size (), 1u) << script;
         EXPECT_TRUE (result.tests[0].passed)
         << match << " is offered but the runtime does not bind it: "
@@ -430,9 +433,9 @@ TEST (ScriptCompletions, EveryExpectMemberTheRuntimeBindsIsOffered) {
         }
         size_t start = 1;
         while (start <= match.size ()) {
-            const size_t dot = match.find ('.', start);
-            const std::string segment = match.substr (start,
-            dot == std::string::npos ? std::string::npos : dot - start);
+            const size_t dot          = match.find ('.', start);
+            const std::string segment = match.substr (
+            start, dot == std::string::npos ? std::string::npos : dot - start);
             if (!segment.empty ()) {
                 segments.insert (segment);
             }
@@ -442,7 +445,8 @@ TEST (ScriptCompletions, EveryExpectMemberTheRuntimeBindsIsOffered) {
             start = dot + 1;
         }
     }
-    ASSERT_FALSE (segments.empty ()) << "no assertion chains found to compare against";
+    ASSERT_FALSE (segments.empty ())
+    << "no assertion chains found to compare against";
 
     std::string offered_literal;
     for (const auto& segment : segments) {
@@ -463,7 +467,8 @@ TEST (ScriptCompletions, EveryExpectMemberTheRuntimeBindsIsOffered) {
     "];\n"
     "pm.test(\"t\", function() {\n"
     "  var bound = Object.getOwnPropertyNames(pm.expect(1));\n"
-    "  var missing = bound.filter(function (name) { return offered.indexOf(name) === -1; });\n"
+    "  var missing = bound.filter(function (name) { return "
+    "offered.indexOf(name) === -1; });\n"
     "  if (missing.length) { throw new Error(missing.join(', ')); }\n"
     "});";
 
@@ -542,7 +547,7 @@ TEST (ScriptCompletions, NoOfferedResponseHeaderIndexUsesAMixedCaseKey) {
         for (const char* field : { "insertText", "documentation", "detail" }) {
             const std::string text = item.value (field, std::string{});
             for (size_t at = text.find (index_prefix); at != std::string::npos;
-                 at        = text.find (index_prefix, at + 1)) {
+            at             = text.find (index_prefix, at + 1)) {
                 const size_t open = at + index_prefix.size ();
                 ASSERT_LT (open, text.size ()) << text;
                 const char quote = text[open];
@@ -555,8 +560,10 @@ TEST (ScriptCompletions, NoOfferedResponseHeaderIndexUsesAMixedCaseKey) {
                 indexed++;
 
                 std::string lowered = key;
-                std::transform (lowered.begin (), lowered.end (), lowered.begin (),
-                [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+                std::transform (lowered.begin (), lowered.end (),
+                lowered.begin (), [] (unsigned char c) {
+                    return static_cast<char> (std::tolower (c));
+                });
                 EXPECT_EQ (key, lowered)
                 << item.value ("label", std::string{})
                 << " indexes pm.response.headers with '" << key
@@ -566,8 +573,8 @@ TEST (ScriptCompletions, NoOfferedResponseHeaderIndexUsesAMixedCaseKey) {
         }
     }
 
-    ASSERT_GT (indexed, 0)
-    << "nothing offered indexes pm.response.headers at all, so this scan proved nothing";
+    ASSERT_GT (indexed, 0) << "nothing offered indexes pm.response.headers at "
+                              "all, so this scan proved nothing";
 }
 
 // The executable half of the same guard, and the one that would have caught
@@ -577,12 +584,14 @@ TEST (ScriptCompletions, NoOfferedResponseHeaderIndexUsesAMixedCaseKey) {
 // Content-Type" rather than "the example is wrong".
 TEST (ScriptCompletions, TheContentTypeSnippetPassesAgainstAJsonResponse) {
     const auto completions = get_script_completions ();
-    const auto* snippet    = find_by_label (completions, "Test: Content-Type JSON");
-    ASSERT_NE (snippet, nullptr) << "the Content-Type snippet is no longer offered";
+    const auto* snippet = find_by_label (completions, "Test: Content-Type JSON");
+    ASSERT_NE (snippet, nullptr)
+    << "the Content-Type snippet is no longer offered";
 
     const std::string insert = snippet->value ("insertText", std::string{});
     ASSERT_EQ (insert.find ("${"), std::string::npos)
-    << "the snippet gained a placeholder, so it is no longer runnable as written";
+    << "the snippet gained a placeholder, so it is no longer runnable as "
+       "written";
 
     vayu::runtime::ScriptEngine engine;
     vayu::Request request;
@@ -593,7 +602,7 @@ TEST (ScriptCompletions, TheContentTypeSnippetPassesAgainstAJsonResponse) {
     response.status_code = 200;
     // Spelled the way the HTTP client stores it, which is the whole point.
     response.headers = { { "content-type", "application/json; charset=utf-8" } };
-    response.body    = R"({"ok": true})";
+    response.body = R"({"ok": true})";
 
     auto result = engine.execute_test (insert, request, response, env);
     ASSERT_EQ (result.tests.size (), 1u) << result.error_message;
@@ -690,7 +699,7 @@ bool is_deliberately_uncompletable (const std::string& name) {
 std::vector<std::string> split_commas (const std::string& joined) {
     std::vector<std::string> parts;
     for (size_t start = 0; start <= joined.size ();) {
-        const size_t comma = joined.find (',', start);
+        const size_t comma     = joined.find (',', start);
         const std::string part = joined.substr (
         start, comma == std::string::npos ? std::string::npos : comma - start);
         if (!part.empty ()) {
@@ -808,9 +817,9 @@ TEST (ScriptCompletions, EveryPmMemberTheRuntimeBindsIsOffered) {
         }
     }
 
-    EXPECT_GT (checked, 40)
-    << "far fewer pm members than the runtime binds - the walk above is broken, "
-       "not the completion list";
+    EXPECT_GT (checked, 40) << "far fewer pm members than the runtime binds - "
+                               "the walk above is broken, "
+                               "not the completion list";
 
     std::string report;
     for (const auto& name : missing) {
@@ -849,13 +858,12 @@ TEST (ScriptCompletions, TheWalkSeparatesDepthThreeAccessorsFromWireEntries) {
     };
 
     // The API three levels down, which the two-level walk never saw.
-    for (const char* accessor : { "pm.request.headers.get", "pm.request.headers.has",
-         "pm.request.headers.add", "pm.request.headers.upsert",
-         "pm.request.headers.remove", "pm.response.headers.get",
-         "pm.response.headers.has", "pm.response.cookies.get",
-         "pm.response.cookies.has", "pm.response.cookies.toObject",
-         "pm.cookies.jar().get", "pm.cookies.jar().set",
-         "pm.cookies.jar().unset", "pm.cookies.jar().clear" }) {
+    for (const char* accessor :
+    { "pm.request.headers.get", "pm.request.headers.has", "pm.request.headers.add",
+    "pm.request.headers.upsert", "pm.request.headers.remove",
+    "pm.response.headers.get", "pm.response.headers.has", "pm.response.cookies.get",
+    "pm.response.cookies.has", "pm.response.cookies.toObject", "pm.cookies.jar().get",
+    "pm.cookies.jar().set", "pm.cookies.jar().unset", "pm.cookies.jar().clear" }) {
         EXPECT_TRUE (is_required (accessor))
         << accessor << " is bound by the runtime but the walk never required it";
     }
@@ -872,8 +880,9 @@ TEST (ScriptCompletions, TheWalkSeparatesDepthThreeAccessorsFromWireEntries) {
         EXPECT_TRUE (is_wire (entry))
         << entry << " is a wire entry but the walk did not classify it as one";
         EXPECT_FALSE (is_required (entry))
-        << entry << " is on the wire, not API - demanding a completion for it "
-                    "would make every response header a false positive";
+        << entry
+        << " is on the wire, not API - demanding a completion for it "
+           "would make every response header a false positive";
     }
 }
 
@@ -894,7 +903,8 @@ TEST (ScriptCompletions, TheIterationDataAccessorsAreOffered) {
         // request script, where pm.iterationData is undefined (#300/#356).
         const std::string documentation = item->value ("documentation", std::string{});
         EXPECT_NE (documentation.find ("undefined"), std::string::npos)
-        << expected << " does not say it is absent outside a data-driven run: " << documentation;
+        << expected
+        << " does not say it is absent outside a data-driven run: " << documentation;
     }
 }
 

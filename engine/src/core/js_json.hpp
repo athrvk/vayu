@@ -67,7 +67,9 @@ inline const json* as_record (const json* node) {
 /// coerces - an unquoted `name: 5` is not a name here, exactly as it is not one
 /// on the renderer side.
 inline const std::string* as_str (const json* node) {
-    return node != nullptr && node->is_string () ? node->get_ptr<const std::string*> () : nullptr;
+    return node != nullptr && node->is_string () ?
+    node->get_ptr<const std::string*> () :
+    nullptr;
 }
 
 /// `asArray(v)[index]`: the entry, or `nullptr` for a non-array or a short one.
@@ -120,7 +122,7 @@ inline std::string js_number_text (const json& value) {
         return "null"; // What `JSON.stringify` writes for NaN and Infinity.
     }
     if (std::trunc (real) == real && std::abs (real) < 1e21) {
-        std::array<char, 64> buffer {};
+        std::array<char, 64> buffer{};
         const int written = std::snprintf (buffer.data (), buffer.size (), "%.0f", real);
         if (written > 0) {
             std::string text (buffer.data (), static_cast<size_t> (written));
@@ -128,8 +130,9 @@ inline std::string js_number_text (const json& value) {
             return text == "-0" ? "0" : text;
         }
     }
-    std::array<char, 64> buffer {};
-    const auto result = std::to_chars (buffer.data (), buffer.data () + buffer.size (), real);
+    std::array<char, 64> buffer{};
+    const auto result =
+    std::to_chars (buffer.data (), buffer.data () + buffer.size (), real);
     std::string text (buffer.data (), result.ptr);
     // `to_chars` writes `1e+21` / `1e-07`; JavaScript writes `1e+21` / `1e-7`.
     const size_t exponent = text.find ('e');
@@ -179,7 +182,7 @@ inline void append_json_string (const std::string& value, std::string& out) {
         case '\t': out += "\\t"; break;
         default:
             if (static_cast<unsigned char> (ch) < 0x20) {
-                std::array<char, 8> escape {};
+                std::array<char, 8> escape{};
                 std::snprintf (escape.data (), escape.size (), "\\u%04x",
                 static_cast<unsigned int> (static_cast<unsigned char> (ch)));
                 out += escape.data ();
@@ -194,7 +197,8 @@ inline void append_json_string (const std::string& value, std::string& out) {
 
 inline void append_json_text (const json& value, size_t indent, size_t step, std::string& out);
 
-inline void append_json_container (const json& value, size_t indent, size_t step, std::string& out) {
+inline void
+append_json_container (const json& value, size_t indent, size_t step, std::string& out) {
     const bool array = value.is_array ();
     if (value.empty ()) {
         out += array ? "[]" : "{}";
@@ -267,7 +271,7 @@ inline std::string js_json_compact (const json& value) {
  * every time it is asked.
  */
 inline std::string encode_uri_component (const std::string& value) {
-    static constexpr std::string_view HEX = "0123456789ABCDEF";
+    static constexpr std::string_view HEX        = "0123456789ABCDEF";
     static constexpr std::string_view UNRESERVED = "-_.!~*'()";
     std::string out;
     out.reserve (value.size ());
@@ -287,7 +291,8 @@ inline std::string encode_uri_component (const std::string& value) {
 /// `containsVariableToken(text)`: a `{{name}}` anywhere in the string. Such a
 /// value is left unencoded, so the variable syntax survives into the URL.
 inline bool contains_variable_token (const std::string& text) {
-    for (size_t at = text.find ("{{"); at != std::string::npos; at = text.find ("{{", at + 1)) {
+    for (size_t at = text.find ("{{"); at != std::string::npos;
+    at             = text.find ("{{", at + 1)) {
         const size_t close = text.find ("}}", at + 2);
         if (close == std::string::npos) {
             return false;
@@ -316,10 +321,13 @@ std::string query_string (const std::vector<Row>& params) {
         if (!out.empty ()) {
             out += '&';
         }
-        out += contains_variable_token (row.key) ? row.key : encode_uri_component (row.key);
+        out += contains_variable_token (row.key) ? row.key :
+                                                   encode_uri_component (row.key);
         if (!row.value.empty ()) {
             out += '=';
-            out += contains_variable_token (row.value) ? row.value : encode_uri_component (row.value);
+            out += contains_variable_token (row.value) ?
+            row.value :
+            encode_uri_component (row.value);
         }
     }
     return out;

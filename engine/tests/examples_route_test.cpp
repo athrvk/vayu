@@ -206,14 +206,14 @@ TEST_F (ExamplesRouteTest, CreateRejectsBodyOverTheCap) {
 // that claims `user` keeps it, because that claim is the whole reason the
 // column exists.
 TEST_F (ExamplesRouteTest, CreateDefaultsOriginToImportAndKeepsAClaimedUser) {
-    auto [status, body] =
-    routes::create_request_example_response (*db_, "req_1", json{ { "name", "Bare" } });
+    auto [status, body] = routes::create_request_example_response (
+    *db_, "req_1", json{ { "name", "Bare" } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["origin"], "import");
     EXPECT_EQ (db_->get_request_example (body["id"])->origin, "import");
 
-    auto [saved_status, saved] = routes::create_request_example_response (*db_, "req_1",
-    json{ { "name", "Saved from a response" }, { "origin", "user" } });
+    auto [saved_status, saved] = routes::create_request_example_response (*db_,
+    "req_1", json{ { "name", "Saved from a response" }, { "origin", "user" } });
     ASSERT_EQ (saved_status, 200) << saved.dump ();
     EXPECT_EQ (saved["origin"], "user");
     EXPECT_EQ (db_->get_request_example (saved["id"])->origin, "user");
@@ -267,8 +267,8 @@ TEST_F (ExamplesRouteTest, UpdateOriginFollowsTheNullVsAbsentRule) {
 // the row: it used to live only in the default *name*, which the save dialog
 // invites the user to edit, so renaming it erased the disclosure.
 TEST_F (ExamplesRouteTest, CreateDefaultsBodyTruncatedToFalseAndKeepsAClaimedTrue) {
-    auto [status, body] =
-    routes::create_request_example_response (*db_, "req_1", json{ { "name", "Whole" } });
+    auto [status, body] = routes::create_request_example_response (
+    *db_, "req_1", json{ { "name", "Whole" } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["bodyTruncated"], false);
     EXPECT_FALSE (db_->get_request_example (body["id"])->body_truncated);
@@ -447,8 +447,8 @@ TEST_F (ExamplesRouteTest, DeleteRemovesAUserSavedRowOutright) {
 // the `suppressed` filter from either `Database` read and the first three do.
 TEST_F (ExamplesRouteTest, DeletingAnImportedExampleLeavesATombstoneNoReadCanSee) {
     const std::string id = create_example ("req_1",
-    json{ { "name", "404 - Not found" }, { "status", 404 }, { "body", R"({"error":"gone"})" },
-    { "contentType", "application/json" } });
+    json{ { "name", "404 - Not found" }, { "status", 404 },
+    { "body", R"({"error":"gone"})" }, { "contentType", "application/json" } });
 
     auto [status, body] = routes::delete_request_example_response (*db_, "req_1", id);
     ASSERT_EQ (status, 200) << body.dump ();
@@ -460,8 +460,8 @@ TEST_F (ExamplesRouteTest, DeletingAnImportedExampleLeavesATombstoneNoReadCanSee
     EXPECT_EQ (db_->count_request_examples ("req_1"), 0);
 
     // An update cannot bring it back by writing over the tombstone.
-    auto [update_status, _] =
-    routes::update_request_example_response (*db_, "req_1", id, json{ { "name", "back" } });
+    auto [update_status, _] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "name", "back" } });
     EXPECT_EQ (update_status, 404);
 
     // What is kept is the status - the identity a sync matches on - and not the
@@ -484,7 +484,8 @@ TEST_F (ExamplesRouteTest, DeletingTheRequestDeletesItsExamples) {
     // A tombstone is a row like any other, so the cascade has to take it too -
     // otherwise a deleted imported example outlives the request it answered
     // (issue #722).
-    const std::string tombstoned = create_example ("req_1", json{ { "name", "deleted" } });
+    const std::string tombstoned =
+    create_example ("req_1", json{ { "name", "deleted" } });
     routes::delete_request_example_response (*db_, "req_1", tombstoned);
     ASSERT_EQ (db_->get_suppressed_request_examples ("req_1").size (), 1u);
 

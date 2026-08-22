@@ -48,7 +48,7 @@ struct TransferData {
     size_t max_response_bytes = 0;
     /// Set by write_callback when it refused to buffer more, so the completion
     /// can name the cap instead of reporting curl's generic write failure.
-    bool body_limit_exceeded           = false;
+    bool body_limit_exceeded = false;
 
     /// The caps this transfer streams under, copied from the request when the
     /// handle is configured; absent for every non-streaming transfer, which is

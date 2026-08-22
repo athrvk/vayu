@@ -73,8 +73,10 @@ std::string generate_attempt_id () {
 } // namespace
 
 std::string build_authorize_url (const nlohmann::json& config,
-const std::string& state, const std::string& code_challenge,
-const std::string& redirect_uri, bool pkce) {
+const std::string& state,
+const std::string& code_challenge,
+const std::string& redirect_uri,
+bool pkce) {
     std::string url = field (config, "authorizationUrl");
 
     std::vector<std::pair<std::string, std::string>> params = {
@@ -111,7 +113,7 @@ struct OAuth2AuthorizeManager::Attempt {
     std::string code_verifier;
     nlohmann::json config;
     std::string redirect_uri;
-    bool pkce = true;
+    bool pkce          = true;
     int64_t created_at = 0;
 
     // "pending" | "completed" | "failed"
@@ -162,11 +164,12 @@ void OAuth2AuthorizeManager::reap_timed_out_locked () {
 }
 
 AuthorizeStart OAuth2AuthorizeManager::start (vayu::db::Database& db,
-const nlohmann::json& config, const std::string& mode) {
+const nlohmann::json& config,
+const std::string& mode) {
     AuthorizeStart out;
 
     if (!config.is_object () || field (config, "authorizationUrl").empty () ||
-        field (config, "clientId").empty ()) {
+    field (config, "clientId").empty ()) {
         out.ok            = false;
         out.error_code    = "oauth2_invalid_config";
         out.error_message = "authorizationUrl and clientId are required";
@@ -180,7 +183,7 @@ const nlohmann::json& config, const std::string& mode) {
         auto it = config.find ("pkce");
         return it == config.end () || !it->is_boolean () || it->get<bool> ();
     }();
-    attempt->state         = pkce::random_token (16);
+    attempt->state = pkce::random_token (16);
     attempt->code_verifier = attempt->pkce ? pkce::random_token (32) : std::string{};
     const std::string challenge =
     attempt->pkce ? pkce::code_challenge (attempt->code_verifier) : std::string{};
@@ -202,9 +205,9 @@ const nlohmann::json& config, const std::string& mode) {
 
         attempt->listener.server ().Get ("/callback",
         [raw, &db] (const httplib::Request& req, httplib::Response& res) {
-            const auto params = parse_query (req.target.find ('?') != std::string::npos
-                    ? req.target.substr (req.target.find ('?') + 1)
-                    : std::string{});
+            const auto params = parse_query (req.target.find ('?') != std::string::npos ?
+            req.target.substr (req.target.find ('?') + 1) :
+            std::string{});
             std::string body =
             "<html><body style='font-family:sans-serif;padding:2rem'>";
 
@@ -214,26 +217,28 @@ const nlohmann::json& config, const std::string& mode) {
                     raw->error += ": " + d->second;
                 }
                 raw->result_state.store (2);
-                body += "<h3>Authorization failed</h3><p>You can close this tab.</p>";
-            } else if (params.count ("state") == 0 ||
-            params.at ("state") != raw->state) {
+                body +=
+                "<h3>Authorization failed</h3><p>You can close this tab.</p>";
+            } else if (params.count ("state") == 0 || params.at ("state") != raw->state) {
                 raw->error = "State mismatch (possible CSRF)";
                 raw->result_state.store (2);
-                body += "<h3>Authorization failed</h3><p>You can close this tab.</p>";
+                body +=
+                "<h3>Authorization failed</h3><p>You can close this tab.</p>";
             } else {
                 const std::string code =
                 params.count ("code") ? params.at ("code") : "";
-                oauth::InteractiveExchange ex{ code, raw->code_verifier,
-                    raw->redirect_uri };
+                oauth::InteractiveExchange ex{ code, raw->code_verifier, raw->redirect_uri };
                 auto result = oauth::acquire_token (db, raw->config, false, ex);
                 if (std::holds_alternative<vayu::db::OAuthToken> (result)) {
                     raw->cache_key = oauth::cache_key (raw->config);
                     raw->result_state.store (1);
-                    body += "<h3>Authorization received</h3><p>You can close this tab.</p>";
+                    body += "<h3>Authorization received</h3><p>You can close "
+                            "this tab.</p>";
                 } else {
                     raw->error = std::get<oauth::TokenError> (result).message;
                     raw->result_state.store (2);
-                    body += "<h3>Token exchange failed</h3><p>You can close this tab.</p>";
+                    body += "<h3>Token exchange failed</h3><p>You can close "
+                            "this tab.</p>";
                 }
             }
             body += "</body></html>";
@@ -251,14 +256,13 @@ const nlohmann::json& config, const std::string& mode) {
             out.error_message = "Could not bind a local callback port";
             return out;
         }
-        attempt->redirect_uri =
-        "http://127.0.0.1:" + std::to_string (port) + "/callback";
+        attempt->redirect_uri = "http://127.0.0.1:" + std::to_string (port) + "/callback";
     }
 
     out.attempt_id    = attempt_id;
     out.redirect_uri  = attempt->redirect_uri;
-    out.authorize_url = build_authorize_url (config, attempt->state, challenge,
-    attempt->redirect_uri, attempt->pkce);
+    out.authorize_url = build_authorize_url (
+    config, attempt->state, challenge, attempt->redirect_uri, attempt->pkce);
 
     {
         std::lock_guard<std::mutex> lock (mutex_);
@@ -270,7 +274,8 @@ const nlohmann::json& config, const std::string& mode) {
 }
 
 AuthorizeStatus OAuth2AuthorizeManager::complete (vayu::db::Database& db,
-const std::string& attempt_id, const std::string& callback_url) {
+const std::string& attempt_id,
+const std::string& callback_url) {
     // Snapshot what the exchange needs under the lock, then release it: the token
     // exchange is a network round-trip and must not stall status() polls for
     // other attempts (the manager is shared across all in-flight authorizations).

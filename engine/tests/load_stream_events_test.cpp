@@ -40,8 +40,10 @@
 
 namespace vayu::http::routes {
 // Defined in runs.cpp; returns {http_status, json_body}.
-std::pair<int, nlohmann::json>
-run_samples_response (vayu::db::Database& db, const std::string& run_id, int64_t limit, int64_t offset);
+std::pair<int, nlohmann::json> run_samples_response (vayu::db::Database& db,
+const std::string& run_id,
+int64_t limit,
+int64_t offset);
 } // namespace vayu::http::routes
 
 namespace {
@@ -167,7 +169,8 @@ TEST (BufferedStreamEvents, ATruncatedBodyIsAlwaysDisclosedAsAPrefix) {
     vayu::http::buffered_stream_events_node (event_body (2), limits, 2, false);
     EXPECT_EQ (boundary["items"].size (), 2u);
     EXPECT_TRUE (boundary["eventsTruncated"])
-    << "a truncated capture whose parse happens to be whole still shows a prefix";
+    << "a truncated capture whose parse happens to be whole still shows a "
+       "prefix";
 }
 
 TEST (BufferedStreamEvents, PerEventTruncationIsDisclosedInBand) {
@@ -228,7 +231,7 @@ class LoadReplayEventsTest : public ::testing::Test {
     /// test decides what is replayed rather than a 1-in-100 die.
     static std::shared_ptr<vayu::core::RunContext> context_with (const std::string& script) {
         const json cfg = { { "response_sample_rate", 1 }, { "max_response_samples", 100 } };
-        auto context   = std::make_shared<vayu::core::RunContext> ("run-replay", cfg);
+        auto context = std::make_shared<vayu::core::RunContext> ("run-replay", cfg);
         context->test_script = script;
         return context;
     }
@@ -347,10 +350,11 @@ class StreamedSampleRouteTest : public ::testing::Test {
 
 TEST_F (StreamedSampleRouteTest, AStreamedCaptureCarriesItsParsedEvents) {
     vayu::core::MetricsCollector collector ("run-1", capture_config ());
-    auto response = streamed_response (THREE_EVENTS, 3);
+    auto response          = streamed_response (THREE_EVENTS, 3);
     response.error_code    = vayu::ErrorCode::ConnectionFailed;
     response.error_message = "closed early";
-    collector.record_error (vayu::ErrorCode::ConnectionFailed, "closed early", "{}", &response);
+    collector.record_error (
+    vayu::ErrorCode::ConnectionFailed, "closed early", "{}", &response);
     collector.flush_to_database (*db_);
 
     const auto [status, body] =

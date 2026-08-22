@@ -42,8 +42,8 @@ bool text_shaped (std::string_view type) {
  * cap rather than anything about the body.
  */
 bool prefix_is_utf8_text (std::string_view bytes) {
-    const auto* p         = reinterpret_cast<const unsigned char*> (bytes.data ());
-    const size_t inspect  = std::min (bytes.size (), SNIFF_BYTES);
+    const auto* p = reinterpret_cast<const unsigned char*> (bytes.data ());
+    const size_t inspect = std::min (bytes.size (), SNIFF_BYTES);
 
     size_t i = 0;
     while (i < inspect) {
@@ -87,17 +87,18 @@ std::string media_type (std::string_view content_type) {
     semi == std::string_view::npos ? content_type : content_type.substr (0, semi);
 
     // Trim ASCII whitespace both ends.
-    while (!head.empty () && (std::isspace (static_cast<unsigned char> (head.front ())) != 0)) {
+    while (!head.empty () &&
+    (std::isspace (static_cast<unsigned char> (head.front ())) != 0)) {
         head.remove_prefix (1);
     }
-    while (!head.empty () && (std::isspace (static_cast<unsigned char> (head.back ())) != 0)) {
+    while (!head.empty () &&
+    (std::isspace (static_cast<unsigned char> (head.back ())) != 0)) {
         head.remove_suffix (1);
     }
 
     std::string out (head);
-    std::transform (out.begin (), out.end (), out.begin (), [] (unsigned char ch) {
-        return static_cast<char> (std::tolower (ch));
-    });
+    std::transform (out.begin (), out.end (), out.begin (),
+    [] (unsigned char ch) { return static_cast<char> (std::tolower (ch)); });
     return out;
 }
 
@@ -119,8 +120,8 @@ bool looks_binary (std::string_view body, std::string_view content_type) {
 
 std::string body_digest (std::string_view stored_body) {
     const auto digest = vayu::utils::sha256 (stored_body);
-    return vayu::utils::hex_encode (
-    std::string_view (reinterpret_cast<const char*> (digest.data ()), digest.size ()));
+    return vayu::utils::hex_encode (std::string_view (
+    reinterpret_cast<const char*> (digest.data ()), digest.size ()));
 }
 
 } // namespace vayu::core

@@ -39,7 +39,8 @@ constexpr size_t CHUNK_BYTES = 8 * 1024;
 constexpr size_t DRIBBLE_CHUNK = 4 * 1024;
 constexpr size_t DRIBBLE_BYTES = 40 * 1024;
 static_assert ((DRIBBLE_BYTES / DRIBBLE_CHUNK) * 120 > 300,
-"the dribble must outlast the 300ms total bound the tests set, or they prove nothing");
+"the dribble must outlast the 300ms total bound the tests set, or they prove "
+"nothing");
 
 class MockHttpBin {
     public:
@@ -176,7 +177,7 @@ class HttpClientTest : public ::testing::Test {
     protected:
     void SetUp () override {
         global_init ();
-        mock_ = std::make_unique<MockHttpBin> ();
+        mock_   = std::make_unique<MockHttpBin> ();
         client_ = std::make_unique<Client> ();
     }
 
@@ -295,9 +296,12 @@ TEST_F (HttpClientTest, RawRequestIsTheHeaderBlockThatWentOnTheWire) {
     EXPECT_NE (raw.find ("X-Trace: abc"), std::string::npos) << raw;
     EXPECT_NE (raw.find ("User-Agent: "), std::string::npos) << raw;
     EXPECT_NE (raw.find ("Accept: */*"), std::string::npos)
-    << "the view was rebuilt from the composed headers, not read off the wire:\n"
+    << "the view was rebuilt from the composed headers, not read off the "
+       "wire:\n"
     << raw;
-    EXPECT_TRUE (raw.ends_with ("\r\n\r\n")) << "header block is unterminated:\n" << raw;
+    EXPECT_TRUE (raw.ends_with ("\r\n\r\n"))
+    << "header block is unterminated:\n"
+    << raw;
 }
 
 // A followed redirect sends two requests; the view describes the one that
@@ -315,7 +319,8 @@ TEST_F (HttpClientTest, RawRequestOfAFollowedRedirectShowsTheFinalHop) {
     const auto& response = result.value ();
     EXPECT_EQ (response.status_code, 200);
     EXPECT_TRUE (response.raw_request.starts_with ("GET /get HTTP/1.1\r\n"))
-    << "the raw view named the hop that redirected, not the one that answered:\n"
+    << "the raw view named the hop that redirected, not the one that "
+       "answered:\n"
     << response.raw_request;
 }
 
@@ -331,7 +336,9 @@ TEST_F (HttpClientTest, RawRequestKeepsTheBodyAfterTheWireHeaders) {
     // view rather than a synthesized block that happens to have the same shape.
     EXPECT_NE (raw.find ("Accept: */*"), std::string::npos) << raw;
     EXPECT_NE (raw.find ("Content-Length: 16\r\n"), std::string::npos) << raw;
-    EXPECT_TRUE (raw.ends_with ("\r\n\r\n" R"({"name": "test"})")) << raw;
+    EXPECT_TRUE (raw.ends_with ("\r\n\r\n"
+                                R"({"name": "test"})"))
+    << raw;
 }
 
 TEST_F (HttpClientTest, SendsPostRequest) {
@@ -574,7 +581,7 @@ TEST_F (HttpClientTest, StallTimeoutAbortsATransferThatStopsSending) {
     auto result      = client.get (mock_->url ("/stalls"));
     const auto took  = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::steady_clock::now () - start)
-    .count ();
+                      .count ();
 
     ASSERT_TRUE (result.is_ok ());
     EXPECT_TRUE (result.value ().has_error ());

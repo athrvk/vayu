@@ -23,8 +23,7 @@ TEST (DebugRedact, CaseInsensitiveHeaderName) {
 
 TEST (DebugRedact, RedactsCookiesAndProxyAuth) {
     EXPECT_EQ (redact_header_line ("Cookie: session=abc"), "Cookie: <redacted>");
-    EXPECT_EQ (redact_header_line ("Set-Cookie: session=abc; HttpOnly"),
-    "Set-Cookie: <redacted>");
+    EXPECT_EQ (redact_header_line ("Set-Cookie: session=abc; HttpOnly"), "Set-Cookie: <redacted>");
     EXPECT_EQ (redact_header_line ("Proxy-Authorization: Basic y"),
     "Proxy-Authorization: <redacted>");
     EXPECT_EQ (redact_header_line ("WWW-Authenticate: Bearer realm=x"),
@@ -46,6 +45,5 @@ TEST (DebugRedact, HandlesNoColonAndEmpty) {
 
 TEST (DebugRedact, ToleratesWhitespaceAroundName) {
     // Defensive: some emitters pad the name. The value is still redacted.
-    EXPECT_EQ (redact_header_line ("  Authorization : Bearer x"),
-    "  Authorization : <redacted>");
+    EXPECT_EQ (redact_header_line ("  Authorization : Bearer x"), "  Authorization : <redacted>");
 }

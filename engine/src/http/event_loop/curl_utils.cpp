@@ -802,9 +802,9 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // `queue_wait_ms` is measured from, so the duration cap covers the same
     // span the report attributes to the transfer.
     if (request.stream_bounds) {
-        data->stream_bounds = request.stream_bounds;
-        data->stream_deadline =
-        data->submitted_at + std::chrono::milliseconds (request.stream_bounds->max_duration_ms);
+        data->stream_bounds   = request.stream_bounds;
+        data->stream_deadline = data->submitted_at +
+        std::chrono::milliseconds (request.stream_bounds->max_duration_ms);
     }
 
     // Set headers. No sent record is kept on this path - a load run's captures
@@ -955,15 +955,15 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // its whole output is numbers attributed to a protocol. No log line here,
     // unlike client.cpp: this runs once per transfer, and a run that downgrades
     // downgrades every one of them. The flag rides out on each trace instead.
-    response.http_version_downgraded =
-    vayu::http::http_version_downgraded (data->request.http_version, response.http_version);
+    response.http_version_downgraded = vayu::http::http_version_downgraded (
+    data->request.http_version, response.http_version);
 
     // Get curl timing info - these are wire-only (libcurl's view)
     // Perceived latency: wall-clock from submit() to now. steady_clock is
     // monotonic so it's not affected by NTP jumps.
     auto completion = std::chrono::steady_clock::now ();
-    double perceived_ms = std::chrono::duration<double, std::milli> (
-        completion - data->submitted_at).count ();
+    double perceived_ms =
+    std::chrono::duration<double, std::milli> (completion - data->submitted_at).count ();
 
     double wire_ms = wire_seconds * 1000.0;
     // Clamp queue_wait to >= 0 to absorb sub-microsecond clock jitter where
@@ -979,15 +979,14 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     if (delta < -1.0) {
         vayu::utils::log_warning (
         "queue_wait clock skew: perceived_ms=" + std::to_string (perceived_ms) +
-        " wire_ms=" + std::to_string (wire_ms) +
-        " delta_ms=" + std::to_string (delta) +
+        " wire_ms=" + std::to_string (wire_ms) + " delta_ms=" + std::to_string (delta) +
         " - submitted_at stamp may be set after curl wire start");
     }
     double queue_wait_ms = std::max (0.0, delta);
 
-    response.timing.total_ms      = perceived_ms;        // redefined as perceived
-    response.timing.wire_ms       = wire_ms;             // new
-    response.timing.queue_wait_ms = queue_wait_ms;       // new
+    response.timing.total_ms      = perceived_ms;  // redefined as perceived
+    response.timing.wire_ms       = wire_ms;       // new
+    response.timing.queue_wait_ms = queue_wait_ms; // new
     apply_phase_timings (response.timing, phase_times);
 
     // Wire byte counts (body + headers), for throughput-in-bytes metrics.
@@ -997,12 +996,10 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     curl_easy_getinfo (curl, CURLINFO_SIZE_UPLOAD_T, &ul_bytes);
     curl_easy_getinfo (curl, CURLINFO_HEADER_SIZE, &header_bytes);
     curl_easy_getinfo (curl, CURLINFO_REQUEST_SIZE, &request_bytes);
-    response.timing.bytes_down =
-        static_cast<size_t> (std::max<curl_off_t> (0, dl_bytes)) +
-        static_cast<size_t> (std::max<long> (0, header_bytes));
-    response.timing.bytes_up =
-        static_cast<size_t> (std::max<curl_off_t> (0, ul_bytes)) +
-        static_cast<size_t> (std::max<long> (0, request_bytes));
+    response.timing.bytes_down = static_cast<size_t> (std::max<curl_off_t> (0, dl_bytes)) +
+    static_cast<size_t> (std::max<long> (0, header_bytes));
+    response.timing.bytes_up = static_cast<size_t> (std::max<curl_off_t> (0, ul_bytes)) +
+    static_cast<size_t> (std::max<long> (0, request_bytes));
 
     // Set body. On a failed transfer this is whatever arrived before the
     // failure, which is also the truncated prefix when the body cap tripped.

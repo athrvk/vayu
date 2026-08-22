@@ -55,8 +55,7 @@ double measured_error_rate (const RunSummaryInputs& inputs) {
             failed += count;
         }
     }
-    return static_cast<double> (failed) * 100.0 /
-    static_cast<double> (inputs.total_requests);
+    return static_cast<double> (failed) * 100.0 / static_cast<double> (inputs.total_requests);
 }
 
 constexpr double MAX_LATENCY_BUDGET_MS = 86400000.0; // a day; past it nothing completes
@@ -66,22 +65,18 @@ constexpr double MAX_THROUGHPUT_BUDGET_RPS = 1e9;
 const std::array<ThresholdMetric, 5>& metrics () {
     static const std::array<ThresholdMetric, 5> table = { {
     { "latencyP50Ms", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
-    "greater than 0 and at most 86400000",
-    "It is a latency ceiling in milliseconds.",
+    "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p50; } },
     { "latencyP95Ms", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
-    "greater than 0 and at most 86400000",
-    "It is a latency ceiling in milliseconds.",
+    "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p95; } },
     { "latencyP99Ms", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
-    "greater than 0 and at most 86400000",
-    "It is a latency ceiling in milliseconds.",
+    "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p99; } },
     { "maxErrorRatePct", Direction::AtMost, 0.0, true, 100.0, "between 0 and 100",
     "It is a percentage of the run's requests.", measured_error_rate },
     { "minThroughputRps", Direction::AtLeast, 0.0, false, MAX_THROUGHPUT_BUDGET_RPS,
-    "greater than 0 and at most 1000000000",
-    "It is a completed-requests-per-second floor.",
+    "greater than 0 and at most 1000000000", "It is a completed-requests-per-second floor.",
     [] (const RunSummaryInputs& in) { return in.throughput; } },
     } };
     return table;
@@ -112,8 +107,8 @@ const ThresholdMetric* find_metric (const std::string& key) {
 /// wrong type is skipped rather than guessed at - the route rejects both before
 /// a run exists, and a snapshot that reached here carrying one is an older or
 /// hand-edited row that must not take the whole section down with it.
-std::vector<std::pair<const ThresholdMetric*, double>>
-declared_budgets (const nlohmann::json& thresholds) {
+std::vector<std::pair<const ThresholdMetric*, double>> declared_budgets (
+const nlohmann::json& thresholds) {
     std::vector<std::pair<const ThresholdMetric*, double>> declared;
     if (!thresholds.is_object ()) {
         return declared;
@@ -167,12 +162,12 @@ std::optional<std::string> validate_thresholds (const nlohmann::json& config) {
         }
         // Read as a double first: an integer read of a fractional or huge value
         // is itself undefined, and this is the guard that has to be total.
-        const double limit    = value.get<double> ();
-        const bool under_min  = metric->min_inclusive ? limit < metric->min_limit :
-                                                        !(limit > metric->min_limit);
+        const double limit = value.get<double> ();
+        const bool under_min = metric->min_inclusive ? limit < metric->min_limit :
+                                                       !(limit > metric->min_limit);
         if (!std::isfinite (limit) || under_min || limit > metric->max_limit) {
-            return "'thresholds." + key + "' must be " + metric->range + " (got " +
-            value.dump () + "). " + metric->why;
+            return "'thresholds." + key + "' must be " + metric->range +
+            " (got " + value.dump () + "). " + metric->why;
         }
         ++declared;
     }
@@ -188,8 +183,8 @@ std::optional<std::string> validate_thresholds (const nlohmann::json& config) {
     return std::nullopt;
 }
 
-std::optional<ThresholdOutcome>
-evaluate_thresholds (const nlohmann::json& config, const RunSummaryInputs& inputs) {
+std::optional<ThresholdOutcome> evaluate_thresholds (const nlohmann::json& config,
+const RunSummaryInputs& inputs) {
     if (!config.is_object () || !config.contains ("thresholds")) {
         return std::nullopt;
     }

@@ -69,9 +69,7 @@ create_environment_response (vayu::db::Database& db, const nlohmann::json& json)
     const std::string id = vayu::utils::generate_id ("env_");
 
     if (db.get_environment (id).has_value ()) {
-        return { 409,
-            error_body (409, "Environment '" + id +
-            "' already exists; use PUT /environments/:id to update") };
+        return { 409, error_body (409, "Environment '" + id + "' already exists; use PUT /environments/:id to update") };
     }
 
     vayu::db::Environment e;

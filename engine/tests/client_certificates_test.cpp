@@ -398,15 +398,17 @@ TEST (ClientCertValidation, AcceptsAHostAndAReadablePair) {
     ScratchFile cert{ "validation_cert.pem" };
     ScratchFile key{ "validation_key.pem" };
 
-    EXPECT_FALSE (
-    client_cert_rejection ("api.example.com", std::nullopt, ClientCertFormat::Pem, cert.path (), key.path ())
+    EXPECT_FALSE (client_cert_rejection ("api.example.com", std::nullopt,
+    ClientCertFormat::Pem, cert.path (), key.path ())
     .has_value ());
-    EXPECT_FALSE (
-    client_cert_rejection ("api.example.com", 8443, ClientCertFormat::Pem, cert.path (), key.path ()).has_value ());
+    EXPECT_FALSE (client_cert_rejection (
+    "api.example.com", 8443, ClientCertFormat::Pem, cert.path (), key.path ())
+    .has_value ());
     // An IPv6 literal, bracketless - the form `parse_authority` yields, so the
     // form a match will compare against.
-    EXPECT_FALSE (
-    client_cert_rejection ("::1", 8443, ClientCertFormat::Pem, cert.path (), key.path ()).has_value ());
+    EXPECT_FALSE (client_cert_rejection (
+    "::1", 8443, ClientCertFormat::Pem, cert.path (), key.path ())
+    .has_value ());
 }
 
 TEST (ClientCertValidation, RejectsAHostThatCouldNeverMatch) {
@@ -455,27 +457,30 @@ TEST (ClientCertValidation, RejectsAPortOutsideTheRange) {
     ScratchFile cert{ "validation_cert3.pem" };
     ScratchFile key{ "validation_key3.pem" };
 
-    EXPECT_TRUE (
-    client_cert_rejection ("api.example.com", 0, ClientCertFormat::Pem, cert.path (), key.path ()).has_value ());
-    EXPECT_TRUE (
-    client_cert_rejection ("api.example.com", 70000, ClientCertFormat::Pem, cert.path (), key.path ()).has_value ());
-    EXPECT_TRUE (
-    client_cert_rejection ("api.example.com", -1, ClientCertFormat::Pem, cert.path (), key.path ()).has_value ());
+    EXPECT_TRUE (client_cert_rejection (
+    "api.example.com", 0, ClientCertFormat::Pem, cert.path (), key.path ())
+    .has_value ());
+    EXPECT_TRUE (client_cert_rejection (
+    "api.example.com", 70000, ClientCertFormat::Pem, cert.path (), key.path ())
+    .has_value ());
+    EXPECT_TRUE (client_cert_rejection (
+    "api.example.com", -1, ClientCertFormat::Pem, cert.path (), key.path ())
+    .has_value ());
 }
 
 TEST (ClientCertValidation, RejectsAFileThatIsNotThere) {
     ScratchFile cert{ "validation_cert4.pem" };
     ScratchFile key{ "validation_key4.pem" };
 
-    const auto missing_cert = client_cert_rejection (
-    "api.example.com", std::nullopt, ClientCertFormat::Pem, "/nope/client.pem", key.path ());
+    const auto missing_cert = client_cert_rejection ("api.example.com",
+    std::nullopt, ClientCertFormat::Pem, "/nope/client.pem", key.path ());
     ASSERT_TRUE (missing_cert.has_value ());
     // The message has to name the file, or the user is left with "invalid
     // certificate" and two paths to check by hand.
     EXPECT_NE (missing_cert->find ("/nope/client.pem"), std::string::npos);
 
-    const auto missing_key = client_cert_rejection (
-    "api.example.com", std::nullopt, ClientCertFormat::Pem, cert.path (), "/nope/client.key");
+    const auto missing_key = client_cert_rejection ("api.example.com",
+    std::nullopt, ClientCertFormat::Pem, cert.path (), "/nope/client.key");
     ASSERT_TRUE (missing_key.has_value ());
     EXPECT_NE (missing_key->find ("/nope/client.key"), std::string::npos);
 
@@ -535,14 +540,14 @@ TEST (ClientCertValidation, APkcs12EntryCarriesItsOwnKeyAndMayNotNameOne) {
 
     EXPECT_FALSE (client_cert_rejection ("api.example.com", std::nullopt,
     ClientCertFormat::Pkcs12, bundle.path (), "")
-                  .has_value ())
+    .has_value ())
     << "a bundle with no key path is the only complete shape a PKCS#12 entry "
        "has";
 
     // Stored and ignored is the failure this refusal exists to prevent: the
     // card would keep asking for a file nothing ever opens.
-    const auto with_key = client_cert_rejection (
-    "api.example.com", std::nullopt, ClientCertFormat::Pkcs12, bundle.path (), key.path ());
+    const auto with_key = client_cert_rejection ("api.example.com",
+    std::nullopt, ClientCertFormat::Pkcs12, bundle.path (), key.path ());
     ASSERT_TRUE (with_key.has_value ());
     EXPECT_NE (with_key->find ("PKCS#12"), std::string::npos) << *with_key;
 
@@ -562,8 +567,8 @@ TEST (ClientCertValidation, RefusesAFileThatContradictsItsDeclaredFormat) {
     // The mistake worth catching at write time: a `.p12` registered as a PEM
     // pair fails at handshake time as libcurl's own parse error against the
     // endpoint, which is the misdiagnosis this registry exists to end.
-    const auto bundle_as_pem = client_cert_rejection (
-    "api.example.com", std::nullopt, ClientCertFormat::Pem, der.path (), key.path ());
+    const auto bundle_as_pem = client_cert_rejection ("api.example.com",
+    std::nullopt, ClientCertFormat::Pem, der.path (), key.path ());
     ASSERT_TRUE (bundle_as_pem.has_value ());
     EXPECT_NE (bundle_as_pem->find ("p12"), std::string::npos) << *bundle_as_pem;
     EXPECT_NE (bundle_as_pem->find (der.path ()), std::string::npos) << *bundle_as_pem;
@@ -584,10 +589,10 @@ TEST (ClientCertValidation, LeavesAFileItCannotClassifyToTheBackend) {
 
     EXPECT_FALSE (client_cert_rejection ("api.example.com", std::nullopt,
     ClientCertFormat::Pem, unclassified.path (), key.path ())
-                  .has_value ());
+    .has_value ());
     EXPECT_FALSE (client_cert_rejection ("api.example.com", std::nullopt,
     ClientCertFormat::Pkcs12, unclassified.path (), "")
-                  .has_value ());
+    .has_value ());
 }
 
 // ---------------------------------------------------------------------------
@@ -618,10 +623,11 @@ TEST_F (ClientCertificateDbTest, RegistersAPkcs12EntryWithNoKeyPath) {
     // the format and an empty `keyPath`, which is what lets the card stop
     // asking for a file that does not exist.
     ScratchFile bundle{ "route_bundle.p12", std::string (DER_SHAPED) };
-    const json payload = { { "host", "api.example.com" }, { "certPath", bundle.path () },
-        { "certFormat", "p12" } };
+    const json payload = { { "host", "api.example.com" },
+        { "certPath", bundle.path () }, { "certFormat", "p12" } };
 
-    const auto [status, created] = routes::create_client_certificate_response (*db_, payload);
+    const auto [status, created] =
+    routes::create_client_certificate_response (*db_, payload);
     ASSERT_EQ (status, 200) << created.dump ();
     EXPECT_EQ (created["certFormat"], "p12");
     EXPECT_EQ (created["keyPath"], "");
@@ -640,9 +646,9 @@ TEST_F (ClientCertificateDbTest, ReadsAnAbsentFormatOffTheFile) {
     ASSERT_EQ (bundle_status, 200) << from_bundle.dump ();
     EXPECT_EQ (from_bundle["certFormat"], "p12");
 
-    const auto [pem_status, from_pem] = routes::create_client_certificate_response (
-    *db_, json{ { "host", "pem.example.com" }, { "certPath", pem.path () },
-        { "keyPath", key_.path () } });
+    const auto [pem_status, from_pem] = routes::create_client_certificate_response (*db_,
+    json{ { "host", "pem.example.com" }, { "certPath", pem.path () },
+    { "keyPath", key_.path () } });
     ASSERT_EQ (pem_status, 200) << from_pem.dump ();
     EXPECT_EQ (from_pem["certFormat"], "pem");
 
@@ -655,8 +661,8 @@ TEST_F (ClientCertificateDbTest, ReadsAnAbsentFormatOffTheFile) {
 }
 
 TEST_F (ClientCertificateDbTest, RefusesAFormatItDoesNotKnow) {
-    json payload           = body ("api.example.com");
-    payload["certFormat"]  = "pkcs12";
+    json payload          = body ("api.example.com");
+    payload["certFormat"] = "pkcs12";
 
     const auto [status, error] = routes::create_client_certificate_response (*db_, payload);
     EXPECT_EQ (status, 400);
@@ -671,7 +677,8 @@ TEST_F (ClientCertificateDbTest, RefusesAPemEntryWithNoKeyFile) {
 
     const auto [status, error] = routes::create_client_certificate_response (*db_, payload);
     EXPECT_EQ (status, 400);
-    EXPECT_NE (error["error"]["message"].get<std::string> ().find ("key file"), std::string::npos)
+    EXPECT_NE (error["error"]["message"].get<std::string> ().find ("key file"),
+    std::string::npos)
     << error.dump ();
 }
 
@@ -686,8 +693,8 @@ TEST_F (ClientCertificateDbTest, MovingAnEntryToPkcs12ClearsTheKeyPath) {
     ASSERT_EQ (created_status, 200) << created.dump ();
     const std::string id = created["id"];
 
-    const auto [kept_status, kept] = routes::update_client_certificate_response (*db_, id,
-    json{ { "certFormat", "p12" }, { "certPath", bundle.path () } });
+    const auto [kept_status, kept] = routes::update_client_certificate_response (
+    *db_, id, json{ { "certFormat", "p12" }, { "certPath", bundle.path () } });
     EXPECT_EQ (kept_status, 400) << kept.dump ();
 
     const auto [status, updated] = routes::update_client_certificate_response (*db_, id,
@@ -947,7 +954,7 @@ TEST_F (ClientCertificateDbTest, ARowDeclaringAFormatNobodyKnowsIsDroppedNotGues
     routes::create_client_certificate_response (*db_, body ("api.example.com")).first, 200);
     {
         vayu::db::ClientCertificate row = db_->get_client_certificates ().front ();
-        row.cert_format                 = "pkcs12";
+        row.cert_format = "pkcs12";
         db_->save_client_certificate (row);
     }
 
@@ -955,11 +962,12 @@ TEST_F (ClientCertificateDbTest, ARowDeclaringAFormatNobodyKnowsIsDroppedNotGues
 
     // And an update of that row answers 400 rather than 200-while-unusable: the
     // merged format is read, not assumed, so the caller is told to name one.
-    const std::string id = db_->get_client_certificates ().front ().id;
-    const auto [status, error] =
-    routes::update_client_certificate_response (*db_, id, json{ { "host", "moved.example.com" } });
+    const std::string id       = db_->get_client_certificates ().front ().id;
+    const auto [status, error] = routes::update_client_certificate_response (
+    *db_, id, json{ { "host", "moved.example.com" } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (error["error"]["message"].get<std::string> ().find ("certFormat"), std::string::npos)
+    EXPECT_NE (
+    error["error"]["message"].get<std::string> ().find ("certFormat"), std::string::npos)
     << error.dump ();
 }
 
@@ -969,8 +977,8 @@ TEST_F (ClientCertificateDbTest, TheStoredFormatReachesTheRuleTheApplierReads) {
     // the applier writing PEM for every entry, exactly as before #833.
     ScratchFile bundle{ "resolved_bundle.p12", std::string (DER_SHAPED) };
     ASSERT_EQ (routes::create_client_certificate_response (*db_,
-               json{ { "host", "bundle.example.com" }, { "certPath", bundle.path () },
-                   { "certFormat", "p12" } })
+               json{ { "host", "bundle.example.com" },
+               { "certPath", bundle.path () }, { "certFormat", "p12" } })
                .first,
     200);
     ASSERT_EQ (
@@ -985,7 +993,8 @@ TEST_F (ClientCertificateDbTest, TheStoredFormatReachesTheRuleTheApplierReads) {
     << "a bundle row carried a key path into the policy, which the applier "
        "would hand libcurl as CURLOPT_SSLKEY";
 
-    const ClientCertRule* pem_rule = match_client_certificate (policy, "pem.example.com", 443);
+    const ClientCertRule* pem_rule =
+    match_client_certificate (policy, "pem.example.com", 443);
     ASSERT_NE (pem_rule, nullptr);
     EXPECT_EQ (pem_rule->format, ClientCertFormat::Pem);
     EXPECT_EQ (pem_rule->key_path, key_.path ());
@@ -1103,8 +1112,8 @@ TEST (ClientCertificateBackend, TakesTheCertificateOptionsOnThisPlatform) {
     // libcurl at all (#833), and a backend that refused one of them would leave
     // entries in that format going out as something else, or not at all.
     for (const auto format : all_client_cert_formats ()) {
-        EXPECT_EQ (curl_easy_setopt (curl, CURLOPT_SSLCERTTYPE, curl_ssl_cert_type (format)),
-        CURLE_OK)
+        EXPECT_EQ (
+        curl_easy_setopt (curl, CURLOPT_SSLCERTTYPE, curl_ssl_cert_type (format)), CURLE_OK)
         << "TLS backend '" << backend << "' refuses CURLOPT_SSLCERTTYPE '"
         << curl_ssl_cert_type (format) << "'";
     }

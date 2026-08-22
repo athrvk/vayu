@@ -71,7 +71,7 @@ TEST (CapacityControllerTest, HealthyWindowStepsUpByGrowthFactor) {
 }
 
 TEST (CapacityControllerTest, GrowthIsAtLeastOneConcurrency) {
-    CapacityConfig config = search ();
+    CapacityConfig config    = search ();
     config.start_concurrency = 1;
     // +25% of 1 rounds back to 1, which would search forever at one connection.
     const auto decision = decide_next_level (config, { window (1, 900, 2.0) });
@@ -88,8 +88,8 @@ TEST (CapacityControllerTest, StepUpNeverExceedsTheCap) {
 // The mutation check for the consecutive requirement: drop it from
 // decide_next_level and this test starts reporting Stop.
 TEST (CapacityControllerTest, OneBreachingWindowHoldsRatherThanStopping) {
-    const auto decision =
-    decide_next_level (search (), { window (40, 4000, 20.0), window (50, 4200, 180.0) });
+    const auto decision = decide_next_level (
+    search (), { window (40, 4000, 20.0), window (50, 4200, 180.0) });
     EXPECT_EQ (decision.action, CapacityAction::Hold);
     EXPECT_EQ (decision.next_concurrency, 50u); // re-measures the same level
     EXPECT_EQ (decision.stop_reason, nullptr);
@@ -151,8 +151,8 @@ TEST (CapacityControllerTest, ReachingTheCapStops) {
 TEST (CapacityControllerTest, ACapBreachStillReportsTheLatencyLimitFirst) {
     // At the cap *and* breaching: the SLO is what the service did, the cap is
     // only where the search ran out of room.
-    const auto decision =
-    decide_next_level (search (), { window (100, 20000, 300.0), window (100, 19000, 320.0) });
+    const auto decision = decide_next_level (
+    search (), { window (100, 20000, 300.0), window (100, 19000, 320.0) });
     EXPECT_EQ (decision.action, CapacityAction::Stop);
     EXPECT_STREQ (decision.stop_reason, stop::SLO_EXCEEDED);
 }
@@ -162,8 +162,8 @@ TEST (CapacityControllerTest, ACapBreachStillReportsTheLatencyLimitFirst) {
 // ---------------------------------------------------------------------------
 
 TEST (CapacityControllerTest, KneeIsTheLevelThatGaveOutAndHeadlineIsTheLastThatHeld) {
-    const std::vector<CapacityWindow> history{ window (10, 1000, 5.0), window (48, 23400, 41.2),
-        window (64, 23000, 300.0), window (64, 22800, 312.0) };
+    const std::vector<CapacityWindow> history{ window (10, 1000, 5.0),
+        window (48, 23400, 41.2), window (64, 23000, 300.0), window (64, 22800, 312.0) };
     const auto summary = summarize_capacity (search (), history, stop::SLO_EXCEEDED);
 
     ASSERT_TRUE (summary.max_healthy.has_value ());
@@ -181,7 +181,8 @@ TEST (CapacityControllerTest, KneeIsTheLevelThatGaveOutAndHeadlineIsTheLastThatH
 }
 
 TEST (CapacityControllerTest, NoKneeWhenTheSearchNeverSawTheServiceGiveOut) {
-    const std::vector<CapacityWindow> history{ window (10, 1000, 5.0), window (100, 9000, 40.0) };
+    const std::vector<CapacityWindow> history{ window (10, 1000, 5.0),
+        window (100, 9000, 40.0) };
     const auto summary = summarize_capacity (search (), history, stop::CAP_REACHED);
 
     ASSERT_TRUE (summary.max_healthy.has_value ());
@@ -190,7 +191,8 @@ TEST (CapacityControllerTest, NoKneeWhenTheSearchNeverSawTheServiceGiveOut) {
 }
 
 TEST (CapacityControllerTest, NoHeadlineWhenTheFirstLevelAlreadyBreached) {
-    const std::vector<CapacityWindow> history{ window (10, 90, 400.0), window (10, 88, 420.0) };
+    const std::vector<CapacityWindow> history{ window (10, 90, 400.0),
+        window (10, 88, 420.0) };
     const auto summary = summarize_capacity (search (), history, stop::SLO_EXCEEDED);
 
     EXPECT_FALSE (summary.max_healthy.has_value ());
@@ -199,9 +201,8 @@ TEST (CapacityControllerTest, NoHeadlineWhenTheFirstLevelAlreadyBreached) {
 }
 
 TEST (CapacityControllerTest, PayloadOmitsWhatWasNotObserved) {
-    const auto summary =
-    summarize_capacity (search (), { window (10, 90, 400.0), window (10, 88, 420.0) },
-    stop::SLO_EXCEEDED);
+    const auto summary = summarize_capacity (search (),
+    { window (10, 90, 400.0), window (10, 88, 420.0) }, stop::SLO_EXCEEDED);
     const auto payload = build_capacity_summary_payload (summary);
 
     EXPECT_FALSE (payload.contains ("max_healthy_concurrency"));
@@ -284,7 +285,8 @@ TEST (CapacityControllerTest, AnUnusableSloFallsBackToTheDefault) {
  * an empty string passes forever.
  */
 TEST (CapacityControllerTest, TheWindowedPercentilesHaveExactlyOneProductionCaller) {
-    const std::filesystem::path root = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src";
+    const std::filesystem::path root =
+    std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src";
     ASSERT_TRUE (std::filesystem::exists (root));
 
     size_t files_scanned = 0;

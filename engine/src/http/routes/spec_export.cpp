@@ -95,17 +95,17 @@ vayu::core::ExportBody read_body (const std::string& blob) {
         body.mode = mode->get<std::string> ();
     }
     if (const auto content = parsed.find ("content");
-        content != parsed.end () && content->is_string ()) {
+    content != parsed.end () && content->is_string ()) {
         body.content = content->get<std::string> ();
     }
     if (const auto fields = parsed.find ("fields");
-        fields != parsed.end () && fields->is_array ()) {
+    fields != parsed.end () && fields->is_array ()) {
         for (const auto& field : *fields) {
             if (!field.is_object ()) {
                 continue;
             }
             if (const auto key = field.find ("key");
-                key != field.end () && key->is_string ()) {
+            key != field.end () && key->is_string ()) {
                 body.field_keys.push_back (key->get<std::string> ());
             }
         }
@@ -167,7 +167,7 @@ export_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
 
     auto format = vayu::core::ExportFormat::Json;
     if (const auto field = json.find ("format");
-        field != json.end () && !field->is_null ()) {
+    field != json.end () && !field->is_null ()) {
         if (!field->is_string ()) {
             return { 400, error_body (400, R"(Invalid 'format': must be "json" or "yaml")") };
         }

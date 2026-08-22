@@ -123,7 +123,7 @@ const std::array<DynamicVariable, 15> DYNAMIC_VARIABLES = { {
 [] {
     return std::to_string (std::chrono::duration_cast<std::chrono::seconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
-                           .count ());
+    .count ());
 } },
 { "$isoTimestamp", [] { return iso_timestamp (); } },
 { "$randomInt", [] { return std::to_string (random_int (0, 1000)); } },
@@ -314,8 +314,8 @@ std::string resolve_template_with_data (const std::string& input,
 const VariableValues& vars,
 const DataRowColumns& row,
 std::optional<std::string>& missing_column) {
-    return substitute_tokens (input,
-    [&] (const std::string& name) -> std::optional<std::string> {
+    return substitute_tokens (
+    input, [&] (const std::string& name) -> std::optional<std::string> {
         // Ahead of the scopes, exactly as `lookup_variable` puts it: the
         // namespace is disjoint from them, so a variable someone named
         // `data.id` must not answer for the column - and the column must not
@@ -534,7 +534,7 @@ nlohmann::json flatten_stored_headers (const std::string& blob) {
             continue;
         }
         if (auto enabled = row.find ("enabled"); enabled != row.end () &&
-            enabled->is_boolean () && !enabled->get<bool> ()) {
+        enabled->is_boolean () && !enabled->get<bool> ()) {
             continue;
         }
         const auto value = row.find ("value");
@@ -603,8 +603,8 @@ const std::vector<vayu::db::Collection>& chain) {
     // security bug rather than a surprise: `verify_ssl` defaults to *true*
     // engine-side, so an omitted `false` would verify the certificate the user
     // explicitly asked the engine not to check (issue #706).
-    payload["verifySSL"]       = request.verify_ssl;
-    payload["requestId"]       = request.id;
+    payload["verifySSL"] = request.verify_ssl;
+    payload["requestId"] = request.id;
 
     // Identity for the script sandbox (`pm.info.requestName`), not an HTTP
     // field. Only the by-id path has a row to read it from; the inline path's
@@ -694,7 +694,7 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
     }
 
     if (auto method = payload.find ("method");
-        method != payload.end () && method->is_string ()) {
+    method != payload.end () && method->is_string ()) {
         std::string verb = method->get<std::string> ();
         std::transform (verb.begin (), verb.end (), verb.begin (),
         [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
@@ -706,7 +706,7 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
     }
 
     if (auto headers = payload.find ("headers");
-        headers != payload.end () && headers->is_object ()) {
+    headers != payload.end () && headers->is_object ()) {
         nlohmann::json resolved = nlohmann::json::object ();
         // A header is the one field composition refuses a payload over, because
         // it is the one whose text has a terminator and no escape for it: a
@@ -737,11 +737,11 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
                 payload.erase ("body");
             } else {
                 if (auto content = it->find ("content");
-                    content != it->end () && content->is_string ()) {
+                content != it->end () && content->is_string ()) {
                     *content = resolve_template (content->get<std::string> (), vars);
                 }
                 if (auto fields = it->find ("fields");
-                    fields != it->end () && fields->is_array ()) {
+                fields != it->end () && fields->is_array ()) {
                     for (auto& field : *fields) {
                         if (!field.is_object ()) {
                             continue;
@@ -754,7 +754,7 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
                         for (const char* name :
                         { "key", "value", "src", "fileName", "contentType" }) {
                             if (auto entry = field.find (name);
-                                entry != field.end () && entry->is_string ()) {
+                            entry != field.end () && entry->is_string ()) {
                                 *entry =
                                 resolve_template (entry->get<std::string> (), vars);
                             }

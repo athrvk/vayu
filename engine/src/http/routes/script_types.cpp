@@ -291,7 +291,7 @@ struct Signature {
  */
 size_t find_params_open (const std::string& detail, const std::string& name) {
     for (size_t pos = name.empty () ? std::string::npos : detail.find (name);
-         pos != std::string::npos; pos = detail.find (name, pos + 1)) {
+    pos != std::string::npos; pos = detail.find (name, pos + 1)) {
         const size_t after = pos + name.size ();
         if (after >= detail.size () || detail[after] != '(') {
             continue;
@@ -461,7 +461,7 @@ void append_doc (std::string& out, const TypeNode& node, const std::string& inde
     // the rest of the file's declarations down with it.
     std::string body = node.documentation;
     for (size_t pos = body.find ("*/"); pos != std::string::npos;
-         pos        = body.find ("*/", pos + 3)) {
+    pos             = body.find ("*/", pos + 3)) {
         body.replace (pos, 2, "*\\/");
     }
 
@@ -608,7 +608,7 @@ std::string generate_script_typedefs () {
     // in its entry says so - see `forced_return`.
     if (auto pm = global_root.children.find ("pm"); pm != global_root.children.end ()) {
         if (auto expect = pm->second.children.find ("expect");
-            expect != pm->second.children.end ()) {
+        expect != pm->second.children.end ()) {
             expect->second.forced_return = CHAIN;
         }
     }

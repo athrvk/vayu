@@ -526,7 +526,8 @@ TEST (TlsBackend, ClassifiesTheBackendsThisRepoCanBeBuiltAgainst) {
     // asserted only where it happens to be taken. Without this, a classifier
     // that answered "bundle file" to everything would still be green on Linux
     // and macOS and would only be caught by the Windows leg.
-    EXPECT_EQ (verifies_through_a_bundle_file ("OpenSSL/3.6.3"), std::optional<bool> (true));
+    EXPECT_EQ (verifies_through_a_bundle_file ("OpenSSL/3.6.3"),
+    std::optional<bool> (true));
     EXPECT_EQ (verifies_through_a_bundle_file ("Schannel"), std::optional<bool> (false));
     // Not a backend anything here has a statement about, and saying so is the
     // point: guessing would put a build under a trust model nobody checked.
@@ -549,10 +550,12 @@ TEST (TlsBackend, IsTheBackendEveryTrustStatementHereAssumes) {
     << "curl_version_info() names no TLS backend, so nothing this repo says "
        "about trust is checked on this build";
 
-    const std::optional<bool> bundle_file_backend = verifies_through_a_bundle_file (backend);
+    const std::optional<bool> bundle_file_backend =
+    verifies_through_a_bundle_file (backend);
     ASSERT_TRUE (bundle_file_backend.has_value ())
     << "TLS backend '" << backend
-    << "' is one no statement in this repo covers - decide which trust model it "
+    << "' is one no statement in this repo covers - decide which trust model "
+       "it "
        "follows and say so, rather than leaving the docs describing a build "
        "nobody is running";
 
@@ -592,7 +595,8 @@ TEST (TlsBackend, IsTheBackendEveryTrustStatementHereAssumes) {
     << "libcurl enumerates no TLS backend at all, so nothing here is checked";
     std::vector<std::string> compiled_in;
     for (int i = 0; available[i] != nullptr; ++i) {
-        compiled_in.emplace_back (available[i]->name != nullptr ? available[i]->name : "unnamed");
+        compiled_in.emplace_back (
+        available[i]->name != nullptr ? available[i]->name : "unnamed");
     }
     EXPECT_EQ (vayu::http::pin_tls_backend (), vayu::http::TlsBackendSelection::Selected)
     << "this process never selected its TLS backend, so on the MultiSSL build "
@@ -618,7 +622,8 @@ TEST (TlsBackend, FindsTheSystemAnchorsTheMergeExtends) {
     // failure would show up as a quietly unasserted branch on a green leg.
     const std::string backend = tls_backend_name ();
     ASSERT_FALSE (backend.empty ());
-    const std::optional<bool> bundle_file_backend = verifies_through_a_bundle_file (backend);
+    const std::optional<bool> bundle_file_backend =
+    verifies_through_a_bundle_file (backend);
     ASSERT_TRUE (bundle_file_backend.has_value ()) << backend;
     ASSERT_TRUE (*bundle_file_backend)
     << "TLS backend '" << backend << "' does not verify through a bundle file";

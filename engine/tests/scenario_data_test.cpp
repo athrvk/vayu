@@ -991,6 +991,6 @@ TEST (ScenarioDataScanTest, ThePrefixAloneIsNotSomethingToRefuse) {
     // over a token that never reaches the wire.
     EXPECT_FALSE (vayu::core::tokenize_data_fields (
     request_with_url ("https://api.test/{{data.}}"))
-                  .first_token ()
-                  .has_value ());
+    .first_token ()
+    .has_value ());
 }
