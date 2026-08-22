@@ -17,6 +17,65 @@ elif [ -d "/usr/local/opt/llvm/bin" ]; then
     export PATH="/usr/local/opt/llvm/bin:$PATH"
 fi
 
+# Finds the binary for a pinned LLVM tool, which is not simply its plain name.
+# `apt install clang-format-19` - what CONTRIBUTING.md tells an Ubuntu
+# contributor to run - installs `/usr/bin/clang-format-19` and leaves the plain
+# `clang-format` at the distribution's 18, while Homebrew's LLVM 19 and the
+# Windows installer both use the plain name. Only apt splits them, so both names
+# are tried, versioned first.
+#
+# One helper rather than a copy per tool (issue #918). The clang-tidy pass used
+# to look under the plain name alone, so a contributor who followed that install
+# instruction to the letter still got the 18, was told to install a 19, and
+# linted nothing - the very packaging split the clang-format pass had already
+# been taught about. A second copy of the lookup would drift from the first the
+# next time either pin moved.
+#
+# $1 tool, $2 the major it is pinned to, $3 how to compare: `exact` for
+# clang-format, where another major is a wrong answer rather than a missing one,
+# or `minimum` for clang-tidy, whose pin is the floor that can parse the config.
+# The comparison is a parameter because it is the only thing the two lookups do
+# not share.
+#
+# Sets LLVM_TOOL to the binary that satisfied the pin, empty when none did, and
+# LLVM_TOOL_NEAREST to a "name version" for the last candidate that did not -
+# which is what lets the warning name what you have instead of repeating what to
+# install. A candidate whose `--version` prints nothing numeric is rejected, not
+# assumed current.
+find_llvm_tool() {
+    local tool="$1" want="$2" mode="$3"
+    local candidate version major accepted
+    LLVM_TOOL=
+    LLVM_TOOL_NEAREST=
+    for candidate in "${tool}-${want}" "$tool"; do
+        if ! command -v "$candidate" &> /dev/null; then
+            continue
+        fi
+        # The tolerant of the two regexes this replaces: it also matches a
+        # two-component `19.1`, which some builds report.
+        version=$("$candidate" --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)
+        major=${version%%.*}
+        accepted=
+        case "$mode" in
+            exact) [ "$major" = "$want" ] && accepted=1 ;;
+            minimum) [ -n "$major" ] && [ "$major" -ge "$want" ] 2>/dev/null && accepted=1 ;;
+            # Reachable only by editing this file wrongly, and silent if it were
+            # tolerated: an unknown mode would accept nothing and every pass
+            # would skip, which is the failure this hook exists to stop being.
+            *)
+                echo "pre-commit: find_llvm_tool got an unknown comparison mode '$mode'" >&2
+                exit 1
+                ;;
+        esac
+        if [ -n "$accepted" ]; then
+            LLVM_TOOL="$candidate"
+            return 0
+        fi
+        LLVM_TOOL_NEAREST="$candidate ${version:-(unknown version)}"
+    done
+    return 1
+}
+
 # The oldest clang-tidy that can parse engine/.clang-tidy. `ExcludeHeaderFilterRegex`
 # landed in LLVM 19; an older binary rejects the whole config file, so it lints
 # *nothing* and still exits 0 - a hook that scans an empty set and reports success
@@ -68,24 +127,11 @@ done
 # Nothing engine-side staged: no probe, no message. An app-only commit has no
 # business hearing about the C++ formatter.
 if [ ${#FORMAT_FILES[@]} -gt 0 ]; then
-    # Discovery before the probe, and under both names, because the two ways to
-    # have a 19 look different: `apt install clang-format-19`, which is what
-    # CONTRIBUTING.md tells an Ubuntu contributor to run, leaves plain
-    # `clang-format` at the distribution's 18, while Homebrew's LLVM 19 installs
-    # it as `clang-format`.
-    CLANG_FORMAT=
-    NEAREST_CLANG_FORMAT=
-    for CANDIDATE in "clang-format-${CLANG_FORMAT_MAJOR}" clang-format; do
-        if ! command -v "$CANDIDATE" &> /dev/null; then
-            continue
-        fi
-        CANDIDATE_VERSION=$("$CANDIDATE" --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)
-        NEAREST_CLANG_FORMAT="$CANDIDATE ${CANDIDATE_VERSION:-(unknown version)}"
-        if [ "${CANDIDATE_VERSION%%.*}" = "$CLANG_FORMAT_MAJOR" ]; then
-            CLANG_FORMAT="$CANDIDATE"
-            break
-        fi
-    done
+    # Discovery before the probe, under both names, and `exact` because this pin
+    # is not a floor: a 20 is as wrong an answer here as an 18.
+    find_llvm_tool clang-format "$CLANG_FORMAT_MAJOR" exact
+    CLANG_FORMAT="$LLVM_TOOL"
+    NEAREST_CLANG_FORMAT="$LLVM_TOOL_NEAREST"
 
     if [ -z "$CLANG_FORMAT" ]; then
         # A skip rather than a refusal, on the same reasoning as the clang-tidy
@@ -129,32 +175,33 @@ end_hook() {
     exit 0
 }
 
+# Discovery and version probe, before any file is linted, and said loudly and
+# once: the failure this replaces was silent, and a contributor on 18 had no way
+# to tell "clean" from "never ran". Absent and too-old share one message because
+# they share one cure; the nearest candidate is what tells them apart, and
+# naming it is what stops the warning from reading as advice already followed
+# (issue #918).
+#
+# The `Lint changed engine sources` step in .github/workflows/pr-tests.yml lints
+# the same lines on clang-tidy 19 before a pull request can merge, so this stays
+# a skip rather than a refusal to commit - a missing or old local toolchain costs
+# a contributor nothing but the early warning.
+find_llvm_tool clang-tidy "$MIN_CLANG_TIDY_MAJOR" minimum
+CLANG_TIDY="$LLVM_TOOL"
+if [ -z "$CLANG_TIDY" ]; then
+    echo "WARNING: no clang-tidy ${MIN_CLANG_TIDY_MAJOR} or newer found${LLVM_TOOL_NEAREST:+ (nearest: ${LLVM_TOOL_NEAREST})}."
+    echo "         engine/.clang-tidy uses ExcludeHeaderFilterRegex, which needs clang-tidy"
+    echo "         >= ${MIN_CLANG_TIDY_MAJOR}; an older binary rejects the whole config and lints nothing."
+    echo "         NOTHING WAS LINTED. Install it ('apt install clang-tidy-${MIN_CLANG_TIDY_MAJOR}',"
+    echo "         'brew install llvm@${MIN_CLANG_TIDY_MAJOR}') or rely on CI, which lints the same"
+    echo "         lines on clang-tidy ${MIN_CLANG_TIDY_MAJOR}."
+    end_hook
+fi
+
 # What it looks at - the lines this commit changes, or whole files under
-# VAYU_TIDY_FULL - is announced below, once the staged set is known.
-echo "Running clang-tidy on staged C++ changes..."
-
-# Check if clang-tidy is installed
-if ! command -v clang-tidy &> /dev/null; then
-    echo "clang-tidy not found. Skipping linting."
-    end_hook
-fi
-
-# Version probe, before any file is linted. Said loudly and once: the failure this
-# replaces was silent, and a contributor on 18 had no way to tell "clean" from
-# "never ran". The `Lint changed engine sources` step in
-# .github/workflows/pr-tests.yml lints the same lines on clang-tidy 19 before a
-# pull request can merge, so this stays a skip rather than a refusal to commit -
-# a missing or old local toolchain costs a contributor nothing but the early
-# warning.
-CLANG_TIDY_VERSION=$(clang-tidy --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-CLANG_TIDY_MAJOR=${CLANG_TIDY_VERSION%%.*}
-if [ -z "$CLANG_TIDY_MAJOR" ] || [ "$CLANG_TIDY_MAJOR" -lt "$MIN_CLANG_TIDY_MAJOR" ] 2>/dev/null; then
-    echo "WARNING: clang-tidy ${CLANG_TIDY_VERSION:-(unknown version)} cannot read engine/.clang-tidy."
-    echo "         It uses ExcludeHeaderFilterRegex, which needs clang-tidy >= ${MIN_CLANG_TIDY_MAJOR}."
-    echo "         NOTHING WAS LINTED. Install a newer clang-tidy (e.g. 'apt install clang-tidy-19')"
-    echo "         or rely on CI, which lints the same lines on clang-tidy 19."
-    end_hook
-fi
+# VAYU_TIDY_FULL - is announced below, once the staged set is known. The binary
+# is named because it need not be the plain one.
+echo "Running ${CLANG_TIDY} on staged C++ changes..."
 
 # Turns one file's staged hunk headers into clang-tidy `--line-filter` ranges.
 #
@@ -296,13 +343,18 @@ for FILE in $LINT_FILES; do
     # no `-Wno-` flag covers. This hook does not do that, because reconfiguring
     # someone's build tree from a git hook would throw away their next
     # incremental build.
+    #
+    # `$CLANG_TIDY`, not `clang-tidy`, in both branches: the discovery above can
+    # settle on `clang-tidy-19` while the plain name is an 18 that cannot read
+    # the config at all, so a branch that invoked the plain name would lint
+    # nothing and say it had linted.
     if [ -f "engine/build/compile_commands.json" ]; then
-        clang-tidy --allow-no-checks --extra-arg=-Wno-ignored-gch \
+        "$CLANG_TIDY" --allow-no-checks --extra-arg=-Wno-ignored-gch \
             "${LINE_FILTER_ARG[@]}" -p engine/build "$FILE" || STATUS=1
     else
         echo "Warning: compile_commands.json not found in engine/build. clang-tidy might report false positives."
         # Fallback: try to include common directories
-        clang-tidy --allow-no-checks "${LINE_FILTER_ARG[@]}" "$FILE" \
+        "$CLANG_TIDY" --allow-no-checks "${LINE_FILTER_ARG[@]}" "$FILE" \
             -- -Iengine/include -Iengine/vendor/quickjs-ng || STATUS=1
     fi
 done

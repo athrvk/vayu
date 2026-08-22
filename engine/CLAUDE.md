@@ -39,7 +39,11 @@ engine/
   costs a five-figure-line rewrite.
 - Linter: clang-tidy (`.clang-tidy` configs in `engine/`, `engine/src/runtime/`,
   `engine/tests/`), **19 or newer** - the root config uses
-  `ExcludeHeaderFilterRegex`, which an older binary rejects outright. **A
+  `ExcludeHeaderFilterRegex`, which an older binary rejects outright. The hook
+  finds it under `clang-tidy-19` or a plain `clang-tidy`, through the same
+  `find_llvm_tool` the formatter uses (`exact` there, `minimum` here) - apt
+  splits the names and Homebrew does not, and probing the plain name alone made
+  the hook skip on the setup CONTRIBUTING.md prescribes (#918). **A
   finding is a failure now** (#885): `WarningsAsErrors: '*'` in
   `engine/.clang-tidy` is the one place that says so, and both consumers read
   their verdict from clang-tidy's exit status - the pre-commit hook refuses the
