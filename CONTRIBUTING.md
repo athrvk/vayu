@@ -123,10 +123,11 @@ vayu/
   warning, install a newer clang-tidy (Ubuntu 24.04 ships 18 by default;
   `apt install clang-tidy-19` is what CI uses) or lean on CI, which lints the
   engine sources your pull request changes on clang-tidy 19. A finding fails in
-  both places - the hook refuses the commit, CI fails the engine job - but they
-  are scoped differently: CI gates the **lines** your pull request changes,
-  while the hook lints whole staged files and so also reports findings that were
-  already there. See
+  both places - the hook refuses the commit, CI fails the engine job - and both
+  gate the **lines** you changed, not the whole file, so a finding older than
+  your diff stops neither (#902). A hook refusal is therefore a merge blocker
+  you are seeing early. To lint whole staged files instead, backlog and all,
+  commit once with `VAYU_TIDY_FULL=1`. See
   [Static Analysis](docs/engine/building.md#static-analysis).
 
 #### Naming Conventions

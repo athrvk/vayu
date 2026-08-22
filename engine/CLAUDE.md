@@ -47,12 +47,16 @@ engine/
   `event_loop_worker.cpp` / `temp_database.hpp` unlinted. macOS is excluded
   because clang-tidy 19 *and* 20 both SIGILL there on the AppleClang 21 SDK
   (#906); the only macOS-conditional code is four `#define`s, so what is lost is
-  `clang-analyzer-*` over shared code under libc++. **CI gates the changed
-  *lines***, through LLVM's
-  `clang-tidy-diff.py`: the tree had never been linted and most files carry
-  findings older than any diff, so whole-file gating would fail a pull request
-  for code it did not write. The hook is the stricter one (whole staged files);
-  #902 tracks aligning them. Nothing lints at *build*
+  `clang-analyzer-*` over shared code under libc++. **Both gate the changed
+  *lines***: the tree had never been linted and most files carry findings older
+  than any diff, so whole-file gating would fail a pull request for code it did
+  not write. The mechanisms differ on purpose (#902) - CI runs LLVM's
+  `clang-tidy-diff.py`, the hook parses `git diff --cached -U0` hunk headers and
+  passes `--line-filter` itself, because the driver needs Python and a
+  version-matched copy that is packaged differently on each platform, and a
+  fallback to whole-file linting would restore the asymmetry it removes.
+  `VAYU_TIDY_FULL=1` opts one commit back into whole staged files, for paying
+  the backlog down on purpose. Nothing lints at *build*
   time: the commented-out `CMAKE_CXX_CLANG_TIDY` block went with #885, because a
   lint that runs when someone uncomments it never runs. See
   `docs/engine/building.md`.

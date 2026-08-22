@@ -606,7 +606,7 @@ clang-tidy runs in two places, and both of them can stop a change:
 
 | Where | What it lints | What a finding does |
 |-------|---------------|---------------------|
-| `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | Whole staged `.c/.cpp/.h/.hpp` files | Refuses the commit |
+| `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **changed lines** of staged `.c/.cpp/.h/.hpp` files | Refuses the commit |
 | `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of `engine/{src,include,tests}` sources, on all three platforms | Fails CI |
 
 A finding is a failure because `engine/.clang-tidy` sets
@@ -615,17 +615,42 @@ found and still exits 0. That single setting is what both places read their
 verdict from - do not re-state it as a `--warnings-as-errors` flag at a call
 site, or the two can disagree about what counts.
 
-**CI gates the changed lines, not the changed files**, through LLVM's own
-`clang-tidy-diff.py`. The engine had never been linted, so most files carry
-findings older than any current diff - `openapi_drafts.cpp` answered with nine
-on an untouched tree. Gating whole files would fail a pull request for code it
-did not write, in every file it happened to open. New code is held to the config
-from its first line; the backlog is paid down by whoever edits those lines.
+**Both gate the changed lines, not the changed files.** The engine had never
+been linted, so most files carry findings older than any current diff -
+`openapi_drafts.cpp` answered with nine on an untouched tree. Gating whole files
+would fail a pull request for code it did not write, in every file it happened
+to open. New code is held to the config from its first line; the backlog is paid
+down by whoever edits those lines.
 
-The pre-commit hook is the stricter of the two: it lints whole staged files, so
-it reports the backlog as well. That is deliberate for a local early warning you
-can skip with `git commit --no-verify`, and it is why a hook refusal is not by
-itself a merge blocker. Issue #902 tracks aligning the two.
+The hook used to be the stricter of the two - it gated whole staged files, so a
+one-line edit to a legacy file was refused a commit over findings CI would let
+through, and `--no-verify` was the only way past it. #902 aligned them: a hook
+that has to be bypassed to commit is advisory in practice, which is the state
+#885 set out to end.
+
+**The two compute those lines differently, and that is deliberate.** CI runs
+LLVM's own `clang-tidy-diff.py`. The hook parses the staged diff's hunk headers
+itself and passes clang-tidy `--line-filter` directly, because the driver is a
+Python script whose version has to match the binary - an 18-era copy rejects the
+`-allow-no-checks` that `engine/src/runtime/` needs - and it is packaged
+differently on each platform (`/usr/bin/clang-tidy-diff-19.py` from apt,
+`share/clang/clang-tidy-diff.py` beside the binary under Homebrew and the
+Windows LLVM installer). A CI image pins all of that; a contributor's machine
+does not, and a hook that fell back to whole-file linting whenever it could not
+find a driver or an interpreter would put the asymmetry back for exactly the
+people it hurts. `git diff --cached -U0` is always available, and with no
+context lines a hunk header's new-side range *is* the set of lines the commit
+adds, so the hook reads the headers and never the diff body.
+
+**`VAYU_TIDY_FULL=1` restores whole-file linting** for one commit:
+
+```bash
+VAYU_TIDY_FULL=1 git commit
+```
+
+That is for someone paying the backlog down on purpose - the one case where the
+findings CI ignores are the point. Everything else about the hook is unchanged
+by it.
 
 **Commits listed in `.git-blame-ignore-revs` are skipped.** The gate reads the
 same file `git blame` does, and for the same reason: a commit declared to be

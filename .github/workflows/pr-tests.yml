@@ -114,15 +114,36 @@ jobs:
               - '!.github/workflows/docs.yml'
               - '!requirements-docs.txt'
 
-      # Default quantifier (`some`) on purpose: each filter below is a union of
-      # paths, so "matched at least one" is the question being asked. These are
-      # deliberately *not* responsible for excluding documentation - a change to
-      # app/src/modules/README.md matches `app/**` here and is rejected by
-      # `code` above instead, so the docs rule stays written down once.
+      # `some-with-excludes`: a file routes to an area if it matches at least
+      # one of the paths listed - they are a union - and no `!` pattern rejects
+      # it. Plain `some` cannot express the second half, because a lone `!`
+      # pattern under it matches every file *outside* the tree and turns the
+      # filter permanently true; `every` cannot express the first, because it
+      # turns the union into an intersection no file can satisfy.
+      #
+      # These filters used to leave documentation entirely to `code` above, on
+      # the reasoning that the docs rule should be written down once - a
+      # README.md under app/ matched `app/**` here and `code` rejected it. That
+      # is wrong whenever a pull request touches both, because the two filters
+      # are evaluated over the *changeset*, not per file: `code` asks "is any
+      # file here not documentation", the area asks "is any file here in this
+      # tree", and the job condition ANDs two answers that different files gave.
+      # A change to `engine/CLAUDE.md` plus any script therefore ran the engine
+      # matrix on all three platforms with no engine source touched (seen on
+      # #913, where the two answers came from `engine/CLAUDE.md` and
+      # `scripts/pre-commit`). The docs rule is still written once per area
+      # rather than once per repository, which is the smallest place it can live
+      # and still be true.
+      #
+      # Only `app` and `engine` carry it, because only their unions contain a
+      # tree glob that a `.md` can fall inside. The other three name individual
+      # files or extension globs that no `.md` can match. Add a `**` glob to one
+      # of them and it needs these two lines too.
       - name: Route to the trees the change can affect
         uses: dorny/paths-filter@v4
         id: area
         with:
+          predicate-quantifier: some-with-excludes
           # `shared/**` belongs to the app: vitest and vite both alias it to
           # `@shared`, so an icon or asset there is compiled into the renderer.
           # `build.py` and `VERSION` are listed under both trees because either
@@ -145,6 +166,10 @@ jobs:
               - 'build.py'
               - 'VERSION'
               - '.github/workflows/pr-tests.yml'
+              # Both forms, for the reason the `code` filter gives above: the
+              # bare one covers a root-level file, the `**/` one covers nested.
+              - '!*.md'
+              - '!**/*.md'
             engine:
               - 'engine/**'
               - 'build.py'
@@ -152,6 +177,8 @@ jobs:
               - '.clang-format'
               - '.github/check-windows-deps.py'
               - '.github/workflows/pr-tests.yml'
+              - '!*.md'
+              - '!**/*.md'
             build_script:
               - 'build.py'
               - 'scripts/test/vcpkg_baseline_test.py'
@@ -180,6 +207,24 @@ jobs:
               - '**/*.py'
               - 'scripts/pre-commit'
               - '.github/workflows/pr-tests.yml'
+
+      # The routing, said out loud. Every job below is gated on these five
+      # booleans, and until this step existed the only way to answer "why did
+      # the engine matrix run on a change that touched no engine source" was to
+      # re-evaluate the globs by hand - which is how the doc-routing defect
+      # above went unnoticed. Note that a change to *this file* routes to every
+      # area on purpose, so a pull request editing the split sees the full
+      # matrix regardless of what else it touches.
+      - name: Report the routing
+        shell: bash
+        env:
+          CODE: ${{ steps.code.outputs.code }}
+          AREAS: ${{ toJSON(steps.area.outputs) }}
+        run: |
+          {
+            echo "- non-documentation changes: \`$CODE\`"
+            echo "- areas: \`$AREAS\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Lint, formatting and type-check are platform-independent, so one runner
   # answers for all three - they used to run inside the app job, where roughly
