@@ -201,7 +201,7 @@ RouteError body_error (const std::string& message) {
 RouteError item_error (int status, const std::string& message, const std::string& item) {
     auto body             = error_body (status, message);
     body["error"]["item"] = item;
-    return { status, body };
+    return { .status = status, .body = body };
 }
 
 /** Reads one optional top-level array; anything else that is not an array is a 400. */

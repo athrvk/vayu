@@ -150,7 +150,8 @@ using RouteResult = std::expected<void, RouteError>;
  */
 [[nodiscard]] inline std::unexpected<RouteError>
 route_error (int status, const std::string& message, std::string_view code = {}) {
-    return std::unexpected (RouteError{ status, error_body (status, message, code) });
+    return std::unexpected (
+    RouteError{ .status = status, .body = error_body (status, message, code) });
 }
 
 /**

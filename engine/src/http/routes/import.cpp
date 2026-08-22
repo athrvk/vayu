@@ -353,7 +353,7 @@ RouteError body_error (const std::string& message) {
 RouteError item_error (const std::string& message, const std::string& temp_id) {
     auto body             = error_body (400, message);
     body["error"]["item"] = temp_id;
-    return { 400, body };
+    return { .status = 400, .body = body };
 }
 
 /**
