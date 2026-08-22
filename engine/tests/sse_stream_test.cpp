@@ -1283,8 +1283,7 @@ TEST_F (StreamExecuteTest, ABufferedSendStoresTheScriptResultsItAlsoReturns) {
     ASSERT_EQ (trace["scripts"]["testResults"].size (), 2u);
     EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ());
     EXPECT_FALSE (trace["scripts"]["testResults"][1]["passed"].get<bool> ());
-    EXPECT_FALSE (
-    trace["scripts"]["testResults"][1].value ("error", "").empty ());
+    EXPECT_FALSE (trace["scripts"]["testResults"][1].value ("error", "").empty ());
     EXPECT_EQ (trace["scripts"]["consoleLogs"][0]["message"], "asserted");
 }
 

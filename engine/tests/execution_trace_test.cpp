@@ -374,8 +374,8 @@ TEST (ExecutionTrace, OmitsTheClientCertificateWhenNoneWasUsed) {
 // a design send a pre-request assertion was reported nowhere at all.
 
 TEST (ScriptResultNode, ListsBothScriptsAssertionsInExecutionOrder) {
-    const auto node = build_script_result_node (
-    script_with ({ passing ("token was issued") }),
+    const auto node =
+    build_script_result_node (script_with ({ passing ("token was issued") }),
     script_with ({ failing ("status is 200", "expected 500 to equal 200") }));
 
     ASSERT_TRUE (node.contains ("testResults")) << node.dump ();
@@ -412,8 +412,8 @@ TEST (ScriptResultNode, NamesTheScriptTheWayConsoleLinesDo) {
 // carries, so it keeps meaning exactly what it did - with the phase now said
 // rather than assumed.
 TEST (ScriptResultNode, APostRequestOnlyListIsUnchangedApartFromTheSource) {
-    const auto node =
-    build_script_result_node (vayu::ScriptResult{}, script_with ({ passing ("status is 200") }));
+    const auto node = build_script_result_node (
+    vayu::ScriptResult{}, script_with ({ passing ("status is 200") }));
 
     ASSERT_EQ (node["testResults"].size (), 1u);
     EXPECT_EQ (node["testResults"][0]["name"], "status is 200");
@@ -423,7 +423,8 @@ TEST (ScriptResultNode, APostRequestOnlyListIsUnchangedApartFromTheSource) {
 // Absent, not empty: the pane reads an absent list as "no results", and an
 // empty one would put a Tests tab's worth of nothing on every scriptless send.
 TEST (ScriptResultNode, OmitsTheListWhenNeitherScriptAsserted) {
-    const auto node = build_script_result_node (vayu::ScriptResult{}, vayu::ScriptResult{});
+    const auto node =
+    build_script_result_node (vayu::ScriptResult{}, vayu::ScriptResult{});
 
     EXPECT_FALSE (node.contains ("testResults")) << node.dump ();
 }

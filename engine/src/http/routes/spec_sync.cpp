@@ -82,7 +82,8 @@ namespace vayu::http::routes {
  * own descendants with it, which is what makes it a boundary rather than a
  * filter.
  */
-std::unordered_set<std::string> collection_subtree_ids (const std::vector<vayu::db::Collection>& all,
+std::unordered_set<std::string> collection_subtree_ids (
+const std::vector<vayu::db::Collection>& all,
 const std::string& root,
 const std::function<bool (const vayu::db::Collection&)>& descend_into) {
     std::unordered_map<std::string, const vayu::db::Collection*> rows;
@@ -247,8 +248,8 @@ std::string& temp_id_out) {
         return body_error ("Invalid " + at + ": must be an object");
     }
     if (item.contains ("id")) {
-        return body_error ("Invalid " + at +
-        ": 'id' is not accepted - the engine assigns ids; reference items by 'tempId'");
+        return body_error ("Invalid " +
+        at + ": 'id' is not accepted - the engine assigns ids; reference items by 'tempId'");
     }
     if (!item.contains ("tempId") || !item["tempId"].is_string () ||
     item["tempId"].get<std::string> ().empty ()) {
@@ -303,7 +304,9 @@ const std::unordered_set<int>& suppressed_statuses = {}) {
         // `origin` and `suppressed` were learned - must reach a sync's rows too,
         // and a second construction here is how it would not.
         if (auto err = apply_item_fields (
-            [&] { return apply_request_example_fields (x, example, /*is_create=*/true); },
+            [&] {
+                return apply_request_example_fields (x, example, /*is_create=*/true);
+            },
             "example", owner)) {
             return err;
         }
@@ -319,8 +322,7 @@ const std::unordered_set<int>& suppressed_statuses = {}) {
 
     if (rows.size () + surviving > vayu::core::constants::request_example::MAX_PER_REQUEST) {
         return item_error (400,
-        "Too many examples: " + std::to_string (rows.size () + surviving) +
-        " exceeds the limit of " +
+        "Too many examples: " + std::to_string (rows.size () + surviving) + " exceeds the limit of " +
         std::to_string (vayu::core::constants::request_example::MAX_PER_REQUEST) + " per request",
         owner);
     }
@@ -403,8 +405,8 @@ class DocumentedExamples {
  */
 struct ExampleRefresh {
     std::vector<std::string> replaced; ///< Imported row ids, to delete.
-    int base_order = 0;                ///< Where the replacement block starts.
-    size_t surviving = 0;              ///< User rows, which stay exactly as they are.
+    int base_order   = 0;              ///< Where the replacement block starts.
+    size_t surviving = 0; ///< User rows, which stay exactly as they are.
     /**
      * Statuses the user deleted, from this request's tombstones.
      *
@@ -429,7 +431,8 @@ const std::vector<vayu::db::RequestExample>& tombstones) {
         highest = std::max (highest, row.order);
         if (row.origin == vayu::core::constants::request_example::ORIGIN_IMPORT) {
             plan.replaced.push_back (row.id);
-            lowest_import = lowest_import ? std::min (*lowest_import, row.order) : row.order;
+            lowest_import =
+            lowest_import ? std::min (*lowest_import, row.order) : row.order;
         } else {
             plan.surviving += 1;
         }
@@ -475,7 +478,8 @@ class FolderResolver {
         }
         const std::string temp = "tmp_col_" + std::to_string (created_.size ());
         claimed_.emplace (folder, temp);
-        created_.push_back ({ { "tempId", temp }, { "name", folder }, { "parentId", root_id_ } });
+        created_.push_back (
+        { { "tempId", temp }, { "name", folder }, { "parentId", root_id_ } });
         return { { "collectionTempId", temp } };
     }
 
@@ -523,8 +527,8 @@ class FolderResolver {
 nlohmann::json safe_sync_payload (const std::string& root_id,
 const std::vector<vayu::db::Collection>& collections,
 const SpecComparison& comparison) {
-    const vayu::core::SpecDiff& diff       = comparison.diff;
-    const vayu::core::SafeSpecApply safe   = vayu::core::safe_spec_apply (diff);
+    const vayu::core::SpecDiff& diff     = comparison.diff;
+    const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
     FolderResolver folders (root_id, collections);
 
     nlohmann::json create = nlohmann::json::array ();
@@ -553,10 +557,11 @@ const SpecComparison& comparison) {
         }
         const vayu::core::ChangedRequest& changed = diff.changed[i];
         const vayu::core::SpecRequestDraft& entry = comparison.fetched[changed.draft];
-        const nlohmann::json fields               = draft_request_fields_json (entry.draft);
+        const nlohmann::json fields = draft_request_fields_json (entry.draft);
 
         nlohmann::json item{ { "id", comparison.requests[changed.request].id },
-            { "specOperation", spec_operation_json (entry.operation) }, { "examples", true } };
+            { "specOperation", spec_operation_json (entry.operation) },
+            { "examples", true } };
         for (const vayu::core::SpecField field : safe.update[i].fields) {
             const std::string key (vayu::core::spec_field_name (field));
             item[key] = fields.at (key);
@@ -571,7 +576,7 @@ const SpecComparison& comparison) {
     // deletes nothing" is a rule with one author, and a route that spelled it
     // here would be a second one.
     nlohmann::json remove = nlohmann::json::array ();
-    size_t kept = 0;
+    size_t kept           = 0;
     for (size_t i = 0; i < diff.removed.size (); ++i) {
         if (safe.remove[i]) {
             remove.push_back (comparison.requests[diff.removed[i]].id);
@@ -595,9 +600,9 @@ const SpecComparison& comparison) {
         { "update", std::move (update) }, { "delete", std::move (remove) },
         { "skipped",
         nlohmann::json{ { "requests", left_alone },
-            // Every field the document moved that this apply does not write -
-            // whether its request was left alone whole or applied around it.
-            { "fields", offered_fields - written_fields }, { "deletions", kept } } } };
+        // Every field the document moved that this apply does not write -
+        // whether its request was left alone whole or applied around it.
+        { "fields", offered_fields - written_fields }, { "deletions", kept } } } };
 }
 
 /**
@@ -609,7 +614,7 @@ const SpecComparison& comparison) {
  */
 struct ClaimedIds {
     std::unordered_map<std::string, std::string> real; ///< tempId -> engine id.
-    std::unordered_set<std::string> collections;       ///< Which of them are folders.
+    std::unordered_set<std::string> collections; ///< Which of them are folders.
 };
 
 } // namespace
@@ -629,15 +634,18 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
     }
 
     std::string collection_id;
-    if (auto err = apply_required_string_field (body, "collectionId", collection_id, /*is_create=*/true)) {
+    if (auto err = apply_required_string_field (
+        body, "collectionId", collection_id, /*is_create=*/true)) {
         return *err;
     }
     if (collection_id.empty ()) {
-        return body_error ("Invalid 'collectionId': must be a non-empty string");
+        return body_error (
+        "Invalid 'collectionId': must be a non-empty string");
     }
 
     if (!body.contains ("spec") || !body["spec"].is_object ()) {
-        return body_error ("Invalid 'spec': must be an object with the re-fetched document");
+        return body_error (
+        "Invalid 'spec': must be an object with the re-fetched document");
     }
     const auto& spec_item = body["spec"];
     for (const char* engine_owned : { "id", "hash", "fetchedAt" }) {
@@ -647,11 +655,13 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         }
     }
     std::string content;
-    if (auto err = apply_required_string_field (spec_item, "content", content, /*is_create=*/true)) {
+    if (auto err = apply_required_string_field (
+        spec_item, "content", content, /*is_create=*/true)) {
         return *err;
     }
     if (content.empty ()) {
-        return body_error ("Invalid 'spec.content': an empty document is not a spec");
+        return body_error (
+        "Invalid 'spec.content': an empty document is not a spec");
     }
 
     /*
@@ -677,13 +687,15 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         policy = stated_policy->get<std::string> ();
         if (policy != "safe") {
             return body_error ("Invalid 'policy': '" + policy +
-            "' is not a policy this engine has; the only one is \"safe\" - everything the "
-            "document adds, every field it moved that nobody here had edited, and no deletions");
+            "' is not a policy this engine has; the only one is \"safe\" - "
+            "everything the "
+            "document adds, every field it moved that nobody here had edited, "
+            "and no deletions");
         }
         for (const char* section : { "collections", "create", "update", "delete" }) {
             if (body.contains (section) && !body[section].is_null ()) {
-                return body_error (std::string ("Invalid '") + section +
-                "': a policy sync decides its own rows; send 'policy' or the rows, not both");
+                return body_error (std::string ("Invalid '") +
+                section + "': a policy sync decides its own rows; send 'policy' or the rows, not both");
             }
         }
     }
@@ -712,8 +724,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
     // Recomputed inside the lock for a policy sync, whose rows are not known
     // until the comparison is made - this early check is the one that keeps a
     // caller's own oversized payload from being parsed row by row first.
-    size_t stated =
-    new_collections->size () + creates->size () + updates->size () + deletes->size ();
+    size_t stated = new_collections->size () + creates->size () +
+    updates->size () + deletes->size ();
     if (stated > MAX_SYNC_ITEMS) {
         return body_error ("Sync too large: " + std::to_string (stated) +
         " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call");
@@ -722,7 +734,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
     std::pair<int, nlohmann::json> result;
     db.with_lock ([&] {
         const auto stored_collections = db.get_collections ();
-        auto root = std::find_if (stored_collections.begin (), stored_collections.end (),
+        auto root =
+        std::find_if (stored_collections.begin (), stored_collections.end (),
         [&] (const vayu::db::Collection& c) { return c.id == collection_id; });
         if (root == stored_collections.end ()) {
             result = { 404, error_body (404, "Collection not found") };
@@ -761,7 +774,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         DocumentedExamples documented (document);
         if (spec_item.contains ("sourceUrl") && !spec_item["sourceUrl"].is_null ()) {
             if (!spec_item["sourceUrl"].is_string ()) {
-                result = body_error ("Invalid 'spec.sourceUrl': must be a string or null");
+                result = body_error (
+                "Invalid 'spec.sourceUrl': must be a string or null");
                 return;
             }
             const auto url = spec_item["sourceUrl"].get<std::string> ();
@@ -778,18 +792,18 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         nlohmann::json policy_rows;
         if (!policy.empty ()) {
             SpecComparison comparison;
-            if (auto err = compare_bound_spec (db, stored_collections, subtree, bound_id,
-                document, comparison)) {
+            if (auto err = compare_bound_spec (db, stored_collections, subtree,
+                bound_id, document, comparison)) {
                 result = *err;
                 return;
             }
-            policy_rows     = safe_sync_payload (collection_id, stored_collections, comparison);
+            policy_rows = safe_sync_payload (collection_id, stored_collections, comparison);
             new_collections = &policy_rows["collections"];
             creates         = &policy_rows["create"];
             updates         = &policy_rows["update"];
             deletes         = &policy_rows["delete"];
-            stated = new_collections->size () + creates->size () + updates->size () +
-                     deletes->size ();
+            stated          = new_collections->size () + creates->size () +
+            updates->size () + deletes->size ();
             if (stated > MAX_SYNC_ITEMS) {
                 result = body_error ("Sync too large: " + std::to_string (stated) +
                 " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call");
@@ -816,7 +830,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
 
             if (item.contains ("openapi")) {
                 result = item_error (400,
-                "Invalid 'openapi': a folder a sync creates is part of the document being "
+                "Invalid 'openapi': a folder a sync creates is part of the "
+                "document being "
                 "synced, not a document of its own",
                 temp);
                 return;
@@ -832,8 +847,7 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
                 parent = item["parentId"].get<std::string> ();
                 if (!subtree.contains (parent)) {
                     result = item_error (400,
-                    "Invalid 'parentId': '" + parent +
-                    "' is not the collection being synced or one beneath it",
+                    "Invalid 'parentId': '" + parent + "' is not the collection being synced or one beneath it",
                     temp);
                     return;
                 }
@@ -845,13 +859,15 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             folder.created_at = now;
             folder.updated_at = now;
             if (auto err = apply_item_fields (
-                [&] { return apply_collection_fields (db, folder, fields, /*is_create=*/true); },
+                [&] {
+                    return apply_collection_fields (db, folder, fields, /*is_create=*/true);
+                },
                 "collection", temp)) {
                 result = *err;
                 return;
             }
             if (!item.contains ("order") || item["order"].is_null ()) {
-                auto slot    = next_folder_order.try_emplace (parent, folder.order).first;
+                auto slot = next_folder_order.try_emplace (parent, folder.order).first;
                 folder.order = slot->second++;
             }
             batch.new_collections.push_back (std::move (folder));
@@ -868,7 +884,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             }
             if (item.contains ("examples")) {
                 result = item_error (400,
-                "Invalid 'examples': a sync writes the responses the document it stores "
+                "Invalid 'examples': a sync writes the responses the document "
+                "it stores "
                 "documents; omit it",
                 temp);
                 return;
@@ -878,18 +895,20 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             std::string owner;
             if (item.contains ("collectionTempId") && !item["collectionTempId"].is_null ()) {
                 if (!item["collectionTempId"].is_string ()) {
-                    result = item_error (400, "Invalid 'collectionTempId': must be a string", temp);
+                    result = item_error (
+                    400, "Invalid 'collectionTempId': must be a string", temp);
                     return;
                 }
                 const auto named = item["collectionTempId"].get<std::string> ();
                 if (!claimed.collections.contains (named)) {
-                    result = item_error (400,
-                    "Unknown collectionTempId '" + named + "'", temp);
+                    result =
+                    item_error (400, "Unknown collectionTempId '" + named + "'", temp);
                     return;
                 }
                 if (item.contains ("collectionId")) {
                     result = item_error (400,
-                    "Invalid request: send either 'collectionTempId' (a folder in this "
+                    "Invalid request: send either 'collectionTempId' (a folder "
+                    "in this "
                     "payload) or 'collectionId' (one already stored), not both",
                     temp);
                     return;
@@ -900,7 +919,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             } else {
                 if (!item.contains ("collectionId") || !item["collectionId"].is_string ()) {
                     result = item_error (400,
-                    "Invalid 'collectionId': must name a collection beneath the one being "
+                    "Invalid 'collectionId': must name a collection beneath "
+                    "the one being "
                     "synced, or use 'collectionTempId'",
                     temp);
                     return;
@@ -929,7 +949,9 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             row.created_at = now;
             row.updated_at = now;
             if (auto err = apply_item_fields (
-                [&] { return apply_request_fields (db, row, fields, /*is_create=*/true); },
+                [&] {
+                    return apply_request_fields (db, row, fields, /*is_create=*/true);
+                },
                 "request", temp)) {
                 result = *err;
                 return;
@@ -947,14 +969,15 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
              */
             if (row.spec_operation) {
                 if (auto rows = documented.rows_for (*row.spec_operation)) {
-                    if (auto err = build_example_rows (*rows, row.id, temp, /*base_order=*/0,
-                        now, batch.examples, /*surviving=*/0)) {
+                    if (auto err = build_example_rows (*rows, row.id, temp,
+                        /*base_order=*/0, now, batch.examples, /*surviving=*/0)) {
                         result = *err;
                         return;
                     }
                 } else {
                     result = item_error (400,
-                    "Invalid 'specOperation': the document being synced declares no such "
+                    "Invalid 'specOperation': the document being synced "
+                    "declares no such "
                     "operation, so there is nothing to create for it",
                     temp);
                     return;
@@ -968,19 +991,20 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         for (size_t i = 0; i < updates->size (); ++i) {
             const auto& item = (*updates)[i];
             if (!item.is_object ()) {
-                result = body_error ("Invalid update at index " + std::to_string (i) +
-                ": must be an object");
+                result = body_error ("Invalid update at index " +
+                std::to_string (i) + ": must be an object");
                 return;
             }
             if (!item.contains ("id") || !item["id"].is_string () ||
             item["id"].get<std::string> ().empty ()) {
-                result = body_error ("Invalid update at index " + std::to_string (i) +
-                ": 'id' must be the id of a stored request");
+                result = body_error ("Invalid update at index " +
+                std::to_string (i) + ": 'id' must be the id of a stored request");
                 return;
             }
             const std::string id = item["id"].get<std::string> ();
             if (!touched.insert (id).second) {
-                result = item_error (400, "Request '" + id + "' appears twice in this sync", id);
+                result = item_error (
+                400, "Request '" + id + "' appears twice in this sync", id);
                 return;
             }
             auto stored = db.get_request (id);
@@ -998,7 +1022,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             }
             if (item.contains ("collectionId")) {
                 result = item_error (400,
-                "Invalid 'collectionId': a sync updates a request where it is; move it with "
+                "Invalid 'collectionId': a sync updates a request where it is; "
+                "move it with "
                 "PUT /requests/:id",
                 id);
                 return;
@@ -1007,7 +1032,9 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             vayu::db::Request row = *stored;
             row.updated_at        = now;
             if (auto err = apply_item_fields (
-                [&] { return apply_request_fields (db, row, item, /*is_create=*/false); },
+                [&] {
+                    return apply_request_fields (db, row, item, /*is_create=*/false);
+                },
                 "request", id)) {
                 result = *err;
                 return;
@@ -1026,9 +1053,12 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             decision != item.end () && !decision->is_null ()) {
                 if (!decision->is_boolean ()) {
                     result = item_error (400,
-                    "Invalid 'examples': must be true to refresh this request's imported "
-                    "examples from the document being synced, or absent to leave them - a "
-                    "sync writes the responses the document documents, not rows you state",
+                    "Invalid 'examples': must be true to refresh this "
+                    "request's imported "
+                    "examples from the document being synced, or absent to "
+                    "leave them - a "
+                    "sync writes the responses the document documents, not "
+                    "rows you state",
                     id);
                     return;
                 }
@@ -1037,7 +1067,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             if (refresh) {
                 if (!row.spec_operation) {
                     result = item_error (400,
-                    "Invalid 'examples': this request records no operation, so the document "
+                    "Invalid 'examples': this request records no operation, so "
+                    "the document "
                     "documents no responses for it",
                     id);
                     return;
@@ -1045,7 +1076,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
                 const auto rows = documented.rows_for (*row.spec_operation);
                 if (!rows) {
                     result = item_error (400,
-                    "Invalid 'examples': the document being synced declares no operation "
+                    "Invalid 'examples': the document being synced declares no "
+                    "operation "
                     "this request records, so it documents no responses for it",
                     id);
                     return;
@@ -1054,8 +1086,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
                 db.get_suppressed_request_examples (id));
                 batch.deleted_examples.insert (batch.deleted_examples.end (),
                 plan.replaced.begin (), plan.replaced.end ());
-                if (auto err = build_example_rows (*rows, id, id, plan.base_order, now,
-                    batch.examples, plan.surviving, plan.suppressed_statuses)) {
+                if (auto err = build_example_rows (*rows, id, id, plan.base_order,
+                    now, batch.examples, plan.surviving, plan.suppressed_statuses)) {
                     result = *err;
                     return;
                 }
@@ -1067,13 +1099,14 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         for (size_t i = 0; i < deletes->size (); ++i) {
             const auto& item = (*deletes)[i];
             if (!item.is_string () || item.get<std::string> ().empty ()) {
-                result = body_error ("Invalid delete at index " + std::to_string (i) +
-                ": must be the id of a stored request");
+                result = body_error ("Invalid delete at index " +
+                std::to_string (i) + ": must be the id of a stored request");
                 return;
             }
             const std::string id = item.get<std::string> ();
             if (!touched.insert (id).second) {
-                result = item_error (400, "Request '" + id + "' appears twice in this sync", id);
+                result = item_error (
+                400, "Request '" + id + "' appears twice in this sync", id);
                 return;
             }
             auto stored = db.get_request (id);
@@ -1104,21 +1137,17 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         }
 
         // ---- the binding moves with the rows ----------------------------------
-        batch.binding            = *root;
-        batch.binding.openapi    = nlohmann::json{ { "specId", batch.spec.id },
-            { "specHash", batch.spec.hash },
-            { "syncedAt", now } }
-                                   .dump ();
+        batch.binding         = *root;
+        batch.binding.openapi = nlohmann::json{
+            { "specId", batch.spec.id }, { "specHash", batch.spec.hash }, { "syncedAt", now }
+        }.dump ();
         batch.binding.updated_at = now;
 
         db.spec_sync_apply (batch);
         nlohmann::json response{ { "idMap", claimed.real },
-            { "specId", batch.spec.id },
-            { "specHash", batch.spec.hash },
-            { "syncedAt", now },
-            { "created", batch.created.size () },
-            { "updated", batch.updated.size () },
-            { "deleted", batch.deleted.size () } };
+            { "specId", batch.spec.id }, { "specHash", batch.spec.hash },
+            { "syncedAt", now }, { "created", batch.created.size () },
+            { "updated", batch.updated.size () }, { "deleted", batch.deleted.size () } };
         if (!policy.empty ()) {
             // What the policy declined, for a caller that stated no ticks and so
             // cannot see what it did not tick. Absent for an explicit payload,
@@ -1155,21 +1184,22 @@ void register_spec_sync_routes (RouteContext& ctx) {
      * for an unknown collection, 409 when a row the diff was computed against
      * has since gone. Nothing is written unless all of it is.
      */
-    ctx.server.Post ("/specs/sync", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    ctx.server.Post (
+    "/specs/sync", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         nlohmann::json body;
         try {
             body = nlohmann::json::parse (req.body);
         } catch (const std::exception& e) {
-            vayu::utils::log_warning ("POST /specs/sync - invalid JSON body: " +
-            std::string (e.what ()));
+            vayu::utils::log_warning (
+            "POST /specs/sync - invalid JSON body: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON body");
             return;
         }
         try {
             auto [status, response] = spec_sync_response (ctx.db, body);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /specs/sync - " + std::to_string (status) + ": " +
-                error_message_of (response));
+                vayu::utils::log_warning ("POST /specs/sync - " +
+                std::to_string (status) + ": " + error_message_of (response));
             } else {
                 vayu::utils::log_info ("POST /specs/sync - applied to spec " +
                 response["specId"].get<std::string> () + ": +" +
@@ -1184,10 +1214,12 @@ void register_spec_sync_routes (RouteContext& ctx) {
             // is the narrow window a retry after a busy database opens. Still a
             // conflict rather than a 500: nothing was written, and re-checking is
             // exactly what the client should do.
-            vayu::utils::log_warning ("POST /specs/sync - 409: " + std::string (e.what ()));
+            vayu::utils::log_warning (
+            "POST /specs/sync - 409: " + std::string (e.what ()));
             send_error (res, 409, e.what ());
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /specs/sync - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "POST /specs/sync - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

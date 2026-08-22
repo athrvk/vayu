@@ -84,7 +84,8 @@ describe_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     }
     const auto content = content_field->get<std::string> ();
     if (content.empty ()) {
-        return body_error ("Invalid 'content': an empty document is not a spec");
+        return body_error (
+        "Invalid 'content': an empty document is not a spec");
     }
 
     // The cap a store of these bytes would apply, read the same way
@@ -102,18 +103,20 @@ describe_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
         return body_error ("Invalid 'content': " + read.error);
     }
 
-    const vayu::core::DocumentDescription described = vayu::core::describe_document (read.root);
+    const vayu::core::DocumentDescription described =
+    vayu::core::describe_document (read.root);
     if (!described.is_spec ()) {
         // A readable file that is not a contract - a Postman export, a config,
         // a document whose `openapi` is a version this does not read. Named as
         // what is missing rather than as "unrecognised", because the caller can
         // act on that: it is the key a spec declares itself with.
-        return body_error ("This document declares neither 'openapi': '3.x' nor "
-                           "'swagger': '2.0', so it is not an OpenAPI document.");
+        return body_error (
+        "This document declares neither 'openapi': '3.x' nor "
+        "'swagger': '2.0', so it is not an OpenAPI document.");
     }
     if (described.operations.size () > vayu::core::constants::spec_document::MAX_OPERATIONS) {
-        return body_error ("Spec declares " + std::to_string (described.operations.size ()) +
-        " operations, over the limit of " +
+        return body_error ("Spec declares " +
+        std::to_string (described.operations.size ()) + " operations, over the limit of " +
         std::to_string (vayu::core::constants::spec_document::MAX_OPERATIONS));
     }
 
@@ -123,8 +126,8 @@ describe_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     }
 
     return { 200,
-        nlohmann::json{ { "format", described.format }, { "title", described.title },
-        { "operations", std::move (operations) } } };
+        nlohmann::json{ { "format", described.format },
+        { "title", described.title }, { "operations", std::move (operations) } } };
 }
 
 void register_spec_describe_routes (RouteContext& ctx) {
@@ -137,14 +140,14 @@ void register_spec_describe_routes (RouteContext& ctx) {
      * Returns: {format, title, operations}, or 400 for bytes that are over the
      * size cap, cannot be read, or are not an OpenAPI document.
      */
-    ctx.server.Post (
-    "/specs/describe", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    ctx.server.Post ("/specs/describe",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
             auto json           = nlohmann::json::parse (req.body);
             auto [status, body] = describe_spec_response (ctx.db, json);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /specs/describe - " + std::to_string (status) +
-                ": " + error_message_of (body));
+                vayu::utils::log_warning ("POST /specs/describe - " +
+                std::to_string (status) + ": " + error_message_of (body));
             } else {
                 vayu::utils::log_info ("POST /specs/describe - " +
                 body["format"].get<std::string> () + ", " +
@@ -153,7 +156,8 @@ void register_spec_describe_routes (RouteContext& ctx) {
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /specs/describe - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "POST /specs/describe - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });

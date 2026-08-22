@@ -47,8 +47,8 @@
  * Delete this when the engine's minimum GCC carries `[[gnu::no_dangling]]`
  * (GCC 14), which states the fact at the function instead of at its callers.
  */
-#define VAYU_IGNORE_FALSE_DANGLING_REFERENCE                                             \
-    _Pragma ("GCC diagnostic push")                                                      \
+#define VAYU_IGNORE_FALSE_DANGLING_REFERENCE \
+    _Pragma ("GCC diagnostic push")          \
     _Pragma ("GCC diagnostic ignored \"-Wdangling-reference\"")
 
 /**
@@ -62,8 +62,8 @@
  * is worth keeping for the cases it would catch in our own code - which is
  * exactly why these are suppressed one function at a time.
  */
-#define VAYU_IGNORE_FALSE_NULL_DEREFERENCE                                               \
-    _Pragma ("GCC diagnostic push")                                                      \
+#define VAYU_IGNORE_FALSE_NULL_DEREFERENCE \
+    _Pragma ("GCC diagnostic push")        \
     _Pragma ("GCC diagnostic ignored \"-Wnull-dereference\"")
 
 /**
@@ -78,9 +78,9 @@
  * `-Wstringop-overflow` depending on which pass reaches it first, so silencing
  * one alone just moves the warning to the other spelling.
  */
-#define VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS                                           \
-    _Pragma ("GCC diagnostic push")                                                      \
-    _Pragma ("GCC diagnostic ignored \"-Warray-bounds\"")                                \
+#define VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS            \
+    _Pragma ("GCC diagnostic push")                       \
+    _Pragma ("GCC diagnostic ignored \"-Warray-bounds\"") \
     _Pragma ("GCC diagnostic ignored \"-Wstringop-overflow\"")
 
 /// Ends the region opened by any `VAYU_IGNORE_FALSE_*` above.

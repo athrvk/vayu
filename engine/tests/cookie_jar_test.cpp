@@ -188,11 +188,11 @@ TEST (CookieJarParse, RefusesLinesItCannotTrust) {
     // cookie that never expires.
     EXPECT_FALSE (parse_cookie_line (
     netscape_line ("example.com", "FALSE", "/", "FALSE", "never", "session", "abc"))
-                  .has_value ());
+    .has_value ());
     // No name: no reader can address it.
     EXPECT_FALSE (parse_cookie_line (
     netscape_line ("example.com", "FALSE", "/", "FALSE", "0", "", "abc"))
-                  .has_value ());
+    .has_value ());
 }
 
 // ============================================================================

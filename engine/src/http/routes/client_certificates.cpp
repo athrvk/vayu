@@ -140,15 +140,15 @@ std::string cert_format_valid_list () {
  * because "PKCS12" was not the word we wanted is a handshake failure against
  * the endpoint later.
  */
-std::optional<std::pair<int, nlohmann::json>>
-apply_cert_format_field (const nlohmann::json& json,
+std::optional<std::pair<int, nlohmann::json>> apply_cert_format_field (
+const nlohmann::json& json,
 std::string& out,
 std::string_view cert_path,
 bool is_create) {
     const auto seed = [&] () {
         const auto sniffed = vayu::http::sniff_client_cert_format (cert_path);
-        out = sniffed ? vayu::http::to_string (*sniffed) :
-                        vayu::http::to_string (vayu::http::ClientCertFormat::Pem);
+        out                = sniffed ? vayu::http::to_string (*sniffed) :
+                                       vayu::http::to_string (vayu::http::ClientCertFormat::Pem);
     };
     if (!json.contains ("certFormat")) {
         if (is_create) {
@@ -162,13 +162,14 @@ bool is_create) {
     }
     if (!json["certFormat"].is_string ()) {
         return std::make_pair (400,
-        error_body (400, "Invalid 'certFormat': must be a string. Valid values: " +
-        cert_format_valid_list ()));
+        error_body (400,
+        "Invalid 'certFormat': must be a string. Valid values: " + cert_format_valid_list ()));
     }
     const std::string candidate = json["certFormat"].get<std::string> ();
     if (!vayu::http::client_cert_format_from_string (candidate)) {
         return std::make_pair (400,
-        error_body (400, "Invalid 'certFormat': '" + candidate +
+        error_body (400,
+        "Invalid 'certFormat': '" + candidate +
         "' is not a certificate format. Valid values: " + cert_format_valid_list ()));
     }
     out = candidate;
@@ -212,8 +213,9 @@ bool is_create) {
             c.key_path.clear ();
         } else if (!json["keyPath"].is_string ()) {
             return std::make_pair (400,
-            error_body (400, "Invalid 'keyPath': must be a string, or null for a "
-                             "PKCS#12 entry that carries its own key"));
+            error_body (400,
+            "Invalid 'keyPath': must be a string, or null for a "
+            "PKCS#12 entry that carries its own key"));
         } else {
             c.key_path = json["keyPath"].get<std::string> ();
         }
@@ -232,12 +234,12 @@ bool is_create) {
     const auto format = vayu::http::client_cert_format_from_string (c.cert_format);
     if (!format) {
         return std::make_pair (400,
-        error_body (400, "Stored 'certFormat' is '" + c.cert_format +
-        "', which is not a certificate format - set it explicitly. Valid values: " +
+        error_body (400,
+        "Stored 'certFormat' is '" + c.cert_format + "', which is not a certificate format - set it explicitly. Valid values: " +
         cert_format_valid_list ()));
     }
-    if (const auto rejection =
-        vayu::http::client_cert_rejection (c.host, c.port, *format, c.cert_path, c.key_path)) {
+    if (const auto rejection = vayu::http::client_cert_rejection (
+        c.host, c.port, *format, c.cert_path, c.key_path)) {
         return std::make_pair (
         400, error_body (400, "Invalid client certificate: " + *rejection));
     }

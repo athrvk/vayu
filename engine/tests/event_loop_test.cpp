@@ -16,8 +16,7 @@
 #include "vayu/http/thread_pool.hpp"
 
 namespace {
-const std::string INVALID_URL =
-"http://127.0.0.1:1/"; // Port 1 - connection refused (fast fail)
+const std::string INVALID_URL = "http://127.0.0.1:1/"; // Port 1 - connection refused (fast fail)
 
 class MockServer {
     public:
@@ -553,6 +552,7 @@ TEST_F (EventLoopTest, TimingIdentity) {
     const auto& t = result.value ().timing;
     EXPECT_GE (t.total_ms, 0.0);
     EXPECT_GE (t.queue_wait_ms, 0.0);
-    EXPECT_GT (t.wire_ms, 0.0) << "wire_ms must be populated (CURLINFO_TOTAL_TIME)";
+    EXPECT_GT (t.wire_ms, 0.0)
+    << "wire_ms must be populated (CURLINFO_TOTAL_TIME)";
     EXPECT_NEAR (t.total_ms, t.wire_ms + t.queue_wait_ms, 1.0);
 }

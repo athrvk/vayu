@@ -117,7 +117,7 @@ TEST_F (LoadStrategyTest, RunContextHasRefillPrimitives) {
 // Closed-loop: constant_concurrency N=50 against a 500ms endpoint must hold
 // ~50 in flight, NOT climb to the old ~900. peak_in_flight is the ground truth.
 TEST_F (LoadStrategyTest, ConstantConcurrencyHoldsTargetInFlight) {
-    const size_t N = 50;
+    const size_t N        = 50;
     nlohmann::json config = {
         { "mode", "constant_concurrency" },
         { "duration", "2s" },
@@ -154,7 +154,7 @@ TEST_F (LoadStrategyTest, ConstantConcurrencyHoldsTargetInFlight) {
 
 // Closed-loop ramp: in-flight tracks the ramp line and never overshoots target.
 TEST_F (LoadStrategyTest, RampUpTracksTargetWithoutOvershoot) {
-    const size_t TARGET = 50;
+    const size_t TARGET   = 50;
     nlohmann::json config = {
         { "mode", "ramp_up" },
         { "duration", "3s" },
@@ -220,8 +220,8 @@ TEST_F (LoadStrategyTest, RampUpDurationShorterThanRampStillRuns) {
 // N kept within the httplib test-mock thread pool so /fast completes promptly;
 // stop(false) skips the drain (peak is already captured during execute).
 TEST_F (LoadStrategyTest, IterationsSubmitsExactlyMAndHoldsN) {
-    const size_t M = 50;
-    const size_t N = 10;
+    const size_t M        = 50;
+    const size_t N        = 10;
     nlohmann::json config = {
         { "mode", "iterations" },
         { "iterations", M },
@@ -245,7 +245,8 @@ TEST_F (LoadStrategyTest, IterationsSubmitsExactlyMAndHoldsN) {
     context->event_loop->stop (false);
 
     EXPECT_EQ (context->requests_sent.load (), M) << "did not submit exactly M";
-    EXPECT_LE (context->peak_in_flight.load (), N + 10) << "exceeded concurrency N";
+    EXPECT_LE (context->peak_in_flight.load (), N + 10)
+    << "exceeded concurrency N";
 }
 
 // Fast endpoint: a fixed-interval poll would let in-flight collapse between
@@ -276,7 +277,7 @@ TEST_F (LoadStrategyTest, FastEndpointHoldsMeanInFlight) {
     strategy->execute (context, db, request);
     context->event_loop->stop (false);
 
-    size_t completed     = context->metrics_collector->total_requests ();
+    size_t completed = context->metrics_collector->total_requests ();
     double avg_latency_s = context->metrics_collector->average_latency () / 1000.0;
     double throughput    = static_cast<double> (completed) / DUR_S;
     double mean_inflight = throughput * avg_latency_s; // Little's Law
@@ -330,7 +331,8 @@ TEST_F (LoadStrategyTest, StopWakesControllerPromptly) {
     stopper.join ();
     context->event_loop->stop (false);
 
-    EXPECT_LT (elapsed_ms, 2000) << "controller did not observe should_stop promptly";
+    EXPECT_LT (elapsed_ms, 2000)
+    << "controller did not observe should_stop promptly";
 }
 
 // The collector's percentiles expose non-zero max/min; run_manager persists
@@ -353,7 +355,9 @@ TEST_F (LoadStrategyTest, PercentilesExposeNonZeroMax) {
 // with headers, so assert a lower bound, not equality).
 TEST_F (LoadStrategyTest, CapturesReceivedBytes) {
     nlohmann::json config = {
-        { "mode", "iterations" }, { "iterations", 20 }, { "concurrency", 5 },
+        { "mode", "iterations" },
+        { "iterations", 20 },
+        { "concurrency", 5 },
     };
     auto context = std::make_shared<vayu::core::RunContext> ("test-bytes", config);
     vayu::http::EventLoopConfig loop_config;
@@ -803,10 +807,8 @@ TEST_F (LoadStrategyTest, RunContextResolvesTheSamplingConfigOnce) {
 // and the outlier below stops reaching the slow store at all.
 TEST_F (LoadStrategyTest, OutliersAndExemplarsCaptureBodiesButPlainSamplesDoNot) {
     nlohmann::json config = {
-        { "mode", "constant_rps" },
-        { "slow_threshold_ms", 100 },
-        { "save_timing_breakdown", true },
-        { "success_sample_rate", 1 }, // every completion is sampled
+        { "mode", "constant_rps" }, { "slow_threshold_ms", 100 },
+        { "save_timing_breakdown", true }, { "success_sample_rate", 1 }, // every completion is sampled
     };
     auto context = std::make_shared<vayu::core::RunContext> ("test-capture", config);
     vayu::db::Database db (TEST_DB_PATH);
@@ -818,7 +820,7 @@ TEST_F (LoadStrategyTest, OutliersAndExemplarsCaptureBodiesButPlainSamplesDoNot)
     for (size_t i = 0; i < quota; ++i) {
         vayu::core::handle_result (context, db, completion (5.0));
     }
-    vayu::core::handle_result (context, db, completion (5.0));   // past the quota
+    vayu::core::handle_result (context, db, completion (5.0)); // past the quota
     vayu::core::handle_result (context, db, completion (500.0)); // outlier
 
     // The outlier is charged to the slow budget, exactly as it was before
@@ -827,7 +829,8 @@ TEST_F (LoadStrategyTest, OutliersAndExemplarsCaptureBodiesButPlainSamplesDoNot)
     const auto& slow = context->metrics_collector->slow_results ();
     ASSERT_EQ (slow.size (), 1u)
     << "the outlier was rerouted out of the slow store by the exemplar bucket";
-    ASSERT_TRUE (slow[0].capture.has_value ()) << "an outlier must carry its body";
+    ASSERT_TRUE (slow[0].capture.has_value ())
+    << "an outlier must carry its body";
 
     // Every sampled fast completion is stored; the first `quota` of them
     // claimed an exemplar and kept a body, the one past the quota did not.
@@ -904,11 +907,11 @@ vayu::db::Database& db) {
     request.timeout_ms = 30000;
 
     context->is_running = true;
-    context->start_time_ms =
-    std::chrono::duration_cast<std::chrono::milliseconds> (
+    context->start_time_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
-    .count ();
-    std::thread metrics ([context, &db] () { vayu::core::collect_metrics (context, &db); });
+                             .count ();
+    std::thread metrics (
+    [context, &db] () { vayu::core::collect_metrics (context, &db); });
 
     auto strategy = vayu::core::LoadStrategy::create (config);
     EXPECT_NE (strategy, nullptr);
@@ -951,9 +954,11 @@ TEST_F (LoadStrategyTest, CapacityStopsOnTheSloAgainstASlowEndpoint) {
     EXPECT_EQ (summary.stop_reason, "slo_exceeded");
     ASSERT_TRUE (summary.knee.has_value ());
     EXPECT_GT (summary.knee->p99_ms, summary.slo_ms);
-    EXPECT_EQ (summary.knee->concurrency, 4u) << "the search should not have climbed";
+    EXPECT_EQ (summary.knee->concurrency, 4u)
+    << "the search should not have climbed";
     EXPECT_FALSE (summary.max_healthy.has_value ())
-    << "no level held the budget, so there is no sustainable capacity to report";
+    << "no level held the budget, so there is no sustainable capacity to "
+       "report";
     // The breach plus the re-measure that confirmed it.
     EXPECT_EQ (summary.levels.size (), 2u);
 }
@@ -963,12 +968,9 @@ TEST_F (LoadStrategyTest, CapacityStopsOnTheSloAgainstASlowEndpoint) {
 // knee it never observed.
 TEST_F (LoadStrategyTest, CapacityStopsAtTheCapAgainstAFastEndpoint) {
     nlohmann::json config = {
-        { "mode", "capacity" },
-        { "duration", "30s" },
-        { "stepDuration", "1s" },
+        { "mode", "capacity" }, { "duration", "30s" }, { "stepDuration", "1s" },
         { "sloMs", 2000 }, // far above anything /fast can produce
-        { "startConcurrency", 2 },
-        { "concurrency", 3 }, // one step-up and the search is at its ceiling
+        { "startConcurrency", 2 }, { "concurrency", 3 }, // one step-up and the search is at its ceiling
     };
 
     vayu::db::Database db (TEST_DB_PATH);
@@ -996,8 +998,8 @@ TEST_F (LoadStrategyTest, CapacityStopsOnItsDeadline) {
     };
 
     vayu::db::Database db (TEST_DB_PATH);
-    const auto summary =
-    run_capacity_search (config, mock_server->fast_url (), "test-capacity-deadline", db);
+    const auto summary = run_capacity_search (
+    config, mock_server->fast_url (), "test-capacity-deadline", db);
 
     EXPECT_EQ (summary.stop_reason, "deadline");
     // One window closed before the clock ran out; the partial second one is not
@@ -1038,20 +1040,22 @@ TEST_F (LoadStrategyTest, PhaseHistogramsEscapeTheRetentionSample) {
         { "save_timing_breakdown", true },
         { "success_sample_rate", 10 },
     };
-    auto context = std::make_shared<vayu::core::RunContext> ("test-phase-escape", config);
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-phase-escape", config);
     vayu::db::Database db (TEST_DB_PATH);
 
     // The sampler keeps completions 0, 10, 20, ... - the fast ones.
     for (int i = 0; i < 500; ++i) {
-        vayu::core::handle_result (context, db,
-        completion_with_ttfb (10.0, i % 10 == 0 ? 5.0 : 200.0));
+        vayu::core::handle_result (
+        context, db, completion_with_ttfb (10.0, i % 10 == 0 ? 5.0 : 200.0));
     }
 
     EXPECT_EQ (context->metrics_collector->success_results ().size (), 50u);
 
     auto phases = context->metrics_collector->phase_percentiles ();
     ASSERT_TRUE (phases.has_value ());
-    const auto& ttfb = (*phases)[static_cast<size_t> (vayu::core::TimingPhase::FirstByte)];
+    const auto& ttfb =
+    (*phases)[static_cast<size_t> (vayu::core::TimingPhase::FirstByte)];
     EXPECT_EQ (ttfb.count, 500u);
     EXPECT_NEAR (ttfb.p50, 200.0, 1.0);
     // The retained sample is 90% of the way off; that gap is the feature.

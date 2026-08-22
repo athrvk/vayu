@@ -1580,8 +1580,8 @@ TEST_F (ScriptEngineTest, ScriptWritingAFormDataBodyIsRefusedRatherThanDropped) 
 namespace {
 
 Body form_data_body_with_a_file (const std::string& src) {
-    Body body    = form_data_body ();
-    body.fields  = { { "caption", "my avatar", true } };
+    Body body   = form_data_body ();
+    body.fields = { { "caption", "my avatar", true } };
     FormField up;
     up.key  = "avatar";
     up.type = FormFieldType::File;
@@ -1605,9 +1605,9 @@ TEST_F (ScriptEngineTest, ScriptTellsAFilePartFromAnEmptyTextField) {
     // text part below produces, so a script could not tell them apart.
     EXPECT_EQ (request.headers["X-Seen-Body"], "caption=my%20avatar&avatar=@portrait.png");
 
-    Request text_request     = request;
-    text_request.headers     = {};
-    text_request.body        = form_data_body ();
+    Request text_request = request;
+    text_request.headers = {};
+    text_request.body    = form_data_body ();
     text_request.body.fields = { { "caption", "my avatar", true }, { "avatar", "", true } };
 
     auto text_result = engine.execute_prerequest (R"JS(
@@ -1621,7 +1621,8 @@ TEST_F (ScriptEngineTest, ScriptTellsAFilePartFromAnEmptyTextField) {
 }
 
 TEST_F (ScriptEngineTest, ScriptSeesTheFilenameAndNotTheLocalPath) {
-    request.body = form_data_body_with_a_file ("/home/ada/private/portrait.png");
+    request.body =
+    form_data_body_with_a_file ("/home/ada/private/portrait.png");
 
     auto result = engine.execute_prerequest (R"JS(
         pm.request.headers['X-Has-Path'] = String(pm.request.body.indexOf('/home/ada') !== -1);
@@ -3463,10 +3464,10 @@ TEST_F (ScriptEngineTest, HeaderNamesDifferingOnlyInCaseAreRejected) {
 // an empty string - a script's `typeof` check is the whole point of the
 // distinction.
 TEST_F (ScriptEngineTest, PmInfoExposesTheFieldsThatWereSet) {
-    auto ctx          = ScriptContext::for_test (request, response);
-    ctx.environment   = &env;
-    ctx.request_id    = "req_42";
-    ctx.request_name  = "Fetch users";
+    auto ctx         = ScriptContext::for_test (request, response);
+    ctx.environment  = &env;
+    ctx.request_id   = "req_42";
+    ctx.request_name = "Fetch users";
 
     auto result = engine.execute (R"JS(
         pm.test("identity", function() {
@@ -3910,7 +3911,7 @@ TEST_F (ScriptEngineTest, IterationDataGetOnAnUnknownKeyIsUndefined) {
 TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
     const nlohmann::json row{ { "userId", "1001" }, { "city", "Portland, OR" },
         { "quantity", 3 }, { "active", true } };
-    auto ctx = data_test (request, response, env, row);
+    auto ctx      = data_test (request, response, env, row);
     env["userId"] = { "an-environment-variable", true };
 
     auto result = engine.execute (R"JS(
@@ -4060,7 +4061,8 @@ TEST_F (ScriptEngineTest, IterationDataHasAnswersPresenceIncludingANullColumn) {
 TEST_F (ScriptEngineTest, IterationDataHasThrowsOutsideADataDrivenRun) {
     const nlohmann::json row{ { "username", "ada" } };
     auto first = data_test (request, response, env, row);
-    auto first_result = engine.execute ("globalThis.stashed = pm.iterationData;", first);
+    auto first_result =
+    engine.execute ("globalThis.stashed = pm.iterationData;", first);
     ASSERT_TRUE (first_result.success) << first_result.error_message;
 
     auto second_result = engine.execute_test (
@@ -4068,7 +4070,8 @@ TEST_F (ScriptEngineTest, IterationDataHasThrowsOutsideADataDrivenRun) {
 
     EXPECT_FALSE (second_result.success);
     // Named, so the message points at the call the script actually made.
-    EXPECT_NE (second_result.error_message.find ("pm.iterationData.has is not available here"),
+    EXPECT_NE (second_result.error_message.find (
+               "pm.iterationData.has is not available here"),
     std::string::npos)
     << second_result.error_message;
 }
@@ -4190,12 +4193,13 @@ TEST_F (ScriptEngineTest, AStashedIterationDataRefusesOnceTheRowIsGone) {
 // either of those was told to look for a data set that was never the point.
 TEST_F (ScriptEngineTest, AStashedIterationDataNamesEverySurfaceThatBindsARow) {
     const nlohmann::json row{ { "username", "ada" } };
-    auto first        = data_test (request, response, env, row);
-    auto first_result = engine.execute ("globalThis.stashed = pm.iterationData;", first);
+    auto first = data_test (request, response, env, row);
+    auto first_result =
+    engine.execute ("globalThis.stashed = pm.iterationData;", first);
     ASSERT_TRUE (first_result.success) << first_result.error_message;
 
-    auto second_result = engine.execute_test (
-    "globalThis.stashed.toObject();", request, response, env);
+    auto second_result =
+    engine.execute_test ("globalThis.stashed.toObject();", request, response, env);
 
     ASSERT_FALSE (second_result.success);
     for (const char* surface : { "collection run", "send-with-row", "load run" }) {

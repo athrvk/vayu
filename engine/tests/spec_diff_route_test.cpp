@@ -114,15 +114,15 @@ class SpecDiffRouteTest : public ::testing::Test {
     void bind (const std::string& collection_id, const std::string& spec_id) {
         auto [status, body] = routes::update_collection_response (*db_, collection_id,
         json{ { "openapi",
-            json{ { "specId", spec_id }, { "specHash", "seed" }, { "syncedAt", 1 } } } });
+        json{ { "specId", spec_id }, { "specHash", "seed" }, { "syncedAt", 1 } } } });
         EXPECT_EQ (status, 200) << body.dump ();
     }
 
     /** The request an import of `BOUND_DOC` would have created for `listPets`. */
     std::string create_listed_request (const std::string& collection_id) {
         auto [status, response] = routes::create_request_response (*db_,
-        json{ { "collectionId", collection_id }, { "name", "List pets" }, { "method", "GET" },
-        { "url", "{{baseUrl}}/pets" },
+        json{ { "collectionId", collection_id }, { "name", "List pets" },
+        { "method", "GET" }, { "url", "{{baseUrl}}/pets" },
         { "specOperation",
         json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
         EXPECT_EQ (status, 200) << response.dump ();
@@ -130,7 +130,8 @@ class SpecDiffRouteTest : public ::testing::Test {
     }
 
     json diff (const json& overrides = json::object ()) {
-        json body = { { "collectionId", root_ }, { "spec", json{ { "content", FETCHED_DOC } } } };
+        json body = { { "collectionId", root_ },
+            { "spec", json{ { "content", FETCHED_DOC } } } };
         body.update (overrides);
         auto [status, response] = routes::diff_spec_response (*db_, body);
         EXPECT_EQ (status, 200) << response.dump ();
@@ -209,8 +210,8 @@ TEST_F (SpecDiffRouteTest, SaysWhenTheDocumentIsByteForByteTheStoredOne) {
 TEST_F (SpecDiffRouteTest, CountsARequestThatCarriesNoOperationRatherThanReportingItRemoved) {
     create_listed_request (root_);
     auto [status, response] = routes::create_request_response (*db_,
-    json{ { "collectionId", root_ }, { "name", "hand written" }, { "method", "GET" },
-    { "url", "{{baseUrl}}/health" } });
+    json{ { "collectionId", root_ }, { "name", "hand written" },
+    { "method", "GET" }, { "url", "{{baseUrl}}/health" } });
     ASSERT_EQ (status, 200) << response.dump ();
 
     const json body = diff ();
@@ -221,10 +222,10 @@ TEST_F (SpecDiffRouteTest, CountsARequestThatCarriesNoOperationRatherThanReporti
 
 TEST_F (SpecDiffRouteTest, ReportsARequestWhoseOperationTheDocumentNoLongerDeclares) {
     auto [status, response] = routes::create_request_response (*db_,
-    json{ { "collectionId", root_ }, { "name", "Delete a pet" }, { "method", "DELETE" },
-    { "url", "{{baseUrl}}/pets/{{petId}}" },
-    { "specOperation", json{ { "operationId", "deletePet" }, { "method", "DELETE" },
-                      { "path", "/pets/{petId}" } } } });
+    json{ { "collectionId", root_ }, { "name", "Delete a pet" },
+    { "method", "DELETE" }, { "url", "{{baseUrl}}/pets/{{petId}}" },
+    { "specOperation",
+    json{ { "operationId", "deletePet" }, { "method", "DELETE" }, { "path", "/pets/{petId}" } } } });
     ASSERT_EQ (status, 200) << response.dump ();
     const std::string gone = response.value ("id", std::string{});
 
@@ -266,7 +267,8 @@ TEST_F (SpecDiffRouteTest, RefusesACollectionThatBindsNoDocument) {
     json{ { "collectionId", unbound }, { "spec", json{ { "content", FETCHED_DOC } } } });
 
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("not bound"), std::string::npos);
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("not bound"),
+    std::string::npos);
 }
 
 TEST_F (SpecDiffRouteTest, RefusesABindingNamingADocumentTheStoreNoLongerHolds) {
@@ -291,22 +293,26 @@ TEST_F (SpecDiffRouteTest, RefusesABindingNamingADocumentTheStoreNoLongerHolds) 
     json{ { "collectionId", root_ }, { "spec", json{ { "content", FETCHED_DOC } } } });
 
     EXPECT_EQ (status, 409);
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("spec_missing"), std::string::npos);
+    EXPECT_NE (
+    body["error"]["message"].get<std::string> ().find ("spec_missing"), std::string::npos);
 }
 
 TEST_F (SpecDiffRouteTest, RefusesAMissingCollectionADocumentThatWillNotReadAndAnEmptyOne) {
     {
         auto [status, body] = routes::diff_spec_response (*db_,
-        json{ { "collectionId", "col_nope" }, { "spec", json{ { "content", FETCHED_DOC } } } });
+        json{ { "collectionId", "col_nope" },
+        { "spec", json{ { "content", FETCHED_DOC } } } });
         EXPECT_EQ (status, 404) << body.dump ();
     }
     {
         // A document that is neither JSON nor YAML is a 400 that says where it
         // broke, not a comparison against nothing.
         auto [status, body] = routes::diff_spec_response (*db_,
-        json{ { "collectionId", root_ }, { "spec", json{ { "content", "{\"openapi\": [" } } } });
+        json{ { "collectionId", root_ },
+        { "spec", json{ { "content", "{\"openapi\": [" } } } });
         EXPECT_EQ (status, 400) << body.dump ();
-        EXPECT_NE (body["error"]["message"].get<std::string> ().find ("spec.content"),
+        EXPECT_NE (
+        body["error"]["message"].get<std::string> ().find ("spec.content"),
         std::string::npos);
     }
     {
@@ -315,7 +321,8 @@ TEST_F (SpecDiffRouteTest, RefusesAMissingCollectionADocumentThatWillNotReadAndA
         EXPECT_EQ (status, 400) << body.dump ();
     }
     {
-        auto [status, body] = routes::diff_spec_response (*db_, json{ { "collectionId", root_ } });
+        auto [status, body] =
+        routes::diff_spec_response (*db_, json{ { "collectionId", root_ } });
         EXPECT_EQ (status, 400) << body.dump ();
     }
 }
@@ -329,8 +336,8 @@ TEST_F (SpecDiffRouteTest, ComparesAgainstTheStoredDocumentRatherThanAnythingThe
      * up.
      */
     auto [status, response] = routes::create_request_response (*db_,
-    json{ { "collectionId", root_ }, { "name", "My own name for it" }, { "method", "GET" },
-    { "url", "{{baseUrl}}/pets" },
+    json{ { "collectionId", root_ }, { "name", "My own name for it" },
+    { "method", "GET" }, { "url", "{{baseUrl}}/pets" },
     { "specOperation",
     json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
     ASSERT_EQ (status, 200) << response.dump ();
@@ -359,10 +366,10 @@ TEST_F (SpecDiffRouteTest, ComparesAgainstTheStoredDocumentRatherThanAnythingThe
 TEST_F (SpecDiffRouteTest, MarksWhatASyncWouldWriteWithNothingTicked) {
     create_listed_request (root_);
     auto [status, response] = routes::create_request_response (*db_,
-    json{ { "collectionId", root_ }, { "name", "Delete a pet" }, { "method", "DELETE" },
-    { "url", "{{baseUrl}}/pets/{{petId}}" },
-    { "specOperation", json{ { "operationId", "deletePet" }, { "method", "DELETE" },
-                      { "path", "/pets/{petId}" } } } });
+    json{ { "collectionId", root_ }, { "name", "Delete a pet" },
+    { "method", "DELETE" }, { "url", "{{baseUrl}}/pets/{{petId}}" },
+    { "specOperation",
+    json{ { "operationId", "deletePet" }, { "method", "DELETE" }, { "path", "/pets/{petId}" } } } });
     ASSERT_EQ (status, 200) << response.dump ();
 
     const json body = diff ();
@@ -386,8 +393,8 @@ TEST_F (SpecDiffRouteTest, MarksAFieldSomebodyEditedAsNotSafeToWrite) {
      * reddens this, and an apply would take somebody's work with it.
      */
     auto [status, response] = routes::create_request_response (*db_,
-    json{ { "collectionId", root_ }, { "name", "My pets call" }, { "method", "GET" },
-    { "url", "{{baseUrl}}/pets" },
+    json{ { "collectionId", root_ }, { "name", "My pets call" },
+    { "method", "GET" }, { "url", "{{baseUrl}}/pets" },
     { "specOperation",
     json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
     ASSERT_EQ (status, 200) << response.dump ();

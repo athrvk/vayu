@@ -55,7 +55,8 @@ bool matches_exact (const std::string& pattern, int status) {
 
 /// Whether @p pattern is a range (`"2XX"`) covering @p status.
 bool matches_range (const std::string& pattern, int status) {
-    if (pattern.size () != 3 || std::isdigit (static_cast<unsigned char> (pattern[0])) == 0) {
+    if (pattern.size () != 3 ||
+    std::isdigit (static_cast<unsigned char> (pattern[0])) == 0) {
         return false;
     }
     if (upper (pattern.substr (1)) != "XX") {
@@ -115,7 +116,7 @@ std::optional<std::string> validate_operations_index (const nlohmann::json& oper
             }
         }
         if (auto id = row.find ("operationId");
-            id != row.end () && !id->is_null () && !id->is_string ()) {
+        id != row.end () && !id->is_null () && !id->is_string ()) {
             return "Invalid '" + at + ".operationId': must be a string or null";
         }
         auto responses = row.find ("responses");
@@ -123,13 +124,11 @@ std::optional<std::string> validate_operations_index (const nlohmann::json& oper
             continue;
         }
         if (!responses->is_array ()) {
-            return "Invalid '" + at +
-            ".responses': must be an array of declared status patterns";
+            return "Invalid '" + at + ".responses': must be an array of declared status patterns";
         }
         for (const auto& pattern : *responses) {
             if (!pattern.is_string () || pattern.get<std::string> ().empty ()) {
-                return "Invalid '" + at +
-                ".responses': every declared status pattern must be a non-empty string";
+                return "Invalid '" + at + ".responses': every declared status pattern must be a non-empty string";
             }
         }
     }
@@ -156,8 +155,8 @@ match_status_pattern (const std::vector<std::string>& patterns, int status) {
     return std::nullopt;
 }
 
-std::optional<std::vector<DeclaredOperation>>
-parse_declared_operations (const std::string& stored) {
+std::optional<std::vector<DeclaredOperation>> parse_declared_operations (
+const std::string& stored) {
     if (stored.empty ()) {
         return std::nullopt;
     }
@@ -190,7 +189,7 @@ parse_declared_operations (const std::string& stored) {
             operation.operation_id = id->get<std::string> ();
         }
         if (auto responses = row.find ("responses");
-            responses != row.end () && responses->is_array ()) {
+        responses != row.end () && responses->is_array ()) {
             for (const auto& pattern : *responses) {
                 if (pattern.is_string () && !pattern.get<std::string> ().empty ()) {
                     operation.responses.push_back (pattern.get<std::string> ());
@@ -211,7 +210,8 @@ OperationIndex::OperationIndex (const std::vector<DeclaredOperation>& declared) 
         if (!declared[i].operation_id.empty ()) {
             by_operation_id_.emplace (declared[i].operation_id, i);
         }
-        by_method_path_.emplace (method_path_key (declared[i].method, declared[i].path), i);
+        by_method_path_.emplace (
+        method_path_key (declared[i].method, declared[i].path), i);
     }
 }
 
@@ -233,7 +233,7 @@ std::optional<size_t> OperationIndex::resolve (const std::string& spec_operation
         const auto operation_id = id->get<std::string> ();
         if (!operation_id.empty ()) {
             if (auto found = by_operation_id_.find (operation_id);
-                found != by_operation_id_.end ()) {
+            found != by_operation_id_.end ()) {
                 return found->second;
             }
         }
@@ -244,7 +244,7 @@ std::optional<size_t> OperationIndex::resolve (const std::string& spec_operation
         return std::nullopt;
     }
     if (auto found = by_method_path_.find (method_path_key (method, path));
-        found != by_method_path_.end ()) {
+    found != by_method_path_.end ()) {
         return found->second;
     }
     return std::nullopt;
@@ -366,8 +366,8 @@ size_t undeclared_operation_requests) {
         // Braced initialization evaluates left to right, so both lists have
         // filled this by the time the row is read below.
         std::set<int> statuses_shown;
-        nlohmann::json row{ { "method", operation.method }, { "path", operation.path },
-            { "sent", seen.sent },
+        nlohmann::json row{ { "method", operation.method },
+            { "path", operation.path }, { "sent", seen.sent },
             { "statusesSeen", capped_statuses (statuses_seen, statuses_shown) },
             { "declaredHit", declared_hit }, { "declaredMissed", declared_missed },
             { "undeclaredSeen", capped_statuses (undeclared, statuses_shown) } };
@@ -394,7 +394,8 @@ size_t undeclared_operation_requests) {
         const bool covered = seen.sent > 0;
         operations_covered += covered ? 1 : 0;
         declared_total += operation.responses.size ();
-        declared_hit_total += static_cast<size_t> (std::count (hit.begin (), hit.end (), true));
+        declared_hit_total +=
+        static_cast<size_t> (std::count (hit.begin (), hit.end (), true));
         undeclared_total += undeclared.size ();
         transport_errors_total += seen.transport_errors;
         rows.push_back ({ std::move (row), covered });

@@ -89,8 +89,8 @@ TEST (ReadDataRow, NullIsNoRow) {
 }
 
 TEST (ReadDataRow, ObjectIsTheRow) {
-    auto row = read_data_row (json{ { "data", { { "id", "7" }, { "email", "a@b.c" } } } },
-    kDataBytes);
+    auto row = read_data_row (
+    json{ { "data", { { "id", "7" }, { "email", "a@b.c" } } } }, kDataBytes);
     ASSERT_TRUE (row.ok);
     ASSERT_TRUE (row.value.has_value ());
     EXPECT_EQ ((*row.value)["id"], "7");
@@ -109,7 +109,8 @@ TEST (ReadDataRow, EmptyObjectIsStillARow) {
 /// The near miss is an array - the shape `scenario.data` takes - so the message
 /// has to say that a single send binds one row rather than a set.
 TEST (ReadDataRow, ArrayIsRefusedAndSaysWhy) {
-    auto row = read_data_row (json{ { "data", json::array ({ json::object () }) } }, kDataBytes);
+    auto row =
+    read_data_row (json{ { "data", json::array ({ json::object () }) } }, kDataBytes);
     EXPECT_FALSE (row.ok);
     EXPECT_NE (row.error.find ("name/value pairs"), std::string::npos);
     EXPECT_NE (row.error.find ("collection run"), std::string::npos);
@@ -223,8 +224,7 @@ TEST (SendWithRowAuth, Oauth2DataTokenIsRefusedByName) {
     const json payload{ { "auth",
     { { "mode", "oauth2" },
     { "config",
-    { { "grantType", "client_credentials" },
-    { "clientId", "{{data.client}}" },
+    { { "grantType", "client_credentials" }, { "clientId", "{{data.client}}" },
     { "tokenUrl", "https://issuer.example/token" } } } } } };
 
     const auto plan = plan_send_row_auth (payload, true);
@@ -242,8 +242,7 @@ TEST (SendWithRowAuth, Oauth2WithoutADataTokenIsNotRefused) {
     const json payload{ { "auth",
     { { "mode", "oauth2" },
     { "config",
-    { { "grantType", "client_credentials" },
-    { "clientId", "static-client" },
+    { { "grantType", "client_credentials" }, { "clientId", "static-client" },
     { "tokenUrl", "https://issuer.example/token" } } } } } };
 
     const auto plan = plan_send_row_auth (payload, true);
@@ -266,8 +265,10 @@ class SendWithRowTest : public ::testing::Test {
     }
 
     /// One exchange, exactly as the route runs it: scripts bracket a real send.
-    vayu::http::routes::ExchangeOutcome
-    send (vayu::Request request, const json* row, const std::string& pre, const std::string& post) {
+    vayu::http::routes::ExchangeOutcome send (vayu::Request request,
+    const json* row,
+    const std::string& pre,
+    const std::string& post) {
         vayu::runtime::ScriptEngine engine;
         vayu::http::CookieJar jar;
         vayu::http::routes::ScriptVariableScopes scopes;
@@ -341,8 +342,8 @@ class SendWithRowTest : public ::testing::Test {
 /// a bind that reached the struct but not the wire would still be red.
 TEST_F (SendWithRowTest, BoundValuesReachTheWire) {
     vayu::Request request;
-    request.method = vayu::HttpMethod::POST;
-    request.url    = server_->url () + "/users/{{data.id}}";
+    request.method              = vayu::HttpMethod::POST;
+    request.url                 = server_->url () + "/users/{{data.id}}";
     request.headers["X-Tenant"] = "{{data.tenant}}";
     request.body.mode           = vayu::BodyMode::Json;
     request.body.content        = R"({"email":"{{data.email}}"})";
@@ -385,7 +386,8 @@ TEST_F (SendWithRowTest, MissingColumnFailsTheBindByName) {
 /// than to the tokens' text.
 TEST_F (SendWithRowTest, BasicCredentialsBindBeforeTheyAreEncoded) {
     const json payload{ { "method", "GET" }, { "url", server_->url () },
-        { "auth", { { "mode", "basic" }, { "username", "{{data.user}}" },
+        { "auth",
+        { { "mode", "basic" }, { "username", "{{data.user}}" },
         { "password", "{{data.pass}}" } } } };
     const json row{ { "user", "ada" }, { "pass", "s3cr3t:7" } };
 
@@ -420,8 +422,7 @@ TEST_F (SendWithRowTest, BearerCredentialBindsToTheRow) {
 
 TEST_F (SendWithRowTest, ApiKeyHeaderBindsBothHalves) {
     const json payload{ { "method", "GET" }, { "url", server_->url () },
-        { "auth", { { "mode", "apikey" }, { "key", "X-{{data.header}}" },
-        { "value", "{{data.key}}" } } } };
+        { "auth", { { "mode", "apikey" }, { "key", "X-{{data.header}}" }, { "value", "{{data.key}}" } } } };
     const json row{ { "header", "Tenant-Key" }, { "key", "k-7" } };
 
     auto prepared = build_with_row (payload, row);
@@ -438,8 +439,9 @@ TEST_F (SendWithRowTest, ApiKeyHeaderBindsBothHalves) {
 /// binding after the auth had been applied could not produce.
 TEST_F (SendWithRowTest, ApiKeyInQueryIsEncodedAfterTheBind) {
     const json payload{ { "method", "GET" }, { "url", server_->url () },
-        { "auth", { { "mode", "apikey" }, { "key", "token" },
-        { "value", "{{data.key}}" }, { "in", "query" } } } };
+        { "auth",
+        { { "mode", "apikey" }, { "key", "token" }, { "value", "{{data.key}}" },
+        { "in", "query" } } } };
     const json row{ { "key", "a b&c" } };
 
     auto prepared = build_with_row (payload, row);
@@ -455,8 +457,7 @@ TEST_F (SendWithRowTest, ApiKeyInQueryIsEncodedAfterTheBind) {
 /// does, and the route turns it into the same 400 - nothing is sent.
 TEST_F (SendWithRowTest, MissingCredentialColumnFailsTheBind) {
     const json payload{ { "method", "GET" }, { "url", server_->url () },
-        { "auth", { { "mode", "basic" }, { "username", "{{data.user}}" },
-        { "password", "static" } } } };
+        { "auth", { { "mode", "basic" }, { "username", "{{data.user}}" }, { "password", "static" } } } };
 
     const auto prepared = build_with_row (payload, json{ { "tenant", "acme" } });
     EXPECT_FALSE (prepared.ok);
@@ -506,8 +507,9 @@ TEST_F (SendWithRowTest, PreRequestScriptReadsTheRow) {
     request.url = server_->url ();
 
     const json row{ { "email", "ada@example.com" } };
-    auto outcome = send (request, &row,
-    assertion ("pm.expect(pm.iterationData.get(\"email\")).to.eql(\"ada@example.com\");"), "");
+    auto outcome = send (request,
+    &row, assertion ("pm.expect(pm.iterationData.get(\"email\")).to.eql(\"ada@example.com\");"),
+    "");
     expect_passed (outcome.pre_script_result);
 }
 

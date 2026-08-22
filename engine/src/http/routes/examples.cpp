@@ -116,15 +116,16 @@ apply_origin_field (const nlohmann::json& json, std::string& out, bool is_create
     }
     if (json["origin"].is_string ()) {
         const std::string candidate = json["origin"].get<std::string> ();
-        if (candidate == example_bounds::ORIGIN_IMPORT || candidate == example_bounds::ORIGIN_USER) {
+        if (candidate == example_bounds::ORIGIN_IMPORT ||
+        candidate == example_bounds::ORIGIN_USER) {
             out = candidate;
             return std::nullopt;
         }
     }
     return std::make_pair (400,
     error_body (400,
-    std::string ("Invalid 'origin': must be '") + example_bounds::ORIGIN_IMPORT + "' or '" +
-    example_bounds::ORIGIN_USER + "'"));
+    std::string ("Invalid 'origin': must be '") + example_bounds::ORIGIN_IMPORT +
+    "' or '" + example_bounds::ORIGIN_USER + "'"));
 }
 
 } // namespace

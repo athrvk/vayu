@@ -290,14 +290,16 @@ TEST_F (NativeStoreVerificationTest, APublicCertificateVerifiesWithNothingPasted
     // cause, and failing on a closed network would red every offline build.
     if (response.error_code == ErrorCode::ConnectionFailed ||
     response.error_code == ErrorCode::DnsError || response.error_code == ErrorCode::Timeout) {
-        GTEST_SKIP () << "no route to " << PUBLIC_HTTPS_URL << " ("
-                      << to_string (response.error_code) << ": " << response.error_message
-                      << ") - this asserts about the platform's trust store and "
-                         "needs a public host to assert against";
+        GTEST_SKIP ()
+        << "no route to " << PUBLIC_HTTPS_URL << " ("
+        << to_string (response.error_code) << ": " << response.error_message
+        << ") - this asserts about the platform's trust store and "
+           "needs a public host to assert against";
     }
 
     EXPECT_NE (response.error_code, ErrorCode::SslError)
-    << "a public certificate did not verify with an empty `customCaCertificates`, "
+    << "a public certificate did not verify with an empty "
+       "`customCaCertificates`, "
        "so this build's default trust store is not the platform's: "
     << response.error_message;
     EXPECT_EQ (response.error_code, ErrorCode::None)
@@ -326,7 +328,8 @@ TEST_F (NativeStoreVerificationTest, APasteExtendsThatStoreRatherThanReplacingIt
     if (response.error_code == ErrorCode::ConnectionFailed ||
     response.error_code == ErrorCode::DnsError || response.error_code == ErrorCode::Timeout) {
         GTEST_SKIP () << "no route to " << PUBLIC_HTTPS_URL << " ("
-                      << to_string (response.error_code) << ": " << response.error_message << ")";
+                      << to_string (response.error_code) << ": "
+                      << response.error_message << ")";
     }
 
     EXPECT_NE (response.error_code, ErrorCode::SslError)

@@ -37,7 +37,8 @@ namespace vayu::http::routes {
 // Defined in collections.cpp; returns std::nullopt when the parent assignment
 // is legal, else {http_status, json_body} describing the 400 rejection.
 std::optional<std::pair<int, nlohmann::json>> validate_parent_assignment (
-vayu::db::Database& db, const std::string& id,
+vayu::db::Database& db,
+const std::string& id,
 const std::optional<std::string>& parent_id);
 } // namespace vayu::http::routes
 
@@ -62,7 +63,8 @@ class CollectionsRouteTest : public ::testing::Test {
 
     // Persist a collection with an optional parent. Bypasses the route so tests
     // can build shapes (including corrupt cycles) the route would reject.
-    void seed_collection (const std::string& id, const std::string& name,
+    void seed_collection (const std::string& id,
+    const std::string& name,
     std::optional<std::string> parent = std::nullopt) {
         vayu::db::Collection col;
         col.id        = id;
@@ -113,7 +115,8 @@ TEST_F (CollectionsRouteTest, ReparentIntoDescendantRejectedWith400) {
     auto err = vayu::http::routes::validate_parent_assignment (*db_, "col_a", "col_c");
     ASSERT_TRUE (err.has_value ());
     EXPECT_EQ (err->first, 400);
-    EXPECT_EQ (err->second["error"]["message"], "Cannot move a collection into its own descendant");
+    EXPECT_EQ (err->second["error"]["message"],
+    "Cannot move a collection into its own descendant");
 }
 
 TEST_F (CollectionsRouteTest, LegalReparentSucceeds) {

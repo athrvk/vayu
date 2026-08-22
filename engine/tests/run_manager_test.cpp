@@ -111,8 +111,7 @@ TEST (LiveRingSize, HonoursAConfiguredCeiling) {
     EXPECT_EQ (live_ring_size (300000, 100, 500000), 3000u);
     // A nonsense ceiling from a hand-edited row falls back rather than
     // collapsing the ring to nothing.
-    EXPECT_EQ (live_ring_size (0, 100, 0),
-    vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS);
+    EXPECT_EQ (live_ring_size (0, 100, 0), vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS);
 }
 
 // 0 is the "Full run" option in the dashboard's window picker - no time limit,
@@ -131,8 +130,8 @@ TEST (LiveRingSize, ZeroWindowMeansFullRunAndYieldsTheCeiling) {
 // unvalidated. Dividing by a zero interval is UB, and a negative window is not
 // a setting at all - unlike 0, which means "full run".
 TEST (LiveRingSize, FallsBackOnInvalidInputsInsteadOfDividingByZero) {
-    const size_t stock = live_ring_size (
-    vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS,
+    const size_t stock =
+    live_ring_size (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS,
     vayu::core::constants::server::STATS_INTERVAL_MS);
 
     EXPECT_EQ (live_ring_size (300000, 0), 3000u);
@@ -161,8 +160,10 @@ TEST (RunContextTopic, MaxStoredErrorsReachesTheCollector) {
     RunContext raised ("raised", cfg, 42);
 
     for (size_t i = 0; i < 50; ++i) {
-        stock.metrics_collector->record_error (vayu::ErrorCode::ConnectionFailed, "boom", "");
-        raised.metrics_collector->record_error (vayu::ErrorCode::ConnectionFailed, "boom", "");
+        stock.metrics_collector->record_error (
+        vayu::ErrorCode::ConnectionFailed, "boom", "");
+        raised.metrics_collector->record_error (
+        vayu::ErrorCode::ConnectionFailed, "boom", "");
     }
 
     EXPECT_EQ (raised.metrics_collector->errors ().size (), 42u);
@@ -239,7 +240,7 @@ TEST (RunManagerRetention, RetainMovesOutOfActiveButKeepsLookup) {
 TEST (BuildTickPayload, WrapsStatsAsSseEventWithOffsetId) {
     nlohmann::json stats;
     stats["totalRequests"] = 42;
-    std::string p = vayu::core::build_tick_payload (stats, 7);
+    std::string p          = vayu::core::build_tick_payload (stats, 7);
     EXPECT_NE (p.find ("event: metrics\n"), std::string::npos);
     EXPECT_NE (p.find ("id: 7\n"), std::string::npos);
     EXPECT_NE (p.find ("\"totalRequests\":42"), std::string::npos);
@@ -266,7 +267,7 @@ TEST (CollectMetrics, StaysOpenUntilTheStopDrainCompletes) {
     auto ctx = std::make_shared<RunContext> ("drain_run", cfg);
     // collect_metrics reads active_count() from the loop on the 1 Hz DB path.
     vayu::http::EventLoopConfig loop_config;
-    ctx->event_loop   = std::make_unique<vayu::http::EventLoop> (loop_config);
+    ctx->event_loop    = std::make_unique<vayu::http::EventLoop> (loop_config);
     ctx->start_time_ms = 1;
     ctx->is_running    = true;
 
@@ -306,12 +307,13 @@ TEST (CollectMetrics, SizesTheReplayRingFromTheConfiguredWindow) {
 
     // 20s of history at a 20ms cadence = 1000 ticks - deliberately neither the
     // default window nor the default cadence, so a hardcoded 3000 fails here.
-    auto entry  = db.get_config_entry ("liveReplayWindowMs");
-    ASSERT_TRUE (entry.has_value ()) << "seed_default_config did not seed the key";
+    auto entry = db.get_config_entry ("liveReplayWindowMs");
+    ASSERT_TRUE (entry.has_value ())
+    << "seed_default_config did not seed the key";
     entry->value = "20000";
     db.save_config_entry (*entry);
 
-    auto tick  = db.get_config_entry ("liveTickIntervalMs");
+    auto tick = db.get_config_entry ("liveTickIntervalMs");
     ASSERT_TRUE (tick.has_value ());
     tick->value = "20";
     db.save_config_entry (*tick);
@@ -380,7 +382,7 @@ TEST (RunManagerRetention, SweepEvictsExpiredOnly) {
     mgr.retain_run ("b");
 
     a->completed_at_ms.store (1); // backdate "a" far into the past
-    mgr.sweep_retained (60000);    // ttl 60s; "b" was stamped ~now
+    mgr.sweep_retained (60000);   // ttl 60s; "b" was stamped ~now
 
     EXPECT_EQ (mgr.get_run_or_retained ("a"), nullptr);
     EXPECT_NE (mgr.get_run_or_retained ("b"), nullptr);

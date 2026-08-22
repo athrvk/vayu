@@ -87,10 +87,10 @@ class ScenarioPlanTest : public ::testing::Test {
     // state it; everything else shares one timestamp and sorts on `order`.
     void seed_collection (const std::string& id,
     const std::string& parent_id,
-    int order                     = 0,
-    const std::string& auth       = "",
-    const std::string& pre_script = "",
-    int64_t created_at            = 1,
+    int order                      = 0,
+    const std::string& auth        = "",
+    const std::string& pre_script  = "",
+    int64_t created_at             = 1,
     const std::string& data_schema = "{}") {
         vayu::db::Collection col;
         col.id = id;
@@ -144,7 +144,7 @@ class ScenarioPlanTest : public ::testing::Test {
 
     // Generous bounds unless a test is about a bound.
     static vayu::core::ScenarioResolveOptions options (size_t max_steps = 200,
-    size_t max_data_rows  = 1000,
+    size_t max_data_rows                                                = 1000,
     size_t max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES) {
         vayu::core::ScenarioResolveOptions opts;
         opts.timeout_ms            = 30000;
@@ -280,7 +280,7 @@ TEST_F (ScenarioPlanTest, TiedOrdersRunInTheSameSequenceTheSidebarShows) {
     seed_request ("later", "root", /*order=*/0);
     seed_request ("earlier", "root", /*order=*/0);
     auto make_older = [&] (const std::string& id, int64_t created_at) {
-        auto row       = db_->get_request (id);
+        auto row = db_->get_request (id);
         ASSERT_TRUE (row.has_value ());
         row->created_at = created_at;
         db_->save_request (*row);
@@ -288,7 +288,8 @@ TEST_F (ScenarioPlanTest, TiedOrdersRunInTheSameSequenceTheSidebarShows) {
     make_older ("earlier", 1000);
     make_older ("later", 2000);
 
-    const auto resolved = vayu::core::resolve_scenario (*db_, block ("root"), options ());
+    const auto resolved =
+    vayu::core::resolve_scenario (*db_, block ("root"), options ());
     ASSERT_TRUE (resolved.ok) << resolved.error;
     EXPECT_EQ (step_ids (resolved.plan), (std::vector<std::string>{ "earlier", "later" }));
 }
@@ -529,7 +530,7 @@ TEST_F (ScenarioPlanTest, EmptyIsJudgedAfterRecursiveIsApplied) {
     vayu::core::resolve_scenario (*db_, block ("root"), options ()).ok);
     EXPECT_TRUE (vayu::core::resolve_scenario (
     *db_, block ("root", /*recursive=*/true), options ())
-                 .ok);
+    .ok);
 }
 
 TEST_F (ScenarioPlanTest, AStepThatCannotComposeNamesTheOffendingRequest) {
@@ -660,9 +661,12 @@ TEST_F (ScenarioPlanTest, ADataTokenWithNoDataSetIsRefusedNamingTheStepAndTheTok
     EXPECT_FALSE (resolved.ok);
     // The step it names is the offending one, not the first one composed.
     EXPECT_NE (resolved.error.find ("step 1"), std::string::npos) << resolved.error;
-    EXPECT_NE (resolved.error.find ("Request bound"), std::string::npos) << resolved.error;
-    EXPECT_NE (resolved.error.find ("{{data.id}}"), std::string::npos) << resolved.error;
-    EXPECT_NE (resolved.error.find ("scenario.data"), std::string::npos) << resolved.error;
+    EXPECT_NE (resolved.error.find ("Request bound"), std::string::npos)
+    << resolved.error;
+    EXPECT_NE (resolved.error.find ("{{data.id}}"), std::string::npos)
+    << resolved.error;
+    EXPECT_NE (resolved.error.find ("scenario.data"), std::string::npos)
+    << resolved.error;
     // No partial plan, exactly as every other resolution failure leaves none.
     EXPECT_TRUE (resolved.plan.steps.empty ());
 }
@@ -695,16 +699,17 @@ TEST_F (ScenarioPlanTest, ADataTokenOutsideTheUrlIsRefusedToo) {
         seed_request ("req", "col", /*order=*/0, "https://example.test/ok",
         /*auth=*/"", /*post_script=*/"", /*created_at=*/1, headers, body);
 
-        const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+        const auto resolved =
+        vayu::core::resolve_scenario (*db_, block ("col"), options ());
         EXPECT_FALSE (resolved.ok) << headers << " | " << body;
-        EXPECT_NE (resolved.error.find ("{{data.id}}"), std::string::npos) << resolved.error;
+        EXPECT_NE (resolved.error.find ("{{data.id}}"), std::string::npos)
+        << resolved.error;
     };
 
     refused (R"([{"key":"X-Id","value":"{{data.id}}","enabled":true}])", "");
     refused (R"([{"key":"{{data.id}}","value":"x","enabled":true}])", "");
     refused ("", R"({"mode":"json","content":"{\"id\":\"{{data.id}}\"}"})");
-    refused ("",
-    R"({"mode":"form-data","fields":[{"key":"id","value":"{{data.id}}","enabled":true}]})");
+    refused ("", R"({"mode":"form-data","fields":[{"key":"id","value":"{{data.id}}","enabled":true}]})");
 }
 
 TEST_F (ScenarioPlanTest, TheNoDataRefusalCitesTheCollectionsDeclaredColumns) {
@@ -712,8 +717,8 @@ TEST_F (ScenarioPlanTest, TheNoDataRefusalCitesTheCollectionsDeclaredColumns) {
     // `resolve_scenario` already loaded this collection and threw it away;
     // capturing it is what lets the refusal say which file to run with rather
     // than only that one is missing. Revert the capture and this reddens.
-    seed_collection ("col", "", /*order=*/0, /*auth=*/"", /*pre_script=*/"", /*created_at=*/1,
-    R"({"columns":["id","email"],"declaredAt":1700000000000})");
+    seed_collection ("col", "", /*order=*/0, /*auth=*/"", /*pre_script=*/"",
+    /*created_at=*/1, R"({"columns":["id","email"],"declaredAt":1700000000000})");
     seed_request ("bound", "col", /*order=*/0, "https://example.test/u/{{data.id}}");
 
     const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
@@ -727,14 +732,15 @@ TEST_F (ScenarioPlanTest, TheNoDataRefusalStaysUnchangedWithoutAContract) {
     // The other half: a collection that declares nothing must not grow an empty
     // parenthetical, and a schema that is not one degrades to no tail at all
     // rather than to a message about columns that are not column names.
-    for (const char* schema : { "{}", "", "not json", R"({"columns":"id"})",
-             R"({"columns":[7]})" }) {
+    for (const char* schema :
+    { "{}", "", "not json", R"({"columns":"id"})", R"({"columns":[7]})" }) {
         reset_database ();
         seed_collection ("col", "", /*order=*/0, /*auth=*/"", /*pre_script=*/"",
         /*created_at=*/1, schema);
         seed_request ("bound", "col", /*order=*/0, "https://example.test/u/{{data.id}}");
 
-        const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+        const auto resolved =
+        vayu::core::resolve_scenario (*db_, block ("col"), options ());
 
         EXPECT_FALSE (resolved.ok) << schema;
         EXPECT_EQ (resolved.error.find ("declared columns"), std::string::npos)

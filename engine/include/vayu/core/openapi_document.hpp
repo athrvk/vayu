@@ -158,8 +158,8 @@ struct DocumentRead {
  * - **`responses` keys verbatim**, in document order, empty keys dropped.
  *   Patterns, not codes: `2XX` and `default` are what the document declares.
  */
-[[nodiscard]] std::vector<DeclaredOperation>
-declared_operations_of (const nlohmann::ordered_json& document);
+[[nodiscard]] std::vector<DeclaredOperation> declared_operations_of (
+const nlohmann::ordered_json& document);
 
 /**
  * What a document is, for a caller deciding whether to bind it (issue #869).
@@ -246,8 +246,8 @@ struct DocumentDescription {
  * as full of `nullable` as an inline one. `core/schema_validation.hpp` merges
  * the two back into one validation root.
  */
-[[nodiscard]] nlohmann::ordered_json
-response_schemas_of (const nlohmann::ordered_json& document);
+[[nodiscard]] nlohmann::ordered_json response_schemas_of (
+const nlohmann::ordered_json& document);
 
 /**
  * One row of a draft request's key/value table: a query parameter, a header, or
@@ -461,8 +461,8 @@ struct SpecRequestDraft {
  * `openapi_drafts_test.cpp` and by the app's
  * `spec-request-drafts.conformance.test.ts`.
  */
-[[nodiscard]] std::vector<SpecRequestDraft>
-spec_request_drafts_of (const nlohmann::ordered_json& document);
+[[nodiscard]] std::vector<SpecRequestDraft> spec_request_drafts_of (
+const nlohmann::ordered_json& document);
 
 /**
  * @brief `spec_request_drafts_of` for an **import** rather than a diff (issue
@@ -540,6 +540,7 @@ struct SpecIndexes {
  * - reads once and calls this, rather than parsing the same bytes twice and
  * risking two answers about them.
  */
-[[nodiscard]] SpecIndexes spec_indexes_of (const nlohmann::ordered_json& document, size_t index_cap);
+[[nodiscard]] SpecIndexes
+spec_indexes_of (const nlohmann::ordered_json& document, size_t index_cap);
 
 } // namespace vayu::core

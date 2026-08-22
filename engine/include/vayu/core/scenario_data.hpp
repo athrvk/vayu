@@ -333,7 +333,8 @@ size_t row_index);
  * bound; an oauth2 config is deliberately absent from that walk, which is why
  * it needs this second, config-shaped scan.
  */
-[[nodiscard]] std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth);
+[[nodiscard]] std::optional<std::string> first_oauth2_data_token (
+const vayu::http::Auth& auth);
 
 /**
  * `render_data_value` moved to `http/request_composer.hpp` (issue #890).

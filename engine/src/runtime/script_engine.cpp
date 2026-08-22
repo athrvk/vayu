@@ -96,11 +96,11 @@ namespace {
 struct ContextData {
     std::vector<TestResult> tests;
     std::vector<ConsoleEntry> console_output;
-    const Request* request           = nullptr;
-    const Response* response         = nullptr;
-    Environment* environment         = nullptr;
-    Environment* globals             = nullptr;
-    Environment* collectionVariables = nullptr;
+    const Request* request                              = nullptr;
+    const Response* response                            = nullptr;
+    Environment* environment                            = nullptr;
+    Environment* globals                                = nullptr;
+    Environment* collectionVariables                    = nullptr;
     const std::vector<Environment>* collectionAncestors = nullptr;
     std::optional<std::string> request_id;
     std::optional<std::string> request_name;
@@ -215,9 +215,11 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
         [] (unsigned char c) { return std::tolower (c); });
         // Trim whitespace
         auto isspace_pred = [] (unsigned char c) { return std::isspace (c); };
-        while (!lowered.empty () && isspace_pred (static_cast<unsigned char> (lowered.front ())))
+        while (!lowered.empty () &&
+        isspace_pred (static_cast<unsigned char> (lowered.front ())))
             lowered.erase (lowered.begin ());
-        while (!lowered.empty () && isspace_pred (static_cast<unsigned char> (lowered.back ())))
+        while (!lowered.empty () &&
+        isspace_pred (static_cast<unsigned char> (lowered.back ())))
             lowered.pop_back ();
 
         if (lowered == "true" || lowered == "1" || lowered == "yes")
@@ -259,11 +261,8 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
  * integer to a shared C function, which is exactly the shape of this problem -
  * the alternative is four wrappers that each forward to a fifth.
  */
-JSValue js_console_log (JSContext* ctx,
-JSValueConst this_val,
-int argc,
-JSValueConst* argv,
-int magic) {
+JSValue
+js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     auto* data = get_context_data (ctx);
     std::stringstream ss;
 
@@ -307,8 +306,7 @@ int magic) {
         }
     }
 
-    data->console_output.push_back (
-    { static_cast<ConsoleLevel> (magic), ss.str () });
+    data->console_output.push_back ({ static_cast<ConsoleLevel> (magic), ss.str () });
     return JS_UNDEFINED;
 }
 
@@ -331,15 +329,9 @@ void setup_console (JSContext* ctx) {
     };
 
     for (const auto& method : METHODS) {
-        JS_SetPropertyStr (ctx,
-        console,
-        method.name,
-        JS_NewCFunctionMagic (ctx,
-        js_console_log,
-        method.name,
-        1,
-        JS_CFUNC_generic_magic,
-        static_cast<int> (method.level)));
+        JS_SetPropertyStr (ctx, console, method.name,
+        JS_NewCFunctionMagic (ctx, js_console_log, method.name, 1,
+        JS_CFUNC_generic_magic, static_cast<int> (method.level)));
     }
 
     JS_SetPropertyStr (ctx, global, "console", console);
@@ -418,10 +410,10 @@ JSValue throw_assertion_failure (JSContext* ctx, const std::string& message) {
     if (JS_IsException (error)) {
         return JS_EXCEPTION;
     }
-    JS_DefinePropertyValueStr (ctx, error, "name", JS_NewString (ctx, "AssertionError"),
-    JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-    JS_DefinePropertyValueStr (ctx, error, "message", JS_NewString (ctx, message.c_str ()),
-    JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_DefinePropertyValueStr (ctx, error, "name",
+    JS_NewString (ctx, "AssertionError"), JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_DefinePropertyValueStr (ctx, error, "message",
+    JS_NewString (ctx, message.c_str ()), JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     return JS_Throw (ctx, error);
 }
 
@@ -3062,10 +3054,11 @@ JSValue create_cookie_list (JSContext* ctx, const std::vector<vayu::http::SetCoo
         JSValue entry = JS_NewObject (ctx);
         JS_SetPropertyStr (ctx, entry, "name", JS_NewString (ctx, cookie.name.c_str ()));
         JS_SetPropertyStr (ctx, entry, "value", JS_NewString (ctx, cookie.value.c_str ()));
-        JSValue attrs = JS_NewArray (ctx);
+        JSValue attrs       = JS_NewArray (ctx);
         uint32_t attr_index = 0;
         for (const auto& attr : cookie.attrs) {
-            JS_SetPropertyUint32 (ctx, attrs, attr_index++, JS_NewString (ctx, attr.c_str ()));
+            JS_SetPropertyUint32 (
+            ctx, attrs, attr_index++, JS_NewString (ctx, attr.c_str ()));
         }
         JS_SetPropertyStr (ctx, entry, "attrs", attrs);
         JS_SetPropertyUint32 (ctx, list, index++, entry);
@@ -3099,8 +3092,8 @@ JSValue js_response_cookies (JSContext* ctx, JSValueConst this_val, int argc, JS
         return list;
     }
     if (JS_IsObject (this_val)) {
-        if (JS_DefinePropertyValueStr (ctx, this_val, "cookies", JS_DupValue (ctx, list),
-            JS_PROP_C_W_E) < 0) {
+        if (JS_DefinePropertyValueStr (ctx, this_val, "cookies",
+            JS_DupValue (ctx, list), JS_PROP_C_W_E) < 0) {
             // Caching is an optimisation - a rejected redefinition must not
             // fail the read the script actually asked for.
             JS_FreeValue (ctx, JS_GetException (ctx));
@@ -3152,7 +3145,7 @@ void install_response_events (JSContext* ctx, JSValue response, const nlohmann::
             JS_SetPropertyStr (ctx, entry, "data",
             JS_NewStringLen (ctx, data.data (), data.size ()));
             if (const auto source_id = item.find ("sourceId");
-                source_id != item.end () && source_id->is_string ()) {
+            source_id != item.end () && source_id->is_string ()) {
                 const auto id = source_id->get<std::string> ();
                 JS_SetPropertyStr (
                 ctx, entry, "id", JS_NewStringLen (ctx, id.data (), id.size ()));
@@ -3391,12 +3384,12 @@ void setup_pm_info (JSContext* ctx, JSValue pm) {
 
     if (data) {
         if (data->request_id && !data->request_id->empty ()) {
-            JS_SetPropertyStr (
-            ctx, info, "requestId", JS_NewString (ctx, data->request_id->c_str ()));
+            JS_SetPropertyStr (ctx, info, "requestId",
+            JS_NewString (ctx, data->request_id->c_str ()));
         }
         if (data->request_name && !data->request_name->empty ()) {
-            JS_SetPropertyStr (
-            ctx, info, "requestName", JS_NewString (ctx, data->request_name->c_str ()));
+            JS_SetPropertyStr (ctx, info, "requestName",
+            JS_NewString (ctx, data->request_name->c_str ()));
         }
         if (data->event) {
             JS_SetPropertyStr (ctx, info, "eventName",
@@ -3949,7 +3942,7 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
     // Weakest scope first, so a stronger one overwrites it and the snapshot
     // agrees with what get() would have answered for every key in it.
     for (auto it = std::rbegin (variables_precedence);
-         it != std::rend (variables_precedence); ++it) {
+    it != std::rend (variables_precedence); ++it) {
         merge_visible_variables (
         ctx, *it, [&] (const std::string& key, const Variable& variable) {
             JS_SetPropertyStr (ctx, snapshot, key.c_str (),
@@ -4013,7 +4006,7 @@ JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int a
     // Weakest scope first so a stronger one overwrites - the same walk
     // toObject() does, and the same answer get() would give per name.
     for (auto it = std::rbegin (variables_precedence);
-         it != std::rend (variables_precedence); ++it) {
+    it != std::rend (variables_precedence); ++it) {
         merge_visible_variables (
         ctx, *it, [&] (const std::string& key, const Variable& variable) {
             values[key] = variable.value;
@@ -4022,7 +4015,7 @@ JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int a
 
     auto* data = get_context_data (ctx);
     if (data == nullptr || data->iteration_data == nullptr ||
-        !data->iteration_data->is_object ()) {
+    !data->iteration_data->is_object ()) {
         // No row to resolve against, so the namespace stays written as it
         // stands - what composition does, and what lets one script run in both
         // a data-driven run and a plain send.
@@ -4543,8 +4536,7 @@ JSValue js_jar_cookies_has (JSContext* ctx, JSValueConst this_val, int argc, JSV
     return JS_NewBool (ctx, find_jar_cookie (*cookies, *name) != nullptr);
 }
 
-JSValue
-js_jar_cookies_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+JSValue js_jar_cookies_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
@@ -4862,10 +4854,10 @@ JSValue js_cookies_jar (JSContext* ctx, JSValueConst this_val, int argc, JSValue
 // it where there is no jar is told why instead of meeting "not a function".
 void setup_pm_cookies (JSContext* ctx, JSValue pm) {
     JSValue cookies = JS_NewObject (ctx);
-    JS_SetPropertyStr (ctx, cookies, "get",
-    JS_NewCFunction (ctx, js_jar_cookies_get, "get", 1));
-    JS_SetPropertyStr (ctx, cookies, "has",
-    JS_NewCFunction (ctx, js_jar_cookies_has, "has", 1));
+    JS_SetPropertyStr (
+    ctx, cookies, "get", JS_NewCFunction (ctx, js_jar_cookies_get, "get", 1));
+    JS_SetPropertyStr (
+    ctx, cookies, "has", JS_NewCFunction (ctx, js_jar_cookies_has, "has", 1));
     JS_SetPropertyStr (ctx, cookies, "toObject",
     JS_NewCFunction (ctx, js_jar_cookies_to_object, "toObject", 0));
     JS_SetPropertyStr (
@@ -5024,7 +5016,8 @@ ContextData* iteration_data_context (JSContext* ctx, const char* member) {
     auto* data = get_context_data (ctx);
     if (!data || !data->iteration_data) {
         JS_ThrowTypeError (ctx,
-        "pm.iterationData.%s is not available here: this script has no data row "
+        "pm.iterationData.%s is not available here: this script has no data "
+        "row "
         "bound. A row is bound by an iteration of a collection run with a data "
         "set, by a send-with-row, and by a scenario load run's deferred "
         "per-step script. See docs/engine/scripting.md.",

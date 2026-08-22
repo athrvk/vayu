@@ -62,7 +62,7 @@ bool plateaued (const CapacityConfig& config, const std::vector<CapacityWindow>&
 
 size_t next_level_above (const CapacityConfig& config, size_t current) {
     const double grown = static_cast<double> (current) * (1.0 + config.step_growth);
-    size_t next        = current + 1;
+    size_t next = current + 1;
     if (std::isfinite (grown) && grown > static_cast<double> (next)) {
         next = static_cast<size_t> (grown);
     }
@@ -71,8 +71,8 @@ size_t next_level_above (const CapacityConfig& config, size_t current) {
 
 } // namespace
 
-CapacityDecision
-decide_next_level (const CapacityConfig& config, const std::vector<CapacityWindow>& history) {
+CapacityDecision decide_next_level (const CapacityConfig& config,
+const std::vector<CapacityWindow>& history) {
     if (history.empty ()) {
         return { CapacityAction::StepUp, config.start_concurrency, nullptr };
     }
@@ -141,8 +141,8 @@ const char* stop_reason) {
 nlohmann::json build_capacity_summary_payload (const CapacitySummary& summary) {
     nlohmann::json levels = nlohmann::json::array ();
     for (const auto& level : summary.levels) {
-        levels.push_back ({ { "concurrency", level.concurrency }, { "rps", level.rps },
-            { "p99_ms", level.p99_ms } });
+        levels.push_back ({ { "concurrency", level.concurrency },
+        { "rps", level.rps }, { "p99_ms", level.p99_ms } });
     }
 
     nlohmann::json payload;
@@ -171,9 +171,9 @@ int64_t deadline_ms) {
 
     CapacityConfig out;
     out.step_duration_ms = step_duration_ms > 0 ? step_duration_ms : defaults::STEP_DURATION_MS;
-    out.deadline_ms      = deadline_ms;
-    out.step_growth      = defaults::STEP_GROWTH;
-    out.plateau_gain_pct = defaults::PLATEAU_GAIN_PCT;
+    out.deadline_ms        = deadline_ms;
+    out.step_growth        = defaults::STEP_GROWTH;
+    out.plateau_gain_pct   = defaults::PLATEAU_GAIN_PCT;
     out.slo_breach_windows = defaults::SLO_BREACH_WINDOWS;
 
     // Read through an explicit type check rather than `json::value`, which
@@ -197,13 +197,14 @@ int64_t deadline_ms) {
     // a garbage level. The route rejects such a value with a 400, but this
     // function is documented total over stored snapshots no route ever saw.
     auto concurrency_level = [&number] (const char* key, double fallback) -> size_t {
-        constexpr double kGuard = static_cast<double> (constants::run_config::MAX_CONCURRENCY);
+        constexpr double kGuard =
+        static_cast<double> (constants::run_config::MAX_CONCURRENCY);
         return static_cast<size_t> (std::min (number (key, fallback), kGuard));
     };
 
     out.start_concurrency = concurrency_level ("startConcurrency", 1.0);
-    out.max_concurrency =
-    concurrency_level ("concurrency", static_cast<double> (defaults::MAX_CONCURRENCY));
+    out.max_concurrency   = concurrency_level (
+    "concurrency", static_cast<double> (defaults::MAX_CONCURRENCY));
     // A cap below the start is a search with nowhere to go; it runs the one
     // level and stops `cap_reached` rather than climbing past the ceiling.
     out.max_concurrency = std::max (out.max_concurrency, out.start_concurrency);

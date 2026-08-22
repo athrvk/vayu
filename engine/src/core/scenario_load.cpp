@@ -231,8 +231,8 @@ const ScenarioExecution& execution) {
 
     const std::string mode = config.value ("mode", std::string{});
     const auto type        = parse_load_test_type (mode);
-    if (!type || *type == LoadTestType::ConstantRps || *type == LoadTestType::Capacity ||
-    requested_rps (config) > 0.0) {
+    if (!type || *type == LoadTestType::ConstantRps ||
+    *type == LoadTestType::Capacity || requested_rps (config) > 0.0) {
         // The route rejects both with a 400 before the run row exists; this is
         // the same rule stated where the executor would otherwise have to guess.
         throw std::invalid_argument (validate_scenario_load_config (config).value_or (
@@ -252,8 +252,8 @@ const ScenarioExecution& execution) {
     std::max<size_t> (1, static_cast<size_t> (config.value ("iterations", 1000))) :
     0;
 
-    auto state =
-    std::make_shared<ScenarioLoadState> (step_count, vu_count, make_coverage_tally (execution));
+    auto state = std::make_shared<ScenarioLoadState> (
+    step_count, vu_count, make_coverage_tally (execution));
     state->data_row_count = execution.data_rows.size ();
     state->vus.reserve (vu_count);
     for (size_t i = 0; i < vu_count; ++i) {
@@ -404,10 +404,10 @@ const ScenarioExecution& execution) {
         // Read here rather than in the completion: `finish_step` advances it at
         // an iteration boundary, so the callback would report the iteration the
         // VU moved on to instead of the one this step ran in.
-        const size_t iteration          = vu->iteration;
-        vayu::Request request           = step.request;
-        request.track_cookies           = true;
-        request.cookie_lines            = vu->cookies;
+        const size_t iteration = vu->iteration;
+        vayu::Request request  = step.request;
+        request.track_cookies  = true;
+        request.cookie_lines   = vu->cookies;
 
         // The data pass, per iteration and before the send. A step carrying no
         // `{{data.*}}` token has empty templates and is not walked at all,
@@ -451,8 +451,8 @@ const ScenarioExecution& execution) {
             // happened. `is_error()` is the no-response case, which records as
             // status 0 and is reported as a transport error rather than a
             // status the server never sent (issue #629).
-            state->coverage.record (step_index,
-            result.is_error () ? 0 : result.value ().status_code);
+            state->coverage.record (
+            step_index, result.is_error () ? 0 : result.value ().status_code);
             finish_step (vu, step_index, errored,
             errored ? nullptr : &result.value ().cookie_lines);
             handle_result (context, db, std::move (result),

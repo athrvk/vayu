@@ -119,8 +119,8 @@ nlohmann::json config_error (const std::string& message) {
  *         specific reason(s) - which key, and why (bad type / out of range) -
  *         so the app can show it instead of a generic "check the logs".
  */
-std::pair<int, nlohmann::json> apply_config_update (vayu::db::Database& db,
-const std::string& body) {
+std::pair<int, nlohmann::json>
+apply_config_update (vayu::db::Database& db, const std::string& body) {
     nlohmann::json json;
     try {
         json = nlohmann::json::parse (body);
@@ -163,8 +163,9 @@ const std::string& body) {
         updates[key] = value;
     } else {
         return { 400,
-        config_error ("Invalid request format. Expected { \"entries\": {...} } "
-                      "or { \"key\": \"...\", \"value\": \"...\" }") };
+            config_error (
+            "Invalid request format. Expected { \"entries\": {...} } "
+            "or { \"key\": \"...\", \"value\": \"...\" }") };
     }
 
     if (updates.empty ()) {
@@ -187,12 +188,11 @@ const std::string& body) {
             try {
                 int int_val = std::stoi (value);
                 if (existing->min_value && int_val < std::stoi (*existing->min_value)) {
-                    reason = "'" + key + "' must be at least " + *existing->min_value +
-                    " (got " + value + ")";
-                } else if (existing->max_value &&
-                int_val > std::stoi (*existing->max_value)) {
-                    reason = "'" + key + "' must be at most " + *existing->max_value +
-                    " (got " + value + ")";
+                    reason = "'" + key + "' must be at least " +
+                    *existing->min_value + " (got " + value + ")";
+                } else if (existing->max_value && int_val > std::stoi (*existing->max_value)) {
+                    reason = "'" + key + "' must be at most " +
+                    *existing->max_value + " (got " + value + ")";
                 }
             } catch (...) {
                 reason = "'" + key + "' must be an integer (got '" + value + "')";
@@ -201,12 +201,12 @@ const std::string& body) {
             try {
                 double double_val = std::stod (value);
                 if (existing->min_value && double_val < std::stod (*existing->min_value)) {
-                    reason = "'" + key + "' must be at least " + *existing->min_value +
-                    " (got " + value + ")";
+                    reason = "'" + key + "' must be at least " +
+                    *existing->min_value + " (got " + value + ")";
                 } else if (existing->max_value &&
                 double_val > std::stod (*existing->max_value)) {
-                    reason = "'" + key + "' must be at most " + *existing->max_value +
-                    " (got " + value + ")";
+                    reason = "'" + key + "' must be at most " +
+                    *existing->max_value + " (got " + value + ")";
                 }
             } catch (...) {
                 reason = "'" + key + "' must be a number (got '" + value + "')";

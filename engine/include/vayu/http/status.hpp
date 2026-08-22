@@ -116,11 +116,16 @@ inline std::string status_text (int code) {
     case 511: return "Network Authentication Required";
 
     default:
-        if (code >= 100 && code < 200) return "Informational";
-        if (code >= 200 && code < 300) return "Success";
-        if (code >= 300 && code < 400) return "Redirect";
-        if (code >= 400 && code < 500) return "Client Error";
-        if (code >= 500 && code < 600) return "Server Error";
+        if (code >= 100 && code < 200)
+            return "Informational";
+        if (code >= 200 && code < 300)
+            return "Success";
+        if (code >= 300 && code < 400)
+            return "Redirect";
+        if (code >= 400 && code < 500)
+            return "Client Error";
+        if (code >= 500 && code < 600)
+            return "Server Error";
         return "Unknown";
     }
 }

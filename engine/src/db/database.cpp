@@ -201,16 +201,15 @@ inline auto make_storage (const std::string& path) {
     make_table ("collections", make_column ("id", &Collection::id, primary_key ()),
     make_column ("parent_id", &Collection::parent_id), make_column ("name", &Collection::name),
     make_column ("description", &Collection::description), // NEW: collection description
-    make_column ("variables", &Collection::variables),     // JSON: collection-scoped vars
-    make_column ("auth", &Collection::auth),               // NEW: JSON auth config
-    make_column ("pre_request_script", &Collection::pre_request_script),   // NEW: JS
+    make_column ("variables", &Collection::variables), // JSON: collection-scoped vars
+    make_column ("auth", &Collection::auth),           // NEW: JSON auth config
+    make_column ("pre_request_script", &Collection::pre_request_script), // NEW: JS
     make_column ("post_request_script", &Collection::post_request_script), // NEW: JS
     // The declared data contract (issue #599). NOT NULL with a default_value on
     // the `keywords` precedent, so sync_schema can ALTER TABLE ADD COLUMN it
     // onto an existing, non-empty collections table - every pre-existing row
     // backfills to `{}`, which is what "declares no contract" is spelled as.
-    make_column ("data_schema", &Collection::data_schema,
-    default_value (std::string ("{}"))),
+    make_column ("data_schema", &Collection::data_schema, default_value (std::string ("{}"))),
     // The OpenAPI binding (issue #637). Same NOT NULL + default_value shape as
     // `data_schema` directly above, and for the same reason: sync_schema ALTERs
     // it onto an existing, non-empty collections table and every pre-existing
@@ -225,16 +224,14 @@ inline auto make_storage (const std::string& path) {
     make_column ("collection_id", &Request::collection_id),
     make_column ("name", &Request::name),
     make_column ("description", &Request::description), // NEW: request description
-    make_column ("method", &Request::method),
-    make_column ("url", &Request::url),
+    make_column ("method", &Request::method), make_column ("url", &Request::url),
     make_column ("params", &Request::params),   // JSON array of KeyValueEntry
     make_column ("headers", &Request::headers), // JSON array of KeyValueEntry
     make_column ("body", &Request::body),       // JSON discriminated union
-    make_column ("body_type", &Request::body_type),
-    make_column ("auth", &Request::auth),                               // JSON
+    make_column ("body_type", &Request::body_type), make_column ("auth", &Request::auth), // JSON
     make_column ("pre_request_script", &Request::pre_request_script),   // JS
     make_column ("post_request_script", &Request::post_request_script), // JS
-    make_column ("order", &Request::order),     // NEW: position within collection
+    make_column ("order", &Request::order), // NEW: position within collection
     // Redirect policy. NOT NULL, so the default_value is what lets sync_schema
     // ALTER TABLE ADD COLUMN these onto an existing, non-empty requests table -
     // pre-existing rows backfill to the engine defaults (follow, cap at 10).
@@ -264,8 +261,7 @@ inline auto make_storage (const std::string& path) {
     // Request examples: saved example responses for a request (issue #481).
     // Created by import today, and the response source a mock server serves
     // from. sync_schema() creates the table outright, so no migration.
-    make_table ("request_examples",
-    make_column ("id", &RequestExample::id, primary_key ()),
+    make_table ("request_examples", make_column ("id", &RequestExample::id, primary_key ()),
     make_column ("request_id", &RequestExample::request_id),
     make_column ("name", &RequestExample::name),
     make_column ("status", &RequestExample::status),
@@ -319,7 +315,7 @@ inline auto make_storage (const std::string& path) {
     make_table ("environments", make_column ("id", &Environment::id, primary_key ()),
     make_column ("name", &Environment::name),
     make_column ("description", &Environment::description), // NEW: environment description
-    make_column ("variables", &Environment::variables),     // JSON: {key: {value, enabled}}
+    make_column ("variables", &Environment::variables), // JSON: {key: {value, enabled}}
     make_column ("is_active", &Environment::is_active),
     make_column ("created_at", &Environment::created_at),
     make_column ("updated_at", &Environment::updated_at)),
@@ -330,7 +326,7 @@ inline auto make_storage (const std::string& path) {
     make_table ("runs", make_column ("id", &Run::id, primary_key ()),
     make_column ("request_id", &Run::request_id),
     make_column ("environment_id", &Run::environment_id),
-    make_column ("type", &Run::type), // "design", "load" or "scenario"
+    make_column ("type", &Run::type),     // "design", "load" or "scenario"
     make_column ("status", &Run::status), // pending/running/completed/failed
     make_column ("config_snapshot", &Run::config_snapshot), // JSON: full request copy
     make_column ("start_time", &Run::start_time), make_column ("end_time", &Run::end_time),
@@ -372,7 +368,8 @@ inline auto make_storage (const std::string& path) {
     // Content-addressed within the run so N identical load-test responses cost
     // one copy. sync_schema() creates new tables outright, so this and the
     // table below need no migration.
-    make_table ("body_blobs", make_column ("id", &BodyBlob::id, primary_key ().autoincrement ()),
+    make_table ("body_blobs",
+    make_column ("id", &BodyBlob::id, primary_key ().autoincrement ()),
     make_column ("run_id", &BodyBlob::run_id), make_column ("hash", &BodyBlob::hash),
     make_column ("content", &BodyBlob::content)),
 
@@ -428,14 +425,12 @@ inline auto make_storage (const std::string& path) {
     // these onto an existing config_entries table - the rows are re-seeded with
     // their metadata on every startup anyway, so the backfill value is only
     // what the row holds between the ALTER and that upsert.
-    make_column ("requires_restart", &ConfigEntry::requires_restart,
-    default_value (false)),
+    make_column ("requires_restart", &ConfigEntry::requires_restart, default_value (false)),
     make_column ("advanced", &ConfigEntry::advanced, default_value (false)),
     // JSON array of search terms, "[]" when the entry declares none - the
     // same ALTER-friendly shape, and a column that is never null so the
     // serializer has no absent case to invent an array for.
-    make_column ("keywords", &ConfigEntry::keywords,
-    default_value (std::string ("[]"))),
+    make_column ("keywords", &ConfigEntry::keywords, default_value (std::string ("[]"))),
     // Nullable, like min_value/max_value: an entry that measures nothing
     // declares no unit, and NULL is that. A nullable column is ALTER-friendly
     // without a default_value.
@@ -511,7 +506,8 @@ struct Database::Impl {
     /// shadowed member is C4458, an error here.
     std::string opened_file;
 
-    Impl (const std::string& path) : storage (make_storage (path)), opened_file (path) {
+    Impl (const std::string& path)
+    : storage (make_storage (path)), opened_file (path) {
         std::filesystem::path db_path (path);
         if (db_path.has_parent_path ()) {
             std::filesystem::create_directories (db_path.parent_path ());
@@ -765,8 +761,8 @@ void Database::init () {
     // the other two: it is handed to the open callback, which re-applies it to
     // every connection sqlite_orm opens. Setting it before the first read below
     // means that read already carries it.
-    impl_->cache_size_bytes.store (
-    get_config_int ("dbCacheSize", vayu::core::constants::database::CACHE_SIZE_BYTES));
+    impl_->cache_size_bytes.store (get_config_int (
+    "dbCacheSize", vayu::core::constants::database::CACHE_SIZE_BYTES));
 
     // Get synchronous mode (0=OFF, 1=NORMAL, 2=FULL)
     int synchronous =
@@ -914,12 +910,13 @@ void Database::delete_collection (const std::string& id) {
             // Examples first, and by request id rather than by collection: they
             // hang off the request, so deleting the requests before them would
             // leave rows no read can reach and no later delete can find.
-            for (const auto& r :
-            impl_->storage.get_all<Request> (where (c (&Request::collection_id) == *it))) {
+            for (const auto& r : impl_->storage.get_all<Request> (
+                 where (c (&Request::collection_id) == *it))) {
                 impl_->storage.remove_all<RequestExample> (
                 where (c (&RequestExample::request_id) == r.id));
             }
-            impl_->storage.remove_all<Request> (where (c (&Request::collection_id) == *it));
+            impl_->storage.remove_all<Request> (
+            where (c (&Request::collection_id) == *it));
             impl_->storage.remove_all<Collection> (where (c (&Collection::id) == *it));
         }
         return true; // Commit
@@ -969,7 +966,8 @@ void Database::delete_request (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("Deleting request (cascade): id=" + id);
     impl_->storage.transaction ([&] {
-        impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::request_id) == id));
+        impl_->storage.remove_all<RequestExample> (
+        where (c (&RequestExample::request_id) == id));
         impl_->storage.remove_all<Request> (where (c (&Request::id) == id));
         return true; // Commit
     });
@@ -981,7 +979,8 @@ void Database::delete_request (const std::string& id) {
 
 void Database::save_request_example (const RequestExample& e) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Saving request example: id=" + e.id + ", request_id=" + e.request_id);
+    vayu::utils::log_debug (
+    "Saving request example: id=" + e.id + ", request_id=" + e.request_id);
     impl_->storage.replace (e);
 }
 
@@ -995,8 +994,8 @@ void Database::save_request_example (const RequestExample& e) {
  */
 std::optional<RequestExample> Database::get_request_example (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    auto rows = impl_->storage.get_all<RequestExample> (
-    where (c (&RequestExample::id) == id and c (&RequestExample::suppressed) == false));
+    auto rows = impl_->storage.get_all<RequestExample> (where (
+    c (&RequestExample::id) == id and c (&RequestExample::suppressed) == false));
     if (rows.empty ())
         return std::nullopt;
     return rows.front ();
@@ -1014,7 +1013,8 @@ std::vector<RequestExample> Database::get_request_examples (const std::string& r
     // imported example is invisible to the list route, the mock server and the
     // export alike (issue #722).
     return impl_->storage.get_all<RequestExample> (
-    where (c (&RequestExample::request_id) == request_id and c (&RequestExample::suppressed) == false),
+    where (c (&RequestExample::request_id) == request_id and
+    c (&RequestExample::suppressed) == false),
     multi_order_by (order_by (&RequestExample::order),
     order_by (&RequestExample::created_at), order_by (&RequestExample::id)));
 }
@@ -1026,11 +1026,12 @@ std::vector<RequestExample> Database::get_request_examples (const std::string& r
  * spec sync's `refresh_examples`, which has to know which statuses the user
  * removed before writing the document's examples back.
  */
-std::vector<RequestExample>
-Database::get_suppressed_request_examples (const std::string& request_id) {
+std::vector<RequestExample> Database::get_suppressed_request_examples (
+const std::string& request_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<RequestExample> (
-    where (c (&RequestExample::request_id) == request_id and c (&RequestExample::suppressed) == true));
+    where (c (&RequestExample::request_id) == request_id and
+    c (&RequestExample::suppressed) == true));
 }
 
 int64_t Database::count_request_examples (const std::string& request_id) {
@@ -1038,7 +1039,8 @@ int64_t Database::count_request_examples (const std::string& request_id) {
     // Tombstones do not count against `MAX_PER_REQUEST`: a user who deletes an
     // imported example has fewer examples, not the same number with one hidden.
     return impl_->storage.count<RequestExample> (
-    where (c (&RequestExample::request_id) == request_id and c (&RequestExample::suppressed) == false));
+    where (c (&RequestExample::request_id) == request_id and
+    c (&RequestExample::suppressed) == false));
 }
 
 void Database::delete_request_example (const std::string& id) {
@@ -1056,17 +1058,18 @@ void Database::delete_request_example (const std::string& id) {
 void Database::suppress_request_example (const std::string& id, int64_t now) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("Suppressing imported request example: id=" + id);
-    auto rows = impl_->storage.get_all<RequestExample> (where (c (&RequestExample::id) == id));
+    auto rows =
+    impl_->storage.get_all<RequestExample> (where (c (&RequestExample::id) == id));
     if (rows.empty ()) {
         return;
     }
-    RequestExample row  = rows.front ();
-    row.suppressed      = true;
-    row.body            = "";
-    row.headers         = "";
-    row.content_type    = "";
-    row.body_truncated  = false;
-    row.updated_at      = now;
+    RequestExample row = rows.front ();
+    row.suppressed     = true;
+    row.body           = "";
+    row.headers        = "";
+    row.content_type   = "";
+    row.body_truncated = false;
+    row.updated_at     = now;
     impl_->storage.replace (row);
 }
 
@@ -1082,7 +1085,8 @@ void Database::save_spec_document (const SpecDocument& s) {
 
 std::optional<SpecDocument> Database::get_spec_document (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    auto rows = impl_->storage.get_all<SpecDocument> (where (c (&SpecDocument::id) == id));
+    auto rows =
+    impl_->storage.get_all<SpecDocument> (where (c (&SpecDocument::id) == id));
     if (rows.empty ())
         return std::nullopt;
     return rows.front ();
@@ -1383,10 +1387,11 @@ const std::vector<Request>& requests) {
 void Database::spec_sync_apply (const SpecSyncBatch& batch) {
     // "spec write" rather than "sync": `POST /specs/bind` commits through this
     // same batch (issue #862), with its create and delete halves empty.
-    vayu::utils::log_debug ("Applying spec write: collection=" + batch.binding.id + ", spec=" +
-    batch.spec.id + ", +" + std::to_string (batch.created.size ()) + " requests, ~" +
-    std::to_string (batch.updated.size ()) + ", -" + std::to_string (batch.deleted.size ()) +
-    ", " + std::to_string (batch.new_collections.size ()) + " new collections");
+    vayu::utils::log_debug ("Applying spec write: collection=" + batch.binding.id +
+    ", spec=" + batch.spec.id + ", +" + std::to_string (batch.created.size ()) +
+    " requests, ~" + std::to_string (batch.updated.size ()) + ", -" +
+    std::to_string (batch.deleted.size ()) + ", " +
+    std::to_string (batch.new_collections.size ()) + " new collections");
 
     retry_on_busy ("apply spec sync", 5, std::chrono::milliseconds (100), [&] {
         impl_->storage.transaction ([&] {
@@ -1395,7 +1400,8 @@ void Database::spec_sync_apply (const SpecSyncBatch& batch) {
                 throw MissingRowError ("Collection", batch.binding.id);
             }
             for (const auto& row : batch.updated) {
-                if (impl_->storage.count<Request> (where (c (&Request::id) == row.id)) == 0) {
+                if (impl_->storage.count<Request> (
+                    where (c (&Request::id) == row.id)) == 0) {
                     throw MissingRowError ("Request", row.id);
                 }
             }
@@ -1406,7 +1412,8 @@ void Database::spec_sync_apply (const SpecSyncBatch& batch) {
                 impl_->storage.remove_all<Request> (where (c (&Request::id) == id));
             }
             for (const auto& id : batch.deleted_examples) {
-                impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
+                impl_->storage.remove_all<RequestExample> (
+                where (c (&RequestExample::id) == id));
             }
 
             impl_->storage.replace (batch.spec);
@@ -1502,7 +1509,8 @@ void Database::delete_environment (const std::string& id) {
 
 void Database::save_client_certificate (const ClientCertificate& c) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Saving client certificate: id=" + c.id + ", host=" + c.host);
+    vayu::utils::log_debug (
+    "Saving client certificate: id=" + c.id + ", host=" + c.host);
     impl_->storage.replace (c);
 }
 
@@ -1513,8 +1521,8 @@ std::vector<ClientCertificate> Database::get_client_certificates () {
 
 std::optional<ClientCertificate> Database::get_client_certificate (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    auto rows =
-    impl_->storage.get_all<ClientCertificate> (where (c (&ClientCertificate::id) == id));
+    auto rows = impl_->storage.get_all<ClientCertificate> (
+    where (c (&ClientCertificate::id) == id));
     if (rows.empty ())
         return std::nullopt;
     return rows.front ();
@@ -1565,8 +1573,7 @@ std::optional<OAuthToken> Database::get_oauth_token (const std::string& cache_ke
 
 void Database::delete_oauth_token (const std::string& cache_key) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    impl_->storage.remove_all<OAuthToken> (
-    where (c (&OAuthToken::cache_key) == cache_key));
+    impl_->storage.remove_all<OAuthToken> (where (c (&OAuthToken::cache_key) == cache_key));
 }
 
 // ============================================================================
@@ -1653,33 +1660,33 @@ auto run_filter_where (const RunFilter& filter) {
     const bool no_collection = !filter.collection_id.has_value ();
     const bool no_baseline   = !filter.baseline.has_value ();
 
-    const RunType type_val           = filter.type.value_or (RunType::Design);
-    const RunStatus status_val       = filter.status.value_or (RunStatus::Pending);
-    const std::string req_val        = filter.request_id.value_or ("");
-    const std::string q_pat          = "%" + (filter.q ? *filter.q : std::string{}) + "%";
+    const RunType type_val     = filter.type.value_or (RunType::Design);
+    const RunStatus status_val = filter.status.value_or (RunStatus::Pending);
+    const std::string req_val  = filter.request_id.value_or ("");
+    const std::string q_pat = "%" + (filter.q ? *filter.q : std::string{}) + "%";
     const std::string collection_val = filter.collection_id.value_or ("");
     const bool baseline_val          = filter.baseline.value_or (false);
 
     // The snapshot when it is JSON, an empty object when it is not - the guard
     // described above, so json_extract below is always handed valid JSON.
-    const auto snapshot_json = case_<std::string> ()
-                               .when (json_valid (&Run::config_snapshot),
-                               then (&Run::config_snapshot))
-                               .else_ (std::string{ "{}" })
-                               .end ();
+    const auto snapshot_json =
+    case_<std::string> ()
+    .when (json_valid (&Run::config_snapshot), then (&Run::config_snapshot))
+    .else_ (std::string{ "{}" })
+    .end ();
 
     return where ((c (&Run::type) == type_val || no_type) &&
     (c (&Run::status) == status_val || no_status) &&
     (c (&Run::request_id) == req_val || no_req) &&
     (like (&Run::config_snapshot, q_pat) || no_q) &&
     (c (&Run::baseline) == baseline_val || no_baseline) &&
-    (json_extract<std::string> (snapshot_json, std::string{ "$.scenario.collectionId" }) ==
-     collection_val ||
+    (json_extract<std::string> (snapshot_json, std::string{ "$.scenario.collectionId" }) == collection_val ||
     no_collection));
 }
 } // namespace
 
-std::vector<Run> Database::get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset) {
+std::vector<Run>
+Database::get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<Run> (run_filter_where (filter),
     order_by (&Run::start_time).desc (), sqlite_orm::limit (offset, limit));
@@ -1853,10 +1860,10 @@ size_t Database::reconcile_orphaned_runs () {
 }
 
 void Database::prune_runs_configured () {
-    const int max_runs =
-    get_config_int ("maxRunsRetained", vayu::core::constants::database::MAX_RUNS_RETAINED);
-    const int max_age_days =
-    get_config_int ("runRetentionDays", vayu::core::constants::database::RUN_RETENTION_DAYS);
+    const int max_runs = get_config_int (
+    "maxRunsRetained", vayu::core::constants::database::MAX_RUNS_RETAINED);
+    const int max_age_days = get_config_int (
+    "runRetentionDays", vayu::core::constants::database::RUN_RETENTION_DAYS);
     prune_runs (max_runs, max_age_days);
     // A run that has just been pruned may have been the last thing naming an
     // OpenAPI document (issue #718). Retention is where that reference is
@@ -1881,8 +1888,7 @@ void Database::add_metric_tick (const MetricTick& tick) {
 std::vector<MetricTick>
 Database::get_metric_ticks_paginated (const std::string& run_id, int64_t limit, int64_t offset) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.get_all<MetricTick> (
-    where (c (&MetricTick::run_id) == run_id),
+    return impl_->storage.get_all<MetricTick> (where (c (&MetricTick::run_id) == run_id),
     multi_order_by (order_by (&MetricTick::timestamp), order_by (&MetricTick::id)),
     sqlite_orm::limit (offset, limit));
 }
@@ -1915,8 +1921,7 @@ void Database::add_monitor_sample (const MonitorSample& sample) {
 std::vector<MonitorSample>
 Database::get_monitor_samples_paginated (const std::string& run_id, int64_t limit, int64_t offset) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.get_all<MonitorSample> (
-    where (c (&MonitorSample::run_id) == run_id),
+    return impl_->storage.get_all<MonitorSample> (where (c (&MonitorSample::run_id) == run_id),
     multi_order_by (order_by (&MonitorSample::timestamp), order_by (&MonitorSample::id)),
     sqlite_orm::limit (offset, limit));
 }
@@ -1958,9 +1963,8 @@ int Database::add_inbox_request (const InboxRequest& capture, int64_t max_captur
     return assigned_id;
 }
 
-std::vector<InboxRequest> Database::get_inbox_requests_paginated (const std::string& inbox_id,
-int64_t limit,
-int64_t offset) {
+std::vector<InboxRequest>
+Database::get_inbox_requests_paginated (const std::string& inbox_id, int64_t limit, int64_t offset) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<InboxRequest> (
     where (c (&InboxRequest::inbox_id) == inbox_id),
@@ -1969,7 +1973,8 @@ int64_t offset) {
 
 int64_t Database::count_inbox_requests (const std::string& inbox_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.count<InboxRequest> (where (c (&InboxRequest::inbox_id) == inbox_id));
+    return impl_->storage.count<InboxRequest> (
+    where (c (&InboxRequest::inbox_id) == inbox_id));
 }
 
 std::vector<InboxRequest>
@@ -1982,8 +1987,8 @@ Database::get_inbox_requests_since (const std::string& inbox_id, int64_t last_id
 
 int64_t Database::clear_inbox_requests (const std::string& inbox_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    const int64_t removed =
-    impl_->storage.count<InboxRequest> (where (c (&InboxRequest::inbox_id) == inbox_id));
+    const int64_t removed = impl_->storage.count<InboxRequest> (
+    where (c (&InboxRequest::inbox_id) == inbox_id));
     impl_->storage.remove_all<InboxRequest> (where (c (&InboxRequest::inbox_id) == inbox_id));
     return removed;
 }
@@ -1994,7 +1999,8 @@ int64_t Database::clear_inbox_requests_all () {
     if (removed > 0) {
         impl_->storage.remove_all<InboxRequest> ();
     }
-    return removed;}
+    return removed;
+}
 
 // ============================================================================
 // Results - Individual request outcomes with timing breakdown
@@ -2019,8 +2025,7 @@ const std::vector<PendingResultBody>& bodies) {
             std::vector<int> result_ids;
             result_ids.reserve (results.size ());
             for (const auto& result : results) {
-                result_ids.push_back (
-                static_cast<int> (impl_->storage.insert (result)));
+                result_ids.push_back (static_cast<int> (impl_->storage.insert (result)));
             }
 
             // Dedup within the run: identical bodies (the norm for a load test)
@@ -2048,12 +2053,12 @@ const std::vector<PendingResultBody>& bodies) {
                 }
 
                 ResultBody row;
-                row.result_id    = result_ids[pending.result_index];
-                row.run_id       = results[pending.result_index].run_id;
-                row.headers      = pending.headers;
-                row.blob_id      = blob_id;
-                row.body_bytes   = pending.body_bytes;
-                row.truncated    = pending.truncated;
+                row.result_id     = result_ids[pending.result_index];
+                row.run_id        = results[pending.result_index].run_id;
+                row.headers       = pending.headers;
+                row.blob_id       = blob_id;
+                row.body_bytes    = pending.body_bytes;
+                row.truncated     = pending.truncated;
                 row.is_binary     = pending.binary;
                 row.content_type  = pending.content_type;
                 row.stream_events = pending.stream_events;
@@ -2341,10 +2346,9 @@ void Database::seed_default_config () {
     //                          story. dbCacheSize, the one that does, is wired
     //                          instead of retired.
     for (const char* retired : { "requestBatchSize", "contextPoolSize",
-             "maxConnections", "tcpKeepAliveIdle", "tcpKeepAliveInterval",
-             "statsInterval", "maxJsonFieldSize", "sseConnectTimeout",
-             "sseMaxRetry", "sseSendLastEventId", "dbTempStore", "dbMmapSize",
-             "dbWalAutocheckpoint" }) {
+         "maxConnections", "tcpKeepAliveIdle", "tcpKeepAliveInterval",
+         "statsInterval", "maxJsonFieldSize", "sseConnectTimeout", "sseMaxRetry",
+         "sseSendLastEventId", "dbTempStore", "dbMmapSize", "dbWalAutocheckpoint" }) {
         impl_->storage.remove_all<ConfigEntry> (
         where (c (&ConfigEntry::key) == std::string (retired)));
     }
@@ -2390,8 +2394,7 @@ void Database::seed_default_config () {
         // built it, so a wrapper that held on to it would be reading freed
         // storage the moment one is stored instead of called immediately.
         std::string json =
-        nlohmann::json (std::vector<std::string> (terms.begin (), terms.end ()))
-        .dump ();
+        nlohmann::json (std::vector<std::string> (terms.begin (), terms.end ())).dump ();
         return [json = std::move (json)] (ConfigEntry entry) {
             entry.keywords = json;
             return entry;
@@ -2441,20 +2444,19 @@ void Database::seed_default_config () {
     // and builds that run's EventLoop from it, so a change is in force for the
     // next run started. It carried the flag until #873, which told the user to
     // restart for a setting the engine had already picked up.
-    upsert_config (keywords ({ "cores", "parallelism" }) (ConfigEntry{ "workers",
-    std::to_string (std::thread::hardware_concurrency ()), "integer", "Worker Threads",
+    upsert_config (keywords ({ "cores", "parallelism" }) (ConfigEntry{
+    "workers", std::to_string (std::thread::hardware_concurrency ()), "integer", "Worker Threads",
     "Number of background worker threads. Higher values improve throughput on "
     "multi-core systems but increase RAM usage. "
     "Default equals CPU core count.",
     "general_engine", std::to_string (std::thread::hardware_concurrency ()),
     "1", "128", std::nullopt, now }));
 
-    upsert_config (restart_required (unit ("bytes") (
-    keywords ({ "ram" }) (ConfigEntry{ "dbCacheSize",
-    std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES),
-    "integer", "Database Cache Size",
+    upsert_config (restart_required (unit ("bytes") (keywords ({ "ram" }) (ConfigEntry{ "dbCacheSize",
+    std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES), "integer", "Database Cache Size",
     "Memory SQLite keeps per connection for recently used database pages. A "
-    "larger cache spares repeated reads while a high-RPS run writes results and "
+    "larger cache spares repeated reads while a high-RPS run writes results "
+    "and "
     "the dashboard queries them. 64 to 128 megabytes suits runs storing 10,000 "
     "or more results a second.",
     "general_engine", std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES),
@@ -2462,10 +2464,9 @@ void Database::seed_default_config () {
     "1073741824", // max: 1GB in bytes
     std::nullopt, now }))));
 
-    upsert_config (restart_required (advanced (unit ("ms") (
-    keywords ({ "contention" }) (ConfigEntry{ "dbBusyTimeout",
-    std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS),
-    "integer", "Database Lock Wait Time",
+    upsert_config (restart_required (advanced (
+    unit ("ms") (keywords ({ "contention" }) (ConfigEntry{ "dbBusyTimeout",
+    std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS), "integer", "Database Lock Wait Time",
     "How long a thread waits for the database when another one is writing to "
     "it. Result-storage threads compete for it during a high-concurrency run, "
     "and a longer wait turns a 'database is locked' failure into a pause "
@@ -2475,10 +2476,8 @@ void Database::seed_default_config () {
     "60000", // max: 60 seconds
     std::nullopt, now })))));
 
-    upsert_config (restart_required (keywords ({ "fsync", "pragma" }) (
-    ConfigEntry{ "dbSynchronous",
-    std::to_string (vayu::core::constants::database::SYNCHRONOUS), "enum",
-    "Data Safety Mode",
+    upsert_config (restart_required (keywords ({ "fsync", "pragma" }) (ConfigEntry{ "dbSynchronous",
+    std::to_string (vayu::core::constants::database::SYNCHRONOUS), "enum", "Data Safety Mode",
     "How hard SQLite works to get results onto disk before reporting them "
     "written. Off is the fastest and the default: the database stays "
     "uncorrupted through a crash, but the last few results may be lost to a "
@@ -2497,8 +2496,7 @@ void Database::seed_default_config () {
     // at "network tuning".
     // =========================================================================
 
-    upsert_config (unit ("ms") (keywords ({ "deadline", "give up", "hang" }) (
-    ConfigEntry{ "defaultTimeout",
+    upsert_config (unit ("ms") (keywords ({ "deadline", "give up", "hang" }) (ConfigEntry{ "defaultTimeout",
     std::to_string (vayu::core::constants::server::DEFAULT_TIMEOUT_MS), "integer", "Default Request Timeout",
     "How long an HTTP request may run before it is abandoned, "
     "when the request does not set a timeout of its own. Raise it for slow "
@@ -2508,7 +2506,8 @@ void Database::seed_default_config () {
     "300000", // max: 5 minutes
     std::nullopt, now })));
 
-    upsert_config (keywords ({ "h2", "alpn" }) (ConfigEntry{ "defaultHttpVersion",
+    upsert_config (
+    keywords ({ "h2", "alpn" }) (ConfigEntry{ "defaultHttpVersion",
     vayu::to_string (vayu::DEFAULT_HTTP_VERSION), "enum", "Default HTTP Version",
     "Protocol a newly created request starts with. Auto lets the server and "
     "client negotiate (HTTP/2 where available, falling back to HTTP/1.1). "
@@ -2516,9 +2515,8 @@ void Database::seed_default_config () {
     "network_performance", vayu::to_string (vayu::DEFAULT_HTTP_VERSION),
     std::nullopt, std::nullopt, http_version_options_json (), now }));
 
-    upsert_config (keywords ({ "concurrency", "parallel" }) (
-    ConfigEntry{ "eventLoopMaxConcurrent",
-    std::to_string (vayu::core::constants::event_loop::MAX_CONCURRENT),
+    upsert_config (keywords ({ "concurrency", "parallel" }) (ConfigEntry{
+    "eventLoopMaxConcurrent", std::to_string (vayu::core::constants::event_loop::MAX_CONCURRENT),
     "integer", "Max Concurrent Requests (Per Worker)",
     "How many requests one worker keeps in flight at once. Higher values use "
     "more file descriptors and push the target harder. Read when a load test "
@@ -2526,9 +2524,9 @@ void Database::seed_default_config () {
     "network_performance", std::to_string (vayu::core::constants::event_loop::MAX_CONCURRENT),
     "1", "10000", std::nullopt, now }));
 
-    upsert_config (keywords ({ "socket", "pool" }) (ConfigEntry{ "eventLoopMaxPerHost",
-    std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST), "integer",
-    "Max Connections Per Host (Per Worker)",
+    upsert_config (keywords ({ "socket", "pool" }) (ConfigEntry{
+    "eventLoopMaxPerHost", std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST),
+    "integer", "Max Connections Per Host (Per Worker)",
     "Concurrency limit for a specific target API host. Critical for respecting "
     "target rate limits. "
     "Lower values are gentler on the target; higher values maximize "
@@ -2536,14 +2534,14 @@ void Database::seed_default_config () {
     "network_performance", std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST),
     "1", "1000", std::nullopt, now }));
 
-    upsert_config (unit ("sec") (keywords ({ "ttl" }) (ConfigEntry{ "dnsCacheTimeout",
-    std::to_string (vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS),
-    "integer", "DNS Cache Timeout",
+    upsert_config (
+    unit ("sec") (keywords ({ "ttl" }) (ConfigEntry{ "dnsCacheTimeout",
+    std::to_string (vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS), "integer", "DNS Cache Timeout",
     "How long a resolved hostname is reused before it is looked up "
-    "again. 0 forces a fresh lookup on every request; 60 to 300 seconds suits a "
+    "again. 0 forces a fresh lookup on every request; 60 to 300 seconds suits "
+    "a "
     "stable endpoint.",
-    "network_performance",
-    std::to_string (vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS),
+    "network_performance", std::to_string (vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS),
     "0",    // Disable cache
     "3600", // 1 hour
     std::nullopt, now })));
@@ -2555,8 +2553,7 @@ void Database::seed_default_config () {
     // network - none of which the labels say.
     upsert_config (keywords ({ "corporate", "firewall", "mitm", "zscaler", "vpn" }) (
     ConfigEntry{ "proxyMode",
-    vayu::http::to_string (vayu::http::TransportPolicy{}.proxy_mode), "enum",
-    "Proxy",
+    vayu::http::to_string (vayu::http::TransportPolicy{}.proxy_mode), "enum", "Proxy",
     "How outbound requests reach the network. From environment uses the "
     "http_proxy and https_proxy variables the engine was started with, which "
     "is what a terminal-launched engine already picks up and a desktop launch "
@@ -2564,12 +2561,11 @@ void Database::seed_default_config () {
     "configured with, which the app resolves and shows below. Manual routes "
     "everything through the proxy URL below. None sends direct, ignoring those "
     "variables too.",
-    "network_performance",
-    vayu::http::to_string (vayu::http::TransportPolicy{}.proxy_mode), std::nullopt,
-    std::nullopt, proxy_mode_options_json (), now }));
+    "network_performance", vayu::http::to_string (vayu::http::TransportPolicy{}.proxy_mode),
+    std::nullopt, std::nullopt, proxy_mode_options_json (), now }));
 
-    upsert_config (keywords ({ "corporate", "firewall", "mitm" }) (ConfigEntry{ "proxyUrl", "",
-    "string", "Proxy URL",
+    upsert_config (keywords ({ "corporate", "firewall", "mitm" }) (
+    ConfigEntry{ "proxyUrl", "", "string", "Proxy URL",
     "The proxy to route through when Proxy is set to Manual, written the way "
     "curl takes it: scheme://user:password@host:port. The scheme selects the "
     "kind - http, https, socks4, socks4a, socks5, socks5h - and credentials in "
@@ -2645,9 +2641,9 @@ void Database::seed_default_config () {
     // rule rather than by whatever the setting happened to be at each arrival.
     upsert_config (keywords ({ "eventsource", "server-sent", "event stream" }) (
     ConfigEntry{ "sseMaxRetainedEvents",
-    std::to_string (vayu::core::constants::sse::MAX_RETAINED_EVENTS), "integer",
-    "Stream Events Retained",
-    "How many of a streaming request's events are held in memory for the Events "
+    std::to_string (vayu::core::constants::sse::MAX_RETAINED_EVENTS), "integer", "Stream Events Retained",
+    "How many of a streaming request's events are held in memory for the "
+    "Events "
     "timeline. Older ones are dropped as new ones arrive, so this is how far "
     "back a long stream can be scrolled while it is running; the completed run "
     "stores its own, separate list. Each event costs roughly its own size in "
@@ -2658,24 +2654,20 @@ void Database::seed_default_config () {
     std::nullopt, now }));
 
     upsert_config (unit ("bytes") (
-    keywords ({ "eventsource", "server-sent", "event stream" }) (
-    ConfigEntry{ "sseMaxEventBytes",
-    std::to_string (vayu::core::constants::sse::MAX_EVENT_BYTES), "integer",
-    "Stream Event Size Limit",
+    keywords ({ "eventsource", "server-sent", "event stream" }) (ConfigEntry{ "sseMaxEventBytes",
+    std::to_string (vayu::core::constants::sse::MAX_EVENT_BYTES), "integer", "Stream Event Size Limit",
     "How much of a single streamed event is kept. A larger event is held as a "
     "prefix and flagged as truncated, never silently cut - the event reports "
     "the size as received either way. This is also what bounds the parser "
-    "itself, so a server that sends without a line break cannot exhaust memory.",
+    "itself, so a server that sends without a line break cannot exhaust "
+    "memory.",
     "services", std::to_string (vayu::core::constants::sse::MAX_EVENT_BYTES),
     std::to_string (vayu::core::constants::sse::MIN_EVENT_BYTES),
-    std::to_string (vayu::core::constants::sse::EVENT_BYTES_CEILING),
-    std::nullopt, now })));
+    std::to_string (vayu::core::constants::sse::EVENT_BYTES_CEILING), std::nullopt, now })));
 
-    upsert_config (unit ("ms") (
-    keywords ({ "eventsource", "server-sent", "event stream" }) (
-    ConfigEntry{ "sseMaxStreamDurationMs",
-    std::to_string (vayu::core::constants::sse::MAX_STREAM_DURATION_MS), "integer",
-    "Stream Duration Limit",
+    upsert_config (unit ("ms") (keywords ({ "eventsource", "server-sent",
+    "event stream" }) (ConfigEntry{ "sseMaxStreamDurationMs",
+    std::to_string (vayu::core::constants::sse::MAX_STREAM_DURATION_MS), "integer", "Stream Duration Limit",
     "How long a streaming request may run before the engine ends it and says "
     "so. A stream has no content length and no promise to end, so this is the "
     "backstop that keeps one from holding a worker forever. A request may ask "
@@ -2687,22 +2679,18 @@ void Database::seed_default_config () {
 
     upsert_config (keywords ({ "eventsource", "server-sent", "event stream" }) (
     ConfigEntry{ "sseMaxStreamEvents",
-    std::to_string (vayu::core::constants::sse::MAX_STREAM_EVENTS), "integer",
-    "Stream Event Limit",
+    std::to_string (vayu::core::constants::sse::MAX_STREAM_EVENTS), "integer", "Stream Event Limit",
     "How many events a streaming request may receive before the engine ends it "
     "and says so. The count backstop beside the time one, for a stream that "
     "talks fast rather than long. A request may ask for a lower limit of its "
     "own.",
     "services", std::to_string (vayu::core::constants::sse::MAX_STREAM_EVENTS),
     std::to_string (vayu::core::constants::sse::MIN_STREAM_EVENTS),
-    std::to_string (vayu::core::constants::sse::STREAM_EVENTS_CEILING),
-    std::nullopt, now }));
+    std::to_string (vayu::core::constants::sse::STREAM_EVENTS_CEILING), std::nullopt, now }));
 
     upsert_config (advanced (unit ("ms") (
-    keywords ({ "eventsource", "server-sent", "event stream" }) (
-    ConfigEntry{ "sseIdleTimeoutMs",
-    std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS), "integer",
-    "Stream Idle Timeout",
+    keywords ({ "eventsource", "server-sent", "event stream" }) (ConfigEntry{ "sseIdleTimeoutMs",
+    std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS), "integer", "Stream Idle Timeout",
     "How long a stream may deliver nothing before the engine ends it. This is "
     "the one deadline a stream gets - a whole-transfer timeout would kill a "
     "healthy stream mid-flight - so it must be longer than the quietest gap "
@@ -2710,8 +2698,7 @@ void Database::seed_default_config () {
     "second resolution.",
     "services", std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS),
     std::to_string (vayu::core::constants::sse::MIN_IDLE_TIMEOUT_MS),
-    std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS_CEILING),
-    std::nullopt, now }))));
+    std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS_CEILING), std::nullopt, now }))));
 
     // Webhook inbox. All three are read once when an inbox starts, so a change
     // applies to the next inbox started - no restart. The running listener keeps
@@ -2719,10 +2706,10 @@ void Database::seed_default_config () {
     // truncated and retained by a single rule rather than by whatever the
     // setting happened to be at each arrival.
     upsert_config (unit ("bytes") (ConfigEntry{ "inboxMaxBodyBytes",
-    std::to_string (vayu::core::constants::inbox::MAX_BODY_BYTES), "integer",
-    "Inbox Capture Body Limit",
+    std::to_string (vayu::core::constants::inbox::MAX_BODY_BYTES), "integer", "Inbox Capture Body Limit",
     "How much of an inbound webhook body an inbox stores. A larger "
-    "payload is kept as a prefix and flagged as truncated, never silently cut - "
+    "payload is kept as a prefix and flagged as truncated, never silently cut "
+    "- "
     "the capture reports the size as received either way. Raise it for a "
     "provider that posts large documents; the transport still refuses anything "
     "over 8 MB outright, which is not a webhook.",
@@ -2731,8 +2718,7 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::inbox::MAX_PAYLOAD_BYTES), std::nullopt, now }));
 
     upsert_config (ConfigEntry{ "inboxMaxCaptures",
-    std::to_string (vayu::core::constants::inbox::MAX_CAPTURES), "integer",
-    "Inbox Captures Retained",
+    std::to_string (vayu::core::constants::inbox::MAX_CAPTURES), "integer", "Inbox Captures Retained",
     "How many requests one inbox keeps before the oldest are dropped. Also the "
     "most a single page of the capture list may ask for. Raise it to keep a "
     "long webhook session whole; every capture is a stored row, so this and "
@@ -2741,16 +2727,17 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::inbox::MIN_CAPTURES),
     std::to_string (vayu::core::constants::inbox::CAPTURES_CEILING), std::nullopt, now });
 
-    upsert_config (advanced (unit ("ms") (ConfigEntry{ "inboxLivePollIntervalMs",
-    std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS), "integer",
-    "Inbox Live Poll Interval",
+    upsert_config (
+    advanced (unit ("ms") (ConfigEntry{ "inboxLivePollIntervalMs",
+    std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS), "integer", "Inbox Live Poll Interval",
     "How often a watched inbox checks for newly arrived "
     "captures. This is the delay between a webhook landing and its row "
     "appearing. Lower costs a few more wakeups per second on the one thread "
     "holding that stream and nothing on the capture path itself.",
     "services", std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS),
     std::to_string (vayu::core::constants::inbox::MIN_LIVE_POLL_INTERVAL_MS),
-    std::to_string (vayu::core::constants::inbox::MAX_LIVE_POLL_INTERVAL_MS), std::nullopt, now })));
+    std::to_string (vayu::core::constants::inbox::MAX_LIVE_POLL_INTERVAL_MS),
+    std::nullopt, now })));
 
     // Mid-run OAuth 2.0 refresh. A load run renews a header-placed access token
     // before it expires, so a run longer than its token does not turn into a
@@ -2760,56 +2747,56 @@ void Database::seed_default_config () {
     // user tuning token renewal arrives at Services, which is where the Dock
     // files the OAuth issuer itself.
     upsert_config (unit ("ms") (ConfigEntry{ "oauth2RefreshLeadMs",
-    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS), "integer",
-    "OAuth 2.0 Refresh Lead Time",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS),
+    "integer", "OAuth 2.0 Refresh Lead Time",
     "How far ahead of an access token's expiry a running load "
     "test renews it. Wider than the 45-second skew the token cache already "
     "applies, so the new credential is published while the old one is still "
     "accepted and no request falls in the gap. Raise it for a provider that is "
     "slow to issue tokens.",
-    "services",
-    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS),
+    "services", std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS),
     "1000",    // 1 second
     "3600000", // 1 hour
     std::nullopt, now }));
 
-    upsert_config (advanced (unit ("ms") (ConfigEntry{ "oauth2RefreshMinIntervalMs",
-    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS), "integer",
-    "Min OAuth 2.0 Refresh Interval",
+    upsert_config (
+    advanced (unit ("ms") (ConfigEntry{ "oauth2RefreshMinIntervalMs",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS),
+    "integer", "Min OAuth 2.0 Refresh Interval",
     "Floor on the wait between two mid-run renewals. A token "
     "whose whole lifetime is shorter than the lead time above is always inside "
-    "its refresh window, so without this floor a run would re-acquire in a tight "
+    "its refresh window, so without this floor a run would re-acquire in a "
+    "tight "
     "loop and hammer the token endpoint. Lower it only for a provider that "
     "issues very short-lived tokens.",
-    "services",
-    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS),
+    "services", std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS),
     "100",     // 0.1 second - a floor, never 0: that is the tight loop
     "3600000", // 1 hour
     std::nullopt, now })));
 
     upsert_config (advanced (unit ("ms") (ConfigEntry{ "oauth2RefreshRetryMs",
-    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS), "integer",
-    "OAuth 2.0 Refresh Retry Delay",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS), "integer", "OAuth 2.0 Refresh Retry Delay",
     "First wait after a mid-run renewal is refused, doubled "
-    "per consecutive failure up to the ceiling below. The run keeps sending the "
+    "per consecutive failure up to the ceiling below. The run keeps sending "
+    "the "
     "credential it already has - a failed renewal is reported in the run's "
     "report, never fatal - so this is about recovering from a token endpoint "
     "that blipped.",
-    "services",
-    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS),
+    "services", std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS),
     "250", "600000", std::nullopt, now })));
 
-    upsert_config (advanced (unit ("ms") (ConfigEntry{ "oauth2RefreshRetryMaxMs",
-    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS), "integer",
-    "Max OAuth 2.0 Refresh Retry Delay",
+    upsert_config (
+    advanced (unit ("ms") (ConfigEntry{ "oauth2RefreshRetryMaxMs",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS),
+    "integer", "Max OAuth 2.0 Refresh Retry Delay",
     "Ceiling on that backoff, so a token endpoint that is "
     "down for an hour costs the run a bounded number of attempts rather than "
     "one every few seconds.",
-    "services",
-    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS),
+    "services", std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS),
     "1000", "3600000", std::nullopt, now })));
 
-    upsert_config (advanced (unit ("ms") (ConfigEntry{ "oauth2RefreshPollIntervalMs",
+    upsert_config (
+    advanced (unit ("ms") (ConfigEntry{ "oauth2RefreshPollIntervalMs",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS),
     "integer", "OAuth 2.0 Refresh Poll Interval",
     "How often the renewal watchdog wakes while it waits, to "
@@ -2817,8 +2804,7 @@ void Database::seed_default_config () {
     "writes its report, so this bounds how long the run's last moments take. "
     "Lower costs a few more wakeups per second on one sleeping thread and "
     "nothing on the request path.",
-    "services",
-    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS),
+    "services", std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS),
     "10",   // 10ms - below this the wakeups outweigh what they save
     "5000", // 5s - past this a finished run visibly waits on the join
     std::nullopt, now })));
@@ -2835,40 +2821,41 @@ void Database::seed_default_config () {
     // the next run started, no restart. The interval *bounds* (250-60000ms) are
     // deliberately not settings: they exist to stop a cadence that measures the
     // scraper rather than the target.
-    upsert_config (unit ("ms") (keywords ({ "prometheus" }) (
-    ConfigEntry{ "monitorIntervalMs",
-    std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS), "integer",
-    "Server Monitoring Scrape Interval",
+    upsert_config (
+    unit ("ms") (keywords ({ "prometheus" }) (ConfigEntry{ "monitorIntervalMs",
+    std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS), "integer", "Server Monitoring Scrape Interval",
     "How often a load test scrapes the metrics endpoint it "
-    "was pointed at, when the run does not set its own interval. Each scrape is "
+    "was pointed at, when the run does not set its own interval. Each scrape "
+    "is "
     "one request on the run's monitor thread, so it never delays the run's own "
     "metrics - but a cadence faster than the target's own collection interval "
-    "only re-reads the same numbers. Raise it for an endpoint that is expensive "
+    "only re-reads the same numbers. Raise it for an endpoint that is "
+    "expensive "
     "to render.",
-    "observability",
-    std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS),
+    "observability", std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS),
     std::to_string (vayu::core::constants::monitor::MIN_INTERVAL_MS),
     std::to_string (vayu::core::constants::monitor::MAX_INTERVAL_MS), std::nullopt, now })));
 
     upsert_config (keywords ({ "prometheus" }) (ConfigEntry{ "monitorMaxSeries",
-    std::to_string (vayu::core::constants::monitor::MAX_SERIES), "integer",
-    "Server Monitoring Metric Limit",
+    std::to_string (vayu::core::constants::monitor::MAX_SERIES), "integer", "Server Monitoring Metric Limit",
     "How many metric names one run may chart from its monitored endpoint. Each "
-    "is a line on a single overlay and a name matched against every line of the "
+    "is a line on a single overlay and a name matched against every line of "
+    "the "
     "exposition body, so the ceiling is about a readable chart rather than a "
-    "hard cost. The chart has four distinct colours and repeats them past that.",
+    "hard cost. The chart has four distinct colours and repeats them past "
+    "that.",
     "observability", std::to_string (vayu::core::constants::monitor::MAX_SERIES),
     "1", "64", std::nullopt, now }));
 
-    upsert_config (advanced (unit ("ms") (keywords ({ "prometheus" }) (
-    ConfigEntry{ "monitorScrapeTimeoutMs",
-    std::to_string (vayu::core::constants::monitor::DEFAULT_SCRAPE_TIMEOUT_MS),
-    "integer", "Server Monitoring Scrape Timeout",
+    upsert_config (advanced (unit ("ms") (keywords ({ "prometheus" }) (ConfigEntry{ "monitorScrapeTimeoutMs",
+    std::to_string (vayu::core::constants::monitor::DEFAULT_SCRAPE_TIMEOUT_MS), "integer", "Server Monitoring Scrape Timeout",
     "How long one scrape of the metrics endpoint may take "
     "before it counts as a gap in the series. 0 derives the budget from the "
     "scrape interval - three quarters of it - which is what most endpoints "
-    "want; set it explicitly for an exposition slow enough to fail every scrape "
-    "at that budget, where the only other way out is a slower cadence that also "
+    "want; set it explicitly for an exposition slow enough to fail every "
+    "scrape "
+    "at that budget, where the only other way out is a slower cadence that "
+    "also "
     "thins the data. A value longer than the interval a run scrapes at is "
     "shortened to it, because a scrape that outlives its own cadence puts the "
     "loop behind itself.",
@@ -2876,10 +2863,8 @@ void Database::seed_default_config () {
     "0", std::to_string (vayu::core::constants::monitor::MAX_INTERVAL_MS),
     std::nullopt, now }))));
 
-    upsert_config (unit ("ms") (keywords ({ "refresh rate", "sse" }) (
-    ConfigEntry{ "liveTickIntervalMs",
-    std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
-    "integer", "Live Metrics Tick Interval",
+    upsert_config (unit ("ms") (keywords ({ "refresh rate", "sse" }) (ConfigEntry{ "liveTickIntervalMs",
+    std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS), "integer", "Live Metrics Tick Interval",
     "How often the engine emits a live-metrics tick into the "
     "in-memory replay topic during a run. A lower value gives smoother live "
     "charts for slightly more CPU; the 1-second ceiling exists because slower "
@@ -2888,11 +2873,11 @@ void Database::seed_default_config () {
     "observability", std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
     "10", "1000", std::nullopt, now })));
 
-    upsert_config (unit ("ms") (keywords ({ "time range" }) (
-    ConfigEntry{ "liveReplayWindowMs",
-    std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
-    "integer", "Live Chart Window",
-    "How much recent live-metrics history to keep: the span the dashboard's live "
+    upsert_config (
+    unit ("ms") (keywords ({ "time range" }) (ConfigEntry{ "liveReplayWindowMs",
+    std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS), "integer", "Live Chart Window",
+    "How much recent live-metrics history to keep: the span the dashboard's "
+    "live "
     "charts show, and the span the engine holds in memory per run so the "
     "dashboard can rebuild those charts when it attaches - or re-attaches - "
     "mid-run. One setting drives both, so they cannot disagree. Its editor is "
@@ -2904,45 +2889,41 @@ void Database::seed_default_config () {
     "memory backstop "
     "either way, so a fast tick interval reaches that ceiling before a long "
     "window does.",
-    "observability",
-    std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
+    "observability", std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
     "0", "3600000", std::nullopt, now })));
 
     upsert_config (advanced (ConfigEntry{ "liveMaxRetainedTicks",
-    std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS),
-    "integer", "Live Metrics Tick Ceiling",
+    std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS), "integer", "Live Metrics Tick Ceiling",
     "Hard ceiling on live-metrics data points held in memory per run, on both "
     "sides - the engine's replay ring and the dashboard's chart history. It is "
-    "a memory bound rather than a rendering one, since the charts bucket points "
+    "a memory bound rather than a rendering one, since the charts bucket "
+    "points "
     "before plotting, and it binds only when the chart window divided by the "
     "tick interval exceeds it - a long window at a fast tick interval, which "
     "stock settings never reach. Raise it if a long window is being cut short; "
     "each point costs roughly 1 KB.",
-    "observability",
-    std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS),
+    "observability", std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS),
     "1000", "500000", std::nullopt, now }));
 
-    upsert_config (unit ("ms") (ConfigEntry{ "liveRetentionMs",
-    "60000",
-    "integer", "Live Metrics Retention",
+    upsert_config (unit ("ms") (ConfigEntry{ "liveRetentionMs", "60000", "integer", "Live Metrics Retention",
     "How long a finished run's in-memory live-metrics topic "
-    "is kept so the dashboard can still attach and replay it. After this window "
+    "is kept so the dashboard can still attach and replay it. After this "
+    "window "
     "the run is evicted and the dashboard falls back to the stored report. 0 "
     "disables retention, so that fallback is immediate.",
-    "observability", "60000",
-    "0", "600000", std::nullopt, now }));
+    "observability", "60000", "0", "600000", std::nullopt, now }));
 
-    upsert_config (keywords ({ "ttfb", "timings" }) (ConfigEntry{ "phaseHistograms",
-    vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
+    upsert_config (keywords ({ "ttfb", "timings" }) (ConfigEntry{
+    "phaseHistograms", vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
     "boolean", "Per-Phase Latency Histograms",
     "Records DNS, connect, TLS, first-byte and download times for every "
     "load-test completion, so the report gives each phase real percentiles "
-    "instead of an average over the few exchanges it stores traces for. This is "
+    "instead of an average over the few exchanges it stores traces for. This "
+    "is "
     "what answers whether a slow p99 came from the server or from connection "
     "setup. It costs five histogram writes per completion; turn it off only if "
     "a run at your throughput ceiling measurably suffers.",
-    "observability",
-    vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
+    "observability", vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
     std::nullopt, std::nullopt, std::nullopt, now }));
 
     // =========================================================================
@@ -2964,20 +2945,18 @@ void Database::seed_default_config () {
     "than this covers the first N and will not sum to the total beside it. 0 "
     "means unlimited, which against a fully refusing target grows for the life "
     "of the run.",
-    "data_retention",
-    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
+    "data_retention", std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
     "0", "10000000", std::nullopt, now });
 
     upsert_config (unit ("bytes") (ConfigEntry{ "maxTraceBodyBytes",
-    std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES), "integer",
-    "Max Stored Trace Body Size",
+    std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES), "integer", "Max Stored Trace Body Size",
     "Largest request or response body kept in a design run's stored "
     "trace. A larger body is truncated in the database - the response viewer "
     "says so, and re-sending fetches the full body - so one huge response does "
     "not bloat storage forever.",
     "data_retention", std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES),
-    "1024",       // 1KB
-    "104857600",  // 100MB
+    "1024",      // 1KB
+    "104857600", // 100MB
     std::nullopt, now }));
 
     upsert_config (unit ("bytes") (ConfigEntry{ "maxSampleBodyBytes",
@@ -2987,8 +2966,7 @@ void Database::seed_default_config () {
     "sample. Deliberately far smaller than the design-run trace limit, because "
     "a load run captures tens of exchanges nobody asked for individually. A "
     "larger body is stored truncated and marked as such.",
-    "data_retention",
-    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES),
+    "data_retention", std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES),
     "0",         // 0 disables body capture while keeping headers and metadata
     "104857600", // 100MB
     std::nullopt, now }));
@@ -3000,15 +2978,14 @@ void Database::seed_default_config () {
     "samples keep their headers and metadata and only their bodies are "
     "dropped, and the report says how many. Captured data is stored verbatim, "
     "can contain credentials, and is deleted with the run.",
-    "data_retention",
-    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES),
+    "data_retention", std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES),
     "0",          // 0 disables body capture while keeping headers and metadata
     "1073741824", // 1GB
     std::nullopt, now }));
 
     upsert_config (ConfigEntry{ "maxScenarioStoredSteps",
-    std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS), "integer",
-    "Max Stored Scenario Steps",
+    std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS),
+    "integer", "Max Stored Scenario Steps",
     "How many per-step results one collection run keeps, which bounds what a "
     "long run costs the dashboard to load. Steps that failed, errored or were "
     "skipped are kept first and successes fill the rest, so raising this buys "
@@ -3019,8 +2996,7 @@ void Database::seed_default_config () {
 
     upsert_config (keywords ({ "eventsource", "server-sent", "event stream" }) (
     ConfigEntry{ "sseMaxStoredEvents",
-    std::to_string (vayu::core::constants::sse::MAX_STORED_EVENTS), "integer",
-    "Stream Events Stored Per Run",
+    std::to_string (vayu::core::constants::sse::MAX_STORED_EVENTS), "integer", "Stream Events Stored Per Run",
     "How many events a finished streaming run keeps on disk, so reopening it "
     "from History shows the timeline again. A run that received more says so - "
     "the stored list is marked truncated and carries the true total. 0 keeps "
@@ -3030,8 +3006,7 @@ void Database::seed_default_config () {
     std::nullopt, now }));
 
     upsert_config (keywords ({ "cleanup" }) (ConfigEntry{ "maxRunsRetained",
-    std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED), "integer",
-    "Max Runs Retained",
+    std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED), "integer", "Max Runs Retained",
     "Keep at most this many most-recent runs; older runs, with their metrics "
     "and results, are pruned at startup and after each run finishes. A higher "
     "value - or 0 for unlimited - keeps more history but grows the database "
@@ -3040,10 +3015,9 @@ void Database::seed_default_config () {
     "data_retention", std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED),
     "0", "100000", std::nullopt, now }));
 
-    upsert_config (unit ("days") (keywords ({ "cleanup" }) (
-    ConfigEntry{ "runRetentionDays",
-    std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS), "integer",
-    "Run Retention",
+    upsert_config (
+    unit ("days") (keywords ({ "cleanup" }) (ConfigEntry{ "runRetentionDays",
+    std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS), "integer", "Run Retention",
     "Delete runs older than this age, with their metrics and results, at "
     "startup and after each run finishes. A higher value - or 0 to keep runs "
     "forever - retains more history at the cost of a larger database file on "
@@ -3061,19 +3035,17 @@ void Database::seed_default_config () {
     // =========================================================================
 
     upsert_config (ConfigEntry{ "maxScenarioSteps",
-    std::to_string (vayu::core::constants::scenario::MAX_STEPS), "integer",
-    "Max Scenario Steps",
+    std::to_string (vayu::core::constants::scenario::MAX_STEPS), "integer", "Max Scenario Steps",
     "Largest number of requests one collection run may resolve to. The whole "
     "sequence is composed before the first send and held in memory for the "
     "run, and a load-mode scenario allocates a latency histogram per step, so "
     "this bounds memory rather than expressing a preference. A collection that "
     "resolves to more steps is rejected outright, never silently truncated.",
-    "limits", std::to_string (vayu::core::constants::scenario::MAX_STEPS),
-    "1", "10000", std::nullopt, now });
+    "limits", std::to_string (vayu::core::constants::scenario::MAX_STEPS), "1",
+    "10000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "maxScenarioDataRows",
-    std::to_string (vayu::core::constants::scenario::MAX_DATA_ROWS), "integer",
-    "Max Scenario Data Rows",
+    std::to_string (vayu::core::constants::scenario::MAX_DATA_ROWS), "integer", "Max Scenario Data Rows",
     "Largest data set one collection run may carry. The app parses the CSV or "
     "JSON file and sends the rows on the run payload - the engine never reads "
     "a file from disk - so this bounds how big that payload may get. A larger "
@@ -3082,20 +3054,20 @@ void Database::seed_default_config () {
     "1", "1000000", std::nullopt, now });
 
     upsert_config (unit ("bytes") (ConfigEntry{ "maxScenarioDataBytes",
-    std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES), "integer",
-    "Max Scenario Data Size",
+    std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES), "integer", "Max Scenario Data Size",
     "Largest data set one collection run may carry, measured over its JSON. "
-    "The row limit alone does not bound the payload - one row is free to hold a "
+    "The row limit alone does not bound the payload - one row is free to hold "
+    "a "
     "megabyte in a single cell - and the HTTP body cap above this would drop "
-    "the connection instead of explaining itself. A larger data set is rejected "
+    "the connection instead of explaining itself. A larger data set is "
+    "rejected "
     "with a message naming this setting.",
     "limits", std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES),
     "1024", "104857600", std::nullopt, now }));
 
-    upsert_config (unit ("bytes") (keywords ({ "swagger" }) (
-    ConfigEntry{ "maxSpecDocumentBytes",
-    std::to_string (vayu::core::constants::spec_document::MAX_BYTES), "integer",
-    "Max OpenAPI Document Size",
+    upsert_config (unit ("bytes") (
+    keywords ({ "swagger" }) (ConfigEntry{ "maxSpecDocumentBytes",
+    std::to_string (vayu::core::constants::spec_document::MAX_BYTES), "integer", "Max OpenAPI Document Size",
     "Largest OpenAPI document one collection may bind. The document is stored "
     "verbatim and parsed back by every feature that reads it, so this bounds "
     "both the row and that parse. A larger document is rejected with a message "
@@ -3131,35 +3103,38 @@ void Database::seed_default_config () {
     // its memory and stack, and whether console output is collected.
     // =========================================================================
 
-    upsert_config (unit ("ms") (keywords ({ "runaway" }) (ConfigEntry{ "scriptTimeout",
+    upsert_config (
+    unit ("ms") (keywords ({ "runaway" }) (ConfigEntry{ "scriptTimeout",
     std::to_string (vayu::core::constants::script_engine::TIMEOUT_MS), "integer", "Script Execution Timeout",
     "How long a pre- or post-request script may run. A script "
-    "that exceeds this is aborted and reported as an error, so an infinite loop "
+    "that exceeds this is aborted and reported as an error, so an infinite "
+    "loop "
     "cannot hang the engine. 0 disables the limit, which is not recommended.",
     "scripting_sandbox", std::to_string (vayu::core::constants::script_engine::TIMEOUT_MS),
     "0", "60000", std::nullopt, now })));
 
-    upsert_config (keywords ({ "debug", "print" }) (ConfigEntry{ "scriptEnableConsole",
-    vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
-    "boolean", "Enable Script Console",
-    "Makes console.log() available inside scripts, with its output shown in the "
+    upsert_config (
+    keywords ({ "debug", "print" }) (ConfigEntry{ "scriptEnableConsole",
+    vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false", "boolean", "Enable Script Console",
+    "Makes console.log() available inside scripts, with its output shown in "
+    "the "
     "response viewer. Turn it off during a load test, where the writes cost "
     "throughput for output nobody reads.",
     "scripting_sandbox", vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
     std::nullopt, std::nullopt, std::nullopt, now }));
 
-    upsert_config (unit ("bytes") (keywords ({ "ram", "oom" }) (
-    ConfigEntry{ "scriptMemoryLimit",
+    upsert_config (unit ("bytes") (
+    keywords ({ "ram", "oom" }) (ConfigEntry{ "scriptMemoryLimit",
     std::to_string (vayu::core::constants::script_engine::MEMORY_LIMIT), "integer", "Script Memory Limit",
-    "Largest heap one script execution may allocate before it is aborted. Raise "
+    "Largest heap one script execution may allocate before it is aborted. "
+    "Raise "
     "it only for a script that processes very large data structures.",
     "scripting_sandbox", std::to_string (vayu::core::constants::script_engine::MEMORY_LIMIT),
     "1048576",   // 1MB
     "268435456", // 256MB
     std::nullopt, now })));
 
-    upsert_config (advanced (unit ("bytes") (keywords ({ "recursion" }) (
-    ConfigEntry{ "scriptStackSize",
+    upsert_config (advanced (unit ("bytes") (keywords ({ "recursion" }) (ConfigEntry{ "scriptStackSize",
     std::to_string (vayu::core::constants::script_engine::STACK_SIZE), "integer", "Script Stack Size",
     "Depth of the call stack one script execution may use. Raise it only for a "
     "script that recurses deeply enough to overflow.",

@@ -37,8 +37,8 @@ namespace {
  * failure regardless of which route produced it.
  */
 nlohmann::json token_error_body (const oauth::TokenError& err) {
-    auto body  = routes::error_body (err.http_status, err.message, err.code);
-    auto& e    = body["error"];
+    auto body = routes::error_body (err.http_status, err.message, err.code);
+    auto& e   = body["error"];
     if (err.provider_status != 0) {
         e["providerStatus"] = err.provider_status;
     }
@@ -69,8 +69,7 @@ oauth2_token_post (vayu::db::Database& db, const std::string& request_body) {
     try {
         req = nlohmann::json::parse (request_body);
     } catch (const nlohmann::json::exception& e) {
-        return { 400, error_body (400, "Invalid JSON: " + std::string (e.what ()),
-                     "oauth2_invalid_config") };
+        return { 400, error_body (400, "Invalid JSON: " + std::string (e.what ()), "oauth2_invalid_config") };
     }
 
     const auto config = req.value ("config", nlohmann::json ());
@@ -172,9 +171,9 @@ void register_oauth_routes (RouteContext& ctx) {
         }
         res.status = 200;
         res.set_content (nlohmann::json{ { "attemptId", result.attempt_id },
-                             { "authorizeUrl", result.authorize_url },
-                             { "redirectUri", result.redirect_uri } }
-        .dump (),
+                         { "authorizeUrl", result.authorize_url },
+                         { "redirectUri", result.redirect_uri } }
+                         .dump (),
         "application/json");
     });
 
@@ -191,15 +190,16 @@ void register_oauth_routes (RouteContext& ctx) {
             return;
         }
         const auto st = ctx.authorize_manager.complete (ctx.db,
-        body.value ("attemptId", std::string{}), body.value ("callbackUrl", std::string{}));
-        res.status = st.state == "not_found" ? 404 : 200;
+        body.value ("attemptId", std::string{}),
+        body.value ("callbackUrl", std::string{}));
+        res.status    = st.state == "not_found" ? 404 : 200;
         res.set_content (authorize_status_json (st).dump (), "application/json");
     });
 
     ctx.server.Get (R"(/oauth2/authorize/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const auto st = ctx.authorize_manager.status (req.matches[1]);
-        res.status = st.state == "not_found" ? 404 : 200;
+        res.status    = st.state == "not_found" ? 404 : 200;
         res.set_content (authorize_status_json (st).dump (), "application/json");
     });
 
@@ -213,7 +213,7 @@ void register_oauth_routes (RouteContext& ctx) {
     ctx.server.Get ("/oauth2/token",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         auto [status, body] = oauth2_token_get (ctx.db, req.get_param_value ("key"));
-        res.status          = status;
+        res.status = status;
         res.set_content (body.dump (), "application/json");
     });
 
@@ -221,7 +221,7 @@ void register_oauth_routes (RouteContext& ctx) {
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         vayu::utils::log_info ("DELETE /oauth2/token");
         auto [status, body] = oauth2_token_delete (ctx.db, req.get_param_value ("key"));
-        res.status          = status;
+        res.status = status;
         res.set_content (body.dump (), "application/json");
     });
 }

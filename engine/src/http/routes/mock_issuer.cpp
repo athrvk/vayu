@@ -135,7 +135,7 @@ std::string& error) {
         MockIssuerClient client;
         client.client_id = id->get<std::string> ();
         if (const auto secret = entry.find ("clientSecret");
-            secret != entry.end () && !secret->is_null ()) {
+        secret != entry.end () && !secret->is_null ()) {
             if (!secret->is_string ()) {
                 error = "clientSecret must be a string";
                 return false;
@@ -303,7 +303,7 @@ MockIssuerConfig parse_mock_issuer_settings (const nlohmann::json& body) {
     out.settings.port = static_cast<int> (port);
 
     if (const auto claims = body.find ("claims");
-        claims != body.end () && !claims->is_null ()) {
+    claims != body.end () && !claims->is_null ()) {
         if (!claims->is_object ()) {
             out.ok    = false;
             out.error = "claims must be an object";
@@ -515,7 +515,7 @@ void handle_token (Issuer& issuer, const httplib::Request& req, httplib::Respons
             return;
         }
         if (const std::string redirect = req.get_param_value ("redirect_uri");
-            redirect != issued.redirect_uri) {
+        redirect != issued.redirect_uri) {
             send_oauth_error (res, 400, "invalid_grant",
             "redirect_uri does not match the authorize call");
             return;
@@ -577,7 +577,7 @@ void handle_authorize (Issuer& issuer, const httplib::Request& req, httplib::Res
         return;
     }
     if (const std::string response_type = req.get_param_value ("response_type");
-        !response_type.empty () && response_type != "code") {
+    !response_type.empty () && response_type != "code") {
         send_oauth_error (res, 400, "unsupported_response_type", response_type);
         return;
     }

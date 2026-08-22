@@ -51,7 +51,8 @@ namespace vayu::core {
  */
 [[nodiscard]] inline std::string
 build_sse_frame (const std::string& event_name, const std::string& data, size_t offset) {
-    return "event: " + event_name + "\nid: " + std::to_string (offset) + "\ndata: " + data + "\n\n";
+    return "event: " + event_name + "\nid: " + std::to_string (offset) +
+    "\ndata: " + data + "\n\n";
 }
 
 /**
@@ -237,8 +238,8 @@ struct RunContext {
     // The initializer covers the stock window at the stock cadence, so a direct
     // append_tick caller - a test, or a run whose thread has not read config
     // yet - is bounded too rather than falling back to unlimited.
-    std::atomic<size_t> max_live_ticks{ live_ring_size (
-    constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS, constants::server::STATS_INTERVAL_MS) };
+    std::atomic<size_t> max_live_ticks{ live_ring_size (constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS,
+    constants::server::STATS_INTERVAL_MS) };
 
     // Bounded ring of wire-ready SSE payload strings (each is a full
     // "event: metrics\nid: <n>\ndata: {...}\n\n"). Produced by the metrics
@@ -255,9 +256,9 @@ struct RunContext {
     // over an overnight soak at the default 10 ticks/sec).
     mutable std::mutex tick_mtx;
     std::deque<std::string> tick_buffer;
-    size_t tick_base_offset{ 0 };  // absolute index of tick_buffer.front(); tick_mtx
+    size_t tick_base_offset{ 0 }; // absolute index of tick_buffer.front(); tick_mtx
     std::atomic<size_t> published_count{ 0 }; // total ticks ever published
-    std::atomic<bool> closed{ false };         // set true AFTER final tick appended
+    std::atomic<bool> closed{ false }; // set true AFTER final tick appended
     std::atomic<int64_t> completed_at_ms{ 0 }; // 0 while running; stamped at completion
 
     // A batch of replayed ticks plus the absolute offset the consumer should ask
@@ -301,10 +302,11 @@ struct RunContext {
     [[nodiscard]] TickBatch ticks_since (size_t from) const {
         std::lock_guard<std::mutex> lock (tick_mtx);
         size_t end = tick_base_offset + tick_buffer.size ();
-        if (from >= end) return { {}, from };
-        size_t start = from < tick_base_offset ? tick_base_offset : from;
-        auto begin_it =
-        tick_buffer.begin () + static_cast<std::ptrdiff_t> (start - tick_base_offset);
+        if (from >= end)
+            return { {}, from };
+        size_t start  = from < tick_base_offset ? tick_base_offset : from;
+        auto begin_it = tick_buffer.begin () +
+        static_cast<std::ptrdiff_t> (start - tick_base_offset);
         return { { begin_it, tick_buffer.end () }, end };
     }
     /// Push one already-framed payload and trim the ring. Caller holds `tick_mtx`.
@@ -317,8 +319,7 @@ struct RunContext {
             tick_buffer.pop_front ();
             ++tick_base_offset;
         }
-        published_count.store (tick_base_offset + tick_buffer.size (),
-        std::memory_order_release);
+        published_count.store (tick_base_offset + tick_buffer.size (), std::memory_order_release);
     }
 
     [[nodiscard]] size_t tick_count () const {
@@ -424,7 +425,7 @@ struct RunContext {
     // caller without a database to hand) on the stock cap.
     RunContext (const std::string& id,
     nlohmann::json cfg,
-    size_t max_errors                = constants::metrics_collector::DEFAULT_MAX_ERRORS,
+    size_t max_errors = constants::metrics_collector::DEFAULT_MAX_ERRORS,
     EngineDefaults engine_defaults = {});
     ~RunContext ();
 
@@ -451,15 +452,15 @@ struct RunContext {
  * comparing the two has one mapping to check, not two.
  */
 struct MetricTickSample {
-    int64_t timestamp      = 0;   // Unix ms; the tick's single wall-clock sample
+    int64_t timestamp = 0; // Unix ms; the tick's single wall-clock sample
     double elapsed_seconds = 0.0; // Seconds since the run's first persisted tick
-    size_t requests_completed = 0; // Responses received (success + error)
-    size_t requests_failed    = 0; // Of those, errors
-    double current_rps        = 0.0;
+    size_t requests_completed  = 0; // Responses received (success + error)
+    size_t requests_failed     = 0; // Of those, errors
+    double current_rps         = 0.0;
     size_t current_concurrency = 0;
     double send_rate           = 0.0;
     double throughput          = 0.0;
-    size_t backpressure        = 0; // Sent but not yet responded
+    size_t backpressure        = 0;   // Sent but not yet responded
     double error_rate          = 0.0; // Percent
     size_t dropped_requests    = 0;
     size_t bytes_sent          = 0;
@@ -559,8 +560,8 @@ bool verbose);
  *
  * @param verbose Log the tallies, as the run's own logging does.
  */
-[[nodiscard]] SampledValidationTotals validate_sampled_responses (
-const std::shared_ptr<RunContext>& context, bool verbose);
+[[nodiscard]] SampledValidationTotals
+validate_sampled_responses (const std::shared_ptr<RunContext>& context, bool verbose);
 
 /**
  * @brief Hang each step's deferred-validation tallies off its entry in a
@@ -611,17 +612,17 @@ struct SamplingRetention {
  * (whole-run) percentiles, never a window.
  */
 struct RunSummaryInputs {
-    size_t total_requests     = 0;
-    double rps                = 0.0;
-    double send_rate          = 0.0;
-    double throughput         = 0.0;
-    double test_duration_s    = 0.0;
-    double setup_overhead_s   = 0.0;
-    size_t peak_concurrency   = 0;
-    size_t dropped_requests   = 0;
-    double queue_wait_avg_ms  = 0.0;
-    size_t bytes_sent         = 0;
-    size_t bytes_received     = 0;
+    size_t total_requests    = 0;
+    double rps               = 0.0;
+    double send_rate         = 0.0;
+    double throughput        = 0.0;
+    double test_duration_s   = 0.0;
+    double setup_overhead_s  = 0.0;
+    size_t peak_concurrency  = 0;
+    size_t dropped_requests  = 0;
+    double queue_wait_avg_ms = 0.0;
+    size_t bytes_sent        = 0;
+    size_t bytes_received    = 0;
     std::map<int, size_t> status_codes;
     MetricsCollector::Percentiles latency; // min/max/p50..p999, whole-run
     double latency_avg_ms = 0.0; // Mean latency; the histogram does not carry it

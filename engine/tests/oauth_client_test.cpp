@@ -33,8 +33,9 @@ std::map<std::string, std::string> parse_form (const std::string& body) {
     std::map<std::string, std::string> out;
     size_t pos = 0;
     while (pos < body.size ()) {
-        auto amp  = body.find ('&', pos);
-        auto pair = body.substr (pos, amp == std::string::npos ? std::string::npos : amp - pos);
+        auto amp = body.find ('&', pos);
+        auto pair =
+        body.substr (pos, amp == std::string::npos ? std::string::npos : amp - pos);
         if (auto eq = pair.find ('='); eq != std::string::npos) {
             out[pair.substr (0, eq)] = pair.substr (eq + 1);
         }
@@ -51,12 +52,13 @@ class MockTokenServer {
     MockTokenServer () {
         svr_.Post (".*", [this] (const httplib::Request& req, httplib::Response& res) {
             ++hits_;
-            last_path_ = req.path;
-            last_body_ = req.body;
-            last_auth_ = req.get_header_value ("Authorization");
+            last_path_         = req.path;
+            last_body_         = req.body;
+            last_auth_         = req.get_header_value ("Authorization");
             last_content_type_ = req.get_header_value ("Content-Type");
             const auto form    = parse_form (req.body);
-            const auto grant   = form.count ("grant_type") ? form.at ("grant_type") : "";
+            const auto grant =
+            form.count ("grant_type") ? form.at ("grant_type") : "";
 
             if (req.path == "/token") {
                 res.set_content (R"({"access_token":"AT)" + std::to_string (hits_) +
@@ -66,8 +68,8 @@ class MockTokenServer {
                 res.set_content (R"({"access_token":"AT-PLAIN"})", "application/json");
             } else if (req.path == "/token-legacy") {
                 // Form-encoded body with a string expires_in (legacy GitHub style)
-                res.set_content ("access_token=legacy&token_type=bearer&expires_in=1200",
-                "text/plain");
+                res.set_content (
+                "access_token=legacy&token_type=bearer&expires_in=1200", "text/plain");
             } else if (req.path == "/refresh-norotate") {
                 if (grant == "refresh_token") {
                     res.set_content (R"({"access_token":"REFRESHED","expires_in":3600})",
@@ -86,8 +88,7 @@ class MockTokenServer {
                 }
             } else if (req.path == "/token-fail") {
                 res.status = 400;
-                res.set_content (
-                R"({"error":"invalid_client","error_description":"bad secret"})",
+                res.set_content (R"({"error":"invalid_client","error_description":"bad secret"})",
                 "application/json");
             } else {
                 res.status = 404;
@@ -107,10 +108,18 @@ class MockTokenServer {
     std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port_) + path;
     }
-    int hits () const { return hits_; }
-    const std::string& last_body () const { return last_body_; }
-    const std::string& last_auth () const { return last_auth_; }
-    const std::string& last_content_type () const { return last_content_type_; }
+    int hits () const {
+        return hits_;
+    }
+    const std::string& last_body () const {
+        return last_body_;
+    }
+    const std::string& last_auth () const {
+        return last_auth_;
+    }
+    const std::string& last_content_type () const {
+        return last_content_type_;
+    }
 
     private:
     httplib::Server svr_;
@@ -269,7 +278,8 @@ TEST_F (OAuthClientTest, MissingExpiresInMeansNonExpiring) {
 
 TEST_F (OAuthClientTest, FormEncodedResponseAndStringExpiresIn) {
     MockTokenServer idp;
-    auto r = oauth::acquire_token (*db_, cc_config (idp, "/token-legacy"), false, std::nullopt);
+    auto r =
+    oauth::acquire_token (*db_, cc_config (idp, "/token-legacy"), false, std::nullopt);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r));
     const auto& t = std::get<vayu::db::OAuthToken> (r);
     EXPECT_EQ (t.access_token, "legacy");
@@ -335,7 +345,7 @@ TEST_F (OAuthClientTest, ProviderErrorIsStructured) {
 TEST_F (OAuthClientTest, ConnectionFailureIsNetworkError) {
     json config = { { "grantType", "client_credentials" },
         { "accessTokenUrl", "http://127.0.0.1:1/token" }, { "clientId", "cid" } };
-    auto r = oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto r      = oauth::acquire_token (*db_, config, false, std::nullopt);
     ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
     EXPECT_EQ (std::get<oauth::TokenError> (r).http_status, 502);
     EXPECT_EQ (std::get<oauth::TokenError> (r).code, "oauth2_network_error");
@@ -344,7 +354,7 @@ TEST_F (OAuthClientTest, ConnectionFailureIsNetworkError) {
 TEST_F (OAuthClientTest, AuthCodeWithoutInteractiveIs409) {
     json config = { { "grantType", "authorization_code" },
         { "accessTokenUrl", "https://idp.example/token" }, { "clientId", "cid" } };
-    auto r = oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto r      = oauth::acquire_token (*db_, config, false, std::nullopt);
     ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
     EXPECT_EQ (std::get<oauth::TokenError> (r).http_status, 409);
     EXPECT_EQ (std::get<oauth::TokenError> (r).code, "oauth2_interactive_required");
@@ -355,8 +365,7 @@ TEST_F (OAuthClientTest, AuthCodeExchangeSendsCodeVerifierAndRedirect) {
     json config = { { "grantType", "authorization_code" },
         { "accessTokenUrl", idp.url ("/token") }, { "clientId", "cid" },
         { "clientSecret", "sec" } };
-    oauth::InteractiveExchange ex{ "CODE123", "VERIFIER456",
-        "http://127.0.0.1:9999/callback" };
+    oauth::InteractiveExchange ex{ "CODE123", "VERIFIER456", "http://127.0.0.1:9999/callback" };
     auto r = oauth::acquire_token (*db_, config, false, ex);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r));
     auto form = parse_form (idp.last_body ());
@@ -369,9 +378,11 @@ TEST_F (OAuthClientTest, AuthCodeExchangeSendsCodeVerifierAndRedirect) {
 TEST_F (OAuthClientTest, InvalidConfigsAre400) {
     for (const json& config :
     { json (nullptr), json{ { "grantType", "client_credentials" } },
-        json{ { "grantType", "client_credentials" }, { "accessTokenUrl", "ftp://x" }, { "clientId", "c" } },
-        json{ { "grantType", "client_credentials" }, { "accessTokenUrl", "https://x" } },
-        json{ { "grantType", "implicit" }, { "accessTokenUrl", "https://x" }, { "clientId", "c" } } }) {
+    json{ { "grantType", "client_credentials" },
+    { "accessTokenUrl", "ftp://x" }, { "clientId", "c" } },
+    json{ { "grantType", "client_credentials" }, { "accessTokenUrl", "https://x" } },
+    json{ { "grantType", "implicit" }, { "accessTokenUrl", "https://x" },
+    { "clientId", "c" } } }) {
         auto r = oauth::acquire_token (*db_, config, false, std::nullopt);
         ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
         EXPECT_EQ (std::get<oauth::TokenError> (r).http_status, 400);

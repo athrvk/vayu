@@ -236,7 +236,7 @@ TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
     // Read the names back out of the generated file rather than restating them,
     // so the test cannot agree with a stale copy of the list.
     for (size_t pos = dts.find ("declare const "); pos != std::string::npos;
-         pos        = dts.find ("declare const ", pos + 1)) {
+    pos             = dts.find ("declare const ", pos + 1)) {
         const size_t start = pos + std::string ("declare const ").size ();
         const size_t colon = dts.find (':', start);
         if (colon == std::string::npos) {

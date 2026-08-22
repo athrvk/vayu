@@ -86,11 +86,20 @@ std::string method_path_key (const std::string& method, const std::string& path)
 const std::unordered_set<std::string>& unevaluatable_keywords () {
     static const std::unordered_set<std::string> keywords = {
         // JSON Schema 2019-09 / 2020-12
-        "unevaluatedProperties", "unevaluatedItems", "prefixItems",
-        "dependentSchemas", "dependentRequired", "minContains", "maxContains",
-        "$dynamicRef", "$dynamicAnchor", "$recursiveRef", "$recursiveAnchor",
+        "unevaluatedProperties",
+        "unevaluatedItems",
+        "prefixItems",
+        "dependentSchemas",
+        "dependentRequired",
+        "minContains",
+        "maxContains",
+        "$dynamicRef",
+        "$dynamicAnchor",
+        "$recursiveRef",
+        "$recursiveAnchor",
         // OpenAPI's own, which should have been normalised app-side
-        "nullable", "discriminator",
+        "nullable",
+        "discriminator",
     };
     return keywords;
 }
@@ -107,8 +116,8 @@ const std::vector<std::string>& subschema_keys () {
 /// not keywords - walking these as if their keys were keywords is how a
 /// property legitimately called "nullable" would be reported as a dialect gap.
 const std::vector<std::string>& subschema_map_keys () {
-    static const std::vector<std::string> keys = { "properties", "patternProperties",
-        "definitions", "$defs", "dependentSchemas" };
+    static const std::vector<std::string> keys = { "properties",
+        "patternProperties", "definitions", "$defs", "dependentSchemas" };
     return keys;
 }
 
@@ -191,7 +200,8 @@ std::string pointer_of_context (const std::vector<std::string>& context) {
  * *wrong* - and the fallback below keeps a body from ever being reported as
  * failing with nothing to show for it.
  */
-constexpr const char* STRUCTURAL_ERROR_PREFIX = "Failed to validate against schema associated with";
+constexpr const char* STRUCTURAL_ERROR_PREFIX =
+"Failed to validate against schema associated with";
 
 } // namespace
 
@@ -203,7 +213,8 @@ std::string to_string (UncheckedReason reason) {
     case UncheckedReason::NeverStamped: return "never_stamped";
     case UncheckedReason::OperationNotDeclared: return "operation_not_declared";
     case UncheckedReason::NoSchemaForStatus: return "no_schema_for_status";
-    case UncheckedReason::NoSchemaForContentType: return "no_schema_for_content_type";
+    case UncheckedReason::NoSchemaForContentType:
+        return "no_schema_for_content_type";
     case UncheckedReason::NoResponse: return "no_response";
     case UncheckedReason::BodyNotJson: return "body_not_json";
     }
@@ -346,7 +357,7 @@ collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json
     // have. The visited set covers `$ref` cycles; the node budget covers a
     // schema that is merely enormous.
     std::vector<const nlohmann::json*> pending = { &schema };
-    size_t visited_nodes = 0;
+    size_t visited_nodes                       = 0;
     while (!pending.empty () && visited_nodes < limits::MAX_SCHEMA_NODES) {
         const nlohmann::json* node = pending.back ();
         pending.pop_back ();
@@ -493,7 +504,8 @@ std::optional<ResponseSchemaIndex> ResponseSchemaIndex::parse (const std::string
     }
 
     ResponseSchemaIndex index;
-    if (auto roots = parsed.find ("refRoots"); roots != parsed.end () && roots->is_object ()) {
+    if (auto roots = parsed.find ("refRoots");
+    roots != parsed.end () && roots->is_object ()) {
         index.ref_roots_ = *roots;
     }
 
@@ -512,17 +524,18 @@ std::optional<ResponseSchemaIndex> ResponseSchemaIndex::parse (const std::string
 
         IndexedOperation operation;
         if (auto responses = row.find ("responses");
-            responses != row.end () && responses->is_array ()) {
+        responses != row.end () && responses->is_array ()) {
             for (const auto& response : *responses) {
                 if (!response.is_object ()) {
                     continue;
                 }
                 DeclaredSchema declared;
-                declared.status       = response.value ("status", std::string ());
-                declared.content_type = lower (response.value ("contentType", std::string ()));
-                auto schema           = response.find ("schema");
-                if (declared.status.empty () || declared.content_type.empty () ||
-                schema == response.end ()) {
+                declared.status = response.value ("status", std::string ());
+                declared.content_type =
+                lower (response.value ("contentType", std::string ()));
+                auto schema = response.find ("schema");
+                if (declared.status.empty () ||
+                declared.content_type.empty () || schema == response.end ()) {
                     continue;
                 }
                 declared.schema = *schema;
@@ -534,8 +547,8 @@ std::optional<ResponseSchemaIndex> ResponseSchemaIndex::parse (const std::string
         // First writer wins in both maps, the rule `OperationIndex` states: a
         // document declaring one identity twice is malformed, and resolving to
         // whichever row came last would make a verdict depend on write order.
-        if (auto id = row.find ("operationId");
-            id != row.end () && id->is_string () && !id->get<std::string> ().empty ()) {
+        if (auto id = row.find ("operationId"); id != row.end () &&
+        id->is_string () && !id->get<std::string> ().empty ()) {
             index.by_operation_id_.emplace (id->get<std::string> (), at);
         }
         index.by_method_path_.emplace (method_path_key (method, path), at);
@@ -565,21 +578,20 @@ const std::string& body) const {
         try {
             const auto stamped = nlohmann::json::parse (spec_operation);
             if (stamped.is_object ()) {
-                if (auto id = stamped.find ("operationId");
-                    id != stamped.end () && id->is_string () &&
-                    !id->get<std::string> ().empty ()) {
+                if (auto id = stamped.find ("operationId"); id != stamped.end () &&
+                id->is_string () && !id->get<std::string> ().empty ()) {
                     if (auto found = by_operation_id_.find (id->get<std::string> ());
-                        found != by_operation_id_.end ()) {
+                    found != by_operation_id_.end ()) {
                         at = found->second;
                     }
                 }
                 if (!at) {
                     const auto method = stamped.value ("method", std::string ());
-                    const auto path   = stamped.value ("path", std::string ());
+                    const auto path = stamped.value ("path", std::string ());
                     if (!method.empty () && !path.empty ()) {
                         if (auto found =
                             by_method_path_.find (method_path_key (method, path));
-                            found != by_method_path_.end ()) {
+                        found != by_method_path_.end ()) {
                             at = found->second;
                         }
                     }
@@ -606,7 +618,8 @@ const std::string& body) const {
     // three media types is one candidate status, not three.
     std::vector<std::string> patterns;
     for (const auto& declared : responses) {
-        if (std::find (patterns.begin (), patterns.end (), declared.status) == patterns.end ()) {
+        if (std::find (patterns.begin (), patterns.end (), declared.status) ==
+        patterns.end ()) {
             patterns.push_back (declared.status);
         }
     }
@@ -617,7 +630,7 @@ const std::string& body) const {
     }
     const std::string& status = patterns[*matched];
 
-    const auto media = media_type_of (content_type);
+    const auto media               = media_type_of (content_type);
     const DeclaredSchema* selected = nullptr;
     for (const auto& declared : responses) {
         if (declared.status != status) {
@@ -637,7 +650,7 @@ const std::string& body) const {
             if (declared.status != status) {
                 continue;
             }
-            const auto slash = declared.content_type.find ('/');
+            const auto slash    = declared.content_type.find ('/');
             const bool wildcard = declared.content_type == "*/*" ||
             (slash != std::string::npos && declared.content_type.substr (slash) == "/*" &&
             media.rfind (declared.content_type.substr (0, slash + 1), 0) == 0);
@@ -664,8 +677,7 @@ const std::string& body) const {
         return verdict;
     }
 
-    verdict                      = validate_body_against_schema (selected->schema,
-    ref_roots_, parsed_body);
+    verdict = validate_body_against_schema (selected->schema, ref_roots_, parsed_body);
     verdict.matched_status       = selected->status;
     verdict.matched_content_type = selected->content_type;
     return verdict;

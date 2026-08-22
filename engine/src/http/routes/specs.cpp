@@ -142,12 +142,12 @@ nlohmann::json draft_example_rows (const std::vector<vayu::core::DraftExample>& 
     for (const vayu::core::DraftExample& example : examples) {
         nlohmann::json headers = nlohmann::json::array ();
         if (example.documented) {
-            headers.push_back ({ { "key", "Content-Type" }, { "value", example.content_type },
-            { "enabled", true } });
+            headers.push_back ({ { "key", "Content-Type" },
+            { "value", example.content_type }, { "enabled", true } });
         }
-        rows.push_back ({ { "name", example.name }, { "status", example.status },
-        { "headers", std::move (headers) }, { "body", example.body },
-        { "contentType", example.content_type } });
+        rows.push_back ({ { "name", example.name },
+        { "status", example.status }, { "headers", std::move (headers) },
+        { "body", example.body }, { "contentType", example.content_type } });
     }
     return rows;
 }
@@ -168,8 +168,7 @@ nlohmann::json draft_example_rows (const std::vector<vayu::core::DraftExample>& 
  * Every other outcome is bound-but-unjudgeable and carries the reason, because
  * a chip that silently never appears is how a broken index stays broken.
  */
-DesignSchemaResolution
-resolve_design_schema_index (vayu::db::Database& db,
+DesignSchemaResolution resolve_design_schema_index (vayu::db::Database& db,
 const std::optional<std::string>& request_id) {
     DesignSchemaResolution resolved;
     if (!request_id || request_id->empty ()) {
@@ -193,7 +192,7 @@ const std::optional<std::string>& request_id) {
     const std::string& spec_id   = bound->spec_id;
     const std::string& spec_hash = bound->spec_hash;
 
-    resolved.bound = true;
+    resolved.bound      = true;
     const auto document = db.get_spec_document (spec_id);
     if (!document) {
         // The write path refuses a binding naming a document that will not
@@ -228,8 +227,7 @@ const std::optional<std::string>& request_id) {
  * states it once and the collection-run and load hooks that follow can call the
  * same thing rather than a second arrangement of the same three steps.
  */
-std::optional<vayu::core::ValidationVerdict>
-validate_design_response (vayu::db::Database& db,
+std::optional<vayu::core::ValidationVerdict> validate_design_response (vayu::db::Database& db,
 const std::optional<std::string>& request_id,
 const vayu::Response& response) {
     vayu::http::routes::DesignSchemaResolution resolved;
@@ -258,8 +256,7 @@ const vayu::Response& response) {
     } catch (const std::exception& e) {
         // Same rule as above: a validator that threw is not a response that
         // failed, and the exchange itself is not in question.
-        vayu::utils::log_warning (
-        "Schema validation failed: " + std::string (e.what ()));
+        vayu::utils::log_warning ("Schema validation failed: " + std::string (e.what ()));
         return std::nullopt;
     }
 }
@@ -295,8 +292,7 @@ const std::unordered_set<std::string>& pending) {
     db.get_spec_document (spec_id).has_value ()) {
         return std::nullopt;
     }
-    return std::make_pair (400,
-    error_body (400, "Spec '" + spec_id + "' does not exist"));
+    return std::make_pair (400, error_body (400, "Spec '" + spec_id + "' does not exist"));
 }
 
 /**
@@ -346,9 +342,7 @@ create_spec_document_response (vayu::db::Database& db, const nlohmann::json& jso
     }
     for (const char* derived : { "hash", "fetchedAt" }) {
         if (json.contains (derived)) {
-            return { 400,
-                error_body (400, std::string ("'") + derived +
-                "' is computed by the engine; omit it") };
+            return { 400, error_body (400, std::string ("'") + derived + "' is computed by the engine; omit it") };
         }
     }
 
@@ -357,14 +351,13 @@ create_spec_document_response (vayu::db::Database& db, const nlohmann::json& jso
         return *err;
     }
     if (content.empty ()) {
-        return { 400,
-            error_body (400,
-            "Invalid 'content': an empty document is not a spec") };
+        return { 400, error_body (400, "Invalid 'content': an empty document is not a spec") };
     }
     const size_t cap = spec_size_cap (db);
     if (content.size () > cap) {
         return { 400,
-            error_body (400, "Spec document is " + std::to_string (content.size ()) +
+            error_body (400,
+            "Spec document is " + std::to_string (content.size ()) +
             " bytes, over the limit of " + std::to_string (cap) +
             " (raise the 'maxSpecDocumentBytes' setting to allow more)") };
     }
@@ -382,8 +375,7 @@ create_spec_document_response (vayu::db::Database& db, const nlohmann::json& jso
 
     if (json.contains ("sourceUrl") && !json["sourceUrl"].is_null ()) {
         if (!json["sourceUrl"].is_string ()) {
-            return { 400,
-                error_body (400, "Invalid 'sourceUrl': must be a string or null") };
+            return { 400, error_body (400, "Invalid 'sourceUrl': must be a string or null") };
         }
         const auto url = json["sourceUrl"].get<std::string> ();
         if (!url.empty ()) {
@@ -392,8 +384,7 @@ create_spec_document_response (vayu::db::Database& db, const nlohmann::json& jso
     }
 
     if (db.get_spec_document (spec.id).has_value ()) {
-        return { 409,
-            error_body (409, "Spec '" + spec.id + "' already exists") };
+        return { 409, error_body (409, "Spec '" + spec.id + "' already exists") };
     }
 
     db.save_spec_document (spec);
@@ -461,8 +452,8 @@ delete_spec_document_response (vayu::db::Database& db, const std::string& id) {
             std::string message = "Spec '" + id + "' is bound by collection '" +
             bound.front ().name + "' (" + bound.front ().id + ")";
             if (bound.size () > 1) {
-                message += " and " + std::to_string (bound.size () - 1) + " other" +
-                std::string (bound.size () == 2 ? "" : "s");
+                message += " and " + std::to_string (bound.size () - 1) +
+                " other" + std::string (bound.size () == 2 ? "" : "s");
             }
             message += "; unbind it before deleting the document";
             result = { 409, error_body (409, message) };
@@ -494,11 +485,11 @@ void register_spec_routes (RouteContext& ctx) {
             auto json           = nlohmann::json::parse (req.body);
             auto [status, body] = create_spec_document_response (ctx.db, json);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /specs - " + std::to_string (status) +
-                ": " + error_message_of (body));
+                vayu::utils::log_warning ("POST /specs - " +
+                std::to_string (status) + ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info ("POST /specs - Stored spec: id=" +
-                body["id"].get<std::string> () +
+                vayu::utils::log_info (
+                "POST /specs - Stored spec: id=" + body["id"].get<std::string> () +
                 ", hash=" + body["hash"].get<std::string> ());
             }
             res.status = status;
@@ -524,12 +515,14 @@ void register_spec_routes (RouteContext& ctx) {
         try {
             auto [status, body] = get_spec_document_meta_response (ctx.db, spec_id);
             if (status != 200) {
-                vayu::utils::log_warning ("GET /specs/:id/meta - Spec not found: " + spec_id);
+                vayu::utils::log_warning (
+                "GET /specs/:id/meta - Spec not found: " + spec_id);
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("GET /specs/:id/meta - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "GET /specs/:id/meta - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });
@@ -577,7 +570,8 @@ void register_spec_routes (RouteContext& ctx) {
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("DELETE /specs/:id - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "DELETE /specs/:id - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

@@ -112,7 +112,7 @@ std::string& error) {
     }
     if (auto failed = describe_failed_tests (
         exchange.pre_script_result, exchange.post_script_result);
-        !failed.empty ()) {
+    !failed.empty ()) {
         error = failed;
         return StepOutcome::Failed;
     }
@@ -418,7 +418,7 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     // (issue #681 on #682's block), with the two things only this mode knows
     // added on top.
     if (auto validation = build_sampled_validation_payload (inputs.validation);
-        !validation.empty ()) {
+    !validation.empty ()) {
         // **The denominator is every step, not a reservoir.** #682's block is
         // sampled by construction and its readers say so; this one is not, and
         // a reader told "no sampled response failed" about a run that checked
@@ -481,8 +481,8 @@ RunManager& manager) {
         // behaviour rather than anything this runner adds.
         std::optional<std::string> environment_id;
         if (auto it = context->config.find ("environmentId");
-            it != context->config.end () && it->is_string () &&
-            !it->get<std::string> ().empty ()) {
+        it != context->config.end () && it->is_string () &&
+        !it->get<std::string> ().empty ()) {
             environment_id = it->get<std::string> ();
         }
         const std::string cookie_scope =
@@ -717,7 +717,7 @@ RunManager& manager) {
                             end_iteration = true;
                         } else if (auto next =
                                    resolve_next_step (name_index, control.target);
-                                   !next.ok) {
+                        !next.ok) {
                             record.outcome = StepOutcome::Errored;
                             record.error   = next.error;
                             end_iteration  = true;
@@ -755,7 +755,7 @@ RunManager& manager) {
                 // of nothing on every stored step.
                 if (auto scripts = vayu::http::routes::build_script_result_node (
                     exchange.pre_script_result, exchange.post_script_result);
-                    !scripts.empty ()) {
+                !scripts.empty ()) {
                     record.trace["scripts"] = std::move (scripts);
                 }
 

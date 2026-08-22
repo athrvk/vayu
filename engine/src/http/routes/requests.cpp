@@ -38,8 +38,8 @@ namespace vayu::http::routes {
  * HTTP server - see requests_route_test.cpp. The error body is built by
  * `error_body`, like every other error the engine emits.
  */
-std::pair<int, nlohmann::json> get_request_response (vayu::db::Database& db,
-const std::string& id) {
+std::pair<int, nlohmann::json>
+get_request_response (vayu::db::Database& db, const std::string& id) {
     auto request = db.get_request (id);
     if (!request) {
         return { 404, error_body (404, "Request not found") };
@@ -127,7 +127,9 @@ static std::string http_version_seed (vayu::db::Database& db) {
  * here would never match the document it came from.
  */
 static std::optional<std::pair<int, nlohmann::json>>
-apply_spec_operation_field (const nlohmann::json& json, std::optional<std::string>& out, bool is_create) {
+apply_spec_operation_field (const nlohmann::json& json,
+std::optional<std::string>& out,
+bool is_create) {
     if (!json.contains ("specOperation")) {
         if (is_create) {
             out = std::nullopt;
@@ -148,8 +150,7 @@ apply_spec_operation_field (const nlohmann::json& json, std::optional<std::strin
         if (!value.contains (key) || !value[key].is_string () ||
         value[key].get<std::string> ().empty ()) {
             return std::make_pair (400,
-            error_body (400, std::string ("Invalid 'specOperation.") + key +
-            "': must be a non-empty string"));
+            error_body (400, std::string ("Invalid 'specOperation.") + key + "': must be a non-empty string"));
         }
     }
     if (value["path"].get<std::string> ().front () != '/') {
@@ -179,8 +180,7 @@ apply_spec_operation_field (const nlohmann::json& json, std::optional<std::strin
  * Declared in routes.hpp because `POST /import/apply` applies the same fields to
  * every request in a bulk payload (issue #96).
  */
-std::optional<std::pair<int, nlohmann::json>> apply_request_fields (
-vayu::db::Database& db,
+std::optional<std::pair<int, nlohmann::json>> apply_request_fields (vayu::db::Database& db,
 vayu::db::Request& r,
 const nlohmann::json& json,
 bool is_create) {
@@ -280,8 +280,8 @@ reject_missing_collection (vayu::db::Database& db, const std::string& collection
     if (db.get_collection (collection_id).has_value ()) {
         return std::nullopt;
     }
-    return std::make_pair (400,
-    error_body (400, "Collection '" + collection_id + "' does not exist"));
+    return std::make_pair (
+    400, error_body (400, "Collection '" + collection_id + "' does not exist"));
 }
 
 /**
@@ -327,9 +327,7 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
     const std::string id = vayu::utils::generate_id ("req_");
 
     if (db.get_request (id).has_value ()) {
-        return { 409,
-            error_body (409,
-            "Request '" + id + "' already exists; use PUT /requests/:id to update") };
+        return { 409, error_body (409, "Request '" + id + "' already exists; use PUT /requests/:id to update") };
     }
 
     vayu::db::Request r;

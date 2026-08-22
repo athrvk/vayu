@@ -48,7 +48,8 @@ namespace vayu::http::routes {
  * every other error the engine emits.
  */
 std::optional<std::pair<int, nlohmann::json>> validate_parent_assignment (
-vayu::db::Database& db, const std::string& id,
+vayu::db::Database& db,
+const std::string& id,
 const std::optional<std::string>& parent_id) {
     if (!parent_id.has_value ()) {
         return std::nullopt; // No parent -> no cycle possible.
@@ -61,8 +62,8 @@ const std::optional<std::string>& parent_id) {
     std::optional<std::string> cursor = parent_id;
     while (cursor.has_value ()) {
         if (*cursor == id) {
-            return std::make_pair (
-            400, error_body (400, "Cannot move a collection into its own descendant"));
+            return std::make_pair (400,
+            error_body (400, "Cannot move a collection into its own descendant"));
         }
         if (!visited.insert (*cursor).second) {
             break; // Already seen -> pre-existing corrupt cycle; stop, bounded.
@@ -121,17 +122,18 @@ constexpr size_t MAX_DATA_SCHEMA_COLUMN_CHARS = 256;
  * with `is_create=true` while the payload's parents are still unwritten, so a
  * check that reached for another record would refuse a legal bulk import.
  */
-static std::optional<std::pair<int, nlohmann::json>>
-validate_data_schema (const nlohmann::json& schema) {
+static std::optional<std::pair<int, nlohmann::json>> validate_data_schema (
+const nlohmann::json& schema) {
     if (schema.contains ("columns")) {
         const auto& columns = schema["columns"];
         if (!columns.is_array ()) {
-            return std::make_pair (
-            400, error_body (400, "Invalid 'dataSchema.columns': must be an array of strings"));
+            return std::make_pair (400,
+            error_body (400, "Invalid 'dataSchema.columns': must be an array of strings"));
         }
         if (columns.size () > MAX_DATA_SCHEMA_COLUMNS) {
             return std::make_pair (400,
-            error_body (400, "Invalid 'dataSchema.columns': " + std::to_string (columns.size ()) +
+            error_body (400,
+            "Invalid 'dataSchema.columns': " + std::to_string (columns.size ()) +
             " columns, over the limit of " + std::to_string (MAX_DATA_SCHEMA_COLUMNS)));
         }
         std::unordered_set<std::string> seen;
@@ -147,22 +149,24 @@ validate_data_schema (const nlohmann::json& schema) {
             }
             if (name.size () > MAX_DATA_SCHEMA_COLUMN_CHARS) {
                 return std::make_pair (400,
-                error_body (400, "Invalid 'dataSchema.columns': a column name is longer than " +
+                error_body (400,
+                "Invalid 'dataSchema.columns': a column name is longer than " +
                 std::to_string (MAX_DATA_SCHEMA_COLUMN_CHARS) + " characters"));
             }
             if (!seen.insert (name).second) {
                 return std::make_pair (400,
-                error_body (400, "Invalid 'dataSchema.columns': duplicate column '" + name + "'"));
+                error_body (400,
+                "Invalid 'dataSchema.columns': duplicate column '" + name + "'"));
             }
         }
     }
     if (schema.contains ("declaredAt") && !schema["declaredAt"].is_number ()) {
-        return std::make_pair (
-        400, error_body (400, "Invalid 'dataSchema.declaredAt': must be a number"));
+        return std::make_pair (400,
+        error_body (400, "Invalid 'dataSchema.declaredAt': must be a number"));
     }
     if (schema.contains ("fileName") && !schema["fileName"].is_string ()) {
-        return std::make_pair (
-        400, error_body (400, "Invalid 'dataSchema.fileName': must be a string"));
+        return std::make_pair (400,
+        error_body (400, "Invalid 'dataSchema.fileName': must be a string"));
     }
     return std::nullopt;
 }
@@ -184,8 +188,8 @@ validate_data_schema (const nlohmann::json& schema) {
  * `reject_unbindable_spec`'s, called by each write path with whatever it knows
  * is about to exist.
  */
-static std::optional<std::pair<int, nlohmann::json>>
-validate_openapi_binding (const nlohmann::json& binding) {
+static std::optional<std::pair<int, nlohmann::json>> validate_openapi_binding (
+const nlohmann::json& binding) {
     if (binding.empty ()) {
         return std::nullopt; // Unbound; nothing to check.
     }
@@ -219,8 +223,7 @@ validate_openapi_binding (const nlohmann::json& binding) {
  * Declared in routes.hpp because `POST /import/apply` applies the same fields to
  * every collection in a bulk payload (issue #96).
  */
-std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (
-vayu::db::Database& db,
+std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (vayu::db::Database& db,
 vayu::db::Collection& c,
 const nlohmann::json& json,
 bool is_create) {
@@ -323,9 +326,7 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
     const std::string id = vayu::utils::generate_id ("col_");
 
     if (db.get_collection (id).has_value ()) {
-        return { 409,
-            error_body (409, "Collection '" + id +
-            "' already exists; use PUT /collections/:id to update") };
+        return { 409, error_body (409, "Collection '" + id + "' already exists; use PUT /collections/:id to update") };
     }
 
     vayu::db::Collection c;
@@ -472,9 +473,8 @@ void register_collection_routes (RouteContext& ctx) {
             auto json = nlohmann::json::parse (req.body);
             auto [status, body] = update_collection_response (ctx.db, collection_id, json);
             if (status != 200) {
-                vayu::utils::log_warning ("PUT /collections/:id - " +
-                std::to_string (status) + " for id=" + collection_id + ": " +
-                error_message_of (body));
+                vayu::utils::log_warning ("PUT /collections/:id - " + std::to_string (status) +
+                " for id=" + collection_id + ": " + error_message_of (body));
             } else {
                 vayu::utils::log_info (
                 "PUT /collections/:id - Updated collection: id=" + collection_id +

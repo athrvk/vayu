@@ -214,8 +214,10 @@ class ResponseSchemaIndex {
      *        included; the media type is taken off it here.
      * @param body           The raw response body.
      */
-    [[nodiscard]] ValidationVerdict
-    check (const std::string& spec_operation, int status_code, const std::string& content_type, const std::string& body) const;
+    [[nodiscard]] ValidationVerdict check (const std::string& spec_operation,
+    int status_code,
+    const std::string& content_type,
+    const std::string& body) const;
 
     /// Operations the index declares. Zero is possible and honest: a document
     /// whose operations all declare unschema'd responses.
@@ -225,7 +227,7 @@ class ResponseSchemaIndex {
 
     private:
     struct DeclaredSchema {
-        std::string status;       ///< `"200"`, `"2XX"`, `"default"` - as written.
+        std::string status; ///< `"200"`, `"2XX"`, `"default"` - as written.
         std::string content_type; ///< Media type, lower-cased, as written.
         nlohmann::json schema;
     };
@@ -327,7 +329,8 @@ struct SampledValidationTotals {
  * validated nothing, and reporting it zeros would read as a contract nothing
  * failed - the absent-not-zeros rule every conditional section here follows.
  */
-[[nodiscard]] nlohmann::json build_sampled_validation_payload (const SampledValidationTotals& totals);
+[[nodiscard]] nlohmann::json build_sampled_validation_payload (
+const SampledValidationTotals& totals);
 
 /**
  * @brief Validate one JSON body against one schema.

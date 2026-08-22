@@ -58,14 +58,14 @@ namespace {
  */
 std::string document (std::string_view paths) {
     return std::string (R"({"openapi":"3.0.0","info":{"title":"Pets API"},)"
-    R"("servers":[{"url":"https://api.example.com"}],"paths":)") +
+                        R"("servers":[{"url":"https://api.example.com"}],"paths":)") +
     std::string (paths) + "}";
 }
 
 /** A JSON request body declaring one string property. */
 std::string json_body (std::string_view properties) {
     return std::string (R"("requestBody":{"content":{"application/json":)"
-    R"({"schema":{"type":"object","properties":{)") +
+                        R"({"schema":{"type":"object","properties":{)") +
     std::string (properties) + "}}}}}";
 }
 
@@ -78,8 +78,10 @@ std::vector<SpecRequestDraft> drafts_of (const std::string& text) {
 /** One operation of a document, by `operationId`. */
 const SpecRequestDraft& draft_of (const std::vector<SpecRequestDraft>& drafts,
 const std::string& operation_id) {
-    const auto found = std::find_if (drafts.begin (), drafts.end (),
-    [&] (const SpecRequestDraft& entry) { return entry.operation.operation_id == operation_id; });
+    const auto found =
+    std::find_if (drafts.begin (), drafts.end (), [&] (const SpecRequestDraft& entry) {
+        return entry.operation.operation_id == operation_id;
+    });
     EXPECT_NE (found, drafts.end ()) << "no operation " << operation_id << " in this fixture";
     return *found;
 }
@@ -109,16 +111,15 @@ std::vector<std::string> field_names (const vayu::core::ChangedRequest& changed)
     return names;
 }
 
-const vayu::core::SpecFieldDiff* field_named (const vayu::core::ChangedRequest& changed,
-SpecField field) {
+const vayu::core::SpecFieldDiff*
+field_named (const vayu::core::ChangedRequest& changed, SpecField field) {
     const auto found = std::find_if (changed.fields.begin (), changed.fields.end (),
     [&] (const vayu::core::SpecFieldDiff& entry) { return entry.field == field; });
     return found == changed.fields.end () ? nullptr : &*found;
 }
 
 /** The `createPet` operation, which several cases carry unchanged. */
-const std::string CREATE_PET =
-R"("post":{"operationId":"createPet","summary":"Create a pet",)" +
+const std::string CREATE_PET = R"("post":{"operationId":"createPet","summary":"Create a pet",)" +
 json_body (R"("name":{"type":"string"})") + "}";
 
 /** The bound document every case below compares against. */
@@ -148,13 +149,13 @@ class SpecDiffTest : public ::testing::Test {
     }
 
     /** The operation the changed request at @p index was followed to. */
-    [[nodiscard]] const vayu::core::DeclaredOperation& operation_of (const SpecDiff& diff,
-    size_t index) const {
+    [[nodiscard]] const vayu::core::DeclaredOperation&
+    operation_of (const SpecDiff& diff, size_t index) const {
         return fetched_[diff.changed[index].draft].operation;
     }
 
-    [[nodiscard]] const vayu::core::ChangedRequest* changed_with_id (const SpecDiff& diff,
-    const std::string& operation_id) const {
+    [[nodiscard]] const vayu::core::ChangedRequest*
+    changed_with_id (const SpecDiff& diff, const std::string& operation_id) const {
         for (const auto& item : diff.changed) {
             if (fetched_[item.draft].operation.operation_id == operation_id) {
                 return &item;
@@ -205,9 +206,9 @@ class DuplicateOperationIdTest : public ::testing::Test {
     mutable std::vector<SpecRequestDraft> fetched_;
 };
 
-const std::string DuplicateOperationIdTest::DUP = document (
-R"({"/a":{"get":{"operationId":"list","summary":"List A"}},)"
-R"("/b":{"post":{"operationId":"list","summary":"Create B"}}})");
+const std::string DuplicateOperationIdTest::DUP =
+document (R"({"/a":{"get":{"operationId":"list","summary":"List A"}},)"
+          R"("/b":{"post":{"operationId":"list","summary":"Create B"}}})");
 
 TEST_F (DuplicateOperationIdTest, LeavesTheSecondRequestOnItsOwnOperationWhenTheFirstChanges) {
     const std::string tweaked = document (
@@ -234,7 +235,7 @@ TEST_F (DuplicateOperationIdTest, PrefersTheRequestsOwnEndpointOverAnIdNamingADi
     // One claimant, so the id is not ambiguous among the requests - what refuses
     // it here is the entry it names having a different method and path from the
     // stamp, while the document still declares the stamp's own.
-    auto orphan      = request_from ("req_b", entries_[1]);
+    auto orphan = request_from ("req_b", entries_[1]);
     orphan.operation = vayu::core::DeclaredOperation{ "list", "POST", "/b", {} };
 
     const SpecDiff diff = diff_dup (DUP, { orphan });
@@ -251,9 +252,9 @@ TEST_F (DuplicateOperationIdTest, PrefersTheRequestsOwnEndpointOverAnIdNamingADi
 }
 
 TEST_F (DuplicateOperationIdTest, ReportsAMovedEndpointAsGoneRatherThanFollowingTheSharedId) {
-    const std::string moved = document (
-    R"({"/a":{"get":{"operationId":"list","summary":"List A"}},)"
-    R"("/b2":{"post":{"operationId":"list","summary":"Create B"}}})");
+    const std::string moved =
+    document (R"({"/a":{"get":{"operationId":"list","summary":"List A"}},)"
+              R"("/b2":{"post":{"operationId":"list","summary":"Create B"}}})");
 
     const SpecDiff diff = diff_dup (moved, collection ());
 
@@ -381,8 +382,7 @@ TEST_F (SpecDiffTest, NamesEveryFieldTheDocumentMovedWithTheValueItWouldWrite) {
     const std::string next = document (
     R"({"/pets":{"get":{"operationId":"listPets","summary":"List all the pets",)"
     R"("parameters":[{"name":"limit","in":"query","required":true,"example":"10"}]},)" +
-    CREATE_PET +
-    R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
+    CREATE_PET + R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
     const auto* listed  = changed_with_id (diff, "listPets");
@@ -390,7 +390,8 @@ TEST_F (SpecDiffTest, NamesEveryFieldTheDocumentMovedWithTheValueItWouldWrite) {
     ASSERT_NE (listed, nullptr);
     EXPECT_EQ (field_names (*listed),
     (std::vector<std::string>{ "name", "params", "url" }));
-    EXPECT_NE (field_named (*listed, SpecField::Url)->next.find ("limit=10"), std::string::npos);
+    EXPECT_NE (field_named (*listed, SpecField::Url)->next.find ("limit=10"),
+    std::string::npos);
     EXPECT_EQ (field_named (*listed, SpecField::Name)->next, "List all the pets");
     EXPECT_TRUE (std::none_of (listed->fields.begin (), listed->fields.end (),
     [] (const auto& field) { return field.user_touched; }));
@@ -398,9 +399,9 @@ TEST_F (SpecDiffTest, NamesEveryFieldTheDocumentMovedWithTheValueItWouldWrite) {
 }
 
 TEST_F (SpecDiffTest, ReportsTheBodyAChangedSchemaNowProduces) {
-    const std::string next = document (
-    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)"
-    R"("post":{"operationId":"createPet","summary":"Create a pet",)" +
+    const std::string next =
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)"
+              R"("post":{"operationId":"createPet","summary":"Create a pet",)" +
     json_body (R"("name":{"type":"string"},"tag":{"type":"string"})") +
     R"(}},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
 
@@ -433,7 +434,7 @@ TEST_F (SpecDiffTest, DoesNotFlagAFieldOnlyTheDocumentMoved) {
     // The mutation check for the three-way rule: compare the request against the
     // *new* document instead of the bound one and this flags, which would have
     // the apply refuse to write a change nobody had touched.
-    const auto untouched   = request_from ("req_0", draft_of (bound_, "listPets"));
+    const auto untouched = request_from ("req_0", draft_of (bound_, "listPets"));
     const std::string next = document (
     R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
     R"("parameters":[{"name":"limit","in":"query","required":true,"example":"50"}]}}})");
@@ -442,15 +443,16 @@ TEST_F (SpecDiffTest, DoesNotFlagAFieldOnlyTheDocumentMoved) {
 
     ASSERT_EQ (diff.changed.size (), 1u);
     EXPECT_FALSE (diff.changed[0].fields.empty ());
-    EXPECT_TRUE (std::none_of (diff.changed[0].fields.begin (), diff.changed[0].fields.end (),
+    EXPECT_TRUE (
+    std::none_of (diff.changed[0].fields.begin (), diff.changed[0].fields.end (),
     [] (const auto& field) { return field.user_touched; }));
 }
 
 TEST_F (SpecDiffTest, MakesNoClaimAboutWhoEditedWhatWhenTheBoundDocumentCannotBeRead) {
     auto edited = request_from ("req_0", draft_of (bound_, "listPets"));
     edited.name = "My list call";
-    const std::vector<SpecRequestDraft> fetched = drafts_of (
-    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"}}})"));
+    const std::vector<SpecRequestDraft> fetched = drafts_of (document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"}}})"));
 
     const SpecDiff diff = vayu::core::diff_spec (fetched, nullptr, { edited });
 
@@ -496,8 +498,8 @@ TEST_F (SpecDiffTest, DoesNotCompareTheResponsesADocumentDocuments) {
     ASSERT_EQ (fetched[0].draft.examples.size (), 1u);
     EXPECT_EQ (fetched[0].draft.examples[0].name, "200 - Every pet");
 
-    const SpecDiff diff =
-    vayu::core::diff_spec (fetched, &bound_, { request_from ("req_0", draft_of (bound_, "listPets")) });
+    const SpecDiff diff = vayu::core::diff_spec (
+    fetched, &bound_, { request_from ("req_0", draft_of (bound_, "listPets")) });
 
     EXPECT_TRUE (diff.changed.empty ());
     EXPECT_EQ (diff.unchanged, 1u);
@@ -533,7 +535,7 @@ TEST_F (SpecDiffTest, TruncatesADisplayedValueWithoutTruncatingTheComparedOne) {
     long_a + R"(b"}}})");
     const std::vector<SpecRequestDraft> a = drafts_of (next);
     const std::vector<SpecRequestDraft> b = drafts_of (longer);
-    auto request       = request_from ("req_0", a[0]);
+    auto request                          = request_from ("req_0", a[0]);
     const SpecDiff two = vayu::core::diff_spec (b, &a, { request });
     ASSERT_EQ (two.changed.size (), 1u);
     EXPECT_NE (field_named (two.changed[0], SpecField::Description), nullptr);
@@ -572,9 +574,9 @@ class StubParameterTest : public ::testing::Test {
     std::vector<SpecRequestDraft> stub_;
 };
 
-const std::string StubParameterTest::STUB = document (
-R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
-R"("parameters":[{"name":"verbose","in":"query"}]}}})");
+const std::string StubParameterTest::STUB =
+document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
+          R"("parameters":[{"name":"verbose","in":"query"}]}}})");
 
 TEST_F (StubParameterTest, ImportsDisabledWhichIsWhatLeavesAnythingToSurvive) {
     ASSERT_EQ (stub_[0].draft.params.size (), 1u);
@@ -592,8 +594,10 @@ TEST_F (StubParameterTest, ReportsTheFlipAsTheUsersAgainstADocumentThatDidNotMov
     const SpecDiff diff = vayu::core::diff_spec (stub_, &stub_, { verbose_enabled () });
 
     ASSERT_EQ (diff.changed.size (), 1u);
-    EXPECT_EQ (field_names (diff.changed[0]), (std::vector<std::string>{ "params", "url" }));
-    EXPECT_TRUE (std::all_of (diff.changed[0].fields.begin (), diff.changed[0].fields.end (),
+    EXPECT_EQ (field_names (diff.changed[0]),
+    (std::vector<std::string>{ "params", "url" }));
+    EXPECT_TRUE (
+    std::all_of (diff.changed[0].fields.begin (), diff.changed[0].fields.end (),
     [] (const auto& field) { return field.user_touched; }));
 }
 
@@ -633,13 +637,13 @@ TEST_F (SpecDiffTest, ReportsTheUsersMethodEditAsTheirsSoAnApplyCannotTakeItBack
     // Mutation check: drop `Method` from `FIELDS` and the field list is
     // `["description"]` - the exact blindness that let the apply revert a HEAD
     // back to a GET.
-    auto edited_to_head   = request_from ("req_0", draft_of (bound_, "listPets"));
+    auto edited_to_head = request_from ("req_0", draft_of (bound_, "listPets"));
     edited_to_head.method = "HEAD";
 
     const SpecDiff diff = diff_against (
     document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
-    R"("description":"Paged."},)" + CREATE_PET +
-    R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})"),
+              R"("description":"Paged."},)" +
+    CREATE_PET + R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})"),
     { edited_to_head });
 
     ASSERT_EQ (diff.changed.size (), 1u);
@@ -656,8 +660,8 @@ TEST_F (SpecDiffTest, ReportsTheUsersMethodEditAsTheirsSoAnApplyCannotTakeItBack
 TEST_F (SpecDiffTest, ReportsAMethodTheDocumentItselfMovedAsTheDocuments) {
     // Same operationId, different verb: the request is still followed (the id
     // leads), and the verb it should now send is offered like any other field.
-    const std::string moved =
-    document (R"({"/pets":{"post":{"operationId":"listPets","summary":"List pets"}}})");
+    const std::string moved = document (
+    R"({"/pets":{"post":{"operationId":"listPets","summary":"List pets"}}})");
 
     const SpecDiff diff =
     diff_against (moved, { request_from ("req_0", draft_of (bound_, "listPets")) });
@@ -740,8 +744,8 @@ TEST_F (SpecDiffTest, SafeApplyLeavesAFieldTheUserEditedAndTakesOneOnlyTheDocume
     R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
     R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Fetch one pet"}}})");
 
-    const SpecDiff diff =
-    diff_against (next, { edited, request_from ("req_2", draft_of (bound_, "getPet")) });
+    const SpecDiff diff = diff_against (
+    next, { edited, request_from ("req_2", draft_of (bound_, "getPet")) });
     const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
 
     ASSERT_EQ (diff.changed.size (), 2u);
@@ -771,8 +775,8 @@ TEST_F (SpecDiffTest, SafeApplyLeavesARequestWholeWhenTheBoundDocumentCouldNotBe
      */
     auto edited = request_from ("req_0", draft_of (bound_, "listPets"));
     edited.name = "My list call";
-    const std::vector<SpecRequestDraft> fetched = drafts_of (
-    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"}}})"));
+    const std::vector<SpecRequestDraft> fetched = drafts_of (document (
+    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"}}})"));
 
     const SpecDiff diff = vayu::core::diff_spec (fetched, nullptr, { edited });
     const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
@@ -800,7 +804,8 @@ TEST_F (SpecDiffTest, SafeApplyTakesARequestWhoseOnlyMovementIsItsIdentity) {
     R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
     R"(},"/pets/{petId}":{"get":{"operationId":"fetchPet","summary":"Get a pet"}}})");
 
-    const SpecDiff diff = diff_against (next, { request_from ("req_2", draft_of (bound_, "getPet")) });
+    const SpecDiff diff =
+    diff_against (next, { request_from ("req_2", draft_of (bound_, "getPet")) });
     const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
 
     ASSERT_EQ (diff.changed.size (), 1u);

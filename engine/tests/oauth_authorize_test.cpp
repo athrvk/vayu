@@ -26,8 +26,7 @@ class MockTokenServer {
     public:
     MockTokenServer () {
         svr_.Post ("/token", [] (const httplib::Request&, httplib::Response& res) {
-            res.set_content (
-            R"({"access_token":"IATOKEN","token_type":"Bearer","expires_in":3600})",
+            res.set_content (R"({"access_token":"IATOKEN","token_type":"Bearer","expires_in":3600})",
             "application/json");
         });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
@@ -59,8 +58,9 @@ std::map<std::string, std::string> parse_q (const std::string& q) {
     std::map<std::string, std::string> out;
     size_t pos = 0;
     while (pos < q.size ()) {
-        auto amp  = q.find ('&', pos);
-        auto pair = q.substr (pos, amp == std::string::npos ? std::string::npos : amp - pos);
+        auto amp = q.find ('&', pos);
+        auto pair =
+        q.substr (pos, amp == std::string::npos ? std::string::npos : amp - pos);
         if (auto eq = pair.find ('='); eq != std::string::npos)
             out[pair.substr (0, eq)] = pair.substr (eq + 1);
         if (amp == std::string::npos)
@@ -92,8 +92,8 @@ class OAuthAuthorizeTest : public ::testing::Test {
 TEST (BuildAuthorizeUrl, IncludesPkceAndParams) {
     const json config = { { "authorizationUrl", "https://idp.example/auth" },
         { "clientId", "cid" }, { "scope", "openid profile" } };
-    const auto url = vayu::http::build_authorize_url (config, "STATE1", "CHALLENGE1",
-    "http://127.0.0.1:5000/callback", true);
+    const auto url    = vayu::http::build_authorize_url (
+    config, "STATE1", "CHALLENGE1", "http://127.0.0.1:5000/callback", true);
     auto q = parse_q (query_of (url));
     EXPECT_EQ (q["response_type"], "code");
     EXPECT_EQ (q["client_id"], "cid");
@@ -123,8 +123,7 @@ TEST_F (OAuthAuthorizeTest, StartRejectsIncompleteConfig) {
 TEST_F (OAuthAuthorizeTest, EmbeddedRequiresCallbackUrl) {
     vayu::http::OAuth2AuthorizeManager mgr;
     auto r = mgr.start (*db_,
-    json{ { "authorizationUrl", "https://idp/auth" }, { "clientId", "c" } },
-    "embedded");
+    json{ { "authorizationUrl", "https://idp/auth" }, { "clientId", "c" } }, "embedded");
     EXPECT_FALSE (r.ok);
 }
 
@@ -138,8 +137,7 @@ TEST_F (OAuthAuthorizeTest, EmbeddedRejectsStateMismatch) {
 
     auto start = mgr.start (*db_, config, "embedded");
     ASSERT_TRUE (start.ok);
-    auto st = mgr.complete (*db_, start.attempt_id,
-    "https://app/callback?code=XYZ&state=WRONG");
+    auto st = mgr.complete (*db_, start.attempt_id, "https://app/callback?code=XYZ&state=WRONG");
     EXPECT_EQ (st.state, "failed");
     EXPECT_NE (st.error.find ("State"), std::string::npos);
 }
@@ -157,8 +155,8 @@ TEST_F (OAuthAuthorizeTest, EmbeddedCompletesAndExchanges) {
     // Pull the real state out of the authorize URL so the callback matches.
     const std::string state = parse_q (query_of (start.authorize_url))["state"];
 
-    auto st = mgr.complete (*db_, start.attempt_id,
-    "https://app/callback?code=AUTHCODE&state=" + state);
+    auto st = mgr.complete (
+    *db_, start.attempt_id, "https://app/callback?code=AUTHCODE&state=" + state);
     EXPECT_EQ (st.state, "completed");
     EXPECT_FALSE (st.cache_key.empty ());
     EXPECT_TRUE (db_->get_oauth_token (st.cache_key).has_value ());
@@ -178,7 +176,8 @@ TEST_F (OAuthAuthorizeTest, LoopbackEndToEnd) {
 
     // Simulate the IdP redirecting the browser to the loopback callback.
     const std::string state = parse_q (query_of (start.authorize_url))["state"];
-    httplib::Client cli (start.redirect_uri.substr (0, start.redirect_uri.find ("/callback")));
+    httplib::Client cli (
+    start.redirect_uri.substr (0, start.redirect_uri.find ("/callback")));
     auto resp = cli.Get ("/callback?code=AUTHCODE&state=" + state);
     ASSERT_TRUE (resp != nullptr);
     EXPECT_EQ (resp->status, 200);
@@ -197,7 +196,7 @@ TEST_F (OAuthAuthorizeTest, CancelStopsAttempt) {
     vayu::http::OAuth2AuthorizeManager mgr;
     const json config = { { "authorizationUrl", "https://idp/auth" },
         { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } };
-    auto start = mgr.start (*db_, config, "loopback");
+    auto start        = mgr.start (*db_, config, "loopback");
     ASSERT_TRUE (start.ok);
     mgr.cancel (start.attempt_id);
     EXPECT_EQ (mgr.status (start.attempt_id).state, "not_found");

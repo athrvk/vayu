@@ -83,10 +83,10 @@ TEST (InboxParseStart, RejectsRatherThanDefaultsAnUnusableValue) {
     .has_value ());
     EXPECT_TRUE (vayu::http::parse_inbox_start (
     json{ { "response", { { "delayMs", inbox_constants::MAX_RESPONSE_DELAY_MS + 1 } } } }, out)
-                 .has_value ());
+    .has_value ());
     EXPECT_TRUE (vayu::http::parse_inbox_start (
     json{ { "response", { { "headers", "nope" } } } }, out)
-                 .has_value ());
+    .has_value ());
     EXPECT_TRUE (
     vayu::http::parse_inbox_start (json{ { "port", 70000 } }, out).has_value ());
     EXPECT_TRUE (vayu::http::parse_inbox_start (json{ { "bind", "" } }, out).has_value ());
@@ -165,12 +165,12 @@ TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValue) {
     // what it was handed.
     ASSERT_FALSE (vayu::http::parse_inbox_response_update (
     json{ { "response", { { "body", "ok" } } } }, current, out)
-                  .has_value ());
+    .has_value ());
     EXPECT_EQ (out.body, "ok");
     EXPECT_EQ (out.status, 500);
 
     EXPECT_TRUE (vayu::http::parse_inbox_response_update (json{ { "status", 12 } }, current, out)
-                 .has_value ());
+    .has_value ());
 }
 
 // ---------------------------------------------------------------------------

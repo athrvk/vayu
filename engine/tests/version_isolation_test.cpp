@@ -116,7 +116,8 @@ TEST (VersionIsolationTest, TheHubHeadersDoNotNameTheVersion) {
 
     for (const auto& relative : kHubHeaders) {
         const auto path = root / relative;
-        ASSERT_TRUE (std::filesystem::exists (path)) << relative << " is not where the guard looks";
+        ASSERT_TRUE (std::filesystem::exists (path))
+        << relative << " is not where the guard looks";
         const std::string source = strip_comments (read_file (path));
         ASSERT_FALSE (source.empty ()) << relative << " read as empty";
         total_bytes += source.size ();
@@ -137,12 +138,12 @@ TEST (VersionIsolationTest, TheHubHeadersDoNotNameTheVersion) {
        "version-derived value behind a declaration the way "
        "core/user_agent.hpp does. Offenders: "
     << [&] {
-        std::string joined;
-        for (const auto& name : offenders) {
-            joined += (joined.empty () ? "" : ", ") + name;
-        }
-        return joined;
-    }();
+           std::string joined;
+           for (const auto& name : offenders) {
+               joined += (joined.empty () ? "" : ", ") + name;
+           }
+           return joined;
+       }();
 }
 
 /**
@@ -154,9 +155,10 @@ TEST (VersionIsolationTest, TheHubHeadersDoNotNameTheVersion) {
  * forever - the same shape as the empty-scan defect the assertions above guard.
  */
 TEST (VersionIsolationTest, TheGuardStillSeesTheVersionInCode) {
-    const std::string offending = "// we deliberately do not use VAYU_VERSION_STRING here\n"
-                                  "#include \"vayu/version.hpp\"\n"
-                                  "const char* a = \"Vayu/\" VAYU_VERSION_STRING;\n";
+    const std::string offending =
+    "// we deliberately do not use VAYU_VERSION_STRING here\n"
+    "#include \"vayu/version.hpp\"\n"
+    "const char* a = \"Vayu/\" VAYU_VERSION_STRING;\n";
     const std::string stripped = strip_comments (offending);
     EXPECT_NE (stripped.find ("vayu/version.hpp"), std::string::npos);
     EXPECT_NE (stripped.find ("VAYU_VERSION_STRING"), std::string::npos);

@@ -468,10 +468,10 @@ const std::vector<ExportRequest>& requests) {
 
     Dialect dialect;
     if (const std::string version = string_member (assembly.document, "openapi");
-        !version.empty ()) {
+    !version.empty ()) {
         dialect = { "OpenAPI " + version, true };
     } else if (const std::string legacy = string_member (assembly.document, "swagger");
-               !legacy.empty ()) {
+    !legacy.empty ()) {
         // The dialect is never changed: a 3.0 document exports as 3.0, a 2.0
         // document as 2.0. For 2.0 the presence pass still runs, but nothing is
         // written into an operation - parameters and examples are a different

@@ -89,7 +89,8 @@ class LoadStreamServer {
         svr_.Get ("/finite", [] (const httplib::Request&, httplib::Response& res) {
             res.set_chunked_content_provider (
             "text/event-stream", [] (size_t, httplib::DataSink& sink) {
-                const std::string body = "data: a\n\n: ping\n\ndata: b\n\ndata: c\n\n";
+                const std::string body =
+                "data: a\n\n: ping\n\ndata: b\n\ndata: c\n\n";
                 sink.write (body.data (), body.size ());
                 sink.done ();
                 return true;
@@ -137,7 +138,8 @@ vayu::Request stream_request (const std::string& url, int64_t max_events, int64_
 }
 
 /// One transfer through a started loop, with the result the callback saw.
-vayu::Result<vayu::Response> run_one (vayu::http::EventLoop& loop, const vayu::Request& request) {
+vayu::Result<vayu::Response>
+run_one (vayu::http::EventLoop& loop, const vayu::Request& request) {
     auto handle = loop.submit_async (request);
     return handle.future.get ();
 }
@@ -192,7 +194,8 @@ TEST (SseLoadStreamTest, DurationCapEndsASilentStreamAsASuccess) {
     EXPECT_EQ (response.status_code, 200);
     EXPECT_TRUE (response.stream_capped);
     ASSERT_TRUE (response.stream_events.has_value ());
-    EXPECT_EQ (*response.stream_events, 0u) << "a silent stream delivered nothing, and says so";
+    EXPECT_EQ (*response.stream_events, 0u)
+    << "a silent stream delivered nothing, and says so";
     // Ended by the cap, well before the backstop timeout that sits
     // LOAD_STREAM_TIMEOUT_GRACE_MS past it.
     EXPECT_LT (elapsed.count (), 1200 + vayu::core::constants::sse::LOAD_STREAM_TIMEOUT_GRACE_MS);
@@ -291,8 +294,10 @@ TEST (SseLoadStreamTest, BalancedAccountingUnderConcurrency) {
         std::this_thread::sleep_for (std::chrono::milliseconds (20));
     }
 
-    EXPECT_EQ (completed.load (), STREAMS) << "a stream that never completes leaks its slot";
-    EXPECT_EQ (succeeded.load (), STREAMS) << "a cap-ended stream is a successful completion";
+    EXPECT_EQ (completed.load (), STREAMS)
+    << "a stream that never completes leaks its slot";
+    EXPECT_EQ (succeeded.load (), STREAMS)
+    << "a cap-ended stream is a successful completion";
     EXPECT_EQ (capped.load (), STREAMS);
     EXPECT_EQ (with_counts.load (), STREAMS);
     EXPECT_EQ (loop.active_count (), 0u);

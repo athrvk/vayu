@@ -28,11 +28,12 @@ int64_t limit,
 int64_t offset,
 size_t returned) {
     nlohmann::json response;
-    response["data"]                   = std::move (data);
-    response["pagination"]["total"]    = total_count;
-    response["pagination"]["limit"]    = limit;
-    response["pagination"]["offset"]   = offset;
-    response["pagination"]["hasMore"]  = (offset + static_cast<int64_t> (returned)) < total_count;
+    response["data"]                 = std::move (data);
+    response["pagination"]["total"]  = total_count;
+    response["pagination"]["limit"]  = limit;
+    response["pagination"]["offset"] = offset;
+    response["pagination"]["hasMore"] =
+    (offset + static_cast<int64_t> (returned)) < total_count;
     response["pagination"]["returned"] = returned;
     return response;
 }
@@ -62,8 +63,8 @@ int64_t offset) {
             // A payload this engine wrote always parses; a corrupt one is a
             // damaged row, not a client error - skip it loudly rather than
             // failing the whole page.
-            vayu::utils::log_warning (std::string ("Skipping unreadable ") + kind +
-            " for run " + run_id + " (id=" + std::to_string (row.id) + "): " + e.what ());
+            vayu::utils::log_warning (std::string ("Skipping unreadable ") + kind + " for run " +
+            run_id + " (id=" + std::to_string (row.id) + "): " + e.what ());
         }
     }
     return time_series_envelope (
@@ -99,7 +100,9 @@ int64_t offset) {
  * stats_route_test.cpp. Exceptions propagate to the route's try/catch (500).
  */
 std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
-const std::string& run_id, int64_t limit, int64_t offset) {
+const std::string& run_id,
+int64_t limit,
+int64_t offset) {
     auto run = db.get_run (run_id);
     if (!run) {
         return { 404, error_body (404, "Run not found") };
@@ -123,7 +126,9 @@ const std::string& run_id, int64_t limit, int64_t offset) {
  * same definitive 404 the tick series returns.
  */
 std::pair<int, nlohmann::json> run_monitor_series_response (vayu::db::Database& db,
-const std::string& run_id, int64_t limit, int64_t offset) {
+const std::string& run_id,
+int64_t limit,
+int64_t offset) {
     auto run = db.get_run (run_id);
     if (!run) {
         return { 404, error_body (404, "Run not found") };
@@ -159,8 +164,8 @@ const std::string& run_id) {
         return false;
     }
 
-    const int total_req = payload.value ("requests_completed", 0);
-    const int errors    = payload.value ("requests_failed", 0);
+    const int total_req            = payload.value ("requests_completed", 0);
+    const int errors               = payload.value ("requests_failed", 0);
     aggregate["currentRps"]        = payload.value ("current_rps", 0.0);
     aggregate["errorRate"]         = payload.value ("error_rate", 0.0);
     aggregate["activeConnections"] = payload.value ("current_concurrency", 0);
@@ -169,10 +174,10 @@ const std::string& run_id) {
     aggregate["throughput"]        = payload.value ("throughput", 0.0);
     aggregate["backpressure"]      = payload.value ("backpressure", 0);
     aggregate["totalErrors"]       = errors;
-    aggregate["totalSuccess"]      = total_req > errors ? total_req - errors : 0;
-    aggregate["elapsedSeconds"]    = payload.value ("elapsed_seconds", 0.0);
-    aggregate["timestamp"]         = payload.value ("timestamp", tick.timestamp);
-    aggregate["runId"]             = run_id;
+    aggregate["totalSuccess"]   = total_req > errors ? total_req - errors : 0;
+    aggregate["elapsedSeconds"] = payload.value ("elapsed_seconds", 0.0);
+    aggregate["timestamp"]      = payload.value ("timestamp", tick.timestamp);
+    aggregate["runId"]          = run_id;
     return true;
 }
 
@@ -180,13 +185,15 @@ const std::string& run_id) {
 // Raw parsing stays here; the extracted core is handed clean, clamped ints.
 // limit: default 5000, invalid/<=0 -> 5000, capped at 50000. offset: <0 -> 0.
 std::pair<int64_t, int64_t> parse_time_series_pagination (const httplib::Request& req) {
-    int64_t limit = 5000;
+    int64_t limit  = 5000;
     int64_t offset = 0;
     if (req.has_param ("limit")) {
         try {
             limit = std::stoll (req.get_param_value ("limit"));
-            if (limit <= 0) limit = 5000;
-            if (limit > 50000) limit = 50000; // Cap at 50k for safety
+            if (limit <= 0)
+                limit = 5000;
+            if (limit > 50000)
+                limit = 50000; // Cap at 50k for safety
         } catch (...) {
             limit = 5000;
         }
@@ -194,7 +201,8 @@ std::pair<int64_t, int64_t> parse_time_series_pagination (const httplib::Request
     if (req.has_param ("offset")) {
         try {
             offset = std::stoll (req.get_param_value ("offset"));
-            if (offset < 0) offset = 0;
+            if (offset < 0)
+                offset = 0;
         } catch (...) {
             offset = 0;
         }
@@ -285,7 +293,8 @@ void register_metrics_routes (RouteContext& ctx) {
         std::string run_id = req.matches[1];
 
         // Check for JSON format (batch retrieval for charts)
-        bool json_format = req.has_param ("format") && req.get_param_value ("format") == "json";
+        bool json_format =
+        req.has_param ("format") && req.get_param_value ("format") == "json";
 
         if (json_format) {
             vayu::utils::log_info (
@@ -296,12 +305,14 @@ void register_metrics_routes (RouteContext& ctx) {
                 auto [status, body] =
                 run_time_series_response (ctx.db, run_id, limit, offset);
                 if (status == 404) {
-                    vayu::utils::log_warning ("GET /stats/:id - Run not found: " + run_id);
+                    vayu::utils::log_warning (
+                    "GET /stats/:id - Run not found: " + run_id);
                 }
                 res.status = status;
                 res.set_content (body.dump (), "application/json");
             } catch (const std::exception& e) {
-                vayu::utils::log_error ("GET /stats/:id?format=json - Error: " + std::string (e.what ()));
+                vayu::utils::log_error (
+                "GET /stats/:id?format=json - Error: " + std::string (e.what ()));
                 send_error (res, 500, e.what ());
             }
             return;
@@ -353,12 +364,12 @@ void register_metrics_routes (RouteContext& ctx) {
                         bool tick_updates = false;
                         for (const auto& tick : ticks) {
                             last_tick_id = tick.id;
-                            tick_updates |= apply_tick_to_stream (
-                            tick, aggregated_metrics, run_id);
+                            tick_updates |=
+                            apply_tick_to_stream (tick, aggregated_metrics, run_id);
                         }
                         if (tick_updates) {
-                            std::string payload = "event: metrics\ndata: " +
-                            aggregated_metrics.dump () + "\n\n";
+                            std::string payload =
+                            "event: metrics\ndata: " + aggregated_metrics.dump () + "\n\n";
                             if (!sink.write (payload.data (), payload.size ())) {
                                 return false;
                             }
@@ -405,8 +416,8 @@ void register_metrics_routes (RouteContext& ctx) {
      * GET /runs/:runId/live  (alias: GET /metrics/live/:runId, deprecated)
      * Streams real-time metrics directly from MetricsCollector (lock-free, faster).
      */
-    httplib::Server::Handler live_metrics =
-    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler live_metrics = [&ctx] (const httplib::Request& req,
+                                            httplib::Response& res) {
         std::string run_id = req.matches[1];
 
         // Evict expired retained topics, then resolve active OR within-retention.
@@ -418,7 +429,7 @@ void register_metrics_routes (RouteContext& ctx) {
             res.status = 404;
             nlohmann::json error;
             error["error"] = "Run not found or expired";
-            error["hint"]  = "Use /runs/" + run_id + "/report for the stored report";
+            error["hint"] = "Use /runs/" + run_id + "/report for the stored report";
             res.set_content (error.dump (), "application/json");
             return;
         }
@@ -427,19 +438,24 @@ void register_metrics_routes (RouteContext& ctx) {
         size_t start_offset = 0;
         if (req.has_header ("Last-Event-ID")) {
             try {
-                start_offset = std::stoull (req.get_header_value ("Last-Event-ID")) + 1;
-            } catch (...) { start_offset = 0; }
+                start_offset =
+                std::stoull (req.get_header_value ("Last-Event-ID")) + 1;
+            } catch (...) {
+                start_offset = 0;
+            }
         }
 
         res.set_content_provider ("text/event-stream",
         [run_id, context, start_offset] (size_t, httplib::DataSink& sink) {
             size_t offset = start_offset;
             while (true) {
-                if (!sink.is_writable ()) return false;
+                if (!sink.is_writable ())
+                    return false;
 
                 auto batch = context->ticks_since (offset);
                 for (const auto& payload : batch.payloads) {
-                    if (!sink.write (payload.data (), payload.size ())) return false;
+                    if (!sink.write (payload.data (), payload.size ()))
+                        return false;
                 }
                 // Adopt the producer's offset rather than advancing by the batch
                 // size: a resume from before the retained window skips ahead.

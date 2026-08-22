@@ -109,7 +109,8 @@ std::string normalize_mock_path (const std::string& url) {
         work = close == std::string::npos ? std::string () : work.substr (close + 2);
     } else if (!work.empty () && work[0] != '/') {
         const auto slash = work.find ('/');
-        const std::string_view authority (work.data (), slash == std::string::npos ? work.size () : slash);
+        const std::string_view authority (
+        work.data (), slash == std::string::npos ? work.size () : slash);
         if (looks_like_authority (authority)) {
             work = slash == std::string::npos ? std::string () : work.substr (slash);
         }
@@ -122,9 +123,9 @@ std::string normalize_mock_path (const std::string& url) {
     std::string out;
     std::size_t start = 0;
     while (start <= work.size ()) {
-        const auto slash = work.find ('/', start);
-        const std::string segment =
-        work.substr (start, slash == std::string::npos ? std::string::npos : slash - start);
+        const auto slash          = work.find ('/', start);
+        const std::string segment = work.substr (
+        start, slash == std::string::npos ? std::string::npos : slash - start);
         if (!segment.empty ()) {
             out += '/';
             out += normalize_colon_segment (segment);
@@ -141,9 +142,9 @@ std::vector<MockPathSegment> mock_path_segments (const std::string& path) {
     std::vector<MockPathSegment> segments;
     std::size_t start = 0;
     while (start <= path.size ()) {
-        const auto slash = path.find ('/', start);
-        const std::string piece =
-        path.substr (start, slash == std::string::npos ? std::string::npos : slash - start);
+        const auto slash        = path.find ('/', start);
+        const std::string piece = path.substr (
+        start, slash == std::string::npos ? std::string::npos : slash - start);
         if (!piece.empty ()) {
             MockPathSegment segment;
             const bool templated = piece.size () > 4 && piece.rfind ("{{", 0) == 0 &&
@@ -168,11 +169,8 @@ namespace {
 
 /// Read a bounded integer field, or say why it was refused. Absent and `null`
 /// both keep @p out, which the caller seeded with the default.
-std::optional<MockParseError> read_bounded_int (const nlohmann::json& json,
-const char* key,
-int low,
-int high,
-int& out) {
+std::optional<MockParseError>
+read_bounded_int (const nlohmann::json& json, const char* key, int low, int high, int& out) {
     const auto it = json.find (key);
     if (it == json.end () || it->is_null ()) {
         return std::nullopt;
@@ -241,8 +239,8 @@ std::vector<std::pair<std::string, std::string>> example_headers (const std::str
         if (key == row.end () || !key->is_string () || key->get<std::string> ().empty ()) {
             continue;
         }
-        if (const auto enabled = row.find ("enabled");
-            enabled != row.end () && enabled->is_boolean () && !enabled->get<bool> ()) {
+        if (const auto enabled = row.find ("enabled"); enabled != row.end () &&
+        enabled->is_boolean () && !enabled->get<bool> ()) {
             continue;
         }
         const auto value = row.find ("value");
@@ -264,8 +262,7 @@ bool header_is (const std::string& name, const char* wanted) {
 
 /// The content type an example is served under: its denormalized column, then
 /// its own `Content-Type` header, then plain text - never a guess at the body.
-std::string
-example_content_type (const vayu::db::RequestExample& example,
+std::string example_content_type (const vayu::db::RequestExample& example,
 const std::vector<std::pair<std::string, std::string>>& headers) {
     if (!example.content_type.empty ()) {
         return example.content_type;
@@ -320,11 +317,11 @@ build_mock_routes (vayu::db::Database& db, const std::string& collection_id) {
             const auto examples = db.get_request_examples (request.id);
             if (!examples.empty ()) {
                 // The first one, in the order phase 1 made a contract.
-                const auto& example      = examples.front ();
-                route.has_response       = true;
-                route.response.status    = example.status;
-                route.response.headers   = example_headers (example.headers);
-                route.response.body      = example.body;
+                const auto& example    = examples.front ();
+                route.has_response     = true;
+                route.response.status  = example.status;
+                route.response.headers = example_headers (example.headers);
+                route.response.body    = example.body;
                 route.response.content_type =
                 example_content_type (example, route.response.headers);
             }
@@ -395,7 +392,7 @@ const std::string& path) {
         return match;
     }
 
-    match.route_index  = *best;
+    match.route_index   = *best;
     match.matched_route = *best;
     return match;
 }
@@ -413,15 +410,14 @@ const std::string& path) {
             methods += (methods.empty () ? "" : ", ") + allowed;
         }
         return routes::error_body (404,
-        target + " - no request matches that method; '" + matched.path_template +
-        "' is served for " + methods,
+        target + " - no request matches that method; '" +
+        matched.path_template + "' is served for " + methods,
         "mock_method_mismatch");
     }
     case MockMissKind::NoExample: {
         const auto& matched = routes[*match.matched_route];
         return routes::error_body (501,
-        target + " matches request '" + matched.request_name +
-        "', but it has no saved example to serve - import or save one, then restart the mock",
+        target + " matches request '" + matched.request_name + "', but it has no saved example to serve - import or save one, then restart the mock",
         "mock_no_example");
     }
     case MockMissKind::NoPath:
@@ -510,14 +506,14 @@ struct MockServerManager::MockServer {
 
     MockServerInfo info () const {
         MockServerInfo out;
-        out.mock_id                = id;
-        out.collection_id          = collection_id;
-        out.collection_name        = collection_name;
-        out.port                   = port;
-        out.url                    = "http://127.0.0.1:" + std::to_string (port);
-        out.latency_ms             = latency_ms;
-        out.error_rate_pct         = error_rate_pct;
-        out.route_count            = static_cast<int> (routes.size ());
+        out.mock_id         = id;
+        out.collection_id   = collection_id;
+        out.collection_name = collection_name;
+        out.port            = port;
+        out.url             = "http://127.0.0.1:" + std::to_string (port);
+        out.latency_ms      = latency_ms;
+        out.error_rate_pct  = error_rate_pct;
+        out.route_count     = static_cast<int> (routes.size ());
         out.routes_without_example = routes_without_example;
         out.created_at             = created_at;
         return out;
@@ -537,15 +533,15 @@ MockServerManager::~MockServerManager () {
     servers_.clear ();
 }
 
-MockServerManager::StartResult
-MockServerManager::start (vayu::db::Database& db, const MockStartRequest& request) {
+MockServerManager::StartResult MockServerManager::start (vayu::db::Database& db,
+const MockStartRequest& request) {
     StartResult out;
 
     const auto collection = db.get_collection (request.collection_id);
     if (!collection) {
-        out.ok            = false;
-        out.http_status   = 404;
-        out.error_code    = "not_found";
+        out.ok          = false;
+        out.http_status = 404;
+        out.error_code  = "not_found";
         out.error_message = "Collection '" + request.collection_id + "' not found";
         return out;
     }
@@ -553,9 +549,9 @@ MockServerManager::start (vayu::db::Database& db, const MockStartRequest& reques
     {
         std::lock_guard<std::mutex> lock (mutex_);
         if (servers_.size () >= constants::mock_server::MAX_SERVERS) {
-            out.ok          = false;
-            out.http_status = 409;
-            out.error_code  = "mock_limit_reached";
+            out.ok            = false;
+            out.http_status   = 409;
+            out.error_code    = "mock_limit_reached";
             out.error_message = "Already running the maximum of " +
             std::to_string (constants::mock_server::MAX_SERVERS) +
             " mock servers; stop one first";
@@ -573,11 +569,11 @@ MockServerManager::start (vayu::db::Database& db, const MockStartRequest& reques
     server->routes          = build_mock_routes (db, request.collection_id);
 
     if (server->routes.size () > constants::mock_server::MAX_ROUTES) {
-        out.ok          = false;
-        out.http_status = 400;
-        out.error_code  = "mock_too_many_routes";
-        out.error_message = "Collection '" + collection->name + "' has more than " +
-        std::to_string (constants::mock_server::MAX_ROUTES) +
+        out.ok            = false;
+        out.http_status   = 400;
+        out.error_code    = "mock_too_many_routes";
+        out.error_message = "Collection '" + collection->name +
+        "' has more than " + std::to_string (constants::mock_server::MAX_ROUTES) +
         " requests, past what one mock server holds";
         return out;
     }
@@ -591,29 +587,31 @@ MockServerManager::start (vayu::db::Database& db, const MockStartRequest& reques
         "' (and everything under it) has no requests to serve";
         return out;
     }
-    server->routes_without_example = static_cast<int> (
-    std::count_if (server->routes.begin (), server->routes.end (),
+    server->routes_without_example =
+    static_cast<int> (std::count_if (server->routes.begin (), server->routes.end (),
     [] (const MockRoute& route) { return !route.has_response; }));
 
-    MockServer* raw                   = server.get ();
+    MockServer* raw                    = server.get ();
     httplib::Server::Handler responder = [raw] (const httplib::Request& req,
-                                          httplib::Response& res) {
+                                         httplib::Response& res) {
         if (raw->latency_ms > 0) {
             std::this_thread::sleep_for (std::chrono::milliseconds (raw->latency_ms));
         }
         if (should_inject_error (raw->error_rate_pct, raw->served)) {
             res.status = 500;
-            res.set_content (routes::error_body (500,
-                             "Injected failure (errorRatePct=" +
-                             std::to_string (raw->error_rate_pct) + ")", "mock_injected_error")
-                             .dump (),
+            res.set_content (
+            routes::error_body (500,
+            "Injected failure (errorRatePct=" + std::to_string (raw->error_rate_pct) + ")",
+            "mock_injected_error")
+            .dump (),
             "application/json");
             return;
         }
 
         const auto match = resolve_mock_route (raw->routes, req.method, req.path);
         if (!match.route_index) {
-            const auto body = mock_miss_body (raw->routes, match, req.method, req.path);
+            const auto body =
+            mock_miss_body (raw->routes, match, req.method, req.path);
             res.status = match.miss == MockMissKind::NoExample ? 501 : 404;
             res.set_content (body.dump (), "application/json");
             return;
@@ -731,10 +729,12 @@ void register_mock_server_routes (RouteContext& ctx) {
      * collectionName, url, port, latencyMs, errorRatePct, routeCount,
      * routesWithoutExample, createdAt}.
      */
-    ctx.server.Post ("/mock/start", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    ctx.server.Post (
+    "/mock/start", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         nlohmann::json body;
         try {
-            body = req.body.empty () ? nlohmann::json::object () : nlohmann::json::parse (req.body);
+            body = req.body.empty () ? nlohmann::json::object () :
+                                       nlohmann::json::parse (req.body);
         } catch (const std::exception& e) {
             send_error (res, 400, std::string ("Invalid JSON body: ") + e.what ());
             return;
@@ -749,12 +749,14 @@ void register_mock_server_routes (RouteContext& ctx) {
             auto result = ctx.mock_server_manager.start (ctx.db, start);
             if (!result.ok) {
                 vayu::utils::log_warning ("POST /mock/start - " + result.error_message);
-                send_error (res, result.http_status, result.error_message, result.error_code);
+                send_error (res, result.http_status, result.error_message,
+                result.error_code);
                 return;
             }
             send_json (res, mock_server_info_json (result.info));
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /mock/start - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "POST /mock/start - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

@@ -570,7 +570,8 @@ nlohmann::json draft_example_rows (const std::vector<vayu::core::DraftExample>& 
  *        *different* document is where this contract stops (issue #721); the
  *        other two take the whole subtree and pass nothing.
  */
-std::unordered_set<std::string> collection_subtree_ids (const std::vector<vayu::db::Collection>& all,
+std::unordered_set<std::string> collection_subtree_ids (
+const std::vector<vayu::db::Collection>& all,
 const std::string& root,
 const std::function<bool (const vayu::db::Collection&)>& descend_into = {});
 
@@ -584,8 +585,7 @@ const std::function<bool (const vayu::db::Collection&)>& descend_into = {});
  * pairing the preview never showed. Defined in spec_sync.cpp, beside the subtree
  * walk it completes.
  */
-std::vector<vayu::db::Request>
-collection_subtree_requests (vayu::db::Database& db,
+std::vector<vayu::db::Request> collection_subtree_requests (vayu::db::Database& db,
 const std::vector<vayu::db::Collection>& all,
 const std::unordered_set<std::string>& subtree);
 
@@ -655,8 +655,7 @@ struct SpecComparison {
  * the only failure left here is a binding naming a document the store no longer
  * holds, returned as the `409` both routes give it. Defined in spec_diff.cpp.
  */
-std::optional<std::pair<int, nlohmann::json>>
-compare_bound_spec (vayu::db::Database& db,
+std::optional<std::pair<int, nlohmann::json>> compare_bound_spec (vayu::db::Database& db,
 const std::vector<vayu::db::Collection>& collections,
 const std::unordered_set<std::string>& subtree,
 const std::string& spec_id,
@@ -691,8 +690,7 @@ const std::optional<std::string>& request_id);
  * when the request's collection ancestry binds no document - the state that
  * means no verdict node at all. Defined in specs.cpp.
  */
-std::optional<vayu::core::ValidationVerdict>
-validate_design_response (vayu::db::Database& db,
+std::optional<vayu::core::ValidationVerdict> validate_design_response (vayu::db::Database& db,
 const std::optional<std::string>& request_id,
 const vayu::Response& response);
 

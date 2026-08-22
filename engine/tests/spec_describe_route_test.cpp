@@ -112,8 +112,8 @@ TEST_F (SpecDescribeRouteTest, ReadsYamlAndNamesTheSwaggerDialect) {
 // renders its own placeholder; a name made up here would be this side claiming
 // the document calls itself something.
 TEST_F (SpecDescribeRouteTest, ADocumentWithNoTitleIsDescribedAsHavingNone) {
-    auto [status, body] =
-    describe (R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{}}}}}})");
+    auto [status, body] = describe (
+    R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{}}}}}})");
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["title"], "");
     EXPECT_EQ (body["operations"].size (), 1u);
@@ -125,14 +125,16 @@ TEST_F (SpecDescribeRouteTest, ADocumentWithNoTitleIsDescribedAsHavingNone) {
 TEST_F (SpecDescribeRouteTest, RefusesAFileThatIsNotAnOpenApiDocument) {
     auto [status, body] = describe (R"({"info":{"name":"Team"},"item":[]})");
     ASSERT_EQ (status, 400) << body.dump ();
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("not an OpenAPI document"),
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find (
+               "not an OpenAPI document"),
     std::string::npos);
 }
 
 TEST_F (SpecDescribeRouteTest, RefusesBytesItCannotRead) {
     auto [status, body] = describe ("openapi: [3.0.0\n");
     ASSERT_EQ (status, 400) << body.dump ();
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Invalid 'content'"),
+    EXPECT_NE (
+    body["error"]["message"].get<std::string> ().find ("Invalid 'content'"),
     std::string::npos);
 }
 
@@ -140,7 +142,8 @@ TEST_F (SpecDescribeRouteTest, RefusesAnEmptyOrMissingDocument) {
     auto [empty, empty_body] = describe ("");
     EXPECT_EQ (empty, 400) << empty_body.dump ();
 
-    auto [missing, missing_body] = routes::describe_spec_response (*db_, json::object ());
+    auto [missing, missing_body] =
+    routes::describe_spec_response (*db_, json::object ());
     EXPECT_EQ (missing, 400) << missing_body.dump ();
 }
 
@@ -156,7 +159,8 @@ TEST_F (SpecDescribeRouteTest, RefusesADocumentOverTheConfiguredCap) {
 
     auto [status, body] = describe (PETS_V3);
     ASSERT_EQ (status, 400) << body.dump ();
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("over the limit of 64"),
+    EXPECT_NE (
+    body["error"]["message"].get<std::string> ().find ("over the limit of 64"),
     std::string::npos);
 }
 

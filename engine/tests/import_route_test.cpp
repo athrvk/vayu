@@ -31,12 +31,13 @@ const vayu::http::TransportPolicy& transport);
 using ImportFetchEmitter =
 std::function<bool (const std::string& event, const nlohmann::json& data)>;
 std::pair<int, nlohmann::json> import_fetch_stream (const std::string& request_body,
-const vayu::http::TransportPolicy& transport, const ImportFetchEmitter& emit);
+const vayu::http::TransportPolicy& transport,
+const ImportFetchEmitter& emit);
 
 // The client config both forms build, so the bounds a fetch runs under can be
 // asserted without a test that waits out a 30-second stall window.
-vayu::http::ClientConfig
-import_fetch_client_config (size_t max_bytes, const vayu::http::TransportPolicy& transport);
+vayu::http::ClientConfig import_fetch_client_config (size_t max_bytes,
+const vayu::http::TransportPolicy& transport);
 } // namespace vayu::http::routes
 
 namespace {
@@ -45,7 +46,7 @@ namespace {
 /// Large enough that a transfer cut off at a 1 KiB bound cannot have been asked
 /// for anything close to all of them - which is how `served()` proves the
 /// refusal happened while the bytes were arriving.
-constexpr size_t CHUNK_BYTES         = 1024;
+constexpr size_t CHUNK_BYTES = 1024;
 
 constexpr size_t CHUNKED_TOTAL_BYTES = 4 * 1024 * 1024;
 
@@ -118,8 +119,8 @@ std::string fetch_body (const std::string& url, uint64_t max_bytes) {
 }
 
 TEST (ImportFetch, RejectsInvalidJson) {
-    auto [status, body] = vayu::http::routes::import_fetch (
-    "not json", vayu::http::TransportPolicy{});
+    auto [status, body] =
+    vayu::http::routes::import_fetch ("not json", vayu::http::TransportPolicy{});
     EXPECT_EQ (status, 400);
     EXPECT_TRUE (body.contains ("error"));
 }
@@ -132,8 +133,8 @@ TEST (ImportFetch, RejectsNonHttpUrl) {
 
 TEST (ImportFetch, ProxiesSuccessfully) {
     MockSpecServer mock;
-    std::string body =
-    R"({"url":"http://127.0.0.1:)" + std::to_string (mock.port ()) + R"(/spec.json"})";
+    std::string body = R"({"url":"http://127.0.0.1:)" +
+    std::to_string (mock.port ()) + R"(/spec.json"})";
     auto [status, json] =
     vayu::http::routes::import_fetch (body, vayu::http::TransportPolicy{});
     EXPECT_EQ (status, 200);
@@ -280,7 +281,8 @@ struct Emitted {
 /// Collects every event, and optionally stops listening after the first.
 class Recorder {
     public:
-    explicit Recorder (bool keep_listening = true) : keep_listening_ (keep_listening) {
+    explicit Recorder (bool keep_listening = true)
+    : keep_listening_ (keep_listening) {
     }
 
     vayu::http::routes::ImportFetchEmitter emitter () {
@@ -311,8 +313,9 @@ TEST (ImportFetchStream, ReportsProgressAndThenTheResult) {
     MockSpecServer mock (64 * 1024);
     Recorder recorder;
 
-    const auto [status, body] = vayu::http::routes::import_fetch_stream (
-    fetch_body (mock.url ("/large")), vayu::http::TransportPolicy{}, recorder.emitter ());
+    const auto [status, body] =
+    vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/large")),
+    vayu::http::TransportPolicy{}, recorder.emitter ());
 
     // Nothing to answer with a status: the outcome went out as an event.
     EXPECT_EQ (status, 200);
@@ -337,8 +340,8 @@ TEST (ImportFetchStream, ReportsNoTotalForAResponseThatDeclaresNoLength) {
     MockSpecServer mock;
     Recorder recorder;
 
-    vayu::http::routes::import_fetch_stream (
-    fetch_body (mock.url ("/chunked")), vayu::http::TransportPolicy{}, recorder.emitter ());
+    vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/chunked")),
+    vayu::http::TransportPolicy{}, recorder.emitter ());
 
     const auto progress = recorder.of ("progress");
     ASSERT_FALSE (progress.empty ());
@@ -355,8 +358,8 @@ TEST (ImportFetchStream, ThrottlesProgressWellBelowOneEventPerWrite) {
     MockSpecServer mock;
     Recorder recorder;
 
-    vayu::http::routes::import_fetch_stream (
-    fetch_body (mock.url ("/chunked")), vayu::http::TransportPolicy{}, recorder.emitter ());
+    vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/chunked")),
+    vayu::http::TransportPolicy{}, recorder.emitter ());
 
     const auto progress = recorder.of ("progress");
     ASSERT_FALSE (progress.empty ());
@@ -414,8 +417,8 @@ TEST (ImportFetchStream, StopsFetchingOnceTheListenerHasGone) {
     MockSpecServer mock;
     Recorder recorder (false); // The socket died after the first frame.
 
-    vayu::http::routes::import_fetch_stream (
-    fetch_body (mock.url ("/chunked")), vayu::http::TransportPolicy{}, recorder.emitter ());
+    vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/chunked")),
+    vayu::http::TransportPolicy{}, recorder.emitter ());
 
     // The 4 MiB body is abandoned rather than read to the end for nobody. One
     // event went out - the one whose write revealed the listener was gone.

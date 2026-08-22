@@ -54,8 +54,8 @@ bool os_at_least (DWORD major, DWORD minor, bool use_rtl) {
     osver.dwPlatformId        = VER_PLATFORM_WIN32_NT;
 
     ULONGLONG mask = 0;
-    mask           = VerSetConditionMask (mask, VER_MAJORVERSION, VER_GREATER_EQUAL);
-    mask           = VerSetConditionMask (mask, VER_MINORVERSION, VER_GREATER_EQUAL);
+    mask = VerSetConditionMask (mask, VER_MAJORVERSION, VER_GREATER_EQUAL);
+    mask = VerSetConditionMask (mask, VER_MINORVERSION, VER_GREATER_EQUAL);
     mask = VerSetConditionMask (mask, VER_SERVICEPACKMAJOR, VER_GREATER_EQUAL);
     mask = VerSetConditionMask (mask, VER_SERVICEPACKMINOR, VER_GREATER_EQUAL);
     mask = VerSetConditionMask (mask, VER_PLATFORMID, VER_EQUAL);
@@ -64,8 +64,9 @@ bool os_at_least (DWORD major, DWORD minor, bool use_rtl) {
     VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR | VER_PLATFORMID;
 
     if (use_rtl) {
-        using RtlVerifyVersionInfoFn = LONG (APIENTRY*) (OSVERSIONINFOEXW*, ULONG, ULONGLONG);
-        HMODULE ntdll                = GetModuleHandleW (L"ntdll");
+        using RtlVerifyVersionInfoFn =
+        LONG (APIENTRY*) (OSVERSIONINFOEXW*, ULONG, ULONGLONG);
+        HMODULE ntdll = GetModuleHandleW (L"ntdll");
         if (!ntdll) {
             return false;
         }
@@ -142,16 +143,18 @@ TEST (HttpVersionSupport, WindowsOsVersionIsNotShimmed) {
     const bool truth_81   = os_at_least (6, 3, /*use_rtl=*/true);
     const bool shimmed_81 = os_at_least (6, 3, /*use_rtl=*/false);
 
-    ASSERT_TRUE (truth_81) << "ntdll reports this OS as older than Windows 8.1, so "
-                              "the shim below has nothing to hide and this test can "
-                              "say nothing about the manifest - not a build defect.";
+    ASSERT_TRUE (truth_81)
+    << "ntdll reports this OS as older than Windows 8.1, so "
+       "the shim below has nothing to hide and this test can "
+       "say nothing about the manifest - not a build defect.";
 
     EXPECT_TRUE (shimmed_81)
     << "This process is being version-shimmed: Windows tells it the OS is 6.2 "
        "while ntdll reports 6.3+.\n"
        "That means the supportedOS compatibility manifest is missing from this "
        "executable. Schannel is still in this build (MultiSSL - see #858), and "
-       "anything that puts the process on it gets ALPN silently disabled: every "
+       "anything that puts the process on it gets ALPN silently disabled: "
+       "every "
        "HTTPS request would be HTTP/1.1 no matter what httpVersion asks for "
        "(issue #215).\n"
        "Fix: engine/res/vayu-windows.manifest must reach this target via "
@@ -168,10 +171,13 @@ TEST (HttpVersionSupport, WindowsOsVersionIsNotShimmed) {
        "not.\n"
        "If the 6.3 probe above passed, the manifest is present but incomplete: "
        "it is missing the Windows 10/11 supportedOS id "
-       "{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}, which caps what this process is "
+       "{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}, which caps what this process "
+       "is "
        "told at 6.3.\n"
-       "Nothing reads a shimmed version above 6.3 today (#856 enumerated them), "
-       "so this is not a live defect - but the invariant this test exists for is "
+       "Nothing reads a shimmed version above 6.3 today (#856 enumerated "
+       "them), "
+       "so this is not a live defect - but the invariant this test exists for "
+       "is "
        "that the reported version is the real one, and "
        ".github/check-windows-deps.py requires this id on the shipped binary. "
        "Half a manifest here and a full one there is the drift both guards are "

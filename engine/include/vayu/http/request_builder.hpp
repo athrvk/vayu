@@ -45,7 +45,7 @@ enum class AuthResolution : std::uint8_t { Apply, Defer };
 struct RequestBuild {
     bool ok = true;
     vayu::Request request;
-    bool parse_failed = false;
+    bool parse_failed          = false;
     vayu::ErrorCode error_code = vayu::ErrorCode::None;
     std::string error_message;
     std::string detail_code;
@@ -64,7 +64,9 @@ struct RequestBuild {
  * @param auth       Whether to resolve `auth` here (default) or leave it to the
  *                   caller - see @ref AuthResolution.
  */
-RequestBuild build_request (const nlohmann::json& config, vayu::db::Database* db,
-int timeout_ms, AuthResolution auth = AuthResolution::Apply);
+RequestBuild build_request (const nlohmann::json& config,
+vayu::db::Database* db,
+int timeout_ms,
+AuthResolution auth = AuthResolution::Apply);
 
 } // namespace vayu::http

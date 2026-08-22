@@ -15,8 +15,7 @@ using nlohmann::json;
 namespace {
 
 TEST (RequestBuilder, BuildsValidRequestAndAppliesTimeoutAndAuth) {
-    const json cfg = { { "method", "GET" },
-        { "url", "https://api.example.com/v1" },
+    const json cfg = { { "method", "GET" }, { "url", "https://api.example.com/v1" },
         { "auth", { { "mode", "bearer" }, { "token", "abc" } } } };
     auto b = vayu::http::build_request (cfg, nullptr, 12345);
     ASSERT_TRUE (b.ok);
@@ -35,7 +34,7 @@ TEST (RequestBuilder, ParseFailureIsFlagged) {
 
 TEST (RequestBuilder, NoAuthLeavesHeadersEmpty) {
     const json cfg = { { "method", "POST" }, { "url", "https://api.example.com" } };
-    auto b         = vayu::http::build_request (cfg, nullptr, 1000);
+    auto b = vayu::http::build_request (cfg, nullptr, 1000);
     ASSERT_TRUE (b.ok);
     EXPECT_TRUE (b.request.headers.empty ());
 }
@@ -43,7 +42,7 @@ TEST (RequestBuilder, NoAuthLeavesHeadersEmpty) {
 TEST (SanitizeConfigSnapshot, ReducesAuthToModeOnly) {
     const std::string body =
     R"({"method":"GET","url":"https://x/y","auth":{"mode":"basic","username":"u","password":"secret"}})";
-    const auto out = vayu::json::sanitize_config_snapshot (body);
+    const auto out    = vayu::json::sanitize_config_snapshot (body);
     const auto parsed = json::parse (out);
     EXPECT_EQ (parsed["url"], "https://x/y");
     EXPECT_EQ (parsed["auth"], (json{ { "mode", "basic" } }));

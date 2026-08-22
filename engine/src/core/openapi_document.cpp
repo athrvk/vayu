@@ -57,7 +57,8 @@ using walk::WalkedOperation;
 /// the sentence a caller reads, so every throw site writes one.
 class ReadFailure : public std::runtime_error {
     public:
-    explicit ReadFailure (const std::string& message) : std::runtime_error (message) {
+    explicit ReadFailure (const std::string& message)
+    : std::runtime_error (message) {
     }
 };
 
@@ -116,9 +117,9 @@ void install_yaml_callbacks () {
 }
 
 bool is_decimal_digits (std::string_view text) {
-    return !text.empty () && std::all_of (text.begin (), text.end (), [] (unsigned char c) {
-        return std::isdigit (c) != 0;
-    });
+    return !text.empty () &&
+    std::all_of (text.begin (), text.end (),
+    [] (unsigned char c) { return std::isdigit (c) != 0; });
 }
 
 /**
@@ -163,7 +164,7 @@ nlohmann::ordered_json plain_scalar (const std::string& text) {
         base = digits[1] == 'x' ? 16 : (digits[1] == 'o' ? 8 : 2);
     }
     if (base != 0) {
-        const std::string body { base == 10 ? digits : digits.substr (2) };
+        const std::string body{ base == 10 ? digits : digits.substr (2) };
         errno                 = 0;
         char* end             = nullptr;
         const long long value = std::strtoll (body.c_str (), &end, base);
@@ -245,7 +246,8 @@ class Converter {
             return nullptr;
         }
         const std::string value = to_string (node.val ());
-        return node.is_val_quoted () ? nlohmann::ordered_json (value) : plain_scalar (value);
+        return node.is_val_quoted () ? nlohmann::ordered_json (value) :
+                                       plain_scalar (value);
     }
 
     private:
@@ -257,8 +259,10 @@ class Converter {
 
     void spend () {
         if (remaining_nodes_ == 0) {
-            throw ReadFailure ("document expands to more nodes than its size allows - "
-                               "an alias or a merge key resolves to far more than it is written as");
+            throw ReadFailure (
+            "document expands to more nodes than its size allows - "
+            "an alias or a merge key resolves to far more than it is written "
+            "as");
         }
         --remaining_nodes_;
     }
@@ -522,17 +526,18 @@ constexpr const char* BUNDLED_KEY = "x-vayu-bundled";
  * `nullable` is deliberately absent - it *does* constrain a body, so it is
  * translated rather than dropped.
  */
-constexpr std::array<std::string_view, 4> OPENAPI_ONLY_KEYS = { "discriminator", "xml",
-    "externalDocs", "example" };
+constexpr std::array<std::string_view, 4> OPENAPI_ONLY_KEYS = { "discriminator",
+    "xml", "externalDocs", "example" };
 
 /**
  * Where a keyword's value is itself a schema, or a list of them - one branch,
  * because translating a list is translating each entry of it and the walk below
  * already does that for any array it is handed.
  */
-constexpr std::array<std::string_view, 15> SUBSCHEMA_KEYS = { "not", "if", "then", "else",
-    "contains", "additionalProperties", "propertyNames", "additionalItems", "unevaluatedItems",
-    "unevaluatedProperties", "items", "allOf", "anyOf", "oneOf", "prefixItems" };
+constexpr std::array<std::string_view, 15> SUBSCHEMA_KEYS = { "not", "if",
+    "then", "else", "contains", "additionalProperties", "propertyNames",
+    "additionalItems", "unevaluatedItems", "unevaluatedProperties", "items",
+    "allOf", "anyOf", "oneOf", "prefixItems" };
 
 /// Where a keyword holds a map of subschemas keyed by *data* names - the values
 /// are schemas, the keys are a body's field names and mean nothing here.
@@ -568,7 +573,7 @@ nlohmann::ordered_json to_json_schema (const nlohmann::ordered_json& schema) {
 
     nlohmann::ordered_json out = nlohmann::ordered_json::object ();
     for (auto entry = schema.begin (); entry != schema.end (); ++entry) {
-        const std::string& key             = entry.key ();
+        const std::string& key              = entry.key ();
         const nlohmann::ordered_json& value = entry.value ();
         // `nullable` is handled below, once, against whatever `type` ends up
         // being - doing it here would depend on key order.
@@ -666,8 +671,8 @@ nlohmann::ordered_json ref_roots_of (const nlohmann::ordered_json& document) {
     if (const nlohmann::ordered_json* components = find_object (document, "components")) {
         if (const nlohmann::ordered_json* schemas = find_object (*components, "schemas")) {
             nlohmann::ordered_json carried = nlohmann::ordered_json::object ();
-            carried["schemas"] = map_schemas (*schemas);
-            roots["components"] = std::move (carried);
+            carried["schemas"]             = map_schemas (*schemas);
+            roots["components"]            = std::move (carried);
         }
     }
     if (const nlohmann::ordered_json* definitions = find_object (document, "definitions")) {
@@ -697,8 +702,9 @@ nlohmann::ordered_json ref_roots_of (const nlohmann::ordered_json& document) {
 }
 
 /// One `{status, contentType, schema}` row of the index.
-nlohmann::ordered_json
-declared_response (const std::string& status, std::string content_type, const nlohmann::ordered_json& schema) {
+nlohmann::ordered_json declared_response (const std::string& status,
+std::string content_type,
+const nlohmann::ordered_json& schema) {
     nlohmann::ordered_json row;
     row["status"]      = status;
     row["contentType"] = std::move (content_type);
@@ -725,8 +731,8 @@ bool is_schema (const nlohmann::ordered_json& node) {
  * is nothing to check against, and an empty schema would claim everything is
  * valid.
  */
-nlohmann::ordered_json
-response_schemas_v3 (const nlohmann::ordered_json& document, const nlohmann::ordered_json& operation) {
+nlohmann::ordered_json response_schemas_v3 (const nlohmann::ordered_json& document,
+const nlohmann::ordered_json& operation) {
     nlohmann::ordered_json declared = nlohmann::ordered_json::array ();
     const nlohmann::ordered_json* responses = find_object (operation, "responses");
     if (responses == nullptr) {
@@ -736,7 +742,8 @@ response_schemas_v3 (const nlohmann::ordered_json& document, const nlohmann::ord
         if (entry.key ().empty ()) {
             continue;
         }
-        const nlohmann::ordered_json* response = resolve_single_hop (document, entry.value ());
+        const nlohmann::ordered_json* response =
+        resolve_single_hop (document, entry.value ());
         if (response == nullptr) {
             continue;
         }
@@ -752,7 +759,8 @@ response_schemas_v3 (const nlohmann::ordered_json& document, const nlohmann::ord
             if (schema == media.value ().end () || !is_schema (*schema)) {
                 continue;
             }
-            declared.push_back (declared_response (entry.key (), lower (media.key ()), *schema));
+            declared.push_back (
+            declared_response (entry.key (), lower (media.key ()), *schema));
         }
     }
     return declared;
@@ -764,14 +772,14 @@ response_schemas_v3 (const nlohmann::ordered_json& document, const nlohmann::ord
  * once for the whole operation and the schema once per response, so one
  * response declares the same schema for each type it produces.
  */
-std::vector<std::string>
-produced_media_types (const nlohmann::ordered_json& document, const nlohmann::ordered_json& operation) {
+std::vector<std::string> produced_media_types (const nlohmann::ordered_json& document,
+const nlohmann::ordered_json& operation) {
     const nlohmann::ordered_json* produces = nullptr;
     if (const auto own = operation.find ("produces");
-        own != operation.end () && own->is_array ()) {
+    own != operation.end () && own->is_array ()) {
         produces = &(*own);
     } else if (const auto shared = document.find ("produces");
-               shared != document.end () && shared->is_array ()) {
+    shared != document.end () && shared->is_array ()) {
         produces = &(*shared);
     }
 
@@ -790,8 +798,8 @@ produced_media_types (const nlohmann::ordered_json& document, const nlohmann::or
 }
 
 /// A Swagger 2.0 operation's declared response schemas.
-nlohmann::ordered_json
-response_schemas_v2 (const nlohmann::ordered_json& document, const nlohmann::ordered_json& operation) {
+nlohmann::ordered_json response_schemas_v2 (const nlohmann::ordered_json& document,
+const nlohmann::ordered_json& operation) {
     nlohmann::ordered_json declared = nlohmann::ordered_json::array ();
     const nlohmann::ordered_json* responses = find_object (operation, "responses");
     if (responses == nullptr) {
@@ -802,7 +810,8 @@ response_schemas_v2 (const nlohmann::ordered_json& document, const nlohmann::ord
         if (entry.key ().empty ()) {
             continue;
         }
-        const nlohmann::ordered_json* response = resolve_single_hop (document, entry.value ());
+        const nlohmann::ordered_json* response =
+        resolve_single_hop (document, entry.value ());
         if (response == nullptr) {
             continue;
         }
@@ -829,7 +838,9 @@ std::string emit_yaml (const nlohmann::ordered_json& document) {
         emit_seq (document, 0, out);
         return out;
     }
-    out += document.is_object () ? "{}" : (document.is_array () ? "[]" : scalar_text (document));
+    out += document.is_object () ?
+    "{}" :
+    (document.is_array () ? "[]" : scalar_text (document));
     out += '\n';
     return out;
 }
@@ -868,7 +879,7 @@ DocumentRead read_document (const std::string& text) {
         // Anything the YAML library throws that is not our own failure - an
         // allocation it could not make, a state we have no sentence for. It is
         // still the document's problem, never the daemon's.
-        result.root  = nullptr;
+        result.root = nullptr;
         result.error = std::string ("could not be read as JSON or YAML: ") + e.what ();
     }
     return result;
@@ -888,12 +899,8 @@ std::vector<DeclaredOperation> declared_operations_of (const nlohmann::ordered_j
 DocumentDescription describe_document (const nlohmann::ordered_json& document) {
     DocumentDescription described;
     switch (walk::spec_dialect (document)) {
-    case walk::Dialect::V3:
-        described.format = "OpenAPI 3.0";
-        break;
-    case walk::Dialect::V2:
-        described.format = "OpenAPI 2.0 (Swagger)";
-        break;
+    case walk::Dialect::V3: described.format = "OpenAPI 3.0"; break;
+    case walk::Dialect::V2: described.format = "OpenAPI 2.0 (Swagger)"; break;
     case walk::Dialect::None:
         // Readable, and not a contract. Said as an empty format rather than as a
         // failure, because the caller asked what these bytes are and "not an
@@ -923,8 +930,9 @@ nlohmann::ordered_json response_schemas_of (const nlohmann::ordered_json& docume
         if (!walked.identified) {
             continue; // no identity to file its schemas under
         }
-        nlohmann::ordered_json responses = v3 ? response_schemas_v3 (document, *walked.node) :
-                                                response_schemas_v2 (document, *walked.node);
+        nlohmann::ordered_json responses = v3 ?
+        response_schemas_v3 (document, *walked.node) :
+        response_schemas_v2 (document, *walked.node);
         if (responses.empty ()) {
             continue;
         }
@@ -954,7 +962,8 @@ SpecIndexes spec_indexes_of (const nlohmann::ordered_json& document, size_t inde
     std::vector<WalkedOperation> walked = walk_operations (document);
     // Only the operations that declare an identity are indexed; the rest are
     // the import's to build a request for (see `WalkedOperation::identified`).
-    std::erase_if (walked, [] (const WalkedOperation& row) { return !row.identified; });
+    std::erase_if (
+    walked, [] (const WalkedOperation& row) { return !row.identified; });
     if (walked.empty ()) {
         return indexes; // no index, which is not the same as an empty contract
     }

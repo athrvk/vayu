@@ -34,10 +34,12 @@
 
 namespace vayu::http::routes {
 // Defined in runs.cpp; returns {http_status, json_body}.
+std::pair<int, nlohmann::json> run_samples_response (vayu::db::Database& db,
+const std::string& run_id,
+int64_t limit,
+int64_t offset);
 std::pair<int, nlohmann::json>
-run_samples_response (vayu::db::Database& db, const std::string& run_id, int64_t limit, int64_t offset);
-std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
-const std::string& run_id);
+run_report_response (vayu::db::Database& db, const std::string& run_id);
 } // namespace vayu::http::routes
 
 using namespace vayu::core;
@@ -60,10 +62,10 @@ vayu::Response make_response (int status, std::string body, std::string content_
 /// knobs pinned so a test decides what is retained rather than a 1-in-100 die.
 MetricsCollectorConfig capture_config () {
     MetricsCollectorConfig config;
-    config.expected_requests      = 1000;
+    config.expected_requests       = 1000;
     config.capture_response_bodies = true;
-    config.store_success_traces   = false;
-    config.success_sample_rate    = 1;
+    config.store_success_traces    = false;
+    config.success_sample_rate     = 1;
     return config;
 }
 
@@ -145,11 +147,10 @@ TEST_F (ResponseCaptureTest, ExemplarStoreKeepsOnePerStatusUpToTheLimit) {
 
     for (int status : { 200, 500 }) {
         for (int i = 0; i < 10; ++i) {
-            auto response      = make_response (status, "body-" + std::to_string (status));
+            auto response = make_response (status, "body-" + std::to_string (status));
             const bool exemplar = collector.claim_status_exemplar (status);
             collector.record_success (status, 1.0, 0.0, exemplar ? "{}" : "",
-            exemplar ? SuccessTraceReason::Exemplar : SuccessTraceReason::None,
-            &response);
+            exemplar ? SuccessTraceReason::Exemplar : SuccessTraceReason::None, &response);
         }
     }
 
@@ -213,12 +214,13 @@ TEST_F (ResponseCaptureTest, RefusedSlotsSpendNoBudget) {
 // ---------------------------------------------------------------------------
 
 TEST_F (ResponseCaptureTest, BodyOverThePerBodyCapIsTruncatedAndSaysSo) {
-    MetricsCollectorConfig config  = capture_config ();
-    config.max_sample_body_bytes   = 16;
+    MetricsCollectorConfig config = capture_config ();
+    config.max_sample_body_bytes  = 16;
     MetricsCollector collector ("run_truncate", config);
 
     auto response = make_response (500, std::string (100, 'y'));
-    collector.record_error (vayu::ErrorCode::ConnectionFailed, "server error", "{}", &response);
+    collector.record_error (
+    vayu::ErrorCode::ConnectionFailed, "server error", "{}", &response);
 
     ASSERT_EQ (collector.errors ().size (), 1u);
     const auto& captured = collector.errors ()[0].capture;
@@ -234,7 +236,7 @@ TEST_F (ResponseCaptureTest, BodyOverThePerBodyCapIsTruncatedAndSaysSo) {
 TEST_F (ResponseCaptureTest, SpentBudgetKeepsMetadataAndCountsDroppedBodies) {
     MetricsCollectorConfig config = capture_config ();
     config.max_sample_bytes       = 250;
-    config.max_errors             = 0; // unlimited, so the store is not the limit
+    config.max_errors = 0; // unlimited, so the store is not the limit
     MetricsCollector collector ("run_budget", config);
 
     for (int i = 0; i < 10; ++i) {
@@ -245,7 +247,8 @@ TEST_F (ResponseCaptureTest, SpentBudgetKeepsMetadataAndCountsDroppedBodies) {
     ASSERT_EQ (collector.errors ().size (), 10u);
     size_t with_body = 0;
     for (const auto& record : collector.errors ()) {
-        ASSERT_TRUE (record.capture.has_value ()) << "metadata must survive a spent budget";
+        ASSERT_TRUE (record.capture.has_value ())
+        << "metadata must survive a spent budget";
         EXPECT_EQ (record.capture->headers.size (), 2u);
         EXPECT_EQ (record.capture->body_bytes, 100);
         if (!record.capture->body.empty ()) {
@@ -280,8 +283,8 @@ TEST_F (ResponseCaptureTest, IdenticalBodiesAreStoredOnce) {
     for (const auto& row : rows) {
         blob_ids.insert (row.blob_id);
     }
-    EXPECT_EQ (blob_ids.size (), 1u)
-    << "20 identical responses should share one stored body, not store 20 copies";
+    EXPECT_EQ (blob_ids.size (), 1u) << "20 identical responses should share "
+                                        "one stored body, not store 20 copies";
 
     // And the shared blob still reads back as the body every row claims.
     for (const auto& row : rows) {
@@ -295,17 +298,20 @@ TEST_F (ResponseCaptureTest, BinaryBodyIsStoredAsADescriptor) {
 
     // Raw deflate bytes under an origin's own text/html - the realistic case,
     // since the engine never sets CURLOPT_ACCEPT_ENCODING.
-    auto response = make_response (200, std::string ("\x1f\x8b\x08\x00\xff\xfe\x00\x01", 8), "text/html");
+    auto response = make_response (
+    200, std::string ("\x1f\x8b\x08\x00\xff\xfe\x00\x01", 8), "text/html");
     collector.record_error (vayu::ErrorCode::ConnectionFailed, "boom", "{}", &response);
     collector.flush_to_database (*db_);
 
     auto rows = db_->get_result_bodies_paginated ("run_binary", 100, 0);
     ASSERT_EQ (rows.size (), 1u);
     EXPECT_TRUE (rows[0].is_binary);
-    EXPECT_EQ (rows[0].blob_id, 0) << "a binary body must not be stored as text";
+    EXPECT_EQ (rows[0].blob_id, 0)
+    << "a binary body must not be stored as text";
     EXPECT_EQ (rows[0].body_bytes, 8);
 
-    auto [status, body] = vayu::http::routes::run_samples_response (*db_, "run_binary", 50, 0);
+    auto [status, body] =
+    vayu::http::routes::run_samples_response (*db_, "run_binary", 50, 0);
     ASSERT_EQ (status, 200);
     const auto& sample = body["data"][0]["response"];
     EXPECT_TRUE (sample["binary"].get<bool> ());
@@ -321,13 +327,13 @@ TEST_F (ResponseCaptureTest, BinaryBodyIsStoredAsADescriptor) {
 TEST_F (ResponseCaptureTest, CaptureAddsNothingToTheReportPathsRows) {
     auto flush_trace_bytes = [this] (const std::string& run_id, bool capture) {
         seed_run (run_id);
-        MetricsCollectorConfig config   = capture_config ();
+        MetricsCollectorConfig config  = capture_config ();
         config.capture_response_bodies = capture;
         MetricsCollector collector (run_id, config);
         for (int i = 0; i < 5; ++i) {
             auto response = make_response (500, std::string (4096, 'q'));
-            collector.record_error (vayu::ErrorCode::ConnectionFailed, "boom", R"({"totalMs":1})",
-            capture ? &response : nullptr);
+            collector.record_error (vayu::ErrorCode::ConnectionFailed, "boom",
+            R"({"totalMs":1})", capture ? &response : nullptr);
         }
         collector.flush_to_database (*db_);
 
@@ -377,7 +383,8 @@ TEST_F (ResponseCaptureTest, DeletingARunDeletesItsCapturedBodies) {
 
     db_->delete_run ("run_delete");
     EXPECT_EQ (db_->count_result_bodies ("run_delete"), 0)
-    << "captured data outlived the run it belongs to; maxRunsRetained is its expiry";
+    << "captured data outlived the run it belongs to; maxRunsRetained is its "
+       "expiry";
 }
 
 // ---------------------------------------------------------------------------
@@ -420,7 +427,8 @@ TEST_F (ResponseCaptureTest, ReportResultIdsMatchTheSamplesEndpoint) {
     }
     collector.flush_to_database (*db_);
 
-    auto [report_status, report] = vayu::http::routes::run_report_response (*db_, "run_join");
+    auto [report_status, report] =
+    vayu::http::routes::run_report_response (*db_, "run_join");
     ASSERT_EQ (report_status, 200);
     std::set<int> report_ids;
     for (const auto& result : report["results"]) {
@@ -447,13 +455,15 @@ TEST_F (ResponseCaptureTest, SamplesEndpointPaginatesAndFourOhFours) {
     }
     collector.flush_to_database (*db_);
 
-    auto [status, page] = vayu::http::routes::run_samples_response (*db_, "run_pages", 2, 0);
+    auto [status, page] =
+    vayu::http::routes::run_samples_response (*db_, "run_pages", 2, 0);
     ASSERT_EQ (status, 200);
     EXPECT_EQ (page["data"].size (), 2u);
     EXPECT_EQ (page["pagination"]["total"].get<int64_t> (), 5);
     EXPECT_TRUE (page["pagination"]["hasMore"].get<bool> ());
 
-    auto [last_status, last] = vayu::http::routes::run_samples_response (*db_, "run_pages", 2, 4);
+    auto [last_status, last] =
+    vayu::http::routes::run_samples_response (*db_, "run_pages", 2, 4);
     ASSERT_EQ (last_status, 200);
     EXPECT_EQ (last["data"].size (), 1u);
     EXPECT_FALSE (last["pagination"]["hasMore"].get<bool> ());
@@ -473,7 +483,8 @@ TEST_F (ResponseCaptureTest, SamplesEndpointPaginatesAndFourOhFours) {
 // asks before it knows whether there is anything to show.
 TEST_F (ResponseCaptureTest, RunWithNoCapturesIsAnEmptyPage) {
     seed_run ("run_empty");
-    auto [status, body] = vayu::http::routes::run_samples_response (*db_, "run_empty", 50, 0);
+    auto [status, body] =
+    vayu::http::routes::run_samples_response (*db_, "run_empty", 50, 0);
     EXPECT_EQ (status, 200);
     EXPECT_TRUE (body["data"].empty ());
     EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 0);

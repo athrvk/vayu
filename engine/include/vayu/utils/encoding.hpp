@@ -147,8 +147,7 @@ inline std::string url_encode (std::string_view in) {
     for (const char ch : in) {
         const auto c = static_cast<uint8_t> (ch);
         if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
-            c == '~') {
+        (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
             out.push_back (static_cast<char> (c));
         } else {
             out.push_back ('%');
@@ -203,8 +202,8 @@ inline std::string url_decode (std::string_view in) {
  * Keys and values are individually url_encode()d and joined with '&'. Order is
  * preserved so callers can produce deterministic bodies (useful for tests).
  */
-inline std::string
-form_encode (const std::vector<std::pair<std::string, std::string>>& fields) {
+inline std::string form_encode (
+const std::vector<std::pair<std::string, std::string>>& fields) {
     std::string out;
     bool first = true;
     for (const auto& [key, value] : fields) {

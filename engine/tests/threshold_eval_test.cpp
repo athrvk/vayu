@@ -92,7 +92,8 @@ TEST (ThresholdEval, AnObjectOfOnlyNullsDeclaresNothing) {
     // every sense that matters - and must be rejected as one.
     nlohmann::json thresholds{ { "latencyP99Ms", nullptr }, { "maxErrorRatePct", nullptr } };
     EXPECT_TRUE (validate_thresholds (config_with (thresholds)).has_value ());
-    EXPECT_FALSE (evaluate_thresholds (config_with (thresholds), measured_run ()).has_value ());
+    EXPECT_FALSE (
+    evaluate_thresholds (config_with (thresholds), measured_run ()).has_value ());
 }
 
 TEST (ThresholdEval, ANonObjectThresholdsValueIsRejected) {
@@ -130,7 +131,8 @@ TEST (ThresholdEval, ALatencyBudgetOfZeroOrLessIsRejected) {
 TEST (ThresholdEval, AZeroErrorRateBudgetIsAccepted) {
     // "No request may fail" is the one zero that is an intent rather than a
     // typo, so the error rate is the only budget whose floor is inclusive.
-    EXPECT_FALSE (validate_thresholds (config_with ({ { "maxErrorRatePct", 0 } })).has_value ());
+    EXPECT_FALSE (
+    validate_thresholds (config_with ({ { "maxErrorRatePct", 0 } })).has_value ());
 }
 
 TEST (ThresholdEval, AnErrorRateBudgetOutsideZeroToHundredIsRejected) {
@@ -145,8 +147,7 @@ TEST (ThresholdEval, AThroughputFloorOfZeroIsRejected) {
 
 TEST (ThresholdEval, EveryKnownBudgetIsAcceptedTogether) {
     nlohmann::json thresholds{ { "latencyP50Ms", 20 }, { "latencyP95Ms", 40 },
-        { "latencyP99Ms", 50 }, { "maxErrorRatePct", 0.1 },
-        { "minThroughputRps", 10000 } };
+        { "latencyP99Ms", 50 }, { "maxErrorRatePct", 0.1 }, { "minThroughputRps", 10000 } };
     EXPECT_FALSE (validate_thresholds (config_with (thresholds)).has_value ());
     auto outcome = evaluate_thresholds (config_with (thresholds), measured_run ());
     ASSERT_TRUE (outcome.has_value ());
@@ -158,22 +159,22 @@ TEST (ThresholdEval, EveryKnownBudgetIsAcceptedTogether) {
 TEST (ThresholdEval, ALatencyBudgetPassesAtOrUnderTheLimit) {
     // 47 ms measured. The boundary is a pass: a budget of "p99 under 47" that
     // rejected exactly 47 would be reporting a breach the numbers deny.
-    EXPECT_TRUE (only_check (evaluate_thresholds (
-                 config_with ({ { "latencyP99Ms", 50 } }), measured_run ()))
-                 .passed);
-    EXPECT_TRUE (only_check (evaluate_thresholds (
-                 config_with ({ { "latencyP99Ms", 47 } }), measured_run ()))
-                 .passed);
-    EXPECT_FALSE (only_check (evaluate_thresholds (
-                  config_with ({ { "latencyP99Ms", 46.9 } }), measured_run ()))
-                  .passed);
+    EXPECT_TRUE (only_check (
+    evaluate_thresholds (config_with ({ { "latencyP99Ms", 50 } }), measured_run ()))
+    .passed);
+    EXPECT_TRUE (only_check (
+    evaluate_thresholds (config_with ({ { "latencyP99Ms", 47 } }), measured_run ()))
+    .passed);
+    EXPECT_FALSE (only_check (
+    evaluate_thresholds (config_with ({ { "latencyP99Ms", 46.9 } }), measured_run ()))
+    .passed);
 }
 
 TEST (ThresholdEval, EachPercentileReadsItsOwnMeasurement) {
     // The failure this catches is a copy-paste in the metric table: three
     // budgets all judging p99 would look correct until a run's p50 breached.
-    auto config  = config_with ({ { "latencyP50Ms", 20 }, { "latencyP95Ms", 40 },
-         { "latencyP99Ms", 50 } });
+    auto config = config_with (
+    { { "latencyP50Ms", 20 }, { "latencyP95Ms", 40 }, { "latencyP99Ms", 50 } });
     auto outcome = evaluate_thresholds (config, measured_run ());
     ASSERT_TRUE (outcome.has_value ());
     ASSERT_EQ (outcome->checks.size (), 3u);
@@ -189,26 +190,25 @@ TEST (ThresholdEval, TheErrorRateCountsEveryNonSuccessStatus) {
     // 8 server errors + 2 transport failures out of 1000 = 1%. The collector's
     // own error_rate() would say 0.2% here, and a run of nothing but 500s would
     // score a clean 0 - which is the bug this test exists to pin.
-    auto check =
-    only_check (evaluate_thresholds (config_with ({ { "maxErrorRatePct", 5 } }),
-    measured_run ()));
+    auto check = only_check (evaluate_thresholds (
+    config_with ({ { "maxErrorRatePct", 5 } }), measured_run ()));
     EXPECT_DOUBLE_EQ (check.actual, 1.0);
     EXPECT_TRUE (check.passed);
 
-    EXPECT_FALSE (only_check (evaluate_thresholds (
-                  config_with ({ { "maxErrorRatePct", 0.5 } }), measured_run ()))
-                  .passed);
+    EXPECT_FALSE (only_check (
+    evaluate_thresholds (config_with ({ { "maxErrorRatePct", 0.5 } }), measured_run ()))
+    .passed);
 }
 
 TEST (ThresholdEval, AThroughputFloorFailsBelowTheLimit) {
     // The one budget judged the other way round - a copy of the latency
     // comparison here would call a starved run a pass.
-    EXPECT_TRUE (only_check (evaluate_thresholds (
-                 config_with ({ { "minThroughputRps", 500 } }), measured_run ()))
-                 .passed);
-    EXPECT_FALSE (only_check (evaluate_thresholds (
-                  config_with ({ { "minThroughputRps", 501 } }), measured_run ()))
-                  .passed);
+    EXPECT_TRUE (only_check (
+    evaluate_thresholds (config_with ({ { "minThroughputRps", 500 } }), measured_run ()))
+    .passed);
+    EXPECT_FALSE (only_check (
+    evaluate_thresholds (config_with ({ { "minThroughputRps", 501 } }), measured_run ()))
+    .passed);
 }
 
 TEST (ThresholdEval, TalliesSplitPassedFromFailed) {
@@ -226,8 +226,8 @@ TEST (ThresholdEval, ARunThatSentNothingHasNoErrorRate) {
     // A run stopped before its first completion is judged on what it measured,
     // and 0/0 is 0% - not a division that takes the summary write down with it.
     RunSummaryInputs empty;
-    auto check =
-    only_check (evaluate_thresholds (config_with ({ { "maxErrorRatePct", 1 } }), empty));
+    auto check = only_check (
+    evaluate_thresholds (config_with ({ { "maxErrorRatePct", 1 } }), empty));
     EXPECT_DOUBLE_EQ (check.actual, 0.0);
     EXPECT_TRUE (check.passed);
 }

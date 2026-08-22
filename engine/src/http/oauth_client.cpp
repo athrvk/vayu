@@ -58,8 +58,9 @@ nlohmann::json parse_token_body (const std::string& body) {
     nlohmann::json out = nlohmann::json::object ();
     size_t pos         = 0;
     while (pos < body.size ()) {
-        auto amp        = body.find ('&', pos);
-        const auto pair = body.substr (pos, amp == std::string::npos ? std::string::npos : amp - pos);
+        auto amp = body.find ('&', pos);
+        const auto pair =
+        body.substr (pos, amp == std::string::npos ? std::string::npos : amp - pos);
         if (auto eq = pair.find ('='); eq != std::string::npos) {
             out[url_decode (pair.substr (0, eq))] = url_decode (pair.substr (eq + 1));
         }
@@ -108,14 +109,16 @@ void apply_client_auth (TokenRequest& req, const nlohmann::json& config) {
         return;
     }
     // default: basic_auth_header, with §2.3.1 URL-encoding of the parts
-    req.headers["Authorization"] =
-    "Basic " + vayu::utils::base64_encode (vayu::utils::url_encode (client_id) +
-    ":" + vayu::utils::url_encode (client_secret));
+    req.headers["Authorization"] = "Basic " +
+    vayu::utils::base64_encode (vayu::utils::url_encode (client_id) + ":" +
+    vayu::utils::url_encode (client_secret));
 }
 
-std::variant<vayu::db::OAuthToken, TokenError>
-post_token_request (vayu::db::Database& db, const nlohmann::json& config,
-const std::string& url, TokenRequest& req, const std::string& key) {
+std::variant<vayu::db::OAuthToken, TokenError> post_token_request (vayu::db::Database& db,
+const nlohmann::json& config,
+const std::string& url,
+TokenRequest& req,
+const std::string& key) {
     req.headers["Content-Type"] = "application/x-www-form-urlencoded";
     req.headers["Accept"]       = "application/json";
 
@@ -141,7 +144,7 @@ const std::string& url, TokenRequest& req, const std::string& key) {
     auto body = parse_token_body (resp.body);
 
     if (resp.status_code >= 400 || !body.is_object () ||
-        field (body, "access_token").empty ()) {
+    field (body, "access_token").empty ()) {
         TokenError err;
         err.http_status     = 401;
         err.code            = "oauth2_provider_error";
@@ -164,9 +167,9 @@ const std::string& url, TokenRequest& req, const std::string& key) {
     }
 
     vayu::db::OAuthToken token;
-    token.cache_key     = key;
-    token.access_token  = field (body, "access_token");
-    token.token_type    = field (body, "token_type");
+    token.cache_key    = key;
+    token.access_token = field (body, "access_token");
+    token.token_type   = field (body, "token_type");
     if (token.token_type.empty ()) {
         token.token_type = "Bearer";
     }
@@ -192,9 +195,8 @@ std::string cache_key (const nlohmann::json& config) {
     if (creds_id.empty ()) {
         creds_id = "default";
     }
-    return field (config, "accessTokenUrl") + "\x1f" + field (config, "clientId") +
-    "\x1f" + creds_id + "\x1f" +
-    (grant == "password" ? field (config, "username") : "");
+    return field (config, "accessTokenUrl") + "\x1f" + field (config, "clientId") + "\x1f" +
+    creds_id + "\x1f" + (grant == "password" ? field (config, "username") : "");
 }
 
 bool is_expired (const vayu::db::OAuthToken& t, int64_t now, int64_t skew_ms) {
@@ -204,24 +206,23 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now, int64_t skew_ms) {
     return now > t.created_at + t.expires_in * 1000 - skew_ms;
 }
 
-std::variant<vayu::db::OAuthToken, TokenError>
-acquire_token (vayu::db::Database& db, const nlohmann::json& config,
-bool force_refresh, const std::optional<InteractiveExchange>& interactive) {
+std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database& db,
+const nlohmann::json& config,
+bool force_refresh,
+const std::optional<InteractiveExchange>& interactive) {
     if (!config.is_object ()) {
         return TokenError{ 400, "oauth2_invalid_config", "Missing OAuth 2.0 config" };
     }
 
     const std::string token_url = field (config, "accessTokenUrl");
     if (token_url.rfind ("http://", 0) != 0 && token_url.rfind ("https://", 0) != 0) {
-        return TokenError{ 400, "oauth2_invalid_config",
-            "accessTokenUrl must be an http(s) URL" };
+        return TokenError{ 400, "oauth2_invalid_config", "accessTokenUrl must be an http(s) URL" };
     }
     if (field (config, "clientId").empty ()) {
         return TokenError{ 400, "oauth2_invalid_config", "clientId is required" };
     }
     const std::string grant = field (config, "grantType");
-    if (grant != "client_credentials" && grant != "password" &&
-        grant != "authorization_code") {
+    if (grant != "client_credentials" && grant != "password" && grant != "authorization_code") {
         return TokenError{ 400, "oauth2_invalid_config",
             "Unsupported grantType: " + (grant.empty () ? "(none)" : grant) };
     }
@@ -235,8 +236,7 @@ bool force_refresh, const std::optional<InteractiveExchange>& interactive) {
             return *cached;
         }
         // Refresh path (also used for force_refresh when a refresh token exists)
-        if (!cached->refresh_token.empty () &&
-            flag (config, "autoRefreshToken", true)) {
+        if (!cached->refresh_token.empty () && flag (config, "autoRefreshToken", true)) {
             std::string refresh_url = field (config, "refreshTokenUrl");
             if (refresh_url.empty ()) {
                 refresh_url = token_url;
@@ -306,11 +306,11 @@ nlohmann::json serialize_token (const vayu::db::OAuthToken& t) {
     if (!t.scope.empty ()) {
         out["scope"] = t.scope;
     }
-    out["expiresIn"] = t.expires_in;
-    out["createdAt"] = t.created_at;
-    out["expiresAt"] = t.expires_in > 0 ?
-    nlohmann::json (t.created_at + t.expires_in * 1000) :
-    nlohmann::json (nullptr);
+    out["expiresIn"]       = t.expires_in;
+    out["createdAt"]       = t.created_at;
+    out["expiresAt"]       = t.expires_in > 0 ?
+          nlohmann::json (t.created_at + t.expires_in * 1000) :
+          nlohmann::json (nullptr);
     out["hasRefreshToken"] = !t.refresh_token.empty ();
     return out;
 }

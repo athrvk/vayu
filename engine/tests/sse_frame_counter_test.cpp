@@ -169,7 +169,8 @@ TEST (SseFrameCounterTest, EventsIsReadableMidStreamForTheCapCheck) {
     counter.feed ("data: b\n\n");
     EXPECT_EQ (counter.events (), 2u);
     counter.feed ("data: partial\n");
-    EXPECT_EQ (counter.events (), 2u) << "an unterminated frame is not yet an event";
+    EXPECT_EQ (counter.events (), 2u)
+    << "an unterminated frame is not yet an event";
 }
 
 TEST (SseFrameCounterTest, FinishCountsAnUnterminatedTrailingFrame) {

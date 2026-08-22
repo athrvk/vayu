@@ -292,8 +292,7 @@ nlohmann::json make_trace (const std::string& request_body, const std::string& r
         { "request",
         { { "method", "POST" }, { "url", "http://example.test/" },
         { "headers", nlohmann::json::object () }, { "body", request_body } } },
-        { "response",
-        { { "headers", nlohmann::json::object () }, { "body", response_body } } }
+        { "response", { { "headers", nlohmann::json::object () }, { "body", response_body } } }
     };
 }
 
@@ -413,8 +412,7 @@ TEST (CapTraceBodies, IgnoresAnErrorTraceWithNoResponseBody) {
     nlohmann::json trace{ { "request",
                           { { "method", "GET" }, { "url", "http://x/" },
                           { "headers", nlohmann::json::object () } } },
-        { "error_type", "CONNECTION_FAILED" },
-        { "error_message", "could not connect" } };
+        { "error_type", "CONNECTION_FAILED" }, { "error_message", "could not connect" } };
 
     EXPECT_NO_THROW (cap_trace_bodies (trace, 4));
     EXPECT_FALSE (trace.contains ("response"));

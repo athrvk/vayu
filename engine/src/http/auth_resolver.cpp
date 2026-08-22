@@ -28,8 +28,7 @@ std::string field (const nlohmann::json& obj, const char* key) {
 }
 
 // Append `key=value` to a URL's query component, preserving any fragment.
-void append_query_param (std::string& url, const std::string& key,
-const std::string& value) {
+void append_query_param (std::string& url, const std::string& key, const std::string& value) {
     std::string fragment;
     if (const auto hash = url.find ('#'); hash != std::string::npos) {
         fragment = url.substr (hash);
@@ -55,8 +54,8 @@ AuthApplyResult from_token_error (const oauth::TokenError& err) {
     AuthApplyResult out;
     out.ok          = false;
     out.code        = err.code == "oauth2_interactive_required" ?
-    vayu::ErrorCode::AuthRequired :
-    vayu::ErrorCode::AuthFailed;
+           vayu::ErrorCode::AuthRequired :
+           vayu::ErrorCode::AuthFailed;
     out.message     = err.message;
     out.detail_code = err.code;
     return out;
@@ -65,12 +64,11 @@ AuthApplyResult from_token_error (const oauth::TokenError& err) {
 // Resolve an oauth2 config to a token (cache-aware) and place it on the
 // request per tokenPlacement. Shared by apply_auth and preflight_auth
 // (the latter passes a null request and only acquires).
-AuthApplyResult resolve_oauth2 (vayu::Request* req, const nlohmann::json& config,
-vayu::db::Database* db) {
+AuthApplyResult
+resolve_oauth2 (vayu::Request* req, const nlohmann::json& config, vayu::db::Database* db) {
     if (db == nullptr) {
         return { false, vayu::ErrorCode::AuthFailed,
-            "OAuth 2.0 requires database access for the token cache",
-            "oauth2_no_database" };
+            "OAuth 2.0 requires database access for the token cache", "oauth2_no_database" };
     }
 
     // autoFetchToken=false → only ever use a valid cached token.
@@ -87,7 +85,7 @@ vayu::db::Database* db) {
     } else if (auto cached = db->get_oauth_token (oauth::cache_key (config))) {
         const auto now = std::chrono::duration_cast<std::chrono::milliseconds> (
         std::chrono::system_clock::now ().time_since_epoch ())
-        .count ();
+                         .count ();
         if (!oauth::is_expired (*cached, now)) {
             result = *cached;
         }
@@ -106,8 +104,7 @@ vayu::db::Database* db) {
             }
             append_query_param (req->url, param, token.access_token);
         } else if (req->headers.count ("Authorization") == 0) {
-            req->headers["Authorization"] =
-            oauth2_header_value (config, token.access_token);
+            req->headers["Authorization"] = oauth2_header_value (config, token.access_token);
         }
     }
     return {};
@@ -115,8 +112,7 @@ vayu::db::Database* db) {
 
 } // namespace
 
-std::string oauth2_header_value (const nlohmann::json& config,
-const std::string& access_token) {
+std::string oauth2_header_value (const nlohmann::json& config, const std::string& access_token) {
     std::string prefix = "Bearer";
     if (auto it = config.find ("headerPrefix"); it != config.end () && it->is_string ()) {
         prefix = it->get<std::string> ();
@@ -153,7 +149,7 @@ vayu::db::Database* db) {
     // A refresh token is the only non-interactive way back for this grant; the
     // others can simply re-run their grant.
     if (field (config, "grantType") == "authorization_code" &&
-        cached->refresh_token.empty ()) {
+    cached->refresh_token.empty ()) {
         return std::nullopt;
     }
 
@@ -209,8 +205,7 @@ Auth parse_auth (const nlohmann::json& auth) {
     return UnsupportedAuth{ mode };
 }
 
-AuthApplyResult
-apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db) {
+AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db) {
     return std::visit (
     [&] (const auto& a) -> AuthApplyResult {
         using T = std::decay_t<decltype (a)>;
@@ -225,8 +220,8 @@ apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db) {
             return {};
         } else if constexpr (std::is_same_v<T, BasicAuth>) {
             if (req.headers.count ("Authorization") == 0) {
-                req.headers["Authorization"] =
-                "Basic " + vayu::utils::base64_encode (a.username + ":" + a.password);
+                req.headers["Authorization"] = "Basic " +
+                vayu::utils::base64_encode (a.username + ":" + a.password);
             }
             return {};
         } else if constexpr (std::is_same_v<T, ApiKeyAuth>) {
@@ -242,8 +237,7 @@ apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db) {
         } else if constexpr (std::is_same_v<T, OAuth2Auth>) {
             return resolve_oauth2 (&req, a.config, db);
         } else {
-            static_assert (std::is_same_v<T, UnsupportedAuth>,
-            "unhandled Auth variant");
+            static_assert (std::is_same_v<T, UnsupportedAuth>, "unhandled Auth variant");
             vayu::utils::log_debug ("apply_auth: mode '" + a.mode +
             "' is not executable; sending request without auth");
             return {};
@@ -252,8 +246,8 @@ apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db) {
     auth);
 }
 
-AuthApplyResult apply_auth (vayu::Request& req, const nlohmann::json& auth,
-vayu::db::Database* db) {
+AuthApplyResult
+apply_auth (vayu::Request& req, const nlohmann::json& auth, vayu::db::Database* db) {
     return apply_auth (req, parse_auth (auth), db);
 }
 

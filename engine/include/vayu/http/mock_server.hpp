@@ -101,9 +101,9 @@ struct MockServerInfo {
     /// `http://127.0.0.1:<port>` - the base a client points at. No trailing
     /// slash: it is concatenated with a path that always has a leading one.
     std::string url;
-    int port = 0;
-    int latency_ms      = 0;
-    int error_rate_pct  = 0;
+    int port           = 0;
+    int latency_ms     = 0;
+    int error_rate_pct = 0;
     /// How many routes the table holds, and how many of those have no example
     /// to serve. The second number is the one that explains an empty-looking
     /// mock, so it is reported rather than left to be discovered per-404.
@@ -177,7 +177,8 @@ std::vector<MockPathSegment> mock_path_segments (const std::string& path);
  * matching route wins ties - so the table is reproducible across restarts
  * rather than dependent on map iteration.
  */
-std::vector<MockRoute> build_mock_routes (vayu::db::Database& db, const std::string& collection_id);
+std::vector<MockRoute>
+build_mock_routes (vayu::db::Database& db, const std::string& collection_id);
 
 /**
  * Resolve one inbound `method + path` against @p routes.
@@ -192,8 +193,10 @@ const std::string& method,
 const std::string& path);
 
 /** The 404 body a miss answers with - the near-miss is the debugging value. */
-nlohmann::json
-mock_miss_body (const std::vector<MockRoute>& routes, const MockMatch& match, const std::string& method, const std::string& path);
+nlohmann::json mock_miss_body (const std::vector<MockRoute>& routes,
+const MockMatch& match,
+const std::string& method,
+const std::string& path);
 
 /** The wire shape of a mock, shared by start and list. */
 nlohmann::json mock_server_info_json (const MockServerInfo& info);

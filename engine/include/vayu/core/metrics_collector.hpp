@@ -85,9 +85,9 @@ struct ResponseSample {
 
     ResponseSample () = default;
     ResponseSample (const Response& resp, int64_t ts)
-    : status_code (resp.status_code), status_text (resp.status_text), body (resp.body),
-      headers (resp.headers), latency_ms (resp.timing.total_ms), timestamp (ts),
-      stream_events (resp.stream_events) {
+    : status_code (resp.status_code), status_text (resp.status_text),
+      body (resp.body), headers (resp.headers), latency_ms (resp.timing.total_ms),
+      timestamp (ts), stream_events (resp.stream_events) {
     }
 };
 
@@ -232,9 +232,8 @@ inline constexpr size_t TIMING_PHASE_COUNT = 5;
 
 /// Wire names, indexed by TimingPhase. The report's `timingBreakdown.phases`
 /// object is keyed by these.
-inline constexpr std::array<const char*, TIMING_PHASE_COUNT> TIMING_PHASE_KEYS = {
-    "dns", "connect", "tls", "firstByte", "download"
-};
+inline constexpr std::array<const char*, TIMING_PHASE_COUNT> TIMING_PHASE_KEYS = { "dns",
+    "connect", "tls", "firstByte", "download" };
 
 /**
  * @brief Why a success trace was built, i.e. which budget retains it.
@@ -255,10 +254,10 @@ inline constexpr std::array<const char*, TIMING_PHASE_COUNT> TIMING_PHASE_KEYS =
  * deserve a body, which no ordering of these three could express.
  */
 enum class SuccessTraceReason {
-    None,     ///< no trace was built for this completion
-    Sampled,  ///< the 1-in-N sampler selected it
-    Slow,     ///< it crossed slow_threshold_ms
-    Exemplar  ///< it is one of the first EXEMPLARS_PER_STATUS of its status code
+    None,    ///< no trace was built for this completion
+    Sampled, ///< the 1-in-N sampler selected it
+    Slow,    ///< it crossed slow_threshold_ms
+    Exemplar ///< it is one of the first EXEMPLARS_PER_STATUS of its status code
 };
 
 /**
@@ -341,10 +340,10 @@ class MetricsCollector {
     void record_success (int status_code,
     double latency_ms,
     double queue_wait_ms,
-    const std::string& trace_data     = "",
-    SuccessTraceReason trace_reason   = SuccessTraceReason::None,
-    const Response* capture_source    = nullptr,
-    const Timing* phases              = nullptr);
+    const std::string& trace_data   = "",
+    SuccessTraceReason trace_reason = SuccessTraceReason::None,
+    const Response* capture_source  = nullptr,
+    const Timing* phases            = nullptr);
 
     /**
      * @brief Record a response sample for deferred script validation
@@ -564,8 +563,8 @@ class MetricsCollector {
     [[nodiscard]] double average_queue_wait () const {
         size_t count = success_count ();
         return count > 0 ? total_queue_wait_sum_.load (std::memory_order_relaxed) /
-                            static_cast<double> (count)
-                         : 0.0;
+        static_cast<double> (count) :
+                           0.0;
     }
 
     [[nodiscard]] double error_rate () const {
@@ -594,14 +593,14 @@ class MetricsCollector {
          * 500ms endpoint was meeting a 100ms budget.
          */
         size_t count = 0;
-        double p50  = 0.0;
-        double p75  = 0.0;
-        double p90  = 0.0;
-        double p95  = 0.0;
-        double p99  = 0.0;
-        double p999 = 0.0;
-        double min  = 0.0;
-        double max  = 0.0;
+        double p50   = 0.0;
+        double p75   = 0.0;
+        double p90   = 0.0;
+        double p95   = 0.0;
+        double p99   = 0.0;
+        double p999  = 0.0;
+        double min   = 0.0;
+        double max   = 0.0;
     };
 
     [[nodiscard]] Percentiles calculate_percentiles ();
@@ -619,7 +618,8 @@ class MetricsCollector {
      * whole return is optional rather than an array of empty Percentiles - a
      * report showing a zeroed TLS row would claim the handshake was free.
      */
-    [[nodiscard]] std::optional<std::array<Percentiles, TIMING_PHASE_COUNT>> phase_percentiles () const;
+    [[nodiscard]] std::optional<std::array<Percentiles, TIMING_PHASE_COUNT>>
+    phase_percentiles () const;
 
     /**
      * @brief What a streaming run's completions delivered (issue #576).

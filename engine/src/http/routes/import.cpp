@@ -58,8 +58,8 @@ std::function<bool (const std::string& event, const nlohmann::json& data)>;
  * bound and every behavioural test stays green while a 10 MB import goes back to
  * failing at 30 seconds.
  */
-vayu::http::ClientConfig
-import_fetch_client_config (size_t max_bytes, const vayu::http::TransportPolicy& transport);
+vayu::http::ClientConfig import_fetch_client_config (size_t max_bytes,
+const vayu::http::TransportPolicy& transport);
 
 namespace {
 
@@ -124,8 +124,8 @@ std::variant<FetchTarget, FetchRefusal> read_fetch_target (const std::string& re
  * for a refused body, a 502 for a failed hop, the content and its type for a
  * good one - must be the one answer.
  */
-std::pair<int, nlohmann::json>
-fetch_outcome (const vayu::http::Client& client, const Result<Response>& result) {
+std::pair<int, nlohmann::json> fetch_outcome (const vayu::http::Client& client,
+const Result<Response>& result) {
     if (!result.is_ok ()) {
         return { 502, error_body (502, "Failed to fetch: " + client.last_error ()) };
     }
@@ -165,8 +165,8 @@ fetch_outcome (const vayu::http::Client& client, const Result<Response>& result)
  * document that arrives on one and times out on the other would be the same
  * import succeeding or failing depending on which surface asked for it.
  */
-vayu::http::ClientConfig
-fetch_client_config (size_t max_bytes, const vayu::http::TransportPolicy& transport) {
+vayu::http::ClientConfig fetch_client_config (size_t max_bytes,
+const vayu::http::TransportPolicy& transport) {
     vayu::http::ClientConfig config;
     config.transport          = transport;
     config.max_response_bytes = max_bytes;
@@ -198,8 +198,8 @@ std::optional<FetchRefusal> import_fetch_refusal (const std::string& request_bod
 
 } // namespace
 
-vayu::http::ClientConfig
-import_fetch_client_config (size_t max_bytes, const vayu::http::TransportPolicy& transport) {
+vayu::http::ClientConfig import_fetch_client_config (size_t max_bytes,
+const vayu::http::TransportPolicy& transport) {
     return fetch_client_config (max_bytes, transport);
 }
 
@@ -263,28 +263,32 @@ const vayu::http::TransportPolicy& transport) {
  *         out as an event.
  */
 std::pair<int, nlohmann::json> import_fetch_stream (const std::string& request_body,
-const vayu::http::TransportPolicy& transport, const ImportFetchEmitter& emit) {
+const vayu::http::TransportPolicy& transport,
+const ImportFetchEmitter& emit) {
     auto target = read_fetch_target (request_body);
     if (const auto* refusal = std::get_if<FetchRefusal> (&target)) {
         return *refusal;
     }
     const auto& fetch = std::get<FetchTarget> (target);
 
-    bool listening              = true;
-    bool reported_once          = false;
-    uint64_t reported_at_bytes  = 0;
-    auto reported_at            = std::chrono::steady_clock::now ();
+    bool listening             = true;
+    bool reported_once         = false;
+    uint64_t reported_at_bytes = 0;
+    auto reported_at           = std::chrono::steady_clock::now ();
 
-    vayu::http::ClientConfig client_config = fetch_client_config (fetch.max_bytes, transport);
-    client_config.on_body_progress         = [&] (uint64_t received,
-                                       std::optional<uint64_t> declared_total) {
+    vayu::http::ClientConfig client_config =
+    fetch_client_config (fetch.max_bytes, transport);
+    client_config.on_body_progress = [&] (uint64_t received,
+                                     std::optional<uint64_t> declared_total) {
         const auto now = std::chrono::steady_clock::now ();
         const auto since =
-        std::chrono::duration_cast<std::chrono::milliseconds> (now - reported_at).count ();
+        std::chrono::duration_cast<std::chrono::milliseconds> (now - reported_at)
+        .count ();
         // The first report always goes out: it is what tells the dialog the
         // download has started and how large it is, and holding it back for a
         // throttle window is holding back the only thing worth saying early.
-        const bool due = !reported_once || received - reported_at_bytes >= vayu::core::constants::import_fetch::PROGRESS_EVERY_BYTES ||
+        const bool due = !reported_once ||
+        received - reported_at_bytes >= vayu::core::constants::import_fetch::PROGRESS_EVERY_BYTES ||
         since >= vayu::core::constants::import_fetch::PROGRESS_EVERY_MS;
         if (!due) {
             return true;
@@ -292,7 +296,7 @@ const vayu::http::TransportPolicy& transport, const ImportFetchEmitter& emit) {
         reported_once     = true;
         reported_at_bytes = received;
         reported_at       = now;
-        listening         = emit (vayu::core::constants::import_fetch::EVENT_PROGRESS,
+        listening = emit (vayu::core::constants::import_fetch::EVENT_PROGRESS,
         nlohmann::json{ { "received", received },
         { "total", declared_total ? nlohmann::json (*declared_total) : nlohmann::json () } });
         return listening;
@@ -346,9 +350,10 @@ std::pair<int, nlohmann::json> body_error (const std::string& message) {
  * endpoint's documented error shape and sits *inside* the error object, next to
  * the code and message, so a client reads one place for the whole failure.
  */
-std::pair<int, nlohmann::json> item_error (const std::string& message, const std::string& temp_id) {
-    auto body                 = error_body (400, message);
-    body["error"]["item"]     = temp_id;
+std::pair<int, nlohmann::json>
+item_error (const std::string& message, const std::string& temp_id) {
+    auto body             = error_body (400, message);
+    body["error"]["item"] = temp_id;
     return { 400, body };
 }
 
@@ -392,8 +397,8 @@ std::string& temp_id_out) {
         return body_error ("Invalid " + at + ": must be an object");
     }
     if (item.contains ("id")) {
-        return body_error ("Invalid " + at +
-        ": 'id' is not accepted - the engine assigns ids; reference items by 'tempId'");
+        return body_error ("Invalid " +
+        at + ": 'id' is not accepted - the engine assigns ids; reference items by 'tempId'");
     }
     if (!item.contains ("tempId") || !item["tempId"].is_string () ||
     item["tempId"].get<std::string> ().empty ()) {
@@ -450,13 +455,15 @@ const nlohmann::json& requests,
 const nlohmann::json& environments,
 const nlohmann::json& specs,
 TempIds& temps) {
-    if (auto err = claim_section (collections, "collection", "col_", temps.real, temps.collections)) {
+    if (auto err = claim_section (
+        collections, "collection", "col_", temps.real, temps.collections)) {
         return err;
     }
     if (auto err = claim_section (requests, "request", "req_", temps.real, temps.requests)) {
         return err;
     }
-    if (auto err = claim_section (environments, "environment", "env_", temps.real, temps.environments)) {
+    if (auto err = claim_section (
+        environments, "environment", "env_", temps.real, temps.environments)) {
         return err;
     }
     if (auto err = claim_section (specs, "spec", "spec_", temps.real, temps.specs)) {
@@ -485,7 +492,8 @@ resolve_parents (const nlohmann::json& collections, TempIds& temps) {
             continue;
         }
         if (!item["parentTempId"].is_string ()) {
-            return item_error ("Invalid 'parentTempId': must be a string or null", temp);
+            return item_error (
+            "Invalid 'parentTempId': must be a string or null", temp);
         }
         const std::string parent = item["parentTempId"].get<std::string> ();
         if (!temps.is_collection.contains (parent)) {
@@ -514,7 +522,8 @@ std::optional<std::pair<int, nlohmann::json>> detect_parent_cycles (const TempId
         std::string cursor = temp;
         while (!acyclic.contains (cursor)) {
             if (!on_path.insert (cursor).second) {
-                return item_error ("Cycle in parentTempId references at '" + cursor + "'", temp);
+                return item_error (
+                "Cycle in parentTempId references at '" + cursor + "'", temp);
             }
             path.push_back (cursor);
             auto next = temps.parent_of.find (cursor);
@@ -580,9 +589,9 @@ resolve_spec_binding (nlohmann::json& fields, const TempIds& temps, const std::s
         return item_error ("Invalid 'openapi.specTempId': must be a string", temp);
     }
     if (binding->contains ("specId")) {
-        return item_error (
-        "Invalid 'openapi': send either 'specTempId' (a spec in this payload) or "
-        "'specId' (one already stored), not both",
+        return item_error ("Invalid 'openapi': send either 'specTempId' (a "
+                           "spec in this payload) or "
+                           "'specId' (one already stored), not both",
         temp);
     }
     const std::string named = spec_temp->get<std::string> ();
@@ -611,8 +620,8 @@ std::vector<vayu::db::Collection>& out) {
         nlohmann::json fields = item;
         auto parent           = temps.parent_of.find (temp);
         fields["parentId"]    = parent == temps.parent_of.end () ?
-        nlohmann::json (nullptr) :
-        nlohmann::json (temps.real.at (parent->second));
+           nlohmann::json (nullptr) :
+           nlohmann::json (temps.real.at (parent->second));
 
         if (auto err = resolve_spec_binding (fields, temps, temp)) {
             return err;
@@ -624,7 +633,9 @@ std::vector<vayu::db::Collection>& out) {
         c.updated_at = now;
 
         if (auto err = apply_item_fields (
-            [&] { return apply_collection_fields (db, c, fields, /*is_create=*/true); },
+            [&] {
+                return apply_collection_fields (db, c, fields, /*is_create=*/true);
+            },
             "collection", temp)) {
             return err;
         }
@@ -635,8 +646,9 @@ std::vector<vayu::db::Collection>& out) {
         // them would land on the same number. Hand out consecutive slots from that
         // starting point instead, in payload order.
         if (!item.contains ("order") || item["order"].is_null ()) {
-            const std::string sibling_key =
-            fields["parentId"].is_null () ? std::string () : fields["parentId"].get<std::string> ();
+            const std::string sibling_key = fields["parentId"].is_null () ?
+            std::string () :
+            fields["parentId"].get<std::string> ();
             auto slot = next_order.try_emplace (sibling_key, c.order).first;
             c.order   = slot->second++;
         }
@@ -658,8 +670,7 @@ std::vector<vayu::db::Collection>& out) {
  * `POST /requests/:id/examples` uses - so an imported example and a created one
  * cannot disagree about a default, a required field or the body cap.
  */
-std::optional<std::pair<int, nlohmann::json>>
-build_example_rows (const nlohmann::json& item,
+std::optional<std::pair<int, nlohmann::json>> build_example_rows (const nlohmann::json& item,
 const std::string& request_id,
 const std::string& temp,
 int64_t now,
@@ -674,8 +685,7 @@ std::vector<vayu::db::RequestExample>& out) {
     if (examples.size () > vayu::core::constants::request_example::MAX_PER_REQUEST) {
         return item_error ("Too many examples: " + std::to_string (examples.size ()) +
         " exceeds the limit of " +
-        std::to_string (vayu::core::constants::request_example::MAX_PER_REQUEST) +
-        " per request",
+        std::to_string (vayu::core::constants::request_example::MAX_PER_REQUEST) + " per request",
         temp);
     }
 
@@ -696,7 +706,9 @@ std::vector<vayu::db::RequestExample>& out) {
         x.updated_at = now;
 
         if (auto err = apply_item_fields (
-            [&] { return apply_request_example_fields (x, example, /*is_create=*/true); },
+            [&] {
+                return apply_request_example_fields (x, example, /*is_create=*/true);
+            },
             "example", temp)) {
             return err;
         }
@@ -725,8 +737,9 @@ std::vector<vayu::db::RequestExample>& examples_out) {
         const std::string& temp = temps.requests[i];
 
         if (!item.contains ("collectionTempId") || !item["collectionTempId"].is_string ()) {
-            return item_error (
-            "Invalid 'collectionTempId': must be the tempId of a collection in this payload", temp);
+            return item_error ("Invalid 'collectionTempId': must be the tempId "
+                               "of a collection in this payload",
+            temp);
         }
         const std::string owner = item["collectionTempId"].get<std::string> ();
         if (!temps.is_collection.contains (owner)) {
@@ -742,7 +755,10 @@ std::vector<vayu::db::RequestExample>& examples_out) {
         r.updated_at = now;
 
         if (auto err = apply_item_fields (
-            [&] { return apply_request_fields (db, r, fields, /*is_create=*/true); }, "request", temp)) {
+            [&] {
+                return apply_request_fields (db, r, fields, /*is_create=*/true);
+            },
+            "request", temp)) {
             return err;
         }
         if (auto err = build_example_rows (item, r.id, temp, now, examples_out)) {
@@ -781,8 +797,7 @@ std::vector<vayu::db::SpecDocument>& out) {
         }
         for (const char* derived : { "hash", "fetchedAt" }) {
             if (item.contains (derived)) {
-                return item_error (std::string ("Invalid '") + derived +
-                "': computed by the engine; omit it",
+                return item_error (std::string ("Invalid '") + derived + "': computed by the engine; omit it",
                 temp);
             }
         }
@@ -791,9 +806,9 @@ std::vector<vayu::db::SpecDocument>& out) {
         s.id      = temps.real.at (temp);
         s.content = item["content"].get<std::string> ();
         if (s.content.size () > cap) {
-            return item_error ("Spec document is " + std::to_string (s.content.size ()) +
-            " bytes, over the limit of " + std::to_string (cap) +
-            " (raise the 'maxSpecDocumentBytes' setting to allow more)",
+            return item_error ("Spec document is " +
+            std::to_string (s.content.size ()) + " bytes, over the limit of " +
+            std::to_string (cap) + " (raise the 'maxSpecDocumentBytes' setting to allow more)",
             temp);
         }
         s.hash       = spec_content_hash (s.content);
@@ -804,7 +819,8 @@ std::vector<vayu::db::SpecDocument>& out) {
 
         if (item.contains ("sourceUrl") && !item["sourceUrl"].is_null ()) {
             if (!item["sourceUrl"].is_string ()) {
-                return item_error ("Invalid 'sourceUrl': must be a string or null", temp);
+                return item_error (
+                "Invalid 'sourceUrl': must be a string or null", temp);
             }
             const auto url = item["sourceUrl"].get<std::string> ();
             if (!url.empty ()) {
@@ -817,8 +833,8 @@ std::vector<vayu::db::SpecDocument>& out) {
 }
 
 /** Pass 3d - environment rows; nothing to resolve, they reference nobody. */
-std::optional<std::pair<int, nlohmann::json>>
-build_environment_rows (const nlohmann::json& environments,
+std::optional<std::pair<int, nlohmann::json>> build_environment_rows (
+const nlohmann::json& environments,
 const TempIds& temps,
 int64_t now,
 std::vector<vayu::db::Environment>& out) {
@@ -832,7 +848,9 @@ std::vector<vayu::db::Environment>& out) {
         e.updated_at = now;
 
         if (auto err = apply_item_fields (
-            [&] { return apply_environment_fields (e, environments[i], /*is_create=*/true); },
+            [&] {
+                return apply_environment_fields (e, environments[i], /*is_create=*/true);
+            },
             "environment", temp)) {
             return err;
         }
@@ -872,10 +890,10 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
         return body_error ("Body must be a JSON object");
     }
 
-    const nlohmann::json* collections   = nullptr;
-    const nlohmann::json* requests      = nullptr;
-    const nlohmann::json* environments  = nullptr;
-    const nlohmann::json* specs         = nullptr;
+    const nlohmann::json* collections  = nullptr;
+    const nlohmann::json* requests     = nullptr;
+    const nlohmann::json* environments = nullptr;
+    const nlohmann::json* specs        = nullptr;
     if (auto err = read_items (body, "collections", collections)) {
         return *err;
     }
@@ -961,8 +979,8 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
         for (size_t i = 0; i < collection_rows.size (); ++i) {
             if (auto err = apply_item_fields (
                 [&] {
-                    return reject_unbindable_spec (db, collection_rows[i].openapi,
-                    temps.pending_spec_ids);
+                    return reject_unbindable_spec (
+                    db, collection_rows[i].openapi, temps.pending_spec_ids);
                 },
                 "collection", temps.collections[i])) {
                 result = *err;
@@ -988,7 +1006,8 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
                 collection_rows[i].openapi = std::move (*stamped);
             }
         }
-        db.import_apply (collection_rows, request_rows, environment_rows, example_rows, spec_rows);
+        db.import_apply (collection_rows, request_rows, environment_rows,
+        example_rows, spec_rows);
     });
     return result;
 }
@@ -1001,7 +1020,8 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
  * `Database` only for the live cap, and a test can then hand it a document
  * rather than a socket.
  */
-std::pair<int, nlohmann::json> import_parse_response (vayu::db::Database& db, const nlohmann::json& body) {
+std::pair<int, nlohmann::json>
+import_parse_response (vayu::db::Database& db, const nlohmann::json& body) {
     if (!body.is_object ()) {
         return body_error ("Body must be a JSON object");
     }
@@ -1011,7 +1031,8 @@ std::pair<int, nlohmann::json> import_parse_response (vayu::db::Database& db, co
     }
     const auto content = content_field->get<std::string> ();
     if (content.empty ()) {
-        return body_error ("Invalid 'content': an empty document is not an import");
+        return body_error (
+        "Invalid 'content': an empty document is not an import");
     }
 
     // The same cap a stored spec document is held to, because an OpenAPI import
@@ -1021,19 +1042,24 @@ std::pair<int, nlohmann::json> import_parse_response (vayu::db::Database& db, co
     // than two.
     const size_t cap = spec_size_cap (db);
     if (content.size () > cap) {
-        return { 413, error_body (413, "Import document is " + std::to_string (content.size ()) +
-        " bytes, over the limit of " + std::to_string (cap) +
-        " (raise the 'maxSpecDocumentBytes' setting to allow more)") };
+        return { 413,
+            error_body (413,
+            "Import document is " + std::to_string (content.size ()) +
+            " bytes, over the limit of " + std::to_string (cap) +
+            " (raise the 'maxSpecDocumentBytes' setting to allow more)") };
     }
 
     vayu::core::ImportOptions options;
-    if (auto found = body.find ("importEnvironments"); found != body.end () && !found->is_null ()) {
+    if (auto found = body.find ("importEnvironments");
+    found != body.end () && !found->is_null ()) {
         if (!found->is_boolean ()) {
-            return body_error ("Invalid 'importEnvironments': must be a boolean");
+            return body_error (
+            "Invalid 'importEnvironments': must be a boolean");
         }
         options.import_environments = found->get<bool> ();
     }
-    if (auto found = body.find ("importScripts"); found != body.end () && !found->is_null ()) {
+    if (auto found = body.find ("importScripts");
+    found != body.end () && !found->is_null ()) {
         if (!found->is_boolean ()) {
             return body_error ("Invalid 'importScripts': must be a boolean");
         }
@@ -1053,9 +1079,11 @@ std::pair<int, nlohmann::json> import_parse_response (vayu::db::Database& db, co
         }
         source.source_url = found->get<std::string> ();
     }
-    if (auto found = body.find ("unresolvedRefs"); found != body.end () && !found->is_null ()) {
+    if (auto found = body.find ("unresolvedRefs");
+    found != body.end () && !found->is_null ()) {
         if (!found->is_number_integer () || found->get<long long> () < 0) {
-            return body_error ("Invalid 'unresolvedRefs': must be a non-negative integer");
+            return body_error (
+            "Invalid 'unresolvedRefs': must be a non-negative integer");
         }
         source.unresolved_refs = found->get<int> ();
     }
@@ -1088,7 +1116,8 @@ std::pair<int, nlohmann::json> import_parse_response (vayu::db::Database& db, co
  * nothing: what a document *declares* is `POST /specs/describe`, and this is
  * only what its bytes *are*.
  */
-std::pair<int, nlohmann::json> import_document_response (vayu::db::Database& db, const nlohmann::json& body) {
+std::pair<int, nlohmann::json>
+import_document_response (vayu::db::Database& db, const nlohmann::json& body) {
     if (!body.is_object ()) {
         return body_error ("Body must be a JSON object");
     }
@@ -1099,9 +1128,11 @@ std::pair<int, nlohmann::json> import_document_response (vayu::db::Database& db,
     const auto content = content_field->get<std::string> ();
     const size_t cap   = spec_size_cap (db);
     if (content.size () > cap) {
-        return { 413, error_body (413, "Document is " + std::to_string (content.size ()) +
-        " bytes, over the limit of " + std::to_string (cap) +
-        " (raise the 'maxSpecDocumentBytes' setting to allow more)") };
+        return { 413,
+            error_body (413,
+            "Document is " + std::to_string (content.size ()) +
+            " bytes, over the limit of " + std::to_string (cap) +
+            " (raise the 'maxSpecDocumentBytes' setting to allow more)") };
     }
 
     const vayu::core::DocumentRead read = vayu::core::read_document (content);
@@ -1133,13 +1164,14 @@ std::pair<int, nlohmann::json> import_document_response (vayu::db::Database& db,
  * value wins - the caller asked for this file's variables, and skipping them
  * would be the silent no-op.
  */
-std::pair<int, nlohmann::json> import_response (vayu::db::Database& db, const nlohmann::json& body) {
+std::pair<int, nlohmann::json>
+import_response (vayu::db::Database& db, const nlohmann::json& body) {
     auto [status, parsed] = import_parse_response (db, body);
     if (status != 200) {
         return { status, parsed };
     }
 
-    const nlohmann::json payload = vayu::core::import_apply_payload (parsed);
+    const nlohmann::json payload   = vayu::core::import_apply_payload (parsed);
     auto [applied_status, applied] = import_apply_response (db, payload);
     if (applied_status != 200) {
         return { applied_status, applied };
@@ -1152,7 +1184,8 @@ std::pair<int, nlohmann::json> import_response (vayu::db::Database& db, const nl
         // delete every global the user already had.
         nlohmann::json merged = nlohmann::json::object ();
         if (const auto stored = db.get_globals ()) {
-            const nlohmann::json existing = nlohmann::json::parse (stored->variables, nullptr, false);
+            const nlohmann::json existing =
+            nlohmann::json::parse (stored->variables, nullptr, false);
             if (existing.is_object ()) {
                 merged = existing;
             }
@@ -1201,10 +1234,10 @@ void register_import_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/import/fetch",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const bool streaming =
-        req.get_header_value ("Accept").find ("text/event-stream") != std::string::npos;
-        vayu::utils::log_info (std::string ("POST /import/fetch") +
-        (streaming ? " (streaming)" : ""));
+        const bool streaming = req.get_header_value ("Accept").find (
+                               "text/event-stream") != std::string::npos;
+        vayu::utils::log_info (
+        std::string ("POST /import/fetch") + (streaming ? " (streaming)" : ""));
 
         if (!streaming) {
             auto [status, body] =
@@ -1224,19 +1257,19 @@ void register_import_routes (RouteContext& ctx) {
         // holding separate opinions about what a valid request is.
         if (const auto refusal = import_fetch_refusal (req.body)) {
             res.status = refusal->first;
-            res.set_content (
-            refusal->second.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+            res.set_content (refusal->second.dump (-1, ' ', false,
+                             nlohmann::json::error_handler_t::replace),
             "application/json");
             return;
         }
 
         // Copied, not captured by reference: the provider runs after this
         // handler has returned and the `Request` is gone.
-        const std::string body      = req.body;
-        const auto transport        = vayu::http::resolve_transport_policy (ctx.db);
+        const std::string body = req.body;
+        const auto transport   = vayu::http::resolve_transport_policy (ctx.db);
         res.set_content_provider ("text/event-stream",
         [body, transport] (size_t, httplib::DataSink& sink) {
-            size_t frame = 0;
+            size_t frame    = 0;
             const auto emit = [&sink, &frame] (const std::string& event,
                               const nlohmann::json& data) {
                 if (!sink.is_writable ()) {
@@ -1245,7 +1278,8 @@ void register_import_routes (RouteContext& ctx) {
                 // The shared framer, so this stream's frames cannot drift from
                 // the run topics' shape.
                 const std::string payload = vayu::core::build_sse_frame (event,
-                data.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace), frame++);
+                data.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+                frame++);
                 return sink.write (payload.data (), payload.size ());
             };
             import_fetch_stream (body, transport, emit);
@@ -1278,8 +1312,8 @@ void register_import_routes (RouteContext& ctx) {
         try {
             body = nlohmann::json::parse (req.body);
         } catch (const std::exception& e) {
-            vayu::utils::log_warning ("POST /import/apply - invalid JSON body: " +
-            std::string (e.what ()));
+            vayu::utils::log_warning (
+            "POST /import/apply - invalid JSON body: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON body");
             return;
         }
@@ -1288,8 +1322,8 @@ void register_import_routes (RouteContext& ctx) {
         try {
             auto [status, response] = import_apply_response (ctx.db, body);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /import/apply - " + std::to_string (status) +
-                ": " + error_message_of (response));
+                vayu::utils::log_warning ("POST /import/apply - " +
+                std::to_string (status) + ": " + error_message_of (response));
             } else {
                 vayu::utils::log_info ("POST /import/apply - applied " +
                 std::to_string (response["idMap"].size ()) + " items");
@@ -1297,7 +1331,8 @@ void register_import_routes (RouteContext& ctx) {
             res.status = status;
             res.set_content (response.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /import/apply - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "POST /import/apply - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });
@@ -1323,16 +1358,16 @@ void register_import_routes (RouteContext& ctx) {
         try {
             body = nlohmann::json::parse (req.body);
         } catch (const std::exception& e) {
-            vayu::utils::log_warning ("POST /import/parse - invalid JSON body: " +
-            std::string (e.what ()));
+            vayu::utils::log_warning (
+            "POST /import/parse - invalid JSON body: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON body");
             return;
         }
         try {
             auto [status, response] = import_parse_response (ctx.db, body);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /import/parse - " + std::to_string (status) +
-                ": " + error_message_of (response));
+                vayu::utils::log_warning ("POST /import/parse - " +
+                std::to_string (status) + ": " + error_message_of (response));
             } else {
                 vayu::utils::log_info ("POST /import/parse - " +
                 response["meta"]["format"].get<std::string> () + ", " +
@@ -1343,7 +1378,8 @@ void register_import_routes (RouteContext& ctx) {
             response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
             "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /import/parse - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "POST /import/parse - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });
@@ -1363,23 +1399,24 @@ void register_import_routes (RouteContext& ctx) {
         try {
             body = nlohmann::json::parse (req.body);
         } catch (const std::exception& e) {
-            vayu::utils::log_warning ("POST /import/document - invalid JSON body: " +
-            std::string (e.what ()));
+            vayu::utils::log_warning (
+            "POST /import/document - invalid JSON body: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON body");
             return;
         }
         try {
             auto [status, response] = import_document_response (ctx.db, body);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /import/document - " + std::to_string (status) +
-                ": " + error_message_of (response));
+                vayu::utils::log_warning ("POST /import/document - " +
+                std::to_string (status) + ": " + error_message_of (response));
             }
             res.status = status;
             res.set_content (
             response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
             "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /import/document - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "POST /import/document - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });
@@ -1402,19 +1439,20 @@ void register_import_routes (RouteContext& ctx) {
         try {
             body = nlohmann::json::parse (req.body);
         } catch (const std::exception& e) {
-            vayu::utils::log_warning ("POST /import - invalid JSON body: " + std::string (e.what ()));
+            vayu::utils::log_warning (
+            "POST /import - invalid JSON body: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON body");
             return;
         }
         try {
             auto [status, response] = import_response (ctx.db, body);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /import - " + std::to_string (status) + ": " +
-                error_message_of (response));
+                vayu::utils::log_warning ("POST /import - " +
+                std::to_string (status) + ": " + error_message_of (response));
             } else {
                 vayu::utils::log_info ("POST /import - imported " +
-                std::to_string (response["requests"].get<size_t> ()) + " request(s) from " +
-                response["meta"]["format"].get<std::string> ());
+                std::to_string (response["requests"].get<size_t> ()) +
+                " request(s) from " + response["meta"]["format"].get<std::string> ());
             }
             res.status = status;
             res.set_content (

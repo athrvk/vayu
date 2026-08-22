@@ -46,9 +46,12 @@
 #include "vayu/db/database.hpp"
 
 namespace vayu::http::routes {
-std::pair<int, nlohmann::json> import_parse_response (vayu::db::Database& db, const nlohmann::json& body);
-std::pair<int, nlohmann::json> import_document_response (vayu::db::Database& db, const nlohmann::json& body);
-std::pair<int, nlohmann::json> import_response (vayu::db::Database& db, const nlohmann::json& body);
+std::pair<int, nlohmann::json>
+import_parse_response (vayu::db::Database& db, const nlohmann::json& body);
+std::pair<int, nlohmann::json>
+import_document_response (vayu::db::Database& db, const nlohmann::json& body);
+std::pair<int, nlohmann::json>
+import_response (vayu::db::Database& db, const nlohmann::json& body);
 } // namespace vayu::http::routes
 
 namespace {
@@ -74,9 +77,9 @@ json skip_counts (const json& skipped) {
     json counts = json::object ();
     for (const json& entry : skipped) {
         const std::string kind = entry.at ("kind").get<std::string> ();
-        counts[kind] = counts.contains (kind) ?
-        counts[kind].get<int> () + entry.at ("count").get<int> () :
-        entry.at ("count").get<int> ();
+        counts[kind]           = counts.contains (kind) ?
+                  counts[kind].get<int> () + entry.at ("count").get<int> () :
+                  entry.at ("count").get<int> ();
     }
     return counts;
 }
@@ -88,7 +91,8 @@ void sort_examples (json& collections) {
                 continue;
             }
             json& examples = request.at ("examples");
-            std::stable_sort (examples.begin (), examples.end (), [] (const json& a, const json& b) {
+            std::stable_sort (examples.begin (), examples.end (),
+            [] (const json& a, const json& b) {
                 return a.at ("status").get<int> () < b.at ("status").get<int> ();
             });
         }
@@ -99,8 +103,8 @@ void sort_examples (json& collections) {
 /// The comparable form of a result: plain `json` (whose objects compare by key,
 /// not by insertion order) with the two normalisations above applied.
 json comparable (const nlohmann::ordered_json& result) {
-    json out                 = json::parse (result.dump ());
-    out["meta"]["skipped"]   = skip_counts (out.at ("meta").at ("skipped"));
+    json out               = json::parse (result.dump ());
+    out["meta"]["skipped"] = skip_counts (out.at ("meta").at ("skipped"));
     sort_examples (out.at ("collections"));
     return out;
 }
@@ -108,7 +112,7 @@ json comparable (const nlohmann::ordered_json& result) {
 ImportOptions options_of (const json& declared) {
     ImportOptions options;
     options.import_environments = declared.at ("importEnvironments").get<bool> ();
-    options.import_scripts      = declared.at ("importScripts").get<bool> ();
+    options.import_scripts = declared.at ("importScripts").get<bool> ();
     return options;
 }
 
@@ -121,7 +125,8 @@ ImportSource source_of (const json& entry) {
         if (const auto found = declared->find ("sourceUrl"); found != declared->end ()) {
             source.source_url = found->get<std::string> ();
         }
-        if (const auto found = declared->find ("unresolvedRefs"); found != declared->end ()) {
+        if (const auto found = declared->find ("unresolvedRefs");
+        found != declared->end ()) {
             source.unresolved_refs = found->get<int> ();
         }
     }
@@ -130,15 +135,18 @@ ImportSource source_of (const json& entry) {
 
 TEST (ImportConformance, MatchesTheParsersItReplaced) {
     const json fixture = read_fixture ();
-    ASSERT_FALSE (fixture.at ("cases").empty ()) << "an empty corpus proves nothing";
+    ASSERT_FALSE (fixture.at ("cases").empty ())
+    << "an empty corpus proves nothing";
 
     for (const json& entry : fixture.at ("cases")) {
         const std::string name = entry.at ("name").get<std::string> ();
-        const ImportParse parsed = parse_import (entry.at ("document").get<std::string> (),
+        const ImportParse parsed =
+        parse_import (entry.at ("document").get<std::string> (),
         options_of (entry.at ("options")), source_of (entry));
         ASSERT_TRUE (parsed.ok ()) << name << ": " << parsed.error;
 
-        const json expected = comparable (nlohmann::ordered_json::parse (entry.at ("expected").dump ()));
+        const json expected =
+        comparable (nlohmann::ordered_json::parse (entry.at ("expected").dump ()));
         EXPECT_EQ (comparable (parsed.result), expected) << "case: " << name;
     }
 }
@@ -185,8 +193,8 @@ TEST (ImportParse, RefusesBytesThatAreNeitherJsonNorYaml) {
 }
 
 TEST (ImportParse, NamesTheFieldOfAMalformedInsomniaExport) {
-    const ImportParse parsed =
-    parse_import (R"({"_type":"export","__export_format":4,"resources":"nope"})", {}, {});
+    const ImportParse parsed = parse_import (
+    R"({"_type":"export","__export_format":4,"resources":"nope"})", {}, {});
     EXPECT_FALSE (parsed.ok ());
     EXPECT_FALSE (parsed.unrecognised);
     EXPECT_EQ (parsed.error, "Malformed Insomnia export: `resources` must be an array");
@@ -210,7 +218,7 @@ TEST (ImportParse, GatingTheOptionsChangesWhatTheCountsPromise) {
     ImportOptions off;
     off.import_environments = false;
 
-    const ImportParse on  = parse_import (document, {}, {});
+    const ImportParse on    = parse_import (document, {}, {});
     const ImportParse gated = parse_import (document, off, {});
     ASSERT_TRUE (on.ok ());
     ASSERT_TRUE (gated.ok ());
@@ -233,12 +241,13 @@ TEST (ImportParse, GatingTheOptionsChangesWhatTheCountsPromise) {
 TEST (ImportParse, ResolvesARelativeServerUrlAgainstTheDocumentsOwn) {
     const auto base_url = [] (const std::string& server, const std::string& source) {
         ImportSource from;
-        from.source_url = source;
+        from.source_url          = source;
         const ImportParse parsed = parse_import (
         R"({"openapi":"3.0.0","info":{"title":"T"},"servers":[{"url":")" + server + R"("}],"paths":{}})",
         {}, from);
         EXPECT_TRUE (parsed.ok ()) << parsed.error;
-        const json variables = json::parse (parsed.result.at ("collections")[0].at ("variables").dump ());
+        const json variables =
+        json::parse (parsed.result.at ("collections")[0].at ("variables").dump ());
         return variables.contains ("baseUrl") ?
         variables.at ("baseUrl").at ("value").get<std::string> () :
         std::string ();
@@ -296,32 +305,34 @@ TEST_F (ImportParseRoute, RefusesADocumentOverTheStoredCap) {
     ASSERT_TRUE (entry.has_value ());
     entry->value = "64";
     db_->save_config_entry (*entry);
-    auto [status, body] = vayu::http::routes::import_parse_response (*db_,
-    json{ { "content", std::string (200, 'x') } });
+    auto [status, body] = vayu::http::routes::import_parse_response (
+    *db_, json{ { "content", std::string (200, 'x') } });
     EXPECT_EQ (status, 413);
-    EXPECT_NE (body.at ("error").at ("message").get<std::string> ().find ("maxSpecDocumentBytes"),
+    EXPECT_NE (body.at ("error").at ("message").get<std::string> ().find (
+               "maxSpecDocumentBytes"),
     std::string::npos);
 }
 
 TEST_F (ImportParseRoute, PassesTheUnrecognisedSentenceThrough) {
-    auto [status, body] =
-    vayu::http::routes::import_parse_response (*db_, json{ { "content", R"({"a":1})" } });
+    auto [status, body] = vayu::http::routes::import_parse_response (
+    *db_, json{ { "content", R"({"a":1})" } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (body.at ("error").at ("message"), "Unrecognised format");
 }
 
 TEST_F (ImportParseRoute, RefusesAnEmptyOrAbsentDocument) {
     EXPECT_EQ (vayu::http::routes::import_parse_response (*db_, json::object ()).first, 400);
-    EXPECT_EQ (vayu::http::routes::import_parse_response (*db_, json{ { "content", "" } }).first, 400);
     EXPECT_EQ (
-    vayu::http::routes::import_parse_response (*db_, json{ { "content", "{}" }, { "importScripts", "yes" } })
-    .first,
+    vayu::http::routes::import_parse_response (*db_, json{ { "content", "" } }).first, 400);
+    EXPECT_EQ (vayu::http::routes::import_parse_response (
+               *db_, json{ { "content", "{}" }, { "importScripts", "yes" } })
+               .first,
     400);
 }
 
 TEST_F (ImportParseRoute, ReadsADocumentIntoADomForTheRefBundler) {
-    auto [status, body] = vayu::http::routes::import_document_response (*db_,
-    json{ { "content", "openapi: 3.0.0\npaths:\n  /a:\n    get: {}\n" } });
+    auto [status, body] = vayu::http::routes::import_document_response (
+    *db_, json{ { "content", "openapi: 3.0.0\npaths:\n  /a:\n    get: {}\n" } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body.at ("document").at ("openapi"), "3.0.0");
     // Order is the document's, which is the whole reason a YAML reader in the
@@ -330,8 +341,8 @@ TEST_F (ImportParseRoute, ReadsADocumentIntoADomForTheRefBundler) {
 }
 
 TEST_F (ImportParseRoute, PersistsTheWholeTreeInOneCall) {
-    auto [status, body] = vayu::http::routes::import_response (*db_,
-    json{ { "content", R"({"info":{"name":"CB","schema":"v2.1.0"},"item":[
+    auto [status, body] = vayu::http::routes::import_response (
+    *db_, json{ { "content", R"({"info":{"name":"CB","schema":"v2.1.0"},"item":[
         {"name":"Ping","request":{"method":"GET","url":"https://x/ping"}}]})" } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body.at ("collections"), 1);
@@ -355,7 +366,8 @@ TEST_F (ImportParseRoute, PersistsTheWholeTreeInOneCall) {
 TEST_F (ImportParseRoute, WritesAGlobalsExportIntoTheGlobalScopeAndMergesASecond) {
     const auto import_globals = [this] (const std::string& values) {
         auto [status, body] = vayu::http::routes::import_response (*db_,
-        json{ { "content", R"({"_postman_variable_scope":"globals","values":)" + values + "}" } });
+        json{ { "content",
+        R"({"_postman_variable_scope":"globals","values":)" + values + "}" } });
         EXPECT_EQ (status, 200) << body.dump ();
     };
     const auto stored = [this] {
@@ -364,24 +376,27 @@ TEST_F (ImportParseRoute, WritesAGlobalsExportIntoTheGlobalScopeAndMergesASecond
     };
 
     import_globals (R"([{"key":"host","value":"a"},{"key":"token","value":"b"}])");
-    EXPECT_EQ (stored (), (json{ { "host", { { "value", "a" }, { "enabled", true } } },
-                          { "token", { { "value", "b" }, { "enabled", true } } } }));
+    EXPECT_EQ (stored (),
+    (json{ { "host", { { "value", "a" }, { "enabled", true } } },
+    { "token", { { "value", "b" }, { "enabled", true } } } }));
 
     // A second import **merges**: the engine has no merge verb, and writing the
     // import's globals alone would delete every global the user already had.
     // The imported value wins a collision - the caller asked for this file's
     // variables, and skipping them would be the silent no-op.
     import_globals (R"([{"key":"host","value":"z"},{"key":"extra","value":"c"}])");
-    EXPECT_EQ (stored (), (json{ { "host", { { "value", "z" }, { "enabled", true } } },
-                          { "token", { { "value", "b" }, { "enabled", true } } },
-                          { "extra", { { "value", "c" }, { "enabled", true } } } }));
+    EXPECT_EQ (stored (),
+    (json{ { "host", { { "value", "z" }, { "enabled", true } } },
+    { "token", { { "value", "b" }, { "enabled", true } } },
+    { "extra", { { "value", "c" }, { "enabled", true } } } }));
 }
 
 TEST_F (ImportParseRoute, RefusesBytesThatAreNotADocument) {
-    auto [status, body] =
-    vayu::http::routes::import_document_response (*db_, json{ { "content", "{ unclosed: [1, 2" } });
+    auto [status, body] = vayu::http::routes::import_document_response (
+    *db_, json{ { "content", "{ unclosed: [1, 2" } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body.at ("error").at ("message").get<std::string> ().find ("Invalid 'content'"),
+    EXPECT_NE (body.at ("error").at ("message").get<std::string> ().find (
+               "Invalid 'content'"),
     std::string::npos);
 }
 

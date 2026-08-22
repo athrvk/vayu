@@ -12,8 +12,10 @@
 
 namespace vayu::http {
 
-RequestBuild build_request (const nlohmann::json& config, vayu::db::Database* db,
-int timeout_ms, AuthResolution auth_resolution) {
+RequestBuild build_request (const nlohmann::json& config,
+vayu::db::Database* db,
+int timeout_ms,
+AuthResolution auth_resolution) {
     RequestBuild out;
 
     auto parsed = vayu::json::deserialize_request (config);
@@ -36,8 +38,7 @@ int timeout_ms, AuthResolution auth_resolution) {
         return out;
     }
 
-    auto auth = apply_auth (
-    out.request, config.value ("auth", nlohmann::json ()), db);
+    auto auth = apply_auth (out.request, config.value ("auth", nlohmann::json ()), db);
     if (!auth.ok) {
         out.ok            = false;
         out.error_code    = auth.code;

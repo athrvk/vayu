@@ -37,10 +37,11 @@ namespace vayu::core::walk {
 /// The seven methods Vayu executes, in the order the import parsers walk them,
 /// which is therefore the order the index writes rows in. `trace` is not one:
 /// no request can carry an identity Vayu has no verb for.
-constexpr std::array<const char*, 7> HTTP_METHODS = { "get", "post", "put", "patch", "delete",
-    "head", "options" };
+constexpr std::array<const char*, 7> HTTP_METHODS = { "get", "post", "put",
+    "patch", "delete", "head", "options" };
 
-inline const nlohmann::ordered_json* find_object (const nlohmann::ordered_json& node, const char* key) {
+inline const nlohmann::ordered_json*
+find_object (const nlohmann::ordered_json& node, const char* key) {
     if (!node.is_object ()) {
         return nullptr;
     }
@@ -83,8 +84,9 @@ inline Dialect spec_dialect (const nlohmann::ordered_json& document) {
         return Dialect::None;
     }
     if (const auto version = document.find ("openapi");
-        version != document.end () && version->is_string ()) {
-        return version->get<std::string> ().rfind ("3.", 0) == 0 ? Dialect::V3 : Dialect::None;
+    version != document.end () && version->is_string ()) {
+        return version->get<std::string> ().rfind ("3.", 0) == 0 ? Dialect::V3 :
+                                                                   Dialect::None;
     }
     const auto swagger = document.find ("swagger");
     if (swagger == document.end ()) {
@@ -127,11 +129,13 @@ resolve_ref (const nlohmann::ordered_json& document, const std::string& ref) {
         slash == std::string_view::npos ? std::string_view::npos : slash - start));
         // JSON Pointer's two escapes, `~1` before `~0` so an escaped tilde in a
         // path key does not turn into a slash.
-        for (size_t at = segment.find ("~1"); at != std::string::npos; at = segment.find ("~1", at)) {
+        for (size_t at = segment.find ("~1"); at != std::string::npos;
+        at             = segment.find ("~1", at)) {
             segment.replace (at, 2, "/");
             at += 1;
         }
-        for (size_t at = segment.find ("~0"); at != std::string::npos; at = segment.find ("~0", at)) {
+        for (size_t at = segment.find ("~0"); at != std::string::npos;
+        at             = segment.find ("~0", at)) {
             segment.replace (at, 2, "~");
             at += 1;
         }
@@ -164,8 +168,8 @@ resolve_ref (const nlohmann::ordered_json& document, const std::string& ref) {
  * Single-hop, like every ref the import parsers follow: a ref to a ref is not a
  * shape generators emit, and chasing one needs a cycle guard.
  */
-inline const nlohmann::ordered_json*
-resolve_single_hop (const nlohmann::ordered_json& document, const nlohmann::ordered_json& item) {
+inline const nlohmann::ordered_json* resolve_single_hop (const nlohmann::ordered_json& document,
+const nlohmann::ordered_json& item) {
     if (!item.is_object ()) {
         return nullptr;
     }
@@ -173,7 +177,8 @@ resolve_single_hop (const nlohmann::ordered_json& document, const nlohmann::orde
     if (ref == item.end () || !ref->is_string ()) {
         return &item;
     }
-    const nlohmann::ordered_json* resolved = resolve_ref (document, ref->get<std::string> ());
+    const nlohmann::ordered_json* resolved =
+    resolve_ref (document, ref->get<std::string> ());
     return resolved != nullptr && resolved->is_object () ? resolved : nullptr;
 }
 
@@ -266,8 +271,9 @@ walk_operations (const nlohmann::ordered_json& document, WalkNotes* notes = null
     std::unordered_set<std::string> claimed_ids;
 
     for (auto entry = paths->begin (); entry != paths->end (); ++entry) {
-        const std::string& path             = entry.key ();
-        const nlohmann::ordered_json* item = resolve_single_hop (document, entry.value ());
+        const std::string& path = entry.key ();
+        const nlohmann::ordered_json* item =
+        resolve_single_hop (document, entry.value ());
         if (item == nullptr) {
             // An unresolved path item drops every operation under that path,
             // which is a loss an import has to be able to name.
@@ -280,7 +286,8 @@ walk_operations (const nlohmann::ordered_json& document, WalkNotes* notes = null
             // Once per path item, before its methods - the position the
             // renderer's parsers count these from.
             if (const auto parameters = item->find ("parameters");
-                parameters != item->end () && !parameters->is_null () && !parameters->is_array ()) {
+            parameters != item->end () && !parameters->is_null () &&
+            !parameters->is_array ()) {
                 notes->malformed_spec += 1;
             }
             // `trace` is a Path Item Object member in 3.x only, and only a
@@ -305,9 +312,9 @@ walk_operations (const nlohmann::ordered_json& document, WalkNotes* notes = null
             DeclaredOperation row;
             row.method = upper (method);
             row.path   = path;
-            if (const auto id = operation->find ("operationId");
-                identified &&
-                id != operation->end () && id->is_string () && !id->get<std::string> ().empty ()) {
+            if (const auto id = operation->find ("operationId"); identified &&
+            id != operation->end () && id->is_string () &&
+            !id->get<std::string> ().empty ()) {
                 const std::string operation_id = id->get<std::string> ();
                 if (claimed_ids.insert (operation_id).second) {
                     row.operation_id = operation_id;

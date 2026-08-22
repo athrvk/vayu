@@ -182,8 +182,8 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
                 }
             }
         }
-        if (!(*sink->on_progress) (static_cast<uint64_t> (sink->body.size ()),
-            sink->declared_total)) {
+        if (!(*sink->on_progress) (
+            static_cast<uint64_t> (sink->body.size ()), sink->declared_total)) {
             return 0; // Short count: abort with CURLE_WRITE_ERROR.
         }
     }
@@ -557,8 +557,8 @@ Result<Response> Client::send (const Request& request) {
     // libcurl does on this thread. For single-shot sends there is no generator
     // queue, so queue_wait_ms will be near zero - that's the correct contract.
     auto submitted_at = std::chrono::steady_clock::now ();
-    CURLcode res = curl_easy_perform (curl);
-    auto completion = std::chrono::steady_clock::now ();
+    CURLcode res      = curl_easy_perform (curl);
+    auto completion   = std::chrono::steady_clock::now ();
 
     // Cleanup headers and the multipart body, both of which had to outlive the
     // transfer that just finished.
@@ -572,8 +572,8 @@ Result<Response> Client::send (const Request& request) {
     // Before any error return below: a failed transfer can still have
     // collected cookies - see capture_jar_cookies.
     if (impl_->config.cookie_jar) {
-        detail::capture_jar_cookies (curl, *impl_->config.cookie_jar,
-        impl_->config.cookie_scope);
+        detail::capture_jar_cookies (
+        curl, *impl_->config.cookie_jar, impl_->config.cookie_scope);
     }
 
     // Get timing info (try to get even on errors, as curl may have partial timing)
@@ -581,8 +581,8 @@ Result<Response> Client::send (const Request& request) {
 
     // Match the event-loop semantics: total_ms is perceived (submit→completion),
     // wire_ms is libcurl's view, queue_wait_ms is the delta. See curl_utils.cpp.
-    double perceived_ms = std::chrono::duration<double, std::milli> (
-        completion - submitted_at).count ();
+    double perceived_ms =
+    std::chrono::duration<double, std::milli> (completion - submitted_at).count ();
     double wire_ms = phase_times.total * 1000.0;
 
     response.timing.total_ms      = perceived_ms;
@@ -608,11 +608,13 @@ Result<Response> Client::send (const Request& request) {
         // `http://` request never attempts it. Naming that is why this is one
         // message with a suffix and not two call sites.
         const bool cleartext = request.url.rfind ("http://", 0) == 0;
-        vayu::utils::log_warning ("HTTP/2 was requested but the connection negotiated " +
+        vayu::utils::log_warning (
+        "HTTP/2 was requested but the connection negotiated " +
         response.http_version + " - " + request.url +
-        (cleartext ? " (h2 is not offered over cleartext; use https:// or set the "
-                     "protocol to auto)" :
-                     ""));
+        (cleartext ?
+        " (h2 is not offered over cleartext; use https:// or set the "
+        "protocol to auto)" :
+        ""));
     }
 
     // The raw-request view: what libcurl put on the wire, read off the last
@@ -624,8 +626,8 @@ Result<Response> Client::send (const Request& request) {
     // back to the composed request, which is all that ever existed for it.
     response.raw_request = transfer_debug.last_header_out.empty () ?
     synthesize_raw_request (request, response) :
-    raw_request_from_wire (transfer_debug.last_header_out,
-    vayu::http::wire_body_bytes (request.body));
+    raw_request_from_wire (
+    transfer_debug.last_header_out, vayu::http::wire_body_bytes (request.body));
 
     // Check for errors
     if (res != CURLE_OK) {
@@ -641,7 +643,7 @@ Result<Response> Client::send (const Request& request) {
 
         // Return Response object with error details (Postman-compatible approach)
         response.status_code = 0; // 0 indicates client-side error (no server response)
-        response.status_text = vayu::http::status_text (0);
+        response.status_text   = vayu::http::status_text (0);
         response.error_code    = error.code;
         response.error_message = error.message;
         // raw_request is already populated above
@@ -712,8 +714,8 @@ TlsBackendSelection pin_tls_backend () {
             // about a backend it did not choose, so it is said once and loudly
             // rather than discovered by a user whose mTLS stopped working.
             const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
-            vayu::utils::log_error (
-            "Could not select the OpenSSL TLS backend (curl_global_sslset returned " +
+            vayu::utils::log_error ("Could not select the OpenSSL TLS backend "
+                                    "(curl_global_sslset returned " +
             std::to_string (static_cast<int> (result)) + "); this build verifies with '" +
             std::string (info != nullptr && info->ssl_version != nullptr ? info->ssl_version : "unknown") +
             "'. On a MultiSSL build that means CURL_SSL_BACKEND in the "

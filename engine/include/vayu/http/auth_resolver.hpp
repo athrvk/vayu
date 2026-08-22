@@ -47,8 +47,8 @@ struct UnsupportedAuth {
     std::string mode; // digest / aws / ntlm - stored but not executed
 };
 
-using Auth = std::variant<NoAuth, BearerAuth, BasicAuth, ApiKeyAuth, OAuth2Auth,
-UnsupportedAuth>;
+using Auth =
+std::variant<NoAuth, BearerAuth, BasicAuth, ApiKeyAuth, OAuth2Auth, UnsupportedAuth>;
 
 /**
  * @brief Parse a raw `auth` object into the typed Auth model.
@@ -134,7 +134,7 @@ void walk_auth_credentials (AuthRef& auth, Visit&& visit) {
  * machine-readable detail_code for the client.
  */
 struct AuthApplyResult {
-    bool ok = true;
+    bool ok              = true;
     vayu::ErrorCode code = vayu::ErrorCode::None;
     std::string message;
     std::string detail_code;
@@ -152,8 +152,8 @@ AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Data
 /**
  * @brief Convenience overload: parse then apply. Used by direct callers/tests.
  */
-AuthApplyResult apply_auth (vayu::Request& req, const nlohmann::json& auth,
-vayu::db::Database* db);
+AuthApplyResult
+apply_auth (vayu::Request& req, const nlohmann::json& auth, vayu::db::Database* db);
 
 /**
  * @brief Route-level pre-flight for POST /run: for oauth2 configs, acquire the
@@ -170,8 +170,7 @@ AuthApplyResult preflight_auth (const nlohmann::json& auth, vayu::db::Database& 
  * every mid-run refresh - a second copy would let a run's later headers drift
  * in shape from its first.
  */
-std::string oauth2_header_value (const nlohmann::json& config,
-const std::string& access_token);
+std::string oauth2_header_value (const nlohmann::json& config, const std::string& access_token);
 
 /**
  * @brief What a long run needs in order to keep its OAuth 2.0 header valid
@@ -183,10 +182,10 @@ const std::string& access_token);
  * `header_value`; see `vayu::core::run_auth_refresh`.
  */
 struct AuthRefreshPlan {
-    nlohmann::json config;      ///< The oauth2 config block, as acquire_token takes it.
-    std::string header_name;    ///< Header the token was placed on.
-    std::string header_value;   ///< Value currently on the built request.
-    int64_t expires_at_ms = 0;  ///< Absolute expiry (ms since epoch) of that token.
+    nlohmann::json config; ///< The oauth2 config block, as acquire_token takes it.
+    std::string header_name;  ///< Header the token was placed on.
+    std::string header_value; ///< Value currently on the built request.
+    int64_t expires_at_ms = 0; ///< Absolute expiry (ms since epoch) of that token.
 };
 
 /**

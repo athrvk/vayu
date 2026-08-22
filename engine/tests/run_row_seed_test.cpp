@@ -72,15 +72,14 @@ TEST (SeedRunTimes, RunEndTimeDefaultsToZeroBeforeAnySeed) {
 TEST (ScenarioSnapshot, ReplacesTheSentBlockWithTheManifest) {
     const json manifest{ { "source", "collection" }, { "collectionId", "col_1" },
         { "recursive", false }, { "iterations", 2 }, { "dataRowCount", 2 },
-        { "steps", json::array ({ json{ { "index", 0 }, { "requestId", "req_1" },
-        { "name", "Login" }, { "method", "POST" },
-        { "url", "https://api.test/login?key={{apiKey}}" } } }) } };
+        { "steps",
+        json::array ({ json{ { "index", 0 }, { "requestId", "req_1" }, { "name", "Login" },
+        { "method", "POST" }, { "url", "https://api.test/login?key={{apiKey}}" } } }) } };
 
     const std::string sanitized =
     json{ { "scenario",
-    json{ { "source", "collection" }, { "collectionId", "col_1" },
-    { "data", json::array ({ json{ { "password", "hunter2" } },
-    json{ { "password", "hunter3" } } }) } } },
+          json{ { "source", "collection" }, { "collectionId", "col_1" },
+          { "data", json::array ({ json{ { "password", "hunter2" } }, json{ { "password", "hunter3" } } }) } } },
         { "environmentId", "env_1" } }
     .dump ();
 

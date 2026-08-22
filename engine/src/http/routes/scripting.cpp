@@ -1465,8 +1465,7 @@ void register_scripting_routes (RouteContext& ctx) {
      * Served as text in a JSON envelope rather than as a `.d.ts` body so the
      * app can cache on `version` without re-parsing the declarations.
      */
-    ctx.server.Get ("/scripting/types",
-    [] (const httplib::Request&, httplib::Response& res) {
+    ctx.server.Get ("/scripting/types", [] (const httplib::Request&, httplib::Response& res) {
         vayu::utils::log_info (
         "GET /scripting/types - Generating script type declarations");
         try {

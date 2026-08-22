@@ -84,8 +84,8 @@ class ScriptRequestNameTest : public ::testing::Test {
 // The inline path: the renderer executes editor state, which may be unsaved or
 // a detached replay copy, so the name it sends wins over anything stored.
 TEST_F (ScriptRequestNameTest, PayloadNameWinsOverTheStoredRow) {
-    auto resolved = resolve_script_request_name (
-    *db_, json{ { "requestName", "Renamed in the editor" } }, std::string ("req_1"));
+    auto resolved = resolve_script_request_name (*db_,
+    json{ { "requestName", "Renamed in the editor" } }, std::string ("req_1"));
 
     ASSERT_TRUE (resolved.ok) << resolved.error;
     ASSERT_TRUE (resolved.name.has_value ());
@@ -95,8 +95,8 @@ TEST_F (ScriptRequestNameTest, PayloadNameWinsOverTheStoredRow) {
 // An unsaved request has a name and no row to look it up in. This is the case
 // that makes the payload field necessary rather than a convenience.
 TEST_F (ScriptRequestNameTest, PayloadNameIsUsedWithNoRequestIdAtAll) {
-    auto resolved =
-    resolve_script_request_name (*db_, json{ { "requestName", "Untitled" } }, std::nullopt);
+    auto resolved = resolve_script_request_name (
+    *db_, json{ { "requestName", "Untitled" } }, std::nullopt);
 
     ASSERT_TRUE (resolved.ok) << resolved.error;
     ASSERT_TRUE (resolved.name.has_value ());
@@ -107,7 +107,8 @@ TEST_F (ScriptRequestNameTest, PayloadNameIsUsedWithNoRequestIdAtAll) {
 // without this lookup `pm.info.requestName` would be undefined from one client
 // and populated from the other.
 TEST_F (ScriptRequestNameTest, FallsBackToTheStoredRowWhenOnlyAnIdIsSent) {
-    auto resolved = resolve_script_request_name (*db_, json::object (), std::string ("req_1"));
+    auto resolved =
+    resolve_script_request_name (*db_, json::object (), std::string ("req_1"));
 
     ASSERT_TRUE (resolved.ok) << resolved.error;
     ASSERT_TRUE (resolved.name.has_value ());
@@ -117,7 +118,8 @@ TEST_F (ScriptRequestNameTest, FallsBackToTheStoredRowWhenOnlyAnIdIsSent) {
 // A deleted or mistyped id costs the script a name; it does not cost the user
 // their request. The run row already tolerates an id with no row behind it.
 TEST_F (ScriptRequestNameTest, UnknownRequestIdYieldsNoNameAndNoError) {
-    auto resolved = resolve_script_request_name (*db_, json::object (), std::string ("req_gone"));
+    auto resolved =
+    resolve_script_request_name (*db_, json::object (), std::string ("req_gone"));
 
     EXPECT_TRUE (resolved.ok) << resolved.error;
     EXPECT_FALSE (resolved.name.has_value ());
@@ -153,8 +155,8 @@ TEST_F (ScriptRequestNameTest, EmptyPayloadNameWithNoRowResolvesToAbsent) {
 // `null` is how the clients spell "no value" on every other optional field, so
 // it is absence here too, not a type error.
 TEST_F (ScriptRequestNameTest, NullPayloadNameIsAbsenceNotAnError) {
-    auto resolved =
-    resolve_script_request_name (*db_, json{ { "requestName", nullptr } }, std::nullopt);
+    auto resolved = resolve_script_request_name (
+    *db_, json{ { "requestName", nullptr } }, std::nullopt);
 
     EXPECT_TRUE (resolved.ok) << resolved.error;
     EXPECT_FALSE (resolved.name.has_value ());
@@ -164,11 +166,12 @@ TEST_F (ScriptRequestNameTest, NullPayloadNameIsAbsenceNotAnError) {
 // route answers 400 rather than dropping the field and leaving the script to
 // wonder why its name is undefined.
 TEST_F (ScriptRequestNameTest, NonStringPayloadNameIsRejected) {
-    auto resolved =
-    resolve_script_request_name (*db_, json{ { "requestName", 7 } }, std::string ("req_1"));
+    auto resolved = resolve_script_request_name (
+    *db_, json{ { "requestName", 7 } }, std::string ("req_1"));
 
     EXPECT_FALSE (resolved.ok);
-    EXPECT_NE (resolved.error.find ("requestName"), std::string::npos) << resolved.error;
+    EXPECT_NE (resolved.error.find ("requestName"), std::string::npos)
+    << resolved.error;
     EXPECT_FALSE (resolved.name.has_value ());
 }
 
@@ -194,8 +197,8 @@ TEST_F (ScriptRequestNameTest, ComposeInlineCarriesTheClientsNameAndNothingElse)
     ASSERT_EQ (status, 200) << payload.dump ();
     EXPECT_EQ (payload["requestName"], "Unsaved");
 
-    auto [bare_status, bare] = vayu::http::compose_request_core (
-    *db_, json{ { "request", json{ { "method", "GET" }, { "url", "http://127.0.0.1/x" } } } });
+    auto [bare_status, bare] = vayu::http::compose_request_core (*db_,
+    json{ { "request", json{ { "method", "GET" }, { "url", "http://127.0.0.1/x" } } } });
 
     ASSERT_EQ (bare_status, 200) << bare.dump ();
     EXPECT_FALSE (bare.contains ("requestName")) << bare.dump ();
