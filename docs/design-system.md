@@ -1482,7 +1482,7 @@ who wrote it. `dialog-width-scale.test.tsx` holds the set closed; a dialog that
 genuinely needs another size widens the scale here and in `dialog.tsx`, with the
 reason, rather than opening a one-off.
 
-`2xl` was opened for the row picker (issue #887): seven columns of ordinary CSV
+`2xl` was opened for the row picker (issue #892): seven columns of ordinary CSV
 at 576px leaves about 60px a column, which is one truncated cell per column and
 nothing scannable. It is deliberately the last size on the scale - a dialog is a
 focus device before it is a container, so content that wants more room than this

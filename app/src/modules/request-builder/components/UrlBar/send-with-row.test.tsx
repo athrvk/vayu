@@ -420,7 +420,7 @@ describe("the remembered row", () => {
 		/*
 		 * B shows the *default* pick, row 1 - not A's row 2. It used to show none
 		 * at all, and that was the assertion here; the dialog has a footer that
-		 * names the row it will send (issue #887), so "nothing is selected" is no
+		 * names the row it will send (issue #892), so "nothing is selected" is no
 		 * longer a state it can be in and coherently offer that button. The
 		 * guarantee this test exists for is unchanged and now checked more
 		 * directly: what B highlights must not be what A picked.
@@ -466,7 +466,7 @@ describe("the remembered row", () => {
  * The list *was* the first 20 rows by design - a popover is not the file - so
  * before #730 the rows past it were unreachable from here at all, which is
  * precisely the row a long run's failure names ("iteration 501 · row 501").
- * Issue #887 made the picker a dialog and put every row in it, so the number
+ * Issue #892 made the picker a dialog and put every row in it, so the number
  * field is now the shortcut to a distant row rather than the only route to it -
  * these still guard it, because typing an index is how a step's repro is
  * followed and how a 500-row file is navigated without scrolling.
@@ -539,7 +539,7 @@ describe("any row in the file", () => {
 
 	it("reaches a row past the old browse window by scrolling, with no number typed", async () => {
 		// The popover showed twenty rows and made the number field the only way to
-		// the twenty-first (issue #887). A dialog has the room, so every row is in
+		// the twenty-first (issue #892). A dialog has the room, so every row is in
 		// the list and the number field is a shortcut rather than the mechanism.
 		await openBigPicker(60);
 		expect(screen.getByRole("row", { name: /user0@example\.test/ })).toBeTruthy();
@@ -549,7 +549,7 @@ describe("any row in the file", () => {
 });
 
 /**
- * The row picker is a dialog, not a popover (issue #887).
+ * The row picker is a dialog, not a popover (issue #892).
  *
  * The popover was ~384px wide over the response pane, and every constraint the
  * old design worked around came from that box: a row was one truncated line with

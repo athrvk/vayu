@@ -549,7 +549,7 @@ an older engine answers this request the way it always has.
 
 `importFetch` takes a fourth argument, an `AbortSignal`, and it is what actually
 stops a download (issue
-[#884](https://github.com/athrvk/vayu/issues/884)). Abandoning the iteration
+[#893](https://github.com/athrvk/vayu/issues/893)). Abandoning the iteration
 releases the stream, but a caller that is not itself iterating - a dialog closing
 while `importFetch` sits in the loop on its behalf - has no way to reach that, so
 0.22.0 shipped a transport that could cancel and a dialog that never asked it to.

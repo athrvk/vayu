@@ -440,7 +440,7 @@ export function useTreeDnd({
 	 * Start the countdown to opening @p target, or cancel one in flight.
 	 *
 	 * @param target The folder the drop would land **inside**, and nothing else
-	 *   (issue #886). Passing whichever row resolved a destination opened folders
+	 *   (issue #891). Passing whichever row resolved a destination opened folders
 	 *   the drop was only landing *beside*: the edge quarters of a folder row are
 	 *   the reorder bands, so lining a reorder up next to a collapsed folder
 	 *   sprang it open, moved every row below it and left the user aiming at a

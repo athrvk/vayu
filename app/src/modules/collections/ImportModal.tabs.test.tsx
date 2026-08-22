@@ -9,7 +9,7 @@
  */
 
 /**
- * Each import tab owns its own state (issue #884).
+ * Each import tab owns its own state (issue #893).
  *
  * The dialog kept one `phase`, one `entries`, one `error` and one `progress` for
  * all three tabs, and switching tab called `reset()` on them - which cleared the

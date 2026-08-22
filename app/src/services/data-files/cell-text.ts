@@ -15,7 +15,7 @@
  *
  * It lives here because two surfaces show these cells and used to answer
  * separately: the Run dialog's file preview (`DataFilePicker`) and the row
- * picker beside Send (`SendWithRowDialog`, issue #887). Same file, same rows -
+ * picker beside Send (`SendWithRowDialog`, issue #892). Same file, same rows -
  * so a `null` rendering as `""` in one and `"null"` in the other would be two
  * descriptions of one thing.
  *

@@ -107,7 +107,7 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					// values including two one-off pixel widths, so the same kind of
 					// dialog came out a different size depending on who wrote it.
 					//
-					// `2xl` was opened for the data-row picker (issue #887), which
+					// `2xl` was opened for the data-row picker (issue #892), which
 					// is the one dialog whose job is reading a grid rather than
 					// confirming something about it: seven columns of ordinary CSV
 					// at 576px leaves ~60px a column, which is a truncated cell per

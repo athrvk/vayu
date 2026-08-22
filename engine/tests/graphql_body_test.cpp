@@ -301,7 +301,7 @@ TEST (GraphQLEnvelope, OtherModesAreUntouched) {
     json_body.content = R"({"a":1})";
     EXPECT_EQ (wire_body_bytes (json_body), R"({"a":1})");
     // The envelope is what this file is about, and a `json` body has none: its
-    // bytes go out as written. It carries `application/json` since issue #884 -
+    // bytes go out as written. It carries `application/json` since issue #889 -
     // the same header this mode derives, from a mode that does not rewrite.
     EXPECT_EQ (implied_content_type (json_body), "application/json");
 

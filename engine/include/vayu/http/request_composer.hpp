@@ -177,7 +177,7 @@ std::string resolve_template (const std::string& input, const VariableValues& va
  *
  * Lives here rather than in `core/scenario_data.hpp`, where it started, because
  * it is the namespace's own spelling rule and the namespace is declared just
- * above - and because the script sandbox needs it (issue #885) from a layer
+ * above - and because the script sandbox needs it (issue #890) from a layer
  * below core.
  */
 [[nodiscard]] std::string render_data_value (const nlohmann::json& value);
@@ -187,12 +187,13 @@ std::string resolve_template (const std::string& input, const VariableValues& va
  *
  * Composition deliberately has none - a plan is resolved once, before any row is
  * bound, which is why `resolve_template` above keeps the namespace written as it
- * stands. `pm.variables.replaceIn` is the exception (issue #885): it runs *per
+ * stands. `pm.variables.replaceIn` is the exception (issue #890): it runs *per
  * step*, with the iteration's row already in hand, so a token it leaves written
  * is a token it could have resolved and chose not to.
  *
  * @p columns is keyed by column name with the `data.` prefix already stripped,
- * holding the text each cell substitutes (`core::render_data_value`).
+ * holding the text each cell substitutes (`render_data_value` above - it moved
+ * out of `core` with the namespace's spelling rule).
  *
  * @p missing_column reports the first `data.` name the row had no column for, in
  * the shape `resolve_header_template` already uses for its refusal: the resolver

@@ -87,7 +87,7 @@ async function readApiError(response: Response): Promise<ApiError> {
 }
 
 /**
- * The error a caller's own cancel raises (issue #884).
+ * The error a caller's own cancel raises (issue #893).
  *
  * Named `AbortError` because that is what the platform calls this and what a
  * caller already checks for; a bespoke class would be a second vocabulary for
@@ -223,7 +223,7 @@ class HttpClient {
 	 * being retried: the engine has already done the work, and asking again would
 	 * be asking for the same megabytes twice.
 	 *
-	 * @param options.signal the caller's own cancel (issue #884). Abandoning the
+	 * @param options.signal the caller's own cancel (issue #893). Abandoning the
 	 * iteration already releases the stream, but a caller that is *not* iterating -
 	 * a dialog closing while an awaited helper sits in the loop on its behalf - has
 	 * no way to reach that, and the engine goes on downloading megabytes for
