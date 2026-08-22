@@ -556,7 +556,7 @@ clang-tidy runs in two places, and both of them can stop a change:
 | Where | What it lints | What a finding does |
 |-------|---------------|---------------------|
 | `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | Whole staged `.c/.cpp/.h/.hpp` files | Refuses the commit |
-| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of `engine/{src,include,tests}` sources, on Linux | Fails CI |
+| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of `engine/{src,include,tests}` sources, on all three platforms | Fails CI |
 
 A finding is a failure because `engine/.clang-tidy` sets
 `WarningsAsErrors: '*'`; with that empty, clang-tidy prints every diagnostic it
@@ -576,10 +576,26 @@ it reports the backlog as well. That is deliberate for a local early warning you
 can skip with `git commit --no-verify`, and it is why a hook refusal is not by
 itself a merge blocker. Issue #902 tracks aligning the two.
 
+**CI lints on all three platforms**, not just Linux, and pins the same
+clang-tidy major on each. clang-tidy analyses a translation unit, so every
+`#ifdef _WIN32` and `__APPLE__` branch is preprocessed away before a Linux run
+sees it - `platform.hpp`'s four-way split, and the Windows-only blocks in
+`client.cpp`, `event_loop_worker.cpp` and `temp_database.hpp`, are code no
+Linux-only lint could reach. Pinning one major matters more here than it does
+for a single leg: three legs on three clang-tidy versions would report version
+differences as platform differences.
+
 Both pass `--allow-no-checks`, for `engine/src/runtime/` - its `.clang-tidy`
 disables every check, and clang-tidy calls an empty check list a usage error
 rather than a clean run, so the one exempt directory would otherwise be the only
 one that fails.
+
+`engine/.clang-tidy` also sets `ExtraArgs: ['-Wno-ignored-gch']`. The engine
+builds with a precompiled header, and on the GCC and MSVC legs that PCH is not a
+clang one; clang-tidy replaying the compile command reports it, the prod presets
+compile with `-Werror` / `/WX`, and clang raises it as a hard **error** before
+any check filter runs - so it fails every lint of every file, and disabling the
+check does not help. It says nothing about the code.
 
 Both need **clang-tidy 19 or newer**: `engine/.clang-tidy` uses
 `ExcludeHeaderFilterRegex`, which landed in LLVM 19, and an older binary rejects

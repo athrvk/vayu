@@ -478,10 +478,18 @@ jobs:
       # The clang-tidy gate (#885). It rides this job rather than standing up its
       # own because it needs `compile_commands.json` and a configured tree - a
       # separate job would pay the vcpkg install and the configure a second time
-      # for a check that takes seconds against a warm build. Linux only: these
-      # diagnostics are the config's, not the platform's, and running the same
-      # checks over the same files three times says nothing new. After ctest, so
-      # a genuine regression is reported before a lint finding is.
+      # for a check that takes seconds against a warm build. After ctest, so a
+      # genuine regression is reported before a lint finding is.
+      #
+      # **On every leg, not just Linux**, for the reason `VAYU_WERROR` is set on
+      # two of them above: a diagnostic only one platform can emit is exactly
+      # what a gate is for. clang-tidy analyses a *translation unit*, so every
+      # `#ifdef _WIN32` and `__APPLE__` branch is preprocessed away before the
+      # Linux run sees a token - `platform.hpp`'s four-way split, and the
+      # Windows-only blocks in `client.cpp`, `event_loop_worker.cpp` and
+      # `temp_database.hpp`, would have been code no lint could ever reach. The
+      # standard libraries differ too (libstdc++ / libc++ / MSVC STL), and
+      # `clang-analyzer-*` follows them.
       #
       # **It lints the changed lines, not the changed files.** The engine had
       # never been linted, so most files carry findings that predate the diff -
@@ -503,16 +511,20 @@ jobs:
       # `Checks: '-*'`: without it clang-tidy calls an empty check list a usage
       # error and exits 1, so the directory that is meant to be exempt would be
       # the one that fails. `-clang-tidy-binary` because the driver otherwise
-      # calls whatever plain `clang-tidy` resolves to, which on this image is 18.
+      # calls whatever plain `clang-tidy` resolves to, which on the Linux image
+      # is 18 - old enough to reject `engine/.clang-tidy` outright.
       #
-      # Pinned to a major, for the reason the `installer` job pins shellcheck:
-      # findings move between clang-tidy releases, so an unpinned linter can
-      # redden a pull request that changed nothing. 19 is the floor
-      # `engine/.clang-tidy` needs (`ExcludeHeaderFilterRegex`) and the version
-      # CONTRIBUTING.md tells contributors to install, so a local run and this
-      # one answer the same.
+      # Pinned to one major on all three, for the reason the `installer` job
+      # pins shellcheck, and more sharply here: findings move between clang-tidy
+      # releases, so three legs on three versions would report *version*
+      # differences as platform differences - worse than no coverage, because
+      # they read as real. 19 is the floor `engine/.clang-tidy` needs
+      # (`ExcludeHeaderFilterRegex`) and the version CONTRIBUTING.md tells
+      # contributors to install, so a local run and this one answer the same.
+      #
+      # `-j 0` rather than a CPU count: the driver reads 0 as
+      # `multiprocessing.cpu_count()`, and `nproc` does not exist on macOS.
       - name: Lint changed engine sources
-        if: runner.os == 'Linux'
         shell: bash
         run: |
           if ! git rev-parse --verify --quiet HEAD^1 > /dev/null; then
@@ -536,14 +548,52 @@ jobs:
             printf '  - `%s`\n' "${changed[@]}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          sudo apt-get install -y --no-install-recommends clang-tidy-19
-          clang-tidy-19 --version
+          # Installed here rather than in a step of its own so a pull request
+          # that changed no engine source pays for none of it. Each package
+          # brings LLVM's own `clang-tidy-diff.py` with the binary, at a path
+          # that differs per packager - which is the whole of the per-platform
+          # difference below.
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get install -y --no-install-recommends clang-tidy-19
+              tidy=clang-tidy-19
+              tidy_diff=/usr/bin/clang-tidy-diff-19.py
+              python=python3
+              ;;
+            macOS)
+              brew install llvm@19
+              prefix="$(brew --prefix llvm@19)"
+              tidy="$prefix/bin/clang-tidy"
+              tidy_diff="$prefix/share/clang/clang-tidy-diff.py"
+              python=python3
+              ;;
+            Windows)
+              choco install llvm --version=19.1.1 -y --no-progress
+              tidy="/c/Program Files/LLVM/bin/clang-tidy.exe"
+              tidy_diff="/c/Program Files/LLVM/share/clang/clang-tidy-diff.py"
+              python=python
+              ;;
+            *)
+              echo "::error::No clang-tidy 19 recipe for $RUNNER_OS"
+              exit 1
+              ;;
+          esac
+
+          # Both halves, named, before anything depends on them: a missing
+          # driver script would otherwise surface as an unrelated shell error,
+          # and a clang-tidy that resolved to the wrong major would silently
+          # lint against a config it cannot read.
+          "$tidy" --version
+          if [[ ! -f "$tidy_diff" ]]; then
+            echo "::error::clang-tidy-diff.py not found at $tidy_diff"
+            exit 1
+          fi
 
           git diff -U0 HEAD^1 HEAD -- "${roots[@]}" \
-            | clang-tidy-diff-19.py \
-                -clang-tidy-binary clang-tidy-19 \
+            | "$python" "$tidy_diff" \
+                -clang-tidy-binary "$tidy" \
                 -p1 -path engine/build-release \
-                -quiet -allow-no-checks -j "$(nproc)"
+                -quiet -allow-no-checks -j 0
 
       # `always()` so a suite that ran and failed is still reported - but on its
       # own that also reports a *pass* for a job that never got as far as

@@ -35,6 +35,21 @@ Checks: '
 #     option values) and test literals. Naming each at its single use site moves
 #     the number away from what it means.
 
+# Not a style call - this one is here so the gate can run at all, and it has to
+# be a compiler flag rather than a `-clang-diagnostic-ignored-gch` entry in the
+# check list above. The engine builds with a precompiled header, and on the GCC
+# and MSVC legs that PCH is not a clang one, so clang-tidy replaying the compile
+# command reports "precompiled header ... was ignored because it is not a clang
+# PCH file". The prod presets compile with -Werror / /WX and clang-tidy inherits
+# that out of compile_commands.json, so clang raises it as a hard **error**
+# before any check filter is consulted - which is why disabling the check does
+# nothing, and why the diagnostic then failed every lint of every file. It also
+# carries no line in the diff, so no line filter could reach it.
+#
+# It says nothing about the code: clang-tidy re-parses the headers itself and
+# analyses exactly the same translation unit, only more slowly.
+ExtraArgs: ['-Wno-ignored-gch']
+
 # A finding is a failure, in one place. Both consumers of this config read their
 # verdict from clang-tidy's exit status - the `scripts/pre-commit` hook and the
 # `Lint changed engine sources` step in `.github/workflows/pr-tests.yml` - and

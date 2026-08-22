@@ -25,7 +25,12 @@ engine/
   `engine/.clang-tidy` is the one place that says so, and both consumers read
   their verdict from clang-tidy's exit status - the pre-commit hook refuses the
   commit, and the `Lint changed engine sources` step in `pr-tests.yml` fails the
-  engine job. **CI gates the changed *lines***, through LLVM's
+  engine job **on all three platforms** - a `#ifdef _WIN32` branch is
+  preprocessed away before a Linux run sees it, so gating Linux alone would
+  leave `platform.hpp`'s per-OS split and the Windows-only blocks in
+  `client.cpp` / `event_loop_worker.cpp` / `temp_database.hpp` unlinted. The
+  same clang-tidy major is pinned on each leg, or a version difference reads as
+  a platform one. **CI gates the changed *lines***, through LLVM's
   `clang-tidy-diff.py`: the tree had never been linted and most files carry
   findings older than any diff, so whole-file gating would fail a pull request
   for code it did not write. The hook is the stricter one (whole staged files);
