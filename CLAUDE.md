@@ -146,9 +146,14 @@ assert **both** branches.
 
 - **No em-dashes anywhere in the repo.** Use ` - `.
 - **Never run prettier or `eslint --fix` repo-wide**, and never format
-  `docs/design-system.md` - most of the tree isn't prettier-clean and formatting
-  that file reflows ~480 lines. Format only files you touched that were clean
-  before.
+  `docs/design-system.md` - a run reflows ~480 lines of it. The split is not
+  "most of the tree isn't clean": `app/` is prettier-clean to the file and CI
+  keeps it that way (`pnpm format:check`, from `app/` with an app-relative
+  glob), while everything *outside* `app/` is unclean by policy - 64 of the 71
+  Markdown and workflow files there fail a check. The repo-root
+  `.prettierignore` now enforces that boundary mechanically: prettier's domain
+  is `app/`, so a root-resolved run or an editor's format-on-save cannot reflow
+  a doc. Format only files you touched that were clean before.
 - **"Written but never read" is this codebase's most repeated defect** - found
   nine times: state one layer records and no layer displays (SSE errors,
   save-failure reasons, an import phase, parsed cookie attributes), and config

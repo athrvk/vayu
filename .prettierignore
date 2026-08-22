@@ -1,0 +1,21 @@
+# Prettier's domain in this repository is `app/`, and nothing else.
+#
+# `app/` is 100% prettier-clean and CI keeps it that way (`pnpm format:check`,
+# run from `app/` with an app-relative glob, so it never reaches out here).
+# Every other tree is unclean by policy: docs prose is hand-wrapped, the
+# workflows are written to be read as YAML rather than as prettier output, and
+# `docs/design-system.md` reflows ~480 lines on a single pass. CLAUDE.md has
+# said so in prose since before this file existed; prose is what an editor's
+# "format on save" or a stray repo-root `prettier --write` does not read.
+#
+# Written as "ignore everything, then allow `app/`" rather than as a list of the
+# trees that happen to be dirty today, so a tree added tomorrow is protected by
+# default instead of by someone remembering to add a line here. Adding a second
+# prettier-owned tree means one `!` line beside the one below.
+#
+# This changes nothing about `pnpm format:check`, whose cwd and glob never left
+# `app/` - it is the guard rail for every tool that resolves ignores from the
+# repository root.
+
+/*
+!/app/
