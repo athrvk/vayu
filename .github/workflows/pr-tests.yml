@@ -596,6 +596,28 @@ jobs:
           # and a clang-tidy that resolved to the wrong major would silently
           # lint against a config it cannot read.
           "$tidy" --version
+
+          # clang-tidy replays the compile command, precompiled header and all -
+          # and that PCH was written by the *build's* compiler, not by
+          # clang-tidy's clang. On Linux it is a GCC `.gch` ("not a clang PCH
+          # file"); on macOS it is an AppleClang PCH in a format Homebrew's
+          # clang 19 refuses ("newer PCH format that cannot be read"). Under the
+          # prod presets' -Werror / /WX both are hard errors raised before any
+          # check filter, and neither carries a line the diff filter could
+          # match, so every file fails.
+          #
+          # Regenerating the compile database without the PCH is the fix that
+          # does not depend on knowing each compiler's PCH flag spelling. It is
+          # safe to do in place: ctest has already run, so nothing needs this
+          # build tree again, and it re-uses the existing cache - measured at
+          # under a second. The sources parse without it; CMake's PCH is a
+          # build-time accelerator here, not something they lean on.
+          cmake -S engine -B engine/build-release -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
+          if grep -q cmake_pch engine/build-release/compile_commands.json; then
+            echo "::error::compile_commands.json still references a precompiled header"
+            exit 1
+          fi
+
           if [[ ! -f "$tidy_diff" ]]; then
             echo "::error::clang-tidy-diff.py not found at $tidy_diff"
             exit 1

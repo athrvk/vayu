@@ -35,19 +35,25 @@ Checks: '
 #     option values) and test literals. Naming each at its single use site moves
 #     the number away from what it means.
 
-# Not a style call - this one is here so the gate can run at all, and it has to
-# be a compiler flag rather than a `-clang-diagnostic-ignored-gch` entry in the
-# check list above. The engine builds with a precompiled header, and on the GCC
-# and MSVC legs that PCH is not a clang one, so clang-tidy replaying the compile
-# command reports "precompiled header ... was ignored because it is not a clang
-# PCH file". The prod presets compile with -Werror / /WX and clang-tidy inherits
-# that out of compile_commands.json, so clang raises it as a hard **error**
-# before any check filter is consulted - which is why disabling the check does
-# nothing, and why the diagnostic then failed every lint of every file. It also
-# carries no line in the diff, so no line filter could reach it.
+# For the pre-commit hook, which lints against whatever build tree you already
+# have. The engine builds with a precompiled header, and on a GCC build that
+# `.gch` is not one clang can read, so clang-tidy replaying the compile command
+# says "precompiled header ... was ignored because it is not a clang PCH file"
+# on every file. It then falls back to including the header as text and analyses
+# exactly the same translation unit, so the diagnostic is noise about the build
+# tree rather than a fact about the code - and a hook that prints it once per
+# staged file is a hook people stop reading.
 #
-# It says nothing about the code: clang-tidy re-parses the headers itself and
-# analyses exactly the same translation unit, only more slowly.
+# It has to be a compiler flag: with -Werror in the compile command clang raises
+# it as a hard error before any check filter is consulted, so a
+# `-clang-diagnostic-ignored-gch` entry in the check list above does nothing.
+#
+# CI does not rely on this. It regenerates `compile_commands.json` with
+# `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON` before linting, which is the fix that
+# holds for every compiler - macOS produces a *clang* PCH that Homebrew's
+# clang 19 still rejects as "a newer PCH format", which no `-Wno-` flag covers.
+# The hook does not do that, because reconfiguring someone's build tree from a
+# git hook would throw away their next incremental build.
 ExtraArgs: ['-Wno-ignored-gch']
 
 # A finding is a failure, in one place. Both consumers of this config read their

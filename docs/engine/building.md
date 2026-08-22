@@ -590,12 +590,28 @@ disables every check, and clang-tidy calls an empty check list a usage error
 rather than a clean run, so the one exempt directory would otherwise be the only
 one that fails.
 
-`engine/.clang-tidy` also sets `ExtraArgs: ['-Wno-ignored-gch']`. The engine
-builds with a precompiled header, and on the GCC and MSVC legs that PCH is not a
-clang one; clang-tidy replaying the compile command reports it, the prod presets
-compile with `-Werror` / `/WX`, and clang raises it as a hard **error** before
-any check filter runs - so it fails every lint of every file, and disabling the
-check does not help. It says nothing about the code.
+### The precompiled header
+
+The engine builds with a PCH, and clang-tidy replays the compile command that
+uses it - but that PCH was written by the *build's* compiler. On Linux it is a
+GCC `.gch` ("not a clang PCH file"); on macOS it is an AppleClang PCH that
+Homebrew's clang 19 rejects as "a newer PCH format". Under the prod presets'
+`-Werror` / `/WX` both are hard errors raised before any check filter, and
+neither carries a line the diff filter could match, so every file fails.
+
+The two gates handle it differently, on purpose:
+
+- **CI** regenerates `compile_commands.json` with
+  `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON` before linting. That needs no
+  knowledge of any compiler's PCH flags and is the only thing that fixes the
+  macOS case. It is safe in place because ctest has already run, and it takes
+  under a second.
+- **The hook** sets `ExtraArgs: ['-Wno-ignored-gch']` in `engine/.clang-tidy`
+  instead, which silences the GCC case only. Reconfiguring your build tree from
+  a git hook would throw away your next incremental build.
+
+Either way clang-tidy falls back to including the header as text and analyses
+exactly the same translation unit.
 
 Both need **clang-tidy 19 or newer**: `engine/.clang-tidy` uses
 `ExcludeHeaderFilterRegex`, which landed in LLVM 19, and an older binary rejects
