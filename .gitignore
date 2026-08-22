@@ -20,3 +20,7 @@ __pycache__/
 # ./data relative to the working directory). Anchored so it only matches here -
 # the in-tree location, engine/data/, is ignored by engine/.gitignore.
 /data/
+
+# The routing suite's two dependencies (#915). app/node_modules is covered by
+# app/.gitignore; this tree is outside it and has its own tiny package.
+/scripts/test/routing/node_modules/

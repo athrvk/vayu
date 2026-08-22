@@ -1,0 +1,14 @@
+{
+	"name": "vayu-ci-routing-test",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Asserts the pr-tests.yml path-filter routing table (issue #915). Deliberately separate from app/: this is CI plumbing, not renderer code, and the app's dependency tree should not grow a glob matcher for it.",
+	"type": "module",
+	"scripts": {
+		"test": "node paths_filter_test.mjs"
+	},
+	"dependencies": {
+		"js-yaml": "4.1.0",
+		"picomatch": "2.3.1"
+	}
+}

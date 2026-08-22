@@ -371,6 +371,11 @@ The project uses GitHub Actions for automated builds:
     later cannot escape them
   - The Windows frontend suite runs as two vitest shards on two runners; the
     `CI gate` job proves they covered every test file between them
+  - Which of those jobs runs at all is decided by the `Detect changes` job's
+    path filters, and `CI routing` asserts that table - it reads the filters
+    out of the workflow and checks a list of (changed files) -> (areas) with
+    the action's own glob matcher, so a glob that stops matching fails loudly
+    instead of silently skipping a matrix
 
 - **Release Build**: `.github/workflows/release.yml`
   - Triggers on version tags (`v*`)

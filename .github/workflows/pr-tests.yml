@@ -65,6 +65,7 @@ jobs:
       installer: ${{ steps.area.outputs.installer }}
       build_script: ${{ steps.area.outputs.build_script }}
       scripts: ${{ steps.area.outputs.scripts }}
+      ci_routing: ${{ steps.area.outputs.ci_routing }}
     steps:
       # Two invocations, because `predicate-quantifier` applies to the whole
       # action and the two kinds of filter need opposite ones. This one answers
@@ -207,6 +208,15 @@ jobs:
               - '**/*.py'
               - 'scripts/pre-commit'
               - '.github/workflows/pr-tests.yml'
+            # The routing table's own suite (#915). Narrow on purpose: it reads
+            # the filters out of this file, so the only two things that can
+            # change its answer are this file and the suite itself. It does not
+            # ride `scripts` above, which routes on every tracked `.sh` and
+            # `.py` in the repository and would run it on changes it cannot be
+            # affected by - and, the other way round, could not see a `.mjs`.
+            ci_routing:
+              - '.github/workflows/pr-tests.yml'
+              - 'scripts/test/routing/**'
 
       # The routing, said out loud. Every job below is gated on these five
       # booleans, and until this step existed the only way to answer "why did
@@ -1082,6 +1092,51 @@ jobs:
           printf '  %s\n' "${files[@]}"
           ruff check --no-cache "${files[@]}"
 
+  # The routing table above, asserted (#915). Its own job rather than a step in
+  # `Script lint`, for two reasons: that job's `if:` is every tracked shell and
+  # Python file, which is a far wider trigger than this can answer differently
+  # to, and its file list comes from `git ls-files` over those two extensions,
+  # which cannot see this suite at all. A dedicated `ci_routing` filter runs it
+  # exactly when the table or the suite changes - which is rare, so the extra
+  # runner start costs almost nothing across a week of pull requests.
+  #
+  # It needs Node for picomatch, which is the point: matching with anything but
+  # the action's own glob engine would prove nothing about CI. That is a
+  # `setup-node` and an `npm ci` over two dependencies, not the app toolchain -
+  # no pnpm, no workspace, no build.
+  ci-routing:
+    name: CI routing
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.ci_routing == 'true'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: scripts/test/routing/package-lock.json
+
+      # `ci`, not `install`: the lockfile pins picomatch to the major the action
+      # itself depends on, and a resolution that drifts off it would silently
+      # test different glob rules than CI runs.
+      - name: Install the matcher
+        working-directory: scripts/test/routing
+        run: npm ci
+
+      - name: Assert the path-filter routing table
+        working-directory: scripts/test/routing
+        run: node paths_filter_test.mjs
+
   ci-gate:
     name: CI gate
     runs-on: ubuntu-latest
@@ -1089,7 +1144,8 @@ jobs:
     # filter cannot be read as "nothing to test". Without it, a broken `changes`
     # job skips everything, and "skipped" would pass this gate on a change
     # nobody ran.
-    needs: [changes, quality, app, engine, engine-format, installer, build-script, scripts]
+    needs:
+      [changes, quality, app, engine, engine-format, installer, build-script, scripts, ci-routing]
     if: always()
     # `actions: read` is what lets the download below reach this run's own
     # artifacts; everything else here reads job results, which need nothing.
@@ -1178,6 +1234,7 @@ jobs:
           check installer "${{ needs.installer.result }}"
           check build-script "${{ needs['build-script'].result }}"
           check scripts   "${{ needs.scripts.result }}"
+          check ci-routing "${{ needs['ci-routing'].result }}"
 
           if [[ $status -ne 0 ]]; then
             echo "CI failed"
