@@ -178,8 +178,10 @@ read_bounded_int (const nlohmann::json& json, const char* key, int low, int high
         return {};
     }
     if (!it->is_number_integer () || it->get<int> () < low || it->get<int> () > high) {
-        return std::unexpected (MockParseError{ 400, "bad_request",
-        std::format ("Invalid '{}': must be an integer between {} and {}", key, low, high) });
+        return std::unexpected (MockParseError{ .http_status = 400,
+        .code                                                = "bad_request",
+        .message                                             = std::format (
+        "Invalid '{}': must be an integer between {} and {}", key, low, high) });
     }
     out = it->get<int> ();
     return {};
@@ -189,14 +191,17 @@ read_bounded_int (const nlohmann::json& json, const char* key, int low, int high
 
 std::expected<MockStartRequest, MockParseError> parse_mock_start (const nlohmann::json& json) {
     if (!json.is_object ()) {
-        return std::unexpected (
-        MockParseError{ 400, "bad_request", "Request body must be a JSON object" });
+        return std::unexpected (MockParseError{ .http_status = 400,
+        .code                                                = "bad_request",
+        .message = "Request body must be a JSON object" });
     }
 
     const auto collection = json.find ("collectionId");
     if (collection == json.end () || !collection->is_string () ||
     collection->get<std::string> ().empty ()) {
-        return std::unexpected (MockParseError{ 400, "bad_request",
+        return std::unexpected (MockParseError{ .http_status = 400,
+        .code                                                = "bad_request",
+        .message =
         "'collectionId' is required and must be a non-empty string" });
     }
 

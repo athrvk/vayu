@@ -82,7 +82,7 @@ RouteResult read_kind (const nlohmann::json& entry, const std::string& at, Kind&
     }
     if (!entry.contains ("type") || !entry["type"].is_string ()) {
         return std::unexpected (body_error (
-        "Invalid " + at + ": 'type' must be \"collection\" or \"request\""));
+        "Invalid " + at + R"(: 'type' must be "collection" or "request")"));
     }
     const std::string type = entry["type"].get<std::string> ();
     if (type == "collection") {

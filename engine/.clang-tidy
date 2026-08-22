@@ -8,10 +8,11 @@ Checks: '
   -bugprone-easily-swappable-parameters,
   -modernize-use-trailing-return-type,
   -readability-convert-member-functions-to-static,
+  -readability-function-cognitive-complexity,
   -readability-identifier-length,
   -readability-magic-numbers
 '
-# Why each of the five above is off. They were unexplained for as long as this
+# Why each of the six above is off. They were unexplained for as long as this
 # file has existed, which is what makes them relitigable - none is a hard call,
 # and a line each is cheaper than having the argument twice.
 #
@@ -23,6 +24,19 @@ Checks: '
 #   modernize-use-trailing-return-type
 #     `auto f() -> T` is a style this codebase does not use. Turning it on
 #     rewrites every declaration in the tree and settles nothing.
+#   readability-function-cognitive-complexity
+#     Reports at the *function declaration*, never at the line that made the
+#     function complex - so the changed-lines scoping the gate is built on
+#     (#885, #902) cannot honour it. Ten functions in the routes layer are over
+#     the threshold today, three of them far over (spec_sync_response 208,
+#     register_execution_routes 168, a spec_sync lambda 126), all of it older
+#     than any diff; the effect is that editing one line anywhere inside one of
+#     them fails the pull request for complexity nobody in it wrote. #926 was
+#     the first to hit this and turned the check off rather than scatter a
+#     NOLINT per function, which would have fixed the gate for exactly the
+#     functions one pull request happened to touch. **#929 owns the debt**: the
+#     numbers, the splits worth doing, and whether a function-scoped check
+#     belongs in a line-scoped gate at all or in a report-only job.
 #   readability-convert-member-functions-to-static
 #     Proposes making a member static whenever its body happens not to touch
 #     `this`. On a public class that is an API change decided by an
