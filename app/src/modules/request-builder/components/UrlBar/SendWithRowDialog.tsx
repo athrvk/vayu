@@ -215,6 +215,17 @@ export default function SendWithRowDialog({
 	 * and the grid always has a focusable row.
 	 */
 	const selected = typed.kind === "row" ? typed.index : (lastRowIndex ?? 0);
+	/*
+	 * Whether `selected` still names a row of the file just read (issue #894).
+	 *
+	 * Only the fallback can be stale - `parseRowEntry` refuses a number outside
+	 * the file, while neither the remembered index nor a step's repro target is
+	 * clamped against a file that has since shrunk, been re-picked, or been cut
+	 * by a lowered `maxScenarioDataRows`. Named here rather than fixed by
+	 * clamping, for the same reason the typed path refuses: binding the last row
+	 * instead would send a row the user did not ask for and say nothing.
+	 */
+	const selectedMissing = selected >= total;
 
 	const visibleRows = useMemo(
 		() => matchingRows(parsed?.rows ?? [], columns, filter),
@@ -255,7 +266,16 @@ export default function SendWithRowDialog({
 
 	const send = useCallback(
 		(index: number) => {
-			if (!parsed) return;
+			/*
+			 * The one funnel every entry path reaches, so the bounds check lives
+			 * here: `parsed.rows[index]` is typed as a row but is `undefined` for
+			 * an index the file has no row at, and `executeRequest` reads that as
+			 * an ordinary row-less send - the request goes out with every
+			 * `{{data.*}}` token unbound and nothing says so (issue #894). The UI
+			 * refuses before this point; this is what makes the silent send
+			 * unreachable rather than merely unlikely.
+			 */
+			if (!parsed || index < 0 || index >= parsed.rows.length) return;
 			onRowIndexChange(index);
 			setEntry("");
 			onOpenChange(false);
@@ -396,6 +416,17 @@ export default function SendWithRowDialog({
 						{typed.kind === "error" && (
 							<p className="text-[11px] text-destructive-text">{typed.message}</p>
 						)}
+						{/* The same refusal for the row nobody typed: a remembered index,
+						    or a step's repro target, pointing past the file as it reads
+						    now. Said rather than clamped, and the footer's button is
+						    dead while it stands. */}
+						{selectedMissing && (
+							<p className="text-[11px] text-destructive-text">
+								Row {(selected + 1).toLocaleString()} no longer exists - the file
+								has {total.toLocaleString()} {total === 1 ? "row" : "rows"}. Pick
+								one below.
+							</p>
+						)}
 
 						<DialogBody className="rounded-md border border-rule">
 							{visibleRows.length === 0 ? (
@@ -494,18 +525,24 @@ export default function SendWithRowDialog({
 							{/* Names the row it will send, so a row reached by typing a
 							    number is confirmable without hunting for it in the
 							    grid. Clicking a row still sends outright - the fast
-							    loop this feature exists for is one click. */}
+							    loop this feature exists for is one click.
+
+							    Disabled while the named row is not in the file, so the
+							    button never offers a send it would have to make without
+							    a row; the line above the grid says which row and why. */}
 							<button
 								type="button"
+								disabled={selectedMissing}
 								onClick={() => send(selected)}
 								className={cn(
 									"h-8 rounded-md px-3 text-xs font-semibold",
 									"bg-primary-fill text-white border border-primary-fill",
 									"hover:bg-primary-fill/90 hover:border-primary-fill/90",
-									"transition-colors"
+									"disabled:opacity-50 disabled:hover:bg-primary-fill",
+									"disabled:hover:border-primary-fill transition-colors"
 								)}
 							>
-								Send row {selected + 1}
+								Send row {(selected + 1).toLocaleString()}
 							</button>
 						</DialogFooter>
 					</>

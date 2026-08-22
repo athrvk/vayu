@@ -734,3 +734,105 @@ describe("arriving from a failed step", () => {
 		expect(useTabsStore.getState().dataRowTarget).toBeNull();
 	});
 });
+
+/**
+ * A remembered row that outlived the file it pointed into (issue #894).
+ *
+ * The typed field refuses a row the file has no row for, and the two indices
+ * nobody types - the remembered one and a step card's repro target - did not:
+ * neither is clamped, and the file underneath them can shrink between the send
+ * that recorded one and the reopen that reads it (an edited file, a re-picked
+ * one, or a lowered `maxScenarioDataRows` cutting the loaded set with no file
+ * change at all). The footer still read "Send row N", and clicking it sent the
+ * request with every `{{data.*}}` token unbound and nothing naming why.
+ *
+ * So these assert the refusal on both sides of it: the visible one (the footer
+ * dead, the reason stated) and the send funnel itself, which is what makes the
+ * silent send unreachable rather than merely hard to reach.
+ */
+describe("a row the file no longer has", () => {
+	const bigCsv = (count: number) =>
+		["id,email", ...Array.from({ length: count }, (_, i) => `${i},user${i}@example.test`)].join(
+			"\n"
+		);
+
+	/** The grid's own Enter, which sends the selected row without a click. */
+	const pressEnterOnGrid = () =>
+		fireEvent.keyDown(screen.getByRole("row", { name: /user0@example\.test/ }), {
+			key: "Enter",
+		});
+
+	it("refuses a remembered row after the file shrank under it", async () => {
+		rememberFile();
+		// The same declared path, read twice: 30 rows when the row was picked, 5
+		// by the time the picker is reopened.
+		let rows = 30;
+		stubReadDataFile(async () => csvBytes(bigCsv(rows)));
+		const execute = vi.fn(async () => {});
+		renderBar(execute, CONTRACT, "req_a");
+
+		openPicker();
+		fireEvent.click(await screen.findByRole("row", { name: /user25@example\.test/ }));
+		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+		rows = 5;
+		openPicker();
+		await screen.findByRole("row", { name: /user4@example\.test/ });
+
+		// Named, not clamped to row 5: which row was asked for is the thing that
+		// went wrong, and binding a different one would say nothing about it.
+		expect(screen.getByText(/row 26 no longer exists - the file has 5 rows/i)).toBeTruthy();
+
+		const footer = screen.getByRole("button", { name: /^send row 26$/i });
+		expect(footer).toBeDisabled();
+		fireEvent.click(footer);
+		pressEnterOnGrid();
+		// Still the one send from before the file shrank: neither path reached
+		// `executeRequest` with no row bound.
+		expect(execute).toHaveBeenCalledTimes(1);
+
+		// Not a dead end - picking a row that does exist sends as it always did.
+		fireEvent.click(screen.getByRole("row", { name: /user3@example\.test/ }));
+		await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+		expect(execute).toHaveBeenLastCalledWith({ id: "3", email: "user3@example.test" });
+	});
+
+	it("refuses a step's repro target the file has no row for", async () => {
+		// What `openRequestWithDataRow` leaves behind (issue #730), pointing past
+		// a file that no longer runs to 501 rows. The dialog opens on it without a
+		// click, so this state is reached with nothing typed and nothing picked.
+		rememberFile();
+		stubReadDataFile(async () => csvBytes(bigCsv(30)));
+		const execute = vi.fn(async () => {});
+		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 500 } });
+		renderBar(execute, CONTRACT, "req_a");
+
+		await screen.findByRole("row", { name: /user0@example\.test/ });
+		expect(screen.getByText(/row 501 no longer exists - the file has 30 rows/i)).toBeTruthy();
+
+		const footer = screen.getByRole("button", { name: /^send row 501$/i });
+		expect(footer).toBeDisabled();
+		fireEvent.click(footer);
+		pressEnterOnGrid();
+		expect(execute).not.toHaveBeenCalled();
+	});
+
+	it("keeps offering the row it names while the row is in the file", async () => {
+		// The guard's other half: a remembered index inside the file must not be
+		// refused, or the fix would have cost the feature its one-click re-send.
+		rememberFile();
+		stubReadDataFile(async () => csvBytes(bigCsv(30)));
+		const execute = vi.fn(async () => {});
+		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 25 } });
+		renderBar(execute, CONTRACT, "req_a");
+
+		await screen.findByRole("row", { name: /user25@example\.test/ });
+		expect(screen.queryByText(/no longer exists/i)).toBeNull();
+
+		const footer = screen.getByRole("button", { name: /^send row 26$/i });
+		expect(footer).not.toBeDisabled();
+		fireEvent.click(footer);
+		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+		expect(execute).toHaveBeenCalledWith({ id: "25", email: "user25@example.test" });
+	});
+});
