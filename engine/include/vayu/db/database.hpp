@@ -18,6 +18,7 @@
 
 #include <sqlite_orm/sqlite_orm.h>
 
+#include "vayu/db/recovery.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::db {
@@ -137,6 +138,21 @@ class Database {
      * second path parameter threaded through it to find them.
      */
     const std::string& path () const;
+
+    /**
+     * @brief What this startup did about a database it could not open, if it
+     *        had to do anything (issue #922).
+     *
+     * `nullopt` is a clean start - the ordinary case, and the one a genuine
+     * first run gives. A value means the user's data was restored from a backup
+     * or deleted outright, and it is what `GET /health` reports so the app can
+     * say so; see `db/recovery.hpp` for why the fact is on disk and why it is
+     * never cleared here.
+     *
+     * Read once at construction, so the polled health endpoint costs no file
+     * access.
+     */
+    [[nodiscard]] const std::optional<RecoveryRecord>& recovery () const;
 
     // Project Management
     void create_collection (const Collection& c);
@@ -576,6 +592,10 @@ class Database {
     private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    /// The startup recovery record, read from the marker file in the
+    /// constructor. See `recovery()`.
+    std::optional<RecoveryRecord> recovery_;
 
     /**
      * @brief Delete a run and every child row it owns (ticks, metrics, results).

@@ -336,6 +336,7 @@ add_library(vayu_core STATIC
     src/utils/metrics_helper.cpp
     src/utils/id.cpp
     src/db/database.cpp
+    src/db/recovery.cpp
     src/core/auth_refresh.cpp
     src/core/load_strategy.cpp
     src/core/scenario_data.cpp
@@ -572,6 +573,7 @@ if(VAYU_BUILD_TESTS)
         tests/event_loop_test.cpp
         tests/db_test.cpp
         tests/db_concurrency_test.cpp
+        tests/db_recovery_test.cpp
         tests/rate_limit_test.cpp
         tests/metrics_helper_test.cpp
         tests/metrics_collector_test.cpp
@@ -810,6 +812,7 @@ if(VAYU_BUILD_TESTS)
         CustomCaVerificationTest
         DatabaseConcurrencyTest
         DatabaseTest
+        DbRecoveryTest
         DeleteRunTest
         ErrorShapeRouteTest
         ExamplesRouteTest

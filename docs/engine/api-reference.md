@@ -446,6 +446,33 @@ Check engine status and version.
 }
 ```
 
+**`recovery` (optional, issue #922)** - present only when this engine startup had
+to recover the database, and **absent** on a clean start rather than `null`:
+
+```json
+{
+  "status": "ok",
+  "version": "0.3.0",
+  "workers": 8,
+  "recovery": {
+    "outcome": "deleted_corrupt",
+    "at": 1755870000000,
+    "databasePath": "/home/someone/.local/share/vayu/vayu.db"
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `outcome` | `restored_from_backup` - the database failed validation and `<db>.bak` was restored over it. `deleted_corrupt` - it failed validation, no backup restored it, and it was **deleted** so the daemon could start |
+| `at` | When that happened, epoch milliseconds |
+| `databasePath` | The database file it happened to |
+
+The node is read from a marker file beside the database and stands until a later
+recovery overwrites it, so a client that has already told the user about an
+event should key off `at` rather than expecting the node to disappear. See
+[db-schema.md](db-schema.md#the-recovery-marker-issue-922).
+
 ### POST /shutdown
 
 Gracefully shut down the engine. This is the shutdown path the Electron app uses

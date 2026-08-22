@@ -22,6 +22,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 │   ├── AppIcon (Windows only - the system-menu control)
 │   ├── <CommandSearchBar />             // Input-shaped trigger for the ⌘K palette; never its own search
 │   └── EnvPill + WindowControls (Linux only; Windows native overlay; macOS traffic lights)
+├── <RecoveryBanner />                   // components/shared/RecoveryBanner.tsx - only when the engine restored or deleted the database
 ├── <UpdateBanner />
 └── <Shell />                            // components/layout/Shell.tsx - tab-centric layout with drawer + context bar
     ├── <ImportModal />                  // modules/collections/ImportModal.tsx - global overlay, open-state in a store
@@ -1142,6 +1143,29 @@ not left reconciling two true-sounding claims. `ScenarioRunView` reads the flag
 off the steps rather than the report, so a live run discloses it too.
 
 Silent when the surface lists no steps - nothing on screen, nothing to disclose.
+
+## Recovery Banner (`components/shared/RecoveryBanner.tsx`)
+
+The one place the user is told the engine restored or deleted their database
+(issue #922). A database that fails validation at startup and cannot be restored
+from its `.bak` backup is **deleted**, so the daemon starts instead of
+crash-looping - and until this banner the whole record of that was two lines in
+the engine log, with the app coming up looking like a fresh install.
+
+It reads `engine-store.recovery`, which `queries/health.ts` writes from the
+optional `recovery` node on `GET /health`. Absent means a clean start, which is
+also what a genuine first run gives, so the banner renders nothing in the
+ordinary case; the engine never reports the node speculatively (see
+[db-schema.md](../engine/db-schema.md#the-recovery-marker-issue-922)).
+
+A banner rather than a toast, beside `UpdateBanner` and above it: the fact is
+permanent, a user who misses it cannot get it back, and it names a path they may
+want to copy. Dismissal is persisted by the record's `at` timestamp
+(`stores/recovery-notice-store.ts`) rather than held in component state, because
+the engine keeps reporting the record for as long as its marker file stands - a
+relaunch against an already-running engine would otherwise re-announce a wipe
+the user had already acknowledged. A later recovery carries a later `at` and so
+is a different event.
 
 ## Non-Loopback Badge (`components/shared/NonLoopbackBadge.tsx`)
 

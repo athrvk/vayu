@@ -47,4 +47,9 @@ export const STORAGE_KEYS = {
 	 * state and is persisted nowhere here (see `spec-file-store.ts`).
 	 */
 	SPEC_FILE_STORE: "vayu.spec-files",
+	/**
+	 * Zustand persist name for the startup-recovery notice the user has already
+	 * seen (issue #922). One timestamp - the engine keeps the record itself.
+	 */
+	RECOVERY_NOTICE_STORE: "vayu.recovery-notice",
 } as const;

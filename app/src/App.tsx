@@ -9,6 +9,7 @@ import { useEffect } from "react";
 import Shell from "./components/layout/Shell";
 import TitleBar from "./components/layout/TitleBar";
 import UpdateBanner from "./components/shared/UpdateBanner";
+import RecoveryBanner from "./components/shared/RecoveryBanner";
 import Toaster from "./components/shared/Toaster";
 import {
 	useConfigQuery,
@@ -89,6 +90,9 @@ function App() {
 	return (
 		<div className="flex flex-col h-full">
 			<TitleBar />
+			{/* Above the update banner: one says a newer version exists, the
+			    other says the user's data is gone. */}
+			<RecoveryBanner />
 			<UpdateBanner />
 			<div className="flex-1 overflow-hidden">
 				<Shell />

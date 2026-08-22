@@ -347,6 +347,39 @@ main process - the renderer names no directory of its own, the same posture
 `dataFile:read` holds. It is normalized through **both** `migrate` and
 `merge`, for the reason spelled out for `data-file-store` above.
 
+#### `recovery-notice-store.ts` - Which Data-Loss Notice Was Already Seen
+
+One timestamp: the `at` of the startup-recovery record the user has already been
+told about (issue #922).
+
+**State:**
+```typescript
+{
+  acknowledgedAt: number | null  // epoch ms of the dismissed record, or null
+}
+```
+
+**Key Methods:**
+```typescript
+const { acknowledgedAt, acknowledge } = useRecoveryNoticeStore();
+```
+
+**Persistence:** `vayu.recovery-notice` (v1)
+
+The *record* is the engine's - a marker file beside the database, reported on
+`GET /health` for as long as it stands, because a record that cleared itself as
+soon as something read it would be lost whenever the engine restarted before the
+app polled. Showing a notice about it exactly once is this side's job, and one
+timestamp is the whole of it: a later recovery carries a later `at` and is a
+different event, so it surfaces again with no per-event bookkeeping. Persisted
+rather than session state because "does not repeat on the next launch" is the
+point - a window reopened against an already-running engine would otherwise
+re-announce a wipe the user had dismissed. A stored value that is not a finite
+number reads as "nothing acknowledged", the safe direction: a notice shown twice
+is an annoyance, one suppressed by a garbage value is silent data loss again. It
+is normalized through **both** `migrate` and `merge`, for the reason spelled out
+for `data-file-store` above.
+
 #### `engine-store.ts` - Engine Connection & Restart State
 
 Merged store managing engine connection status and restart-required notifications (for config changes that need an engine restart).
@@ -356,6 +389,7 @@ Merged store managing engine connection status and restart-required notification
 {
   isEngineConnected: boolean
   engineError: string | null
+  recovery: EngineRecovery | null  // What the engine's startup did to the database
   pendingRestart: boolean
   restartRequiredKeys: string[]  // Config keys requiring restart
 }
@@ -366,9 +400,15 @@ Merged store managing engine connection status and restart-required notification
 const {
   isEngineConnected, setEngineConnected,
   engineError, setEngineError,
+  recovery, setEngineRecovery,
   pendingRestart, addRestartRequiredKey, clearRestartRequired,
 } = useEngineStore();
 ```
+
+`recovery` is the optional `recovery` node from `GET /health` (issue #922),
+written by the same poll that writes `engineError` and read by `RecoveryBanner`.
+`null` is a clean start; a value means the engine restored the database from its
+backup or deleted it as unrecoverable.
 
 `engineError` is what the failed health poll recorded (`queries/health.ts`), and
 the Dock's connection indicator renders it in a tooltip when the engine is down -
