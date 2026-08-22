@@ -615,12 +615,23 @@ exactly the same translation unit.
 
 Both need **clang-tidy 19 or newer**: `engine/.clang-tidy` uses
 `ExcludeHeaderFilterRegex`, which landed in LLVM 19, and an older binary rejects
-the config file and lints nothing. CI pins the major (`clang-tidy-19`) for the
-reason the installer job pins shellcheck - findings move between releases, and
-an unpinned linter can redden a pull request that changed nothing. The hook
-probes the version and warns loudly instead of exiting clean over an empty scan;
-a contributor without a current clang-tidy loses the early warning, not the
-check.
+the config file and lints nothing. The hook probes the version and warns loudly
+instead of exiting clean over an empty scan; a contributor without a current
+clang-tidy loses the early warning, not the check.
+
+CI's version differs per leg, and none of it is a free choice:
+
+| Leg | clang-tidy | Why |
+|-----|-----------|-----|
+| Linux | 19, from apt | What CONTRIBUTING.md tells contributors to install, so a local run and CI answer the same |
+| macOS | 20, shipped by the image | 19 crashed with SIGILL on a runner that builds with AppleClang 21 |
+| Windows | 20.1.8, shipped by the image | chocolatey refuses to downgrade from the preinstalled version |
+
+The step asserts the 19 floor rather than trusting it, because a runner image
+is a pin somebody else controls. The cost of the spread is that a finding on one
+leg alone may be a version difference rather than a platform one - worth knowing
+when you read a failure, and much cheaper than having no coverage of the per-OS
+branches at all.
 
 To lint by hand, point clang-tidy at a configured build tree:
 

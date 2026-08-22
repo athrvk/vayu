@@ -514,13 +514,21 @@ jobs:
       # calls whatever plain `clang-tidy` resolves to, which on the Linux image
       # is 18 - old enough to reject `engine/.clang-tidy` outright.
       #
-      # Pinned to one major on all three, for the reason the `installer` job
-      # pins shellcheck, and more sharply here: findings move between clang-tidy
-      # releases, so three legs on three versions would report *version*
-      # differences as platform differences - worse than no coverage, because
-      # they read as real. 19 is the floor `engine/.clang-tidy` needs
-      # (`ExcludeHeaderFilterRegex`) and the version CONTRIBUTING.md tells
+      # Versions differ per leg, and none of it is a free choice.
+      #
+      # Linux pins clang-tidy 19 from apt, which is what CONTRIBUTING.md tells
       # contributors to install, so a local run and this one answer the same.
+      # macOS and Windows take the LLVM their runner image already ships (20 on
+      # both): Windows *cannot* be moved down - chocolatey refuses to downgrade
+      # from the preinstalled 20.1.8 - and on macOS 19 crashed outright. Using
+      # what the image pins also costs no install time on either leg.
+      #
+      # 19 is the floor `engine/.clang-tidy` needs (`ExcludeHeaderFilterRegex`),
+      # and it is asserted below rather than trusted, because an image is a pin
+      # somebody else controls. The cost of the spread is that a finding on one
+      # leg alone may be a version difference rather than a platform one - worth
+      # knowing when you read a failure, and much cheaper than having no
+      # coverage of the per-OS branches at all.
       #
       # `-j 0` rather than a CPU count: the driver reads 0 as
       # `multiprocessing.cpu_count()`, and `nproc` does not exist on macOS.
@@ -573,14 +581,22 @@ jobs:
               python=python3
               ;;
             macOS)
-              brew install llvm@19
-              prefix="$(brew --prefix llvm@19)"
+              # 20 rather than 19, and already on the image. clang-tidy 19.1.7
+              # crashed here with SIGILL - an `llvm_unreachable` trap - part way
+              # through both of the heaviest translation units, on a runner that
+              # builds with AppleClang 21. The `brew list || brew install` guard
+              # is this workflow's own idiom, and costs nothing while the image
+              # keeps shipping the formula.
+              brew list llvm@20 > /dev/null 2>&1 || brew install llvm@20
+              prefix="$(brew --prefix llvm@20)"
               tidy="$prefix/bin/clang-tidy"
               tidy_diff="$prefix/share/clang/clang-tidy-diff.py"
               python=python3
               ;;
             Windows)
-              choco install llvm --version=19.1.1 -y --no-progress
+              # Nothing to install: the image ships LLVM 20.1.8, and asking
+              # chocolatey for 19.1.1 failed outright rather than downgrading
+              # ("A newer version of llvm is already installed").
               tidy="/c/Program Files/LLVM/bin/clang-tidy.exe"
               tidy_diff="/c/Program Files/LLVM/share/clang/clang-tidy-diff.py"
               python=python
@@ -591,11 +607,20 @@ jobs:
               ;;
           esac
 
-          # Both halves, named, before anything depends on them: a missing
-          # driver script would otherwise surface as an unrelated shell error,
-          # and a clang-tidy that resolved to the wrong major would silently
-          # lint against a config it cannot read.
+          # Named before anything depends on it: a clang-tidy that resolved to
+          # the wrong place would otherwise surface as an unrelated shell error.
           "$tidy" --version
+
+          # The floor, asserted rather than assumed. Two of the three legs take
+          # whatever LLVM their runner image ships, so an image that rolled
+          # backwards would lint with a binary that cannot read
+          # `engine/.clang-tidy` at all - which is issue #659's silent empty
+          # scan arriving by a new route.
+          major="$("$tidy" --version | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p' | head -1)"
+          if [[ -z "$major" ]] || [[ "$major" -lt 19 ]]; then
+            echo "::error::clang-tidy ${major:-(version unreadable)} is below the 19 that engine/.clang-tidy requires"
+            exit 1
+          fi
 
           # clang-tidy replays the compile command, precompiled header and all -
           # and that PCH was written by the *build's* compiler, not by
@@ -609,10 +634,19 @@ jobs:
           # Regenerating the compile database without the PCH is the fix that
           # does not depend on knowing each compiler's PCH flag spelling. It is
           # safe to do in place: ctest has already run, so nothing needs this
-          # build tree again, and it re-uses the existing cache - measured at
-          # under a second. The sources parse without it; CMake's PCH is a
+          # build tree again. The sources parse without it; CMake's PCH is a
           # build-time accelerator here, not something they lean on.
-          cmake -S engine -B engine/build-release -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
+          #
+          # `VCPKG_MANIFEST_INSTALL=OFF` is what keeps that cheap, and it is not
+          # optional: the vcpkg toolchain re-runs the manifest install on every
+          # configure, which measured **563 seconds** here - nine and a half
+          # minutes added to the engine job for a lint step that takes under a
+          # minute. Skipping it costs nothing, because the dependencies this
+          # tree was built against are already installed in it; the reconfigure
+          # then takes 0.2s and the vcpkg include paths survive untouched.
+          cmake -S engine -B engine/build-release \
+            -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
+            -DVCPKG_MANIFEST_INSTALL=OFF
           if grep -q cmake_pch engine/build-release/compile_commands.json; then
             echo "::error::compile_commands.json still references a precompiled header"
             exit 1
