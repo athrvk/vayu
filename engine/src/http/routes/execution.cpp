@@ -162,26 +162,26 @@ void seed_run_times (vayu::db::Run& run, int64_t started_at) {
 // The validated value is written back onto `json["httpVersion"]` so it reaches
 // deserialize_request as a concrete string; `null` would otherwise hit
 // `.get<std::string>()` there and throw.
-std::optional<std::pair<int, nlohmann::json>> normalize_run_http_version (
-nlohmann::json& json) {
+RouteResult normalize_run_http_version (nlohmann::json& json) {
     if (!json.contains ("httpVersion")) {
-        return std::nullopt;
+        return {};
     }
     if (json["httpVersion"].is_null ()) {
         json.erase ("httpVersion");
-        return std::nullopt;
+        return {};
     }
     // Both early returns above mean the key is present and non-null by now, so
     // the two branches of apply_http_version_field that consume `seed` are
     // unreachable from here. The argument is required by the signature; it does
     // not select behaviour at this call site.
     std::string version;
-    if (auto err = apply_http_version_field (json, "httpVersion", version,
-        vayu::to_string (vayu::DEFAULT_HTTP_VERSION), /*is_create=*/false)) {
-        return err;
+    if (auto outcome = apply_http_version_field (json, "httpVersion", version,
+        vayu::to_string (vayu::DEFAULT_HTTP_VERSION), /*is_create=*/false);
+    !outcome) {
+        return outcome;
     }
     json["httpVersion"] = version;
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -1374,11 +1374,11 @@ void register_execution_routes (RouteContext& ctx) {
         // built, so a rejected request leaves no row behind, and the snapshot
         // still reflects the raw client body (sanitize_config_snapshot reads
         // req.body directly, not this normalized `json`).
-        if (auto err = normalize_run_http_version (json)) {
+        if (auto outcome = normalize_run_http_version (json); !outcome) {
             vayu::utils::log_warning (
-            "POST /runs - Invalid httpVersion: " + err->second.dump ());
-            res.status = err->first;
-            res.set_content (err->second.dump (), "application/json");
+            "POST /runs - Invalid httpVersion: " + outcome.error ().body.dump ());
+            res.status = outcome.error ().status;
+            res.set_content (outcome.error ().body.dump (), "application/json");
             return;
         }
 

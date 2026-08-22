@@ -187,7 +187,7 @@ constexpr size_t MAX_SYNC_ITEMS = 10000;
 /** Absent or null section - a stable empty list to hand out. */
 const nlohmann::json EMPTY_ITEMS = nlohmann::json::array ();
 
-std::pair<int, nlohmann::json> body_error (const std::string& message) {
+RouteError body_error (const std::string& message) {
     return { 400, error_body (400, message) };
 }
 
@@ -198,46 +198,47 @@ std::pair<int, nlohmann::json> body_error (const std::string& message) {
  * being created and the real id for one being updated or deleted - in both
  * cases the only handle the caller has on it.
  */
-std::pair<int, nlohmann::json>
-item_error (int status, const std::string& message, const std::string& item) {
+RouteError item_error (int status, const std::string& message, const std::string& item) {
     auto body             = error_body (status, message);
     body["error"]["item"] = item;
     return { status, body };
 }
 
 /** Reads one optional top-level array; anything else that is not an array is a 400. */
-std::optional<std::pair<int, nlohmann::json>>
+RouteResult
 read_items (const nlohmann::json& body, const char* key, const nlohmann::json*& out) {
     out = &EMPTY_ITEMS;
     if (!body.contains (key) || body[key].is_null ()) {
-        return std::nullopt;
+        return {};
     }
     if (!body[key].is_array ()) {
-        return body_error (std::string ("Invalid '") + key + "': must be an array");
+        return std::unexpected (
+        body_error (std::string ("Invalid '") + key + "': must be an array"));
     }
     out = &body[key];
-    return std::nullopt;
+    return {};
 }
 
 /** Turns an applier's failure - its own error body, or a json type error - into a 400. */
 template <typename Apply>
-std::optional<std::pair<int, nlohmann::json>>
-apply_item_fields (Apply apply, const char* kind, const std::string& item) {
-    std::optional<std::pair<int, nlohmann::json>> err;
+RouteResult apply_item_fields (Apply apply, const char* kind, const std::string& item) {
+    RouteResult outcome;
     try {
-        err = apply ();
+        outcome = apply ();
     } catch (const nlohmann::json::exception& e) {
-        return item_error (400, std::string ("Invalid ") + kind + ": " + e.what (), item);
+        return std::unexpected (
+        item_error (400, std::string ("Invalid ") + kind + ": " + e.what (), item));
     }
-    if (err) {
-        err->second["error"]["item"] = item;
-        return err;
+    if (!outcome) {
+        RouteError refused            = outcome.error ();
+        refused.body["error"]["item"] = item;
+        return std::unexpected (refused);
     }
-    return std::nullopt;
+    return {};
 }
 
 /** Validates a `tempId`, rejects a client-supplied `id`, and claims a real one. */
-std::optional<std::pair<int, nlohmann::json>> claim_temp_id (const nlohmann::json& item,
+RouteResult claim_temp_id (const nlohmann::json& item,
 const char* kind,
 const char* prefix,
 size_t index,
@@ -245,22 +246,24 @@ std::unordered_map<std::string, std::string>& id_map,
 std::string& temp_id_out) {
     const std::string at = std::string (kind) + " at index " + std::to_string (index);
     if (!item.is_object ()) {
-        return body_error ("Invalid " + at + ": must be an object");
+        return std::unexpected (body_error ("Invalid " + at + ": must be an object"));
     }
     if (item.contains ("id")) {
-        return body_error ("Invalid " +
-        at + ": 'id' is not accepted - the engine assigns ids; reference items by 'tempId'");
+        return std::unexpected (body_error ("Invalid " +
+        at + ": 'id' is not accepted - the engine assigns ids; reference items by 'tempId'"));
     }
     if (!item.contains ("tempId") || !item["tempId"].is_string () ||
     item["tempId"].get<std::string> ().empty ()) {
-        return body_error ("Invalid " + at + ": 'tempId' must be a non-empty string");
+        return std::unexpected (
+        body_error ("Invalid " + at + ": 'tempId' must be a non-empty string"));
     }
     temp_id_out = item["tempId"].get<std::string> ();
     if (id_map.contains (temp_id_out)) {
-        return item_error (400, "Duplicate tempId '" + temp_id_out + "'", temp_id_out);
+        return std::unexpected (
+        item_error (400, "Duplicate tempId '" + temp_id_out + "'", temp_id_out));
     }
     id_map.emplace (temp_id_out, vayu::utils::generate_id (prefix));
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -279,7 +282,7 @@ std::string& temp_id_out) {
  * back would make that delete a suggestion. Empty on the create path: a
  * request being created now has nothing behind it to have deleted.
  */
-std::optional<std::pair<int, nlohmann::json>> build_example_rows (const nlohmann::json& examples,
+RouteResult build_example_rows (const nlohmann::json& examples,
 const std::string& request_id,
 const std::string& owner,
 int base_order,
@@ -303,12 +306,13 @@ const std::unordered_set<int>& suppressed_statuses = {}) {
         // these rows are the engine's own: a field the applier learns - the way
         // `origin` and `suppressed` were learned - must reach a sync's rows too,
         // and a second construction here is how it would not.
-        if (auto err = apply_item_fields (
+        if (auto outcome = apply_item_fields (
             [&] {
                 return apply_request_example_fields (x, example, /*is_create=*/true);
             },
-            "example", owner)) {
-            return err;
+            "example", owner);
+        !outcome) {
+            return outcome;
         }
         if (suppressed_statuses.contains (x.status)) {
             continue;
@@ -321,14 +325,14 @@ const std::unordered_set<int>& suppressed_statuses = {}) {
     }
 
     if (rows.size () + surviving > vayu::core::constants::request_example::MAX_PER_REQUEST) {
-        return item_error (400,
+        return std::unexpected (item_error (400,
         "Too many examples: " + std::to_string (rows.size () + surviving) + " exceeds the limit of " +
         std::to_string (vayu::core::constants::request_example::MAX_PER_REQUEST) + " per request",
-        owner);
+        owner));
     }
     out.insert (out.end (), std::make_move_iterator (rows.begin ()),
     std::make_move_iterator (rows.end ()));
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -373,7 +377,7 @@ class DocumentedExamples {
         }
         const std::optional<size_t> found = index_->resolve (spec_operation);
         if (!found) {
-            return std::nullopt;
+            return {};
         }
         // `make_optional` rather than a bare return: copy-initializing an
         // `optional<json>` from a `json` puts nlohmann's `operator ValueType()`
@@ -630,38 +634,40 @@ struct ClaimedIds {
 std::pair<int, nlohmann::json>
 spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
     if (!body.is_object ()) {
-        return body_error ("Body must be a JSON object");
+        return as_response (body_error ("Body must be a JSON object"));
     }
 
     std::string collection_id;
-    if (auto err = apply_required_string_field (
-        body, "collectionId", collection_id, /*is_create=*/true)) {
-        return *err;
+    if (auto outcome = apply_required_string_field (
+        body, "collectionId", collection_id, /*is_create=*/true);
+    !outcome) {
+        return as_response (outcome.error ());
     }
     if (collection_id.empty ()) {
-        return body_error (
-        "Invalid 'collectionId': must be a non-empty string");
+        return as_response (
+        body_error ("Invalid 'collectionId': must be a non-empty string"));
     }
 
     if (!body.contains ("spec") || !body["spec"].is_object ()) {
-        return body_error (
-        "Invalid 'spec': must be an object with the re-fetched document");
+        return as_response (body_error (
+        "Invalid 'spec': must be an object with the re-fetched document"));
     }
     const auto& spec_item = body["spec"];
     for (const char* engine_owned : { "id", "hash", "fetchedAt" }) {
         if (spec_item.contains (engine_owned)) {
-            return body_error (std::string ("Invalid 'spec.") + engine_owned +
-            "': computed by the engine; omit it");
+            return as_response (body_error (std::string ("Invalid 'spec.") +
+            engine_owned + "': computed by the engine; omit it"));
         }
     }
     std::string content;
-    if (auto err = apply_required_string_field (
-        spec_item, "content", content, /*is_create=*/true)) {
-        return *err;
+    if (auto outcome = apply_required_string_field (
+        spec_item, "content", content, /*is_create=*/true);
+    !outcome) {
+        return as_response (outcome.error ());
     }
     if (content.empty ()) {
-        return body_error (
-        "Invalid 'spec.content': an empty document is not a spec");
+        return as_response (
+        body_error ("Invalid 'spec.content': an empty document is not a spec"));
     }
 
     /*
@@ -682,20 +688,21 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
     if (const auto stated_policy = body.find ("policy");
     stated_policy != body.end () && !stated_policy->is_null ()) {
         if (!stated_policy->is_string ()) {
-            return body_error ("Invalid 'policy': must be a string");
+            return as_response (
+            body_error ("Invalid 'policy': must be a string"));
         }
         policy = stated_policy->get<std::string> ();
         if (policy != "safe") {
-            return body_error ("Invalid 'policy': '" + policy +
+            return as_response (body_error ("Invalid 'policy': '" + policy +
             "' is not a policy this engine has; the only one is \"safe\" - "
             "everything the "
             "document adds, every field it moved that nobody here had edited, "
-            "and no deletions");
+            "and no deletions"));
         }
         for (const char* section : { "collections", "create", "update", "delete" }) {
             if (body.contains (section) && !body[section].is_null ()) {
-                return body_error (std::string ("Invalid '") +
-                section + "': a policy sync decides its own rows; send 'policy' or the rows, not both");
+                return as_response (body_error (std::string ("Invalid '") +
+                section + "': a policy sync decides its own rows; send 'policy' or the rows, not both"));
             }
         }
     }
@@ -704,17 +711,17 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
     const nlohmann::json* creates         = nullptr;
     const nlohmann::json* updates         = nullptr;
     const nlohmann::json* deletes         = nullptr;
-    if (auto err = read_items (body, "collections", new_collections)) {
-        return *err;
+    if (auto outcome = read_items (body, "collections", new_collections); !outcome) {
+        return as_response (outcome.error ());
     }
-    if (auto err = read_items (body, "create", creates)) {
-        return *err;
+    if (auto outcome = read_items (body, "create", creates); !outcome) {
+        return as_response (outcome.error ());
     }
-    if (auto err = read_items (body, "update", updates)) {
-        return *err;
+    if (auto outcome = read_items (body, "update", updates); !outcome) {
+        return as_response (outcome.error ());
     }
-    if (auto err = read_items (body, "delete", deletes)) {
-        return *err;
+    if (auto outcome = read_items (body, "delete", deletes); !outcome) {
+        return as_response (outcome.error ());
     }
 
     // The rows the payload asks for. The example rows a refresh writes are the
@@ -727,8 +734,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
     size_t stated = new_collections->size () + creates->size () +
     updates->size () + deletes->size ();
     if (stated > MAX_SYNC_ITEMS) {
-        return body_error ("Sync too large: " + std::to_string (stated) +
-        " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call");
+        return as_response (body_error ("Sync too large: " + std::to_string (stated) +
+        " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call"));
     }
 
     std::pair<int, nlohmann::json> result;
@@ -743,17 +750,18 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         }
         const std::string bound_id = bound_spec_id (root->openapi);
         if (bound_id.empty ()) {
-            result = body_error ("Collection '" + collection_id +
-            "' is not bound to a spec; bind it before syncing");
+            result = as_response (body_error ("Collection '" + collection_id +
+            "' is not bound to a spec; bind it before syncing"));
             return;
         }
         const auto subtree = collection_subtree_ids (stored_collections, collection_id);
 
         const size_t cap = spec_size_cap (db);
         if (content.size () > cap) {
-            result = body_error ("Spec document is " + std::to_string (content.size ()) +
+            result = as_response (
+            body_error ("Spec document is " + std::to_string (content.size ()) +
             " bytes, over the limit of " + std::to_string (cap) +
-            " (raise the 'maxSpecDocumentBytes' setting to allow more)");
+            " (raise the 'maxSpecDocumentBytes' setting to allow more)"));
             return;
         }
 
@@ -768,14 +776,14 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         // them a second time would be a second answer about them.
         nlohmann::ordered_json document;
         if (auto reason = read_spec_indexes (spec_item, batch.spec, cap, &document)) {
-            result = body_error (*reason);
+            result = as_response (body_error (*reason));
             return;
         }
         DocumentedExamples documented (document);
         if (spec_item.contains ("sourceUrl") && !spec_item["sourceUrl"].is_null ()) {
             if (!spec_item["sourceUrl"].is_string ()) {
-                result = body_error (
-                "Invalid 'spec.sourceUrl': must be a string or null");
+                result = as_response (body_error (
+                "Invalid 'spec.sourceUrl': must be a string or null"));
                 return;
             }
             const auto url = spec_item["sourceUrl"].get<std::string> ();
@@ -792,9 +800,10 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         nlohmann::json policy_rows;
         if (!policy.empty ()) {
             SpecComparison comparison;
-            if (auto err = compare_bound_spec (db, stored_collections, subtree,
-                bound_id, document, comparison)) {
-                result = *err;
+            if (auto outcome = compare_bound_spec (
+                db, stored_collections, subtree, bound_id, document, comparison);
+            !outcome) {
+                result = as_response (outcome.error ());
                 return;
             }
             policy_rows = safe_sync_payload (collection_id, stored_collections, comparison);
@@ -805,8 +814,9 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             stated          = new_collections->size () + creates->size () +
             updates->size () + deletes->size ();
             if (stated > MAX_SYNC_ITEMS) {
-                result = body_error ("Sync too large: " + std::to_string (stated) +
-                " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call");
+                result = as_response (body_error (
+                "Sync too large: " + std::to_string (stated) + " items exceeds the limit of " +
+                std::to_string (MAX_SYNC_ITEMS) + " per call"));
                 return;
             }
         }
@@ -822,18 +832,20 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         for (size_t i = 0; i < new_collections->size (); ++i) {
             const auto& item = (*new_collections)[i];
             std::string temp;
-            if (auto err = claim_temp_id (item, "collection", "col_", i, claimed.real, temp)) {
-                result = *err;
+            if (auto outcome =
+                claim_temp_id (item, "collection", "col_", i, claimed.real, temp);
+            !outcome) {
+                result = as_response (outcome.error ());
                 return;
             }
             claimed.collections.insert (temp);
 
             if (item.contains ("openapi")) {
-                result = item_error (400,
+                result = as_response (item_error (400,
                 "Invalid 'openapi': a folder a sync creates is part of the "
                 "document being "
                 "synced, not a document of its own",
-                temp);
+                temp));
                 return;
             }
 
@@ -841,14 +853,15 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             std::string parent    = collection_id;
             if (item.contains ("parentId") && !item["parentId"].is_null ()) {
                 if (!item["parentId"].is_string ()) {
-                    result = item_error (400, "Invalid 'parentId': must be a string", temp);
+                    result = as_response (
+                    item_error (400, "Invalid 'parentId': must be a string", temp));
                     return;
                 }
                 parent = item["parentId"].get<std::string> ();
                 if (!subtree.contains (parent)) {
-                    result = item_error (400,
+                    result = as_response (item_error (400,
                     "Invalid 'parentId': '" + parent + "' is not the collection being synced or one beneath it",
-                    temp);
+                    temp));
                     return;
                 }
             }
@@ -858,12 +871,13 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             folder.id         = claimed.real.at (temp);
             folder.created_at = now;
             folder.updated_at = now;
-            if (auto err = apply_item_fields (
+            if (auto outcome = apply_item_fields (
                 [&] {
                     return apply_collection_fields (db, folder, fields, /*is_create=*/true);
                 },
-                "collection", temp)) {
-                result = *err;
+                "collection", temp);
+            !outcome) {
+                result = as_response (outcome.error ());
                 return;
             }
             if (!item.contains ("order") || item["order"].is_null ()) {
@@ -878,16 +892,18 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         for (size_t i = 0; i < creates->size (); ++i) {
             const auto& item = (*creates)[i];
             std::string temp;
-            if (auto err = claim_temp_id (item, "request", "req_", i, claimed.real, temp)) {
-                result = *err;
+            if (auto outcome =
+                claim_temp_id (item, "request", "req_", i, claimed.real, temp);
+            !outcome) {
+                result = as_response (outcome.error ());
                 return;
             }
             if (item.contains ("examples")) {
-                result = item_error (400,
+                result = as_response (item_error (400,
                 "Invalid 'examples': a sync writes the responses the document "
                 "it stores "
                 "documents; omit it",
-                temp);
+                temp));
                 return;
             }
 
@@ -895,22 +911,22 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             std::string owner;
             if (item.contains ("collectionTempId") && !item["collectionTempId"].is_null ()) {
                 if (!item["collectionTempId"].is_string ()) {
-                    result = item_error (
-                    400, "Invalid 'collectionTempId': must be a string", temp);
+                    result = as_response (item_error (
+                    400, "Invalid 'collectionTempId': must be a string", temp));
                     return;
                 }
                 const auto named = item["collectionTempId"].get<std::string> ();
                 if (!claimed.collections.contains (named)) {
-                    result =
-                    item_error (400, "Unknown collectionTempId '" + named + "'", temp);
+                    result = as_response (item_error (
+                    400, "Unknown collectionTempId '" + named + "'", temp));
                     return;
                 }
                 if (item.contains ("collectionId")) {
-                    result = item_error (400,
+                    result = as_response (item_error (400,
                     "Invalid request: send either 'collectionTempId' (a folder "
                     "in this "
                     "payload) or 'collectionId' (one already stored), not both",
-                    temp);
+                    temp));
                     return;
                 }
                 owner = claimed.real.at (named);
@@ -918,19 +934,18 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
                 next_request_order.try_emplace (owner, 0);
             } else {
                 if (!item.contains ("collectionId") || !item["collectionId"].is_string ()) {
-                    result = item_error (400,
+                    result = as_response (item_error (400,
                     "Invalid 'collectionId': must name a collection beneath "
                     "the one being "
                     "synced, or use 'collectionTempId'",
-                    temp);
+                    temp));
                     return;
                 }
                 owner = item["collectionId"].get<std::string> ();
                 if (!subtree.contains (owner)) {
-                    result = item_error (400,
-                    "Invalid 'collectionId': '" + owner +
-                    "' is not the collection being synced or one beneath it",
-                    temp);
+                    result = as_response (item_error (400,
+                    "Invalid 'collectionId': '" + owner + "' is not the collection being synced or one beneath it",
+                    temp));
                     return;
                 }
                 if (!next_request_order.contains (owner)) {
@@ -948,12 +963,13 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             row.id         = claimed.real.at (temp);
             row.created_at = now;
             row.updated_at = now;
-            if (auto err = apply_item_fields (
+            if (auto outcome = apply_item_fields (
                 [&] {
                     return apply_request_fields (db, row, fields, /*is_create=*/true);
                 },
-                "request", temp)) {
-                result = *err;
+                "request", temp);
+            !outcome) {
+                result = as_response (outcome.error ());
                 return;
             }
             if (!item.contains ("order") || item["order"].is_null ()) {
@@ -969,17 +985,18 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
              */
             if (row.spec_operation) {
                 if (auto rows = documented.rows_for (*row.spec_operation)) {
-                    if (auto err = build_example_rows (*rows, row.id, temp,
-                        /*base_order=*/0, now, batch.examples, /*surviving=*/0)) {
-                        result = *err;
+                    if (auto outcome = build_example_rows (*rows, row.id, temp,
+                        /*base_order=*/0, now, batch.examples, /*surviving=*/0);
+                    !outcome) {
+                        result = as_response (outcome.error ());
                         return;
                     }
                 } else {
-                    result = item_error (400,
+                    result = as_response (item_error (400,
                     "Invalid 'specOperation': the document being synced "
                     "declares no such "
                     "operation, so there is nothing to create for it",
-                    temp);
+                    temp));
                     return;
                 }
             }
@@ -991,20 +1008,20 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         for (size_t i = 0; i < updates->size (); ++i) {
             const auto& item = (*updates)[i];
             if (!item.is_object ()) {
-                result = body_error ("Invalid update at index " +
-                std::to_string (i) + ": must be an object");
+                result = as_response (body_error ("Invalid update at index " +
+                std::to_string (i) + ": must be an object"));
                 return;
             }
             if (!item.contains ("id") || !item["id"].is_string () ||
             item["id"].get<std::string> ().empty ()) {
-                result = body_error ("Invalid update at index " +
-                std::to_string (i) + ": 'id' must be the id of a stored request");
+                result = as_response (body_error ("Invalid update at index " +
+                std::to_string (i) + ": 'id' must be the id of a stored request"));
                 return;
             }
             const std::string id = item["id"].get<std::string> ();
             if (!touched.insert (id).second) {
-                result = item_error (
-                400, "Request '" + id + "' appears twice in this sync", id);
+                result = as_response (item_error (
+                400, "Request '" + id + "' appears twice in this sync", id));
                 return;
             }
             auto stored = db.get_request (id);
@@ -1012,31 +1029,33 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
                 // The diff was computed against a row that has since gone. A
                 // conflict, not a bad request: nothing about the payload is
                 // malformed, the ground moved under it.
-                result = item_error (409, "Request '" + id + "' no longer exists", id);
+                result = as_response (
+                item_error (409, "Request '" + id + "' no longer exists", id));
                 return;
             }
             if (!subtree.contains (stored->collection_id)) {
-                result = item_error (400,
-                "Request '" + id + "' is not beneath the collection being synced", id);
+                result = as_response (item_error (400,
+                "Request '" + id + "' is not beneath the collection being synced", id));
                 return;
             }
             if (item.contains ("collectionId")) {
-                result = item_error (400,
+                result = as_response (item_error (400,
                 "Invalid 'collectionId': a sync updates a request where it is; "
                 "move it with "
                 "PUT /requests/:id",
-                id);
+                id));
                 return;
             }
 
             vayu::db::Request row = *stored;
             row.updated_at        = now;
-            if (auto err = apply_item_fields (
+            if (auto outcome = apply_item_fields (
                 [&] {
                     return apply_request_fields (db, row, item, /*is_create=*/false);
                 },
-                "request", id)) {
-                result = *err;
+                "request", id);
+            !outcome) {
+                result = as_response (outcome.error ());
                 return;
             }
 
@@ -1052,43 +1071,44 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
             if (const auto decision = item.find ("examples");
             decision != item.end () && !decision->is_null ()) {
                 if (!decision->is_boolean ()) {
-                    result = item_error (400,
+                    result = as_response (item_error (400,
                     "Invalid 'examples': must be true to refresh this "
                     "request's imported "
                     "examples from the document being synced, or absent to "
                     "leave them - a "
                     "sync writes the responses the document documents, not "
                     "rows you state",
-                    id);
+                    id));
                     return;
                 }
                 refresh = decision->get<bool> ();
             }
             if (refresh) {
                 if (!row.spec_operation) {
-                    result = item_error (400,
+                    result = as_response (item_error (400,
                     "Invalid 'examples': this request records no operation, so "
                     "the document "
                     "documents no responses for it",
-                    id);
+                    id));
                     return;
                 }
                 const auto rows = documented.rows_for (*row.spec_operation);
                 if (!rows) {
-                    result = item_error (400,
+                    result = as_response (item_error (400,
                     "Invalid 'examples': the document being synced declares no "
                     "operation "
                     "this request records, so it documents no responses for it",
-                    id);
+                    id));
                     return;
                 }
                 const auto plan = refresh_examples (db.get_request_examples (id),
                 db.get_suppressed_request_examples (id));
                 batch.deleted_examples.insert (batch.deleted_examples.end (),
                 plan.replaced.begin (), plan.replaced.end ());
-                if (auto err = build_example_rows (*rows, id, id, plan.base_order,
-                    now, batch.examples, plan.surviving, plan.suppressed_statuses)) {
-                    result = *err;
+                if (auto outcome = build_example_rows (*rows, id, id, plan.base_order,
+                    now, batch.examples, plan.surviving, plan.suppressed_statuses);
+                !outcome) {
+                    result = as_response (outcome.error ());
                     return;
                 }
             }
@@ -1099,14 +1119,14 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         for (size_t i = 0; i < deletes->size (); ++i) {
             const auto& item = (*deletes)[i];
             if (!item.is_string () || item.get<std::string> ().empty ()) {
-                result = body_error ("Invalid delete at index " +
-                std::to_string (i) + ": must be the id of a stored request");
+                result = as_response (body_error ("Invalid delete at index " +
+                std::to_string (i) + ": must be the id of a stored request"));
                 return;
             }
             const std::string id = item.get<std::string> ();
             if (!touched.insert (id).second) {
-                result = item_error (
-                400, "Request '" + id + "' appears twice in this sync", id);
+                result = as_response (item_error (
+                400, "Request '" + id + "' appears twice in this sync", id));
                 return;
             }
             auto stored = db.get_request (id);
@@ -1117,8 +1137,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
                 continue;
             }
             if (!subtree.contains (stored->collection_id)) {
-                result = item_error (400,
-                "Request '" + id + "' is not beneath the collection being synced", id);
+                result = as_response (item_error (400,
+                "Request '" + id + "' is not beneath the collection being synced", id));
                 return;
             }
             batch.deleted.push_back (id);
@@ -1131,8 +1151,8 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
         // that stopped counting them would bound a smaller transaction than the
         // one it was written for.
         if (const size_t writing = stated + batch.examples.size (); writing > MAX_SYNC_ITEMS) {
-            result = body_error ("Sync too large: " + std::to_string (writing) +
-            " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call");
+            result = as_response (body_error ("Sync too large: " + std::to_string (writing) +
+            " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call"));
             return;
         }
 

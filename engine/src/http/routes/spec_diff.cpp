@@ -262,7 +262,7 @@ nlohmann::json draft_request_fields_json (const vayu::core::DraftRequest& draft)
         { "headers", rows_json (draft.headers) }, { "body", std::move (body) } };
 }
 
-std::optional<std::pair<int, nlohmann::json>> compare_bound_spec (vayu::db::Database& db,
+RouteResult compare_bound_spec (vayu::db::Database& db,
 const std::vector<vayu::db::Collection>& collections,
 const std::unordered_set<std::string>& subtree,
 const std::string& spec_id,
@@ -270,10 +270,9 @@ const nlohmann::ordered_json& fetched_document,
 SpecComparison& out) {
     const auto stored = db.get_spec_document (spec_id);
     if (!stored) {
-        return std::make_pair (409,
-        error_body (409,
+        return route_error (409,
         "Collection is bound to spec '" + spec_id +
-        "', which is not stored - rebind it before syncing"));
+        "', which is not stored - rebind it before syncing");
     }
     out.bound_content = stored->content;
     out.fetched       = vayu::core::spec_request_drafts_of (fetched_document);
@@ -311,7 +310,7 @@ SpecComparison& out) {
 
     out.diff =
     vayu::core::diff_spec (out.fetched, bound ? &*bound : nullptr, out.requests);
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -385,9 +384,10 @@ diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     // that says what would change and the route that changes it read one answer,
     // so an apply cannot write rows its preview never showed.
     SpecComparison comparison;
-    if (auto err = compare_bound_spec (
-        db, collections, subtree, spec_id, fetched_read.root, comparison)) {
-        return *err;
+    if (auto outcome = compare_bound_spec (
+        db, collections, subtree, spec_id, fetched_read.root, comparison);
+    !outcome) {
+        return as_response (outcome.error ());
     }
     const auto& fetched              = comparison.fetched;
     const auto& requests             = comparison.requests;

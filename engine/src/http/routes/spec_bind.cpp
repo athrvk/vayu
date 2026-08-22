@@ -98,9 +98,10 @@ bind_spec_response (vayu::db::Database& db, const nlohmann::json& body) {
     }
 
     std::string collection_id;
-    if (auto err = apply_required_string_field (
-        body, "collectionId", collection_id, /*is_create=*/true)) {
-        return *err;
+    if (auto outcome = apply_required_string_field (
+        body, "collectionId", collection_id, /*is_create=*/true);
+    !outcome) {
+        return as_response (outcome.error ());
     }
     if (collection_id.empty ()) {
         return body_error (
@@ -119,9 +120,10 @@ bind_spec_response (vayu::db::Database& db, const nlohmann::json& body) {
         }
     }
     std::string content;
-    if (auto err = apply_required_string_field (
-        spec_item, "content", content, /*is_create=*/true)) {
-        return *err;
+    if (auto outcome = apply_required_string_field (
+        spec_item, "content", content, /*is_create=*/true);
+    !outcome) {
+        return as_response (outcome.error ());
     }
     if (content.empty ()) {
         return body_error (
@@ -211,8 +213,9 @@ bind_spec_response (vayu::db::Database& db, const nlohmann::json& body) {
             // Through the applier every other write of this column uses, so a
             // stamp written by a bind and one written by an import are the same
             // bytes, validated by the same rule.
-            if (auto err = apply_request_fields (db, row, fields, /*is_create=*/false)) {
-                result = *err;
+            if (auto outcome = apply_request_fields (db, row, fields, /*is_create=*/false);
+            !outcome) {
+                result = as_response (outcome.error ());
                 return;
             }
             batch.updated.push_back (std::move (row));

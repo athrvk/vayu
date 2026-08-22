@@ -30,14 +30,14 @@
 
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/routes.hpp"
 
 using nlohmann::json;
 
 namespace vayu::http::routes {
-// Defined in collections.cpp; returns std::nullopt when the parent assignment
-// is legal, else {http_status, json_body} describing the 400 rejection.
-std::optional<std::pair<int, nlohmann::json>> validate_parent_assignment (
-vayu::db::Database& db,
+// Defined in collections.cpp; succeeds when the parent assignment is legal,
+// and fails with the 400 to send when it is not.
+RouteResult validate_parent_assignment (vayu::db::Database& db,
 const std::string& id,
 const std::optional<std::string>& parent_id);
 } // namespace vayu::http::routes
@@ -94,16 +94,17 @@ class CollectionsRouteTest : public ::testing::Test {
 
 TEST_F (CollectionsRouteTest, NullParentIsAllowed) {
     seed_collection ("col_a", "A");
-    auto err = vayu::http::routes::validate_parent_assignment (*db_, "col_a", std::nullopt);
-    EXPECT_FALSE (err.has_value ());
+    EXPECT_TRUE (
+    vayu::http::routes::validate_parent_assignment (*db_, "col_a", std::nullopt).has_value ());
 }
 
 TEST_F (CollectionsRouteTest, SelfParentRejectedWith400) {
     seed_collection ("col_a", "A");
-    auto err = vayu::http::routes::validate_parent_assignment (*db_, "col_a", "col_a");
-    ASSERT_TRUE (err.has_value ());
-    EXPECT_EQ (err->first, 400);
-    EXPECT_EQ (err->second["error"]["message"], "A collection cannot be its own parent");
+    const auto outcome =
+    vayu::http::routes::validate_parent_assignment (*db_, "col_a", "col_a");
+    ASSERT_FALSE (outcome.has_value ());
+    EXPECT_EQ (outcome.error ().status, 400);
+    EXPECT_EQ (outcome.error ().body["error"]["message"], "A collection cannot be its own parent");
 }
 
 TEST_F (CollectionsRouteTest, ReparentIntoDescendantRejectedWith400) {
@@ -112,30 +113,31 @@ TEST_F (CollectionsRouteTest, ReparentIntoDescendantRejectedWith400) {
     seed_collection ("col_b", "B", "col_a");
     seed_collection ("col_c", "C", "col_b");
 
-    auto err = vayu::http::routes::validate_parent_assignment (*db_, "col_a", "col_c");
-    ASSERT_TRUE (err.has_value ());
-    EXPECT_EQ (err->first, 400);
-    EXPECT_EQ (err->second["error"]["message"],
+    const auto outcome =
+    vayu::http::routes::validate_parent_assignment (*db_, "col_a", "col_c");
+    ASSERT_FALSE (outcome.has_value ());
+    EXPECT_EQ (outcome.error ().status, 400);
+    EXPECT_EQ (outcome.error ().body["error"]["message"],
     "Cannot move a collection into its own descendant");
 }
 
 TEST_F (CollectionsRouteTest, LegalReparentSucceeds) {
     // A -> B, and a sibling D. Moving D under B is legal (B is not a descendant
-    // of D). Validation returns nullopt.
+    // of D), so validation succeeds.
     seed_collection ("col_a", "A");
     seed_collection ("col_b", "B", "col_a");
     seed_collection ("col_d", "D");
 
-    auto err = vayu::http::routes::validate_parent_assignment (*db_, "col_d", "col_b");
-    EXPECT_FALSE (err.has_value ());
+    EXPECT_TRUE (
+    vayu::http::routes::validate_parent_assignment (*db_, "col_d", "col_b").has_value ());
 }
 
 TEST_F (CollectionsRouteTest, MissingParentEndsWalkCleanly) {
     // Parent existence is intentionally not required (import creates in bulk).
     // A parent id that resolves to nothing must pass, not throw or reject.
     seed_collection ("col_a", "A");
-    auto err = vayu::http::routes::validate_parent_assignment (*db_, "col_a", "col_ghost");
-    EXPECT_FALSE (err.has_value ());
+    EXPECT_TRUE (
+    vayu::http::routes::validate_parent_assignment (*db_, "col_a", "col_ghost").has_value ());
 }
 
 TEST_F (CollectionsRouteTest, PreExistingCycleDoesNotHangValidator) {
@@ -146,9 +148,9 @@ TEST_F (CollectionsRouteTest, PreExistingCycleDoesNotHangValidator) {
     seed_collection ("col_y", "Y", "col_x");
     seed_collection ("col_z", "Z");
 
-    auto err = vayu::http::routes::validate_parent_assignment (*db_, "col_z", "col_x");
     // col_z is not on the x/y cycle, so the walk simply terminates: legal.
-    EXPECT_FALSE (err.has_value ());
+    EXPECT_TRUE (
+    vayu::http::routes::validate_parent_assignment (*db_, "col_z", "col_x").has_value ());
 }
 
 // -- Cascade delete --------------------------------------------------------

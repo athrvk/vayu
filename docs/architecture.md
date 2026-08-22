@@ -1,6 +1,6 @@
 ---
 description: >-
-  How Vayu works: an Electron UI and a C++20 engine as a local sidecar over HTTP, the process lifecycle, and why the split exists.
+  How Vayu works: an Electron UI and a C++23 engine as a local sidecar over HTTP, the process lifecycle, and why the split exists.
 ---
 
 # Vayu System Architecture
@@ -92,7 +92,7 @@ The Engine is the "muscle"-a headless daemon optimized for maximum I/O throughpu
 - Data persistence (SQLite)
 
 **Technology Stack:**
-- **C++20**: Core language
+- **C++23**: Core language
 - **cpp-httplib**: HTTP server
 - **libcurl**: HTTP client (HTTP/1.1, HTTP/2 via nghttp2 - HTTP/3 is not supported)
 - **QuickJS**: JavaScript engine for scripts

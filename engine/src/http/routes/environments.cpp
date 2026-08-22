@@ -41,17 +41,19 @@ namespace vayu::http::routes {
  * Declared in routes.hpp because `POST /import/apply` applies the same fields to
  * every environment in a bulk payload (issue #96).
  */
-std::optional<std::pair<int, nlohmann::json>>
-apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, bool is_create) {
-    if (auto err = apply_required_string_field (json, "name", e.name, is_create)) {
-        return err;
+RouteResult apply_environment_fields (vayu::db::Environment& e,
+const nlohmann::json& json,
+bool is_create) {
+    if (auto outcome = apply_required_string_field (json, "name", e.name, is_create); !outcome) {
+        return outcome;
     }
     apply_string_field (json, "description", e.description, "", is_create);
-    if (auto err = apply_json_field (json, "variables", e.variables, "{}", is_create)) {
-        return err;
+    if (auto outcome = apply_json_field (json, "variables", e.variables, "{}", is_create);
+    !outcome) {
+        return outcome;
     }
     apply_bool_field (json, "isActive", e.is_active, false, is_create);
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -63,8 +65,8 @@ apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, 
  */
 std::pair<int, nlohmann::json>
 create_environment_response (vayu::db::Database& db, const nlohmann::json& json) {
-    if (auto err = reject_client_supplied_id (json)) {
-        return *err;
+    if (auto outcome = reject_client_supplied_id (json); !outcome) {
+        return as_response (outcome.error ());
     }
     const std::string id = vayu::utils::generate_id ("env_");
 
@@ -77,8 +79,8 @@ create_environment_response (vayu::db::Database& db, const nlohmann::json& json)
     e.created_at = now_ms ();
     e.updated_at = now_ms ();
 
-    if (auto err = apply_environment_fields (e, json, /*is_create=*/true)) {
-        return *err;
+    if (auto outcome = apply_environment_fields (e, json, /*is_create=*/true); !outcome) {
+        return as_response (outcome.error ());
     }
 
     db.save_environment (e);
@@ -94,8 +96,8 @@ create_environment_response (vayu::db::Database& db, const nlohmann::json& json)
 std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json) {
-    if (auto err = reject_mismatched_body_id (json, id)) {
-        return *err;
+    if (auto outcome = reject_mismatched_body_id (json, id); !outcome) {
+        return as_response (outcome.error ());
     }
     auto existing = db.get_environment (id);
     if (!existing) {
@@ -103,8 +105,8 @@ const nlohmann::json& json) {
     }
 
     vayu::db::Environment e = *existing;
-    if (auto err = apply_environment_fields (e, json, /*is_create=*/false)) {
-        return *err;
+    if (auto outcome = apply_environment_fields (e, json, /*is_create=*/false); !outcome) {
+        return as_response (outcome.error ());
     }
     e.updated_at = now_ms ();
 

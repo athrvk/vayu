@@ -10,6 +10,7 @@
 #include "vayu/db/database.hpp"
 
 #include <cstdint>
+#include <expected>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -132,7 +133,7 @@ struct MockParseError {
 };
 
 /**
- * Validate a `POST /mock/start` payload.
+ * Validate a `POST /mock/start` payload, and yield the request it describes.
  *
  * `collectionId` is the one required field; every other rejection is loud
  * rather than a fallback to the default, for the reason `parse_inbox_start`
@@ -142,9 +143,14 @@ struct MockParseError {
  * There is no `bind`: a mock is loopback-only in v1. Unlike an inbox there is
  * no case for exposing it - it answers with stored example bodies, which can
  * carry whatever a recorded response carried, and the engine has no route auth.
+ *
+ * The parsed request is the *value*, not an out-parameter: this used to return
+ * `std::optional<MockParseError>` with the result written through a reference,
+ * so an empty return meant success and a caller could read a half-filled `out`
+ * it never checked. `std::expected` makes the request unreachable unless the
+ * payload was accepted.
  */
-std::optional<MockParseError>
-parse_mock_start (const nlohmann::json& json, MockStartRequest& out);
+std::expected<MockStartRequest, MockParseError> parse_mock_start (const nlohmann::json& json);
 
 /**
  * Reduce a stored request URL to the path template the mock matches on.

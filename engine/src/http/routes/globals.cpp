@@ -41,8 +41,10 @@ save_globals_response (vayu::db::Database& db, const nlohmann::json& json) {
     vayu::db::Globals g;
     g.id = "globals"; // Singleton ID
 
-    if (auto err = apply_json_field (json, "variables", g.variables, "{}", /*is_create=*/true)) {
-        return *err;
+    if (auto outcome =
+        apply_json_field (json, "variables", g.variables, "{}", /*is_create=*/true);
+    !outcome) {
+        return as_response (outcome.error ());
     }
 
     g.updated_at = now_ms ();

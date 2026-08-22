@@ -50,34 +50,38 @@ int64_t now_ms () {
 // ---------------------------------------------------------------------------
 
 TEST (MockParseStart, RequiresACollectionAndDefaultsTheRest) {
-    MockStartRequest out;
-    ASSERT_FALSE (
-    vayu::http::parse_mock_start (json{ { "collectionId", "col_1" } }, out).has_value ());
-    EXPECT_EQ (out.collection_id, "col_1");
-    EXPECT_EQ (out.port, 0);
-    EXPECT_EQ (out.latency_ms, 0);
-    EXPECT_EQ (out.error_rate_pct, 0);
+    const auto parsed =
+    vayu::http::parse_mock_start (json{ { "collectionId", "col_1" } });
+    ASSERT_TRUE (parsed.has_value ());
+    EXPECT_EQ (parsed->collection_id, "col_1");
+    EXPECT_EQ (parsed->port, 0);
+    EXPECT_EQ (parsed->latency_ms, 0);
+    EXPECT_EQ (parsed->error_rate_pct, 0);
 
     // A mock with no collection has nothing to serve, so absence is a 400
     // rather than a listener that 404s everything.
-    EXPECT_TRUE (vayu::http::parse_mock_start (json::object (), out).has_value ());
-    EXPECT_TRUE (
-    vayu::http::parse_mock_start (json{ { "collectionId", "" } }, out).has_value ());
-    EXPECT_TRUE (
-    vayu::http::parse_mock_start (json{ { "collectionId", 7 } }, out).has_value ());
-    EXPECT_TRUE (vayu::http::parse_mock_start (json ("not an object"), out).has_value ());
+    EXPECT_FALSE (vayu::http::parse_mock_start (json::object ()).has_value ());
+    EXPECT_FALSE (
+    vayu::http::parse_mock_start (json{ { "collectionId", "" } }).has_value ());
+    EXPECT_FALSE (vayu::http::parse_mock_start (json{ { "collectionId", 7 } }).has_value ());
+    EXPECT_FALSE (vayu::http::parse_mock_start (json ("not an object")).has_value ());
+
+    // The refusal carries the status and code the route sends, so a caller
+    // that never looks at the value still answers correctly.
+    const auto refused = vayu::http::parse_mock_start (json::object ());
+    ASSERT_FALSE (refused.has_value ());
+    EXPECT_EQ (refused.error ().http_status, 400);
+    EXPECT_EQ (refused.error ().code, "bad_request");
+    EXPECT_FALSE (refused.error ().message.empty ());
 }
 
 TEST (MockParseStart, ReadsAndBoundsEveryTuningField) {
-    MockStartRequest out;
-    ASSERT_FALSE (
-    vayu::http::parse_mock_start (json{ { "collectionId", "col_1" }, { "port", 41234 },
-                                  { "latencyMs", 25 }, { "errorRatePct", 10 } },
-    out)
-    .has_value ());
-    EXPECT_EQ (out.port, 41234);
-    EXPECT_EQ (out.latency_ms, 25);
-    EXPECT_EQ (out.error_rate_pct, 10);
+    const auto parsed = vayu::http::parse_mock_start (json{ { "collectionId", "col_1" },
+    { "port", 41234 }, { "latencyMs", 25 }, { "errorRatePct", 10 } });
+    ASSERT_TRUE (parsed.has_value ());
+    EXPECT_EQ (parsed->port, 41234);
+    EXPECT_EQ (parsed->latency_ms, 25);
+    EXPECT_EQ (parsed->error_rate_pct, 10);
 
     // Out of range is refused rather than clamped: a mock silently answering
     // with no delay when one was asked for is a mock doing something other than
@@ -90,8 +94,7 @@ TEST (MockParseStart, ReadsAndBoundsEveryTuningField) {
          json{ { "latencyMs", "fast" } } }) {
         json body = base;
         body.update (bad);
-        EXPECT_TRUE (vayu::http::parse_mock_start (body, out).has_value ())
-        << body.dump ();
+        EXPECT_FALSE (vayu::http::parse_mock_start (body).has_value ()) << body.dump ();
     }
 }
 

@@ -29,10 +29,16 @@ python build.py --test-only
 ## Prerequisites
 
 - **CMake**: 3.25 or higher
-- **C++ Compiler**: C++20 compatible
-  - Clang 15+ (recommended)
-  - GCC 12+
-  - MSVC 2022+ (Windows)
+- **C++ Compiler**: C++23 capable, which since #901 means the library, not just
+  the dialect flag
+  - GCC 13+ (13.3 is what CI builds on)
+  - Clang 19+ against libstdc++ - clang 18 compiles C++23 but cannot see
+    libstdc++'s `<expected>`, which is gated behind a concepts macro it does not
+    advertise; against libc++ it is fine from 18
+  - AppleClang as shipped with a current Xcode (CI measures 21)
+  - MSVC 2022+ (Windows; CI measures 19.51)
+
+  These are measurements, not folklore - see the feature probe below.
 - **vcpkg**: Package manager (auto-detected or install separately)
 - **Ninja**: Build system (optional, but recommended for faster builds)
 - **Autotools** (Linux and macOS only): `autoconf`, `autoconf-archive`,
@@ -506,11 +512,27 @@ where that header is not itself broadly included.
 
 ### The C++ standard, and the probe that answers a bump
 
-The engine is C++20 (`CMAKE_CXX_STANDARD 20`, `STANDARD_REQUIRED ON`). Raising
-that is a decision about the **worst compiler in the matrix**, not about the
-best: the three platforms ship library support years apart, so "C++23 has
-`std::expected`" is not a fact about the build until each of GCC, AppleClang and
-MSVC has been asked.
+The engine is C++23 (`CMAKE_CXX_STANDARD 23`, `STANDARD_REQUIRED ON`), raised
+from 20 by issue #901. Raising it is a decision about the **worst compiler in
+the matrix**, not about the best: the three platforms ship library support years
+apart, so "C++23 has `std::expected`" was not a fact about the build until each
+of GCC, AppleClang and MSVC had been asked.
+
+What the measurement settled, and what it means for the floor:
+
+| | Ubuntu `g++` 13.3 | macOS AppleClang 21 | Windows MSVC 19.51 |
+|---|---|---|---|
+| `std::expected` | yes | yes | yes |
+| `std::optional` (monadic) | yes | yes | yes |
+| `std::format` (C++20) | yes | yes | yes |
+| `std::move_only_function` | yes | **no** | yes |
+
+The engine uses the first three. It does **not** use `std::move_only_function`,
+however much `thread_pool.hpp`'s `std::function` queue would like to - libc++
+has not shipped it, so on macOS it does not exist. Ubuntu pins no compiler: its
+default GCC covers everything the engine adopted, and `g++-14` adds only
+features that are not on the list (`std::print`, `std::ranges::to`, deducing
+`this`). Re-run the probe before reaching for anything not in the table.
 
 `scripts/cxx-feature-probe/` asks them. It is a standalone CMake project - one
 tiny translation unit per feature, compiled *and linked* at a standard the

@@ -15,12 +15,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include "vayu/http/routes.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http::routes {
 // Declared in execution.cpp.
-std::optional<std::pair<int, nlohmann::json>> normalize_run_http_version (
-nlohmann::json& json);
+RouteResult normalize_run_http_version (nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace {
@@ -29,7 +29,7 @@ using vayu::http::routes::normalize_run_http_version;
 
 TEST (NormalizeRunHttpVersion, AbsentLeavesJsonUntouched) {
     auto json = nlohmann::json::parse (R"({"method":"GET","url":"http://x"})");
-    EXPECT_EQ (normalize_run_http_version (json), std::nullopt);
+    EXPECT_TRUE (normalize_run_http_version (json).has_value ());
     EXPECT_FALSE (json.contains ("httpVersion"));
 }
 
@@ -39,7 +39,7 @@ TEST (NormalizeRunHttpVersion, AcceptsEveryValidVersion) {
     for (const auto version : vayu::all_http_versions ()) {
         const std::string wire = vayu::to_string (version);
         auto json = nlohmann::json::parse (R"({"httpVersion":")" + wire + "\"}");
-        EXPECT_EQ (normalize_run_http_version (json), std::nullopt) << wire;
+        EXPECT_TRUE (normalize_run_http_version (json).has_value ()) << wire;
         ASSERT_TRUE (json.contains ("httpVersion")) << wire;
         EXPECT_EQ (json["httpVersion"], wire) << wire;
     }
@@ -52,17 +52,18 @@ TEST (NormalizeRunHttpVersion, NullIsErasedSoItBehavesLikeAnAbsentKey) {
     // default - erasing is what stops the two diverging once anything resolves
     // a default at this layer.
     auto json = nlohmann::json::parse (R"({"url":"https://x/y","httpVersion":null})");
-    EXPECT_EQ (normalize_run_http_version (json), std::nullopt);
+    EXPECT_TRUE (normalize_run_http_version (json).has_value ());
     EXPECT_FALSE (json.contains ("httpVersion"));
     EXPECT_EQ (json["url"], "https://x/y"); // nothing else disturbed
 }
 
 TEST (NormalizeRunHttpVersion, RejectsUnrecognizedString) {
-    auto json = nlohmann::json::parse (R"({"httpVersion":"spdy"})");
-    auto err  = normalize_run_http_version (json);
-    ASSERT_TRUE (err.has_value ());
-    EXPECT_EQ (err->first, 400);
-    const std::string message = err->second["error"]["message"].get<std::string> ();
+    auto json          = nlohmann::json::parse (R"({"httpVersion":"spdy"})");
+    const auto outcome = normalize_run_http_version (json);
+    ASSERT_FALSE (outcome.has_value ());
+    EXPECT_EQ (outcome.error ().status, 400);
+    const std::string message =
+    outcome.error ().body["error"]["message"].get<std::string> ();
     EXPECT_NE (message.find ("httpVersion"), std::string::npos);
     // Every wire value must be named in the rejection, the same guarantee
     // resource_write_route_test.cpp holds the CRUD route to.
@@ -73,12 +74,11 @@ TEST (NormalizeRunHttpVersion, RejectsUnrecognizedString) {
 }
 
 TEST (NormalizeRunHttpVersion, RejectsNonStringValue) {
-    auto json = nlohmann::json::parse (R"({"httpVersion":2})");
-    auto err  = normalize_run_http_version (json);
-    ASSERT_TRUE (err.has_value ());
-    EXPECT_EQ (err->first, 400);
-    EXPECT_NE (
-    err->second["error"]["message"].get<std::string> ().find ("httpVersion"),
+    auto json          = nlohmann::json::parse (R"({"httpVersion":2})");
+    const auto outcome = normalize_run_http_version (json);
+    ASSERT_FALSE (outcome.has_value ());
+    EXPECT_EQ (outcome.error ().status, 400);
+    EXPECT_NE (outcome.error ().body["error"]["message"].get<std::string> ().find ("httpVersion"),
     std::string::npos);
 }
 

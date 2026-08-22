@@ -57,24 +57,23 @@ namespace {
  * opposite of what the client asked for and is invisible until the wrong
  * certificate is presented somewhere else.
  */
-std::optional<std::pair<int, nlohmann::json>>
-apply_port_field (const nlohmann::json& json, std::optional<int>& out, bool is_create) {
+RouteResult apply_port_field (const nlohmann::json& json, std::optional<int>& out, bool is_create) {
     if (!json.contains ("port")) {
         if (is_create) {
             out.reset ();
         }
-        return std::nullopt;
+        return {};
     }
     if (json["port"].is_null ()) {
         out.reset ();
-        return std::nullopt;
+        return {};
     }
     if (!json["port"].is_number_integer ()) {
-        return std::make_pair (400,
-        error_body (400, "Invalid 'port': must be an integer 1..65535, or null for every port"));
+        return route_error (400,
+        "Invalid 'port': must be an integer 1..65535, or null for every port");
     }
     out = json["port"].get<int> ();
-    return std::nullopt;
+    return {};
 }
 
 /// Hosts are stored lower-cased, so a match is a compare rather than a second
@@ -90,7 +89,7 @@ std::string lowered (std::string value) {
  *
  * @param self_id The row being updated, which is allowed to keep its own pair.
  */
-std::optional<std::pair<int, nlohmann::json>> reject_duplicate_target (vayu::db::Database& db,
+RouteResult reject_duplicate_target (vayu::db::Database& db,
 const vayu::db::ClientCertificate& candidate,
 const std::string& self_id) {
     for (const auto& row : db.get_client_certificates ()) {
@@ -101,13 +100,12 @@ const std::string& self_id) {
             const std::string target = candidate.port ?
             candidate.host + ":" + std::to_string (*candidate.port) :
             candidate.host;
-            return std::make_pair (409,
-            error_body (409,
+            return route_error (409,
             "A client certificate is already registered for '" + target +
-            "' (id " + row.id + "); update or delete that entry instead"));
+            "' (id " + row.id + "); update or delete that entry instead");
         }
     }
-    return std::nullopt;
+    return {};
 }
 
 /// The wire spellings a `certFormat` may take, for the tail of a rejection.
@@ -140,8 +138,7 @@ std::string cert_format_valid_list () {
  * because "PKCS12" was not the word we wanted is a handshake failure against
  * the endpoint later.
  */
-std::optional<std::pair<int, nlohmann::json>> apply_cert_format_field (
-const nlohmann::json& json,
+RouteResult apply_cert_format_field (const nlohmann::json& json,
 std::string& out,
 std::string_view cert_path,
 bool is_create) {
@@ -154,26 +151,24 @@ bool is_create) {
         if (is_create) {
             seed ();
         }
-        return std::nullopt;
+        return {};
     }
     if (json["certFormat"].is_null ()) {
         seed ();
-        return std::nullopt;
+        return {};
     }
     if (!json["certFormat"].is_string ()) {
-        return std::make_pair (400,
-        error_body (400,
-        "Invalid 'certFormat': must be a string. Valid values: " + cert_format_valid_list ()));
+        return route_error (400,
+        "Invalid 'certFormat': must be a string. Valid values: " + cert_format_valid_list ());
     }
     const std::string candidate = json["certFormat"].get<std::string> ();
     if (!vayu::http::client_cert_format_from_string (candidate)) {
-        return std::make_pair (400,
-        error_body (400,
+        return route_error (400,
         "Invalid 'certFormat': '" + candidate +
-        "' is not a certificate format. Valid values: " + cert_format_valid_list ()));
+        "' is not a certificate format. Valid values: " + cert_format_valid_list ());
     }
     out = candidate;
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -183,23 +178,24 @@ bool is_create) {
  * The check runs on the *merged* row rather than on the body, which is what
  * makes a PUT that moves only `keyPath` still prove the pair works together.
  */
-std::optional<std::pair<int, nlohmann::json>> apply_client_certificate_fields (
-vayu::db::ClientCertificate& c,
+RouteResult apply_client_certificate_fields (vayu::db::ClientCertificate& c,
 const nlohmann::json& json,
 bool is_create) {
-    if (auto err = apply_required_string_field (json, "host", c.host, is_create)) {
-        return err;
+    if (auto outcome = apply_required_string_field (json, "host", c.host, is_create); !outcome) {
+        return outcome;
     }
     c.host = lowered (std::move (c.host));
-    if (auto err = apply_port_field (json, c.port, is_create)) {
-        return err;
+    if (auto outcome = apply_port_field (json, c.port, is_create); !outcome) {
+        return outcome;
     }
-    if (auto err = apply_required_string_field (json, "certPath", c.cert_path, is_create)) {
-        return err;
+    if (auto outcome = apply_required_string_field (json, "certPath", c.cert_path, is_create);
+    !outcome) {
+        return outcome;
     }
     // After `certPath`, because an absent format is read off that file.
-    if (auto err = apply_cert_format_field (json, c.cert_format, c.cert_path, is_create)) {
-        return err;
+    if (auto outcome = apply_cert_format_field (json, c.cert_format, c.cert_path, is_create);
+    !outcome) {
+        return outcome;
     }
     // `keyPath` is required for a PEM pair and must be absent for a PKCS#12
     // bundle, so it cannot go through `apply_required_string_field`: what a
@@ -212,10 +208,9 @@ bool is_create) {
         if (json["keyPath"].is_null ()) {
             c.key_path.clear ();
         } else if (!json["keyPath"].is_string ()) {
-            return std::make_pair (400,
-            error_body (400,
+            return route_error (400,
             "Invalid 'keyPath': must be a string, or null for a "
-            "PKCS#12 entry that carries its own key"));
+            "PKCS#12 entry that carries its own key");
         } else {
             c.key_path = json["keyPath"].get<std::string> ();
         }
@@ -233,17 +228,16 @@ bool is_create) {
     // avoid, and the caller can fix it by naming `certFormat` here.
     const auto format = vayu::http::client_cert_format_from_string (c.cert_format);
     if (!format) {
-        return std::make_pair (400,
-        error_body (400,
-        "Stored 'certFormat' is '" + c.cert_format + "', which is not a certificate format - set it explicitly. Valid values: " +
-        cert_format_valid_list ()));
+        return route_error (400,
+        "Stored 'certFormat' is '" +
+        c.cert_format + "', which is not a certificate format - set it explicitly. Valid values: " +
+        cert_format_valid_list ());
     }
     if (const auto rejection = vayu::http::client_cert_rejection (
         c.host, c.port, *format, c.cert_path, c.key_path)) {
-        return std::make_pair (
-        400, error_body (400, "Invalid client certificate: " + *rejection));
+        return route_error (400, "Invalid client certificate: " + *rejection);
     }
-    return std::nullopt;
+    return {};
 }
 
 } // namespace
@@ -255,8 +249,8 @@ bool is_create) {
  */
 std::pair<int, nlohmann::json>
 create_client_certificate_response (vayu::db::Database& db, const nlohmann::json& json) {
-    if (auto err = reject_client_supplied_id (json)) {
-        return *err;
+    if (auto outcome = reject_client_supplied_id (json); !outcome) {
+        return as_response (outcome.error ());
     }
 
     vayu::db::ClientCertificate c;
@@ -264,11 +258,11 @@ create_client_certificate_response (vayu::db::Database& db, const nlohmann::json
     c.created_at = now_ms ();
     c.updated_at = now_ms ();
 
-    if (auto err = apply_client_certificate_fields (c, json, /*is_create=*/true)) {
-        return *err;
+    if (auto outcome = apply_client_certificate_fields (c, json, /*is_create=*/true); !outcome) {
+        return as_response (outcome.error ());
     }
-    if (auto err = reject_duplicate_target (db, c, /*self_id=*/"")) {
-        return *err;
+    if (auto outcome = reject_duplicate_target (db, c, /*self_id=*/""); !outcome) {
+        return as_response (outcome.error ());
     }
 
     db.save_client_certificate (c);
@@ -283,8 +277,8 @@ create_client_certificate_response (vayu::db::Database& db, const nlohmann::json
 std::pair<int, nlohmann::json> update_client_certificate_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json) {
-    if (auto err = reject_mismatched_body_id (json, id)) {
-        return *err;
+    if (auto outcome = reject_mismatched_body_id (json, id); !outcome) {
+        return as_response (outcome.error ());
     }
     auto existing = db.get_client_certificate (id);
     if (!existing) {
@@ -292,11 +286,12 @@ const nlohmann::json& json) {
     }
 
     vayu::db::ClientCertificate c = *existing;
-    if (auto err = apply_client_certificate_fields (c, json, /*is_create=*/false)) {
-        return *err;
+    if (auto outcome = apply_client_certificate_fields (c, json, /*is_create=*/false);
+    !outcome) {
+        return as_response (outcome.error ());
     }
-    if (auto err = reject_duplicate_target (db, c, /*self_id=*/id)) {
-        return *err;
+    if (auto outcome = reject_duplicate_target (db, c, /*self_id=*/id); !outcome) {
+        return as_response (outcome.error ());
     }
     c.updated_at = now_ms ();
 

@@ -38,7 +38,7 @@ Vayu collapses that workflow into one app. Build a request once, point the load 
 
 ## Performance
 
-The HTTP core is a multi-worker libcurl event loop in C++20, isolated from the Electron UI by a local HTTP sidecar so rendering never blocks on the request load. In practice that lets a single laptop saturate a gigabit link while the dashboard keeps streaming metrics frame-by-frame - well past what Node.js-backed Electron tools manage on the same hardware.
+The HTTP core is a multi-worker libcurl event loop in C++23, isolated from the Electron UI by a local HTTP sidecar so rendering never blocks on the request load. In practice that lets a single laptop saturate a gigabit link while the dashboard keeps streaming metrics frame-by-frame - well past what Node.js-backed Electron tools manage on the same hardware.
 
 **Proof - head-to-head vs `wrk` and `vegeta`.** Same mock server, same machine, same session, matched concurrency (64), measured from a standalone engine:
 
@@ -156,7 +156,7 @@ See [Architecture Documentation](https://athrvk.github.io/vayu/architecture/) fo
 | UI state | Zustand |
 | Server state | TanStack Query |
 | Styling | Tailwind CSS v4 |
-| HTTP engine | C++20 + libcurl |
+| HTTP engine | C++23 + libcurl |
 | Scripting | QuickJS (embedded JS engine) |
 | Database | SQLite via sqlite_orm |
 | Build | CMake + vcpkg (C++), pnpm + Vite (app) |

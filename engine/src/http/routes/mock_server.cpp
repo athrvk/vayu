@@ -38,6 +38,8 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <expected>
+#include <format>
 #include <set>
 #include <string_view>
 #include <thread>
@@ -169,49 +171,51 @@ namespace {
 
 /// Read a bounded integer field, or say why it was refused. Absent and `null`
 /// both keep @p out, which the caller seeded with the default.
-std::optional<MockParseError>
+std::expected<void, MockParseError>
 read_bounded_int (const nlohmann::json& json, const char* key, int low, int high, int& out) {
     const auto it = json.find (key);
     if (it == json.end () || it->is_null ()) {
-        return std::nullopt;
+        return {};
     }
     if (!it->is_number_integer () || it->get<int> () < low || it->get<int> () > high) {
-        return MockParseError{ 400, "bad_request",
-            std::string ("Invalid '") + key + "': must be an integer between " +
-            std::to_string (low) + " and " + std::to_string (high) };
+        return std::unexpected (MockParseError{ 400, "bad_request",
+        std::format ("Invalid '{}': must be an integer between {} and {}", key, low, high) });
     }
     out = it->get<int> ();
-    return std::nullopt;
+    return {};
 }
 
 } // namespace
 
-std::optional<MockParseError>
-parse_mock_start (const nlohmann::json& json, MockStartRequest& out) {
-    out = MockStartRequest{};
+std::expected<MockStartRequest, MockParseError> parse_mock_start (const nlohmann::json& json) {
     if (!json.is_object ()) {
-        return MockParseError{ 400, "bad_request", "Request body must be a JSON object" };
+        return std::unexpected (
+        MockParseError{ 400, "bad_request", "Request body must be a JSON object" });
     }
 
     const auto collection = json.find ("collectionId");
     if (collection == json.end () || !collection->is_string () ||
     collection->get<std::string> ().empty ()) {
-        return MockParseError{ 400, "bad_request",
-            "'collectionId' is required and must be a non-empty string" };
+        return std::unexpected (MockParseError{ 400, "bad_request",
+        "'collectionId' is required and must be a non-empty string" });
     }
-    out.collection_id = collection->get<std::string> ();
 
-    if (auto err = read_bounded_int (json, "port", 0, 65535, out.port)) {
-        return err;
+    MockStartRequest parsed;
+    parsed.collection_id = collection->get<std::string> ();
+
+    if (auto outcome = read_bounded_int (json, "port", 0, 65535, parsed.port); !outcome) {
+        return std::unexpected (outcome.error ());
     }
-    if (auto err = read_bounded_int (json, "latencyMs", 0,
-        constants::mock_server::MAX_LATENCY_MS, out.latency_ms)) {
-        return err;
+    if (auto outcome = read_bounded_int (json, "latencyMs", 0,
+        constants::mock_server::MAX_LATENCY_MS, parsed.latency_ms);
+    !outcome) {
+        return std::unexpected (outcome.error ());
     }
-    if (auto err = read_bounded_int (json, "errorRatePct", 0, 100, out.error_rate_pct)) {
-        return err;
+    if (auto outcome = read_bounded_int (json, "errorRatePct", 0, 100, parsed.error_rate_pct);
+    !outcome) {
+        return std::unexpected (outcome.error ());
     }
-    return std::nullopt;
+    return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -739,14 +743,15 @@ void register_mock_server_routes (RouteContext& ctx) {
             send_error (res, 400, std::string ("Invalid JSON body: ") + e.what ());
             return;
         }
-        MockStartRequest start;
-        if (auto error = parse_mock_start (body, start); error) {
-            vayu::utils::log_warning ("POST /mock/start - " + error->message);
-            send_error (res, error->http_status, error->message, error->code);
+        const auto start = parse_mock_start (body);
+        if (!start) {
+            const auto& refusal = start.error ();
+            vayu::utils::log_warning ("POST /mock/start - " + refusal.message);
+            send_error (res, refusal.http_status, refusal.message, refusal.code);
             return;
         }
         try {
-            auto result = ctx.mock_server_manager.start (ctx.db, start);
+            auto result = ctx.mock_server_manager.start (ctx.db, *start);
             if (!result.ok) {
                 vayu::utils::log_warning ("POST /mock/start - " + result.error_message);
                 send_error (res, result.http_status, result.error_message,

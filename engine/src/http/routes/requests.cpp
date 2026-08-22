@@ -126,47 +126,43 @@ static std::string http_version_seed (vayu::db::Database& db) {
  * templated path, so it is required to start with `/` - a concrete URL stored
  * here would never match the document it came from.
  */
-static std::optional<std::pair<int, nlohmann::json>>
-apply_spec_operation_field (const nlohmann::json& json,
+static RouteResult apply_spec_operation_field (const nlohmann::json& json,
 std::optional<std::string>& out,
 bool is_create) {
     if (!json.contains ("specOperation")) {
         if (is_create) {
             out = std::nullopt;
         }
-        return std::nullopt;
+        return {};
     }
     const auto& value = json["specOperation"];
     if (value.is_null ()) {
         out = std::nullopt;
-        return std::nullopt;
+        return {};
     }
     if (!value.is_object ()) {
-        return std::make_pair (400,
-        error_body (400, "Invalid 'specOperation': must be a JSON object or null"));
+        return route_error (400, "Invalid 'specOperation': must be a JSON object or null");
     }
 
     for (const char* key : { "method", "path" }) {
         if (!value.contains (key) || !value[key].is_string () ||
         value[key].get<std::string> ().empty ()) {
-            return std::make_pair (400,
-            error_body (400, std::string ("Invalid 'specOperation.") + key + "': must be a non-empty string"));
+            return route_error (400,
+            std::string ("Invalid 'specOperation.") + key + "': must be a non-empty string");
         }
     }
     if (value["path"].get<std::string> ().front () != '/') {
-        return std::make_pair (400,
-        error_body (400,
+        return route_error (400,
         "Invalid 'specOperation.path': must be the templated path from the "
-        "document and start with '/' (e.g. '/pets/{petId}')"));
+        "document and start with '/' (e.g. '/pets/{petId}')");
     }
     if (value.contains ("operationId") && !value["operationId"].is_null () &&
     !value["operationId"].is_string ()) {
-        return std::make_pair (400,
-        error_body (400, "Invalid 'specOperation.operationId': must be a string"));
+        return route_error (400, "Invalid 'specOperation.operationId': must be a string");
     }
 
     out = value.dump ();
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -180,49 +176,54 @@ bool is_create) {
  * Declared in routes.hpp because `POST /import/apply` applies the same fields to
  * every request in a bulk payload (issue #96).
  */
-std::optional<std::pair<int, nlohmann::json>> apply_request_fields (vayu::db::Database& db,
+RouteResult apply_request_fields (vayu::db::Database& db,
 vayu::db::Request& r,
 const nlohmann::json& json,
 bool is_create) {
-    if (auto err = apply_required_string_field (
-        json, "collectionId", r.collection_id, is_create)) {
-        return err;
+    if (auto outcome =
+        apply_required_string_field (json, "collectionId", r.collection_id, is_create);
+    !outcome) {
+        return outcome;
     }
-    if (auto err = apply_required_string_field (json, "name", r.name, is_create)) {
-        return err;
+    if (auto outcome = apply_required_string_field (json, "name", r.name, is_create); !outcome) {
+        return outcome;
     }
 
     std::string method_str = to_string (r.method);
-    if (auto err = apply_required_string_field (json, "method", method_str, is_create)) {
-        return err;
+    if (auto outcome = apply_required_string_field (json, "method", method_str, is_create);
+    !outcome) {
+        return outcome;
     }
     auto method = vayu::parse_method (method_str);
     if (!method) {
-        return std::make_pair (400, error_body (400, "Invalid HTTP method"));
+        return route_error (400, "Invalid HTTP method");
     }
     r.method = *method;
 
-    if (auto err = apply_required_string_field (json, "url", r.url, is_create)) {
-        return err;
+    if (auto outcome = apply_required_string_field (json, "url", r.url, is_create); !outcome) {
+        return outcome;
     }
 
     apply_string_field (json, "description", r.description, "", is_create);
 
-    if (auto err = apply_key_value_field (json, "params", r.params, is_create)) {
-        return err;
+    if (auto outcome = apply_key_value_field (json, "params", r.params, is_create); !outcome) {
+        return outcome;
     }
-    if (auto err = apply_key_value_field (json, "headers", r.headers, is_create)) {
-        return err;
+    if (auto outcome = apply_key_value_field (json, "headers", r.headers, is_create); !outcome) {
+        return outcome;
     }
 
-    if (auto err = apply_json_field (json, "body", r.body, R"({"mode":"none"})", is_create)) {
-        return err;
+    if (auto outcome = apply_json_field (json, "body", r.body, R"({"mode":"none"})", is_create);
+    !outcome) {
+        return outcome;
     }
     apply_string_field (json, "bodyType", r.body_type, "none", is_create);
     // A request's auth may be 'inherit' - that is its default, and the app
     // resolves the collection chain before the request is executed.
-    if (auto err = apply_json_field (json, "auth", r.auth, R"({"mode":"inherit"})", is_create)) {
-        return err;
+    if (auto outcome =
+        apply_json_field (json, "auth", r.auth, R"({"mode":"inherit"})", is_create);
+    !outcome) {
+        return outcome;
     }
     apply_string_field (json, "preRequestScript", r.pre_request_script, "", is_create);
     apply_string_field (json, "postRequestScript", r.post_request_script, "", is_create);
@@ -243,9 +244,10 @@ bool is_create) {
     // than coerced - see apply_http_version_field in routes.hpp. The seed is
     // read fresh here (not hoisted above the field applications) so it always
     // reflects the config entry as of this write.
-    if (auto err = apply_http_version_field (json, "httpVersion",
-        r.http_version, http_version_seed (db), is_create)) {
-        return err;
+    if (auto outcome = apply_http_version_field (
+        json, "httpVersion", r.http_version, http_version_seed (db), is_create);
+    !outcome) {
+        return outcome;
     }
 
     // Consume the response as an event stream (issue #574). Through the shared
@@ -257,11 +259,12 @@ bool is_create) {
     // the same reason `stream` is: `POST /import/apply` runs this same applier,
     // and an importer that recovered the operation a request came from must be
     // able to store it in the one call that writes the tree.
-    if (auto err = apply_spec_operation_field (json, r.spec_operation, is_create)) {
-        return err;
+    if (auto outcome = apply_spec_operation_field (json, r.spec_operation, is_create);
+    !outcome) {
+        return outcome;
     }
 
-    return std::nullopt;
+    return {};
 }
 
 /**
@@ -275,13 +278,12 @@ bool is_create) {
  * `POST /import/apply` runs the shared applier against collection rows it has
  * not written yet - every id would look missing there.
  */
-static std::optional<std::pair<int, nlohmann::json>>
-reject_missing_collection (vayu::db::Database& db, const std::string& collection_id) {
+static RouteResult reject_missing_collection (vayu::db::Database& db,
+const std::string& collection_id) {
     if (db.get_collection (collection_id).has_value ()) {
-        return std::nullopt;
+        return {};
     }
-    return std::make_pair (
-    400, error_body (400, "Collection '" + collection_id + "' does not exist"));
+    return route_error (400, "Collection '" + collection_id + "' does not exist");
 }
 
 /**
@@ -321,8 +323,8 @@ static bool order_is_defaulted (const nlohmann::json& json) {
  */
 std::pair<int, nlohmann::json>
 create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
-    if (auto err = reject_client_supplied_id (json)) {
-        return *err;
+    if (auto outcome = reject_client_supplied_id (json); !outcome) {
+        return as_response (outcome.error ());
     }
     const std::string id = vayu::utils::generate_id ("req_");
 
@@ -335,11 +337,11 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
     r.created_at = now_ms ();
     r.updated_at = now_ms ();
 
-    if (auto err = apply_request_fields (db, r, json, /*is_create=*/true)) {
-        return *err;
+    if (auto outcome = apply_request_fields (db, r, json, /*is_create=*/true); !outcome) {
+        return as_response (outcome.error ());
     }
-    if (auto err = reject_missing_collection (db, r.collection_id)) {
-        return *err;
+    if (auto outcome = reject_missing_collection (db, r.collection_id); !outcome) {
+        return as_response (outcome.error ());
     }
     if (order_is_defaulted (json)) {
         r.order = next_request_order (db, r.collection_id);
@@ -358,8 +360,8 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
 std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json) {
-    if (auto err = reject_mismatched_body_id (json, id)) {
-        return *err;
+    if (auto outcome = reject_mismatched_body_id (json, id); !outcome) {
+        return as_response (outcome.error ());
     }
     auto existing = db.get_request (id);
     if (!existing) {
@@ -367,15 +369,15 @@ const nlohmann::json& json) {
     }
 
     vayu::db::Request r = *existing;
-    if (auto err = apply_request_fields (db, r, json, /*is_create=*/false)) {
-        return *err;
+    if (auto outcome = apply_request_fields (db, r, json, /*is_create=*/false); !outcome) {
+        return as_response (outcome.error ());
     }
     // Only when the write states a collection: an already-stranded row (written
     // before this check existed) must stay repairable by a PUT that moves it
     // somewhere real, rather than becoming unwritable.
     if (json.contains ("collectionId")) {
-        if (auto err = reject_missing_collection (db, r.collection_id)) {
-            return *err;
+        if (auto outcome = reject_missing_collection (db, r.collection_id); !outcome) {
+            return as_response (outcome.error ());
         }
     }
     // A move that states no `order` appends in the destination. Carrying the
