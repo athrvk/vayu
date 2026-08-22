@@ -359,7 +359,14 @@ jobs:
           - os: macos-latest
             preset: macos-prod
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
-    timeout-minutes: 60
+    # 90, not 60. A normal pull request finishes this job in 5-11 minutes, so
+    # the timeout is a runaway guard rather than a budget - but a pull request
+    # that touches a large number of engine sources makes the clang-tidy step
+    # dominate, because clang-tidy parses a whole translation unit per changed
+    # file no matter how few of its lines changed. #886's 149-file reformat hit
+    # the old 60 on Linux and Windows alike with clang-tidy still running. The
+    # headroom is for that shape of change; nothing routine goes near it.
+    timeout-minutes: 90
     env:
       VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
