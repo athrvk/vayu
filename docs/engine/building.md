@@ -576,14 +576,20 @@ it reports the backlog as well. That is deliberate for a local early warning you
 can skip with `git commit --no-verify`, and it is why a hook refusal is not by
 itself a merge blocker. Issue #902 tracks aligning the two.
 
-**CI lints on all three platforms**, not just Linux, and pins the same
-clang-tidy major on each. clang-tidy analyses a translation unit, so every
-`#ifdef _WIN32` and `__APPLE__` branch is preprocessed away before a Linux run
-sees it - `platform.hpp`'s four-way split, and the Windows-only blocks in
-`client.cpp`, `event_loop_worker.cpp` and `temp_database.hpp`, are code no
-Linux-only lint could reach. Pinning one major matters more here than it does
-for a single leg: three legs on three clang-tidy versions would report version
-differences as platform differences.
+**CI lints on Linux and Windows**, not Linux alone. clang-tidy analyses a
+translation unit, so an `#ifdef _WIN32` branch is preprocessed away before a
+Linux run sees it - `platform.hpp`'s per-OS split and the Windows-only blocks in
+`client.cpp`, `event_loop_worker.cpp` and `temp_database.hpp` are code a
+Linux-only lint could never reach.
+
+**macOS is excluded**, and not by choice: clang-tidy 19.1.7 and 20.1.8 both die
+there with SIGILL - an `llvm_unreachable` trap - part way through the two
+heaviest translation units, which lint clean on both other legs. Upstream clang
+cannot parse that runner's AppleClang 21 SDK. What that loses is small and
+measured: the engine's entire macOS-conditional surface is four `#define`s in
+`platform.hpp` with no statement in them, so what is actually missed is
+`clang-analyzer-*` over shared code as compiled against libc++. Issue #906
+carries the evidence and the ways back in.
 
 Both pass `--allow-no-checks`, for `engine/src/runtime/` - its `.clang-tidy`
 disables every check, and clang-tidy calls an empty check list a usage error
@@ -624,8 +630,7 @@ CI's version differs per leg, and none of it is a free choice:
 | Leg | clang-tidy | Why |
 |-----|-----------|-----|
 | Linux | 19, from apt | What CONTRIBUTING.md tells contributors to install, so a local run and CI answer the same |
-| macOS | 20, shipped by the image | 19 crashed with SIGILL on a runner that builds with AppleClang 21 |
-| Windows | 20.1.8, shipped by the image | chocolatey refuses to downgrade from the preinstalled version |
+| Windows | 20.1.8, shipped by the image | chocolatey refuses to downgrade from the preinstalled version, and the image's copy costs no install time |
 
 The step asserts the 19 floor rather than trusting it, because a runner image
 is a pin somebody else controls. The cost of the spread is that a finding on one
