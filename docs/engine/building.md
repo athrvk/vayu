@@ -763,6 +763,17 @@ disables every check, and clang-tidy calls an empty check list a usage error
 rather than a clean run, so the one exempt directory would otherwise be the only
 one that fails.
 
+**A changed header is an input on Linux only.** `compile_commands.json` has one
+entry per translation unit and none for a `.hpp`, so clang-tidy synthesises a
+command for a header handed to it directly. On Linux that command still finds
+libstdc++; on Windows it does not find the MSVC STL, and the result is the whole
+standard library failing to parse - `no template named 'optional' in namespace
+'std'` - which `WarningsAsErrors: '*'` turns into a failed job. The Windows leg
+therefore lints translation units only. Little is lost, because
+`HeaderFilterRegex` reports findings *inside* a header through every translation
+unit that includes it; what is not covered there is a pull request that changes
+a header and no `.cpp`. Issue #930 carries the flags that would fix it properly.
+
 ### The precompiled header
 
 The engine builds with a PCH, and clang-tidy replays the compile command that
