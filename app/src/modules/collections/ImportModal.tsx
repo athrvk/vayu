@@ -138,6 +138,18 @@ export function ImportModal() {
 	 * this dialog - so there is no tab to switch to while it runs.
 	 */
 	const [checkingBindings, setCheckingBindings] = useState(false);
+	/**
+	 * An apply is under way - the bound-document lookup or the writes themselves.
+	 *
+	 * One name for what the close, the apply guard and the Import button already
+	 * spelled out, because the option toggles now join them (issue #895): a
+	 * toggle supersedes the tab, and the
+	 * apply holds a generation captured before its first file went out, so a
+	 * toggle mid-apply would drop the outcome write that reports which files
+	 * failed. It is also the one moment the options cannot change anything -
+	 * `runImport` sends each file with the values it started with.
+	 */
+	const applying = importMutation.isPending || checkingBindings;
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const folderInputRef = useRef<HTMLInputElement>(null);
 	const { maxBytes: specMaxBytes } = useSpecDocumentLimit();
@@ -213,7 +225,7 @@ export function ImportModal() {
 	};
 
 	const handleClose = () => {
-		if (importMutation.isPending || checkingBindings) return;
+		if (applying) return;
 		// Every tab, not just the visible one: another may be mid-download, and a
 		// dialog that reopens showing work the user closed is the same leak this
 		// change is about.
@@ -296,7 +308,20 @@ export function ImportModal() {
 		for (const t of ["file", "url", "paste"] as Tab[]) {
 			const state = tabs[t];
 			if (state.phase !== "preview" || state.entries.length === 0) continue;
-			const at = generation.current[t];
+			// Supersede, not merely capture (issue #895). A re-parse is a real
+			// engine round trip per file and nothing disables the checkboxes while
+			// one runs, so two toggles inside one round trip would otherwise hold
+			// the *same* generation: both patches pass `patchTab`'s check and
+			// whichever resolves last wins the entries. Bumping first drops the
+			// earlier toggle's late patch, which is what keeps the entries and the
+			// checkboxes describing the same parse - and they must, because
+			// `importScripts` is baked in at parse time and ignored at apply
+			// (`orchestrator.ts`), so a stale parse imports a setting the checkbox
+			// says is off.
+			//
+			// Nothing is aborted by this: only a tab in `preview` reaches here, and
+			// the URL tab's fetch is long finished by then.
+			const at = supersede(t);
 			// Reported like the first parse, because it *is* the first parse again -
 			// one engine round trip per file, which on a folder pick is a wait a
 			// checkbox click should not make look instant.
@@ -442,7 +467,7 @@ export function ImportModal() {
 	 * everything twice.
 	 */
 	const handleImport = async () => {
-		if (applicable.length === 0 || checkingBindings || importMutation.isPending) return;
+		if (applicable.length === 0 || applying) return;
 		const candidates = specCandidates(applicable);
 		if (candidates.length > 0) {
 			setCheckingBindings(true);
@@ -890,6 +915,7 @@ export function ImportModal() {
 									<input
 										type="checkbox"
 										checked={importEnvironments}
+										disabled={applying}
 										onChange={(e) => toggleEnvironments(e.target.checked)}
 									/>
 									Import environments &amp; variables
@@ -898,6 +924,7 @@ export function ImportModal() {
 									<input
 										type="checkbox"
 										checked={importScripts}
+										disabled={applying}
 										onChange={(e) => toggleScripts(e.target.checked)}
 									/>
 									Import pre-request &amp; test scripts
@@ -913,13 +940,9 @@ export function ImportModal() {
 								</Button>
 								<Button
 									onClick={handleImport}
-									disabled={
-										importMutation.isPending ||
-										checkingBindings ||
-										applicable.length === 0
-									}
+									disabled={applying || applicable.length === 0}
 								>
-									{importMutation.isPending || checkingBindings
+									{applying
 										? "Importing…"
 										: // The count only appears for a batch: it is what the
 											// button is about to do N times, and on one file it
