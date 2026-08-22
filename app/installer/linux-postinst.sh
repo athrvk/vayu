@@ -9,7 +9,7 @@ LOCK_FILE="$HOME/.config/vayu/vayu.lock"
 
 if [ -f "$LOCK_FILE" ]; then
     # Check if the PID in the lock file is still running
-    PID=$(cat "$LOCK_FILE" 2>/dev/null | tr -d '\n' || echo "")
+    PID=$(tr -d '\n' 2>/dev/null < "$LOCK_FILE" || echo "")
     
     if [ -n "$PID" ] && [ "$PID" -eq "$PID" ] 2>/dev/null; then
         # Check if process is running AND is vayu-engine

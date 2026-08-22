@@ -64,6 +64,7 @@ jobs:
       engine: ${{ steps.area.outputs.engine }}
       installer: ${{ steps.area.outputs.installer }}
       build_script: ${{ steps.area.outputs.build_script }}
+      scripts: ${{ steps.area.outputs.scripts }}
     steps:
       # Two invocations, because `predicate-quantifier` applies to the whole
       # action and the two kinds of filter need opposite ones. This one answers
@@ -92,6 +93,15 @@ jobs:
           # change to *this* workflow, or to codeql/labeler/release, must still
           # run the matrix. Each of these is checked by the `Docs site` workflow
           # instead, which runs `mkdocs build --strict` on the same paths.
+          #
+          # `.github/hooks/**` and `scripts/install-git-hooks.sh` used to be
+          # excluded here too, on that same reasoning - neither can change a
+          # build artifact. They are back in because #887 gave shell and Python
+          # a linter and both are among the files it reads: a gate whose own
+          # inputs cannot trigger it is the repository's "written but never
+          # read" defect in wiring form. `code` admits them; the area filter
+          # below routes them to `Script lint` alone, so the matrix they still
+          # cannot affect still does not run.
           filters: |
             code:
               - '**'
@@ -100,9 +110,7 @@ jobs:
               - '!**/*.md'
               - '!LICENSE'
               - '!.gitignore'
-              - '!scripts/install-git-hooks.sh'
               - '!.github/mkdocs.yml'
-              - '!.github/hooks/**'
               - '!.github/workflows/docs.yml'
               - '!requirements-docs.txt'
 
@@ -151,10 +159,25 @@ jobs:
               - 'install.sh'
               - 'scripts/test/install_test.sh'
               - 'scripts/test/install_e2e.sh'
-              # The git hook rides this job because it is the only one with a
-              # shell toolchain (shellcheck, bash) already stood up.
+              # The git hook's suite rides this job because it is the only one
+              # with a bash toolchain already stood up. Linting both of them is
+              # `scripts` below, for every shell script at once.
               - 'scripts/pre-commit'
               - 'scripts/test/pre-commit_test.sh'
+              - '.github/workflows/pr-tests.yml'
+            # Globs rather than a list, deliberately: the `Script lint` job
+            # takes its files from `git ls-files`, so a script added tomorrow is
+            # linted the day it lands, and this filter has to be able to see the
+            # same file or the job would never run on it.
+            scripts:
+              # Both forms of each glob, for the reason the `code` filter above
+              # gives: the bare one covers root-level files (`install.sh`,
+              # `build.py`), the `**/` one covers nested.
+              - '*.sh'
+              - '**/*.sh'
+              - '*.py'
+              - '**/*.py'
+              - 'scripts/pre-commit'
               - '.github/workflows/pr-tests.yml'
 
   # Lint, formatting and type-check are platform-independent, so one runner
@@ -705,45 +728,23 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Pinned, and the same build on both runners. Ubuntu's apt and Homebrew
-      # ship different versions, and shellcheck's findings differ between them:
-      # a file clean under one has twice failed here on a rule the other does
-      # not emit, and once the *same* finding arrived under a different code
-      # (SC2317 in 0.9/0.10, SC2329 in 0.11). Pinning makes a local run mean
-      # something, and moves a version bump into a commit someone chose to make.
-      - name: Install shellcheck
+      # Only the suites run here. shellcheck used to run beside each of them,
+      # over the five scripts this job happens to own; it now runs once over
+      # every tracked script in the `Script lint` job below (#887), which is
+      # both cheaper - one runner instead of this two-runner matrix - and the
+      # only version of it that a newly added script cannot escape.
+      - name: Test installer script
         shell: bash
-        env:
-          SHELLCHECK_VERSION: v0.10.0
-        run: |
-          case "${RUNNER_OS}-$(uname -m)" in
-            Linux-x86_64)   target=linux.x86_64 ;;
-            Linux-aarch64)  target=linux.aarch64 ;;
-            macOS-arm64)    target=darwin.aarch64 ;;
-            macOS-x86_64)   target=darwin.x86_64 ;;
-            *) echo "::error::No pinned shellcheck build for ${RUNNER_OS}-$(uname -m)"; exit 1 ;;
-          esac
-          url="https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.${target}.tar.xz"
-          curl -fsSL "$url" | tar -xJ
-          sudo install "shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
-          shellcheck --version
-
-      - name: Lint and test installer script
-        shell: bash
-        run: |
-          shellcheck install.sh scripts/test/install_test.sh scripts/test/install_e2e.sh
-          bash scripts/test/install_test.sh
+        run: bash scripts/test/install_test.sh
 
       # The pre-commit hook's clang-tidy version probe (#659). Linux only: the
       # hook prepends Homebrew's LLVM directory when it exists, which shadows
       # the stubbed clang-tidy the suite drives it with, and the probe has no
       # platform-specific half worth running twice.
-      - name: Lint and test the pre-commit hook
+      - name: Test the pre-commit hook
         if: runner.os == 'Linux'
         shell: bash
-        run: |
-          shellcheck scripts/pre-commit scripts/test/pre-commit_test.sh
-          bash scripts/test/pre-commit_test.sh
+        run: bash scripts/test/pre-commit_test.sh
 
       # The dry-run suite above asserts on the commands the installer would have
       # run. This one runs it: a real download from a local release, a real
@@ -790,6 +791,93 @@ jobs:
       - name: Test the stale-vcpkg-baseline self-heal
         run: python3 scripts/test/vcpkg_baseline_test.py
 
+  # The repository's two unlinted languages (#887). Both checks are seconds of
+  # work on a runner that needs neither a C++ toolchain nor Node, so they share
+  # one Linux job rather than riding a matrix that would run each of them two or
+  # three times for one answer - the same reasoning that gave `quality` its own
+  # job.
+  #
+  # Both take their files from `git ls-files`, not an enumerated list. The list
+  # this replaces had drifted to five of the twelve tracked shell scripts, and an
+  # enumeration cannot do better: it records what existed the day it was written.
+  # An empty file list fails rather than passing, per CLAUDE.md - a scan that
+  # looked at nothing is the one failure mode a lint gate cannot survive quietly.
+  scripts:
+    name: Script lint
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.scripts == 'true'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      # Pinned. Ubuntu's apt and Homebrew ship different versions, and
+      # shellcheck's findings differ between them: a file clean under one has
+      # twice failed here on a rule the other does not emit, and once the *same*
+      # finding arrived under a different code (SC2317 in 0.9/0.10, SC2329 in
+      # 0.11). Pinning makes a local run mean something, and moves a version
+      # bump into a commit someone chose to make.
+      - name: Install shellcheck
+        shell: bash
+        env:
+          SHELLCHECK_VERSION: v0.10.0
+        run: |
+          case "$(uname -m)" in
+            x86_64)  target=linux.x86_64 ;;
+            aarch64) target=linux.aarch64 ;;
+            *) echo "::error::No pinned shellcheck build for $(uname -m)"; exit 1 ;;
+          esac
+          url="https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.${target}.tar.xz"
+          curl -fsSL "$url" | tar -xJ
+          sudo install "shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
+
+      # `scripts/pre-commit` is named on its own because it carries no
+      # extension; `engine/vendor/` is dropped because upstream's scripts are
+      # not ours to keep clean.
+      - name: Shellcheck every tracked shell script
+        shell: bash
+        run: |
+          mapfile -t files < <(git ls-files -- '*.sh' 'scripts/pre-commit' | grep -v '^engine/vendor/')
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::No shell scripts to check - the file list is broken, not the tree"
+            exit 1
+          fi
+          printf '  %s\n' "${files[@]}"
+          shellcheck "${files[@]}"
+
+      # Pinned for the reason shellcheck is, and one more: ruff's default rule
+      # set grows between releases, so an unpinned gate can turn a pull request
+      # red over a rule that arrived in a version bump nobody made.
+      - name: Install ruff
+        shell: bash
+        env:
+          RUFF_VERSION: 0.15.8
+        run: |
+          python3 -m pip install --disable-pip-version-check "ruff==${RUFF_VERSION}"
+          ruff --version
+
+      # Default rules only. The tree is clean against them after #887, and a
+      # wider selection is not: `--select F,E,W` reports 122 findings, nearly
+      # all line length in build.py, which is a reformat rather than a lint fix
+      # and belongs in a change someone chose to make.
+      - name: Ruff every tracked Python file
+        shell: bash
+        run: |
+          mapfile -t files < <(git ls-files -- '*.py' | grep -v '^engine/vendor/')
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::No Python files to check - the file list is broken, not the tree"
+            exit 1
+          fi
+          printf '  %s\n' "${files[@]}"
+          ruff check --no-cache "${files[@]}"
+
   ci-gate:
     name: CI gate
     runs-on: ubuntu-latest
@@ -797,7 +885,7 @@ jobs:
     # filter cannot be read as "nothing to test". Without it, a broken `changes`
     # job skips everything, and "skipped" would pass this gate on a change
     # nobody ran.
-    needs: [changes, quality, app, engine, installer, build-script]
+    needs: [changes, quality, app, engine, installer, build-script, scripts]
     if: always()
     # `actions: read` is what lets the download below reach this run's own
     # artifacts; everything else here reads job results, which need nothing.
@@ -884,6 +972,7 @@ jobs:
           check engine    "${{ needs.engine.result }}"
           check installer "${{ needs.installer.result }}"
           check build-script "${{ needs['build-script'].result }}"
+          check scripts   "${{ needs.scripts.result }}"
 
           if [[ $status -ne 0 ]]; then
             echo "CI failed"

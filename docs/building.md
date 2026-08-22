@@ -365,6 +365,10 @@ The project uses GitHub Actions for automated builds:
   - Tests engine and frontend on Linux/Windows/macOS
   - Lint, formatting and type-check run once, on their own Linux job, rather
     than in front of a suite they cannot affect
+  - `Script lint` does the same for the other two languages: shellcheck
+    (v0.10.0) over every tracked shell script and ruff (0.15.8) over every
+    tracked `.py`, both file lists taken from `git ls-files` so a script added
+    later cannot escape them
   - The Windows frontend suite runs as two vitest shards on two runners; the
     `CI gate` job proves they covered every test file between them
 

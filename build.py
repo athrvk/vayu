@@ -279,7 +279,7 @@ def find_visual_studio() -> Optional[str]:
         vs_path = result.stdout.strip()
         if vs_path and Path(vs_path).exists():
             return vs_path
-    except:
+    except (OSError, subprocess.SubprocessError):
         pass
 
     return None
@@ -449,7 +449,7 @@ def find_pnpm_windows() -> Optional[str]:
             for path in pnpm_paths:
                 if path.exists():
                     return str(path)
-    except:
+    except (OSError, subprocess.SubprocessError):
         pass
 
     # Check npm's global directory (alternative method)
@@ -472,7 +472,7 @@ def find_pnpm_windows() -> Optional[str]:
             for path in pnpm_paths:
                 if path.exists():
                     return str(path)
-    except:
+    except (OSError, subprocess.SubprocessError):
         pass
 
     # Check common npm locations (where npm installs global .cmd wrappers)
@@ -549,7 +549,7 @@ def check_tool(name: str, command: List[str]) -> Tuple[bool, str]:
                 # Store for later use
                 CMAKE_PATH = cmake_path
                 return True, version
-            except:
+            except (OSError, subprocess.SubprocessError):
                 return False, ""
         return False, ""
 
@@ -566,7 +566,7 @@ def check_tool(name: str, command: List[str]) -> Tuple[bool, str]:
                 if ninja_dir not in os.environ.get("PATH", "").split(os.pathsep):
                     os.environ["PATH"] = ninja_dir + os.pathsep + os.environ.get("PATH", "")
                 return True, version
-            except:
+            except (OSError, subprocess.SubprocessError):
                 return False, ""
         return False, ""
 
@@ -586,7 +586,7 @@ def check_tool(name: str, command: List[str]) -> Tuple[bool, str]:
                 # Store for later use
                 PNPM_PATH = pnpm_path
                 return True, version
-            except:
+            except (OSError, subprocess.SubprocessError):
                 # If execution fails, fall through to standard check
                 pass
         # Fall through to standard check if Windows-specific search failed
@@ -607,7 +607,7 @@ def check_tool(name: str, command: List[str]) -> Tuple[bool, str]:
             if name == "pnpm":
                 PNPM_PATH = tool_path
             return True, version
-        except:
+        except (OSError, subprocess.SubprocessError):
             return False, ""
     return False, ""
 
@@ -1248,7 +1248,7 @@ def run_tests_only(preset: str, project_root: Path) -> bool:
     test_binary = find_build_artifact(build_dir, build_type, "vayu_tests")
 
     if not test_binary:
-        print_error(f"Tests not found. Build with tests first:\npython build.py -e -t")
+        print_error("Tests not found. Build with tests first:\npython build.py -e -t")
         return False
 
     log_dim(f'Build directory: {build_dir}')
