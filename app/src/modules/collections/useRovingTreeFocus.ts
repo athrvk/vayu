@@ -21,14 +21,27 @@
  * this needs nothing threaded through CollectionItem's prop list:
  *   data-tree-activate  the primary control (open the collection/request)
  *   data-tree-toggle    expand/collapse control (collections only)
- *   data-tree-menu      row actions            (Shift+F10 / Menu key)
+ *   data-tree-menu      row actions            (Shift+F10 / Menu / Shift+Enter)
  *   data-tree-rename    rename control         (F2 key)
- *   data-tree-delete    delete control         (Delete key)
+ *   data-tree-delete    delete control         (Delete / Backspace)
  *   data-tree-label     the row's name         (typeahead)
  *   data-tree-move-*    reorder controls       (Alt+Arrow)
  *
  * Focus is deliberately separate from selection: arrows move focus without
  * opening anything; Enter/Space opens.
+ *
+ * **Two of those keys do not exist on a Mac keyboard**, which is why each has a
+ * second binding (#931):
+ *
+ *   - The key labelled "delete" on a Mac reports `"Backspace"`. `"Delete"` is
+ *     forward-delete, Fn+Delete, which effectively nobody presses - so a
+ *     `"Delete"`-only handler is dead on macOS. Both are accepted here on every
+ *     platform rather than behind an `isMac` fork: Backspace-to-delete is
+ *     standard list behaviour, and the control this clicks opens the
+ *     confirm dialog, so a mistaken press costs a dialog rather than data.
+ *   - Mac keyboards have no Menu key, and F10 is a media key by default, so the
+ *     row menu had no keyboard path at all there. **Shift+Enter** is the third
+ *     one; plain Enter still activates.
  */
 
 import { useCallback, useEffect, useRef, type RefObject } from "react";
@@ -177,13 +190,18 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 				case "Enter":
 				case " ":
 					take();
-					click("[data-tree-activate]");
+					// Shift+Enter is the row menu's Mac-reachable path (see the
+					// header note). Space is left alone: it is the activate key
+					// that does not double as a chord anywhere in the app.
+					if (e.key === "Enter" && e.shiftKey) click("[data-tree-menu]");
+					else click("[data-tree-activate]");
 					break;
 				case "F2":
 					take();
 					click("[data-tree-rename]");
 					break;
 				case "Delete":
+				case "Backspace":
 					take();
 					click("[data-tree-delete]");
 					break;

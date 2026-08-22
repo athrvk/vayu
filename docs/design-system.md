@@ -1316,17 +1316,24 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   collections, `aria-selected` for the open entity.
 - Rows render `tabIndex={-1}`; `useRovingTreeFocus` promotes exactly one to `0`.
 - Keys: Up/Down move, Home/End jump, Right expands then steps in, Left collapses
-  then moves to the parent, Enter/Space opens, **F2** renames, **Delete**
-  deletes, **Shift+F10 / Menu** opens row actions, **typeahead** jumps to the
-  next row whose name starts with what you type, **`*`** expands every folder at
-  the focused row's level.
+  then moves to the parent, Enter/Space opens, **F2** renames, **Delete /
+  Backspace** deletes, **Shift+F10 / Menu / Shift+Enter** opens row actions,
+  **typeahead** jumps to the next row whose name starts with what you type,
+  **`*`** expands every folder at the focused row's level.
+- **The second binding on those two is what a Mac keyboard can reach.** The key
+  labelled "delete" on a Mac reports `"Backspace"` (`"Delete"` is forward-delete,
+  Fn+Delete), and Mac keyboards have no Menu key and default F10 to a media key -
+  so the `Delete`-only and `Shift+F10`-only versions were dead on macOS while
+  passing every test, since jsdom reports one platform. Both bindings are live on
+  every platform rather than behind an `isMac` fork; the tests fire both keys and
+  assert neither the host nor a stubbed platform.
 - **Alt+Arrow moves the row itself**, the keyboard half of drag-and-reorder:
   Up/Down among its siblings, Right into the folder rendered above it, Left out
   to after its parent. Alt because the tree owns the bare arrows and the app owns
   Ctrl/Cmd; every move is announced in the live region below, and the row menu's
   **"Move to..."** is the same move with no chord at all.
-- Every control inside a row is `tabIndex={-1}`, so Delete and Shift+F10 are the
-  keyboard path to row actions - do not remove them without providing another.
+- Every control inside a row is `tabIndex={-1}`, so those keys are the *only*
+  keyboard path to row actions - do not remove one without providing another.
   Both row types must render every hidden control: a folder row without
   `data-tree-delete` swallowed Delete silently for months, because the hook
   `preventDefault`s the key whether or not it finds something to click.

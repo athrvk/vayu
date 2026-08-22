@@ -140,6 +140,23 @@ describe("TabStrip keyboard navigation", () => {
 		expect(ids).toEqual(["t2", "t3"]);
 	});
 
+	/*
+	 * The macOS half of that key (#931). A Mac keyboard's "delete" reports
+	 * "Backspace" - "Delete" is forward-delete, Fn+Delete - so the case above
+	 * passed everywhere while closing nothing on a Mac.
+	 *
+	 * Asserted as a key, not as a platform: the handler has no `isMac` branch, so
+	 * both keys close a tab in the same run wherever it runs.
+	 */
+	it("closes the focused tab with Backspace too, since Mac delete is Backspace", () => {
+		renderStrip();
+		screen.getAllByRole("tab")[0].focus();
+
+		press("Backspace");
+
+		expect(useTabsStore.getState().openTabs.map((t) => t.id)).toEqual(["t2", "t3"]);
+	});
+
 	it("leaves other keys alone so typing is not swallowed", () => {
 		renderStrip();
 		screen.getAllByRole("tab")[0].focus();

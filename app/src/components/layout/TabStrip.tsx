@@ -94,7 +94,13 @@ function TabItem({
 				// Closing was mouse-only: the X is `tabIndex={-1}` and only appears
 				// on hover, and no close shortcut existed anywhere in the app. Delete
 				// on the focused tab is the WAI-ARIA pattern for a deletable tab.
-				if (e.key === "Delete") {
+				// Backspace is the same key on a Mac keyboard: the one labelled
+				// "delete" there reports `"Backspace"`, and `"Delete"` is
+				// forward-delete (Fn+Delete), so a `"Delete"`-only handler closes
+				// nothing on macOS (#931). Accepted on every platform rather than
+				// behind an `isMac` fork - a tab is a view, so closing one loses no
+				// work and the request it showed is still in its collection.
+				if (e.key === "Delete" || e.key === "Backspace") {
 					e.preventDefault();
 					closeTab(tab.id);
 				}
