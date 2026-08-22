@@ -29,6 +29,14 @@
 # `|| FORMAT_STATUS=1` that keeps its status, or widening the scope past those
 # three roots, reddens the cases below.
 #
+# The fifth is where the binaries are looked for (issue #918). Both tools are
+# packaged two ways - `apt install clang-tidy-19` leaves the plain name at
+# Ubuntu's 18, Homebrew and the Windows installer use the plain name - and the
+# hook knew that about clang-format only, so the clang-tidy half skipped on the
+# setup CONTRIBUTING.md prescribes. One `find_llvm_tool` now answers for both,
+# with the exact-vs-minimum comparison a parameter; reverting either call to a
+# bare name reddens the discovery cases below.
+#
 # Everything here drives the real hook with a stubbed `clang-tidy` on PATH.
 # Linux only: the hook prepends Homebrew's LLVM directory when it exists, which
 # would shadow the stub on a Mac, and the probe itself has no platform-specific
@@ -174,8 +182,16 @@ make_sandbox_path() {
 # range the filter lists for that file, and a run with no filter at all reports
 # every line. Emulated rather than mocked away - a stub that ignored the filter
 # would pass whether or not the hook computed one, which is the whole question.
+#
+# $4, when given, is the single binary name to install it under. By default it
+# goes in under **both** `clang-tidy` and `clang-tidy-19` - the shape of a
+# Homebrew or Windows LLVM, where one install answers to both names, and the
+# only way a case stays a statement about the hook now that it looks under the
+# versioned name first (issue #918): a machine or runner image carrying a real
+# `clang-tidy-19` would otherwise answer instead of the stub, exactly as
+# `make_sandbox_path` keeps a real clang-format out of the format cases.
 make_stub() {
-    local version="$1" flagged="${2:-}" line="${3:-1}" dir
+    local version="$1" flagged="${2:-}" line="${3:-1}" only_name="${4:-}" dir
     dir="$(mktemp -d)"
     cat > "$dir/clang-tidy" <<EOF
 #!/usr/bin/env bash
@@ -228,6 +244,11 @@ fi
 exit 0
 EOF
     chmod +x "$dir/clang-tidy"
+    if [ -z "$only_name" ]; then
+        cp "$dir/clang-tidy" "$dir/clang-tidy-19"
+    elif [ "$only_name" != "clang-tidy" ]; then
+        mv "$dir/clang-tidy" "$dir/$only_name"
+    fi
     echo "$dir"
 }
 
@@ -323,12 +344,72 @@ repo="$(make_repo)"
 stub="$(mktemp -d)"
 printf '#!/usr/bin/env bash\necho "clang-tidy from somewhere"\nexit 0\n' > "$stub/clang-tidy"
 chmod +x "$stub/clang-tidy"
+# Both names, for the reason make_stub installs both: the hook looks under
+# `clang-tidy-19` first, and a real one on PATH would answer this question.
+cp "$stub/clang-tidy" "$stub/clang-tidy-19"
 out="$(cd "$repo" && PATH="$stub:$PATH" bash "$HOOK" 2>&1)"
 rm -rf "$repo" "$stub"
 if [[ "$out" == *"NOTHING WAS LINTED"* ]]; then
     pass "a clang-tidy whose version cannot be read is refused, not assumed current"
 else
     fail "an unreadable version is refused" "got: $out"
+fi
+
+# --- Where the binary is looked for (issue #918) ------------------------------
+echo
+echo "pre-commit clang-tidy discovery"
+
+# Ubuntu 24.04's shape, on the half of the hook that had never been told about
+# it: `apt install clang-tidy-19` - which is what the warning above, and
+# CONTRIBUTING.md, tell you to run - installs `/usr/bin/clang-tidy-19` and
+# leaves the plain `clang-tidy` at the distribution's 18. The hook probed the
+# plain name alone, so following that instruction to the letter still linted
+# nothing and printed the same instruction again.
+#
+# The 18 is placed *earlier* on PATH than the 19, so PATH order alone would find
+# it: what is under test is that the versioned name is preferred by name.
+#
+# Mutation-check: revert the clang-tidy discovery to the plain name and both
+# cases below redden, while the 18-skip cases above stay green.
+repo="$(make_repo)"
+plain="$(make_stub 18.1.3 "" 1 clang-tidy)"
+versioned="$(make_stub 19.1.0 main.cpp 1 clang-tidy-19)"
+set +e
+out="$(cd "$repo" && PATH="$plain:$versioned:$(make_sandbox_path)" bash "$HOOK" 2>&1)"
+status=$?
+set -e
+rm -rf "$repo" "$plain" "$versioned"
+if [[ "$out" == *"Running clang-tidy-19 "* && "$out" == *"STUB_LINTED"* ]]; then
+    pass "clang-tidy-19 is preferred over a plain clang-tidy that is 18"
+else
+    fail "clang-tidy-19 is found beside an 18" "exit $status: $out"
+fi
+
+# The half that makes the first one mean something: the 19 it found is the one
+# that lints, and its finding is still a refusal. A hook that discovered the
+# versioned binary and then invoked the plain name would satisfy the case above
+# and gate nothing.
+if [[ "$status" -ne 0 && "$out" != *"NOTHING WAS LINTED"* ]]; then
+    pass "a finding from the versioned clang-tidy refuses the commit"
+else
+    fail "the versioned clang-tidy's finding refuses the commit" "exit $status: $out"
+fi
+
+# One lookup, not one per tool - the drift this issue exists to end, since the
+# clang-format half learned about the packaging split and the clang-tidy half
+# did not. A source scan, and it proves it read the hook first: a guard that
+# counts matches in an empty string reports two of nothing and passes.
+if [[ ! -s "$HOOK" ]]; then
+    fail "scripts/pre-commit was read" "empty or missing: $HOOK"
+else
+    definitions="$(grep -cE '^find_llvm_tool\(\)' "$HOOK" || true)"
+    calls="$(grep -cE '^[[:space:]]*find_llvm_tool ' "$HOOK" || true)"
+    if [[ "$definitions" -eq 1 && "$calls" -eq 2 ]]; then
+        pass "discovery is one helper, called by both the format and the lint pass"
+    else
+        fail "discovery is shared, not copied" \
+             "definitions: $definitions, calls: $calls (want 1 and 2)"
+    fi
 fi
 
 # --- The hook's verdict (issue #885) -----------------------------------------

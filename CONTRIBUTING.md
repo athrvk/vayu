@@ -129,12 +129,19 @@ vayu/
   probes the version and says so rather than passing silently - if you see that
   warning, install a newer clang-tidy (Ubuntu 24.04 ships 18 by default;
   `apt install clang-tidy-19` is what CI uses) or lean on CI, which lints the
-  engine sources your pull request changes on clang-tidy 19. A finding fails in
-  both places - the hook refuses the commit, CI fails the engine job - and both
-  gate the **lines** you changed, not the whole file, so a finding older than
-  your diff stops neither (#902). A hook refusal is therefore a merge blocker
-  you are seeing early. To lint whole staged files instead, backlog and all,
-  commit once with `VAYU_TIDY_FULL=1`. See
+  engine sources your pull request changes on clang-tidy 19.
+
+  The hook finds what that install gives you: like the formatter above, it looks
+  for `clang-tidy-19` first and a plain `clang-tidy` second, because apt leaves
+  the plain name at the distribution's 18 while Homebrew's LLVM and the Windows
+  installer use it (#918). Both tools share one lookup, so the two cannot drift
+  apart again.
+
+  A finding fails in both places - the hook refuses the commit, CI fails the
+  engine job - and both gate the **lines** you changed, not the whole file, so
+  a finding older than your diff stops neither (#902). A hook refusal is
+  therefore a merge blocker you are seeing early. To lint whole staged files
+  instead, backlog and all, commit once with `VAYU_TIDY_FULL=1`. See
   [Static Analysis](docs/engine/building.md#static-analysis).
 
 #### Naming Conventions

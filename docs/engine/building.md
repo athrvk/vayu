@@ -588,7 +588,9 @@ second - `apt install clang-format-19` leaves the plain name at Ubuntu's 18,
 while Homebrew's LLVM 19 installs it under the plain name - and when neither is
 a 19 it says so and checks nothing, on the same reasoning as the clang-tidy
 probe: the pin is exact, so an answer from another major is a wrong answer
-rather than a missing one. `git clang-format --staged` is deliberately not used;
+rather than a missing one. That two-name lookup is
+[shared with the clang-tidy pass](#static-analysis), not duplicated in it.
+`git clang-format --staged` is deliberately not used;
 it formats the changed lines, and a staged file it called clean could still fail
 this whole-file check.
 
@@ -745,6 +747,21 @@ Both need **clang-tidy 19 or newer**: `engine/.clang-tidy` uses
 the config file and lints nothing. The hook probes the version and warns loudly
 instead of exiting clean over an empty scan; a contributor without a current
 clang-tidy loses the early warning, not the check.
+
+The hook looks for `clang-tidy-19` first and a plain `clang-tidy` second, for
+the reason the formatter does: `apt install clang-tidy-19` - the instruction the
+warning itself gives - leaves the plain name at Ubuntu's 18, while Homebrew's
+LLVM 19 and the Windows installer use the plain name. Probing only the plain
+name meant the most common setup installed a 19, found the 18, and was told to
+install a 19 (#918); the warning now names the nearest candidate it rejected, so
+"you have an 18" reads differently from "you have nothing".
+
+**One `find_llvm_tool` in `scripts/pre-commit` answers for both tools**, with
+the comparison a parameter - `exact` for clang-format, whose pin is not a floor,
+and `minimum` for clang-tidy, whose pin is. It is shared rather than copied
+because that is precisely how the two halves came to disagree: the formatter
+learned about the packaging split and the linter did not. `pre-commit_test.sh`
+pins the sharing as well as the behaviour.
 
 CI's version differs per leg, and none of it is a free choice:
 
