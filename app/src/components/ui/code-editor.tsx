@@ -35,6 +35,22 @@ function useDarkMode() {
 	return isDark;
 }
 
+/**
+ * The app's scrollbar thickness, in px, as declared by `::-webkit-scrollbar` in
+ * `index.css`.
+ *
+ * Monaco renders its own scrollbars as DOM inside the editor, so no stylesheet
+ * rule reaches them and this is the only way to size them. It shipped at
+ * Monaco's defaults - 14px vertical, 12px horizontal - which passed unnoticed
+ * beside a 10px native bar and would be 2.3x one at 6px. An editor sits
+ * directly beside plain scroll panes in the body and script panels, so the two
+ * are read together.
+ *
+ * `scroll-area.test.ts` reads the number back out of the CSS and asserts it
+ * matches this one, which is what keeps a third system from drifting again.
+ */
+const SCROLLBAR_SIZE = 6;
+
 /** Options shared by every editor instance. */
 const DEFAULT_OPTIONS = {
 	minimap: { enabled: false },
@@ -62,6 +78,9 @@ const DEFAULT_OPTIONS = {
 		 * and let it bubble otherwise.
 		 */
 		alwaysConsumeMouseWheel: false,
+
+		verticalScrollbarSize: SCROLLBAR_SIZE,
+		horizontalScrollbarSize: SCROLLBAR_SIZE,
 	},
 	// Render suggestion/hover/context-menu widgets in a body-level overlay so they
 	// are not clipped by editor containers with `overflow: hidden` + fixed height.
