@@ -218,6 +218,53 @@ else
     fail "clang-tidy 18 still skips" "exit $HOOK_STATUS: $HOOK_OUTPUT"
 fi
 
+# --- Where the PCH flag lives (issue #912) -----------------------------------
+echo
+echo "pre-commit PCH flag placement"
+
+# `-Wno-ignored-gch` is this hook's alone. It used to sit in engine/.clang-tidy,
+# which CI reads too, and there it failed every pull request that touched a
+# header: compile_commands.json holds no entry for a `.hpp`, so clang-tidy
+# synthesises a command and the ExtraArgs entry arrives in input position
+# ("no such file or directory: '-Wno-ignored-gch'"), which WarningsAsErrors
+# turns into a failed job. Both halves are pinned below - the flag being on the
+# hook's command line, and it being absent from the shared config. Either one
+# alone would pass while the bug was still live.
+#
+# The cases above all take the hook's *fallback* branch, because make_repo
+# builds no compile database. This one supplies one, which is the branch the
+# flag is on.
+repo="$(make_repo)"
+mkdir -p "$repo/engine/build"
+printf '[]\n' > "$repo/engine/build/compile_commands.json"
+stub="$(make_stub 19.1.0)"
+out="$(cd "$repo" && PATH="$stub:$PATH" bash "$HOOK" 2>&1)"
+rm -rf "$repo" "$stub"
+
+if [[ "$out" == *"STUB_LINTED"*"-p engine/build"* ]]; then
+    pass "a compile database is used when present, so the flag's branch is the one under test"
+else
+    fail "the compile-database branch is taken" "got: $out"
+fi
+
+if [[ "$out" == *"--extra-arg=-Wno-ignored-gch"* ]]; then
+    pass "the hook passes -Wno-ignored-gch on its own command line"
+else
+    fail "the hook passes -Wno-ignored-gch itself" "got: $out"
+fi
+
+# The other half, as a source scan - and it proves it read something first,
+# because vitest-style empty-string reads are how a guard like this rots.
+tidy_config="${REPO_ROOT}/engine/.clang-tidy"
+if [[ ! -s "$tidy_config" ]]; then
+    fail "engine/.clang-tidy was read" "empty or missing: $tidy_config"
+elif grep -qE '^[[:space:]]*ExtraArgs:' "$tidy_config"; then
+    fail "engine/.clang-tidy declares no ExtraArgs" \
+         "found: $(grep -nE '^[[:space:]]*ExtraArgs:' "$tidy_config")"
+else
+    pass "engine/.clang-tidy declares no ExtraArgs, so CI's header path stays clean"
+fi
+
 echo
 echo "passed: $PASSED, failed: $FAILED"
 [ "$FAILED" -eq 0 ]

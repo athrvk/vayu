@@ -77,8 +77,37 @@ for FILE in $FILES; do
     # error and exits 1, so now that this loop reads the exit status the one
     # directory that is meant to be exempt would be the only one that refuses a
     # commit. Needs clang-tidy 19, which the probe above has already required.
+    #
+    # `--extra-arg=-Wno-ignored-gch` is this hook's alone, and is passed here
+    # rather than set as `ExtraArgs` in engine/.clang-tidy, where it used to be
+    # (issue #912). This hook lints against whatever build tree you already
+    # have. The engine builds with a precompiled header, and on a GCC build that
+    # `.gch` is not one clang can read, so clang-tidy replaying the compile
+    # command says "precompiled header ... was ignored because it is not a clang
+    # PCH file" on every file. It then falls back to including the header as
+    # text and analyses exactly the same translation unit, so the diagnostic is
+    # noise about the build tree rather than a fact about the code - and a hook
+    # that prints it once per staged file is a hook people stop reading.
+    #
+    # It has to be a compiler flag: with -Werror in the compile command clang
+    # raises it as a hard error before any check filter is consulted, so a
+    # `-clang-diagnostic-ignored-gch` entry in the check list does nothing.
+    #
+    # In engine/.clang-tidy it was worse than unnecessary, it was breaking:
+    # that file is read by CI too, `compile_commands.json` holds no entry for a
+    # header, and on the command clang-tidy synthesises for a file it cannot
+    # look up the flag arrives in input position - "no such file or directory:
+    # '-Wno-ignored-gch'" - failing the engine job for any pull request that
+    # touched a `.hpp`. CI never needed it: it regenerates
+    # `compile_commands.json` with `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON`,
+    # which is the fix that holds for every compiler - macOS produces a *clang*
+    # PCH that Homebrew's clang 19 still rejects as "a newer PCH format", which
+    # no `-Wno-` flag covers. This hook does not do that, because reconfiguring
+    # someone's build tree from a git hook would throw away their next
+    # incremental build.
     if [ -f "engine/build/compile_commands.json" ]; then
-        clang-tidy --allow-no-checks -p engine/build "$FILE" || STATUS=1
+        clang-tidy --allow-no-checks --extra-arg=-Wno-ignored-gch \
+            -p engine/build "$FILE" || STATUS=1
     else
         echo "Warning: compile_commands.json not found in engine/build. clang-tidy might report false positives."
         # Fallback: try to include common directories

@@ -678,9 +678,19 @@ The two gates handle it differently, on purpose:
   knowledge of any compiler's PCH flags and is the only thing that fixes the
   macOS case. It is safe in place because ctest has already run, and it takes
   under a second.
-- **The hook** sets `ExtraArgs: ['-Wno-ignored-gch']` in `engine/.clang-tidy`
-  instead, which silences the GCC case only. Reconfiguring your build tree from
-  a git hook would throw away your next incremental build.
+- **The hook** passes `--extra-arg=-Wno-ignored-gch` on its own clang-tidy
+  command line instead, which silences the GCC case only. Reconfiguring your
+  build tree from a git hook would throw away your next incremental build.
+
+  It is on the command line and **not** in `engine/.clang-tidy`, where it used
+  to sit (issue #912). That file is read by both gates, and there the flag broke
+  the one that never needed it: `compile_commands.json` has one entry per
+  translation unit and so none for a `.hpp`, and on the command clang-tidy
+  synthesises for a file it cannot look up, an `ExtraArgs` entry arrives in
+  input position - `error: no such file or directory: '-Wno-ignored-gch'`,
+  which `WarningsAsErrors: '*'` turns into a failed engine job for any pull
+  request that touched a header. Anything only one gate needs belongs at that
+  gate's call site.
 
 Either way clang-tidy falls back to including the header as text and analyses
 exactly the same translation unit.
