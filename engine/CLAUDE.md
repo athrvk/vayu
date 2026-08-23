@@ -71,7 +71,13 @@ engine/
   libc++, and it comes back only if a Homebrew LLVM survives that SDK. A pull
   request that is nothing but a bulk reformat carries the **`reformat-pr`**
   label, which is the whole of the CI gate's escape hatch - line scoping cannot
-  help a change that rewrites a line in every file. **Both gate the changed
+  help a change that rewrites a line in every file. **CI lints translation
+  units, never a header** (#940): a header has no `compile_commands.json` entry,
+  so clang-tidy guesses a command for it, and a guess that parses the wrong STL
+  emits `clang-diagnostic-error`s - which are *not* line-filtered, taking the
+  whole gate out of changed-lines scope. The hook is what lints headers, because
+  it names every staged file in one filter and CI's per-file driver does not.
+  **Both gate the changed
   *lines***: the tree had never been linted and most files carry findings older
   than any diff, so whole-file gating would fail a pull request for code it did
   not write. The mechanisms differ on purpose (#902) - CI runs LLVM's

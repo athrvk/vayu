@@ -688,7 +688,7 @@ clang-tidy runs in two places, and both of them can stop a change:
 | Where | What it lints | What a finding does |
 |-------|---------------|---------------------|
 | `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **changed lines** of staged `.c/.cpp/.h/.hpp` files | Refuses the commit |
-| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of `engine/{src,include,tests}` sources, on Linux and Windows | Fails CI |
+| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of changed `engine/{src,include,tests}` **translation units** - not headers - on Linux and Windows | Fails CI |
 
 A finding is a failure because `engine/.clang-tidy` sets
 `WarningsAsErrors: '*'`; with that empty, clang-tidy prints every diagnostic it
@@ -756,6 +756,14 @@ Use it only for a reformat: the label excuses every engine line in the pull
 request, so anything else in the same branch goes unlinted with it. Split the
 reformat into its own pull request, which is what #886 did anyway.
 
+**Applying the label does not re-trigger CI.** This workflow runs on
+`pull_request`, whose default activity types are `opened`, `synchronize` and
+`reopened` - labelling is none of them, so the run that is already on the pull
+request keeps its old verdict. Apply the label, then **re-run the engine jobs**;
+the summary flips to the skip line. Do not add `labeled`/`unlabeled` to the
+trigger to avoid the re-run: the path labeler applies labels to every pull
+request, so that would run the whole matrix a second time on all of them.
+
 This replaced a commit walk that read the skip out of `.git-blame-ignore-revs`
 at the pull request's own HEAD (#909's bootstrap, deleted by #940). The
 declaration was an author-writable input to a gate, which needed a validator to
@@ -789,16 +797,71 @@ disables every check, and clang-tidy calls an empty check list a usage error
 rather than a clean run, so the one exempt directory would otherwise be the only
 one that fails.
 
-**A changed header is an input on Linux only.** `compile_commands.json` has one
-entry per translation unit and none for a `.hpp`, so clang-tidy synthesises a
-command for a header handed to it directly. On Linux that command still finds
-libstdc++; on Windows it does not find the MSVC STL, and the result is the whole
-standard library failing to parse - `no template named 'optional' in namespace
-'std'` - which `WarningsAsErrors: '*'` turns into a failed job. The Windows leg
-therefore lints translation units only. Little is lost, because
-`HeaderFilterRegex` reports findings *inside* a header through every translation
-unit that includes it; what is not covered there is a pull request that changes
-a header and no `.cpp`. Issue #930 carries the flags that would fix it properly.
+**The CI gate lints translation units. A header is never an input** - on every
+platform, decided in #940 (it was Windows-only, from #926). The pre-commit hook
+is the gate that lints headers.
+
+`compile_commands.json` has one entry per translation unit and none for a
+`.hpp`, so clang-tidy synthesises a command for a header handed to it directly.
+That command is a guess. On Linux it happens to find libstdc++; on Windows it
+does not find the MSVC STL and the whole standard library fails to parse - `no
+template named 'optional' in namespace 'std'` - which `WarningsAsErrors: '*'`
+turns into a failed job.
+
+What settled it is sharper than one leg failing. **A `clang-diagnostic-error` is
+not line-filtered.** Measured on clang-tidy 19.1.1: an error inside an included
+header is reported even when `-line-filter` names only the translation unit and
+only one of its lines, and clang-tidy then exits `Found compiler error(s)`. So a
+wrong synthesised command does not just fail a leg - it takes the gate out of
+changed-lines scope altogether, and handing clang-tidy a file the compilation
+database has no entry for is the only way this tree produces a compiler error at
+all. The rejected alternative was passing MSVC's include paths through
+(`--extra-arg=-imsvc...`): it buys one more leg of header-as-input coverage, in
+exchange for toolchain plumbing that breaks when a runner image moves, and it
+leaves that bypass open.
+
+**What this costs is less than #926 and #930 assumed, because the coverage they
+credited was never there.** `HeaderFilterRegex` does report diagnostics inside a
+header - but `clang-tidy-diff.py` builds one invocation per changed file, each
+with a `-line-filter` naming *only that file* (`clang-tidy-diff.py:344-351`),
+and clang-tidy drops a diagnostic in any file its filter does not list.
+Measured, same tree, same header, three filters:
+
+| Line filter passed with the `.cpp` | Header finding reported? |
+|---|---|
+| none | yes |
+| names the `.cpp` only - what CI's driver builds | **no** |
+| names the `.cpp` and the header - what the hook builds | yes |
+
+So a changed header has never reached the CI gate through its consumers. It
+reaches the **hook**, which builds one filter over every staged file for exactly
+this reason (the comment at `scripts/pre-commit:229-234` says so). What CI
+genuinely loses by this decision is a header-only change on a machine with no
+hook installed. To lint one by hand, point clang-tidy at a consumer:
+
+```bash
+clang-tidy-19 --allow-no-checks -p engine/build \
+  '-line-filter=[{"name":"engine/src/http/routes.cpp"},{"name":"engine/include/vayu/http/routes.hpp"}]' \
+  engine/src/http/routes.cpp
+```
+
+**This also answers #929's header-in-the-diff anomaly** - the one it recorded as
+observed but not explained. A header in the diff does not widen anything: the
+`.cpp`'s invocation is byte-identical whether or not a header is in the diff
+(the driver builds it from that file's hunks alone). What a header adds is *one
+more invocation, with the header as input* - and that is the invocation whose
+synthesised command can fail, spraying unfiltered `clang-diagnostic-error`s from
+files nobody touched. "The gate stops being line-scoped when a header is in the
+diff" and "the Windows leg fails on headers" were one defect seen from two
+sides, and dropping headers as inputs closes both.
+
+**`readability-function-cognitive-complexity` stays off, with no report-only
+job** (#940, closing #929). It anchors on the function declaration, which a
+line-scoped gate can never honour. A whole-tree report job would restate a list
+[#928](https://github.com/athrvk/vayu/issues/928) already holds, and #928's
+completion *is* the re-enable condition - the check becomes honourable the
+moment nothing pre-existing is left for it to anchor on. Turn it back on there.
+The reason sits beside the disable in `engine/.clang-tidy`.
 
 ### The precompiled header
 

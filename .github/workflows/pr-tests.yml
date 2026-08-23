@@ -660,45 +660,56 @@ jobs:
           done < <(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
             | grep -E '\.(c|cpp|h|hpp)$' || true)
 
-          # Windows cannot lint a *header* as an input, so it does not try.
+          # **This gate lints translation units. A header is never an input**,
+          # on any platform - decided in #940, where it was Windows-only.
           #
           # `compile_commands.json` holds one entry per translation unit and so
-          # none for a `.hpp`; clang-tidy synthesises a command for a file it
-          # cannot look up. On Linux that synthesised command still finds the
-          # standard library. On Windows it does not find the MSVC one, and the
-          # result is not a lint finding but a parse failure of the whole STL -
-          # `no template named 'optional' in namespace 'std'` at every
-          # `std::optional` in `types.hpp`, twenty errors deep, before any check
-          # runs. `WarningsAsErrors: '*'` turns that into a failed engine job.
-          # Measured on #926, where the same run linted every changed `.cpp`
-          # cleanly on the same runner and failed only on the two headers.
+          # none for a `.hpp`, so clang-tidy synthesises a command for a header
+          # handed to it directly. That command is a guess, and when the guess
+          # is wrong the failure is not a lint finding but a parse failure of
+          # the standard library - `no template named 'optional' in namespace
+          # 'std'`, twenty errors deep, in files no diff line touched (#926 on
+          # Windows, where the same run linted every changed `.cpp` cleanly).
           #
-          # What is lost is smaller than it looks: `HeaderFilterRegex` in
-          # engine/.clang-tidy already reports diagnostics *inside* a header
-          # through every translation unit that includes it, so a header changed
-          # alongside its consumers is still linted here. What is genuinely not
-          # covered on this leg is a pull request that changes a header and no
-          # `.cpp` at all. #930 has the flags that would let clang-tidy parse
-          # the MSVC STL directly, which is the real fix; this keeps the gate
-          # honest on the other two legs in the meantime rather than turning it
-          # off everywhere.
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            headers=()
-            translation_units=()
-            for file in ${changed[@]+"${changed[@]}"}; do
-              case "$file" in
-                *.h | *.hpp) headers+=("$file") ;;
-                *) translation_units+=("$file") ;;
-              esac
-            done
-            if [[ ${#headers[@]} -gt 0 ]]; then
-              {
-                echo "- clang-tidy (Windows): **${#headers[@]}** changed header(s) are not linted as inputs here - the synthesised command cannot parse the MSVC standard library (#930). They are still linted through the translation units that include them:"
-                printf '  - `%s`\n' "${headers[@]}"
-              } >> "$GITHUB_STEP_SUMMARY"
-            fi
-            changed=(${translation_units[@]+"${translation_units[@]}"})
+          # It is worse than one leg failing, and this is the part that decided
+          # it: **a `clang-diagnostic-error` is not line-filtered**. Measured on
+          # clang-tidy 19.1.1 - an error in an included header is reported even
+          # when `-line-filter` names only the translation unit and only one of
+          # its lines. So a bad synthesised command does not merely fail, it
+          # takes the gate out of changed-lines scope entirely, which is the one
+          # property the whole design rests on. Feeding clang-tidy a file the
+          # compilation database has no entry for is the only way this tree
+          # produces a compiler error at all.
+          #
+          # The MSVC include paths could be passed through instead
+          # (`--extra-arg=-imsvc...`, re-derived per image). Rejected: it buys
+          # header-as-input coverage on one more leg, at the price of toolchain
+          # plumbing that breaks when an image moves, and it leaves the
+          # error-bypass above wide open.
+          #
+          # What this costs is **not** what #926 assumed. `HeaderFilterRegex`
+          # does report diagnostics inside a header, but `clang-tidy-diff.py`
+          # builds one invocation per changed file with a `-line-filter` naming
+          # *only that file* (`clang-tidy-diff.py:344-351`), and clang-tidy
+          # drops a diagnostic in any file its filter does not list - so a
+          # changed header was never reaching this gate through its consumers
+          # either. The hook is the gate that does lint headers: it builds one
+          # filter naming every staged file, which is why it can.
+          headers=()
+          translation_units=()
+          for file in ${changed[@]+"${changed[@]}"}; do
+            case "$file" in
+              *.h | *.hpp) headers+=("$file") ;;
+              *) translation_units+=("$file") ;;
+            esac
+          done
+          if [[ ${#headers[@]} -gt 0 ]]; then
+            {
+              echo "- clang-tidy: **${#headers[@]}** changed header(s) are not linted here - this gate lints translation units only (#940). \`scripts/pre-commit\` lints them through the sources that include them:"
+              printf '  - `%s`\n' "${headers[@]}"
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
+          changed=(${translation_units[@]+"${translation_units[@]}"})
 
           # The non-empty-scan proof this repository asks of every source
           # scanning guard: name what is about to be linted, so a step that
@@ -791,8 +802,7 @@ jobs:
           fi
 
           # `"${changed[@]}"`, not `"${roots[@]}"`: the roots would re-admit the
-          # headers the Windows leg dropped above, which is the one narrowing
-          # this list still carries.
+          # headers dropped above, which is the one narrowing this list carries.
           git diff -U0 HEAD^1 HEAD -- "${changed[@]}" \
             | "$python" "$tidy_diff" \
                 -clang-tidy-binary "$tidy" \
