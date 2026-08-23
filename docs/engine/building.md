@@ -75,18 +75,8 @@ cmake --build --preset linux-asan
 ctest --preset linux-asan
 ```
 
-`linux-asan` is a separate tree rather than a flag on `linux-dev`, so an ASan
-run never invalidates the ordinary build's objects. It is the tool for a
-**lifetime** bug - a crash the ordinary suite only produces intermittently and
-without an assertion failure, which is what a use-after-free across threads
-looks like. Two things worth knowing when you reach for it:
-
-- Run the suspect tests **under load**, not alone. Issue #646 was a worker
-  thread writing through a `Database` its fixture had already destroyed; it
-  passed 5/5 in isolation and reproduced on every attempt with four copies of
-  the binary running concurrently (each from its own working directory, since
-  the fixtures write scratch `test_*.db` files into it).
-- `ASAN_OPTIONS=detect_leaks=0` keeps the report to the memory error itself.
+There are four more sanitizer presets - `linux-tsan`, `macos-asan`,
+`macos-tsan`, `windows-asan` - see [Sanitizers](#sanitizers) below.
 
 ### Traditional CMake
 
@@ -120,12 +110,129 @@ cmake -B build -DVAYU_BUILD_TESTS=OFF
 # Enable AddressSanitizer (debug builds)
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DVAYU_USE_ASAN=ON
 
-# Enable ThreadSanitizer (debug builds)
+# Enable ThreadSanitizer (debug builds; Linux and macOS only - it stops at
+# configure with a FATAL_ERROR on MSVC)
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DVAYU_USE_TSAN=ON
 
 # Treat compiler warnings as errors (what CI does)
 cmake -B build -DVAYU_WERROR=ON
 ```
+
+## Sanitizers
+
+Five preset trios, one per sanitizer-and-platform combination that exists:
+
+| Preset | Platform | Finds |
+|--------|----------|-------|
+| `linux-asan` | Linux | Memory errors **and leaks** - LeakSanitizer is on by default here |
+| `linux-tsan` | Linux | Data races, lock-order inversions |
+| `macos-asan` | macOS | Memory errors. **No leak detection** - macOS ASan ships without LSan |
+| `macos-tsan` | macOS | Data races, lock-order inversions |
+| `windows-asan` | Windows | Memory errors, via MSVC `/fsanitize=address` |
+
+There is deliberately no `windows-tsan`. ThreadSanitizer has no Windows
+implementation - MSVC ships none, and clang-cl does not implement it either - so
+`-DVAYU_USE_TSAN=ON` on MSVC stops at configure with a `FATAL_ERROR` rather than
+dropping the flag and handing back an unsanitized binary that looks sanitized.
+
+Each preset name is a trio - configure, build and test - so a run is three
+commands with the same word in them:
+
+```bash
+cd engine
+cmake --preset linux-tsan          # or macos-tsan, macos-asan, windows-asan
+cmake --build --preset linux-tsan
+ctest --preset linux-tsan
+```
+
+Every sanitizer preset builds into **its own tree** (`build-asan/`,
+`build-tsan/`) rather than turning a flag on inside `build/`, so a sanitizer run
+never invalidates the ordinary build's objects - and ASan and TSan, which cannot
+coexist in one binary, never fight over one directory. Their test presets run
+`ctest -j2` rather than the usual `-j8`: sanitizer processes are memory-hungry
+(TSan's shadow memory alone is gigabytes per process) and oversubscribing turns
+findings into noise.
+
+### Which one to reach for
+
+**ASan** is the tool for a **lifetime** bug - a crash the ordinary suite only
+produces intermittently and without an assertion failure, which is what a
+use-after-free across threads looks like. Two things worth knowing:
+
+- Run the suspect tests **under load**, not alone. Issue #646 was a worker
+  thread writing through a `Database` its fixture had already destroyed; it
+  passed 5/5 in isolation and reproduced on every attempt with four copies of
+  the binary running concurrently (each from its own working directory, since
+  the fixtures write scratch `test_*.db` files into it).
+- `ASAN_OPTIONS=detect_leaks=0` keeps the report to the memory error itself.
+  Linux only - there is no leak detection to turn off elsewhere.
+
+**TSan** is the tool for a result that is wrong rather than absent: a counter
+that drifts, a histogram whose buckets do not add up, a flag observed in an
+order no thread wrote. Issue #129 was exactly that - a writer-vs-writer
+histogram race - and the busy-poll event loop, the SPSC queues and the
+relaxed-atomic `MetricsCollector` are the same material. No assertion can
+express "these two writes were unordered", which is why the ordinary suite is
+green over code TSan has things to say about.
+
+### Suppressions
+
+`engine/sanitizers/asan.supp` and `engine/sanitizers/tsan.supp` are checked in,
+and the weekly workflow below points `ASAN_OPTIONS`/`TSAN_OPTIONS` at them. They
+exist for the vcpkg dependencies: those are built uninstrumented, so TSan cannot
+see the synchronization inside OpenSSL and can report an edge that is really
+there.
+
+**Never suppress engine code.** A finding in `engine/src` or `engine/include` is
+the thing the run exists to surface. Every entry must carry the report it
+silences, why the frame cannot be fixed here, and the issue tracking its
+removal - the same discipline #897 put on `// NOLINT`. Both files ship empty
+but present, with those rules in their headers.
+
+### The weekly run, and the issues it files
+
+`.github/workflows/sanitizers.yml` runs all five legs against `master` every
+Monday at 09:00 UTC, and on demand via **Run workflow**. It is weekly rather
+than per-pull-request because TSan costs 5-15x in wall time: paying that on
+every pull request would push the engine job past an hour for a class of bug
+that surfaces on the order of once a release. `VAYU_WERROR` is off there - the
+workflow answers "is the engine memory- and thread-correct", not "does it
+compile warning-free", which is `pr-tests.yml`'s gate.
+
+A red leg **files a GitHub issue by itself**, from the runner, through
+`GITHUB_TOKEN` - no model and no tokens are involved. The issue is titled
+`sanitizer: <sanitizer> failure on <runner>` and labelled `sanitizer-failure`,
+`component:engine` and `type:bug`, and carries the run link plus the first
+sanitizer report block from the log; the full log is attached to the run as an
+artifact for 14 days. The title is the dedup key, so a leg that stays red
+accumulates comments on one issue instead of filing a new one every Monday.
+
+So: **if you are reading a `sanitizer-failure` issue, that is where it came
+from.** Closing it is a human act after the fix - the next failure comments
+again, or files fresh if it was closed. Getting it green by adding a
+suppression for engine code is not a fix.
+
+### Known first-run state
+
+The first `linux-tsan` run is recorded in #904's pull request, and two of its
+findings are open:
+
+- **#956** - a real data race: `RunContext`'s event loop is read by the metrics
+  thread while the run thread constructs it. 13 of the 14 race reports are this
+  one race.
+- **#957** - `linux-tsan` segfaults in 58 socket-opening tests, because
+  cpp-httplib resolves through glibc's `getaddrinfo_a()` and glibc services that
+  on a thread TSan never sees created. It is a crash inside the sanitizer
+  runtime, so no suppression can reach it.
+
+So **the `linux-tsan` leg is expected red until #957 is resolved**, and
+`macos-tsan` is the meaningful thread-safety signal in the meantime. `asan` on
+all three and `macos-tsan` are the legs whose colour is news.
+
+The workflow also runs on a pull request that edits the sanitizer machinery
+itself (this workflow, `engine/sanitizers/**`, `engine/CMakeLists.txt`,
+`engine/CMakePresets.json`) and on nothing else, so a change to the presets or
+the flags is proved by the thing it changes before it reaches the cron.
 
 ## Build Outputs
 
@@ -484,7 +591,8 @@ check that scans an empty set passes for the wrong reason.
 ### Debugging
 
 1. Build in Debug mode: `cmake -B build -DCMAKE_BUILD_TYPE=Debug`
-2. Use AddressSanitizer: `-DVAYU_USE_ASAN=ON`
+2. Use a sanitizer preset - `linux-asan` for lifetime bugs, `linux-tsan` for
+   races. See [Sanitizers](#sanitizers)
 3. Generate compile commands: `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (enabled by default)
 
 ### The version string stays out of the widely-included headers

@@ -377,6 +377,14 @@ The project uses GitHub Actions for automated builds:
   - Builds and publishes installers for all platforms
   - Uses CMakePresets and lukka actions for optimal caching
 
+- **Sanitizers**: `.github/workflows/sanitizers.yml`
+  - Runs weekly on `master` (Monday 09:00 UTC) and on demand
+  - ASan on Linux/Windows/macOS and TSan on Linux/macOS - five jobs, because
+    ThreadSanitizer has no Windows implementation
+  - A red leg files or updates a `sanitizer-failure` issue by itself, from the
+    runner through `GITHUB_TOKEN`, with the run link and the sanitizer report
+  - See [Engine building - Sanitizers](engine/building.md#sanitizers)
+
 - **Warm build cache**: `.github/workflows/cache-warm.yml`
   - Runs on `master` when `engine/vcpkg.json` or `app/pnpm-lock.yaml` changes,
     weekly, or on demand

@@ -142,13 +142,47 @@ add_library(vayu_sanitizers INTERFACE)
 
 if(VAYU_USE_ASAN)
     message(STATUS "AddressSanitizer enabled")
-    target_compile_options(vayu_sanitizers INTERFACE -fsanitize=address -fno-omit-frame-pointer)
-    target_link_options(vayu_sanitizers INTERFACE -fsanitize=address)
+    if(MSVC)
+        # MSVC spells it with a slash and links the ASan runtime itself, so
+        # there is no link option to match - passing `-fsanitize=address` here
+        # would be swallowed as an unknown flag and the build would come out
+        # unsanitized while looking green.
+        #
+        # Two MSVC features are incompatible with it, and both are on by
+        # default in the configurations this repo builds: `/RTC1`, which CMake
+        # puts in CMAKE_<LANG>_FLAGS_DEBUG, and incremental linking. Neither is
+        # load-bearing - /RTC1's stack checks are a strict subset of what ASan
+        # reports - so they are removed rather than made the caller's problem.
+        # ASan against the static CRT this repo links (CMAKE_MSVC_RUNTIME_LIBRARY
+        # MultiThreaded... in the windows-* presets) is supported from VS 2019
+        # 16.9 on.
+        target_compile_options(vayu_sanitizers INTERFACE /fsanitize=address)
+        target_link_options(vayu_sanitizers INTERFACE /INCREMENTAL:NO)
+        foreach(_vayu_rtc_flags
+                CMAKE_C_FLAGS_DEBUG CMAKE_CXX_FLAGS_DEBUG
+                CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+            string(REGEX REPLACE "/RTC[1csu]+" "" ${_vayu_rtc_flags} "${${_vayu_rtc_flags}}")
+        endforeach()
+    else()
+        target_compile_options(vayu_sanitizers INTERFACE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(vayu_sanitizers INTERFACE -fsanitize=address)
+    endif()
 endif()
 
 if(VAYU_USE_TSAN)
+    # ThreadSanitizer does not exist on MSVC, and clang-cl does not implement it
+    # on Windows either. Without this the flags below would be dropped as
+    # unknown and the build would report "ThreadSanitizer enabled" while
+    # producing an ordinary binary - a green run that proves nothing. Fail at
+    # configure instead.
+    if(MSVC)
+        message(FATAL_ERROR
+            "VAYU_USE_TSAN is not supported on MSVC - ThreadSanitizer has no "
+            "Windows implementation. Use VAYU_USE_ASAN on Windows, and run TSan "
+            "on Linux or macOS (presets linux-tsan / macos-tsan).")
+    endif()
     message(STATUS "ThreadSanitizer enabled")
-    target_compile_options(vayu_sanitizers INTERFACE -fsanitize=thread)
+    target_compile_options(vayu_sanitizers INTERFACE -fsanitize=thread -fno-omit-frame-pointer)
     target_link_options(vayu_sanitizers INTERFACE -fsanitize=thread)
 endif()
 

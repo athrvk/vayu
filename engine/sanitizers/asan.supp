@@ -1,0 +1,22 @@
+# AddressSanitizer / LeakSanitizer suppressions for the Vayu engine.
+#
+# THE RULE: never suppress engine code. A finding inside engine/src or
+# engine/include is the thing this file's workflow exists to surface - silencing
+# it turns a weekly guard into a weekly green light. The only legitimate entry
+# is a *third-party* frame that ASan cannot see through: the vcpkg dependencies
+# are built without instrumentation, and OpenSSL in particular allocates through
+# its own pools, which LeakSanitizer reports as reachable-but-unfreed at exit.
+#
+# Every entry must carry, in a comment directly above it:
+#   1. the sanitizer report it silences, trimmed to the frames that matter;
+#   2. why the frame cannot be fixed here (upstream, uninstrumented, by design);
+#   3. the issue number tracking its removal, if one is expected.
+# An entry without those three is removed on sight - the same discipline #897
+# put on `// NOLINT` pragmas.
+#
+# Syntax is one `leak:<substring>` or `interceptor_via_lib:<lib>` per line; see
+# https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer#suppressions
+#
+# Deliberately empty: as of the first weekly run nothing here needed silencing.
+# LeakSanitizer only runs on Linux - macOS ASan ships without it - so a leak
+# entry added here is a Linux-only concern by construction.

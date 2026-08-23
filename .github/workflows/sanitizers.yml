@@ -1,0 +1,330 @@
+name: Sanitizers
+
+# ASan and TSan over the engine test suite, weekly on master (#904).
+#
+# **Why weekly and not per-pull-request.** TSan costs 5-15x in wall time and
+# roughly 5-10x in memory; ASan is cheaper but still doubles the suite. Paying
+# that on every pull request would move the engine job from ~11 min to the far
+# side of an hour for a class of bug that appears on the order of once a
+# release. Weekly on master is the cadence that matches the finding rate.
+#
+# **What it is pointed at.** The engine's own history: #129 was a silent
+# writer-vs-writer histogram race, and the busy-poll event loop, the SPSC queues
+# and the relaxed-atomic MetricsCollector are the same material. Those are races
+# no assertion can express, which is why the ordinary suite is green and this
+# workflow exists.
+#
+# **The matrix is five jobs, not six.** ThreadSanitizer has no Windows
+# implementation - MSVC ships none and clang-cl does not implement it - so
+# Windows runs ASan alone, through MSVC's `/fsanitize=address`
+# (engine/CMakeLists.txt). `VAYU_USE_TSAN` fails at configure on MSVC rather
+# than silently building unsanitized. LeakSanitizer rides along with ASan on
+# Linux only; macOS ASan ships without it.
+#
+# **A failure files an issue, with no AI and no tokens involved** - a
+# `github-script` step against `GITHUB_TOKEN`, keyed on sanitizer+platform so a
+# persistently red leg accumulates comments on one issue rather than filing a
+# fresh one every Monday. See docs/engine/building.md.
+#
+# **VAYU_WERROR is deliberately off here.** This workflow answers "is the engine
+# memory- and thread-correct", not "does it compile warning-free" - that gate is
+# pr-tests.yml's. One job, one job's meaning.
+
+on:
+  schedule:
+    # Monday 09:00 UTC. Cron here is always UTC. Deliberately not 06:00, which
+    # is when codeql.yml and cache-warm.yml already run - three cold
+    # three-platform builds starting in the same minute compete for the same
+    # runner pool.
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+  # The pull request that edits this machinery runs it. A new workflow cannot be
+  # dispatched before it exists on the default branch, so without this the first
+  # evidence that any of these five legs configures, builds and runs would
+  # arrive after merge, on a cron, as a red master. The path list is narrow on
+  # purpose: only the sanitizer machinery itself is in it, so ordinary engine
+  # pull requests keep paying nothing. `paths` here does not need the
+  # `ci-gate`-style caveat pr-tests.yml carries - this workflow is not a
+  # required check.
+  pull_request:
+    paths:
+      - '.github/workflows/sanitizers.yml'
+      - 'engine/sanitizers/**'
+      - 'engine/CMakeLists.txt'
+      - 'engine/CMakePresets.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sanitizers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sanitize:
+    name: ${{ matrix.sanitizer }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      # For the auto-filing step below, which is the only thing that needs it.
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            sanitizer: asan
+            preset: linux-asan
+          - os: ubuntu-latest
+            sanitizer: tsan
+            preset: linux-tsan
+          - os: macos-latest
+            sanitizer: asan
+            preset: macos-asan
+          - os: macos-latest
+            sanitizer: tsan
+            preset: macos-tsan
+          # No tsan leg: ThreadSanitizer has no Windows implementation. See the
+          # header, and the FATAL_ERROR in engine/CMakeLists.txt that makes a
+          # wrong invocation fail loudly.
+          - os: windows-latest
+            sanitizer: asan
+            preset: windows-asan
+    # A TSan suite at 5-15x, from a cold compile, on the slowest runner. 120 is
+    # a runaway guard, not a budget.
+    timeout-minutes: 120
+    env:
+      # Byte-identical to pr-tests.yml, release.yml and cache-warm.yml on
+      # purpose - the vcpkg *dependencies* are not sanitized (the flags land on
+      # the engine's own targets, through the vayu_sanitizers interface
+      # library), so their archives are the same artifacts those workflows
+      # build and this reads them out of the master scope rather than
+      # recompiling OpenSSL weekly.
+      VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+      # No sccache, on purpose. The engine's own objects compile with sanitizer
+      # flags, so they hash differently from every other workflow's - sharing
+      # the scope would fill it with entries nothing else can hit while never
+      # hitting one itself. A weekly cold compile is the cheaper trade.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            build-essential \
+            pkg-config \
+            ca-certificates \
+            autoconf \
+            autoconf-archive \
+            automake \
+            libtool
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        # vcpkg builds libsodium from source through its autotools path and runs
+        # autoreconf first; brew's libtool provides the glibtoolize it accepts.
+        run: |
+          command -v ninja || brew install ninja
+          for pkg in autoconf autoconf-archive automake libtool; do
+            brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
+          done
+
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
+          vcpkgJsonGlob: 'engine/vcpkg.json'
+
+      # Each sanitizer preset carries its own binaryDir (build-asan/,
+      # build-tsan/), so a sanitizer run never invalidates the objects of an
+      # ordinary build sharing the checkout.
+      - name: Build engine under ${{ matrix.sanitizer }}
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          configurePreset: ${{ matrix.preset }}
+          buildPreset: ${{ matrix.preset }}
+          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      # `-j2`, set on the test presets themselves rather than here, so a local
+      # `ctest --preset linux-tsan` gets the same restraint. Sanitizer runs are
+      # memory-hungry - TSan shadow memory alone is several GB per process - and
+      # the InboxListener port race seen under load on #875 is a reminder that
+      # `-j8` under a sanitizer adds noise of its own on top of the findings
+      # this is here to read.
+      #
+      # `< /dev/null` matches pr-tests.yml and release.yml: the suite must see
+      # one kind of stdin everywhere (#589).
+      #
+      # `halt_on_error=1` with the default `abort_on_error` means the first
+      # finding aborts the test process, which ctest reports as a failure - a
+      # sanitizer finding fails the job rather than scrolling past.
+      - name: Run the engine suite under ${{ matrix.sanitizer }}
+        working-directory: engine
+        shell: bash
+        env:
+          SANITIZER: ${{ matrix.sanitizer }}
+          PRESET: ${{ matrix.preset }}
+        run: |
+          set -o pipefail
+          supp="$PWD/sanitizers"
+          if [[ "$SANITIZER" == "asan" ]]; then
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
+              # MSVC's ASan runtime accepts a much smaller ASAN_OPTIONS set than
+              # clang's and errors out on a flag it does not know, so it is not
+              # given the suppressions file. It has no LeakSanitizer either.
+              export ASAN_OPTIONS="halt_on_error=1"
+            else
+              export ASAN_OPTIONS="halt_on_error=1:detect_stack_use_after_return=1:suppressions=$supp/asan.supp"
+              # LeakSanitizer reads its own variable, and only exists on Linux -
+              # macOS ASan ships without it. Harmless where it is absent.
+              export LSAN_OPTIONS="suppressions=$supp/asan.supp"
+            fi
+          else
+            export TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1:suppressions=$supp/tsan.supp"
+          fi
+          ctest --preset "$PRESET" --output-on-failure < /dev/null 2>&1 | tee ../sanitizer.log
+
+      - name: Upload the sanitizer log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sanitizer-${{ matrix.sanitizer }}-${{ matrix.os }}
+          path: |
+            sanitizer.log
+            engine/build-*/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Auto-filing, plain GitHub API from the runner - no model, no tokens.
+      # Keyed on sanitizer+platform so a leg that stays red accumulates comments
+      # on one issue instead of filing a new one every Monday. Closing it is a
+      # human act after the fix; the next failure comments again, or files
+      # fresh if it was closed.
+      #
+      # On a pull request from a fork GITHUB_TOKEN is read-only regardless of
+      # the `permissions:` block, so this step would fail there. That is
+      # acceptable: the `pull_request` trigger above exists for the branch that
+      # edits this machinery, and the run's own log and artifact still carry
+      # everything the issue would have said.
+      - name: File or update the sanitizer-failure issue
+        if: failure()
+        uses: actions/github-script@v8
+        env:
+          SANITIZER: ${{ matrix.sanitizer }}
+          PLATFORM: ${{ matrix.os }}
+          PRESET: ${{ matrix.preset }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { SANITIZER, PLATFORM, PRESET } = process.env;
+            const { owner, repo } = context.repo;
+            const label = 'sanitizer-failure';
+            const title = `sanitizer: ${SANITIZER} failure on ${PLATFORM}`;
+            const runUrl =
+              `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            // The first sanitizer report in the log, not the tail: ctest prints
+            // its own summary after the report, so a plain tail is the least
+            // useful part of the output. Falls back to the tail when the job
+            // died before any report - a build failure, or a timeout.
+            const reportStart =
+              /==\d+==ERROR: (Address|Leak)Sanitizer|^WARNING: ThreadSanitizer:|^SUMMARY: (Address|Thread|Leak)Sanitizer/;
+            let excerpt = '';
+            let excerptKind = 'the end of the run log';
+            try {
+              const lines = fs.readFileSync('sanitizer.log', 'utf8').split('\n');
+              const at = lines.findIndex((l) => reportStart.test(l));
+              if (at >= 0) {
+                excerpt = lines.slice(at, at + 120).join('\n');
+                excerptKind = 'the first sanitizer report';
+              } else {
+                excerpt = lines.slice(-80).join('\n');
+              }
+            } catch {
+              excerpt = '(no run log - the job failed before or during the build)';
+              excerptKind = 'no log';
+            }
+            // Issue bodies and comments cap at 65536 characters; leave room for
+            // the prose around it.
+            const MAX = 12000;
+            if (excerpt.length > MAX) {
+              excerpt = `${excerpt.slice(0, MAX)}\n... truncated, full log in the run artifact`;
+            }
+
+            const body = [
+              `**\`${PRESET}\` went red.**`,
+              '',
+              `- run: ${runUrl}`,
+              `- ref: \`${context.ref}\` (event \`${context.eventName}\`, commit \`${context.sha}\`)`,
+              `- job: \`${SANITIZER} on ${PLATFORM}\``,
+              '',
+              `Below is ${excerptKind}; the full log is attached to the run as`,
+              `the \`sanitizer-${SANITIZER}-${PLATFORM}\` artifact.`,
+              '',
+              '```',
+              excerpt,
+              '```',
+              '',
+              'Suppressing engine code to get this green is not a fix - see the',
+              'headers in `engine/sanitizers/`.',
+            ].join('\n');
+
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: label });
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: label,
+                color: 'b60205',
+                description: 'A scheduled ASan/TSan run went red',
+              });
+            }
+
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              labels: label,
+              per_page: 100,
+            });
+            const existing = open.find((i) => i.title === title);
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+              core.notice(`Commented on #${existing.number}: ${title}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                labels: [label, 'component:engine', 'type:bug'],
+              });
+              core.notice(`Filed #${created.data.number}: ${title}`);
+            }
