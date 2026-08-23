@@ -35,7 +35,8 @@ import {
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
 import { useExecutionEventsStore } from "@/stores";
-import { modKey } from "@/lib/platform";
+import { chordKeys } from "@/lib/platform";
+import { SEND_CHORD } from "@/constants/shortcuts";
 import {
 	ResponseBody as SharedResponseBody,
 	ResponseStatusBar,
@@ -155,8 +156,9 @@ export default function ResponseViewer() {
 					<p className="text-md font-medium text-foreground mb-1.5">No response yet</p>
 					<div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
 						<span>Press</span>
-						<Kbd>{modKey}</Kbd>
-						<Kbd>↵</Kbd>
+						{chordKeys(SEND_CHORD).map((cap) => (
+							<Kbd key={cap}>{cap}</Kbd>
+						))}
 						<span>or click Send</span>
 					</div>
 				</div>

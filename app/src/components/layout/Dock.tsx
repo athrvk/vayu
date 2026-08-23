@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
+import { DRAWER_VIEW_CHORDS, TOGGLE_CONTEXT_BAR_CHORD } from "@/constants/shortcuts";
 import {
 	useLayoutStore,
 	useEngineStore,
@@ -41,13 +42,13 @@ const DRAWER_BUTTONS: DrawerButton[] = [
 		view: "collections",
 		icon: <FolderOpen className="w-4 h-4" />,
 		label: "Collections",
-		shortcut: formatChord({ mod: true, shift: true, key: "E" }),
+		shortcut: formatChord(DRAWER_VIEW_CHORDS.collections),
 	},
 	{
 		view: "history",
 		icon: <Clock className="w-4 h-4" />,
 		label: "History",
-		shortcut: formatChord({ mod: true, shift: true, key: "H" }),
+		shortcut: formatChord(DRAWER_VIEW_CHORDS.history),
 	},
 	{
 		view: "variables",
@@ -81,7 +82,7 @@ const DRAWER_BUTTONS: DrawerButton[] = [
 		 */
 		icon: <Braces className="w-4 h-4" />,
 		label: "Variables",
-		shortcut: formatChord({ mod: true, shift: true, key: "U" }),
+		shortcut: formatChord(DRAWER_VIEW_CHORDS.variables),
 	},
 	{
 		view: "services",
@@ -100,13 +101,13 @@ const DRAWER_BUTTONS: DrawerButton[] = [
 		 */
 		icon: <Radio className="w-4 h-4" />,
 		label: "Services",
-		shortcut: formatChord({ mod: true, shift: true, key: "S" }),
+		shortcut: formatChord(DRAWER_VIEW_CHORDS.services),
 	},
 	{
 		view: "settings",
 		icon: <Settings className="w-4 h-4" />,
 		label: "Settings",
-		shortcut: formatChord({ mod: true, key: "," }),
+		shortcut: formatChord(DRAWER_VIEW_CHORDS.settings),
 	},
 ];
 
@@ -426,7 +427,7 @@ export function Dock() {
 						active={contextBarVisible}
 						onClick={toggleContextBar}
 						label="Toggle context bar"
-						shortcut={`(${formatChord({ mod: true, key: "I" })})`}
+						shortcut={`(${formatChord(TOGGLE_CONTEXT_BAR_CHORD)})`}
 					>
 						<PanelRight className="w-4 h-4" />
 					</DockButton>

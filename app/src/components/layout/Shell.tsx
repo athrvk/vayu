@@ -8,6 +8,17 @@
 import { useEffect, useState } from "react";
 import { useTabsStore, useSaveStore, useLayoutStore, type Tab, type DrawerView } from "@/stores";
 import { isModalOpen } from "@/lib/modal";
+import type { Chord } from "@/lib/platform";
+import {
+	SAVE_CHORD,
+	CLOSE_TAB_CHORD,
+	TOGGLE_DRAWER_CHORD,
+	TOGGLE_CONTEXT_BAR_CHORD,
+	SETTINGS_CHORD,
+	DRAWER_VIEW_CHORDS,
+	TAB_CHORDS,
+	matchesChord,
+} from "@/constants/shortcuts";
 import { ImportModal } from "@/modules/collections/ImportModal";
 import { Drawer } from "./Drawer";
 import { Dock } from "./Dock";
@@ -112,6 +123,18 @@ export default function Shell() {
 	}, [activeTab?.type, activeTab?.entityId, setDrawerOpen, setDrawerView]);
 
 	useEffect(() => {
+		/*
+		 * Every chord here is a definition in `constants/shortcuts.ts`, matched by
+		 * `matchesChord` - the same registry the Dock's tooltips advertise from
+		 * and the same matcher the Send/Load Test handler uses (#938).
+		 *
+		 * It was fourteen hand-rolled comparisons against `e.key` behind a raw
+		 * `e.metaKey || e.ctrlKey`, and the two bugs that cost were both things
+		 * the registry has always compared and the hand-rolled map did not:
+		 * `altKey` (so Ctrl+Alt+S, which is AltGr+S on many European Windows
+		 * layouts, saved) and the layout-independence of the digit row (⌘1-9 was
+		 * dead on AZERTY, whose unshifted digits produce `&é"'(-è_çà`).
+		 */
 		const handleKeyDown = (e: KeyboardEvent) => {
 			if (!(e.metaKey || e.ctrlKey)) return;
 			/*
@@ -126,56 +149,54 @@ export default function Shell() {
 			 * else does - which is what a palette on top of the window should do.
 			 */
 			if (isModalOpen()) return;
-			const key = e.key.toLowerCase();
 
-			// ⇧⌘E / ⇧⌘H / ⇧⌘U / ⇧⌘S - drawer view switchers (match Dock tooltips)
-			if (e.shiftKey) {
-				const views: Record<string, DrawerView> = {
-					e: "collections",
-					h: "history",
-					u: "variables",
-					// ⌘S is save, so the services view takes the shifted pair - free
-					// in both maps: the renderer binds no other ⇧⌘ chord and the
-					// native menu's only one is ⇧⌘W (close window).
-					s: "services",
-				};
-				const view = views[key];
-				if (view) {
-					e.preventDefault();
-					activateDrawerView(view);
-				}
+			if (matchesChord(e, SAVE_CHORD)) {
+				e.preventDefault();
+				triggerSave();
+				return;
+			}
+			if (matchesChord(e, CLOSE_TAB_CHORD)) {
+				e.preventDefault();
+				if (activeTabId) closeTab(activeTabId);
+				return;
+			}
+			if (matchesChord(e, TOGGLE_DRAWER_CHORD)) {
+				e.preventDefault();
+				toggleDrawer();
+				return;
+			}
+			if (matchesChord(e, TOGGLE_CONTEXT_BAR_CHORD)) {
+				e.preventDefault();
+				toggleContextBar();
+				return;
+			}
+			if (matchesChord(e, SETTINGS_CHORD)) {
+				e.preventDefault();
+				openTab({ type: "settings", entityId: null });
 				return;
 			}
 
-			switch (key) {
-				case "s":
+			// The drawer switchers, from the same table the Dock's tooltips read.
+			// Settings is in that table too and is handled above, by the chord it
+			// shares - opening the tab, which brings its drawer view with it.
+			for (const [view, chord] of Object.entries(DRAWER_VIEW_CHORDS) as [
+				DrawerView,
+				Chord,
+			][]) {
+				if (matchesChord(e, chord)) {
 					e.preventDefault();
-					triggerSave();
-					break;
-				case "w":
+					activateDrawerView(view);
+					return;
+				}
+			}
+
+			const tabIndex = TAB_CHORDS.findIndex((chord) => matchesChord(e, chord));
+			if (tabIndex !== -1) {
+				const tab = openTabs[tabIndex];
+				if (tab) {
 					e.preventDefault();
-					if (activeTabId) closeTab(activeTabId);
-					break;
-				case "b":
-					e.preventDefault();
-					toggleDrawer();
-					break;
-				case "i":
-					e.preventDefault();
-					toggleContextBar();
-					break;
-				case ",":
-					e.preventDefault();
-					openTab({ type: "settings", entityId: null });
-					break;
-				default:
-					if (key >= "1" && key <= "9") {
-						const tab = openTabs[parseInt(key) - 1];
-						if (tab) {
-							e.preventDefault();
-							focusTab(tab.id);
-						}
-					}
+					focusTab(tab.id);
+				}
 			}
 		};
 		window.addEventListener("keydown", handleKeyDown);

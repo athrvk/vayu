@@ -32,13 +32,55 @@ export const isMac: boolean = detectMac();
 /** Primary modifier key glyph/label for the current platform (⌘ on macOS). */
 export const modKey: string = isMac ? "⌘" : "Ctrl";
 
+/**
+ * How a chord wants the primary modifier.
+ *
+ * `true` is lenient - either ⌘ or Ctrl satisfies it, which is what almost every
+ * chord wants: one definition that reads ⌘S on a Mac and Ctrl+S elsewhere, and
+ * fires for whichever key that platform's users actually press.
+ *
+ * `"strict"` demands the platform's own modifier and refuses the other one:
+ * ⌘ *without* Ctrl on macOS, Ctrl *without* ⌘ elsewhere. Exactly one chord
+ * needs it - the palette's ⌘K, because Ctrl+K on macOS is the Cocoa
+ * kill-to-end-of-line every text field implements (and Monaco's
+ * `deleteAllRight`). A lenient ⌘K listening on the capture phase stole it from
+ * the focused control before the control ever saw it.
+ */
+export type ChordMod = boolean | "strict";
+
 export interface Chord {
 	/** Primary modifier - ⌘ on macOS, Ctrl elsewhere. */
-	mod?: boolean;
+	mod?: ChordMod;
 	shift?: boolean;
 	alt?: boolean;
-	/** The final key, e.g. "E", "," or "↵". */
+	/** The final key, e.g. "E", "," or "↵". Always what is *displayed*. */
 	key: string;
+	/**
+	 * Physical key (`KeyboardEvent.code`, e.g. "Digit1") to match on instead of
+	 * `key`, for chords whose character moves with the layout.
+	 *
+	 * The digit row is the case: on AZERTY the unshifted top row produces
+	 * `&é"'(-è_çà`, so `e.key === "1"` never arrives without Shift - and the
+	 * shifted press that does produce it collides with the shifted chords. The
+	 * position is stable where the character is not, which is why VS Code binds
+	 * these by code too. `key` stays the label, so the hint still reads ⌘1.
+	 */
+	code?: string;
+}
+
+/**
+ * The individual key-caps of a chord, in display order - ["⇧", "⌘", "E"] on
+ * macOS, ["Ctrl", "Shift", "E"] elsewhere.
+ *
+ * Surfaces that render one `<Kbd>` per key (the response pane's empty state)
+ * read this; `formatChord` joins it for the single-string surfaces. Both come
+ * from the one `Chord`, so no display site spells a modifier itself.
+ */
+export function chordKeys({ mod, shift, alt, key }: Chord): string[] {
+	if (isMac) {
+		return [...(alt ? ["⌥"] : []), ...(shift ? ["⇧"] : []), ...(mod ? ["⌘"] : []), key];
+	}
+	return [...(mod ? ["Ctrl"] : []), ...(shift ? ["Shift"] : []), ...(alt ? ["Alt"] : []), key];
 }
 
 /**
@@ -47,14 +89,6 @@ export interface Chord {
  * `+`-joined words ("Ctrl+Shift+E"). This is the single place shortcut hints are
  * rendered so every surface (Dock, tooltips, empty states) stays consistent.
  */
-export function formatChord({ mod, shift, alt, key }: Chord): string {
-	if (isMac) {
-		return `${alt ? "⌥" : ""}${shift ? "⇧" : ""}${mod ? "⌘" : ""}${key}`;
-	}
-	const parts: string[] = [];
-	if (mod) parts.push("Ctrl");
-	if (shift) parts.push("Shift");
-	if (alt) parts.push("Alt");
-	parts.push(key);
-	return parts.join("+");
+export function formatChord(chord: Chord): string {
+	return chordKeys(chord).join(isMac ? "" : "+");
 }

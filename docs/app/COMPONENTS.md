@@ -97,7 +97,7 @@ Labels and icons come from `tab-descriptors.ts`, a sibling module rather than th
 - **Max 12 tabs** with LRU eviction when exceeding; dashboard tabs are exempt from eviction. Dirty tabs (unsaved) are skipped during eviction (autosave is the safety net).
 - **Middle-click closes** a tab (browser-like).
 - **No unsaved dot** - autosave ensures safety.
-- **Keyboard support:** ⌘1–9 jump to tab; displayed via dock shortcuts.
+- **Keyboard support:** ⌘1–9 jump to tab, bound to the physical digit row (`e.code`) rather than to the character it types, so they work on AZERTY and every other shifted-digit layout; displayed via dock shortcuts.
 
 ### `Shell` (`components/layout/Shell.tsx`)
 
@@ -105,7 +105,7 @@ Main layout: tab-centric with resizable drawer, split/overlay context bar, and d
 
 - **One uniform layout for every tab** - `Drawer` (left) + a content column holding `TabStrip` over main + `ContextBar`. No tab type takes over the row. This is deliberate: the Dock's drawer switchers always have a Drawer to act on, so they can never be dead. (Settings used to full-take-over and suppress the Drawer, which left those buttons doing nothing while Settings was open.)
 - **Left navigation is always the Drawer.** Every main view that needs a category/entity list uses the shared Drawer for it - never its own left rail. `SettingsMain` and `VariablesMain` are pure content panes; their category trees live in the Drawer (`settings` / `variables` views). Follow this pattern for any new view - do not add a second sidebar inside the main area.
-- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U/S (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab). ⌘K (command palette) is **not** in this map - it is owned by `CommandPalette`, on the capture phase, because Monaco swallows the key on the bubble.
+- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U/S (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab). Every one of them is a `Chord` in `constants/shortcuts.ts`, matched by `matchesChord` - the same registry the Dock's tooltips advertise from, so no surface can claim a chord the handler does not listen for. They were fourteen hand-rolled comparisons until #938, which is how AltGr (Ctrl+Alt on European Windows layouts) came to fire Save and close tabs, and how ⌘1-9 came to be dead on AZERTY. ⌘K (command palette) is **not** in this map - it is owned by `CommandPalette`, on the capture phase, because Monaco swallows the key on the bubble.
 - **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
 - **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
 - **Drawer-view sync:** an effect points the Drawer at the view matching the active tab - `variables`→variables, `settings`→settings, `request`/`collection`→collections - and opens it.
@@ -801,7 +801,9 @@ Three things about it are load-bearing:
   `Shell`'s bubble-phase keydown map). Monaco treats ⌘K as the start of a chord and stops it
   propagating, so a bubble listener never sees the key while the caret is in an editor.
   `PALETTE_CHORD` lives in `constants/shortcuts.ts` so the handler and every label that
-  advertises the chord read one definition.
+  advertises the chord read one definition. It is also the one chord declared `mod: "strict"`:
+  capture phase plus a lenient modifier meant Ctrl+K on macOS - Cocoa's kill-to-end-of-line, and
+  Monaco's `deleteAllRight` - opened the palette instead of reaching the focused control (#938).
 - **Focus goes back where it came from**, and that is the palette's own code: Radix's
   `FocusScope` restores to a dialog's *trigger*, and a palette summoned by a chord has none, so
   focus would land on `<body>`. The previous element is captured from a store subscription

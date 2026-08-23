@@ -54,7 +54,6 @@ export {
 	DropdownMenuRadioItem,
 	DropdownMenuLabel,
 	DropdownMenuSeparator,
-	DropdownMenuShortcut,
 	DropdownMenuGroup,
 	DropdownMenuPortal,
 	DropdownMenuSub,
@@ -110,7 +109,6 @@ export {
 	CommandEmpty,
 	CommandGroup,
 	CommandItem,
-	CommandShortcut,
 	CommandSeparator,
 } from "./command";
 
