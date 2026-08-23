@@ -65,9 +65,19 @@ engine/
   preprocessed away before a Linux run sees it, so gating Linux alone left
   `platform.hpp`'s per-OS split and the Windows-only blocks in `client.cpp` /
   `event_loop_worker.cpp` / `temp_database.hpp` unlinted. macOS is excluded
-  because clang-tidy 19 *and* 20 both SIGILL there on the AppleClang 21 SDK
-  (#906); the only macOS-conditional code is four `#define`s, so what is lost is
-  `clang-analyzer-*` over shared code under libc++. **Both gate the changed
+  because clang-tidy 19 *and* 20 both SIGILL there on the AppleClang 21 SDK -
+  a settled decision (#940), not an open bug; the only macOS-conditional code is
+  four `#define`s, so what is lost is `clang-analyzer-*` over shared code under
+  libc++, and it comes back only if a Homebrew LLVM survives that SDK. A pull
+  request that is nothing but a bulk reformat carries the **`reformat-pr`**
+  label, which is the whole of the CI gate's escape hatch - line scoping cannot
+  help a change that rewrites a line in every file. **CI lints translation
+  units, never a header** (#940): a header has no `compile_commands.json` entry,
+  so clang-tidy guesses a command for it, and a guess that parses the wrong STL
+  emits `clang-diagnostic-error`s - which are *not* line-filtered, taking the
+  whole gate out of changed-lines scope. The hook is what lints headers, because
+  it names every staged file in one filter and CI's per-file driver does not.
+  **Both gate the changed
   *lines***: the tree had never been linted and most files carry findings older
   than any diff, so whole-file gating would fail a pull request for code it did
   not write. The mechanisms differ on purpose (#902) - CI runs LLVM's
