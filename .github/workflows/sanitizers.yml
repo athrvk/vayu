@@ -90,9 +90,13 @@ jobs:
           - os: windows-latest
             sanitizer: asan
             preset: windows-asan
-    # A TSan suite at 5-15x, from a cold compile, on the slowest runner. 120 is
-    # a runaway guard, not a budget.
-    timeout-minutes: 120
+    # A runaway guard, not a budget. Measured on the first full run of this
+    # workflow, cold, from checkout to the last test: ASan 13 min on Linux and
+    # 15 on macOS, TSan 15 on Linux and 70 on macOS, ASan on Windows the
+    # outlier at well over 100. 150 leaves better than 2x headroom over the
+    # slowest leg once `windows-asan` runs at -j4 (see the preset), and still
+    # catches a genuine hang in one weekly run rather than three.
+    timeout-minutes: 150
     env:
       # Byte-identical to pr-tests.yml, release.yml and cache-warm.yml on
       # purpose - the vcpkg *dependencies* are not sanitized (the flags land on
@@ -164,12 +168,13 @@ jobs:
           buildPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
 
-      # `-j2`, set on the test presets themselves rather than here, so a local
-      # `ctest --preset linux-tsan` gets the same restraint. Sanitizer runs are
-      # memory-hungry - TSan shadow memory alone is several GB per process - and
-      # the InboxListener port race seen under load on #875 is a reminder that
-      # `-j8` under a sanitizer adds noise of its own on top of the findings
-      # this is here to read.
+      # Parallelism is set on the test presets themselves rather than here, so
+      # a local `ctest --preset linux-tsan` gets the same restraint: `-j2`
+      # everywhere except `windows-asan`, which keeps the platform's usual
+      # `-j4`. Sanitizer runs are memory-hungry - TSan shadow memory alone is
+      # several GB per process - and the InboxListener port race seen under
+      # load on #875 is a reminder that `-j8` under a sanitizer adds noise of
+      # its own on top of the findings this is here to read.
       #
       # `< /dev/null` matches pr-tests.yml and release.yml: the suite must see
       # one kind of stdin everywhere (#589).

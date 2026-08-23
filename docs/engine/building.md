@@ -168,6 +168,17 @@ coexist in one binary, never fight over one directory. Their test presets run
 (TSan's shadow memory alone is gigabytes per process) and oversubscribing turns
 findings into noise.
 
+`windows-asan` is the exception, and keeps the platform's usual `-j4`. Windows
+pays far more per test process than the other two - the suite is 2367 separate
+processes - so halving parallelism there costs more than the sanitizer's own
+overhead. The first full run measured it: cold, from checkout to the last test,
+ASan took 13 minutes on Linux and 15 on macOS, TSan 15 on Linux and 70 on
+macOS, while ASan on Windows at `-j2` ran past 100 minutes for the same work
+the ordinary Windows engine job does in 27 at `-j4`. ASan's memory overhead is
+roughly 3x, not TSan's 10x, and the scratch-database tests already share a
+CTest `RESOURCE_LOCK` that keeps `-j4` survivable on Windows, so the restraint
+buys nothing there.
+
 ### Which one to reach for
 
 **ASan** is the tool for a **lifetime** bug - a crash the ordinary suite only

@@ -373,7 +373,7 @@
       "configurePreset": "windows-asan",
       "inherits": ["test-base"],
       "execution": {
-        "jobs": 2
+        "jobs": 4
       }
     },
     {
