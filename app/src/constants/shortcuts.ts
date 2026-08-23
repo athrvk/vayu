@@ -21,10 +21,15 @@ import { isMac, type Chord } from "@/lib/platform";
 import type { DrawerView } from "@/stores";
 
 /** Send the request. */
-export const SEND_CHORD: Chord = { mod: true, key: "↵" };
+export const SEND_CHORD: Chord = { mod: true, key: "↵", label: "Send request" };
 
 /** Start a load test. Shift distinguishes it from Send, as it escalates it. */
-export const LOAD_TEST_CHORD: Chord = { mod: true, shift: true, key: "↵" };
+export const LOAD_TEST_CHORD: Chord = {
+	mod: true,
+	shift: true,
+	key: "↵",
+	label: "Start a load test",
+};
 
 /**
  * Open the command palette.
@@ -43,22 +48,26 @@ export const LOAD_TEST_CHORD: Chord = { mod: true, shift: true, key: "↵" };
  * so a lenient match ate Ctrl+K on macOS - the Cocoa kill-to-end-of-line - out
  * of every input and editor in the app before the focused control saw it.
  */
-export const PALETTE_CHORD: Chord = { mod: "strict", key: "K" };
+export const PALETTE_CHORD: Chord = { mod: "strict", key: "K", label: "Open the command palette" };
 
 /** Save the active tab's entity. */
-export const SAVE_CHORD: Chord = { mod: true, key: "S" };
+export const SAVE_CHORD: Chord = { mod: true, key: "S", label: "Save the active tab" };
 
 /** Close the active tab. */
-export const CLOSE_TAB_CHORD: Chord = { mod: true, key: "W" };
+export const CLOSE_TAB_CHORD: Chord = { mod: true, key: "W", label: "Close tab" };
 
 /** Show/hide the left drawer. */
-export const TOGGLE_DRAWER_CHORD: Chord = { mod: true, key: "B" };
+export const TOGGLE_DRAWER_CHORD: Chord = { mod: true, key: "B", label: "Show or hide the drawer" };
 
 /** Show/hide the right context bar. */
-export const TOGGLE_CONTEXT_BAR_CHORD: Chord = { mod: true, key: "I" };
+export const TOGGLE_CONTEXT_BAR_CHORD: Chord = {
+	mod: true,
+	key: "I",
+	label: "Show or hide the context bar",
+};
 
 /** Open Settings, the platform convention for a preferences window. */
-export const SETTINGS_CHORD: Chord = { mod: true, key: "," };
+export const SETTINGS_CHORD: Chord = { mod: true, key: ",", label: "Open settings" };
 
 /**
  * The drawer view switchers, keyed by the view they activate.
@@ -73,10 +82,10 @@ export const SETTINGS_CHORD: Chord = { mod: true, key: "," };
  * `formatChord` literals, coupled to the handler by a comment.
  */
 export const DRAWER_VIEW_CHORDS: Record<DrawerView, Chord> = {
-	collections: { mod: true, shift: true, key: "E" },
-	history: { mod: true, shift: true, key: "H" },
-	variables: { mod: true, shift: true, key: "U" },
-	services: { mod: true, shift: true, key: "S" },
+	collections: { mod: true, shift: true, key: "E", label: "Show collections" },
+	history: { mod: true, shift: true, key: "H", label: "Show history" },
+	variables: { mod: true, shift: true, key: "U", label: "Show variables" },
+	services: { mod: true, shift: true, key: "S", label: "Show services" },
 	settings: SETTINGS_CHORD,
 };
 
@@ -90,7 +99,52 @@ export const TAB_CHORDS: readonly Chord[] = Array.from({ length: 9 }, (_, i) => 
 	mod: true,
 	key: String(i + 1),
 	code: `Digit${i + 1}`,
+	label: `Focus tab ${i + 1}`,
 }));
+
+/** A named block of chords, as a surface that lists them prints it. */
+export interface ShortcutGroup {
+	/** Stable across renders and reorderings - the React key. */
+	id: string;
+	/** Heading above the block. */
+	title: string;
+	chords: readonly Chord[];
+}
+
+/**
+ * Every chord above, grouped for display (#951).
+ *
+ * The membership is written here rather than in the panel that draws it, so the
+ * surface holds no list of its own: it maps these groups, reads each chord's
+ * `label`, and renders the keys through `chordKeys`. Adding a chord to this file
+ * and to a group is the whole edit - `shortcuts.listed.test.ts` walks this
+ * module's exports and fails if a chord reaches neither.
+ *
+ * `⌘,` appears once. `DRAWER_VIEW_CHORDS.settings` *is* `SETTINGS_CHORD` - the
+ * same object, deliberately - so the drawer group filters it out by identity
+ * rather than printing a second row for a key the reader already saw.
+ */
+export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
+	{ id: "requests", title: "Requests", chords: [SEND_CHORD, LOAD_TEST_CHORD] },
+	{
+		id: "workspace",
+		title: "Workspace",
+		chords: [
+			PALETTE_CHORD,
+			SAVE_CHORD,
+			CLOSE_TAB_CHORD,
+			TOGGLE_DRAWER_CHORD,
+			TOGGLE_CONTEXT_BAR_CHORD,
+			SETTINGS_CHORD,
+		],
+	},
+	{
+		id: "drawer",
+		title: "Drawer views",
+		chords: Object.values(DRAWER_VIEW_CHORDS).filter((chord) => chord !== SETTINGS_CHORD),
+	},
+	{ id: "tabs", title: "Tabs", chords: TAB_CHORDS },
+];
 
 /**
  * Does this event match a chord?

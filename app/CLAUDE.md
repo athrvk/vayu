@@ -51,7 +51,11 @@ Renderer and Electron main process for Vayu. Apache-2.0. See the repo root
   chords `mod: "strict"` so the other platform's modifier stays with the focused
   control, and remember Monaco eats what it recognises - the send chords reach an
   editor through `lib/editor-chords.ts`, which re-dispatches to the one window
-  handler rather than calling the action a second way.
+  handler rather than calling the action a second way. **A chord also carries
+  its own `label` and belongs to a `SHORTCUT_GROUPS` entry** (#951): the
+  Settings > Keyboard shortcuts panel draws every row from that registry, so a
+  chord added without one is a shortcut nothing on screen advertises -
+  `shortcuts.listed.test.ts` fails on it.
 - **The collection tree's key guards come from the same file** - it bails out
   of its named cases on Ctrl/Cmd so those chords reach the window, and its
   editable-target check is `isTextEntryTarget`, which is `ownsEnterKey` plus a

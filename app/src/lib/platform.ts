@@ -56,6 +56,18 @@ export interface Chord {
 	/** The final key, e.g. "E", "," or "↵". Always what is *displayed*. */
 	key: string;
 	/**
+	 * What pressing this does, as a surface listing shortcuts would name it -
+	 * "Send request", "Close tab".
+	 *
+	 * On the definition rather than in a table beside it, for the reason the
+	 * registry exists at all: a parallel list of names keyed by chord is a
+	 * second place a chord is written down, and it goes stale the first time one
+	 * is added. Optional on the type because a chord can be declared for a
+	 * binding nothing lists (an editor's own); every chord in
+	 * `constants/shortcuts.ts` carries one, and a test holds that.
+	 */
+	label?: string;
+	/**
 	 * Physical key (`KeyboardEvent.code`, e.g. "Digit1") to match on instead of
 	 * `key`, for chords whose character moves with the layout.
 	 *

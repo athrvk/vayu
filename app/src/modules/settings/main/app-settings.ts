@@ -332,6 +332,15 @@ export const APP_SETTINGS = [
 		searchText: "Whether agents may change saved requests, environments and engine config.",
 		keywords: ["read-only", "safety", "permission"],
 	},
+	// Keyboard shortcuts
+	{
+		anchor: "keyboard-shortcuts",
+		panel: "shortcuts",
+		label: "Keyboard shortcuts",
+		searchText:
+			"Every chord the app listens for, listed for this platform - send, save, close tab, the drawer views and the tab digits.",
+		keywords: ["hotkey", "keybinding", "chord", "accelerator", "cheat sheet"],
+	},
 ] as const satisfies readonly AppSettingDescriptor[];
 
 /**

@@ -17,7 +17,7 @@
 
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Palette, Code2, LayoutDashboard, Gauge, Bell, Plug, Info } from "lucide-react";
+import { Palette, Code2, LayoutDashboard, Gauge, Bell, Plug, Info, Keyboard } from "lucide-react";
 import type { ClientSettingsCategory, SettingsCategory } from "@/types";
 import AppearancePanel from "./panels/AppearancePanel";
 import EditorPanel from "./panels/EditorPanel";
@@ -26,6 +26,7 @@ import LoadTestingPanel from "./panels/LoadTestingPanel";
 import McpSettingsPanel from "./panels/McpSettingsPanel";
 import NotificationsPanel from "./panels/NotificationsPanel";
 import GeneralPanel from "./panels/GeneralPanel";
+import KeyboardShortcutsPanel from "./panels/KeyboardShortcutsPanel";
 
 export interface AppSettingsPanel {
 	id: ClientSettingsCategory;
@@ -88,6 +89,16 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 		description: "Where toasts appear, how long they stay, and which ones are worth showing",
 		icon: Bell,
 		Component: NotificationsPanel,
+	},
+	{
+		id: "shortcuts",
+		label: "Keyboard shortcuts",
+		description: "Every chord the app listens for, drawn for this platform",
+		icon: Keyboard,
+		Component: KeyboardShortcutsPanel,
+		// Nothing on this screen is editable, so the autosave note would be
+		// answering a question it does not raise.
+		saveNote: "Shortcuts are fixed; this screen is a reference.",
 	},
 	{
 		id: "mcp",
