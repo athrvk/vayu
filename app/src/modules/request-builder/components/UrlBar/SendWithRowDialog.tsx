@@ -211,8 +211,10 @@ export default function SendWithRowDialog({
 	/*
 	 * The row this dialog is pointing at: what was typed, or - when nothing has
 	 * been - the row the caller arrived with, which is the row a step card's
-	 * repro named. Falls back to the first row so the footer always names one
-	 * and the grid always has a focusable row.
+	 * repro named. Falls back to the first row so the footer always names one.
+	 * Which row is *focusable* is a separate question, answered by `focusable`
+	 * below: this index can point outside the rows on screen, and the grid's tab
+	 * stop cannot.
 	 */
 	const selected = typed.kind === "row" ? typed.index : (lastRowIndex ?? 0);
 	/*
@@ -233,6 +235,24 @@ export default function SendWithRowDialog({
 	);
 	const { visible, sentinelRef, hasMore } = useGrowingWindow(visibleRows.length, ROW_WINDOW_STEP);
 	const rendered = visibleRows.slice(0, visible);
+
+	/*
+	 * Which rendered row carries the grid's single tab stop.
+	 *
+	 * `selected` is an address into the *file*, and three ordinary states leave
+	 * it outside the rows on screen: a remembered index past the growing window,
+	 * a filter that excludes it, and a file that shrank under it (#894). Hanging
+	 * the roving `tabIndex=0` off `selected` alone meant every one of those left
+	 * the grid with no tab stop at all - out of the tab order, its key handler
+	 * unreachable, which is the opposite of what a roving tabindex is for.
+	 *
+	 * So the tab stop falls back to the first rendered row. It moves the *focus*,
+	 * never the selection: which row a Send binds is #894's question and is still
+	 * answered by refusing, not by quietly re-pointing at a row nobody asked for.
+	 */
+	const focusable = rendered.some(({ index }) => index === selected)
+		? selected
+		: (rendered[0]?.index ?? -1);
 
 	/*
 	 * Read on open, not on mount: a request tab must not touch the filesystem
@@ -258,11 +278,28 @@ export default function SendWithRowDialog({
 	 * it above the list. Optional-called because jsdom has no layout and
 	 * therefore no `scrollIntoView`.
 	 */
-	const selectedRowRef = useRef<HTMLTableRowElement | null>(null);
+	const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
 	useEffect(() => {
 		if (typed.kind !== "row") return;
-		selectedRowRef.current?.scrollIntoView?.({ block: "nearest" });
+		rowRefs.current.get(selected)?.scrollIntoView?.({ block: "nearest" });
 	}, [typed.kind, selected]);
+
+	/*
+	 * Focus follows selection, but only when the grid itself moved it.
+	 *
+	 * Arrow keys change `selected` through the number field's state, and that
+	 * same state is what a user types into - so focusing the selected row on
+	 * every change would pull the caret out of the field mid-number. The flag is
+	 * set by the grid's own handler and read once, so a keyboard move takes DOM
+	 * focus with it (the ring, and the row a screen reader announces) while
+	 * typing "480" leaves focus where it was typed.
+	 */
+	const focusMovedRow = useRef(false);
+	useEffect(() => {
+		if (!focusMovedRow.current) return;
+		focusMovedRow.current = false;
+		rowRefs.current.get(selected)?.focus();
+	}, [selected]);
 
 	const send = useCallback(
 		(index: number) => {
@@ -285,11 +322,26 @@ export default function SendWithRowDialog({
 	);
 
 	/**
-	 * Arrow keys move the selection through the *filtered* rows, Enter sends.
+	 * How many rows PageUp/PageDown cover.
+	 *
+	 * Taken rather than left out: the grid pattern lists them as optional, and
+	 * without them a keyboard user crossing a 500-row file has one row per press
+	 * or the number field's absolute address, with nothing between. Ten is a
+	 * screenful of this grid at the dialog's height rather than a computed page,
+	 * because the scroller's height is not known here and a wrong measurement
+	 * would move the selection somewhere the eye did not follow.
+	 */
+	const PAGE_ROWS = 10;
+
+	/**
+	 * Arrow keys move the selection through the *rendered* rows, Enter sends.
 	 *
 	 * The number field is the absolute address and this is the relative one, so
 	 * a keyboard user who has filtered to four rows steps through those four
-	 * rather than through the file underneath them.
+	 * rather than through the file underneath them. Bounded by what is rendered
+	 * rather than by the whole filtered set because focus follows selection: a
+	 * step onto a row past the growing window would move `aria-selected` to a row
+	 * with no element to focus, which is the announcement gap this closes.
 	 */
 	const onGridKeyDown = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
 		if (e.key === "Enter" || e.key === " ") {
@@ -297,16 +349,30 @@ export default function SendWithRowDialog({
 			send(selected);
 			return;
 		}
-		const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
-		if (step === 0) return;
+		const at = rendered.findIndex((r) => r.index === selected);
+		const last = rendered.length - 1;
+		const target =
+			e.key === "ArrowDown"
+				? at + 1
+				: e.key === "ArrowUp"
+					? at - 1
+					: e.key === "PageDown"
+						? at + PAGE_ROWS
+						: e.key === "PageUp"
+							? at - PAGE_ROWS
+							: e.key === "Home"
+								? 0
+								: e.key === "End"
+									? last
+									: null;
+		if (target === null) return;
 		e.preventDefault();
-		const at = visibleRows.findIndex((r) => r.index === selected);
-		const next = visibleRows[Math.min(Math.max(at + step, 0), visibleRows.length - 1)];
-		if (next) {
-			// Through the number field's own state, so the two addresses of a row
-			// never disagree about which one is selected.
-			setEntry(String(next.index + 1));
-		}
+		const next = rendered[Math.min(Math.max(target, 0), last)];
+		if (!next || next.index === selected) return;
+		// Through the number field's own state, so the two addresses of a row
+		// never disagree about which one is selected.
+		focusMovedRow.current = true;
+		setEntry(String(next.index + 1));
 	};
 
 	return (
@@ -443,7 +509,12 @@ export default function SendWithRowDialog({
 								 * A roving tabindex keeps the grid one tab stop rather
 								 * than one per row, which at a thousand rows is the
 								 * difference between a keyboard reaching the footer and
-								 * not.
+								 * not - exactly one, always, because the stop falls back
+								 * to the first rendered row when the selected row is not
+								 * on screen (see `focusable`). Arrow, Home, End and
+								 * PageUp/PageDown move that stop and DOM focus with it,
+								 * per the WAI-ARIA grid pattern: a selection a screen
+								 * reader is never told about is not a selection.
 								 */
 								<Table role="grid" aria-label="Data rows">
 									<TableHeader className="sticky top-0 z-10 bg-card">
@@ -460,11 +531,12 @@ export default function SendWithRowDialog({
 										{rendered.map(({ row, index }) => (
 											<TableRow
 												key={index}
-												ref={
-													index === selected ? selectedRowRef : undefined
-												}
+												ref={(el) => {
+													if (el) rowRefs.current.set(index, el);
+													else rowRefs.current.delete(index);
+												}}
 												aria-selected={index === selected}
-												tabIndex={index === selected ? 0 : -1}
+												tabIndex={index === focusable ? 0 : -1}
 												onClick={() => send(index)}
 												className={cn(
 													"cursor-pointer",
