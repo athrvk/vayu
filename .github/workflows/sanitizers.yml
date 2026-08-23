@@ -277,8 +277,10 @@ jobs:
               `- ref: \`${context.ref}\` (event \`${context.eventName}\`, commit \`${context.sha}\`)`,
               `- job: \`${SANITIZER} on ${PLATFORM}\``,
               '',
-              `Below is ${excerptKind}; the full log is attached to the run as`,
-              `the \`sanitizer-${SANITIZER}-${PLATFORM}\` artifact.`,
+              excerptKind === 'no log'
+                ? 'The job produced no test log at all - read the run itself.'
+                : `Below is ${excerptKind}; the full log is attached to the run` +
+                  ` as the \`sanitizer-${SANITIZER}-${PLATFORM}\` artifact.`,
               '',
               '```',
               excerpt,

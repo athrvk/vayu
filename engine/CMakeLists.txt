@@ -101,6 +101,16 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         /WX
         /permissive-
         /FS
+        # Not a warning flag, and here for the same reason /FS is: it is MSVC
+        # build hygiene the whole tree needs. `database.cpp` instantiates
+        # enough of sqlite_orm's templates to exceed the COFF section limit -
+        # `fatal error C1128` - as soon as inlining is off, which is every
+        # Debug configuration. Release never hit it (/O2 folds the sections
+        # away) and windows-dev has no CI leg, so the first build to fail on it
+        # was windows-asan, where /Od plus ASan instrumentation makes it
+        # unmissable. /bigobj only raises that limit; it costs nothing where it
+        # is not needed.
+        /bigobj
         # 4324: 'structure was padded due to alignas' - deliberate, on the
         # cache-line-aligned SPSC queue members (spsc_queue.hpp); the padding
         # is the point. Permanent.
