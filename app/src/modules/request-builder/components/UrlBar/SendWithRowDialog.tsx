@@ -74,6 +74,7 @@ import { Callout } from "@/components/shared";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { dataCellText, type DataFileRow } from "@/services/data-files";
 import { cn } from "@/lib/utils";
+import { isCommitEnter } from "@/lib/keyboard";
 import type { SendWithRowState } from "../../hooks/useSendWithRow";
 
 export interface SendWithRowDialogProps {
@@ -342,9 +343,13 @@ export default function SendWithRowDialog({
 	 * rather than by the whole filtered set because focus follows selection: a
 	 * step onto a row past the growing window would move `aria-selected` to a row
 	 * with no element to focus, which is the announcement gap this closes.
+	 *
+	 * `isCommitEnter` rather than `e.key === "Enter"`: an Enter carrying Ctrl/Cmd
+	 * is the app's Send chord, and this grid and the window listener both acting
+	 * on it produced two competing executions of the same request (#935).
 	 */
 	const onGridKeyDown = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
-		if (e.key === "Enter" || e.key === " ") {
+		if (isCommitEnter(e) || e.key === " ") {
 			e.preventDefault();
 			send(selected);
 			return;
@@ -464,7 +469,7 @@ export default function SendWithRowDialog({
 									value={entry}
 									onChange={(e) => setEntry(e.target.value)}
 									onKeyDown={(e) => {
-										if (e.key !== "Enter") return;
+										if (!isCommitEnter(e)) return;
 										e.preventDefault();
 										if (typed.kind === "row") send(typed.index);
 									}}

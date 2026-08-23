@@ -23,6 +23,8 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { useLayoutStore } from "@/stores";
 import { useRequestBuilderContext } from "../context";
 import { SEND_CHORD, LOAD_TEST_CHORD, matchesChord } from "@/constants/shortcuts";
+import { ownsEnterKey } from "@/lib/keyboard";
+import { isModalOpen } from "@/lib/modal";
 import RequestBreadcrumb from "./RequestBreadcrumb";
 import UrlBar from "./UrlBar";
 import RequestTabs from "./RequestTabs";
@@ -30,7 +32,7 @@ import ResponseAnnouncer from "./ResponseAnnouncer";
 import ResponseViewer from "./ResponseViewer";
 
 export default function RequestBuilderLayout() {
-	const { request, isExecuting, executeRequest, startLoadTest, canStartLoadTest } =
+	const { request, isExecuting, isStreaming, executeRequest, startLoadTest, canStartLoadTest } =
 		useRequestBuilderContext();
 
 	const { requestSplitRatio, setRequestSplitRatio } = useLayoutStore();
@@ -57,7 +59,13 @@ export default function RequestBuilderLayout() {
 	 *
 	 * The editor exclusions are Send's original ones, and they apply to both:
 	 * a plain input (the URL) should still send, but a textarea, a Monaco editor
-	 * or a contenteditable owns Enter for its own purposes.
+	 * or a contenteditable owns Enter for its own purposes. They live in
+	 * `ownsEnterKey` so the collection tree's parallel guard reads the same list.
+	 *
+	 * A modal is the exclusion those three could not express: a dialog's name
+	 * field is a plain input, so it passed the guard and sent the request behind
+	 * the dialog (#935). `isModalOpen` is the one predicate both window handlers
+	 * consult - this one and the Shell's.
 	 */
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
@@ -65,16 +73,23 @@ export default function RequestBuilderLayout() {
 			const isLoadTest = matchesChord(event, LOAD_TEST_CHORD);
 			if (!isSend && !isLoadTest) return;
 
-			const target = event.target as HTMLElement;
-			const isTextarea = target.tagName === "TEXTAREA";
-			const isContentEditable =
-				target.isContentEditable || target.closest('[contenteditable="true"]') !== null;
-			// Monaco editor creates elements with class 'monaco-editor'
-			const isMonacoEditor = target.closest(".monaco-editor") !== null;
-			if (isTextarea || isContentEditable || isMonacoEditor) return;
+			if (ownsEnterKey(event.target as HTMLElement)) return;
+			if (isModalOpen()) return;
 
-			// Don't trigger if the request is already executing or URL is empty
-			if (isExecuting || request.url.trim().length === 0) return;
+			/*
+			 * Don't trigger if the request is already in flight or URL is empty.
+			 *
+			 * `isStreaming` is the second half of "in flight": once the engine has
+			 * answered and the socket is open, `isExecuting` goes false while the
+			 * run is very much still running (`RequestBuilderProvider` clears it
+			 * deliberately, so the Events tab is not hidden behind "Sending…").
+			 * Send *is* Stop for the whole of that window (#574), and the chord now
+			 * matches the button: it does nothing rather than silently replacing
+			 * the open stream with a new one - the run being replaced being exactly
+			 * the one the button in front of you would stop. Stopping is
+			 * destructive, so it stays a deliberate click.
+			 */
+			if (isExecuting || isStreaming || request.url.trim().length === 0) return;
 
 			if (isSend) {
 				event.preventDefault();
@@ -98,7 +113,7 @@ export default function RequestBuilderLayout() {
 		return () => {
 			window.removeEventListener("keydown", handleKeyDown);
 		};
-	}, [request.url, isExecuting, executeRequest, startLoadTest, canStartLoadTest]);
+	}, [request.url, isExecuting, isStreaming, executeRequest, startLoadTest, canStartLoadTest]);
 
 	return (
 		<div className="h-full flex flex-col">

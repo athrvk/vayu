@@ -88,6 +88,37 @@ function Tree({ expanded }: { expanded: boolean }) {
 	);
 }
 
+/**
+ * An expanded folder with nothing in it. The "Empty folder" line is a plain
+ * div, not a treeitem, so in document order the row after this one is its
+ * *sibling* - the shape ArrowRight used to step into.
+ */
+function EmptyFolderTree() {
+	const ref = useRef<HTMLDivElement>(null);
+	const { onKeyDown, onFocus } = useRovingTreeFocus(ref);
+	return (
+		<div ref={ref}>
+			<div role="tree" onKeyDown={onKeyDown} onFocus={onFocus}>
+				<div>
+					<div
+						role="treeitem"
+						tabIndex={-1}
+						aria-expanded="true"
+						data-name="empty"
+						data-tree-label="Empty"
+					>
+						<button tabIndex={-1} data-tree-toggle onClick={toggle}>
+							toggle
+						</button>
+					</div>
+					<div>Empty folder</div>
+				</div>
+				<div role="treeitem" tabIndex={-1} data-name="after" data-tree-label="After" />
+			</div>
+		</div>
+	);
+}
+
 const items = () => Array.from(document.querySelectorAll<HTMLElement>('[role="treeitem"]'));
 const byName = (n: string) => document.querySelector<HTMLElement>(`[data-name="${n}"]`)!;
 const key = (k: string, opts = {}) =>
@@ -394,5 +425,102 @@ describe("useRovingTreeFocus", () => {
 		input.focus();
 		fireEvent.keyDown(input, { key: "ArrowDown" });
 		expect(document.activeElement).toBe(input);
+	});
+
+	/*
+	 * The tree must let the app's chords through (#935, from #931's review).
+	 *
+	 * The named cases match on `e.key` alone and `take()` stops propagation, so
+	 * with a row focused - the normal state after opening a request - mod+Enter
+	 * re-activated the row and the window-level send listener never heard it.
+	 * Each case is a pair with its unmodified twin, so a bail-out that swallowed
+	 * everything would not pass either.
+	 */
+	describe("Ctrl/Cmd chords", () => {
+		it("does not activate the row on mod+Enter, so the send chord survives", () => {
+			render(<Tree expanded />);
+			byName("demo").focus();
+
+			key("Enter", { ctrlKey: true });
+			key("Enter", { metaKey: true });
+			expect(activate).not.toHaveBeenCalled();
+
+			key("Enter");
+			expect(activate).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not take a chord it declines", () => {
+			render(<Tree expanded />);
+			byName("demo").focus();
+
+			// `fireEvent` reports `false` when a handler called preventDefault,
+			// which `take()` does - and `take()` is also what stopped the event
+			// from reaching the window at all.
+			const chord = fireEvent.keyDown(byName("demo"), {
+				key: "Enter",
+				ctrlKey: true,
+				bubbles: true,
+			});
+			expect(chord).toBe(true);
+		});
+
+		it("leaves the other named keys to the app when they carry a modifier", () => {
+			render(<Tree expanded />);
+			byName("req-1").focus();
+
+			key("Backspace", { metaKey: true });
+			expect(del).not.toHaveBeenCalled();
+
+			key("ArrowDown", { ctrlKey: true });
+			expect(document.activeElement).toBe(byName("req-1"));
+
+			key("F2", { ctrlKey: true });
+			expect(rename).not.toHaveBeenCalled();
+		});
+	});
+
+	/*
+	 * The editable-target guard covered INPUT and TEXTAREA only, while the send
+	 * chord's handler also covered contenteditable and Monaco - two lists of the
+	 * same idea, drifting (#931 review). Both now read `isTextEntryTarget`.
+	 */
+	it("ignores keys typed in a contenteditable or a Monaco editor", () => {
+		render(<Tree expanded />);
+
+		const editable = document.createElement("div");
+		editable.setAttribute("contenteditable", "true");
+		editable.tabIndex = 0;
+		byName("demo").appendChild(editable);
+		editable.focus();
+		fireEvent.keyDown(editable, { key: "Enter" });
+		expect(activate).not.toHaveBeenCalled();
+
+		const monaco = document.createElement("div");
+		monaco.className = "monaco-editor";
+		const inner = document.createElement("span");
+		inner.tabIndex = 0;
+		monaco.appendChild(inner);
+		byName("demo").appendChild(monaco);
+		inner.focus();
+		fireEvent.keyDown(inner, { key: "Enter" });
+		expect(activate).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * APG: ArrowRight on an expanded node moves to its first child, and does
+	 * nothing when there is none. The next row in document order is only a child
+	 * if the parent walk says so - for an empty folder it is the next sibling,
+	 * and moving there was an ArrowDown wearing ArrowRight's key.
+	 */
+	it("stays put on ArrowRight in an expanded empty folder", () => {
+		render(<EmptyFolderTree />);
+		byName("empty").focus();
+
+		key("ArrowRight");
+
+		expect(document.activeElement).toBe(byName("empty"));
+		// The sibling is still reachable the way it always was.
+		key("ArrowDown");
+		expect(document.activeElement).toBe(byName("after"));
 	});
 });

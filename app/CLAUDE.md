@@ -28,7 +28,22 @@ Renderer and Electron main process for Vayu. Apache-2.0. See the repo root
   and that commit reaches the handler as an ordinary keydown - so a field
   without the guard saves, fetches or renames on a half-composed value. Seven
   sites were missing it at once, because nothing about the bare comparison
-  looks wrong.
+  looks wrong. It also refuses an Enter carrying Ctrl/Cmd (#935): that Enter is
+  the app's Send chord, and a field acting on it did its own thing _and_ sent
+  the request, which is two actions from one press.
+- **A window-level chord asks `isModalOpen()` first** (`@/lib/modal`, #935).
+  Both global handlers - `Shell.tsx`'s ⌘S/W/B/I/,/1-9 map and
+  `RequestBuilderLayout.tsx`'s Send / Load Test - are bound on `window`, so
+  they fire wherever focus is; a dialog's name field is a plain input that no
+  editor exclusion covers, so ⌘Enter sent the request behind the dialog and ⌘W
+  closed the tab it belonged to. The predicate reads the DOM
+  (`[data-slot="dialog-content"]` not in its closed state) rather than a
+  counter, so every dialog - including one a future feature adds - is covered
+  with nothing to register.
+- **The collection tree's key guards come from the same file** - it bails out
+  of its named cases on Ctrl/Cmd so those chords reach the window, and its
+  editable-target check is `isTextEntryTarget`, which is `ownsEnterKey` plus a
+  plain input. Two lists drifted apart once already.
 - State: Zustand for UI state, TanStack Query for server state
 - Styling: Tailwind CSS v4 - all colors via CSS custom properties
 - **Design system: `docs/design-system.md`** - tokens, elevation, typography,
