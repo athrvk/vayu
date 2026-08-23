@@ -101,9 +101,31 @@ describe("tab content identity across the drawer", () => {
 		// same column, rather than a row spanning the window. Anything else and
 		// its left edge stops tracking the drawer's resize handle.
 		renderShell();
-		const strip = screen.getByRole("tablist");
+		// The strip row, not the tablist nested in it - the tablist holds only
+		// tabs, so the element sitting beside main is its parent.
+		const strip = screen.getByRole("tablist").parentElement as HTMLElement;
 		const main = screen.getByRole("main");
 		expect(strip.parentElement).toBe(main.parentElement?.parentElement);
 		expect(strip.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	/*
+	 * The tabs pattern is a round trip, and only Shell can see both ends: the
+	 * strip's `aria-controls` has to land on an element that exists, and that
+	 * element has to name the tab back. Half of it - tabs pointing at ids nothing
+	 * rendered - is indistinguishable from the whole thing in a strip-only test.
+	 */
+	it("wires the active tab to the content region in both directions", () => {
+		renderShell();
+		const tab = screen.getByRole("tab");
+		const panel = screen.getByRole("tabpanel");
+
+		expect(tab).toHaveAttribute("aria-controls", panel.id);
+		expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+		expect(panel.id).not.toBe("");
+		expect(tab.id).not.toBe("");
+		// The panel is inside main, not instead of it: main is a landmark and
+		// carries only role="main".
+		expect(screen.getByRole("main").contains(panel)).toBe(true);
 	});
 });

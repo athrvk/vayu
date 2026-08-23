@@ -57,6 +57,9 @@ import { fitTabs, makeTextMeasurer, naturalTabWidth } from "./tab-fit";
 // the same tabs and must name them identically. See tab-descriptors.ts.
 import { useTabDescriptors, type TabDescriptor } from "./tab-descriptors";
 import { getMethodColor } from "@/utils";
+// The tab -> panel ids, shared with Shell, which renders the panel end of the
+// relationship. See tab-aria.ts.
+import { tabElementId, tabPanelElementId } from "./tab-aria";
 
 function TabItem({
 	tab,
@@ -79,7 +82,9 @@ function TabItem({
 	return (
 		<div
 			role="tab"
+			id={tabElementId(tab.id)}
 			aria-selected={isActive}
+			aria-controls={tabPanelElementId(tab.id)}
 			tabIndex={rovingTabIndex}
 			data-tab-id={tab.id}
 			title={descriptor.title}
@@ -226,8 +231,15 @@ export function TabStrip() {
 		if (e.key === "End") next = tabs.length - 1;
 
 		e.preventDefault();
-		// Roving tabindex means the destination is currently -1, which is still
-		// focusable programmatically; the render that follows activation fixes it.
+		// Reset every tab before promoting the destination, the shape `focusItem`
+		// in useRovingTreeFocus uses. Setting the destination alone leaked a tab
+		// stop per arrow press: this is a DOM mutation on top of a vdom prop that
+		// did not change, so React re-renders to nothing and the stray `0` on each
+		// tab skated past survives. There is no render to rely on either, because
+		// focus deliberately moves without activating - arrow across a dozen tabs
+		// and the strip was a dozen Tab stops again, the thing roving tabindex is
+		// here to prevent.
+		for (const el of tabs) el.tabIndex = -1;
 		tabs[next].tabIndex = 0;
 		tabs[next].focus();
 	}, []);
@@ -235,8 +247,6 @@ export function TabStrip() {
 	return (
 		<div
 			ref={listRef}
-			role="tablist"
-			onKeyDown={onKeyDown}
 			/*
 			 * `w-full` is load-bearing, not cosmetic - it is the `flex-1` this
 			 * carried while the strip was a row item in the title bar, restated for
@@ -258,15 +268,25 @@ export function TabStrip() {
 			 */
 			className="panel-clip flex h-[var(--tabstrip-height)] w-full shrink-0 items-stretch overflow-hidden border-b border-border bg-panel"
 		>
-			{visible.map((i) => (
-				<TabItem
-					key={openTabs[i].id}
-					tab={openTabs[i]}
-					isActive={openTabs[i].id === activeTabId}
-					width={widths[i]}
-					descriptor={descriptors[i]}
-				/>
-			))}
+			{/*
+			 * The tablist holds tabs and nothing else. The overflow trigger and the
+			 * New-tab button are siblings of it rather than children: a `role=tablist`
+			 * owns only `role=tab` children, and a button inside one is announced as
+			 * part of the tab set - "5 of 6" with a sixth tab that is a menu. The row
+			 * is unchanged visually, because the strip's flex layout is on the element
+			 * around all three.
+			 */}
+			<div role="tablist" onKeyDown={onKeyDown} className="flex min-w-0 items-stretch">
+				{visible.map((i) => (
+					<TabItem
+						key={openTabs[i].id}
+						tab={openTabs[i]}
+						isActive={openTabs[i].id === activeTabId}
+						width={widths[i]}
+						descriptor={descriptors[i]}
+					/>
+				))}
+			</div>
 
 			{/*
 			 * The tabs that did not fit, reachable rather than scrolled out of

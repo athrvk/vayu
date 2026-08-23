@@ -441,17 +441,14 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
 
     steps:
-      # Full history, not depth 2. Depth 2 was enough while the clang-tidy step
-      # below only needed `HEAD^1` - the base side of the merge commit
-      # actions/checkout leaves at HEAD. It now also enumerates the pull
-      # request's own commits, to skip the ones the repository has declared to
-      # be pure reformatting (see that step), and a shallow clone does not
-      # contain them. A full clone of this repository costs seconds against a
-      # job that runs for minutes.
+      # Depth 2, which is all the clang-tidy step below needs: `HEAD^1`, the
+      # base side of the merge commit actions/checkout leaves at HEAD. It was
+      # briefly full history, for a commit walk that read the pull request's own
+      # commits; that walk is gone (#940) and so is its clone cost.
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -568,8 +565,8 @@ jobs:
       # `client.cpp`, `event_loop_worker.cpp` and `temp_database.hpp` were code
       # no lint could reach until the Windows leg ran.
       #
-      # macOS is excluded, and it is the one exclusion here that is not a
-      # choice: clang-tidy 19.1.7 and 20.1.8 both die there with SIGILL - an
+      # macOS is excluded. That is a settled decision (#940), not an open
+      # regression: clang-tidy 19.1.7 and 20.1.8 both die there with SIGILL - an
       # `llvm_unreachable` trap - part way through the two heaviest translation
       # units, which lint clean on both other legs. Upstream clang cannot parse
       # that runner's AppleClang 21 SDK, and two consecutive majors failing the
@@ -577,7 +574,10 @@ jobs:
       # is small and measured: the engine's entire macOS-conditional surface is
       # four `#define`s in `platform.hpp` with no statement in them, so what is
       # actually missed is `clang-analyzer-*` over shared code as compiled
-      # against libc++. Issue #906 carries the evidence and the ways back in.
+      # against libc++. Lint coverage on two of three platforms is a common and
+      # accepted posture. The one condition that reopens it: a Homebrew LLVM
+      # that survives both translation units on the runner's current SDK - try
+      # it by dropping this `if`, and put it back if it traps.
       #
       # **It lints the changed lines, not the changed files.** The engine had
       # never been linted, so most files carry findings that predate the diff -
@@ -594,6 +594,21 @@ jobs:
       # what actions/checkout leaves at HEAD for a `pull_request` event; hence
       # `fetch-depth: 2` above, and the check below rather than a silent empty
       # diff if that ever stops being true.
+      #
+      # **A bulk reformat is the one change line scoping cannot help**, because
+      # it rewrites a line in every file it touches: clang-tidy would parse a
+      # whole translation unit per reformatted file and, for the ones it does
+      # lint, widen the line filter to almost the whole file, so the backlog
+      # older than the diff surfaces as failures. #886's 149-file bulk format
+      # asked for 152 translation units and hit this job's timeout. The escape
+      # is the `reformat-pr` label in the `if` below: a reviewer applies it to a
+      # pull request that is nothing but the formatter's output, sees it on the
+      # pull request, and the lint step does not run. It is deliberately not
+      # machinery - a commit walk that read the skip out of a file in the diff
+      # was tried (#909's bootstrap) and deleted (#940), because a gate whose
+      # exemption is an author-writable input needs a second gate to guard it.
+      # `.git-blame-ignore-revs` still gets the reformat's SHA, for blame, which
+      # is the only thing it is for.
       #
       # `-allow-no-checks` is for `engine/src/runtime/`, whose `.clang-tidy` sets
       # `Checks: '-*'`: without it clang-tidy calls an empty check list a usage
@@ -619,7 +634,9 @@ jobs:
       # `-j 0` rather than a CPU count: the driver reads 0 as
       # `multiprocessing.cpu_count()`, and `nproc` does not exist on macOS.
       - name: Lint changed engine sources
-        if: runner.os != 'macOS'
+        if: >-
+          runner.os != 'macOS'
+          && !contains(github.event.pull_request.labels.*.name, 'reformat-pr')
         shell: bash
         run: |
           # Assert HEAD *is* the merge commit, by asking for the second parent.
@@ -637,127 +654,75 @@ jobs:
           # A read loop rather than `mapfile`: `shell: bash` on the macOS runner
           # is /bin/bash 3.2.57, where mapfile does not exist. The installer job
           # names that trap already - it is the same one, one job over.
-          # Where the diff starts. Normally the base, `HEAD^1` - but if this
-          # pull request contains a commit the repository has declared to be
-          # pure reformatting, the diff starts at that commit instead.
-          #
-          # A reformat rewrites a line in every file it touches, which defeats
-          # line scoping twice over. It makes clang-tidy parse a whole
-          # translation unit per reformatted file - #886's 149-file bulk-format
-          # commit asked for 152 of them and killed this job at its timeout with
-          # clang-tidy still running - and for the files that *are* linted it
-          # widens the line filter to nearly the whole file, so every
-          # pre-existing finding in them surfaces. Both are the failure mode
-          # line scoping exists to prevent: a pull request failed for code it
-          # did not write. Measured on #886, starting from the base: 152 sources
-          # and findings up to "cognitive complexity of 168". Starting from the
-          # bulk-format commit: the same 7 sources that really changed, 23
-          # lines, clean.
-          #
-          # `.git-blame-ignore-revs` is the declaration, the same one `git
-          # blame` reads: "this commit changed formatting and nothing else".
-          # Blame trusts it and so does this, which is a second reason a commit
-          # listed there must be mechanical and nothing else - the file says so.
-          #
-          # The newest such commit wins, because a reformat rewrites whatever
-          # preceded it. The cost is that a *real* commit placed before the
-          # reformat in the same pull request is not linted here; that is the
-          # right trade, since the formatter has rewritten those lines anyway,
-          # and the alternative is the 168-complexity noise above.
-          ignored=()
-          if [[ -f .git-blame-ignore-revs ]]; then
-            while IFS= read -r line; do
-              line="${line%%#*}"
-              line="${line//[[:space:]]/}"
-              [[ -n "$line" ]] && ignored+=("$line")
-            done < .git-blame-ignore-revs
-          fi
-
-          # `git rev-list` lists newest first, so the first match is the newest.
-          # `--no-merges` because HEAD *is* a merge commit here - the one
-          # actions/checkout leaves for a pull_request event - and a merge
-          # authors no lines of its own.
-          base=HEAD^1
-          for rev in $(git rev-list --no-merges HEAD^1..HEAD); do
-            for ig in ${ignored[@]+"${ignored[@]}"}; do
-              if [[ "$rev" == "$ig" ]]; then
-                base="$rev"
-                break 2
-              fi
-            done
-          done
-
           changed=()
           while IFS= read -r file; do
             changed+=("$file")
-          done < <(git diff --name-only "$base" HEAD -- "${roots[@]}" \
+          done < <(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
             | grep -E '\.(c|cpp|h|hpp)$' || true)
 
-          # Windows cannot lint a *header* as an input, so it does not try.
+          # **This gate lints translation units. A header is never an input**,
+          # on any platform - decided in #940, where it was Windows-only.
           #
           # `compile_commands.json` holds one entry per translation unit and so
-          # none for a `.hpp`; clang-tidy synthesises a command for a file it
-          # cannot look up. On Linux that synthesised command still finds the
-          # standard library. On Windows it does not find the MSVC one, and the
-          # result is not a lint finding but a parse failure of the whole STL -
-          # `no template named 'optional' in namespace 'std'` at every
-          # `std::optional` in `types.hpp`, twenty errors deep, before any check
-          # runs. `WarningsAsErrors: '*'` turns that into a failed engine job.
-          # Measured on #926, where the same run linted every changed `.cpp`
-          # cleanly on the same runner and failed only on the two headers.
+          # none for a `.hpp`, so clang-tidy synthesises a command for a header
+          # handed to it directly. That command is a guess, and when the guess
+          # is wrong the failure is not a lint finding but a parse failure of
+          # the standard library - `no template named 'optional' in namespace
+          # 'std'`, twenty errors deep, in files no diff line touched (#926 on
+          # Windows, where the same run linted every changed `.cpp` cleanly).
           #
-          # What is lost is smaller than it looks: `HeaderFilterRegex` in
-          # engine/.clang-tidy already reports diagnostics *inside* a header
-          # through every translation unit that includes it, so a header changed
-          # alongside its consumers is still linted here. What is genuinely not
-          # covered on this leg is a pull request that changes a header and no
-          # `.cpp` at all. #930 has the flags that would let clang-tidy parse
-          # the MSVC STL directly, which is the real fix; this keeps the gate
-          # honest on the other two legs in the meantime rather than turning it
-          # off everywhere.
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            headers=()
-            translation_units=()
-            for file in ${changed[@]+"${changed[@]}"}; do
-              case "$file" in
-                *.h | *.hpp) headers+=("$file") ;;
-                *) translation_units+=("$file") ;;
-              esac
-            done
-            if [[ ${#headers[@]} -gt 0 ]]; then
-              {
-                echo "- clang-tidy (Windows): **${#headers[@]}** changed header(s) are not linted as inputs here - the synthesised command cannot parse the MSVC standard library (#930). They are still linted through the translation units that include them:"
-                printf '  - `%s`\n' "${headers[@]}"
-              } >> "$GITHUB_STEP_SUMMARY"
-            fi
-            changed=(${translation_units[@]+"${translation_units[@]}"})
+          # It is worse than one leg failing, and this is the part that decided
+          # it: **a `clang-diagnostic-error` is not line-filtered**. Measured on
+          # clang-tidy 19.1.1 - an error in an included header is reported even
+          # when `-line-filter` names only the translation unit and only one of
+          # its lines. So a bad synthesised command does not merely fail, it
+          # takes the gate out of changed-lines scope entirely, which is the one
+          # property the whole design rests on. Feeding clang-tidy a file the
+          # compilation database has no entry for is the only way this tree
+          # produces a compiler error at all.
+          #
+          # The MSVC include paths could be passed through instead
+          # (`--extra-arg=-imsvc...`, re-derived per image). Rejected: it buys
+          # header-as-input coverage on one more leg, at the price of toolchain
+          # plumbing that breaks when an image moves, and it leaves the
+          # error-bypass above wide open.
+          #
+          # What this costs is **not** what #926 assumed. `HeaderFilterRegex`
+          # does report diagnostics inside a header, but `clang-tidy-diff.py`
+          # builds one invocation per changed file with a `-line-filter` naming
+          # *only that file* (`clang-tidy-diff.py:344-351`), and clang-tidy
+          # drops a diagnostic in any file its filter does not list - so a
+          # changed header was never reaching this gate through its consumers
+          # either. The hook is the gate that does lint headers: it builds one
+          # filter naming every staged file, which is why it can.
+          headers=()
+          translation_units=()
+          for file in ${changed[@]+"${changed[@]}"}; do
+            case "$file" in
+              *.h | *.hpp) headers+=("$file") ;;
+              *) translation_units+=("$file") ;;
+            esac
+          done
+          if [[ ${#headers[@]} -gt 0 ]]; then
+            {
+              echo "- clang-tidy: **${#headers[@]}** changed header(s) are not linted here - this gate lints translation units only (#940). \`scripts/pre-commit\` lints them through the sources that include them:"
+              printf '  - `%s`\n' "${headers[@]}"
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
+          changed=(${translation_units[@]+"${translation_units[@]}"})
 
           # The non-empty-scan proof this repository asks of every source
           # scanning guard: name what is about to be linted, so a step that
-          # silently narrowed to nothing cannot read as a pass.
-          #
-          # What was skipped is reported rather than dropped quietly, on the
-          # repository's no-silent-caps rule: a narrowed scan that reads as a
-          # clean pass is the failure this summary exists to prevent.
-          all_changed=$(git diff --name-only HEAD^1 HEAD -- "${roots[@]}" \
-            | grep -cE '\.(c|cpp|h|hpp)$' || true)
-          skipped=$(( all_changed - ${#changed[@]} ))
-
+          # silently narrowed to nothing cannot read as a pass. The only thing
+          # that narrows the set now is the Windows header split above, and it
+          # names every file it dropped.
           if [[ ${#changed[@]} -eq 0 ]]; then
-            if [[ $skipped -gt 0 ]]; then
-              echo "- clang-tidy: nothing to lint - all **$skipped** changed engine source(s) were touched only by commits listed in \`.git-blame-ignore-revs\` (reformatting)" >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "- clang-tidy: no engine sources changed, nothing to lint" >> "$GITHUB_STEP_SUMMARY"
-            fi
+            echo "- clang-tidy: no engine source to lint on this leg" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           {
-            echo "- clang-tidy linted the changed lines of **${#changed[@]}** engine source(s), against \`$(git rev-parse --short "$base")\`:"
+            echo "- clang-tidy linted the changed lines of **${#changed[@]}** engine source(s), against \`$(git rev-parse --short HEAD^1)\`:"
             printf '  - `%s`\n' "${changed[@]}"
-            if [[ $skipped -gt 0 ]]; then
-              echo "  - (**$skipped** further source(s) skipped: changed only by the reformatting commit declared in \`.git-blame-ignore-revs\`)"
-            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Installed here rather than in a step of its own so a pull request
@@ -837,13 +802,23 @@ jobs:
           fi
 
           # `"${changed[@]}"`, not `"${roots[@]}"`: the roots would re-admit the
-          # sources that only a declared formatting commit touched, undoing the
-          # skip computed above.
-          git diff -U0 "$base" HEAD -- "${changed[@]}" \
+          # headers dropped above, which is the one narrowing this list carries.
+          git diff -U0 HEAD^1 HEAD -- "${changed[@]}" \
             | "$python" "$tidy_diff" \
                 -clang-tidy-binary "$tidy" \
                 -p1 -path engine/build-release \
                 -quiet -allow-no-checks -j 0
+
+      # The escape says so in the job summary as well as on the pull request.
+      # Same rule as the step above: a gate that narrowed to nothing must not
+      # read as a clean pass, and "the lint step is missing" is easy to miss.
+      - name: Note the lint skip
+        if: >-
+          runner.os != 'macOS'
+          && contains(github.event.pull_request.labels.*.name, 'reformat-pr')
+        shell: bash
+        run: |
+          echo "- clang-tidy: **skipped** - this pull request carries the \`reformat-pr\` label, so it is the formatter's output and nothing else. Remove the label to lint it." >> "$GITHUB_STEP_SUMMARY"
 
       # `always()` so a suite that ran and failed is still reported - but on its
       # own that also reports a *pass* for a job that never got as far as

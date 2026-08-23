@@ -24,6 +24,7 @@ import { Drawer } from "./Drawer";
 import { Dock } from "./Dock";
 import { ContextBar } from "./ContextBar";
 import { TabStrip } from "./TabStrip";
+import { tabElementId, tabPanelElementId } from "./tab-aria";
 import RequestBuilder from "@/modules/request-builder";
 import CollectionDetail from "@/modules/collections/CollectionDetail";
 import LoadTestDashboard from "@/modules/dashboard";
@@ -247,7 +248,22 @@ export default function Shell() {
 					<TabStrip />
 					<div className="flex flex-1 overflow-hidden relative">
 						<main className="flex-1 overflow-hidden flex flex-col min-w-0">
-							{renderTabContent(activeTab)}
+							{/*
+							 * The other half of the strip's tabs pattern: the region a tab
+							 * controls has to say so, or `aria-controls` points at nothing
+							 * and the panel claims no owner. The role goes on a child of
+							 * `main` rather than on `main` itself - `main` is a landmark and
+							 * carries only `role="main"`, so overwriting it would trade one
+							 * relationship for another.
+							 */}
+							<div
+								role="tabpanel"
+								id={activeTab ? tabPanelElementId(activeTab.id) : undefined}
+								aria-labelledby={activeTab ? tabElementId(activeTab.id) : undefined}
+								className="flex flex-1 flex-col min-w-0 overflow-hidden"
+							>
+								{renderTabContent(activeTab)}
+							</div>
 						</main>
 						<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
 					</div>
