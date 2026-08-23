@@ -168,6 +168,35 @@ if(VAYU_USE_ASAN)
         # 16.9 on.
         target_compile_options(vayu_sanitizers INTERFACE /fsanitize=address)
         target_link_options(vayu_sanitizers INTERFACE /INCREMENTAL:NO)
+        # The vcpkg dependencies are prebuilt without ASan, and MSVC's STL
+        # makes that a *link* error rather than a silent mismatch: under
+        # /fsanitize=address it turns on container overflow annotations for
+        # string, vector and optional, and stamps each translation unit with a
+        # `detect_mismatch` record. Ours say 1, ryml's and c4core's say 0, and
+        # the linker refuses - `LNK2038 ... annotate_string`, 18 of them,
+        # ending in LNK1319.
+        #
+        # Turning the annotations off on our side is Microsoft's documented
+        # answer for linking against libraries that were not built with ASan,
+        # and it is the only one available here: instrumenting the dependencies
+        # would need a custom triplet, and their archives are shared byte for
+        # byte with every other workflow's vcpkg cache.
+        #
+        # What it costs is bounded and worth naming: ASan on Windows no longer
+        # catches an overflow that stays inside a container's *spare capacity*
+        # - writing past `size()` but within `capacity()` of a vector or
+        # string. Every other check is untouched: heap, stack and global
+        # overflow, use-after-free, double-free, use-after-return. The Linux
+        # and macOS legs keep container annotations, so nothing is lost from
+        # the matrix as a whole - only from the Windows leg alone.
+        target_compile_definitions(vayu_sanitizers INTERFACE
+            _DISABLE_STRING_ANNOTATION=1
+            _DISABLE_VECTOR_ANNOTATION=1
+            # Newer STLs annotate optional too, and name the macro to match;
+            # a define the STL does not know is inert, so this is safe to
+            # carry on versions that never emitted the record.
+            _DISABLE_OPTIONAL_ANNOTATION=1
+        )
         foreach(_vayu_rtc_flags
                 CMAKE_C_FLAGS_DEBUG CMAKE_CXX_FLAGS_DEBUG
                 CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_RELWITHDEBINFO)

@@ -128,7 +128,22 @@ Five preset trios, one per sanitizer-and-platform combination that exists:
 | `linux-tsan` | Linux | Data races, lock-order inversions |
 | `macos-asan` | macOS | Memory errors. **No leak detection** - macOS ASan ships without LSan |
 | `macos-tsan` | macOS | Data races, lock-order inversions |
-| `windows-asan` | Windows | Memory errors, via MSVC `/fsanitize=address` |
+| `windows-asan` | Windows | Memory errors, via MSVC `/fsanitize=address`. **No container-overflow detection** - see below |
+
+**The Windows leg detects slightly less than the other two.** MSVC's STL turns
+on ASan container annotations for `string`, `vector` and `optional` under
+`/fsanitize=address` and stamps every translation unit with a `detect_mismatch`
+record; the vcpkg dependencies are prebuilt without ASan and stamp the opposite
+value, so the linker refuses the whole binary (`LNK2038 ... annotate_string`,
+ending in `LNK1319`). The engine turns those annotations off on its own side,
+which is Microsoft's documented answer for linking against uninstrumented
+libraries - instrumenting the dependencies would need a custom triplet, and
+their archives are shared byte for byte with every other workflow's vcpkg
+cache. The cost is bounded: Windows no longer catches an overflow that stays
+inside a container's *spare capacity* (past `size()`, within `capacity()`).
+Heap, stack and global overflow, use-after-free, double-free and
+use-after-return are all untouched, and Linux and macOS keep the annotations -
+so the matrix as a whole loses nothing.
 
 There is deliberately no `windows-tsan`. ThreadSanitizer has no Windows
 implementation - MSVC ships none, and clang-cl does not implement it either - so
