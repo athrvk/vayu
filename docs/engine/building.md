@@ -674,7 +674,12 @@ Two other settings look like mistakes and are not; both are commented in
 raising the limit made the bulk diff two to three times worse, because a wider
 limit re-joins line breaks the code chose by hand. And `ContinuationIndentWidth:
 0` wraps arguments to the enclosing block indent, which is what the engine's
-code is written to; changing it is a 257-file rewrite and is tracked separately.
+code is written to. That one was re-measured and **kept** (#940, closing #907):
+`ContinuationIndentWidth: 4` rewrites 250 of the 288 non-vendor sources for
+23,938 lines - 3.3x #886's whole bulk-format commit - and 180 of the 191 sources
+touched in the last 60 engine commits, so it is today's code that disagrees with
+it, not legacy. The table is in `.clang-format`'s header; the question is
+closed.
 
 ### Static Analysis
 
@@ -683,7 +688,7 @@ clang-tidy runs in two places, and both of them can stop a change:
 | Where | What it lints | What a finding does |
 |-------|---------------|---------------------|
 | `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **changed lines** of staged `.c/.cpp/.h/.hpp` files | Refuses the commit |
-| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of `engine/{src,include,tests}` sources, on all three platforms | Fails CI |
+| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of `engine/{src,include,tests}` sources, on Linux and Windows | Fails CI |
 
 A finding is a failure because `engine/.clang-tidy` sets
 `WarningsAsErrors: '*'`; with that empty, clang-tidy prints every diagnostic it
@@ -728,20 +733,35 @@ That is for someone paying the backlog down on purpose - the one case where the
 findings CI ignores are the point. Everything else about the hook is unchanged
 by it.
 
-**Commits listed in `.git-blame-ignore-revs` are skipped.** The gate reads the
-same file `git blame` does, and for the same reason: a commit declared to be
-pure reformatting did not write new code, so re-linting it says nothing. This
-is not only a tidiness argument. Line scoping bounds the *diagnostics*
-clang-tidy reports, not the number of translation units it must parse - and a
-reformat touches a line in every file it rewrites. #886's 149-file bulk-format
-commit made the gate try to analyse 152 translation units in one run and killed
-the job at its 60-minute timeout; with the skip it analyses the 7 that actually
-changed. What was skipped is named in the job summary, never dropped silently.
+**A bulk reformat is the one change line scoping cannot help**, and the escape
+is a label. Line scoping bounds the *diagnostics* clang-tidy reports, not the
+number of translation units it must parse - and a reformat touches a line in
+every file it rewrites, so the gate parses one translation unit per reformatted
+file and widens the line filter on each to nearly the whole file, surfacing a
+backlog older than the diff. #886's 149-file bulk format made the gate ask for
+152 translation units and killed the job at its timeout.
 
-The contract runs the other way too: **do not list a commit in
-`.git-blame-ignore-revs` unless it is purely mechanical**, because doing so now
-excuses it from linting as well as from blame. That rule is written in the file
-itself.
+So a pull request that is nothing but the formatter's output carries the
+**`reformat-pr` label**, and the lint step does not run:
+
+```yaml
+if: >-
+  runner.os != 'macOS'
+  && !contains(github.event.pull_request.labels.*.name, 'reformat-pr')
+```
+
+A reviewer applies it, it is visible on the pull request, and the job summary
+says the lint was skipped rather than leaving a green check to imply it ran.
+Use it only for a reformat: the label excuses every engine line in the pull
+request, so anything else in the same branch goes unlinted with it. Split the
+reformat into its own pull request, which is what #886 did anyway.
+
+This replaced a commit walk that read the skip out of `.git-blame-ignore-revs`
+at the pull request's own HEAD (#909's bootstrap, deleted by #940). The
+declaration was an author-writable input to a gate, which needed a validator to
+guard it, which had a blind spot of its own - three mechanisms for a problem
+that happens about once a year. `.git-blame-ignore-revs` still gets the bulk
+commit's SHA, for `git blame`, which is the only thing it is for.
 
 **CI lints on Linux and Windows**, not Linux alone. clang-tidy analyses a
 translation unit, so an `#ifdef _WIN32` branch is preprocessed away before a
@@ -749,14 +769,20 @@ Linux run sees it - `platform.hpp`'s per-OS split and the Windows-only blocks in
 `client.cpp`, `event_loop_worker.cpp` and `temp_database.hpp` are code a
 Linux-only lint could never reach.
 
-**macOS is excluded**, and not by choice: clang-tidy 19.1.7 and 20.1.8 both die
-there with SIGILL - an `llvm_unreachable` trap - part way through the two
-heaviest translation units, which lint clean on both other legs. Upstream clang
-cannot parse that runner's AppleClang 21 SDK. What that loses is small and
-measured: the engine's entire macOS-conditional surface is four `#define`s in
-`platform.hpp` with no statement in them, so what is actually missed is
-`clang-analyzer-*` over shared code as compiled against libc++. Issue #906
-carries the evidence and the ways back in.
+**macOS is excluded**, and that is decided (#940) rather than pending: clang-tidy
+19.1.7 and 20.1.8 both die there with SIGILL - an `llvm_unreachable` trap - part
+way through the two heaviest translation units, which lint clean on both other
+legs. Upstream clang cannot parse that runner's AppleClang 21 SDK, and two
+consecutive majors failing the same way is not a version ladder worth climbing.
+What that loses is small and measured: the engine's entire macOS-conditional
+surface is four `#define`s in `platform.hpp` with no statement in them, so what
+is actually missed is `clang-analyzer-*` over shared code as compiled against
+libc++. Linting on two of three platforms is a common posture, and this one is
+accepted, not tolerated - there is no open issue for it.
+
+**The one condition that reopens it:** a Homebrew LLVM that survives both
+translation units on the runner's current SDK. Test it by dropping the
+`runner.os != 'macOS'` term from the step's `if`, and put it back if it traps.
 
 Both pass `--allow-no-checks`, for `engine/src/runtime/` - its `.clang-tidy`
 disables every check, and clang-tidy calls an empty check list a usage error
