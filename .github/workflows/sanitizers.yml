@@ -90,12 +90,14 @@ jobs:
           - os: windows-latest
             sanitizer: asan
             preset: windows-asan
-    # A runaway guard, not a budget. Measured on the first full run of this
-    # workflow, cold, from checkout to the last test: ASan 13 min on Linux and
-    # 15 on macOS, TSan 15 on Linux and 70 on macOS, ASan on Windows the
-    # outlier at well over 100. 150 leaves better than 2x headroom over the
-    # slowest leg once `windows-asan` runs at -j4 (see the preset), and still
-    # catches a genuine hang in one weekly run rather than three.
+    # A runaway guard, not a budget. Measured on the first full runs of this
+    # workflow, cold, from checkout to the last test: ASan 13-19 min on Linux
+    # and 14-15 on macOS, TSan 15-17 on Linux and 68-70 on macOS. `windows-asan`
+    # was the outlier at over 100 minutes without finishing, for the reason the
+    # ctest step below describes - per-test timeouts, not parallelism - and is
+    # expected to land far inside this guard now that the net scales with the
+    # sanitizer. 150 keeps headroom over the slowest healthy leg while still
+    # catching a genuine hang in one weekly run rather than three.
     timeout-minutes: 150
     env:
       # Byte-identical to pr-tests.yml, release.yml and cache-warm.yml on
@@ -175,6 +177,13 @@ jobs:
       # several GB per process - and the InboxListener port race seen under
       # load on #875 is a reminder that `-j8` under a sanitizer adds noise of
       # its own on top of the findings this is here to read.
+      #
+      # Parallelism is not what governs this job's wall time. The per-test
+      # CTest timeout is, and it scales with the sanitizer in
+      # engine/CMakeLists.txt - a test that overruns it burns the whole budget
+      # before ctest kills it, and on Windows the tests most likely to overrun
+      # are the ones a RESOURCE_LOCK already serializes. See
+      # docs/engine/building.md.
       #
       # `< /dev/null` matches pr-tests.yml and release.yml: the suite must see
       # one kind of stdin everywhere (#589).

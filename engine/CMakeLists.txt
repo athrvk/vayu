@@ -182,21 +182,26 @@ if(VAYU_USE_ASAN)
         # would need a custom triplet, and their archives are shared byte for
         # byte with every other workflow's vcpkg cache.
         #
+        # `_DISABLE_STL_ANNOTATION` is the STL's own umbrella switch: it
+        # defines _DISABLE_STRING_ANNOTATION, _DISABLE_VECTOR_ANNOTATION and
+        # _DISABLE_OPTIONAL_ANNOTATION itself
+        # (stl/inc/__msvc_sanitizer_annotate_container.hpp). Naming the three
+        # individually would work today and rot the day Microsoft annotates a
+        # fourth container - the link would fail again on a record nobody
+        # listed. It must also be all or nothing: microsoft/STL#6186 documents
+        # that disabling *some* annotations leaves the runtime's
+        # `_Asan_..._should_annotate` flags true against uninstrumented code,
+        # which is a genuine memory-safety hazard, while disabling all of them
+        # is benign.
+        #
         # What it costs is bounded and worth naming: ASan on Windows no longer
         # catches an overflow that stays inside a container's *spare capacity*
-        # - writing past `size()` but within `capacity()` of a vector or
-        # string. Every other check is untouched: heap, stack and global
+        # - writing past `size()` but within `capacity()` of a vector, string
+        # or optional. Every other check is untouched: heap, stack and global
         # overflow, use-after-free, double-free, use-after-return. The Linux
         # and macOS legs keep container annotations, so nothing is lost from
         # the matrix as a whole - only from the Windows leg alone.
-        target_compile_definitions(vayu_sanitizers INTERFACE
-            _DISABLE_STRING_ANNOTATION=1
-            _DISABLE_VECTOR_ANNOTATION=1
-            # Newer STLs annotate optional too, and name the macro to match;
-            # a define the STL does not know is inert, so this is safe to
-            # carry on versions that never emitted the record.
-            _DISABLE_OPTIONAL_ANNOTATION=1
-        )
+        target_compile_definitions(vayu_sanitizers INTERFACE _DISABLE_STL_ANNOTATION)
         foreach(_vayu_rtc_flags
                 CMAKE_C_FLAGS_DEBUG CMAKE_CXX_FLAGS_DEBUG
                 CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_RELWITHDEBINFO)
@@ -1003,7 +1008,38 @@ if(VAYU_BUILD_TESTS)
 
     # Discover tests for CTest. A per-test TIMEOUT acts as a safety net so a
     # deadlock (e.g. a thread-pool teardown hang) is reported as a failure
-    # instead of blocking the suite indefinitely; healthy tests finish in <10s.
+    # instead of blocking the suite indefinitely; healthy tests finish in <10s
+    # in an ordinary build, and the slowest measured is ~10s.
+    #
+    # **The net scales with the instrumentation** (issue #904). 60s is six times
+    # the slowest healthy test *uninstrumented*, which makes it no margin at all
+    # under a sanitizer: AddressSanitizer is documented at ~2x and
+    # ThreadSanitizer at 5-15x, so the same number that is a safety net in one
+    # build is a tripwire across healthy tests in another.
+    #
+    # This is not hypothetical - it is what the first `windows-asan` run hit.
+    # MSVC ASan lands its allocator interception directly on the scratch-database
+    # tests, which are already the pathological case on Windows (see the
+    # RESOURCE_LOCK below), and they ran past 60s. Two things then compound:
+    # a timed-out test burns its *whole* budget before ctest kills it, and on
+    # Windows those same tests are serialized by that lock - so the leg becomes a
+    # serial queue of full-minute burns, which no `-j` setting can shorten. It
+    # ran over 100 minutes without finishing, and the timeouts are counted as
+    # failures, so the leg was red as well as slow.
+    #
+    # Linux and macOS were unaffected and the numbers say why: a full local
+    # `linux-tsan` run produced 58 segfaults and 14 race failures and **zero**
+    # timeouts, with the slowest passing test at 10.09s. Even at TSan's 5-15x
+    # the engine's tests stay well inside 60s there. The multipliers below are
+    # therefore headroom everywhere except the one configuration that needed it.
+    #
+    # The direction of the trade-off is the one this block already argues for
+    # DISCOVERY_TIMEOUT: a hang is bounded by the job timeout anyway, so being
+    # too generous costs a slower failure while being too tight costs a red run
+    # over healthy code. Sized off the documented slowdowns rather than tuned to
+    # one runner: 5x for ASan (over its ~2x, because MSVC's allocator
+    # interception on SQLite paths is worse than the average figure) and 10x for
+    # TSan (the midpoint of 5-15x).
     #
     # DISCOVERY_TIMEOUT bounds something else entirely, and the two are easy to
     # confuse: `PROPERTIES TIMEOUT` is handed to CTest for each discovered test,
@@ -1044,7 +1080,15 @@ if(VAYU_BUILD_TESTS)
     list(TRANSFORM vayu_scratch_database_patterns APPEND ".*")
     list(JOIN vayu_scratch_database_patterns ":" vayu_scratch_database_filter)
 
-    set(vayu_scratch_database_properties TIMEOUT 60)
+    set(vayu_test_timeout 60)
+    if(VAYU_USE_ASAN)
+        set(vayu_test_timeout 300)
+    elseif(VAYU_USE_TSAN)
+        set(vayu_test_timeout 600)
+    endif()
+    message(STATUS "Per-test CTest timeout: ${vayu_test_timeout}s")
+
+    set(vayu_scratch_database_properties TIMEOUT ${vayu_test_timeout})
     if(WIN32)
         list(APPEND vayu_scratch_database_properties RESOURCE_LOCK vayu_scratch_database)
     endif()
@@ -1058,7 +1102,7 @@ if(VAYU_BUILD_TESTS)
     gtest_discover_tests(vayu_tests
         TEST_FILTER "-${vayu_scratch_database_filter}"
         DISCOVERY_TIMEOUT 150
-        PROPERTIES TIMEOUT 60
+        PROPERTIES TIMEOUT ${vayu_test_timeout}
     )
 endif()
 

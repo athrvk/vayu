@@ -126,7 +126,7 @@ Five preset trios, one per sanitizer-and-platform combination that exists:
 |--------|----------|-------|
 | `linux-asan` | Linux | Memory errors **and leaks** - LeakSanitizer is on by default here |
 | `linux-tsan` | Linux | Data races, lock-order inversions |
-| `macos-asan` | macOS | Memory errors. **No leak detection** - macOS ASan ships without LSan |
+| `macos-asan` | macOS | Memory errors. **No leak detection in practice** - see below |
 | `macos-tsan` | macOS | Data races, lock-order inversions |
 | `windows-asan` | Windows | Memory errors, via MSVC `/fsanitize=address`. **No container-overflow detection** - see below |
 
@@ -168,16 +168,43 @@ coexist in one binary, never fight over one directory. Their test presets run
 (TSan's shadow memory alone is gigabytes per process) and oversubscribing turns
 findings into noise.
 
-`windows-asan` is the exception, and keeps the platform's usual `-j4`. Windows
-pays far more per test process than the other two - the suite is 2367 separate
-processes - so halving parallelism there costs more than the sanitizer's own
-overhead. The first full run measured it: cold, from checkout to the last test,
-ASan took 13 minutes on Linux and 15 on macOS, TSan 15 on Linux and 70 on
-macOS, while ASan on Windows at `-j2` ran past 100 minutes for the same work
-the ordinary Windows engine job does in 27 at `-j4`. ASan's memory overhead is
-roughly 3x, not TSan's 10x, and the scratch-database tests already share a
-CTest `RESOURCE_LOCK` that keeps `-j4` survivable on Windows, so the restraint
-buys nothing there.
+`windows-asan` is the exception, and keeps the platform's usual `-j4`. ASan's
+memory overhead is roughly 3x rather than TSan's 10x, and the scratch-database
+tests there already share a CTest `RESOURCE_LOCK`, so `-j2` bought nothing.
+
+**Parallelism is not what makes that leg slow, though, and it is worth knowing
+why before reaching for `-j`.** On Windows the scratch-database tests are
+serialized by that `RESOURCE_LOCK` and are ~81% of the serial wall
+(see the root `CLAUDE.md`), so no `-j` setting can shorten them. What actually
+cost the first run was the **per-test timeout**, covered next.
+
+### The per-test timeout scales with the sanitizer
+
+CTest kills any test that runs longer than a per-test `TIMEOUT`, set in
+`engine/CMakeLists.txt`. It is a deadlock net, not a budget - and it scales
+with the instrumentation:
+
+| Build | Per-test timeout |
+|-------|------------------|
+| Ordinary | 60s |
+| `VAYU_USE_ASAN` | 300s |
+| `VAYU_USE_TSAN` | 600s |
+
+60s is six times the slowest healthy test (~10s) in an ordinary build, which is
+no margin at all once AddressSanitizer's ~2x or ThreadSanitizer's 5-15x is
+applied. The first `windows-asan` run is the worked example: MSVC ASan puts its
+allocator interception straight onto the scratch-database tests, they ran past
+60s, and **a timed-out test burns its whole budget before CTest kills it** -
+serialized behind the `RESOURCE_LOCK`, into a queue of full-minute burns. The
+leg ran over 100 minutes without finishing and was red as well as slow, because
+a timeout counts as a failure.
+
+Linux and macOS never needed this: a full `linux-tsan` run produced 58
+segfaults and 14 race failures and **zero** timeouts, with the slowest passing
+test at 10.09s. The multipliers are headroom everywhere except the one
+configuration that needed them. Configure prints the value it chose
+(`Per-test CTest timeout: ...s`), so a leg that is slow for some other reason
+is not mistaken for this one.
 
 ### Which one to reach for
 
@@ -191,7 +218,12 @@ use-after-free across threads looks like. Two things worth knowing:
   the binary running concurrently (each from its own working directory, since
   the fixtures write scratch `test_*.db` files into it).
 - `ASAN_OPTIONS=detect_leaks=0` keeps the report to the memory error itself.
-  Linux only - there is no leak detection to turn off elsewhere.
+  That is a Linux switch in practice. LeakSanitizer is only **on by default**
+  on Linux; on macOS it is off by default and can in principle be turned on
+  with `detect_leaks=1`, but that needs an open-source clang - Apple's clang
+  may not implement it - and it false-positives inside `libobjc` on Apple
+  Silicon. CI builds macOS with AppleClang, so treat `macos-asan` as reporting
+  memory errors only.
 
 **TSan** is the tool for a result that is wrong rather than absent: a counter
 that drifts, a histogram whose buckets do not add up, a flag observed in an
@@ -218,7 +250,10 @@ but present, with those rules in their headers.
 ### The weekly run, and the issues it files
 
 `.github/workflows/sanitizers.yml` runs all five legs against `master` every
-Monday at 09:00 UTC, and on demand via **Run workflow**. It is weekly rather
+Monday at 09:00 UTC, and on demand via **Run workflow**. Both of those only
+begin once the file is on the default branch - GitHub registers a `schedule`
+and offers `workflow_dispatch` from `master` only - so the first cron fires
+after the merge, not on the pull request that adds it. It is weekly rather
 than per-pull-request because TSan costs 5-15x in wall time: paying that on
 every pull request would push the engine job past an hour for a class of bug
 that surfaces on the order of once a release. `VAYU_WERROR` is off there - the
