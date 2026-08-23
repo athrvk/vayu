@@ -45,6 +45,7 @@ import {
 	Copy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isCommitEnter } from "@/lib/keyboard";
 import { Badge, Input, DeleteConfirmDialog, TooltipIconButton } from "@/components/ui";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 
@@ -261,7 +262,7 @@ export default function VariablesCategoryTree() {
 											value={newEnvName}
 											onChange={(e) => setNewEnvName(e.target.value)}
 											onKeyDown={(e) => {
-												if (e.key === "Enter") handleCreateEnvironment();
+												if (isCommitEnter(e)) handleCreateEnvironment();
 												if (e.key === "Escape") {
 													setCreatingEnvironment(false);
 													setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
@@ -354,7 +355,7 @@ export default function VariablesCategoryTree() {
 														}
 														onKeyDown={(e) => {
 															e.stopPropagation();
-															if (e.key === "Enter")
+															if (isCommitEnter(e))
 																submitRenameEnvironment(
 																	environment.id
 																);

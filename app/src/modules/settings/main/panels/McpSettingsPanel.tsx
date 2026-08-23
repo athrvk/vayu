@@ -64,6 +64,7 @@ import type {
 } from "@/types";
 import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
+import { isCommitEnter } from "@/lib/keyboard";
 import { Callout } from "@/components/shared";
 import { LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
 import { appSetting } from "../app-settings";
@@ -796,7 +797,7 @@ export default function McpSettingsPanel() {
 								value={newHost}
 								onChange={(e) => setNewHost(e.target.value)}
 								onKeyDown={(e) => {
-									if (e.key === "Enter") {
+									if (isCommitEnter(e)) {
 										e.preventDefault();
 										addHost();
 									}

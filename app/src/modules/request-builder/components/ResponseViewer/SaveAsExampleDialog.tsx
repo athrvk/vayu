@@ -37,6 +37,7 @@ import {
 import { Callout } from "@/components/shared";
 import { formatSize } from "@/components/shared/response-viewer";
 import { useCreateRequestExampleMutation } from "@/queries";
+import { isCommitEnter } from "@/lib/keyboard";
 import { defaultExampleName, exampleFromResponse } from "./save-as-example";
 import type { ResponseState } from "../../types";
 
@@ -94,7 +95,7 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 							value={name}
 							onChange={(e) => setName(e.target.value)}
 							onKeyDown={(e) => {
-								if (e.key === "Enter") onSave();
+								if (isCommitEnter(e)) onSave();
 							}}
 							aria-invalid={trimmed.length === 0}
 							autoFocus

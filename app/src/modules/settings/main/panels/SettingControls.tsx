@@ -27,6 +27,7 @@ import {
 	Label,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { isCommitEnter } from "@/lib/keyboard";
 
 export interface OptionButtonItem<T> {
 	value: T;
@@ -481,7 +482,7 @@ export function NumberSettingRow({
 							handleBlur();
 						}}
 						onKeyDown={(e) => {
-							if (e.key === "Enter") e.currentTarget.blur();
+							if (isCommitEnter(e)) e.currentTarget.blur();
 						}}
 						className={cn(
 							"max-w-[12rem]",

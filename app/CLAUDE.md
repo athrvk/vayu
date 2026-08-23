@@ -23,6 +23,12 @@ Renderer and Electron main process for Vayu. Apache-2.0. See the repo root
   walks a document, and it reads it through the engine
   (`POST /import/document`): inlining a `$ref` target is deterministic
   re-serialization, not an opinion about what the document declares.
+- **An Enter that acts uses `isCommitEnter`** (`@/lib/keyboard`), never a bare
+  `e.key === "Enter"` (#939). An IME commits its composition buffer with Enter,
+  and that commit reaches the handler as an ordinary keydown - so a field
+  without the guard saves, fetches or renames on a half-composed value. Seven
+  sites were missing it at once, because nothing about the bare comparison
+  looks wrong.
 - State: Zustand for UI state, TanStack Query for server state
 - Styling: Tailwind CSS v4 - all colors via CSS custom properties
 - **Design system: `docs/design-system.md`** - tokens, elevation, typography,

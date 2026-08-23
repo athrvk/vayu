@@ -44,6 +44,7 @@ import { Kbd } from "./kbd";
 import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
 import { VARIABLE_SCOPE_CONFIG, VARIABLE_SCOPE_DOT } from "@/constants/variables";
 import { cn } from "@/lib/utils";
+import { isCommitEnter } from "@/lib/keyboard";
 import { isDataVariableName } from "@/lib/variable-resolution";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 import type { ResolvedVariable, VariableOrigin } from "@/types";
@@ -214,14 +215,14 @@ export function VariablePopover({
 
 	const handleKeyDown = (e: React.KeyboardEvent) => {
 		if (saveMode === "manual") {
-			if (e.key === "Enter") {
+			if (isCommitEnter(e)) {
 				handleSave();
 			} else if (e.key === "Escape") {
 				handleCancel();
 			}
 		} else {
 			// Auto mode: Enter saves, Escape cancels
-			if (e.key === "Enter") {
+			if (isCommitEnter(e)) {
 				handleOpenChange(false);
 			} else if (e.key === "Escape") {
 				// Mark as cancelled before Radix fires its own onOpenChange for Escape

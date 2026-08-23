@@ -58,6 +58,7 @@ import {
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { ImportProgressView, type ImportProgress } from "./ImportProgressView";
 import { MethodBadge } from "@/components/shared";
+import { isCommitEnter } from "@/lib/keyboard";
 
 type Tab = "file" | "url" | "paste";
 type Phase = "idle" | "detecting" | "preview" | "error";
@@ -737,7 +738,7 @@ export function ImportModal() {
 								value={url}
 								onChange={(e) => setUrl(e.target.value)}
 								onKeyDown={(e) => {
-									if (e.key === "Enter" && url) handleFetchUrl();
+									if (isCommitEnter(e) && url) handleFetchUrl();
 								}}
 								placeholder="https://petstore.swagger.io/v2/swagger.json"
 								className="flex-1"
