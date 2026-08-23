@@ -27,6 +27,7 @@ Special                                        priority:critical  🔴  Blocks o
   severity:blocking  🔴  Breaking change
   dependencies       ⚪  Dependency updates
   release            🔵  Version-bump PR (auto)
+  reformat-pr        🟧  Bulk-format PR (skips clang-tidy)
 ```
 
 ## Label Categories
@@ -123,6 +124,7 @@ These labels indicate **urgency**. Apply manually based on impact and timeline.
 | `ci` | Gray (#95A5A6) | CI/CD related | Used manually; path-based label is `component:ci` |
 | `correctness` | Red (#E74C3C) | Correctness issue | Logic error or incorrect behavior |
 | `release` | Navy (#062477) | Version-bump / release PR | Auto-applied whenever `VERSION` changes |
+| `reformat-pr` | Amber (#F39C12) | PR is bulk formatter output only | **Skips the clang-tidy gate.** Apply only to a PR that is nothing but `clang-format` output - see [building.md](https://github.com/athrvk/vayu/blob/master/docs/engine/building.md#static-analysis) |
 
 ## Labeling Guidelines
 

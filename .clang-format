@@ -12,11 +12,22 @@
 #     limit instead (90/100/120) makes the diff two to three times *worse*,
 #     because a wider limit re-joins line breaks the code chose by hand.
 #   - `ContinuationIndentWidth: 0`. Unusual, and the code is written to it -
-#     wrapped arguments sit at the enclosing block indent. Setting it to 4
-#     rewrites nearly every engine source, at roughly four times the cost of
-#     the whole bulk-format commit, and it is not the style anyone here writes,
-#     including in the last 60 commits. The table is in #907, which is where
-#     changing it gets decided - not here, and not quietly.
+#     wrapped arguments sit at the enclosing block indent. **Decided and kept**
+#     (#940, closing #907), by re-running #886's measurement at clang-format 19
+#     over the 288 non-vendor sources on master at be9be9a:
+#
+#         config                                files rewritten   lines
+#         as shipped                                          0       0
+#         ContinuationIndentWidth: 4                        250   23938
+#         ContinuationIndentWidth: 4 + AlignAfterOpenBracket: Align
+#                                                           250   28105
+#
+#     That is 3.3x and 3.8x #886's whole bulk-format commit (149 files, 7362
+#     lines), and it is not old code disagreeing: of the 191 engine sources
+#     touched in the last 60 engine commits, `ContinuationIndentWidth: 4` would
+#     rewrite 180. People writing engine code today write this style. The
+#     question is closed - do not reopen it without a measurement that says
+#     something new.
 #
 # clang-format 19 is the pinned version (CONTRIBUTING.md); the bulk-format
 # commit in .git-blame-ignore-revs was produced by it.

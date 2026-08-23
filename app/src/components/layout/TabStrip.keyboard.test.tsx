@@ -28,6 +28,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TabStrip } from "./TabStrip";
+import { tabElementId, tabPanelElementId } from "./tab-aria";
 import { useTabsStore } from "@/stores";
 
 /**
@@ -68,6 +69,42 @@ describe("TabStrip keyboard navigation", () => {
 		// Roving tabindex: exactly one reachable entry point.
 		expect(tabs.filter((t) => t.getAttribute("tabindex") === "0")).toHaveLength(1);
 		expect(tabs[0]).toHaveAttribute("tabindex", "0");
+	});
+
+	/*
+	 * The single-stop claim held only on the first render. Arrow navigation moved
+	 * focus by writing `tabIndex = 0` straight onto the destination element and
+	 * left it there: the vdom prop for that tab is still -1, so React re-renders
+	 * to nothing, and focus moves *without* activating, so there is no render to
+	 * rely on in the first place. Three arrow presses, three permanent Tab stops -
+	 * the defect roving tabindex exists to prevent, reintroduced by its own
+	 * navigation. The test above cannot see it, because it never presses a key.
+	 */
+	it("still has exactly one Tab stop after arrowing across the strip", () => {
+		renderStrip();
+		const tabs = screen.getAllByRole("tab");
+
+		tabs[0].focus();
+		press("ArrowRight");
+		press("ArrowRight");
+		press("ArrowLeft");
+
+		const stops = tabs.filter((t) => t.getAttribute("tabindex") === "0");
+		expect(stops).toHaveLength(1);
+		// And it is where focus actually is, so Tab back into the strip returns here.
+		expect(stops[0]).toBe(tabs[1]);
+		expect(document.activeElement).toBe(tabs[1]);
+	});
+
+	it("leaves one Tab stop after Home and End too", () => {
+		renderStrip();
+		const tabs = screen.getAllByRole("tab");
+
+		tabs[0].focus();
+		press("End");
+		press("Home");
+
+		expect(tabs.filter((t) => t.getAttribute("tabindex") === "0")).toHaveLength(1);
 	});
 
 	it("moves focus with Left and Right arrows", () => {
@@ -165,5 +202,40 @@ describe("TabStrip keyboard navigation", () => {
 
 		expect(useTabsStore.getState().openTabs).toHaveLength(3);
 		expect(document.activeElement).toBe(screen.getAllByRole("tab")[0]);
+	});
+});
+
+/**
+ * The strip declared `role="tablist"` and `aria-selected` and stopped there: no
+ * tab named the region it switches, and the region named no tab. A screen reader
+ * reached "tab 2 of 3" and then content with no stated relationship to it.
+ *
+ * The panel half lives in Shell, so it is asserted where the two meet
+ * (`shell-tab-identity.test.tsx`); here is the strip's end of the contract, plus
+ * the structural rule that a tablist owns only tabs.
+ */
+describe("TabStrip tabs pattern", () => {
+	it("points every tab at the panel id its content will carry", () => {
+		renderStrip();
+		const tabs = screen.getAllByRole("tab");
+		expect(tabs).toHaveLength(3);
+
+		for (const [i, tab] of tabs.entries()) {
+			expect(tab).toHaveAttribute("id", tabElementId(TABS[i].id));
+			expect(tab).toHaveAttribute("aria-controls", tabPanelElementId(TABS[i].id));
+		}
+		// Distinct ids, or `aria-labelledby` on the panel resolves to whichever
+		// element the document happens to reach first.
+		expect(new Set(tabs.map((t) => t.id)).size).toBe(tabs.length);
+	});
+
+	it("keeps the New-tab button out of the tab set", () => {
+		renderStrip();
+		const list = screen.getByRole("tablist");
+		// Inside the tablist it is announced as one of the tabs - "4 of 4", with a
+		// fourth that opens nothing. Same for the overflow trigger, which the
+		// narrow-strip case in TabStrip.overflow.test.tsx covers.
+		expect(list.contains(screen.getByLabelText("New tab"))).toBe(false);
+		for (const tab of screen.getAllByRole("tab")) expect(list.contains(tab)).toBe(true);
 	});
 });

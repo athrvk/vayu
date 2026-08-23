@@ -134,6 +134,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	cleanup();
+	vi.unstubAllGlobals();
 	useDataFileStore.setState({ locations: {} });
 	Reflect.deleteProperty(window, "electronAPI");
 });
@@ -732,6 +733,159 @@ describe("arriving from a failed step", () => {
 
 		expect(caret()).toBeNull();
 		expect(useTabsStore.getState().dataRowTarget).toBeNull();
+	});
+});
+
+/**
+ * The grid's keyboard model (issue #936).
+ *
+ * A roving tabindex is a promise of *one* tab stop, and the grid made it by
+ * hanging `tabIndex=0` off the selected row - an address into the file, which
+ * three ordinary states put outside the rows on screen: a remembered index past
+ * the 100-row window, a filter that excludes it, and a file that shrank under it.
+ * Each of those left **zero** rows focusable, so the grid dropped out of the tab
+ * order entirely and the key handler below became unreachable.
+ *
+ * The other half is what a screen reader hears: arrow keys moved
+ * `aria-selected` through state and never moved DOM focus, so the ring stayed on
+ * the old row and nothing was announced. These assert both, on the rendered DOM
+ * rather than on the source, because the defect is what the browser is handed.
+ */
+describe("the grid's keyboard model", () => {
+	const bigCsv = (count: number) =>
+		["id,email", ...Array.from({ length: count }, (_, i) => `${i},user${i}@example.test`)].join(
+			"\n"
+		);
+
+	/** Every data row on screen, header excluded (the header is a `row` too). */
+	const dataRows = () =>
+		screen.getAllByRole("row").filter((el) => /@example\.test/.test(el.textContent ?? ""));
+
+	const tabStops = () => dataRows().filter((el) => el.getAttribute("tabindex") === "0");
+
+	async function openWith(count: number, rowIndex: number | null = null) {
+		rememberFile();
+		stubReadDataFile(async () => csvBytes(bigCsv(count)));
+		const execute = vi.fn(async () => {});
+		if (rowIndex !== null) {
+			useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex } });
+		}
+		renderBar(execute, CONTRACT, "req_a");
+		if (rowIndex === null) openPicker();
+		await screen.findByRole("row", { name: /user0@example\.test/ });
+		return execute;
+	}
+
+	it("keeps exactly one tab stop for a remembered row past the browse window", async () => {
+		// `useGrowingWindow` renders everything where there is no
+		// `IntersectionObserver` - jsdom has none - so a real window needs one
+		// that observes and never fires. Without this the window is the whole
+		// file here and the case the app hits at row 101 cannot be reached at all.
+		vi.stubGlobal(
+			"IntersectionObserver",
+			class {
+				observe() {}
+				disconnect() {}
+				unobserve() {}
+			}
+		);
+
+		// 300 rows, opened on row 251: the window renders the first 100, so the
+		// selected row has no element and the roving assignment had nothing to
+		// land on. The grid must still be reachable by Tab.
+		await openWith(300, 250);
+
+		expect(screen.queryByRole("row", { name: /user250@example\.test/ })).toBeNull();
+		expect(tabStops()).toHaveLength(1);
+		// The fallback is the first rendered row, and it is only the *tab stop* -
+		// the selection still names row 251, which is what the footer sends.
+		expect(tabStops()[0].textContent).toContain("user0@example.test");
+		expect(screen.getByRole("button", { name: /^send row 251$/i })).toBeTruthy();
+	});
+
+	it("keeps exactly one tab stop when the filter excludes the selected row", async () => {
+		await openWith(30, 3);
+		expect(tabStops()).toHaveLength(1);
+
+		fireEvent.change(screen.getByLabelText(/filter rows/i), {
+			target: { value: "user21@" },
+		});
+		expect(screen.queryByRole("row", { name: /user3@example\.test/ })).toBeNull();
+		expect(tabStops()).toHaveLength(1);
+		expect(tabStops()[0].textContent).toContain("user21@example.test");
+	});
+
+	it("keeps exactly one tab stop when the file shrank under the remembered row", async () => {
+		// #894's state: the selection is refused rather than clamped, so it points
+		// past the file - and the rows that *are* there still have to be reachable.
+		await openWith(5, 25);
+		expect(screen.getByText(/row 26 no longer exists/i)).toBeTruthy();
+		expect(tabStops()).toHaveLength(1);
+		expect(screen.getByRole("button", { name: /^send row 26$/i })).toBeDisabled();
+	});
+
+	it("moves DOM focus with the selection on arrow keys", async () => {
+		await openWith(30);
+		const rows = dataRows();
+		rows[0].focus();
+		expect(document.activeElement).toBe(rows[0]);
+
+		fireEvent.keyDown(rows[0], { key: "ArrowDown" });
+		expect(dataRows()[1].getAttribute("aria-selected")).toBe("true");
+		// Both, not one: `aria-selected` alone leaves the ring and the screen
+		// reader's cursor on the row the user just left.
+		expect(document.activeElement).toBe(dataRows()[1]);
+		expect(dataRows()[1].getAttribute("tabindex")).toBe("0");
+		expect(dataRows()[0].getAttribute("tabindex")).toBe("-1");
+
+		fireEvent.keyDown(dataRows()[1], { key: "ArrowUp" });
+		expect(dataRows()[0].getAttribute("aria-selected")).toBe("true");
+		expect(document.activeElement).toBe(dataRows()[0]);
+	});
+
+	it("takes Home, End and the page keys to the ends of the rendered rows", async () => {
+		await openWith(30);
+		const rows = dataRows();
+		rows[0].focus();
+
+		fireEvent.keyDown(rows[0], { key: "End" });
+		expect(document.activeElement).toBe(dataRows()[29]);
+		expect(dataRows()[29].getAttribute("aria-selected")).toBe("true");
+
+		fireEvent.keyDown(dataRows()[29], { key: "PageUp" });
+		expect(document.activeElement).toBe(dataRows()[19]);
+
+		fireEvent.keyDown(dataRows()[19], { key: "PageDown" });
+		expect(document.activeElement).toBe(dataRows()[29]);
+
+		fireEvent.keyDown(dataRows()[29], { key: "Home" });
+		expect(document.activeElement).toBe(dataRows()[0]);
+		expect(dataRows()[0].getAttribute("aria-selected")).toBe("true");
+	});
+
+	it("leaves focus in the number field while a row number is typed", async () => {
+		// The arrow keys move the selection *through* this field's state, so a
+		// focus that followed every change would pull the caret out of it mid-number.
+		await openWith(30);
+		const field = screen.getByLabelText(/send with a row by number/i);
+		field.focus();
+		fireEvent.change(field, { target: { value: "12" } });
+
+		expect(dataRows()[11].getAttribute("aria-selected")).toBe("true");
+		expect(document.activeElement).toBe(field);
+	});
+
+	it("sends the row the keyboard walked to", async () => {
+		const execute = await openWith(30);
+		const rows = dataRows();
+		rows[0].focus();
+
+		fireEvent.keyDown(rows[0], { key: "ArrowDown" });
+		fireEvent.keyDown(dataRows()[1], { key: "ArrowDown" });
+		fireEvent.keyDown(dataRows()[2], { key: "Enter" });
+
+		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+		expect(execute).toHaveBeenCalledWith({ id: "2", email: "user2@example.test" });
 	});
 });
 

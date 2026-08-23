@@ -674,7 +674,12 @@ Two other settings look like mistakes and are not; both are commented in
 raising the limit made the bulk diff two to three times worse, because a wider
 limit re-joins line breaks the code chose by hand. And `ContinuationIndentWidth:
 0` wraps arguments to the enclosing block indent, which is what the engine's
-code is written to; changing it is a 257-file rewrite and is tracked separately.
+code is written to. That one was re-measured and **kept** (#940, closing #907):
+`ContinuationIndentWidth: 4` rewrites 250 of the 288 non-vendor sources for
+23,938 lines - 3.3x #886's whole bulk-format commit - and 180 of the 191 sources
+touched in the last 60 engine commits, so it is today's code that disagrees with
+it, not legacy. The table is in `.clang-format`'s header; the question is
+closed.
 
 ### Static Analysis
 
@@ -683,7 +688,7 @@ clang-tidy runs in two places, and both of them can stop a change:
 | Where | What it lints | What a finding does |
 |-------|---------------|---------------------|
 | `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **changed lines** of staged `.c/.cpp/.h/.hpp` files | Refuses the commit |
-| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of `engine/{src,include,tests}` sources, on all three platforms | Fails CI |
+| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of changed `engine/{src,include,tests}` **translation units** - not headers - on Linux and Windows | Fails CI |
 
 A finding is a failure because `engine/.clang-tidy` sets
 `WarningsAsErrors: '*'`; with that empty, clang-tidy prints every diagnostic it
@@ -728,20 +733,43 @@ That is for someone paying the backlog down on purpose - the one case where the
 findings CI ignores are the point. Everything else about the hook is unchanged
 by it.
 
-**Commits listed in `.git-blame-ignore-revs` are skipped.** The gate reads the
-same file `git blame` does, and for the same reason: a commit declared to be
-pure reformatting did not write new code, so re-linting it says nothing. This
-is not only a tidiness argument. Line scoping bounds the *diagnostics*
-clang-tidy reports, not the number of translation units it must parse - and a
-reformat touches a line in every file it rewrites. #886's 149-file bulk-format
-commit made the gate try to analyse 152 translation units in one run and killed
-the job at its 60-minute timeout; with the skip it analyses the 7 that actually
-changed. What was skipped is named in the job summary, never dropped silently.
+**A bulk reformat is the one change line scoping cannot help**, and the escape
+is a label. Line scoping bounds the *diagnostics* clang-tidy reports, not the
+number of translation units it must parse - and a reformat touches a line in
+every file it rewrites, so the gate parses one translation unit per reformatted
+file and widens the line filter on each to nearly the whole file, surfacing a
+backlog older than the diff. #886's 149-file bulk format made the gate ask for
+152 translation units and killed the job at its timeout.
 
-The contract runs the other way too: **do not list a commit in
-`.git-blame-ignore-revs` unless it is purely mechanical**, because doing so now
-excuses it from linting as well as from blame. That rule is written in the file
-itself.
+So a pull request that is nothing but the formatter's output carries the
+**`reformat-pr` label**, and the lint step does not run:
+
+```yaml
+if: >-
+  runner.os != 'macOS'
+  && !contains(github.event.pull_request.labels.*.name, 'reformat-pr')
+```
+
+A reviewer applies it, it is visible on the pull request, and the job summary
+says the lint was skipped rather than leaving a green check to imply it ran.
+Use it only for a reformat: the label excuses every engine line in the pull
+request, so anything else in the same branch goes unlinted with it. Split the
+reformat into its own pull request, which is what #886 did anyway.
+
+**Applying the label does not re-trigger CI.** This workflow runs on
+`pull_request`, whose default activity types are `opened`, `synchronize` and
+`reopened` - labelling is none of them, so the run that is already on the pull
+request keeps its old verdict. Apply the label, then **re-run the engine jobs**;
+the summary flips to the skip line. Do not add `labeled`/`unlabeled` to the
+trigger to avoid the re-run: the path labeler applies labels to every pull
+request, so that would run the whole matrix a second time on all of them.
+
+This replaced a commit walk that read the skip out of `.git-blame-ignore-revs`
+at the pull request's own HEAD (#909's bootstrap, deleted by #940). The
+declaration was an author-writable input to a gate, which needed a validator to
+guard it, which had a blind spot of its own - three mechanisms for a problem
+that happens about once a year. `.git-blame-ignore-revs` still gets the bulk
+commit's SHA, for `git blame`, which is the only thing it is for.
 
 **CI lints on Linux and Windows**, not Linux alone. clang-tidy analyses a
 translation unit, so an `#ifdef _WIN32` branch is preprocessed away before a
@@ -749,30 +777,91 @@ Linux run sees it - `platform.hpp`'s per-OS split and the Windows-only blocks in
 `client.cpp`, `event_loop_worker.cpp` and `temp_database.hpp` are code a
 Linux-only lint could never reach.
 
-**macOS is excluded**, and not by choice: clang-tidy 19.1.7 and 20.1.8 both die
-there with SIGILL - an `llvm_unreachable` trap - part way through the two
-heaviest translation units, which lint clean on both other legs. Upstream clang
-cannot parse that runner's AppleClang 21 SDK. What that loses is small and
-measured: the engine's entire macOS-conditional surface is four `#define`s in
-`platform.hpp` with no statement in them, so what is actually missed is
-`clang-analyzer-*` over shared code as compiled against libc++. Issue #906
-carries the evidence and the ways back in.
+**macOS is excluded**, and that is decided (#940) rather than pending: clang-tidy
+19.1.7 and 20.1.8 both die there with SIGILL - an `llvm_unreachable` trap - part
+way through the two heaviest translation units, which lint clean on both other
+legs. Upstream clang cannot parse that runner's AppleClang 21 SDK, and two
+consecutive majors failing the same way is not a version ladder worth climbing.
+What that loses is small and measured: the engine's entire macOS-conditional
+surface is four `#define`s in `platform.hpp` with no statement in them, so what
+is actually missed is `clang-analyzer-*` over shared code as compiled against
+libc++. Linting on two of three platforms is a common posture, and this one is
+accepted, not tolerated - there is no open issue for it.
+
+**The one condition that reopens it:** a Homebrew LLVM that survives both
+translation units on the runner's current SDK. Test it by dropping the
+`runner.os != 'macOS'` term from the step's `if`, and put it back if it traps.
 
 Both pass `--allow-no-checks`, for `engine/src/runtime/` - its `.clang-tidy`
 disables every check, and clang-tidy calls an empty check list a usage error
 rather than a clean run, so the one exempt directory would otherwise be the only
 one that fails.
 
-**A changed header is an input on Linux only.** `compile_commands.json` has one
-entry per translation unit and none for a `.hpp`, so clang-tidy synthesises a
-command for a header handed to it directly. On Linux that command still finds
-libstdc++; on Windows it does not find the MSVC STL, and the result is the whole
-standard library failing to parse - `no template named 'optional' in namespace
-'std'` - which `WarningsAsErrors: '*'` turns into a failed job. The Windows leg
-therefore lints translation units only. Little is lost, because
-`HeaderFilterRegex` reports findings *inside* a header through every translation
-unit that includes it; what is not covered there is a pull request that changes
-a header and no `.cpp`. Issue #930 carries the flags that would fix it properly.
+**The CI gate lints translation units. A header is never an input** - on every
+platform, decided in #940 (it was Windows-only, from #926). The pre-commit hook
+is the gate that lints headers.
+
+`compile_commands.json` has one entry per translation unit and none for a
+`.hpp`, so clang-tidy synthesises a command for a header handed to it directly.
+That command is a guess. On Linux it happens to find libstdc++; on Windows it
+does not find the MSVC STL and the whole standard library fails to parse - `no
+template named 'optional' in namespace 'std'` - which `WarningsAsErrors: '*'`
+turns into a failed job.
+
+What settled it is sharper than one leg failing. **A `clang-diagnostic-error` is
+not line-filtered.** Measured on clang-tidy 19.1.1: an error inside an included
+header is reported even when `-line-filter` names only the translation unit and
+only one of its lines, and clang-tidy then exits `Found compiler error(s)`. So a
+wrong synthesised command does not just fail a leg - it takes the gate out of
+changed-lines scope altogether, and handing clang-tidy a file the compilation
+database has no entry for is the only way this tree produces a compiler error at
+all. The rejected alternative was passing MSVC's include paths through
+(`--extra-arg=-imsvc...`): it buys one more leg of header-as-input coverage, in
+exchange for toolchain plumbing that breaks when a runner image moves, and it
+leaves that bypass open.
+
+**What this costs is less than #926 and #930 assumed, because the coverage they
+credited was never there.** `HeaderFilterRegex` does report diagnostics inside a
+header - but `clang-tidy-diff.py` builds one invocation per changed file, each
+with a `-line-filter` naming *only that file* (`clang-tidy-diff.py:344-351`),
+and clang-tidy drops a diagnostic in any file its filter does not list.
+Measured, same tree, same header, three filters:
+
+| Line filter passed with the `.cpp` | Header finding reported? |
+|---|---|
+| none | yes |
+| names the `.cpp` only - what CI's driver builds | **no** |
+| names the `.cpp` and the header - what the hook builds | yes |
+
+So a changed header has never reached the CI gate through its consumers. It
+reaches the **hook**, which builds one filter over every staged file for exactly
+this reason (the comment at `scripts/pre-commit:229-234` says so). What CI
+genuinely loses by this decision is a header-only change on a machine with no
+hook installed. To lint one by hand, point clang-tidy at a consumer:
+
+```bash
+clang-tidy-19 --allow-no-checks -p engine/build \
+  '-line-filter=[{"name":"engine/src/http/routes.cpp"},{"name":"engine/include/vayu/http/routes.hpp"}]' \
+  engine/src/http/routes.cpp
+```
+
+**This also answers #929's header-in-the-diff anomaly** - the one it recorded as
+observed but not explained. A header in the diff does not widen anything: the
+`.cpp`'s invocation is byte-identical whether or not a header is in the diff
+(the driver builds it from that file's hunks alone). What a header adds is *one
+more invocation, with the header as input* - and that is the invocation whose
+synthesised command can fail, spraying unfiltered `clang-diagnostic-error`s from
+files nobody touched. "The gate stops being line-scoped when a header is in the
+diff" and "the Windows leg fails on headers" were one defect seen from two
+sides, and dropping headers as inputs closes both.
+
+**`readability-function-cognitive-complexity` stays off, with no report-only
+job** (#940, closing #929). It anchors on the function declaration, which a
+line-scoped gate can never honour. A whole-tree report job would restate a list
+[#928](https://github.com/athrvk/vayu/issues/928) already holds, and #928's
+completion *is* the re-enable condition - the check becomes honourable the
+moment nothing pre-existing is left for it to anchor on. Turn it back on there.
+The reason sits beside the disable in `engine/.clang-tidy`.
 
 ### The precompiled header
 
