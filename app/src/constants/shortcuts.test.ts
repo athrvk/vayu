@@ -107,8 +107,13 @@ describe("the chords the buttons advertise", () => {
 	it("are the ones the handler listens for", () => {
 		// The label and the handler read the same constant. Asserting the shape
 		// keeps a future edit to one from being an edit to only one.
-		expect(SEND_CHORD).toEqual({ mod: true, key: "↵" });
-		expect(LOAD_TEST_CHORD).toEqual({ mod: true, shift: true, key: "↵" });
+		expect(SEND_CHORD).toEqual({ mod: true, key: "↵", label: "Send request" });
+		expect(LOAD_TEST_CHORD).toEqual({
+			mod: true,
+			shift: true,
+			key: "↵",
+			label: "Start a load test",
+		});
 	});
 
 	it("map the display glyph to the real key name", () => {

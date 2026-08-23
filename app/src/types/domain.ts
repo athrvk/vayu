@@ -2244,6 +2244,7 @@ export type ClientSettingsCategory =
 	| "load-testing"
 	| "notifications"
 	| "general"
+	| "shortcuts"
 	| "mcp";
 
 /**
