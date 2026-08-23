@@ -12,6 +12,7 @@
 #include "vayu/http/live_claim.hpp"
 
 #include <cstdint>
+#include <expected>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -119,9 +120,14 @@ bool is_loopback_bind (const std::string& bind);
  * A non-loopback `bind` additionally requires `confirmNonLoopback: true`: the
  * engine's management API has no route auth and CORS `*`, so binding wide is a
  * trust decision the caller states rather than one a default makes.
+ *
+ * The parsed request is the *value*, not an out-parameter, for the reason
+ * `parse_mock_start` gives: an empty return meaning success reads backwards,
+ * and a half-filled `InboxStartRequest` is unreachable once the request only
+ * exists when the payload was accepted (issue #954).
  */
-std::optional<InboxParseError>
-parse_inbox_start (const nlohmann::json& json, InboxStartRequest& out);
+std::expected<InboxStartRequest, InboxParseError> parse_inbox_start (
+const nlohmann::json& json);
 
 /**
  * Validate a `PUT /inbox/:id` payload against @p current.
@@ -130,10 +136,11 @@ parse_inbox_start (const nlohmann::json& json, InboxStartRequest& out);
  * so changing only the status does not silently drop the configured headers.
  * The payload may be either the canned response itself or `{"response": {...}}`
  * - the start route's shape - so a client can send back what it was given.
+ *
+ * @p current is what an absent field keeps; the merged response is the value.
  */
-std::optional<InboxParseError> parse_inbox_response_update (const nlohmann::json& json,
-const InboxCannedResponse& current,
-InboxCannedResponse& out);
+std::expected<InboxCannedResponse, InboxParseError>
+parse_inbox_response_update (const nlohmann::json& json, const InboxCannedResponse& current);
 
 /**
  * Resolve where `GET /inbox/:id/live` resumes from.
@@ -150,9 +157,8 @@ InboxCannedResponse& out);
  * and resuming from the start would replay every retained capture as though it
  * had just arrived.
  */
-std::optional<InboxParseError> parse_live_resume_point (const std::string& header_value,
-const std::string& param_value,
-int64_t& out);
+std::expected<int64_t, InboxParseError>
+parse_live_resume_point (const std::string& header_value, const std::string& param_value);
 
 /** The wire shape of an inbox, shared by start, list and update. */
 nlohmann::json inbox_info_json (const InboxInfo& info);

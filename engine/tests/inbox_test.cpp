@@ -45,65 +45,61 @@ namespace inbox_constants = vayu::core::constants::inbox;
 // ---------------------------------------------------------------------------
 
 TEST (InboxParseStart, EmptyBodyStartsALoopbackInboxAnswering200) {
-    InboxStartRequest out;
-    auto error = vayu::http::parse_inbox_start (json (nullptr), out);
-    ASSERT_FALSE (error.has_value ());
-    EXPECT_EQ (out.bind, "127.0.0.1");
-    EXPECT_EQ (out.port, 0);
-    EXPECT_EQ (out.response.status, 200);
-    EXPECT_EQ (out.response.delay_ms, 0);
-    EXPECT_TRUE (out.response.body.empty ());
+    const auto parsed = vayu::http::parse_inbox_start (json (nullptr));
+    ASSERT_TRUE (parsed.has_value ());
+    EXPECT_EQ (parsed->bind, "127.0.0.1");
+    EXPECT_EQ (parsed->port, 0);
+    EXPECT_EQ (parsed->response.status, 200);
+    EXPECT_EQ (parsed->response.delay_ms, 0);
+    EXPECT_TRUE (parsed->response.body.empty ());
 }
 
 TEST (InboxParseStart, ReadsEveryResponseField) {
-    InboxStartRequest out;
-    const json body = { { "port", 0 }, { "bind", "127.0.0.1" },
-        { "response",
-        { { "status", 503 }, { "body", "retry later" }, { "delayMs", 25 },
-        { "headers", { { "Retry-After", "1" } } } } } };
-    ASSERT_FALSE (vayu::http::parse_inbox_start (body, out).has_value ());
-    EXPECT_EQ (out.response.status, 503);
-    EXPECT_EQ (out.response.body, "retry later");
-    EXPECT_EQ (out.response.delay_ms, 25);
-    ASSERT_EQ (out.response.headers.count ("Retry-After"), 1u);
-    EXPECT_EQ (out.response.headers.at ("Retry-After"), "1");
+    const json body   = { { "port", 0 }, { "bind", "127.0.0.1" },
+          { "response",
+          { { "status", 503 }, { "body", "retry later" }, { "delayMs", 25 },
+          { "headers", { { "Retry-After", "1" } } } } } };
+    const auto parsed = vayu::http::parse_inbox_start (body);
+    ASSERT_TRUE (parsed.has_value ());
+    EXPECT_EQ (parsed->response.status, 503);
+    EXPECT_EQ (parsed->response.body, "retry later");
+    EXPECT_EQ (parsed->response.delay_ms, 25);
+    ASSERT_EQ (parsed->response.headers.count ("Retry-After"), 1u);
+    EXPECT_EQ (parsed->response.headers.at ("Retry-After"), "1");
 }
 
 TEST (InboxParseStart, RejectsRatherThanDefaultsAnUnusableValue) {
-    InboxStartRequest out;
     // A status outside the HTTP range, a negative delay, a delay past the
     // bound, a non-object headers map and a port outside the range are each a
     // 400: silently answering 200 instead is a listener doing something other
     // than what its caller asked for.
-    EXPECT_TRUE (
-    vayu::http::parse_inbox_start (json{ { "response", { { "status", 900 } } } }, out)
+    EXPECT_FALSE (
+    vayu::http::parse_inbox_start (json{ { "response", { { "status", 900 } } } })
     .has_value ());
-    EXPECT_TRUE (
-    vayu::http::parse_inbox_start (json{ { "response", { { "delayMs", -1 } } } }, out)
+    EXPECT_FALSE (
+    vayu::http::parse_inbox_start (json{ { "response", { { "delayMs", -1 } } } })
     .has_value ());
-    EXPECT_TRUE (vayu::http::parse_inbox_start (
-    json{ { "response", { { "delayMs", inbox_constants::MAX_RESPONSE_DELAY_MS + 1 } } } }, out)
+    EXPECT_FALSE (vayu::http::parse_inbox_start (
+    json{ { "response", { { "delayMs", inbox_constants::MAX_RESPONSE_DELAY_MS + 1 } } } })
     .has_value ());
-    EXPECT_TRUE (vayu::http::parse_inbox_start (
-    json{ { "response", { { "headers", "nope" } } } }, out)
+    EXPECT_FALSE (
+    vayu::http::parse_inbox_start (json{ { "response", { { "headers", "nope" } } } })
     .has_value ());
-    EXPECT_TRUE (
-    vayu::http::parse_inbox_start (json{ { "port", 70000 } }, out).has_value ());
-    EXPECT_TRUE (vayu::http::parse_inbox_start (json{ { "bind", "" } }, out).has_value ());
-    EXPECT_TRUE (vayu::http::parse_inbox_start (json ("not an object"), out).has_value ());
+    EXPECT_FALSE (vayu::http::parse_inbox_start (json{ { "port", 70000 } }).has_value ());
+    EXPECT_FALSE (vayu::http::parse_inbox_start (json{ { "bind", "" } }).has_value ());
+    EXPECT_FALSE (vayu::http::parse_inbox_start (json ("not an object")).has_value ());
 }
 
 TEST (InboxParseStart, NonLoopbackBindNeedsExplicitConfirmation) {
-    InboxStartRequest out;
-    auto refused = vayu::http::parse_inbox_start (json{ { "bind", "0.0.0.0" } }, out);
-    ASSERT_TRUE (refused.has_value ());
-    EXPECT_EQ (refused->http_status, 400);
-    EXPECT_EQ (refused->code, "inbox_non_loopback_bind");
+    const auto refused = vayu::http::parse_inbox_start (json{ { "bind", "0.0.0.0" } });
+    ASSERT_FALSE (refused.has_value ());
+    EXPECT_EQ (refused.error ().http_status, 400);
+    EXPECT_EQ (refused.error ().code, "inbox_non_loopback_bind");
 
-    auto accepted = vayu::http::parse_inbox_start (
-    json{ { "bind", "0.0.0.0" }, { "confirmNonLoopback", true } }, out);
-    EXPECT_FALSE (accepted.has_value ());
-    EXPECT_EQ (out.bind, "0.0.0.0");
+    const auto accepted = vayu::http::parse_inbox_start (
+    json{ { "bind", "0.0.0.0" }, { "confirmNonLoopback", true } });
+    ASSERT_TRUE (accepted.has_value ());
+    EXPECT_EQ (accepted->bind, "0.0.0.0");
 
     // Loopback in any of its spellings needs no confirmation.
     EXPECT_TRUE (vayu::http::is_loopback_bind ("127.0.0.1"));
@@ -127,17 +123,16 @@ TEST (InboxParseStart, ALoopbackLookingHostnameIsNotLoopback) {
     }
     // The gate follows the classification: a non-loopback bind is refused
     // without confirmation and accepted with it.
-    InboxStartRequest out;
-    auto refused =
-    vayu::http::parse_inbox_start (json{ { "bind", "127.example.com" } }, out);
-    ASSERT_TRUE (refused.has_value ())
+    const auto refused =
+    vayu::http::parse_inbox_start (json{ { "bind", "127.example.com" } });
+    ASSERT_FALSE (refused.has_value ())
     << "a hostname starting 127. was bound without confirmation";
-    EXPECT_EQ (refused->code, "inbox_non_loopback_bind");
+    EXPECT_EQ (refused.error ().code, "inbox_non_loopback_bind");
 
-    auto accepted = vayu::http::parse_inbox_start (
-    json{ { "bind", "127.example.com" }, { "confirmNonLoopback", true } }, out);
-    EXPECT_FALSE (accepted.has_value ());
-    EXPECT_EQ (out.bind, "127.example.com");
+    const auto accepted = vayu::http::parse_inbox_start (
+    json{ { "bind", "127.example.com" }, { "confirmNonLoopback", true } });
+    ASSERT_TRUE (accepted.has_value ());
+    EXPECT_EQ (accepted->bind, "127.example.com");
 
     // The whole of 127.0.0.0/8 still needs no confirmation.
     EXPECT_TRUE (vayu::http::is_loopback_bind ("127.255.255.254"));
@@ -151,26 +146,25 @@ TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValue) {
     current.delay_ms = 10;
     current.headers  = { { "X-Trace", "abc" } };
 
-    InboxCannedResponse out;
-    ASSERT_FALSE (
-    vayu::http::parse_inbox_response_update (json{ { "status", 200 } }, current, out)
-    .has_value ());
-    EXPECT_EQ (out.status, 200);
+    const auto status_only =
+    vayu::http::parse_inbox_response_update (json{ { "status", 200 } }, current);
+    ASSERT_TRUE (status_only.has_value ());
+    EXPECT_EQ (status_only->status, 200);
     // The point of the merge: changing the status must not drop the rest.
-    EXPECT_EQ (out.body, "boom");
-    EXPECT_EQ (out.delay_ms, 10);
-    ASSERT_EQ (out.headers.count ("X-Trace"), 1u);
+    EXPECT_EQ (status_only->body, "boom");
+    EXPECT_EQ (status_only->delay_ms, 10);
+    ASSERT_EQ (status_only->headers.count ("X-Trace"), 1u);
 
     // The start route's own shape is accepted too, so a client can send back
     // what it was handed.
-    ASSERT_FALSE (vayu::http::parse_inbox_response_update (
-    json{ { "response", { { "body", "ok" } } } }, current, out)
-    .has_value ());
-    EXPECT_EQ (out.body, "ok");
-    EXPECT_EQ (out.status, 500);
+    const auto wrapped = vayu::http::parse_inbox_response_update (
+    json{ { "response", { { "body", "ok" } } } }, current);
+    ASSERT_TRUE (wrapped.has_value ());
+    EXPECT_EQ (wrapped->body, "ok");
+    EXPECT_EQ (wrapped->status, 500);
 
-    EXPECT_TRUE (vayu::http::parse_inbox_response_update (json{ { "status", 12 } }, current, out)
-    .has_value ());
+    EXPECT_FALSE (
+    vayu::http::parse_inbox_response_update (json{ { "status", 12 } }, current).has_value ());
 }
 
 // ---------------------------------------------------------------------------
@@ -178,36 +172,38 @@ TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValue) {
 // ---------------------------------------------------------------------------
 
 TEST (InboxLiveResumePoint, AbsentMeansFromTheStartAndTheHeaderWinsOverTheParam) {
-    int64_t last_id = -1;
-    ASSERT_FALSE (vayu::http::parse_live_resume_point ("", "", last_id).has_value ());
-    EXPECT_EQ (last_id, 0);
+    const auto absent = vayu::http::parse_live_resume_point ("", "");
+    ASSERT_TRUE (absent.has_value ());
+    EXPECT_EQ (*absent, 0);
 
     // The query parameter is the app's own reconnect - EventSource cannot set a
     // header on a fresh connection - and is read exactly like the header.
-    ASSERT_FALSE (vayu::http::parse_live_resume_point ("", "42", last_id).has_value ());
-    EXPECT_EQ (last_id, 42);
+    const auto from_param = vayu::http::parse_live_resume_point ("", "42");
+    ASSERT_TRUE (from_param.has_value ());
+    EXPECT_EQ (*from_param, 42);
 
     // The browser's reconnect header is the more recent of the two.
-    ASSERT_FALSE (vayu::http::parse_live_resume_point ("77", "42", last_id).has_value ());
-    EXPECT_EQ (last_id, 77);
+    const auto from_header = vayu::http::parse_live_resume_point ("77", "42");
+    ASSERT_TRUE (from_header.has_value ());
+    EXPECT_EQ (*from_header, 77);
 }
 
 TEST (InboxLiveResumePoint, RejectsAValueThatIsNotACaptureId) {
-    int64_t last_id = 0;
     for (const char* bad : { "abc", "12x", "", "-1", " 7", "1.5" }) {
         const std::string value = bad;
         // Empty is absence, not a bad value - it is in this list to pin that.
-        const auto error = vayu::http::parse_live_resume_point ("", value, last_id);
+        const auto resume_point = vayu::http::parse_live_resume_point ("", value);
         if (value.empty ()) {
-            EXPECT_FALSE (error.has_value ());
+            ASSERT_TRUE (resume_point.has_value ());
+            EXPECT_EQ (*resume_point, 0);
             continue;
         }
-        ASSERT_TRUE (error.has_value ()) << bad;
-        EXPECT_EQ (error->http_status, 400) << bad;
-        EXPECT_EQ (error->code, "invalid_last_event_id") << bad;
         // Silently resuming from 0 would replay every retained capture as
-        // though it had just arrived, which is what the loud failure prevents.
-        EXPECT_EQ (last_id, 0) << bad;
+        // though it had just arrived, which is what the loud failure prevents -
+        // and there is no resume point to read at all unless the value parsed.
+        ASSERT_FALSE (resume_point.has_value ()) << bad;
+        EXPECT_EQ (resume_point.error ().http_status, 400) << bad;
+        EXPECT_EQ (resume_point.error ().code, "invalid_last_event_id") << bad;
     }
 }
 

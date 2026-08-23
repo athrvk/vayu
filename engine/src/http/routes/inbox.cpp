@@ -29,6 +29,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstddef>
+#include <expected>
 #include <optional>
 #include <string_view>
 #include <thread>
@@ -176,124 +177,127 @@ bool is_loopback_bind (const std::string& bind) {
 namespace {
 
 /**
- * Read the canned-response fields of @p json onto @p out, which the caller has
- * seeded with the values an absent field should keep.
+ * Read the canned-response fields of @p json onto @p merged, which the caller
+ * has seeded with the values an absent field should keep.
  */
-std::optional<InboxParseError>
-apply_response_fields (const nlohmann::json& json, InboxCannedResponse& out) {
+std::expected<InboxCannedResponse, InboxParseError>
+apply_response_fields (const nlohmann::json& json, InboxCannedResponse merged) {
     if (const auto it = json.find ("status"); it != json.end () && !it->is_null ()) {
         if (!it->is_number_integer () || it->get<int> () < 100 || it->get<int> () > 599) {
-            return InboxParseError{ 400, "bad_request",
-                "Invalid 'status': must be an integer between 100 and 599" };
+            return std::unexpected (InboxParseError{ 400, "bad_request",
+            "Invalid 'status': must be an integer between 100 and 599" });
         }
-        out.status = it->get<int> ();
+        merged.status = it->get<int> ();
     }
     if (const auto it = json.find ("body"); it != json.end () && !it->is_null ()) {
         if (!it->is_string ()) {
-            return InboxParseError{ 400, "bad_request", "Invalid 'body': must be a string" };
+            return std::unexpected (InboxParseError{
+            400, "bad_request", "Invalid 'body': must be a string" });
         }
-        out.body = it->get<std::string> ();
+        merged.body = it->get<std::string> ();
     }
     if (const auto it = json.find ("delayMs"); it != json.end () && !it->is_null ()) {
         if (!it->is_number_integer () || it->get<int> () < 0 ||
         it->get<int> () > constants::inbox::MAX_RESPONSE_DELAY_MS) {
-            return InboxParseError{ 400, "bad_request",
-                "Invalid 'delayMs': must be an integer between 0 and " +
-                std::to_string (constants::inbox::MAX_RESPONSE_DELAY_MS) };
+            return std::unexpected (InboxParseError{ 400, "bad_request",
+            "Invalid 'delayMs': must be an integer between 0 and " +
+            std::to_string (constants::inbox::MAX_RESPONSE_DELAY_MS) });
         }
-        out.delay_ms = it->get<int> ();
+        merged.delay_ms = it->get<int> ();
     }
     if (const auto it = json.find ("headers"); it != json.end () && !it->is_null ()) {
         if (!it->is_object ()) {
-            return InboxParseError{ 400, "bad_request",
-                "Invalid 'headers': must be a JSON object of string values" };
+            return std::unexpected (InboxParseError{ 400, "bad_request",
+            "Invalid 'headers': must be a JSON object of string values" });
         }
         std::map<std::string, std::string> headers;
         for (const auto& [name, value] : it->items ()) {
             if (!value.is_string ()) {
-                return InboxParseError{ 400, "bad_request",
-                    "Invalid 'headers." + name + "': must be a string" };
+                return std::unexpected (InboxParseError{ 400, "bad_request",
+                "Invalid 'headers." + name + "': must be a string" });
             }
             headers[name] = value.get<std::string> ();
         }
-        out.headers = std::move (headers);
+        merged.headers = std::move (headers);
     }
-    return std::nullopt;
+    return merged;
 }
 
 } // namespace
 
-std::optional<InboxParseError>
-parse_inbox_start (const nlohmann::json& json, InboxStartRequest& out) {
-    out = InboxStartRequest{};
+std::expected<InboxStartRequest, InboxParseError> parse_inbox_start (
+const nlohmann::json& json) {
+    InboxStartRequest parsed;
     if (json.is_null ()) {
-        return std::nullopt; // No body at all - every field is optional.
+        return parsed; // No body at all - every field is optional.
     }
     if (!json.is_object ()) {
-        return InboxParseError{ 400, "bad_request", "Request body must be a JSON object" };
+        return std::unexpected (
+        InboxParseError{ 400, "bad_request", "Request body must be a JSON object" });
     }
 
     if (const auto it = json.find ("port"); it != json.end () && !it->is_null ()) {
         if (!it->is_number_integer () || !is_valid_port (it->get<int> ())) {
-            return InboxParseError{
-                400, "bad_request", "Invalid 'port': must be an integer between 0 and 65535 (0 picks a free port)"
-            };
+            return std::unexpected (InboxParseError{ 400, "bad_request",
+            "Invalid 'port': must be an integer between 0 and 65535 (0 picks a "
+            "free port)" });
         }
-        out.port = it->get<int> ();
+        parsed.port = it->get<int> ();
     }
 
     if (const auto it = json.find ("bind"); it != json.end () && !it->is_null ()) {
         if (!it->is_string () || it->get<std::string> ().empty ()) {
-            return InboxParseError{ 400, "bad_request",
-                "Invalid 'bind': must be a non-empty string" };
+            return std::unexpected (InboxParseError{
+            400, "bad_request", "Invalid 'bind': must be a non-empty string" });
         }
-        out.bind = it->get<std::string> ();
+        parsed.bind = it->get<std::string> ();
     }
 
-    if (!is_loopback_bind (out.bind)) {
+    if (!is_loopback_bind (parsed.bind)) {
         const auto confirm = json.find ("confirmNonLoopback");
         const bool confirmed =
         confirm != json.end () && confirm->is_boolean () && confirm->get<bool> ();
         if (!confirmed) {
-            return InboxParseError{ 400, "inbox_non_loopback_bind",
-                "Binding an inbox to '" + out.bind +
-                "' exposes it beyond this machine; resend with "
-                "\"confirmNonLoopback\": true to accept that" };
+            return std::unexpected (InboxParseError{ 400, "inbox_non_loopback_bind",
+            "Binding an inbox to '" + parsed.bind +
+            "' exposes it beyond this machine; resend with "
+            "\"confirmNonLoopback\": true to accept that" });
         }
     }
 
     if (const auto it = json.find ("response"); it != json.end () && !it->is_null ()) {
         if (!it->is_object ()) {
-            return InboxParseError{ 400, "bad_request",
-                "Invalid 'response': must be a JSON object" };
+            return std::unexpected (InboxParseError{
+            400, "bad_request", "Invalid 'response': must be a JSON object" });
         }
-        if (auto err = apply_response_fields (*it, out.response); err) {
-            return err;
+        auto response = apply_response_fields (*it, parsed.response);
+        if (!response) {
+            return std::unexpected (response.error ());
         }
+        parsed.response = std::move (*response);
     }
-    return std::nullopt;
+    return parsed;
 }
 
-std::optional<InboxParseError> parse_inbox_response_update (const nlohmann::json& json,
-const InboxCannedResponse& current,
-InboxCannedResponse& out) {
-    out = current;
+std::expected<InboxCannedResponse, InboxParseError>
+parse_inbox_response_update (const nlohmann::json& json, const InboxCannedResponse& current) {
     if (!json.is_object ()) {
-        return InboxParseError{ 400, "bad_request", "Request body must be a JSON object" };
+        return std::unexpected (
+        InboxParseError{ 400, "bad_request", "Request body must be a JSON object" });
     }
     // Accept the start route's own shape so a client can send back what it was
     // handed; `{"response": null}` means the same as an empty body (keep).
     if (const auto it = json.find ("response"); it != json.end ()) {
         if (it->is_null ()) {
-            return std::nullopt;
+            return current;
         }
         if (!it->is_object ()) {
-            return InboxParseError{ 400, "bad_request",
-                "Invalid 'response': must be a JSON object" };
+            return std::unexpected (InboxParseError{
+            400, "bad_request", "Invalid 'response': must be a JSON object" });
         }
-        return apply_response_fields (*it, out);
+        return apply_response_fields (*it, current);
     }
-    return apply_response_fields (json, out);
+    return apply_response_fields (json, current);
 }
 
 nlohmann::json inbox_info_json (const InboxInfo& info) {
@@ -318,16 +322,14 @@ nlohmann::json inbox_info_json (const InboxInfo& info) {
     return out;
 }
 
-std::optional<InboxParseError> parse_live_resume_point (const std::string& header_value,
-const std::string& param_value,
-int64_t& out) {
-    out = 0;
+std::expected<int64_t, InboxParseError>
+parse_live_resume_point (const std::string& header_value, const std::string& param_value) {
     // The header is the browser's own reconnect and therefore the more recent
     // of the two; an empty one is absent, not a resume point of "".
     const std::string& value = header_value.empty () ? param_value : header_value;
     const char* source = header_value.empty () ? "lastEventId" : "Last-Event-ID";
     if (value.empty ()) {
-        return std::nullopt;
+        return 0;
     }
 
     int64_t parsed_id = 0;
@@ -335,11 +337,10 @@ int64_t& out) {
     const char* end   = begin + value.size ();
     const auto parsed = std::from_chars (begin, end, parsed_id);
     if (parsed.ec != std::errc{} || parsed.ptr != end || parsed_id < 0) {
-        return InboxParseError{ 400, "invalid_last_event_id",
-            std::string (source) + " must be a non-negative capture id" };
+        return std::unexpected (InboxParseError{ 400, "invalid_last_event_id",
+        std::string (source) + " must be a non-negative capture id" });
     }
-    out = parsed_id;
-    return std::nullopt;
+    return parsed_id;
 }
 
 nlohmann::json inbox_capture_json (const vayu::db::InboxRequest& capture) {
@@ -769,14 +770,14 @@ void register_inbox_routes (RouteContext& ctx) {
         if (!read_json_body (req, res, body)) {
             return;
         }
-        InboxStartRequest start;
-        if (auto error = parse_inbox_start (body, start); error) {
-            vayu::utils::log_warning ("POST /inbox/start - " + error->message);
-            send_parse_error (res, *error);
+        const auto start = parse_inbox_start (body);
+        if (!start) {
+            vayu::utils::log_warning ("POST /inbox/start - " + start.error ().message);
+            send_parse_error (res, start.error ());
             return;
         }
         try {
-            auto result = ctx.inbox_manager.start (ctx.db, start);
+            auto result = ctx.inbox_manager.start (ctx.db, *start);
             if (!result.ok) {
                 vayu::utils::log_warning ("POST /inbox/start - " + result.error_message);
                 send_error (res, result.http_status, result.error_message,
@@ -869,13 +870,13 @@ void register_inbox_routes (RouteContext& ctx) {
         if (body.is_null ()) {
             body = nlohmann::json::object ();
         }
-        InboxCannedResponse updated;
-        if (auto error = parse_inbox_response_update (body, current->response, updated); error) {
-            vayu::utils::log_warning ("PUT /inbox/:id - " + error->message);
-            send_parse_error (res, *error);
+        const auto updated = parse_inbox_response_update (body, current->response);
+        if (!updated) {
+            vayu::utils::log_warning ("PUT /inbox/:id - " + updated.error ().message);
+            send_parse_error (res, updated.error ());
             return;
         }
-        auto info = ctx.inbox_manager.update_response (inbox_id, updated);
+        auto info = ctx.inbox_manager.update_response (inbox_id, *updated);
         if (!info) {
             send_error (res, 404, "Inbox not found");
             return;
@@ -944,13 +945,14 @@ void register_inbox_routes (RouteContext& ctx) {
         }
         const auto limits = ctx.inbox_manager.limits (inbox_id).value_or (InboxLimits{});
 
-        int64_t last_id = 0;
-        if (auto error =
-            parse_live_resume_point (req.get_header_value ("Last-Event-ID"),
-            req.get_param_value ("lastEventId"), last_id)) {
-            send_error (res, error->http_status, error->message, error->code);
+        const auto resume_point = parse_live_resume_point (
+        req.get_header_value ("Last-Event-ID"), req.get_param_value ("lastEventId"));
+        if (!resume_point) {
+            const auto& refusal = resume_point.error ();
+            send_error (res, refusal.http_status, refusal.message, refusal.code);
             return;
         }
+        int64_t last_id = *resume_point;
 
         const auto claim = ctx.inbox_manager.try_claim_live (inbox_id);
         if (!claim) {

@@ -66,7 +66,7 @@ The HTTP server handles all API requests from the Electron UI. It runs on `127.0
 
 #### How a route says no
 
-Two shapes, and the difference between them is the point:
+Three shapes, and the difference between them is the point:
 
 - A **testable core** - `create_collection_response`, `import_apply_response` -
   returns `std::pair<int, nlohmann::json>`. Success and failure are both
@@ -78,6 +78,12 @@ Two shapes, and the difference between them is the point:
   `std::expected<void, RouteError>`: nothing on success, and on failure the
   `{status, body}` the caller should answer with. `route_error (status, message)`
   builds the refusal; `as_response` turns one into the pair a core returns.
+- A **payload parser** - `parse_mock_start`, `parse_inbox_start`,
+  `parse_inbox_response_update`, `parse_live_resume_point` - returns
+  `std::expected<Parsed, ParseError>`, where `Parsed` is the validated request
+  itself. The value *is* the return, never an out-parameter: a half-filled
+  request a caller forgot to check for is then unreachable rather than merely
+  unlikely (issues #926, #954).
 
 These used to be `std::optional<std::pair<int, nlohmann::json>>`, where an
 *empty* optional meant success (issue #901). That reads backwards at every call

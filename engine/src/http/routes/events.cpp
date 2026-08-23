@@ -80,13 +80,14 @@ void register_event_stream_routes (RouteContext& ctx) {
             return;
         }
 
-        int64_t last_seen = 0;
-        if (auto error =
-            parse_live_resume_point (req.get_header_value ("Last-Event-ID"),
-            req.get_param_value ("lastEventId"), last_seen)) {
-            send_error (res, error->http_status, error->message, error->code);
+        const auto resume_point = parse_live_resume_point (
+        req.get_header_value ("Last-Event-ID"), req.get_param_value ("lastEventId"));
+        if (!resume_point) {
+            const auto& refusal = resume_point.error ();
+            send_error (res, refusal.http_status, refusal.message, refusal.code);
             return;
         }
+        const int64_t last_seen = *resume_point;
         // Frame ids start at 0, so - unlike the inbox's capture ids - "0" is a
         // real resume point and cannot double as "absent". Presence decides,
         // and a resume starts at the frame *after* the last one seen.
