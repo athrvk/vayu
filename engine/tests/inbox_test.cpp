@@ -64,7 +64,7 @@ TEST (InboxParseStart, ReadsEveryResponseField) {
     EXPECT_EQ (parsed->response.status, 503);
     EXPECT_EQ (parsed->response.body, "retry later");
     EXPECT_EQ (parsed->response.delay_ms, 25);
-    ASSERT_EQ (parsed->response.headers.count ("Retry-After"), 1u);
+    ASSERT_EQ (parsed->response.headers.count ("Retry-After"), 1U);
     EXPECT_EQ (parsed->response.headers.at ("Retry-After"), "1");
 }
 
@@ -153,7 +153,7 @@ TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValue) {
     // The point of the merge: changing the status must not drop the rest.
     EXPECT_EQ (status_only->body, "boom");
     EXPECT_EQ (status_only->delay_ms, 10);
-    ASSERT_EQ (status_only->headers.count ("X-Trace"), 1u);
+    ASSERT_EQ (status_only->headers.count ("X-Trace"), 1U);
 
     // The start route's own shape is accepted too, so a client can send back
     // what it was handed.

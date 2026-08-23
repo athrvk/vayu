@@ -184,37 +184,44 @@ std::expected<InboxCannedResponse, InboxParseError>
 apply_response_fields (const nlohmann::json& json, InboxCannedResponse merged) {
     if (const auto it = json.find ("status"); it != json.end () && !it->is_null ()) {
         if (!it->is_number_integer () || it->get<int> () < 100 || it->get<int> () > 599) {
-            return std::unexpected (InboxParseError{ 400, "bad_request",
+            return std::unexpected (InboxParseError{ .http_status = 400,
+            .code = "bad_request",
+            .message =
             "Invalid 'status': must be an integer between 100 and 599" });
         }
         merged.status = it->get<int> ();
     }
     if (const auto it = json.find ("body"); it != json.end () && !it->is_null ()) {
         if (!it->is_string ()) {
-            return std::unexpected (InboxParseError{
-            400, "bad_request", "Invalid 'body': must be a string" });
+            return std::unexpected (InboxParseError{ .http_status = 400,
+            .code    = "bad_request",
+            .message = "Invalid 'body': must be a string" });
         }
         merged.body = it->get<std::string> ();
     }
     if (const auto it = json.find ("delayMs"); it != json.end () && !it->is_null ()) {
         if (!it->is_number_integer () || it->get<int> () < 0 ||
         it->get<int> () > constants::inbox::MAX_RESPONSE_DELAY_MS) {
-            return std::unexpected (InboxParseError{ 400, "bad_request",
-            "Invalid 'delayMs': must be an integer between 0 and " +
+            return std::unexpected (InboxParseError{ .http_status = 400,
+            .code    = "bad_request",
+            .message = "Invalid 'delayMs': must be an integer between 0 and " +
             std::to_string (constants::inbox::MAX_RESPONSE_DELAY_MS) });
         }
         merged.delay_ms = it->get<int> ();
     }
     if (const auto it = json.find ("headers"); it != json.end () && !it->is_null ()) {
         if (!it->is_object ()) {
-            return std::unexpected (InboxParseError{ 400, "bad_request",
+            return std::unexpected (InboxParseError{ .http_status = 400,
+            .code = "bad_request",
+            .message =
             "Invalid 'headers': must be a JSON object of string values" });
         }
         std::map<std::string, std::string> headers;
         for (const auto& [name, value] : it->items ()) {
             if (!value.is_string ()) {
-                return std::unexpected (InboxParseError{ 400, "bad_request",
-                "Invalid 'headers." + name + "': must be a string" });
+                return std::unexpected (InboxParseError{ .http_status = 400,
+                .code = "bad_request",
+                .message = "Invalid 'headers." + name + "': must be a string" });
             }
             headers[name] = value.get<std::string> ();
         }
@@ -232,13 +239,16 @@ const nlohmann::json& json) {
         return parsed; // No body at all - every field is optional.
     }
     if (!json.is_object ()) {
-        return std::unexpected (
-        InboxParseError{ 400, "bad_request", "Request body must be a JSON object" });
+        return std::unexpected (InboxParseError{ .http_status = 400,
+        .code                                                 = "bad_request",
+        .message = "Request body must be a JSON object" });
     }
 
     if (const auto it = json.find ("port"); it != json.end () && !it->is_null ()) {
         if (!it->is_number_integer () || !is_valid_port (it->get<int> ())) {
-            return std::unexpected (InboxParseError{ 400, "bad_request",
+            return std::unexpected (InboxParseError{ .http_status = 400,
+            .code = "bad_request",
+            .message =
             "Invalid 'port': must be an integer between 0 and 65535 (0 picks a "
             "free port)" });
         }
@@ -247,8 +257,9 @@ const nlohmann::json& json) {
 
     if (const auto it = json.find ("bind"); it != json.end () && !it->is_null ()) {
         if (!it->is_string () || it->get<std::string> ().empty ()) {
-            return std::unexpected (InboxParseError{
-            400, "bad_request", "Invalid 'bind': must be a non-empty string" });
+            return std::unexpected (InboxParseError{ .http_status = 400,
+            .code    = "bad_request",
+            .message = "Invalid 'bind': must be a non-empty string" });
         }
         parsed.bind = it->get<std::string> ();
     }
@@ -258,8 +269,9 @@ const nlohmann::json& json) {
         const bool confirmed =
         confirm != json.end () && confirm->is_boolean () && confirm->get<bool> ();
         if (!confirmed) {
-            return std::unexpected (InboxParseError{ 400, "inbox_non_loopback_bind",
-            "Binding an inbox to '" + parsed.bind +
+            return std::unexpected (InboxParseError{ .http_status = 400,
+            .code    = "inbox_non_loopback_bind",
+            .message = "Binding an inbox to '" + parsed.bind +
             "' exposes it beyond this machine; resend with "
             "\"confirmNonLoopback\": true to accept that" });
         }
@@ -267,8 +279,9 @@ const nlohmann::json& json) {
 
     if (const auto it = json.find ("response"); it != json.end () && !it->is_null ()) {
         if (!it->is_object ()) {
-            return std::unexpected (InboxParseError{
-            400, "bad_request", "Invalid 'response': must be a JSON object" });
+            return std::unexpected (InboxParseError{ .http_status = 400,
+            .code    = "bad_request",
+            .message = "Invalid 'response': must be a JSON object" });
         }
         auto response = apply_response_fields (*it, parsed.response);
         if (!response) {
@@ -282,8 +295,9 @@ const nlohmann::json& json) {
 std::expected<InboxCannedResponse, InboxParseError>
 parse_inbox_response_update (const nlohmann::json& json, const InboxCannedResponse& current) {
     if (!json.is_object ()) {
-        return std::unexpected (
-        InboxParseError{ 400, "bad_request", "Request body must be a JSON object" });
+        return std::unexpected (InboxParseError{ .http_status = 400,
+        .code                                                 = "bad_request",
+        .message = "Request body must be a JSON object" });
     }
     // Accept the start route's own shape so a client can send back what it was
     // handed; `{"response": null}` means the same as an empty body (keep).
@@ -292,8 +306,9 @@ parse_inbox_response_update (const nlohmann::json& json, const InboxCannedRespon
             return current;
         }
         if (!it->is_object ()) {
-            return std::unexpected (InboxParseError{
-            400, "bad_request", "Invalid 'response': must be a JSON object" });
+            return std::unexpected (InboxParseError{ .http_status = 400,
+            .code    = "bad_request",
+            .message = "Invalid 'response': must be a JSON object" });
         }
         return apply_response_fields (*it, current);
     }
@@ -337,8 +352,9 @@ parse_live_resume_point (const std::string& header_value, const std::string& par
     const char* end   = begin + value.size ();
     const auto parsed = std::from_chars (begin, end, parsed_id);
     if (parsed.ec != std::errc{} || parsed.ptr != end || parsed_id < 0) {
-        return std::unexpected (InboxParseError{ 400, "invalid_last_event_id",
-        std::string (source) + " must be a non-negative capture id" });
+        return std::unexpected (InboxParseError{ .http_status = 400,
+        .code = "invalid_last_event_id",
+        .message = std::string (source) + " must be a non-negative capture id" });
     }
     return parsed_id;
 }
