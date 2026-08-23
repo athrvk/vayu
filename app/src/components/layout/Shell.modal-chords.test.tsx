@@ -74,9 +74,12 @@ function renderShell(withDialog: boolean) {
 	);
 }
 
-const chord = (key: string) =>
+// `code` because the tab chords are bound to the physical digit row, not to
+// the character it produces (#938) - see `Shell.chords.test.tsx`.
+const chord = (key: string, code = "") =>
 	fireEvent.keyDown(document.activeElement ?? document.body, {
 		key,
+		code,
 		ctrlKey: true,
 		bubbles: true,
 	});
@@ -118,12 +121,12 @@ describe("Shell chords behind an open modal", () => {
 
 	it("switches tabs on mod+1 with nothing open, and not while a dialog is open", () => {
 		renderShell(false);
-		chord("1");
+		chord("1", "Digit1");
 		expect(useTabsStore.getState().activeTabId).toBe(FIRST);
 
 		useTabsStore.setState({ activeTabId: SECOND });
 		renderShell(true);
-		chord("1");
+		chord("1", "Digit1");
 		expect(useTabsStore.getState().activeTabId).toBe(SECOND);
 	});
 

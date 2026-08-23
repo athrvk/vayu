@@ -40,6 +40,18 @@ Renderer and Electron main process for Vayu. Apache-2.0. See the repo root
   (`[data-slot="dialog-content"]` not in its closed state) rather than a
   counter, so every dialog - including one a future feature adds - is covered
   with nothing to register.
+- **A chord the app listens for is a `Chord` in `constants/shortcuts.ts`**, matched
+  by `matchesChord`, and every surface that displays one reads that same
+  definition through `formatChord` / `chordKeys` (#938). Hand-rolled comparisons
+  are not a style question: the Shell's fourteen read `e.metaKey || e.ctrlKey`
+  and ignored `altKey`, so AltGr - which _is_ Ctrl+Alt on European Windows
+  layouts - saved and closed tabs while the user typed `@`; and ⌘1-9 compared
+  `e.key` to "1".."9", which no AZERTY press produces, so it was dead there.
+  Bind a positional chord by `code` (`Digit1`), give the palette's ⌘K-class
+  chords `mod: "strict"` so the other platform's modifier stays with the focused
+  control, and remember Monaco eats what it recognises - the send chords reach an
+  editor through `lib/editor-chords.ts`, which re-dispatches to the one window
+  handler rather than calling the action a second way.
 - **The collection tree's key guards come from the same file** - it bails out
   of its named cases on Ctrl/Cmd so those chords reach the window, and its
   editable-target check is `isTextEntryTarget`, which is `ownsEnterKey` plus a

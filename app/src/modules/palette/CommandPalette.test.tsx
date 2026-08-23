@@ -34,6 +34,20 @@ import { CommandPalette } from "./CommandPalette";
 import { useImportModalStore, useLayoutStore, useTabsStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useLiveCommandSurfaceStore } from "@/lib/commands";
+import { isMac } from "@/lib/platform";
+
+/**
+ * The primary modifier as this platform sends it.
+ *
+ * The chord is `mod: "strict"` (#938): the platform's own modifier and not the
+ * other one, so that Ctrl+K on a Mac stays the focused field's
+ * kill-to-end-of-line. These cases used to hardcode `metaKey`, which is a host
+ * assumption of the kind `platform.test.ts` exists to warn about - it passed on
+ * Linux CI only because the modifier was lenient. The strict branches
+ * themselves are asserted under a stubbed platform in
+ * `CommandPalette.ctrl-k.test.tsx`.
+ */
+const MOD = isMac ? { metaKey: true } : { ctrlKey: true };
 
 const COLLECTIONS = [
 	{ id: "c1", name: "Payments", parentId: undefined },
@@ -105,7 +119,7 @@ function pressPaletteChordInsideAnEditor() {
 		editor.dispatchEvent(
 			new KeyboardEvent("keydown", {
 				key: "k",
-				metaKey: true,
+				...MOD,
 				bubbles: true,
 				cancelable: true,
 			})
@@ -164,16 +178,14 @@ describe("the ⌘K chord", () => {
 		window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", bubbles: true }));
 		expect(useLayoutStore.getState().paletteOpen).toBe(false);
 		window.dispatchEvent(
-			new KeyboardEvent("keydown", { key: "K", metaKey: true, shiftKey: true, bubbles: true })
+			new KeyboardEvent("keydown", { key: "K", ...MOD, shiftKey: true, bubbles: true })
 		);
 		expect(useLayoutStore.getState().paletteOpen).toBe(false);
 	});
 
 	it("matches the chord under Caps Lock, which reports an upper-case key", () => {
 		renderPalette();
-		window.dispatchEvent(
-			new KeyboardEvent("keydown", { key: "K", metaKey: true, bubbles: true })
-		);
+		window.dispatchEvent(new KeyboardEvent("keydown", { key: "K", ...MOD, bubbles: true }));
 		expect(useLayoutStore.getState().paletteOpen).toBe(true);
 	});
 });

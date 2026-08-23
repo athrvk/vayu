@@ -12,7 +12,6 @@ import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { Check, ChevronRight, Circle } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { Kbd } from "@/components/ui/kbd";
 
 const DropdownMenu = DropdownMenuPrimitive.Root;
 
@@ -186,44 +185,6 @@ function DropdownMenuSeparator({
 	);
 }
 
-// Key-caps any bare string children (e.g. "⌘K" → two small Kbd chips). Pass a
-// fully composed <Kbd> tree if you need control.
-const DropdownMenuShortcut = ({
-	className,
-	children,
-	...props
-}: React.HTMLAttributes<HTMLSpanElement>) => {
-	const content = renderShortcutKeys(children);
-	return (
-		<span
-			data-slot="dropdown-menu-shortcut"
-			className={cn("ml-auto flex items-center gap-1", className)}
-			{...props}
-		>
-			{content}
-		</span>
-	);
-};
-
-function renderShortcutKeys(children: React.ReactNode): React.ReactNode {
-	if (typeof children !== "string") return children;
-	const tokens = children
-		.replace(/\s+/g, "")
-		.split(/[+\s]+/)
-		.flatMap((tok) => (tok.length > 1 ? splitGlyphs(tok) : [tok]))
-		.filter(Boolean);
-	return tokens.map((t, i) => (
-		<Kbd key={i} size="sm">
-			{t}
-		</Kbd>
-	));
-}
-
-function splitGlyphs(s: string): string[] {
-	if (/^[A-Za-z]+$/.test(s)) return [s];
-	return Array.from(s);
-}
-
 export {
 	DropdownMenu,
 	DropdownMenuTrigger,
@@ -233,7 +194,6 @@ export {
 	DropdownMenuRadioItem,
 	DropdownMenuLabel,
 	DropdownMenuSeparator,
-	DropdownMenuShortcut,
 	DropdownMenuGroup,
 	DropdownMenuPortal,
 	DropdownMenuSub,

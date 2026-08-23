@@ -22,6 +22,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import RequestBuilderLayout from "./RequestBuilderLayout";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui";
+import { dispatchChord } from "@/lib/editor-chords";
+import { SEND_CHORD } from "@/constants/shortcuts";
 
 const executeRequest = vi.fn();
 const startLoadTest = vi.fn();
@@ -123,6 +125,22 @@ describe("RequestBuilderLayout send chord", () => {
 		context.request = { url: "   " };
 		renderLayout();
 		sendChord(document.body);
+		expect(executeRequest).not.toHaveBeenCalled();
+	});
+
+	it("sends when an editor re-dispatches the chord it swallowed", () => {
+		// The Monaco bridge (#938): the editor keeps Enter, and hands the chord
+		// back to this handler rather than calling `executeRequest` itself, so
+		// the gates above still apply from inside a body or script pane.
+		renderLayout();
+		dispatchChord(SEND_CHORD);
+		expect(executeRequest).toHaveBeenCalledTimes(1);
+	});
+
+	it("refuses the editor's re-dispatch on the same terms - here, an open stream", () => {
+		context.isStreaming = true;
+		renderLayout();
+		dispatchChord(SEND_CHORD);
 		expect(executeRequest).not.toHaveBeenCalled();
 	});
 

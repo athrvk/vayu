@@ -13,10 +13,11 @@
  * one place. Consumers pass only what varies (language, value, height, etc.).
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Editor, type EditorProps, type OnMount } from "@monaco-editor/react";
 import { useClientSettingsStore } from "@/stores";
 import { selectMonoStack } from "@/stores/client-settings-store";
+import { registerEditorChords } from "@/lib/editor-chords";
 
 type EditorOptions = NonNullable<EditorProps["options"]>;
 
@@ -121,6 +122,20 @@ export function CodeEditor({
 	const editor = useClientSettingsStore((s) => s.editor);
 	const monoStack = useClientSettingsStore(selectMonoStack);
 
+	/*
+	 * Every editor gets the window chords Monaco would otherwise eat, here
+	 * rather than at each call site: it is the wrapper's job to make an editor
+	 * behave like the rest of the app, and there are a dozen of them (#938).
+	 * The caller's own `onMount` still runs.
+	 */
+	const handleMount = useCallback<OnMount>(
+		(instance, monaco) => {
+			registerEditorChords(instance, monaco);
+			onMount?.(instance, monaco);
+		},
+		[onMount]
+	);
+
 	// User editor preferences override the shared defaults; an explicit
 	// `fontSize` prop still wins over the preference, and per-call `options`
 	// win over everything.
@@ -141,7 +156,7 @@ export function CodeEditor({
 			value={value}
 			theme={isDark ? "vs-dark" : "vs"}
 			onChange={onChange ? (v) => onChange(v ?? "") : undefined}
-			onMount={onMount}
+			onMount={handleMount}
 			options={{
 				...DEFAULT_OPTIONS,
 				...prefOptions,
