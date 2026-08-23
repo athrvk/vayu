@@ -172,11 +172,11 @@ findings into noise.
 memory overhead is roughly 3x rather than TSan's 10x, and the scratch-database
 tests there already share a CTest `RESOURCE_LOCK`, so `-j2` bought nothing.
 
-**Parallelism is not what makes that leg slow, though, and it is worth knowing
+**Parallelism is not what governs that leg's wall time, and it is worth knowing
 why before reaching for `-j`.** On Windows the scratch-database tests are
-serialized by that `RESOURCE_LOCK` and are ~81% of the serial wall
-(see the root `CLAUDE.md`), so no `-j` setting can shorten them. What actually
-cost the first run was the **per-test timeout**, covered next.
+serialized by that `RESOURCE_LOCK` and are ~81% of the serial wall (see the root
+`CLAUDE.md`), so no `-j` setting can shorten them. What actually cost the first
+run was neither: see [the ASan runtime DLL](#the-asan-runtime-dll-on-windows).
 
 ### The per-test timeout scales with the sanitizer
 
@@ -191,20 +191,37 @@ with the instrumentation:
 | `VAYU_USE_TSAN` | 600s |
 
 60s is six times the slowest healthy test (~10s) in an ordinary build, which is
-no margin at all once AddressSanitizer's ~2x or ThreadSanitizer's 5-15x is
-applied. The first `windows-asan` run is the worked example: MSVC ASan puts its
-allocator interception straight onto the scratch-database tests, they ran past
-60s, and **a timed-out test burns its whole budget before CTest kills it** -
-serialized behind the `RESOURCE_LOCK`, into a queue of full-minute burns. The
-leg ran over 100 minutes without finishing and was red as well as slow, because
-a timeout counts as a failure.
+thin once AddressSanitizer's ~2x or ThreadSanitizer's 5-15x is applied to it.
+The multipliers hold roughly that same ratio.
 
-Linux and macOS never needed this: a full `linux-tsan` run produced 58
-segfaults and 14 race failures and **zero** timeouts, with the slowest passing
-test at 10.09s. The multipliers are headroom everywhere except the one
-configuration that needed them. Configure prints the value it chose
-(`Per-test CTest timeout: ...s`), so a leg that is slow for some other reason
-is not mistaken for this one.
+**This is headroom, not a fix for anything observed**, and the distinction
+matters. No leg has ever needed it: a `linux-tsan` run in CI reported 70
+failures out of 2367 with **zero** timeouts, finishing its test phase in 275s
+with the slowest passing test around 10s. Configure prints the value it chose
+(`Per-test CTest timeout: ...s`), so a leg that is slow for some other reason is
+not mistaken for this one.
+
+The trade-off has one correction the Windows run below taught: when a hang is
+*systemic* rather than confined to one test, a generous net multiplies the cost
+by the number of tests and only the job timeout saves you. So these are sized to
+cover a slow healthy test and no further.
+
+### The ASan runtime DLL on Windows
+
+A `/MT` or `/MTd` binary still has a **runtime** dependency on
+`clang_rt.asan_dynamic-x86_64.dll`. Statically linking the CRT does not
+statically link the ASan runtime, and has not since VS 2022 17.7. Microsoft
+ships that DLL next to the compiler and documents that the directory is on PATH
+*"in debugging sessions and in Visual Studio developer command prompts"* - which
+a plain CI shell is not.
+
+Without it every test process fails to start, prints nothing, and is killed by
+the per-test timeout. The first `windows-asan` run showed exactly that: **2368
+tests, every one `***Timeout`**, including ones that do nothing but create a
+file. It reads like a slow sanitizer and is a missing DLL - so if that leg ever
+shows a wall of identical timeouts again, check the runtime before touching
+`-j` or the timeout. The workflow locates the DLL rather than hard-coding the
+toolset version, and fails the job immediately when it is absent.
 
 ### Which one to reach for
 

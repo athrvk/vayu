@@ -206,6 +206,36 @@ jobs:
               # clang's and errors out on a flag it does not know, so it is not
               # given the suppressions file. It has no LeakSanitizer either.
               export ASAN_OPTIONS="halt_on_error=1"
+
+              # A /MT or /MTd binary still has a *runtime* dependency on
+              # clang_rt.asan_dynamic-x86_64.dll - static linking of the CRT
+              # does not statically link the ASan runtime, and has not since
+              # VS 2022 17.7. Microsoft ships that DLL next to the compiler and
+              # documents that the directory is on PATH "in debugging sessions
+              # and in Visual Studio developer command prompts". This step is
+              # neither: it is a plain bash step, so the DLL is not found, every
+              # test process fails to start, and each one is killed by the
+              # per-test timeout having printed nothing at all.
+              #
+              # That is precisely what the first windows-asan run did - 2368
+              # tests, every single one `***Timeout`, including ones that do
+              # nothing but create a file. It reads like "the sanitizer is
+              # slow"; it is a missing DLL.
+              #
+              # Located rather than hard-coded: the toolset version is in the
+              # path (...\VC\Tools\MSVC\<version>\bin\Hostx64\x64) and moves
+              # with every image update. Missing is fatal here rather than 150
+              # minutes of silent timeouts later.
+              asan_dll=$(find "/c/Program Files/Microsoft Visual Studio" \
+                  -name 'clang_rt.asan_dynamic-x86_64.dll' 2>/dev/null | head -1)
+              if [[ -z "$asan_dll" ]]; then
+                echo "::error::clang_rt.asan_dynamic-x86_64.dll not found;" \
+                     "every test would start, find no runtime, and time out."
+                exit 1
+              fi
+              echo "ASan runtime: $asan_dll"
+              PATH="$(dirname "$asan_dll"):$PATH"
+              export PATH
             else
               export ASAN_OPTIONS="halt_on_error=1:detect_stack_use_after_return=1:suppressions=$supp/asan.supp"
               # LeakSanitizer reads its own variable, and only exists on Linux -

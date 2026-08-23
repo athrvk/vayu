@@ -1012,34 +1012,32 @@ if(VAYU_BUILD_TESTS)
     # in an ordinary build, and the slowest measured is ~10s.
     #
     # **The net scales with the instrumentation** (issue #904). 60s is six times
-    # the slowest healthy test *uninstrumented*, which makes it no margin at all
-    # under a sanitizer: AddressSanitizer is documented at ~2x and
-    # ThreadSanitizer at 5-15x, so the same number that is a safety net in one
-    # build is a tripwire across healthy tests in another.
+    # the slowest healthy test *uninstrumented*, which is thin once
+    # AddressSanitizer's documented ~2x or ThreadSanitizer's 5-15x is applied to
+    # it. The multipliers below keep roughly that same ratio rather than being
+    # tuned to any one runner.
     #
-    # This is not hypothetical - it is what the first `windows-asan` run hit.
-    # MSVC ASan lands its allocator interception directly on the scratch-database
-    # tests, which are already the pathological case on Windows (see the
-    # RESOURCE_LOCK below), and they ran past 60s. Two things then compound:
-    # a timed-out test burns its *whole* budget before ctest kills it, and on
-    # Windows those same tests are serialized by that lock - so the leg becomes a
-    # serial queue of full-minute burns, which no `-j` setting can shorten. It
-    # ran over 100 minutes without finishing, and the timeouts are counted as
-    # failures, so the leg was red as well as slow.
+    # **This is headroom, not a fix for anything observed.** It is worth being
+    # exact about that, because the first `windows-asan` run looked like it
+    # needed a bigger net and did not. Every one of its 2368 tests reported
+    # `***Timeout`, including ones that only create a file - which no slowdown
+    # factor explains. The binary was not slow, it could not start: a /MTd
+    # binary still needs `clang_rt.asan_dynamic-x86_64.dll` at runtime, and the
+    # ctest step did not have it on PATH. Raising the net made that failure
+    # slower, not better. The workflow now puts the DLL on PATH and fails loudly
+    # if it is absent.
     #
-    # Linux and macOS were unaffected and the numbers say why: a full local
-    # `linux-tsan` run produced 58 segfaults and 14 race failures and **zero**
-    # timeouts, with the slowest passing test at 10.09s. Even at TSan's 5-15x
-    # the engine's tests stay well inside 60s there. The multipliers below are
-    # therefore headroom everywhere except the one configuration that needed it.
+    # Measured, so the numbers here are not guesses: a full `linux-tsan` run in
+    # CI reported 70 failures out of 2367 and **zero** timeouts, finishing its
+    # test phase in 275s, with the slowest passing test around 10s. Nothing came
+    # close to even the ordinary 60s net.
     #
     # The direction of the trade-off is the one this block already argues for
-    # DISCOVERY_TIMEOUT: a hang is bounded by the job timeout anyway, so being
-    # too generous costs a slower failure while being too tight costs a red run
-    # over healthy code. Sized off the documented slowdowns rather than tuned to
-    # one runner: 5x for ASan (over its ~2x, because MSVC's allocator
-    # interception on SQLite paths is worse than the average figure) and 10x for
-    # TSan (the midpoint of 5-15x).
+    # DISCOVERY_TIMEOUT - being too generous costs a slower failure, being too
+    # tight costs a red run over healthy code - with one correction the Windows
+    # run taught: when a hang is *systemic*, a generous net multiplies the cost
+    # by the number of tests, and only the job timeout saves you. So these are
+    # sized to cover a slow healthy test and no further.
     #
     # DISCOVERY_TIMEOUT bounds something else entirely, and the two are easy to
     # confuse: `PROPERTIES TIMEOUT` is handed to CTest for each discovered test,
@@ -1082,9 +1080,9 @@ if(VAYU_BUILD_TESTS)
 
     set(vayu_test_timeout 60)
     if(VAYU_USE_ASAN)
-        set(vayu_test_timeout 300)
+        set(vayu_test_timeout 180)
     elseif(VAYU_USE_TSAN)
-        set(vayu_test_timeout 600)
+        set(vayu_test_timeout 300)
     endif()
     message(STATUS "Per-test CTest timeout: ${vayu_test_timeout}s")
 
