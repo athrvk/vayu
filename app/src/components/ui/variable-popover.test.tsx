@@ -355,3 +355,19 @@ describe("why this value won", () => {
 		expect(within(panel).getByText("••••••••")).toBeInTheDocument();
 	});
 });
+
+describe("an Enter that only commits an IME buffer", () => {
+	it("saves on a plain Enter and not on a composition commit", () => {
+		// The keystroke an IME uses to commit its composition reaches the handler
+		// as an ordinary Enter keydown, so without the guard the popover saved
+		// the half-composed value on the first one.
+		const { onValueChange } = renderPopover({ saveMode: "manual" });
+		const field = within(open()).getByLabelText("Value of merchantId");
+
+		fireEvent.keyDown(field, { key: "Enter", isComposing: true });
+		expect(onValueChange).not.toHaveBeenCalled();
+
+		fireEvent.keyDown(field, { key: "Enter" });
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "mrc_8813", "environment");
+	});
+});
