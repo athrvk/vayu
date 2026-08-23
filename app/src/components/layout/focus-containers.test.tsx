@@ -44,7 +44,11 @@ describe("focus containers", () => {
 	// every focusable descendant - dropping it silently clips the ring.
 	it("marks the tab row as a clipping panel", () => {
 		renderTabStrip();
-		expect(screen.getByRole("tablist")).toHaveClass("panel-clip");
+		// The row, not the tablist inside it: the tablist holds only tabs, while
+		// the clipping edge belongs to the element that also holds the overflow
+		// trigger and the New-tab button.
+		const row = screen.getByRole("tablist").parentElement;
+		expect(row).toHaveClass("panel-clip");
 	});
 
 	// Tree rows are wider than the label button inside them, so the row paints
