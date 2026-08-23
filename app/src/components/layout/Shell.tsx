@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { useTabsStore, useSaveStore, useLayoutStore, type Tab, type DrawerView } from "@/stores";
+import { isModalOpen } from "@/lib/modal";
 import { ImportModal } from "@/modules/collections/ImportModal";
 import { Drawer } from "./Drawer";
 import { Dock } from "./Dock";
@@ -113,6 +114,18 @@ export default function Shell() {
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
 			if (!(e.metaKey || e.ctrlKey)) return;
+			/*
+			 * Nothing here acts while a modal is up (#935). Every chord below
+			 * moves or destroys the thing the dialog is attached to - ⌘W closed
+			 * the tab underneath it, ⌘1-9 switched away from it - so the dialog's
+			 * owner unmounted mid-interaction and the dialog went with it.
+			 *
+			 * Escape closes the dialog first; then the chords are live again. The
+			 * command palette is itself a dialog, so its own ⌘K listener keeps
+			 * working (it is bound in `CommandPalette`, not here) while nothing
+			 * else does - which is what a palette on top of the window should do.
+			 */
+			if (isModalOpen()) return;
 			const key = e.key.toLowerCase();
 
 			// ⇧⌘E / ⇧⌘H / ⇧⌘U / ⇧⌘S - drawer view switchers (match Dock tooltips)

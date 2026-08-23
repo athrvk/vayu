@@ -244,9 +244,16 @@ export default function UrlBar() {
 				 * live dot for the same reason it has one: a stream is *live*, and
 				 * no static colour says so.
 				 *
-				 * No `Hint` wrapper: Cmd/Ctrl+Enter still sends, and a tooltip
-				 * naming a chord that does something else on the button under the
-				 * pointer would be worse than no tooltip.
+				 * The chord follows the button (#935). It used to keep sending
+				 * while this said re-sending "is not a thing this surface offers",
+				 * so Cmd/Ctrl+Enter did the one thing the control in front of you
+				 * had stopped offering - and did it silently, replacing the open
+				 * stream. It is inert for the life of the stream instead; the
+				 * handler in `RequestBuilderLayout` gates on `isStreaming` the way
+				 * this gates on it.
+				 *
+				 * No `Hint` wrapper, then, because there is no chord to advertise:
+				 * Stop is deliberately click-only, stopping being destructive.
 				 */}
 				{isStreaming ? (
 					<button

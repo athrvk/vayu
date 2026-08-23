@@ -42,10 +42,24 @@
  *   - Mac keyboards have no Menu key, and F10 is a media key by default, so the
  *     row menu had no keyboard path at all there. **Shift+Enter** is the third
  *     one; plain Enter still activates.
+ *
+ * **F2 keeps no second binding, deliberately** (#935). It is a media key by
+ * default on a Mac too, so it shares the F10 problem - but not its consequence:
+ * rename is reachable without it by double-click and by the row menu (itself
+ * reachable from the keyboard through Shift+Enter), whereas the row menu had no
+ * path at all. Adding a chord for it would spend one of the few free ones on a
+ * key that is only inconvenient, so this is recorded rather than fixed.
+ *
+ * **Ctrl/Cmd is the app's, not the tree's**, and the bail-out for it is in
+ * `onKeyDown` rather than in each case: the named cases match on `e.key` alone
+ * and `take()` stops propagation, so with a row focused - the normal state
+ * after opening a request - `mod+Enter` re-activated the row and the window's
+ * send listener never heard it (#935, from #931's review).
  */
 
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { TIMING } from "@/config/timing";
+import { isTextEntryTarget } from "@/lib/keyboard";
 
 const ITEM = '[role="treeitem"]';
 
@@ -135,8 +149,15 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 			const current = active.closest<HTMLElement>(ITEM);
 			if (!current || !treeRef.current?.contains(current)) return;
 
-			// Never hijack typing in a rename field.
-			if (active.tagName === "INPUT" || active.tagName === "TEXTAREA") return;
+			// Never hijack typing in a rename field. The set is the one the send
+			// chord's handler excludes, widened by the plain input a rename is -
+			// one definition, so the two guards cannot drift apart again.
+			if (isTextEntryTarget(active)) return;
+
+			// Ctrl/Cmd chords belong to the app. Bailing out here rather than in
+			// each case is what lets the window handlers hear them at all - see
+			// the header note.
+			if (e.ctrlKey || e.metaKey) return;
 
 			const list = items();
 			const i = list.indexOf(current);
@@ -177,7 +198,16 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 					// Collapsed: open it. Children mount on the next render, so a
 					// second press steps into them - no flushSync needed.
 					if (expanded === "false") click("[data-tree-toggle]");
-					else if (expanded === "true") focusItem(list[i + 1]);
+					else if (expanded === "true") {
+						// Expanded: move to the *first child*, and nowhere at all if
+						// there is none. An empty folder renders an "Empty folder"
+						// div rather than a treeitem, so the next row in document
+						// order is its sibling and stepping to it was an ArrowDown
+						// wearing ArrowRight's key (#931 review). Parentage decides,
+						// the same walk the `*` case uses.
+						const next = list[i + 1];
+						if (next && parentItem(next) === current) focusItem(next);
+					}
 					break;
 				case "ArrowLeft":
 					take();
@@ -232,9 +262,10 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 				}
 				default: {
 					// Typeahead. Printable characters only, and never a shortcut:
-					// Ctrl/Cmd/Alt combinations belong to the app, not to the tree.
-					// Space never arrives here - it activates, above.
-					if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) break;
+					// Alt combinations belong to the app, not to the tree (Ctrl/Cmd
+					// left before the switch). Space never arrives here - it
+					// activates, above.
+					if (e.key.length !== 1 || e.altKey) break;
 					take();
 					const now = Date.now();
 					const stale = now - typeahead.current.at > TIMING.TREE_TYPEAHEAD_MS;

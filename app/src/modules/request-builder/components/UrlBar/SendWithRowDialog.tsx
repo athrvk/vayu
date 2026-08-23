@@ -74,6 +74,7 @@ import { Callout } from "@/components/shared";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { dataCellText, type DataFileRow } from "@/services/data-files";
 import { cn } from "@/lib/utils";
+import { isCommitEnter } from "@/lib/keyboard";
 import type { SendWithRowState } from "../../hooks/useSendWithRow";
 
 export interface SendWithRowDialogProps {
@@ -290,9 +291,13 @@ export default function SendWithRowDialog({
 	 * The number field is the absolute address and this is the relative one, so
 	 * a keyboard user who has filtered to four rows steps through those four
 	 * rather than through the file underneath them.
+	 *
+	 * `isCommitEnter` rather than `e.key === "Enter"`: an Enter carrying Ctrl/Cmd
+	 * is the app's Send chord, and this grid and the window listener both acting
+	 * on it produced two competing executions of the same request (#935).
 	 */
 	const onGridKeyDown = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
-		if (e.key === "Enter" || e.key === " ") {
+		if (isCommitEnter(e) || e.key === " ") {
 			e.preventDefault();
 			send(selected);
 			return;
@@ -398,7 +403,7 @@ export default function SendWithRowDialog({
 									value={entry}
 									onChange={(e) => setEntry(e.target.value)}
 									onKeyDown={(e) => {
-										if (e.key !== "Enter") return;
+										if (!isCommitEnter(e)) return;
 										e.preventDefault();
 										if (typed.kind === "row") send(typed.index);
 									}}
