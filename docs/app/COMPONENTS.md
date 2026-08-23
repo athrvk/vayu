@@ -98,6 +98,8 @@ Labels and icons come from `tab-descriptors.ts`, a sibling module rather than th
 - **Middle-click closes** a tab (browser-like).
 - **No unsaved dot** - autosave ensures safety.
 - **Keyboard support:** ⌘1–9 jump to tab; displayed via dock shortcuts.
+- **The strip is one Tab stop, and stays one.** Roving tabindex: exactly one tab carries `tabIndex=0`, Left/Right/Home/End move focus within the strip, and Enter or Space activates - focus moves *without* activating, so skating past a dashboard tab mounts nothing. The arrow handler resets every tab to -1 before promoting the destination; setting the destination alone leaked a stop per press, because the DOM write sits on top of a vdom prop React never re-applies. Delete or Backspace closes the focused tab (both keys, since a Mac's "delete" reports `Backspace`). → `TabStrip.keyboard.test.tsx`
+- **The tablist holds tabs and nothing else.** The overflow "+N" trigger and the "+" button are siblings of the `role="tablist"` element, not children: inside it they are announced as part of the tab set. Each tab carries `id`/`aria-controls` (`tabElementId`, `tabPanelElementId`), and `Shell` gives the content region the matching `role="tabpanel"` + `aria-labelledby` - the WAI-ARIA relationship in both directions.
 
 ### `Shell` (`components/layout/Shell.tsx`)
 
@@ -110,6 +112,7 @@ Main layout: tab-centric with resizable drawer, split/overlay context bar, and d
 - **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
 - **Drawer-view sync:** an effect points the Drawer at the view matching the active tab - `variables`→variables, `settings`→settings, `request`/`collection`→collections - and opens it.
 - **ContextBar mode:** picks "push" (≥1200px width) or "overlay" based on window width. It renders on the tab types the section registry has entries for - request, collection and run - and nothing on the other four. `relative` sits on the main+context row rather than on the outer one, so the overlay stops at the tab strip instead of covering the tabs it belongs to.
+- **The content region is the strip's tab panel.** A `role="tabpanel"` div inside `main` (not on `main`, which is a landmark and carries only `role="main"`), carrying the active tab's panel id and naming that tab with `aria-labelledby`. → `shell-tab-identity.test.tsx`.
 - **The restructure must not remount tab content.** Drawer state is upstream of the column the active tab renders into, so a `key` derived from it - or a wrapper mounted only while the drawer is closed - throws away an unsaved body, a scroll position, a Monaco model. → `shell-tab-identity.test.tsx`.
 - **`<ImportModal />`** and **`<CommandPalette />`** mounted once each as global overlays; visibility in a store rather than in the Shell.
 
