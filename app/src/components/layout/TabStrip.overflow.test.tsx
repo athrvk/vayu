@@ -51,12 +51,22 @@ const TABS = Array.from({ length: 8 }, (_, i) => ({
 	entityId: null,
 }));
 
+/**
+ * The strip root: the element that measures, and the one carrying the row's
+ * layout. The tablist is a child of it and holds only tabs - the overflow
+ * trigger and the New-tab button are not tabs and must not be inside a
+ * `role="tablist"`.
+ */
+function stripRoot(): HTMLElement {
+	return screen.getByRole("tablist").parentElement as HTMLElement;
+}
+
 /** jsdom lays nothing out, so the strip's width has to be supplied. */
 function stubStripWidth(px: number) {
 	Object.defineProperty(HTMLElement.prototype, "clientWidth", {
 		configurable: true,
-		get() {
-			return this.getAttribute("role") === "tablist" ? px : 0;
+		get(this: HTMLElement) {
+			return this.querySelector(':scope > [role="tablist"]') ? px : 0;
 		},
 	});
 }
@@ -94,7 +104,7 @@ describe("tab strip width", () => {
 		 * width to its content - the same loop, reintroduced by a class that
 		 * looks like the one that fixed it.
 		 */
-		expect(screen.getByRole("tablist").className).toMatch(/\bw-full\b/);
+		expect(stripRoot().className).toMatch(/\bw-full\b/);
 	});
 
 	it("takes its height from the band token the drawer header shares", () => {
@@ -103,7 +113,7 @@ describe("tab strip width", () => {
 		// A bare h-8 here would drift from the drawer's header the moment either
 		// side changed, and the two are one band across the window: the strip's
 		// left edge is the drawer's right edge.
-		expect(screen.getByRole("tablist").className).toContain("h-[var(--tabstrip-height)]");
+		expect(stripRoot().className).toContain("h-[var(--tabstrip-height)]");
 	});
 
 	it("shows every tab when there is room", () => {
@@ -120,6 +130,17 @@ describe("tab strip width", () => {
 		expect(shown).toBeGreaterThan(0);
 		expect(shown).toBeLessThan(TABS.length);
 		expect(screen.getByLabelText(`${TABS.length - shown} more tabs`)).toBeInTheDocument();
+	});
+
+	it("keeps the overflow trigger outside the tab set", () => {
+		stubStripWidth(320);
+		renderStrip();
+		const shown = screen.getAllByRole("tab").length;
+		const trigger = screen.getByLabelText(`${TABS.length - shown} more tabs`);
+		// A `role="tablist"` owns only tabs, so inside it the "+N" menu is counted
+		// and announced as one of them - "6 of 6" with a sixth that is a dropdown.
+		expect(screen.getByRole("tablist").contains(trigger)).toBe(false);
+		expect(stripRoot().contains(trigger)).toBe(true);
 	});
 
 	it("keeps the active tab on screen however narrow it gets", () => {
@@ -154,6 +175,7 @@ describe("drag regions", () => {
 		// Non-empty by construction: the strip is stubbed narrow so it renders
 		// tabs *and* the overflow control, and a scan of nothing passes anything.
 		const marked = [
+			stripRoot(),
 			screen.getByRole("tablist"),
 			...screen.getAllByRole("tab"),
 			screen.getByLabelText("New tab"),
