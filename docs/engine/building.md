@@ -336,11 +336,14 @@ test:
 
 | Leg | Wall | Result |
 |-----|------|--------|
-| `asan` / ubuntu-latest | 20 min | green |
-| `asan` / macos-latest | 15 min | green |
+| `asan` / ubuntu-latest | 20 min | green, 2368/2368 |
+| `asan` / macos-latest | 15 min | green, 2368/2368 |
 | `asan` / windows-latest | 43 min | 2368/2369, #959 |
-| `tsan` / ubuntu-latest | 19 min | 2311/2369, #957 |
-| `tsan` / macos-latest | 69 min | green |
+| `tsan` / ubuntu-latest | 19 min | 2310/2368, #957 |
+| `tsan` / macos-latest | 69 min | green, 2368/2368 |
+
+Windows discovers one test more than the other two platforms, so its
+denominator is 2369 rather than 2368.
 
 Three findings came out of the first runs. One is already fixed:
 
