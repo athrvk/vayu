@@ -1035,9 +1035,15 @@ RunManager& manager) {
         ", target_rps=" + std::to_string (target_rps) +
         ", timeout=" + std::to_string (timeout_ms) + "ms");
 
-        // Create EventLoop
-        context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
-        context->event_loop->start ();
+        // Create, start, and only then publish the event loop. The metrics
+        // thread has been ticking since before this thread first ran (both are
+        // spawned by start_run, metrics first) and reads the loop through
+        // active_transfer_count(), so the pointer must land under the same
+        // lock (#956) - and only once the loop is already started, so no
+        // reader can ever observe it half-built.
+        auto event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+        event_loop->start ();
+        context->publish_event_loop (std::move (event_loop));
 
         // Build the request once: deserialize + timeout + auth. The event loop
         // attaches request.headers to every transfer, so resolving auth here
@@ -1124,6 +1130,12 @@ RunManager& manager) {
         // settle, but not forever: a request that has outlived its own timeout
         // by the grace period is never going to answer, and waiting on it pins
         // the run in `running` with no way out.
+        //
+        // Both reads are deliberately NOT under event_loop_mtx: this thread is
+        // the one that published the pointer, so they are ordered by program
+        // order, and stop() blocks for the whole drain - during which the
+        // metrics thread must keep ticking through active_transfer_count(),
+        // which takes that lock every tick.
         if (context->should_stop) {
             context->event_loop->stop (false);
         } else {
@@ -1581,8 +1593,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // re-sampling now_ms() inside drifts them into adjacent ms buckets and the
     // dashboard sees status-codes shift left vs throughput on the same x-axis.
     auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot, int64_t now_wall_ms) {
-        size_t active_count =
-        context->event_loop ? context->event_loop->active_count () : 0;
+        size_t active_count      = context->active_transfer_count ();
         size_t requests_sent     = context->requests_sent.load ();
         size_t requests_expected = context->requests_expected.load ();
         double elapsed_seconds   = context->start_time_ms > 0 ?
@@ -1716,6 +1727,13 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                 // Calculate backpressure (true in-flight: requests sent but not yet responded)
                 size_t backpressure = context->in_flight ();
 
+                // One locked read shared by the debug line and the persisted
+                // row below, so both report the same instant. Unlike the
+                // direct dereference this replaces, a run whose loop is not
+                // published yet - the runner still in its config reads one
+                // second in - reports zero instead of dereferencing null.
+                const size_t active_now = context->active_transfer_count ();
+
                 // Sample the in-flight high-water mark. The closed-loop controller
                 // also updates this at submit granularity; open-loop modes
                 // (constant_rps) rely solely on this 1 Hz sample. CAS-max so the two
@@ -1734,7 +1752,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                 ", throughput=" + std::to_string (throughput) +
                 ", backpressure=" + std::to_string (backpressure) +
                 ", error_rate=" + std::to_string (error_rate) + "%" +
-                ", active=" + std::to_string (context->event_loop->active_count ()) +
+                ", active=" + std::to_string (active_now) +
                 ", sent=" + std::to_string (requests_sent));
 
                 // Persist the tick: one wide row, built here rather than
@@ -1753,17 +1771,17 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                     sample.timestamp = tick_wall_ms;
                     sample.elapsed_seconds =
                     static_cast<double> (tick_wall_ms - first_tick_wall_ms) / 1000.0;
-                    sample.requests_completed = current_total;
-                    sample.requests_failed    = current_errors;
-                    sample.current_rps        = current_rps;
-                    sample.current_concurrency = context->event_loop->active_count ();
-                    sample.send_rate        = send_rate;
-                    sample.throughput       = throughput;
-                    sample.backpressure     = backpressure;
-                    sample.error_rate       = error_rate;
-                    sample.dropped_requests = mc.dropped_requests ();
-                    sample.bytes_sent       = mc.total_bytes_sent ();
-                    sample.bytes_received   = mc.total_bytes_received ();
+                    sample.requests_completed  = current_total;
+                    sample.requests_failed     = current_errors;
+                    sample.current_rps         = current_rps;
+                    sample.current_concurrency = active_now;
+                    sample.send_rate           = send_rate;
+                    sample.throughput          = throughput;
+                    sample.backpressure        = backpressure;
+                    sample.error_rate          = error_rate;
+                    sample.dropped_requests    = mc.dropped_requests ();
+                    sample.bytes_sent          = mc.total_bytes_sent ();
+                    sample.bytes_received      = mc.total_bytes_received ();
                     // Reuse the snapshot already taken for the live tick above.
                     sample.status_codes = status_snapshot;
                     // Windowed (rolling) percentiles from the interval recorder -

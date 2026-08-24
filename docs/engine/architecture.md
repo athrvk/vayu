@@ -66,7 +66,7 @@ The HTTP server handles all API requests from the Electron UI. It runs on `127.0
 
 #### How a route says no
 
-Two shapes, and the difference between them is the point:
+Three shapes, and the difference between them is the point:
 
 - A **testable core** - `create_collection_response`, `import_apply_response` -
   returns `std::pair<int, nlohmann::json>`. Success and failure are both
@@ -78,6 +78,12 @@ Two shapes, and the difference between them is the point:
   `std::expected<void, RouteError>`: nothing on success, and on failure the
   `{status, body}` the caller should answer with. `route_error (status, message)`
   builds the refusal; `as_response` turns one into the pair a core returns.
+- A **payload parser** - `parse_mock_start`, `parse_inbox_start`,
+  `parse_inbox_response_update`, `parse_live_resume_point` - returns
+  `std::expected<Parsed, ParseError>`, where `Parsed` is the validated request
+  itself. The value *is* the return, never an out-parameter: a half-filled
+  request a caller forgot to check for is then unreachable rather than merely
+  unlikely (issues #926, #954).
 
 These used to be `std::optional<std::pair<int, nlohmann::json>>`, where an
 *empty* optional meant success (issue #901). That reads backwards at every call
@@ -639,7 +645,8 @@ continue-on-failure policy** beyond "an errored step ends its iteration".
    ↓
 3. Create Run record (type: Load)
    ↓
-4. Create RunContext with EventLoop
+4. Create RunContext (the worker builds, starts and *publishes* the
+   EventLoop itself, inside execute_load_test)
    ↓
 5. Start worker thread (execute_load_test)
    ↓
@@ -665,6 +672,18 @@ clears `is_running` afterwards. Exiting on `should_stop` emitted the final tick
 and set `closed` while requests were still settling, so the live view froze at
 the stop click while the stored report - written after the worker returned -
 counted everything that landed in between.
+
+The metrics thread also starts *before* the worker has built the event loop, so
+the loop's pointer crosses threads: the worker constructs and starts it, then
+hands it over through `RunContext::publish_event_loop`, and the metrics thread
+reads it only through `active_transfer_count()` - a null check plus the
+`active_count()` call inside the same small mutex, answering zero before
+publication. The lock is what orders the reader against the constructor's
+writes; a bare null check tests a value and orders nothing (#956). The strategy
+thread and the event-loop workers deliberately read the pointer without that
+lock - their reads are ordered by program order on the publishing thread and by
+the submit queue's hand-off, and a lock there would sit on the hot submission
+path.
 
 **Auth outlives its token.** A run resolves auth once, before the strategy
 starts, so a run longer than its OAuth 2.0 access token used to turn into a 401

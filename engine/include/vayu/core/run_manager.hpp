@@ -125,6 +125,44 @@ struct EngineDefaults {
 struct RunContext {
     std::string run_id;
     std::unique_ptr<vayu::http::EventLoop> event_loop;
+    // Orders the metrics thread's reads of `event_loop` against its
+    // publication (#956). start_run spawns the metrics thread before the
+    // runner thread has even built the loop, so the pointer is written by
+    // one thread while the other is already ticking - and the null check
+    // the reader used to carry tests a value, it orders nothing. Every
+    // metrics-thread read goes through active_transfer_count() below. The
+    // strategy thread and the event-loop workers' completion callbacks
+    // deliberately read the pointer WITHOUT this lock, because their reads
+    // are already ordered - by program order on the publishing thread, and
+    // by the submit queue's release/acquire hand-off on the workers - and a
+    // lock there would sit on the 60k-RPS submit path.
+    mutable std::mutex event_loop_mtx;
+
+    /// The single publication path for the run's event loop, pairing with
+    /// active_transfer_count() below. The caller starts the loop BEFORE
+    /// handing it in, so a reader can never observe a constructed-but-
+    /// unstarted loop; the critical section is one pointer swap.
+    void publish_event_loop (std::unique_ptr<vayu::http::EventLoop> loop) {
+        std::lock_guard<std::mutex> lock (event_loop_mtx);
+        event_loop = std::move (loop);
+    }
+
+    /// Transfers currently active in the curl workers, or 0 before the loop
+    /// is published - a different quantity from in_flight() below, which
+    /// counts submitted-but-not-completed and documents why the two differ.
+    /// It is the lock, paired with publish_event_loop, that makes the loop
+    /// constructor's writes visible here - the ternary alone synchronizes
+    /// nothing. Calling active_count() while still holding the lock is what
+    /// closes the read-vs-reset half of #956: the pointer cannot be swapped
+    /// or destroyed while a reader is inside. Holding the lock across the
+    /// call is safe because active_count() only sums per-worker atomics over
+    /// a vector immutable since the impl's constructor - it never blocks and
+    /// takes no lock of its own.
+    [[nodiscard]] size_t active_transfer_count () const {
+        std::lock_guard<std::mutex> lock (event_loop_mtx);
+        return event_loop ? event_loop->active_count () : 0;
+    }
+
     // The run's worker thread is NOT owned here: it holds a shared_ptr to this
     // context, so a context whose last reference is dropped by its own worker
     // (a retained run swept while the worker is still unwinding) would join

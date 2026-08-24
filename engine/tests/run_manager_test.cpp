@@ -337,6 +337,47 @@ TEST (CollectMetrics, SizesTheReplayRingFromTheConfiguredWindow) {
     vayu::tests::remove_database_files (db_path);
 }
 
+// start_run spawns the metrics thread before the runner thread has built the
+// event loop, so early ticks run against a null `event_loop` (#956). Every
+// metrics-thread read goes through active_transfer_count(), whose
+// null-before-publish answer is a safe zero - the 1 Hz DB-gated branch used to
+// dereference the pointer with no null check at all, so this test crashes on
+// the reverted code. The run is held open past one second on purpose, so that
+// branch executes at least once.
+TEST (CollectMetrics, ReportsZeroActiveBeforeTheLoopIsPublished) {
+    const std::string db_path = "test_collect_metrics_unpublished.db";
+    vayu::tests::remove_database_files (db_path);
+
+    vayu::db::Database db (db_path);
+    db.init ();
+
+    nlohmann::json cfg;
+    auto ctx = std::make_shared<RunContext> ("unpublished_run", cfg);
+    // Deliberately never set event_loop - this is the window where the runner
+    // thread is still in its config reads (or failed before building a loop).
+    ctx->start_time_ms = 1;
+    ctx->is_running    = true;
+
+    std::thread metrics ([&] () { collect_metrics (ctx, &db); });
+    std::this_thread::sleep_for (std::chrono::milliseconds (1300));
+    ctx->is_running = false;
+    metrics.join ();
+
+    // The guard must have scanned something: a run that published no ticks
+    // proves nothing about how a tick handles the null.
+    EXPECT_GT (ctx->published_count.load (), 0U);
+    EXPECT_TRUE (ctx->closed.load ());
+
+    // The published payloads report the null-before-publish default as zero
+    // active transfers, not a crash and not a stale number.
+    auto batch = ctx->ticks_since (0);
+    ASSERT_FALSE (batch.payloads.empty ());
+    EXPECT_NE (batch.payloads[0].find ("\"activeConnections\":0"), std::string::npos)
+    << "tick payload did not carry the zero default: " << batch.payloads[0];
+
+    vayu::tests::remove_database_files (db_path);
+}
+
 TEST (RunManagerRetention, BackgroundSweeperEvictsWithoutExternalTriggers) {
     RunManager mgr;
     nlohmann::json cfg;
