@@ -338,19 +338,20 @@ The first run in which all five legs reached their ctest summary is recorded in
 |-----|------|--------|
 | `asan` / ubuntu-latest | 20 min | green |
 | `asan` / macos-latest | 21 min | green |
-| `asan` / windows-latest | 42 min | 2367/2368, one finding |
+| `asan` / windows-latest | 42 min | 2367/2368, #959 |
 | `tsan` / ubuntu-latest | 20 min | #956, #957 |
 | `tsan` / macos-latest | 71 min | #956 |
 
-Three findings are open:
+Three findings came out of it. One is already fixed:
 
-- **#956** - a real data race: `RunContext`'s event loop is read by the metrics
-  thread while the run thread constructs it. 13 of the 14 race reports are this
-  one race, and it reproduces on both TSan legs.
+- **#956** - a real data race: `RunContext`'s event loop was read by the metrics
+  thread while the run thread constructed it. 13 of the 14 race reports were
+  this one race, on both TSan legs. **Fixed in #965**, which is the matrix
+  earning its keep - a race no assertion could express, found on its first run.
 - **#957** - `linux-tsan` segfaults in 58 socket-opening tests, because
   cpp-httplib resolves through glibc's `getaddrinfo_a()` and glibc services that
   on a thread TSan never sees created. It is a crash inside the sanitizer
-  runtime, so no suppression can reach it.
+  runtime, so no suppression can reach it. Still open.
 - **#959** - `ScriptEngineTest.ExpectEqlOnCyclicValuesFailsLoudly` fails on
   `windows-asan` and nowhere else. The cyclic-value guard in `js_deep_equal`
   throws a `RangeError` naming "cyclic" on Linux and macOS; on that leg the
@@ -358,12 +359,12 @@ Three findings are open:
   error is being lost somewhere on the MSVC path. It is not a memory-safety
   report - ASan found no error - which makes it a behaviour difference this
   matrix is the first CI to cover, since the ordinary Windows job builds
-  Release.
+  Release. Still open.
 
 So **the `linux-tsan` leg is expected red until #957 is resolved**, and
-`macos-tsan` is the meaningful thread-safety signal in the meantime.
-`windows-asan` is expected red until #959 is resolved. The two green `asan`
-legs and `macos-tsan` are the ones whose colour is news today.
+`windows-asan` until #959 is. With #956 fixed, `macos-tsan` should now be green
+and is the meaningful thread-safety signal; the two `asan` legs on Linux and
+macOS already are.
 
 The workflow also runs on a pull request that edits the sanitizer machinery
 itself (this workflow, `engine/sanitizers/**`, `engine/CMakeLists.txt`,
