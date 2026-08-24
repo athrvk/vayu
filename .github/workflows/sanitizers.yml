@@ -267,15 +267,56 @@ jobs:
           # bitten: a loader problem is not a Windows-only category, and a
           # check that only guards the platform you already debugged is worth
           # very little.
-          test_bin=$(find "build-asan" "build-tsan" -maxdepth 1 \
-              \( -name 'vayu_tests' -o -name 'vayu_tests.exe' \) 2>/dev/null | head -1)
+          # Located with a loop rather than `find`, because this step runs
+          # under GitHub's default `bash -e -o pipefail`: `find` over a path
+          # that does not exist exits non-zero, pipefail carries that through
+          # the pipe, and errexit kills the step at the assignment - silently,
+          # since the failing command is inside a substitution. Only one build
+          # tree exists on any given leg, so naming both always handed `find` a
+          # missing one.
+          #
+          # It passed local validation because a developer machine that has run
+          # both presets has both trees. That is the whole lesson: the check was
+          # exercised in the one environment where its bug could not appear.
+          test_bin=""
+          for candidate in build-asan/vayu_tests build-asan/vayu_tests.exe \
+                           build-tsan/vayu_tests build-tsan/vayu_tests.exe; do
+            if [[ -x "$candidate" ]]; then
+              test_bin="$candidate"
+              break
+            fi
+          done
           if [[ -z "$test_bin" ]]; then
             echo "::error::no vayu_tests binary under build-asan/ or build-tsan/"
             exit 1
           fi
-          echo "Smoke-checking $test_bin can load"
+          # `timeout` is GNU coreutils and macOS does not ship it - Homebrew
+          # installs it as `gtimeout`. Calling it unconditionally is how this
+          # check took both previously green macOS legs down with exit 127 the
+          # first time it ran. Windows is its own trap: System32 has a
+          # `timeout.exe` that pauses rather than bounding a command, so the
+          # bare name is not safe to trust there either. Resolve it, prefer a
+          # coreutils one, and run unbounded rather than not at all if there is
+          # none - an unbounded smoke check still catches a binary that cannot
+          # start, it just cannot cap one that hangs.
+          timeout_bin=$(command -v gtimeout || true)
+          if [[ -z "$timeout_bin" && -x /usr/bin/timeout ]]; then
+            timeout_bin=/usr/bin/timeout
+          fi
+          if [[ -z "$timeout_bin" ]]; then
+            candidate=$(command -v timeout || true)
+            case "$candidate" in
+              /c/Windows/*|/C/Windows/*|*System32*) candidate="" ;;
+            esac
+            timeout_bin="$candidate"
+          fi
+          echo "Smoke-checking $test_bin can load (timeout: ${timeout_bin:-none})"
           smoke_rc=0
-          timeout 120 "./$test_bin" --gtest_list_tests > /dev/null 2> smoke.err || smoke_rc=$?
+          if [[ -n "$timeout_bin" ]]; then
+            "$timeout_bin" 120 "./$test_bin" --gtest_list_tests > /dev/null 2> smoke.err || smoke_rc=$?
+          else
+            "./$test_bin" --gtest_list_tests > /dev/null 2> smoke.err || smoke_rc=$?
+          fi
           if [[ "$smoke_rc" -ne 0 ]]; then
             echo "::error::$test_bin could not enumerate its tests (exit $smoke_rc)." \
                  "124 means it hung. On Windows: 3221225781 STATUS_DLL_NOT_FOUND," \
