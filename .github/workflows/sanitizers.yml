@@ -224,16 +224,27 @@ jobs:
               #
               # Located rather than hard-coded: the toolset version is in the
               # path (...\VC\Tools\MSVC\<version>\bin\Hostx64\x64) and moves
-              # with every image update. Missing is fatal here rather than 150
-              # minutes of silent timeouts later.
+              # with every image update.
+              #
+              # **Constrained to Hostx64/x64.** A Visual Studio install ships
+              # this DLL once per host/target pair - Hostx86\x64, Hostx64\x64,
+              # Hostarm64\x64 - and they are not interchangeable. Taking
+              # whichever the filesystem happened to return first is how the
+              # first attempt at this fix still hung: the wrong image loads no
+              # better than a missing one, and Windows reports both by refusing
+              # to start the process rather than by printing anything.
+              echo "ASan runtime candidates:"
+              find "/c/Program Files/Microsoft Visual Studio" \
+                  -name 'clang_rt.asan_dynamic-x86_64.dll' 2>/dev/null || true
               asan_dll=$(find "/c/Program Files/Microsoft Visual Studio" \
+                  -ipath '*Hostx64*x64*' \
                   -name 'clang_rt.asan_dynamic-x86_64.dll' 2>/dev/null | head -1)
               if [[ -z "$asan_dll" ]]; then
-                echo "::error::clang_rt.asan_dynamic-x86_64.dll not found;" \
-                     "every test would start, find no runtime, and time out."
+                echo "::error::no Hostx64/x64 clang_rt.asan_dynamic-x86_64.dll;" \
+                     "every test would fail to load its runtime and time out."
                 exit 1
               fi
-              echo "ASan runtime: $asan_dll"
+              echo "ASan runtime chosen: $asan_dll"
               PATH="$(dirname "$asan_dll"):$PATH"
               export PATH
             else
@@ -245,6 +256,41 @@ jobs:
           else
             export TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1:suppressions=$supp/tsan.supp"
           fi
+          # Prove the test binary can start before handing ctest 2368 of them.
+          #
+          # A binary that cannot load its runtime does not error - Windows
+          # refuses to start the process and ctest sees only silence, so the
+          # failure costs a per-test timeout each, 2368 times, and reports
+          # nothing about itself. That is exactly how windows-asan burned two
+          # full job timeouts saying only `***Timeout`. `--gtest_list_tests`
+          # loads the binary and its dependencies without running a single
+          # test, so it separates "cannot start" from "tests fail" in seconds,
+          # and the `timeout` turns a hang into exit 124 rather than another
+          # silent wait.
+          #
+          # Cheap enough to run on every leg rather than only the one that has
+          # bitten: a loader problem is not a Windows-only category, and a
+          # check that only guards the platform you already debugged is worth
+          # very little.
+          test_bin=$(find "build-asan" "build-tsan" -maxdepth 1 \
+              \( -name 'vayu_tests' -o -name 'vayu_tests.exe' \) 2>/dev/null | head -1)
+          if [[ -z "$test_bin" ]]; then
+            echo "::error::no vayu_tests binary under build-asan/ or build-tsan/"
+            exit 1
+          fi
+          echo "Smoke-checking $test_bin can load"
+          smoke_rc=0
+          timeout 120 "./$test_bin" --gtest_list_tests > /dev/null 2> smoke.err || smoke_rc=$?
+          if [[ "$smoke_rc" -ne 0 ]]; then
+            echo "::error::$test_bin could not enumerate its tests (exit $smoke_rc)." \
+                 "124 means it hung; on Windows 3221225781 is STATUS_DLL_NOT_FOUND" \
+                 "and 3221225595 is STATUS_INVALID_IMAGE_FORMAT (wrong-architecture DLL)."
+            echo "--- stderr ---"
+            head -50 smoke.err || true
+            exit 1
+          fi
+          echo "Test binary loads and enumerates cleanly."
+
           ctest --preset "$PRESET" --output-on-failure < /dev/null 2>&1 | tee ../sanitizer.log
 
       - name: Upload the sanitizer log

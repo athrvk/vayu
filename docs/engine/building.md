@@ -216,12 +216,25 @@ ships that DLL next to the compiler and documents that the directory is on PATH
 a plain CI shell is not.
 
 Without it every test process fails to start, prints nothing, and is killed by
-the per-test timeout. The first `windows-asan` run showed exactly that: **2368
-tests, every one `***Timeout`**, including ones that do nothing but create a
-file. It reads like a slow sanitizer and is a missing DLL - so if that leg ever
-shows a wall of identical timeouts again, check the runtime before touching
-`-j` or the timeout. The workflow locates the DLL rather than hard-coding the
-toolset version, and fails the job immediately when it is absent.
+the per-test timeout. `windows-asan` has shown exactly that twice: **2368 tests,
+every one `***Timeout`**, including ones that do nothing but create a file.
+
+**A wall of identical timeouts on that leg means the binary cannot start.** It
+reads like a slow sanitizer and is not one - no slowdown factor makes a test
+that creates a file take three minutes. Check the runtime before touching `-j`
+or the timeout; both have been tried and neither was the cause.
+
+Two things guard it now. The workflow locates the DLL rather than hard-coding a
+toolset version that moves with every image update, **constrained to the
+`Hostx64/x64` copy** - an install ships one per host/target pair and they are
+not interchangeable, and taking whichever the filesystem returned first is how
+the first attempt at this fix still hung. Then, before ctest runs at all, the
+step invokes the test binary once with `--gtest_list_tests`, which loads it and
+its dependencies without running anything. That separates "cannot start" from
+"tests fail" in seconds and prints the loader's own exit code - `3221225781` is
+`STATUS_DLL_NOT_FOUND`, `3221225595` is `STATUS_INVALID_IMAGE_FORMAT`, `124` is
+a hang - instead of costing a job timeout and reporting nothing. It runs on
+every leg, because a loader problem is not a Windows-only category.
 
 ### Which one to reach for
 
