@@ -216,8 +216,9 @@ ships that DLL next to the compiler and documents that the directory is on PATH
 a plain CI shell is not.
 
 Without it every test process fails to start, prints nothing, and is killed by
-the per-test timeout. `windows-asan` has shown exactly that twice: **2368 tests,
-every one `***Timeout`**, including ones that do nothing but create a file.
+the per-test timeout. `windows-asan` showed exactly that twice before the
+developer environment was applied: **2368 tests, every one `***Timeout`**,
+including ones that do nothing but create a file. With it, the same suite runs.
 
 **A wall of identical timeouts on that leg means the binary cannot start.** It
 reads like a slow sanitizer and is not one - no slowdown factor makes a test
@@ -250,13 +251,16 @@ Windows-only category.
 | `3221225595` | `STATUS_INVALID_IMAGE_FORMAT` - wrong-architecture DLL |
 | `3221225794` | `STATUS_DLL_INIT_FAILED` (`0xc0000142`) - see below |
 
-**`STATUS_DLL_INIT_FAILED` is not ours to fix.**
+**`STATUS_DLL_INIT_FAILED` has not been seen on this runner.** Once the
+developer environment was applied, `windows-asan` started and ran the whole
+suite - 2368 tests in 1018s on Windows Server 2025, VS 18, MSVC 19.51.
 [actions/runner-images#8891](https://github.com/actions/runner-images/issues/8891)
-is an open defect in the hosted Windows image: an ASan-instrumented binary will
-not start there even from a correct developer command prompt, with the DLL
-present at the documented path. If `windows-asan` reports that code, the leg is
-not viable on GitHub-hosted runners and should be dropped or moved to a
-self-hosted runner rather than debugged further.
+is an open report of an ASan binary refusing to start on a hosted Windows image
+even with the DLL at the documented path, and is worth knowing about, but it is
+filed against `windows-2022` / VS 2022 17.7 / MSVC 14.37 - three toolchain
+generations behind what this leg uses - so it is a reference, not the verdict on
+a fresh `0xc0000142`. Reproduce one against the image actually in use before
+concluding the leg is unviable on hosted runners.
 
 ### Which one to reach for
 
@@ -327,20 +331,39 @@ suppression for engine code is not a fix.
 
 ### Known first-run state
 
-The first `linux-tsan` run is recorded in #904's pull request, and two of its
-findings are open:
+The first run in which all five legs reached their ctest summary is recorded in
+#904's pull request. Measured cold, checkout to last test:
+
+| Leg | Wall | Result |
+|-----|------|--------|
+| `asan` / ubuntu-latest | 20 min | green |
+| `asan` / macos-latest | 21 min | green |
+| `asan` / windows-latest | 42 min | 2367/2368, one finding |
+| `tsan` / ubuntu-latest | 20 min | #956, #957 |
+| `tsan` / macos-latest | 71 min | #956 |
+
+Three findings are open:
 
 - **#956** - a real data race: `RunContext`'s event loop is read by the metrics
   thread while the run thread constructs it. 13 of the 14 race reports are this
-  one race.
+  one race, and it reproduces on both TSan legs.
 - **#957** - `linux-tsan` segfaults in 58 socket-opening tests, because
   cpp-httplib resolves through glibc's `getaddrinfo_a()` and glibc services that
   on a thread TSan never sees created. It is a crash inside the sanitizer
   runtime, so no suppression can reach it.
+- **#959** - `ScriptEngineTest.ExpectEqlOnCyclicValuesFailsLoudly` fails on
+  `windows-asan` and nowhere else. The cyclic-value guard in `js_deep_equal`
+  throws a `RangeError` naming "cyclic" on Linux and macOS; on that leg the
+  reported message is the matcher's generic `AssertionError`, so the thrown
+  error is being lost somewhere on the MSVC path. It is not a memory-safety
+  report - ASan found no error - which makes it a behaviour difference this
+  matrix is the first CI to cover, since the ordinary Windows job builds
+  Release.
 
 So **the `linux-tsan` leg is expected red until #957 is resolved**, and
-`macos-tsan` is the meaningful thread-safety signal in the meantime. `asan` on
-all three and `macos-tsan` are the legs whose colour is news.
+`macos-tsan` is the meaningful thread-safety signal in the meantime.
+`windows-asan` is expected red until #959 is resolved. The two green `asan`
+legs and `macos-tsan` are the ones whose colour is news today.
 
 The workflow also runs on a pull request that edits the sanitizer machinery
 itself (this workflow, `engine/sanitizers/**`, `engine/CMakeLists.txt`,

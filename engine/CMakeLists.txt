@@ -1023,9 +1023,13 @@ if(VAYU_BUILD_TESTS)
     # `***Timeout`, including ones that only create a file - which no slowdown
     # factor explains. The binary was not slow, it could not start: a /MTd
     # binary still needs `clang_rt.asan_dynamic-x86_64.dll` at runtime, and the
-    # ctest step did not have it on PATH. Raising the net made that failure
-    # slower, not better. The workflow now puts the DLL on PATH and fails loudly
-    # if it is absent.
+    # ctest step ran in neither a debugging session nor a developer command
+    # prompt, which is where Microsoft documents that DLL's directory as being
+    # on PATH. Raising the net made that failure slower, not better. The
+    # workflow now enters a developer environment (ilammy/msvc-dev-cmd) and
+    # smoke-loads the binary before running anything, so the same failure would
+    # now report in seconds. With that in place `windows-asan` runs all 2368
+    # tests in ~1018s with zero timeouts - the net was never the constraint.
     #
     # Measured, so the numbers here are not guesses: a full `linux-tsan` run in
     # CI reported 70 failures out of 2367 and **zero** timeouts, finishing its

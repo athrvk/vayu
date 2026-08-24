@@ -90,14 +90,13 @@ jobs:
           - os: windows-latest
             sanitizer: asan
             preset: windows-asan
-    # A runaway guard, not a budget. Measured on the first full runs of this
-    # workflow, cold, from checkout to the last test: ASan 13-19 min on Linux
-    # and 14-15 on macOS, TSan 15-17 on Linux and 68-70 on macOS. `windows-asan`
-    # was the outlier at over 100 minutes without finishing, for the reason the
-    # ctest step below describes - per-test timeouts, not parallelism - and is
-    # expected to land far inside this guard now that the net scales with the
-    # sanitizer. 150 keeps headroom over the slowest healthy leg while still
-    # catching a genuine hang in one weekly run rather than three.
+    # A runaway guard, not a budget. Measured cold on the first run in which
+    # every leg reached its ctest summary, checkout to last test: ASan 20 min on
+    # Linux, 21 on macOS, 42 on Windows; TSan 20 on Linux and 71 on macOS.
+    # `macos-tsan` sets the ceiling, at TSan's documented 5-15x over a suite the
+    # other legs finish in a fifth of that. 150 keeps better than 2x headroom
+    # over it while still catching a genuine hang in one weekly run rather than
+    # three.
     timeout-minutes: 150
     env:
       # Byte-identical to pr-tests.yml, release.yml and cache-warm.yml on
@@ -192,11 +191,12 @@ jobs:
       # load on #875 is a reminder that `-j8` under a sanitizer adds noise of
       # its own on top of the findings this is here to read.
       #
-      # Parallelism is not what governs this job's wall time. The per-test
-      # CTest timeout is, and it scales with the sanitizer in
-      # engine/CMakeLists.txt - a test that overruns it burns the whole budget
-      # before ctest kills it, and on Windows the tests most likely to overrun
-      # are the ones a RESOURCE_LOCK already serializes. See
+      # The per-test CTest timeout also scales with the sanitizer, in
+      # engine/CMakeLists.txt. It is headroom, not a lever on wall time: with
+      # the binary actually starting, `windows-asan` runs all 2368 tests in
+      # ~1018s at `-j4` with zero timeouts. It earns its place by bounding a
+      # single stuck test, not by rescuing a systemic hang - when the hang is
+      # systemic a generous net just multiplies its cost. See
       # docs/engine/building.md.
       #
       # `< /dev/null` matches pr-tests.yml and release.yml: the suite must see
@@ -321,10 +321,10 @@ jobs:
             echo "::error::$test_bin could not enumerate its tests (exit $smoke_rc)." \
                  "124 means it hung. On Windows: 3221225781 STATUS_DLL_NOT_FOUND," \
                  "3221225595 STATUS_INVALID_IMAGE_FORMAT (wrong-architecture DLL)," \
-                 "3221225794 (0xc0000142) STATUS_DLL_INIT_FAILED - that last one is" \
-                 "actions/runner-images#8891, an open defect in the hosted Windows" \
-                 "image where an ASan binary will not start even from a correct" \
-                 "developer prompt. If it is 8891, this leg is not fixable here."
+                 "3221225794 (0xc0000142) STATUS_DLL_INIT_FAILED - compare that" \
+                 "last one against actions/runner-images#8891, but note it is filed" \
+                 "against windows-2022 / MSVC 14.37 and this leg runs a much newer" \
+                 "image, so reproduce before calling it unfixable here."
             echo "--- stderr ---"
             head -50 smoke.err || true
             exit 1
