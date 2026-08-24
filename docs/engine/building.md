@@ -331,18 +331,18 @@ suppression for engine code is not a fix.
 
 ### Known first-run state
 
-The first run in which all five legs reached their ctest summary is recorded in
-#904's pull request. Measured cold, checkout to last test:
+The state after #965, measured cold on #904's pull request, checkout to last
+test:
 
 | Leg | Wall | Result |
 |-----|------|--------|
 | `asan` / ubuntu-latest | 20 min | green |
-| `asan` / macos-latest | 21 min | green |
-| `asan` / windows-latest | 42 min | 2367/2368, #959 |
-| `tsan` / ubuntu-latest | 20 min | #956, #957 |
-| `tsan` / macos-latest | 71 min | #956 |
+| `asan` / macos-latest | 15 min | green |
+| `asan` / windows-latest | 43 min | 2368/2369, #959 |
+| `tsan` / ubuntu-latest | 19 min | 2311/2369, #957 |
+| `tsan` / macos-latest | 69 min | green |
 
-Three findings came out of it. One is already fixed:
+Three findings came out of the first runs. One is already fixed:
 
 - **#956** - a real data race: `RunContext`'s event loop was read by the metrics
   thread while the run thread constructed it. 13 of the 14 race reports were
@@ -362,9 +362,9 @@ Three findings came out of it. One is already fixed:
   Release. Still open.
 
 So **the `linux-tsan` leg is expected red until #957 is resolved**, and
-`windows-asan` until #959 is. With #956 fixed, `macos-tsan` should now be green
-and is the meaningful thread-safety signal; the two `asan` legs on Linux and
-macOS already are.
+`windows-asan` until #959 is. The other three are green, and `macos-tsan` is the
+meaningful thread-safety signal until #957 unblocks its Linux counterpart: it
+went green the run after #965 landed, with zero race reports on either TSan leg.
 
 The workflow also runs on a pull request that edits the sanitizer machinery
 itself (this workflow, `engine/sanitizers/**`, `engine/CMakeLists.txt`,
