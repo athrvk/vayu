@@ -949,7 +949,21 @@ been linted, so most files carry findings older than any current diff -
 `openapi_drafts.cpp` answered with nine on an untouched tree. Gating whole files
 would fail a pull request for code it did not write, in every file it happened
 to open. New code is held to the config from its first line; the backlog is paid
-down by whoever edits those lines.
+down by whoever edits those lines - and, since #928, by its waves on purpose:
+#942 measured the whole tree against the decided config and #943-#946 pay the
+findings down family by family, with promotion from changed-lines to whole-file
+gating decided in #946 once nothing pre-existing is left to surface.
+
+**What the config enables is a decision, not a default** (#928): the families
+that catch real defects - `bugprone-*`, `clang-analyzer-*`, `concurrency-*`,
+`cert-*`, a curated `cppcoreguidelines-*` safety subset, `performance-*` - plus
+the `readability-*`/`modernize-*` remainder after the style-motivated checks
+were declined with a written reason each. `engine/.clang-tidy` is the single
+source of truth for both lists and the reasons; it also documents the alias
+rule (one name per defect - a `cert-*` alias of an enabled check is off so
+nothing reports twice). The gate holds new code to the newly enabled families
+immediately, on changed lines, while their backlog is paid down - the same
+posture every enabled check has always had.
 
 The hook used to be the stricter of the two - it gated whole staged files, so a
 one-line edit to a legacy file was refused a commit over findings CI would let
