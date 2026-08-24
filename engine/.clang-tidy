@@ -1,20 +1,101 @@
 ---
 Checks: '
   bugprone-*,
+  cert-*,
   clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-owning-memory,
+  cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  cppcoreguidelines-pro-bounds-constant-array-index,
+  cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  cppcoreguidelines-pro-type-const-cast,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-pro-type-reinterpret-cast,
+  cppcoreguidelines-pro-type-static-cast-downcast,
+  cppcoreguidelines-pro-type-union-access,
+  cppcoreguidelines-pro-type-vararg,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-special-member-functions,
   modernize-*,
   performance-*,
   readability-*,
   -bugprone-easily-swappable-parameters,
+  -cert-arr39-c,
+  -cert-con36-c,
+  -cert-con54-cpp,
+  -cert-ctr56-cpp,
+  -cert-dcl16-c,
+  -cert-dcl37-c,
+  -cert-dcl51-cpp,
+  -cert-err09-cpp,
+  -cert-exp42-c,
+  -cert-flp37-c,
+  -cert-int09-c,
+  -cert-msc24-c,
+  -cert-msc30-c,
+  -cert-msc32-c,
+  -cert-msc33-c,
+  -cert-msc54-cpp,
+  -cert-oop11-cpp,
+  -cert-oop54-cpp,
+  -cert-pos44-c,
+  -cert-pos47-c,
+  -cert-sig30-c,
+  -cert-str34-c,
   -modernize-use-trailing-return-type,
+  -modernize-use-designated-initializers,
+  -modernize-use-ranges,
+  -modernize-use-starts-ends-with,
+  -modernize-return-braced-init-list,
+  -modernize-raw-string-literal,
+  -modernize-use-nodiscard,
+  -modernize-use-auto,
+  -modernize-loop-convert,
   -readability-convert-member-functions-to-static,
   -readability-function-cognitive-complexity,
   -readability-identifier-length,
-  -readability-magic-numbers
+  -readability-magic-numbers,
+  -readability-uppercase-literal-suffix,
+  -readability-braces-around-statements,
+  -readability-implicit-bool-conversion,
+  -readability-container-contains,
+  -readability-isolate-declaration,
+  -readability-qualified-auto,
+  -readability-else-after-return,
+  -readability-use-anyofallof,
+  -readability-named-parameter
 '
-# Why each of the six above is off. They were unexplained for as long as this
-# file has existed, which is what makes them relitigable - none is a hard call,
-# and a line each is cheaper than having the argument twice.
+# The enabled set is the #928 decision (owner, 2026-08-23): the families that
+# catch real defects - safety, memory, undefined behaviour, concurrency, CPU
+# cost - are in; checks whose payload is visual style are out, each with a
+# reason below. `cppcoreguidelines-*` is deliberately a curated subset, never
+# the family: the rest of that family is either style (`avoid-magic-numbers`,
+# `init-variables`) or an alias of something already enabled.
+#
+# The `-cert-*` block is not a family opt-out - it is alias handling. Most
+# `cert-*` checks are second names for a check that already runs here under
+# its canonical name (`cert-str34-c` IS `bugprone-signed-char-misuse`), and
+# clang-tidy reports once per enabled NAME, so leaving both names on reports
+# every such defect twice. The rule for which name survives: the canonical
+# name wins wherever its family is enabled (all the `bugprone-*`,
+# `concurrency-*`, `performance-*`, `readability-*` aliases below); a cert
+# alias whose canonical lives in a family this config does not enable
+# (`misc-*`, `google-*`) stays ON under its cert name, because there one name
+# is the only name - that is `cert-dcl03-c` (misc-static-assert),
+# `cert-dcl54-cpp` (misc-new-delete-overloads), `cert-dcl59-cpp`
+# (google-build-namespaces), `cert-err61-cpp`
+# (misc-throw-by-value-catch-by-reference; its twin alias `cert-err09-cpp`
+# is off so the pair cannot double-report) and `cert-fio38-c`
+# (misc-non-copyable-objects). Two cert-on-cert aliases (`cert-msc30-c`,
+# `cert-msc32-c`) are off for the same one-name-per-defect rule.
+# `cert-dcl16-c` is off because it aliases readability-uppercase-literal-suffix,
+# which is declined below - a declined check must not come back under a
+# second name.
+#
+# Why each non-alias check above is off. They were unexplained for as long as
+# this file existed, which is what makes them relitigable - none is a hard
+# call, and a line each is cheaper than having the argument twice.
 #
 #   bugprone-easily-swappable-parameters
 #     Fires on any two adjacent parameters of the same type. Nearly every
@@ -51,6 +132,71 @@ Checks: '
 #     The engine is full of protocol constants (status codes, ports, curl
 #     option values) and test literals. Naming each at its single use site moves
 #     the number away from what it means.
+#   readability-uppercase-literal-suffix
+#     `1u` vs `1U` - a caps preference with no defect class behind it, and the
+#     single largest noise source the full-tree scan found (1174 of 2835
+#     findings at the 188-TU mark). Declined in #928.
+#   readability-braces-around-statements
+#     Brace style on single-statement bodies. The formatter owns layout here;
+#     a linter demanding braces the formatter does not is a second style
+#     authority. Declined in #928.
+#   readability-implicit-bool-conversion
+#     `if (ptr)` and `if (count)` are idiomatic C++ and the explicit casts the
+#     check demands add words, not safety. Borderline by #928's own note:
+#     revisit only if a real bug is ever traced to one - none has been.
+#   modernize-use-designated-initializers
+#     Rewrites every aggregate init (411 sites at the 188-TU mark) for a
+#     spelling preference. Worth it in new code by choice, not as a demand on
+#     old code. Declined in #928.
+#   modernize-use-ranges
+#     `std::ranges::sort(v)` over `std::sort(v.begin(), v.end())` - the same
+#     algorithm, respelled. No behaviour or safety change. Declined in #928.
+#   modernize-use-starts-ends-with
+#     A spelling preference on string tests. The cases where the old spelling
+#     also allocates are performance findings and surface under performance-*
+#     on their own. Declined in #928.
+#   modernize-return-braced-init-list
+#     `return T{...}` vs `return T(...)` - spelling. Declined in #928.
+#   modernize-raw-string-literal
+#     `R"(...)"` over an escaped literal - the same string, respelled. Declined
+#     in #942 (the full-tree measurement).
+#   modernize-use-nodiscard
+#     Demands `[[nodiscard]]` on every value-returning const member, tree-wide.
+#     The defect it guards against - a discarded call - is flagged at the call
+#     site by bugprone-unused-return-value and cert-err33-c, which stay on.
+#     Declined in #942.
+#   modernize-use-auto
+#     `auto x = ...` over a spelled type on iterators and casts - respelling
+#     with no behaviour behind it. Declined in #942.
+#   modernize-loop-convert
+#     Range-for over an index or iterator loop - the same iteration, respelled;
+#     the same rule that declined modernize-use-ranges. Declined in #942.
+#   readability-container-contains
+#     `contains(x)` over `find(x) != end()` - the same test, respelled; the
+#     same rule that declined modernize-use-starts-ends-with. Declined in #942.
+#   readability-isolate-declaration
+#     One declaration per line - declaration layout, the formatter's domain.
+#     Declined in #942.
+#   readability-qualified-auto
+#     `auto *p` vs `auto p` when deducing a pointer - deduction is identical
+#     either way; a spelling clarity preference. Declined in #942.
+#   readability-else-after-return
+#     Dropping `else` after a returning branch - control-flow layout with no
+#     defect class behind it. Declined in #942.
+#   readability-use-anyofallof
+#     `std::any_of` over a short loop with a flag - respelling, same rule as
+#     modernize-use-ranges. Declined in #942.
+#   readability-named-parameter
+#     Demands `/*name*/` on deliberately unnamed parameters. C++ allows the
+#     unnamed form to *mean* unused; the comment adds nothing. Declined in #942.
+#
+# Kept deliberately, against the style-check current: modernize-avoid-c-arrays
+# (a C array decays to a pointer and drops its length; std::array keeps it and
+# bounds-checks in debug - bounds-safety, not spelling, #928), and three
+# readability checks whose payload is a defect class, not layout:
+# avoid-nested-conditional-operator (wrong-branch bugs live in deep ternaries),
+# math-missing-parentheses (precedence confusion), and use-std-min-max
+# (hand-rolled clamps get the comparison backwards). Decided in #942.
 
 # No `ExtraArgs` here, deliberately (issue #912). `-Wno-ignored-gch` used to
 # live on this line, for the pre-commit hook's benefit. It broke CI for every
