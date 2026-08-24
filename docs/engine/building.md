@@ -224,17 +224,39 @@ reads like a slow sanitizer and is not one - no slowdown factor makes a test
 that creates a file take three minutes. Check the runtime before touching `-j`
 or the timeout; both have been tried and neither was the cause.
 
-Two things guard it now. The workflow locates the DLL rather than hard-coding a
-toolset version that moves with every image update, **constrained to the
-`Hostx64/x64` copy** - an install ships one per host/target pair and they are
-not interchangeable, and taking whichever the filesystem returned first is how
-the first attempt at this fix still hung. Then, before ctest runs at all, the
-step invokes the test binary once with `--gtest_list_tests`, which loads it and
-its dependencies without running anything. That separates "cannot start" from
-"tests fail" in seconds and prints the loader's own exit code - `3221225781` is
-`STATUS_DLL_NOT_FOUND`, `3221225595` is `STATUS_INVALID_IMAGE_FORMAT`, `124` is
-a hang - instead of costing a job timeout and reporting nothing. It runs on
-every leg, because a loader problem is not a Windows-only category.
+The workflow gets that PATH the supported way - `ilammy/msvc-dev-cmd`, which is
+what the ecosystem uses - rather than searching for the DLL by hand. Two
+revisions did search by hand and both got it wrong, once by taking whichever
+host/target copy the filesystem returned first (an install ships one per pair
+and they are not interchangeable).
+
+It also sets `ASAN_WIN_CONTINUE_ON_INTERCEPTION_FAILURE`. That is Microsoft's
+documented escape from a *hang*: the runtime hotpatches interceptors into system
+functions, and where a prologue is too short to patch, "the program throws a
+`debugbreak` and halts" - with no debugger attached, a process that never exits
+and never prints, which CTest can only call a timeout. Newer Windows builds are
+known to trip this.
+
+Finally, before ctest runs at all, the step loads the test binary once with
+`--gtest_list_tests`. That separates "cannot start" from "tests fail" in seconds
+and prints the loader's own exit code instead of costing a job timeout and
+reporting nothing. It runs on every leg, because a loader problem is not a
+Windows-only category.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `124` | Hung - the `timeout` fired |
+| `3221225781` | `STATUS_DLL_NOT_FOUND` |
+| `3221225595` | `STATUS_INVALID_IMAGE_FORMAT` - wrong-architecture DLL |
+| `3221225794` | `STATUS_DLL_INIT_FAILED` (`0xc0000142`) - see below |
+
+**`STATUS_DLL_INIT_FAILED` is not ours to fix.**
+[actions/runner-images#8891](https://github.com/actions/runner-images/issues/8891)
+is an open defect in the hosted Windows image: an ASan-instrumented binary will
+not start there even from a correct developer command prompt, with the DLL
+present at the documented path. If `windows-asan` reports that code, the leg is
+not viable on GitHub-hosted runners and should be dropped or moved to a
+self-hosted runner rather than debugged further.
 
 ### Which one to reach for
 
