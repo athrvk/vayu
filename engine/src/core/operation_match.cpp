@@ -258,11 +258,11 @@ const std::vector<MatchableOperation>& operations) {
     std::vector<std::string> request_keys;
     std::unordered_map<std::string, std::vector<size_t>> requests_by_key;
     for (size_t i = 0; i < requests.size (); ++i) {
-        if (!request_shapes[i]) {
+        const std::optional<std::string>& shape = request_shapes[i];
+        if (!shape) {
             continue;
         }
-        const std::string key =
-        operation_shape_key (requests[i].method, *request_shapes[i]);
+        const std::string key = operation_shape_key (requests[i].method, *shape);
         auto [entry, inserted] = requests_by_key.try_emplace (key);
         if (inserted) {
             request_keys.push_back (key);
@@ -311,7 +311,8 @@ const std::vector<MatchableOperation>& operations) {
     std::unordered_map<size_t, std::vector<size_t>> candidates_for;
     std::unordered_map<size_t, std::vector<size_t>> claimants_of;
     for (size_t i = 0; i < requests.size (); ++i) {
-        if (request_claimed[i] || !request_shapes[i]) {
+        const std::optional<std::string>& shape = request_shapes[i];
+        if (request_claimed[i] || !shape) {
             continue;
         }
         const std::string method = upper (requests[i].method);
@@ -319,7 +320,7 @@ const std::vector<MatchableOperation>& operations) {
             if (operation_claimed[j] || upper (operations[j].method) != method) {
                 continue;
             }
-            if (!fills_template (*request_shapes[i], operation_shapes[j])) {
+            if (!fills_template (*shape, operation_shapes[j])) {
                 continue;
             }
             auto [entry, inserted] = candidates_for.try_emplace (i);

@@ -30,6 +30,20 @@ engine/
   reads backwards at every call site and lets a dropped return pass for "fine".
   `route_error` builds the refusal, `as_response` converts one to the pair a
   testable core answers with.
+- **An optional a guard has already proved is read through one binding**, not
+  re-derived: `const auto& shape = shapes[i]; if (!shape) { continue; }
+  use (*shape);`. `shapes[i]` written twice is two expressions, so
+  `bugprone-unchecked-optional-access` cannot connect the guard to the use - and
+  neither can a reader. Where what makes the access safe lives in *another*
+  function (a producer that sets two fields together, a validation pass that ran
+  under the same held DB mutex, a list built only from the rows that had an
+  identity), the access goes through
+  **`vayu::utils::invariant_value`** (`utils/invariant.hpp`, #943), which takes
+  the rule as a string: a broken rule throws `std::logic_error` naming it,
+  instead of reading an empty optional. `.value()` is *not* the way to say this
+  - it names no rule, and the check reports it too, so it buys a `NOLINT` per
+  site. That helper is for invariants only: an optional a client can empty is
+  still handled, with its `if`, its 404 and its default.
 - Formatter: clang-format, **19 exactly** (`.clang-format` at repo root; the
   version is pinned because 39 of the 285 engine sources format differently
   under 18). **A difference is a failure now** (#886): the `Engine formatting`
