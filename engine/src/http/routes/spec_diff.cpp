@@ -44,6 +44,7 @@
 #include "vayu/core/spec_diff.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
@@ -56,6 +57,11 @@
 namespace vayu::http::routes {
 
 namespace {
+
+/// A request the comparison put in `removed` is one it could name an operation
+/// for; one with no identity comes back as `unmapped` instead, never removed.
+constexpr std::string_view REMOVED_HAS_IDENTITY_INVARIANT =
+"a removed request carries the identity the comparison removed it by";
 
 std::pair<int, nlohmann::json> body_error (const std::string& message) {
     return { 400, error_body (400, message) };
@@ -414,9 +420,9 @@ diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
         const size_t index = diff.removed[i];
         removed.push_back (
         { { "requestId", requests[index].id }, { "name", requests[index].name },
-        // Present by construction: a request with no identity is `unmapped`,
-        // never removed.
-        { "operation", spec_operation_json (*requests[index].operation) },
+        { "operation",
+        spec_operation_json (vayu::utils::invariant_value (
+        requests[index].operation, REMOVED_HAS_IDENTITY_INVARIANT)) },
         { "safe", safe.remove[i] } });
     }
     nlohmann::json changed = nlohmann::json::array ();

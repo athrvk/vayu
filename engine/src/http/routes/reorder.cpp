@@ -12,6 +12,7 @@
  */
 
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -330,13 +331,19 @@ void normalize_scope (vayu::db::Database& db, const Scope& scope, int64_t now, W
     }
 }
 
+/// `read_move` proved every named row exists before any of them was staged, and
+/// the whole batch runs under the DB mutex `reorder_response` holds - so a row a
+/// move names is still there when it is read back.
+constexpr std::string_view ROW_EXISTS_INVARIANT =
+"a validated move names a stored row, under the DB mutex the batch holds";
+
 /** Applies one move on top of whatever the normalization pass already staged. */
 void stage_move (vayu::db::Database& db, const Move& move, int64_t now, WriteSet& out) {
     if (move.kind == Kind::Collection) {
         auto staged              = out.collections.find (move.id);
         vayu::db::Collection row = staged != out.collections.end () ?
         staged->second :
-        *db.get_collection (move.id);
+        vayu::utils::invariant_value (db.get_collection (move.id), ROW_EXISTS_INVARIANT);
         row.order                = move.order;
         if (move.states_owner) {
             row.parent_id = move.parent;
@@ -345,10 +352,11 @@ void stage_move (vayu::db::Database& db, const Move& move, int64_t now, WriteSet
         out.collections[row.id] = std::move (row);
         return;
     }
-    auto staged = out.requests.find (move.id);
-    vayu::db::Request row =
-    staged != out.requests.end () ? staged->second : *db.get_request (move.id);
-    row.order = move.order;
+    auto staged           = out.requests.find (move.id);
+    vayu::db::Request row = staged != out.requests.end () ?
+    staged->second :
+    vayu::utils::invariant_value (db.get_request (move.id), ROW_EXISTS_INVARIANT);
+    row.order             = move.order;
     if (move.states_owner) {
         row.collection_id = move.collection;
     }

@@ -26,6 +26,7 @@
 #include "vayu/http/managed_listener.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include <httplib.h>
@@ -406,6 +407,16 @@ const std::string& path) {
     return match;
 }
 
+namespace {
+
+/// `resolve_mock_route` sets `matched_route` on both of the miss kinds that
+/// name a route, which is what makes the index below safe to take. A match
+/// built by hand can still break that, and this is what it would cost.
+constexpr std::string_view MATCHED_ROUTE_INVARIANT =
+"a mock miss kind that names a route carries its index (resolve_mock_route)";
+
+} // namespace
+
 nlohmann::json mock_miss_body (const std::vector<MockRoute>& routes,
 const MockMatch& match,
 const std::string& method,
@@ -413,7 +424,8 @@ const std::string& path) {
     const std::string target = method + " " + path;
     switch (match.miss) {
     case MockMissKind::MethodMismatch: {
-        const auto& matched = routes[*match.matched_route];
+        const auto& matched =
+        routes[vayu::utils::invariant_value (match.matched_route, MATCHED_ROUTE_INVARIANT)];
         std::string methods;
         for (const auto& allowed : match.allowed_methods) {
             methods += (methods.empty () ? "" : ", ") + allowed;
@@ -424,7 +436,8 @@ const std::string& path) {
         "mock_method_mismatch");
     }
     case MockMissKind::NoExample: {
-        const auto& matched = routes[*match.matched_route];
+        const auto& matched =
+        routes[vayu::utils::invariant_value (match.matched_route, MATCHED_ROUTE_INVARIANT)];
         return routes::error_body (501,
         target + " matches request '" + matched.request_name + "', but it has no saved example to serve - import or save one, then restart the mock",
         "mock_no_example");

@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -294,6 +295,23 @@ TEST_F (MockServerTest, ARequestWithNoExampleStaysInTheTableAsUnservable) {
     EXPECT_EQ (body["error"]["code"], "mock_no_example");
     EXPECT_NE (body["error"]["message"].get<std::string> ().find ("req_list"),
     std::string::npos);
+}
+
+TEST_F (MockServerTest, AMissKindWithNoMatchedRouteThrowsRatherThanReadingOne) {
+    seed_pet_store ();
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+
+    // `resolve_mock_route` sets `matched_route` on both of the kinds that name
+    // a route, and `mock_miss_body` reads the index on that rule alone. A match
+    // built by hand can still break it, and this is what it costs: a throw
+    // naming the rule, not an index taken from an empty optional.
+    vayu::http::MockMatch broken;
+    broken.miss = MockMissKind::MethodMismatch;
+    EXPECT_THROW (vayu::http::mock_miss_body (routes, broken, "DELETE", "/pets"),
+    std::logic_error);
+
+    broken.miss = MockMissKind::NoExample;
+    EXPECT_THROW (vayu::http::mock_miss_body (routes, broken, "GET", "/pets"), std::logic_error);
 }
 
 TEST_F (MockServerTest, DisabledExampleHeadersAreNotServedAndDuplicatesSurvive) {
