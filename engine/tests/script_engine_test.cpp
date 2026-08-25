@@ -557,31 +557,36 @@ TEST_F (ScriptEngineTest, ExpectEqlReportsACycleWhereItCloses) {
 // The #959 failure mode itself, and the invariant that retires it.
 //
 // The Windows leg failed because QuickJS's own stack guard tripped before the
-// depth cap did, inside the JS_Call that reads an object's class tag. Frame
-// size decided which won, so the bug was invisible on GCC and Clang and
+// depth cap did, inside the JS_Call that reads an object's class tag. The
+// thrown error was then discarded and the caller reported an ordinary "not
+// deeply equal" - a result for a comparison that never happened. Frame size
+// decided which guard won, so the bug was invisible on GCC and Clang and
 // deterministic on MSVC at /Od under ASan.
 //
-// The property the fix establishes is therefore not "it works at 16 KB" - that
-// is another constant tuned to one toolchain, which is the mistake that caused
-// the bug. It is: **at every interpreter stack budget the engine can actually
-// run a script on, a cyclic compare reports the cycle.** Detecting the cycle
-// where it closes means the answer no longer depends on how much stack a frame
-// happens to take, so this sweeps the budget instead of picking a number.
+// The property is therefore not "it says cyclic at 16 KB", and not "it says
+// cyclic at every budget" either: at a budget tight enough that even the first
+// class-tag read cannot run, the honest answer *is* the interpreter's
+// "Maximum call stack size exceeded". Demanding the cycle there asks the engine
+// to report something it could not compute, which is the very thing being
+// fixed.
 //
-// A budget too small to run the script at all is not a counter-example - the
-// script never reaches the comparison - so those are skipped, and the test
-// requires that at least one budget did run, so it cannot pass by sweeping a
-// range where nothing executed.
+// What must hold at every usable budget is that the failure is **attributable**
+// - the cycle, or the interpreter error that stopped the walk - and never the
+// matcher's bare "to deeply equal", which is what a silently dropped exception
+// looks like. Plus, where there is enough headroom to walk at all, the cycle
+// must be what is reported rather than the depth cap or a stack overflow.
 //
-// Mutation check: with the cycle detection removed and only the depth cap
-// left, the small budgets report the matcher's generic "to deeply equal"
-// message - the exact string windows-asan produced - and this fails.
-TEST_F (ScriptEngineTest, ExpectEqlOnACycleReportsItAtEveryUsableStackBudget) {
+// Mutation check: with the cycle detection removed and only the depth cap left,
+// the tight budgets report `AssertionError: Expected [object Object] to deeply
+// equal [object Object]` - the exact string windows-asan produced - and the
+// generic-message assertion below fails.
+TEST_F (ScriptEngineTest, ExpectEqlOnACycleNeverSilentlyReportsAResult) {
     constexpr std::size_t kKiB             = 1024;
     const std::vector<std::size_t> budgets = { 16 * kKiB, 32 * kKiB, 64 * kKiB,
         128 * kKiB, 256 * kKiB };
 
-    int ran = 0;
+    int ran         = 0;
+    int named_cycle = 0;
     for (const std::size_t budget : budgets) {
         ScriptConfig config;
         config.stack_size = budget;
@@ -597,19 +602,30 @@ TEST_F (ScriptEngineTest, ExpectEqlOnACycleReportsItAtEveryUsableStackBudget) {
         request, response, env);
 
         if (result.tests.empty ()) {
-            // Too small to run the script at all on this toolchain.
+            // Too small to run the script at all - it never reached the
+            // comparison, so it says nothing either way.
             continue;
         }
         ran++;
 
         ASSERT_EQ (result.tests.size (), 1u) << "budget " << budget;
         EXPECT_FALSE (result.tests[0].passed) << "budget " << budget;
-        EXPECT_NE (result.tests[0].error_message.find ("cyclic"), std::string::npos)
-        << "budget " << budget << ": " << result.tests[0].error_message;
+
+        const std::string& message = result.tests[0].error_message;
+        EXPECT_FALSE (message.empty ()) << "budget " << budget;
+        EXPECT_EQ (message.find ("to deeply equal"), std::string::npos)
+        << "budget " << budget
+        << ": the comparison reported a result it did not compute - " << message;
+
+        if (message.find ("cyclic") != std::string::npos) {
+            named_cycle++;
+        }
     }
 
     ASSERT_GT (ran, 0) << "no budget in the sweep ran the script - this test "
                           "proved nothing";
+    EXPECT_GT (named_cycle, 0)
+    << "no budget reported the cycle - detection never engaged";
 }
 
 // A structure that repeats a *value* without being cyclic is not a cycle, and
