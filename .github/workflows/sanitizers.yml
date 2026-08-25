@@ -46,6 +46,14 @@ on:
   # pull requests keep paying nothing. `paths` here does not need the
   # `ci-gate`-style caveat pr-tests.yml carries - this workflow is not a
   # required check.
+  #
+  # `engine/CMakeLists.txt` is in the list for the `vayu_sanitizers` target it
+  # defines, and for a while the engine test *source list* lived in that same
+  # file - so adding one `*_test.cpp` ran all five legs. That list is
+  # `engine/tests/CMakeLists.txt` now (#970), which keeps the "ordinary engine
+  # pull requests pay nothing" sentence above true for test-adding ones too.
+  # Anything moved back into `engine/CMakeLists.txt` that a routine pull
+  # request edits brings the ~70-minute matrix back with it.
   pull_request:
     paths:
       - '.github/workflows/sanitizers.yml'
@@ -350,13 +358,23 @@ jobs:
       # human act after the fix; the next failure comments again, or files
       # fresh if it was closed.
       #
-      # On a pull request from a fork GITHUB_TOKEN is read-only regardless of
-      # the `permissions:` block, so this step would fail there. That is
-      # acceptable: the `pull_request` trigger above exists for the branch that
-      # edits this machinery, and the run's own log and artifact still carry
-      # everything the issue would have said.
+      # **Not on a pull request** (#970). This step exists because nobody is
+      # watching the Monday cron - that is the whole of its reason. A pull
+      # request has a reviewer watching its checks, so a red leg there is
+      # already surfaced, by the surface they are already looking at; filing on
+      # top of it writes a tracker entry whose body opens "`<preset>` went red"
+      # about a ref that is not master and code that may never reach it. #968
+      # is the proof - filed from `refs/pull/958/merge` for a test that did not
+      # exist on master, and closed by hand after the pull request merged
+      # green. The log and the artifact above are ungated on purpose: they are
+      # what the reviewer needs and they file nothing.
+      #
+      # This also settles the fork case the step used to carry a caveat about:
+      # GITHUB_TOKEN is read-only on a pull request from a fork regardless of
+      # the `permissions:` block, so the step would have failed there. It no
+      # longer runs there at all.
       - name: File or update the sanitizer-failure issue
-        if: failure()
+        if: ${{ failure() && github.event_name != 'pull_request' }}
         uses: actions/github-script@v8
         env:
           SANITIZER: ${{ matrix.sanitizer }}

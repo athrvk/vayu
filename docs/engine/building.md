@@ -181,7 +181,7 @@ run was neither: see [the ASan runtime DLL](#the-asan-runtime-dll-on-windows).
 ### The per-test timeout scales with the sanitizer
 
 CTest kills any test that runs longer than a per-test `TIMEOUT`, set in
-`engine/CMakeLists.txt`. It is a deadlock net, not a budget - and it scales
+`engine/tests/CMakeLists.txt`. It is a deadlock net, not a budget - and it scales
 with the instrumentation:
 
 | Build | Per-test timeout |
@@ -338,6 +338,16 @@ from.** Closing it is a human act after the fix - the next failure comments
 again, or files fresh if it was closed. Getting it green by adding a
 suppression for engine code is not a fix.
 
+**Only the cron and `workflow_dispatch` file.** A `pull_request` run that goes
+red fails in the pull request's own checks and files nothing (issue #970) - the
+filing step exists because nobody is watching Monday 09:00, and a pull request
+has a reviewer watching the surface the failure already appears on. Filing
+there wrote a tracker entry saying "`<preset>` went red" about a ref that is
+not `master`: #968 was filed from `refs/pull/958/merge` for a test that did not
+exist on `master` yet, and had to be verified and closed by hand once the pull
+request merged green. The log and the artifact are still uploaded on a pull
+request, because those are what the reviewer needs and they file nothing.
+
 ### What the matrix found, and where it stands
 
 The first runs turned up four things. Three are fixed; one is suppressed with a
@@ -399,6 +409,11 @@ The workflow also runs on a pull request that edits the sanitizer machinery
 itself (this workflow, `engine/sanitizers/**`, `engine/CMakeLists.txt`,
 `engine/CMakePresets.json`) and on nothing else, so a change to the presets or
 the flags is proved by the thing it changes before it reaches the cron.
+`engine/CMakeLists.txt` is in that list for the `vayu_sanitizers` target it
+defines; the engine's **test source list** moved out to
+`engine/tests/CMakeLists.txt` (issue #970) so that adding a test file is no
+longer a change to a trigger path - it was running all five legs, ~70 minutes
+on the slowest, over machinery the diff could not touch.
 
 ## Build Outputs
 
@@ -659,7 +674,7 @@ opens, and makes the seed one transaction.
 
 So the Windows presets run `-j4` with those tests holding a shared CTest
 `RESOURCE_LOCK`: no two of them run at once, while everything else runs 4-wide
-beside them. The locked suites are listed in `engine/CMakeLists.txt`
+beside them. The locked suites are listed in `engine/tests/CMakeLists.txt`
 (`vayu_scratch_database_suites`), which discovers the binary twice - once with a
 gtest filter matching them, once with its negation - so the two halves partition
 the suite exactly. Two configure-time guards keep the list honest: a name that
@@ -732,7 +747,7 @@ silently runs the suite *serially* - a config that looks parallel and is not.
 
 ### Test files are registered, and the build checks it
 
-The `vayu_tests` sources are listed one by one in `engine/CMakeLists.txt`
+The `vayu_tests` sources are listed one by one in `engine/tests/CMakeLists.txt`
 rather than globbed, so the set of files that gets built is visible in the
 diff. The cost of that is a file which is added to `engine/tests/` and never
 listed: it compiles into nothing, runs nothing, and says nothing about it -
