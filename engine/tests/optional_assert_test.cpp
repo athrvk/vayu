@@ -95,26 +95,27 @@ bool guards_with_assert_true (const std::string& code) {
     constexpr std::string_view kOpen = "ASSERT_TRUE (";
     constexpr std::string_view kEnd  = ".has_value ()";
 
-    for (size_t at = code.find (kOpen); at != std::string::npos;
-    at             = code.find (kOpen, at + 1)) {
+    const std::string_view source (code);
+    for (size_t at = source.find (kOpen); at != std::string_view::npos;
+    at             = source.find (kOpen, at + 1)) {
         size_t depth          = 1;
         size_t i              = at + kOpen.size ();
         const size_t argument = i;
-        for (; i < code.size () && depth > 0; ++i) {
-            if (code[i] == '(') {
+        for (; i < source.size () && depth > 0; ++i) {
+            if (source[i] == '(') {
                 ++depth;
-            } else if (code[i] == ')') {
+            } else if (source[i] == ')') {
                 --depth;
             }
         }
         if (depth != 0) {
             continue; // unbalanced, so not an assertion this scan can read
         }
-        std::string_view inside (code.data () + argument, i - argument - 1);
+        std::string_view inside = source.substr (argument, i - argument - 1);
         while (!inside.empty () && (inside.back () == ' ' || inside.back () == '\n')) {
             inside.remove_suffix (1);
         }
-        if (inside.size () >= kEnd.size () && inside.ends_with (kEnd)) {
+        if (inside.ends_with (kEnd)) {
             return true;
         }
     }
