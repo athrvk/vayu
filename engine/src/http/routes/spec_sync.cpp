@@ -184,9 +184,6 @@ namespace {
  */
 constexpr size_t MAX_SYNC_ITEMS = 10000;
 
-/** Absent or null section - a stable empty list to hand out. */
-const nlohmann::json EMPTY_ITEMS = nlohmann::json::array ();
-
 RouteError body_error (const std::string& message) {
     return { 400, error_body (400, message) };
 }
@@ -207,7 +204,11 @@ RouteError item_error (int status, const std::string& message, const std::string
 /** Reads one optional top-level array; anything else that is not an array is a 400. */
 RouteResult
 read_items (const nlohmann::json& body, const char* key, const nlohmann::json*& out) {
-    out = &EMPTY_ITEMS;
+    // Built on the first call rather than before `main`, and outliving the call
+    // because `out` hands back its address - the same reasoning as
+    // `/import/apply`'s copy of this function carries.
+    static const nlohmann::json empty_items = nlohmann::json::array ();
+    out                                     = &empty_items;
     if (!body.contains (key) || body[key].is_null ()) {
         return {};
     }

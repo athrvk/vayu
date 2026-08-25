@@ -11,16 +11,17 @@
 #include <array>
 #include <cctype>
 #include <chrono>
-#include <cstdio>
 #include <ctime>
 #include <random>
 #include <regex>
+#include <string_view>
 #include <unordered_set>
 
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
+#include "vayu/utils/reentrant.hpp"
 
 namespace vayu::http {
 
@@ -48,18 +49,30 @@ const std::regex& token_pattern () {
 // two `{{$guid}}` in one payload are two different ids, which is the reason to
 // write them.
 
-thread_local std::mt19937 rng{ std::random_device{}() };
+/**
+ * One generator per thread, seeded once.
+ *
+ * Function-local rather than a `thread_local` at namespace scope, for the same
+ * reason {@link token_pattern} is: seeding runs `std::random_device`, which can
+ * throw, and at namespace scope that throw happens before the thread's first
+ * statement with no frame able to catch it (`cert-err58-cpp`). Here the first
+ * caller's stack is on hand.
+ */
+std::mt19937& rng () {
+    thread_local std::mt19937 generator{ std::random_device{}() };
+    return generator;
+}
 
 int random_int (int min_inclusive, int max_inclusive) {
     std::uniform_int_distribution<int> dist (min_inclusive, max_inclusive);
-    return dist (rng);
+    return dist (rng ());
 }
 
 template <size_t N> const char* pick (const std::array<const char*, N>& items) {
     return items[static_cast<size_t> (random_int (0, static_cast<int> (N) - 1))];
 }
 
-std::string random_string (size_t length, const std::string& alphabet) {
+std::string random_string (size_t length, std::string_view alphabet) {
     std::string out;
     out.reserve (length);
     for (size_t i = 0; i < length; ++i) {
@@ -69,9 +82,16 @@ std::string random_string (size_t length, const std::string& alphabet) {
     return out;
 }
 
-const std::string ALPHANUMERIC =
+constexpr std::string_view ALPHANUMERIC =
 "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-const std::string PASSWORD_CHARS = ALPHANUMERIC + "!@#$%^&*_-+=";
+// Spelled out rather than written as `ALPHANUMERIC + "!@#$%^&*_-+="`, because
+// that concatenation is dynamic initialisation of a namespace-scope object and
+// its allocation cannot be caught (`cert-err58-cpp`). The assertion below is
+// what keeps the two from drifting apart.
+constexpr std::string_view PASSWORD_CHARS =
+"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*_-+=";
+static_assert (PASSWORD_CHARS.substr (0, ALPHANUMERIC.size ()) == ALPHANUMERIC,
+"the password alphabet is the alphanumeric one plus symbols");
 
 constexpr std::array<const char*, 10> FIRST_NAMES = { "Ada", "Ravi", "Mina",
     "Jonas", "Priya", "Elena", "Omar", "Sofia", "Kenji", "Nora" };
@@ -95,19 +115,20 @@ std::string iso_timestamp () {
     const auto now = system_clock::now ();
     const auto ms = duration_cast<milliseconds> (now.time_since_epoch ()) % 1000;
     const std::time_t t = system_clock::to_time_t (now);
-    std::tm utc{};
-#if defined(_WIN32)
-    gmtime_s (&utc, &t);
-#else
-    gmtime_r (&t, &utc);
-#endif
-    // Sized for snprintf's worst case over full-range ints, so -Wformat-
-    // truncation has nothing to warn about; real output is 24 characters.
-    char buf[96];
-    std::snprintf (buf, sizeof (buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-    utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min,
-    utc.tm_sec, static_cast<int> (ms.count ()));
-    return buf;
+    // The conversion is read rather than assumed: a refused one leaves a
+    // `std::tm` holding nothing usable, and formatting it anyway renders a
+    // confident wrong date. Unreachable for `system_clock::now()` on a 64-bit
+    // `time_t`, which is why it went unchecked - what changes is that the
+    // answer is now either right or empty, never confidently wrong.
+    const std::string seconds = vayu::utils::format_utc_time (t, "%Y-%m-%dT%H:%M:%S");
+    if (seconds.empty ()) {
+        return {};
+    }
+    // The milliseconds, which no `std::strftime` specifier covers. Always three
+    // digits, because the renderer's `toISOString` always writes three.
+    std::string millis = std::to_string (ms.count ());
+    millis.insert (0, 3 - millis.size (), '0');
+    return seconds + "." + millis + "Z";
 }
 
 struct DynamicVariable {
@@ -115,8 +136,10 @@ struct DynamicVariable {
     std::string (*generate) ();
 };
 
-// Same names, same order as the renderer table.
-const std::array<DynamicVariable, 15> DYNAMIC_VARIABLES = { {
+// Same names, same order as the renderer table. `constexpr`, so the table is
+// built by the compiler rather than before `main` - every entry is a literal
+// and a captureless lambda, both of which are constant expressions.
+constexpr std::array<DynamicVariable, 15> DYNAMIC_VARIABLES = { {
 { "$guid", [] { return vayu::utils::generate_id (""); } },
 { "$randomUUID", [] { return vayu::utils::generate_id (""); } },
 { "$timestamp",

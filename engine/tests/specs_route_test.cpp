@@ -84,8 +84,15 @@ R"("paths":{"/pets":{"get":{"operationId":"listPets","responses":{"200":{}}}}}})
 /// What the engine reads off {@link PETSTORE} (issue #853). Named once because
 /// several cases assert it: the index is no longer something a caller sends, so
 /// the document *is* the input and this is the whole of the output.
-const json PETSTORE_INDEX = json::array ({ json{ { "operationId", "listPets" },
-{ "method", "GET" }, { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
+/// A function rather than a namespace-scope `json`, here and for the schema
+/// index below: building one allocates, and at namespace scope that runs before
+/// `main` where the throw cannot be caught (`cert-err58-cpp`).
+const json& petstore_index () {
+    static const json index =
+    json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" },
+    { "path", "/pets" }, { "responses", json::array ({ "200" }) } } });
+    return index;
+}
 
 /// The same document with a response schema on it, for the cases that need a
 /// stored `response_schemas` index. That index is derived from the document too
@@ -97,11 +104,14 @@ R"("paths":{"/pets":{"get":{"operationId":"listPets","responses":)"
 R"({"200":{"content":{"application/json":{"schema":{"type":"array"}}}}}}}}})";
 
 /// What the engine reads off {@link PETSTORE_SCHEMAS} (issue #860).
-const json PETSTORE_SCHEMA_INDEX = json{ { "operations",
-json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" },
-{ "responses",
-json::array ({ json{ { "status", "200" }, { "contentType", "application/json" },
-{ "schema", json{ { "type", "array" } } } } }) } } }) } };
+const json& petstore_schema_index () {
+    static const json index = json{ { "operations",
+    json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" },
+    { "responses",
+    json::array ({ json{ { "status", "200" }, { "contentType", "application/json" },
+    { "schema", json{ { "type", "array" } } } } }) } } }) } };
+    return index;
+}
 
 /// A document Vayu stores happily and reads as declaring nothing - a Postman
 /// export is a perfectly good file that is not a contract. Its column stays
@@ -846,7 +856,7 @@ TEST_F (SpecsRouteTest, AStoredDocumentsIndexIsTheOneTheEngineReadOffIt) {
     auto [read_status, read] =
     routes::get_spec_document_response (*db_, body.value ("id", std::string{}));
     ASSERT_EQ (read_status, 200) << read.dump ();
-    EXPECT_EQ (read["operations"], PETSTORE_INDEX);
+    EXPECT_EQ (read["operations"], petstore_index ());
 }
 
 TEST_F (SpecsRouteTest, ADocumentThatCannotBeReadIsRefusedRatherThanStoredUnreadable) {
@@ -901,7 +911,7 @@ TEST_F (SpecsRouteTest, TheSchemaIndexIsDerivedBesideTheOperationIndexOnBothWrit
     auto [read_status, read] =
     routes::get_spec_document_response (*db_, body.value ("id", std::string{}));
     ASSERT_EQ (read_status, 200) << read.dump ();
-    EXPECT_EQ (read["responseSchemas"], PETSTORE_SCHEMA_INDEX);
+    EXPECT_EQ (read["responseSchemas"], petstore_schema_index ());
 
     auto [import_status, imported] = routes::import_apply_response (*db_,
     json{ { "specs", { { { "tempId", "s1" }, { "content", PETSTORE_SCHEMAS } } } } });
@@ -909,7 +919,7 @@ TEST_F (SpecsRouteTest, TheSchemaIndexIsDerivedBesideTheOperationIndexOnBothWrit
     auto [bulk_status, bulk] = routes::get_spec_document_response (
     *db_, imported["idMap"]["s1"].get<std::string> ());
     ASSERT_EQ (bulk_status, 200) << bulk.dump ();
-    EXPECT_EQ (bulk["responseSchemas"], PETSTORE_SCHEMA_INDEX)
+    EXPECT_EQ (bulk["responseSchemas"], petstore_schema_index ())
     << "one helper for all three writers, or a document describes different "
        "contracts depending on how it arrived";
 }
@@ -936,7 +946,7 @@ TEST_F (SpecsRouteTest, ImportDerivesTheIndexBesideTheDocumentItDescribes) {
     const auto spec_id = body["idMap"]["s1"].get<std::string> ();
     auto [read_status, read] = routes::get_spec_document_response (*db_, spec_id);
     ASSERT_EQ (read_status, 200) << read.dump ();
-    EXPECT_EQ (read["operations"], PETSTORE_INDEX);
+    EXPECT_EQ (read["operations"], petstore_index ());
 }
 
 TEST_F (SpecsRouteTest, AResolvedPlanCarriesTheBoundDocumentsOperations) {

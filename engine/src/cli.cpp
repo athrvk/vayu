@@ -38,8 +38,11 @@
 #include <vector>
 
 namespace {
-// Default daemon URL
-const std::string DEFAULT_DAEMON_URL = vayu::core::constants::defaults::DAEMON_URL;
+// Default daemon URL. A view rather than a `std::string`, so the alias costs
+// nothing before `main` - a namespace-scope `std::string` allocates during
+// dynamic initialisation, where the allocation failure cannot be caught
+// (`cert-err58-cpp`).
+constexpr std::string_view DEFAULT_DAEMON_URL = vayu::core::constants::defaults::DAEMON_URL;
 
 void print_version () {
     std::cout << "vayu-cli " << vayu::Version::string << "\n";
@@ -296,7 +299,7 @@ int run_cli (std::span<char* const> args) {
     int verbosity       = 0; // 0=warn/error, 1=info+, 2=debug+
     bool color          = true;
     std::string filepath;
-    std::string daemon_url = DEFAULT_DAEMON_URL;
+    std::string daemon_url{ DEFAULT_DAEMON_URL };
 
     // Parse flags
     for (size_t i = 1; i < args.size (); ++i) {

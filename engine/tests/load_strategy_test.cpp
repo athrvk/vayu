@@ -31,7 +31,7 @@ namespace {
 
 using vayu::tests::SlowMockServer;
 
-const std::string TEST_DB_PATH = "test_load_strategy.db";
+constexpr const char* TEST_DB_PATH = "test_load_strategy.db";
 
 class LoadStrategyTest : public ::testing::Test {
     protected:

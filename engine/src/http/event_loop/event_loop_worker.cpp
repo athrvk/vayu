@@ -30,8 +30,11 @@ namespace vayu::http::detail {
 // DnsCache Implementation
 // ============================================================================
 
-// Static member definition
-DnsCache EventLoopWorker::dns_cache_;
+// See the declaration for why this is a function and not a data member.
+DnsCache& EventLoopWorker::dns_cache () {
+    static DnsCache cache;
+    return cache;
+}
 
 namespace {
 
@@ -404,7 +407,7 @@ void EventLoopWorker::run_loop () {
             // Acquire handle from pool (lock-free or specialized pool)
             CURL* easy = handle_pool_.acquire ();
             // Note: setup_easy_handle might take time, good to do it outside locks
-            easy = setup_easy_handle (easy, data.get (), config, &dns_cache_);
+            easy = setup_easy_handle (easy, data.get (), config, &dns_cache ());
 
             if (!easy) {
                 // Handle creation failure

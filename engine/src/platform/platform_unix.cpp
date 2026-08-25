@@ -180,8 +180,14 @@ void setup_signal_handlers (ShutdownCallback callback) {
     g_shutdown_callback = std::move (callback);
     g_shutdown_requested.store (false);
 
-    std::signal (SIGINT, unix_signal_handler);
-    std::signal (SIGTERM, unix_signal_handler);
+    // Two returns discarded on purpose (`cert-err33-c`), and they are different
+    // discards. The previous handler goes because the daemon owns both signals
+    // for the process lifetime and has nothing to chain to. `SIG_ERR` goes
+    // because POSIX only produces it here for a signal that cannot be caught -
+    // `SIGKILL` and `SIGSTOP` - and neither of these is one; there is also
+    // nowhere to report it to, since this layer deliberately has no logger.
+    static_cast<void> (std::signal (SIGINT, unix_signal_handler));
+    static_cast<void> (std::signal (SIGTERM, unix_signal_handler));
 }
 
 // ============================================================================

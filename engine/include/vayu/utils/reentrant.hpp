@@ -41,6 +41,17 @@
 
 namespace vayu::utils {
 
+namespace detail {
+
+/// The one `std::tm` -> string rendering both public formatters below share.
+inline std::string format_tm (const std::tm& parts, const char* format) {
+    std::ostringstream out;
+    out << std::put_time (&parts, format);
+    return out.str ();
+}
+
+} // namespace detail
+
 /**
  * @brief @p time in the local zone, formatted by @p format.
  * @param time The instant to render.
@@ -48,17 +59,20 @@ namespace vayu::utils {
  * @return The formatted time, or an empty string for an instant the local zone
  *         cannot represent.
  *
- * The platform split is the same one `request_composer.cpp` uses for the UTC
- * side: POSIX spells the reentrant form `localtime_r`, taking the output
- * parameter last, and MSVC spells it `localtime_s`, taking it first. What the
- * classic call returns is a pointer into shared storage; what this one fills
- * is a `std::tm` on the caller's own stack, which is what `std::put_time` then
+ * The platform split is the one both of these functions make: POSIX spells the
+ * reentrant form `localtime_r`/`gmtime_r`, taking the output parameter last,
+ * and MSVC spells it `localtime_s`/`gmtime_s`, taking it first. What the
+ * classic call returns is a pointer into shared storage; what these fill is a
+ * `std::tm` on the caller's own stack, which is what `std::put_time` then
  * reads.
  *
  * The conversion is checked rather than assumed, because the failure is silent
- * otherwise: a `time_t` outside the zone's range leaves the zero-initialised
- * `std::tm` untouched, which formats as a confident `1899-12-31 00:00:00`. A
- * caller that gets nothing knows it got nothing.
+ * otherwise. A `time_t` outside the zone's range leaves a `std::tm` holding
+ * nothing usable - untouched on some platforms, and on glibc filled and then
+ * abandoned when the year turns out not to fit an `int` - so "failed" does not
+ * even mean "unwritten", and reading the fields anyway renders a confident
+ * `1899-12-31 00:00:00` or a year past every calendar. A caller that gets
+ * nothing knows it got nothing.
  */
 inline std::string format_local_time (std::time_t time, const char* format) {
     std::tm local{};
@@ -70,9 +84,31 @@ inline std::string format_local_time (std::time_t time, const char* format) {
     if (!converted) {
         return {};
     }
-    std::ostringstream out;
-    out << std::put_time (&local, format);
-    return out.str ();
+    return detail::format_tm (local, format);
+}
+
+/**
+ * @brief @p time in UTC, formatted by @p format.
+ * @return The formatted time, or an empty string for an instant that cannot be
+ *         converted - the same contract as {@link format_local_time}, whose
+ *         note on what a refused conversion leaves behind applies here too.
+ *
+ * The UTC sibling, which `request_composer.cpp` used to carry its own copy of -
+ * the platform split written out inline, with the return dropped
+ * (`cert-err33-c`). Sub-second precision is the caller's to append: no
+ * `std::strftime` conversion specifier covers it.
+ */
+inline std::string format_utc_time (std::time_t time, const char* format) {
+    std::tm utc{};
+#if defined(_WIN32)
+    const bool converted = gmtime_s (&utc, &time) == 0;
+#else
+    const bool converted = gmtime_r (&time, &utc) != nullptr;
+#endif
+    if (!converted) {
+        return {};
+    }
+    return detail::format_tm (utc, format);
 }
 
 /**

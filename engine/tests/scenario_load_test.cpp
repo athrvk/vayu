@@ -157,7 +157,7 @@ class ScenarioMockServer {
     size_t waiting_          = 0;
 };
 
-const std::string TEST_DB_PATH = "test_scenario_load.db";
+constexpr const char* TEST_DB_PATH = "test_scenario_load.db";
 
 class ScenarioLoadTest : public ::testing::Test {
     protected:

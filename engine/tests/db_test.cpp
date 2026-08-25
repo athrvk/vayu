@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -21,7 +22,7 @@
 
 namespace vayu::db {
 namespace {
-const std::string TEST_DB_PATH = "test_vayu.db";
+constexpr const char* TEST_DB_PATH = "test_vayu.db";
 
 class DatabaseTest : public ::testing::Test {
     protected:
@@ -620,12 +621,14 @@ TEST_F (DatabaseTest, ImportedActiveEnvironmentAlsoDeactivatesTheStoredOne) {
 // parent_id, runs by start_time. See the comments there for which queries
 // rely on which. Named explicitly rather than counted, because sqlite also
 // creates sqlite_autoindex_* entries of its own.
-const std::vector<std::string> EXPECTED_INDEXES = { "idx_metric_ticks_run_id",
-    "idx_results_run_id", "idx_requests_collection_id", "idx_collections_parent_id",
+constexpr std::array<const char*, 8> EXPECTED_INDEXES = {
+    "idx_metric_ticks_run_id", "idx_results_run_id",
+    "idx_requests_collection_id", "idx_collections_parent_id",
     "idx_runs_start_time", "idx_result_bodies_run_id", "idx_body_blobs_run_id",
     // Examples are read only by request id - the list route and both cascades -
     // so this one backs every access the table has.
-    "idx_request_examples_request_id" };
+    "idx_request_examples_request_id"
+};
 
 // Reads index names straight out of sqlite_master on a separate connection,
 // so the assertion does not rest on anything sqlite_orm reports about itself.
@@ -780,7 +783,7 @@ TEST_F (DatabaseTest, MigratesHttpVersionColumnOntoAPreExistingRequestsTable) {
 
     {
         sqlite3* handle = nullptr;
-        ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
         char* err = nullptr;
         ASSERT_EQ (sqlite3_exec (handle, "ALTER TABLE requests DROP COLUMN http_version",
                    nullptr, nullptr, &err),
@@ -794,7 +797,7 @@ TEST_F (DatabaseTest, MigratesHttpVersionColumnOntoAPreExistingRequestsTable) {
     // assertions below would pass without proving anything.
     {
         sqlite3* handle = nullptr;
-        ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
         sqlite3_stmt* stmt = nullptr;
         ASSERT_EQ (sqlite3_prepare_v2 (handle, "PRAGMA table_info(requests)", -1, &stmt, nullptr),
         SQLITE_OK);
@@ -820,7 +823,7 @@ TEST_F (DatabaseTest, MigratesHttpVersionColumnOntoAPreExistingRequestsTable) {
     // with its data intact and its missing http_version backfilled to auto -
     // not silently dropped and recreated empty.
     sqlite3* handle = nullptr;
-    ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+    ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
 
     sqlite3_stmt* count_stmt = nullptr;
     ASSERT_EQ (sqlite3_prepare_v2 (handle, "SELECT COUNT(*) FROM requests", -1,
@@ -879,7 +882,7 @@ TEST_F (DatabaseTest, DropsTheLegacyMetricsTableFromAPreUpgradeDatabase) {
     // Put the pre-upgrade table back, populated, exactly as the old engine left it.
     {
         sqlite3* handle = nullptr;
-        ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
         char* err = nullptr;
         ASSERT_EQ (
         sqlite3_exec (handle,
@@ -1321,7 +1324,7 @@ TEST_F (DatabaseTest, RunsStoredBeforeTheBaselineColumnReadAsUnpinned) {
     // RequestsTable uses.
     {
         sqlite3* handle = nullptr;
-        ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
         char* err = nullptr;
         ASSERT_EQ (sqlite3_exec (handle, "ALTER TABLE runs DROP COLUMN baseline",
                    nullptr, nullptr, &err),
@@ -1335,7 +1338,7 @@ TEST_F (DatabaseTest, RunsStoredBeforeTheBaselineColumnReadAsUnpinned) {
     // assertions below passing without a pre-column database to prove them on.
     {
         sqlite3* handle = nullptr;
-        ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
         sqlite3_stmt* stmt = nullptr;
         ASSERT_EQ (sqlite3_prepare_v2 (handle, "PRAGMA table_info(runs)", -1, &stmt, nullptr),
         SQLITE_OK);
