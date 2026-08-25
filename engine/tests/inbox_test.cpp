@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
@@ -243,7 +244,7 @@ class InboxListenerTest : public ::testing::Test {
     /// Edit a seeded config row the way a user would through POST /config.
     void set_config (const char* key, int64_t value) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key;
+        ASSERT_HAS_VALUE (entry) << key;
         entry->value = std::to_string (value);
         db_->save_config_entry (*entry);
     }
@@ -355,7 +356,7 @@ TEST_F (InboxListenerTest, StopFreesTheListenerAndKeepsTheHistory) {
     EXPECT_FALSE (manager_->stop ("inbox_nope"));
 
     auto after = manager_->get (started.info.inbox_id);
-    ASSERT_TRUE (after.has_value ());
+    ASSERT_HAS_VALUE (after);
     EXPECT_FALSE (after->running);
     // Stopping is not deleting: the captures are still listable.
     EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 1);
@@ -382,7 +383,7 @@ TEST_F (InboxListenerTest, DeleteFreesTheListenerAndTakesTheCapturesWithIt) {
     // A running inbox is stopped rather than refused: one call, because the
     // caller's intent is "make it gone".
     const auto deleted = manager_->remove (*db_, started.info.inbox_id);
-    ASSERT_TRUE (deleted.has_value ());
+    ASSERT_HAS_VALUE (deleted);
     EXPECT_EQ (*deleted, 2);
 
     EXPECT_FALSE (manager_->get (started.info.inbox_id).has_value ());
@@ -423,7 +424,7 @@ TEST_F (InboxListenerTest, DeleteTakesOnlyItsOwnInboxsCaptures) {
 TEST_F (InboxListenerTest, DeleteLeavesAnAttachedLiveStreamNothingToStrand) {
     auto started     = start ();
     const auto claim = manager_->try_claim_live (started.info.inbox_id);
-    ASSERT_TRUE (claim.has_value ());
+    ASSERT_HAS_VALUE (claim);
 
     ASSERT_TRUE (manager_->remove (*db_, started.info.inbox_id).has_value ());
 
@@ -482,12 +483,12 @@ TEST_F (InboxListenerTest, TearsDownCleanlyWithAListenerStillRunning) {
 TEST_F (InboxListenerTest, OneLiveStreamPerInbox) {
     auto started     = start ();
     const auto claim = manager_->try_claim_live (started.info.inbox_id);
-    ASSERT_TRUE (claim.has_value ());
+    ASSERT_HAS_VALUE (claim);
     EXPECT_FALSE (manager_->try_claim_live (started.info.inbox_id).has_value ())
     << "a second watcher would park a second pool thread on the same inbox";
     manager_->release_live (started.info.inbox_id, *claim);
     const auto second = manager_->try_claim_live (started.info.inbox_id);
-    ASSERT_TRUE (second.has_value ());
+    ASSERT_HAS_VALUE (second);
     EXPECT_NE (*second, *claim)
     << "a reused token would let a stale holder act on it";
     EXPECT_FALSE (manager_->try_claim_live ("inbox_nope").has_value ());
@@ -501,7 +502,7 @@ TEST_F (InboxListenerTest, AWritingStreamKeepsItsClaimPastTheStaleWindow) {
     // must not read as a dead holder here or the test is flaky by design.
     auto started     = start ();
     const auto claim = manager_->try_claim_live (started.info.inbox_id);
-    ASSERT_TRUE (claim.has_value ());
+    ASSERT_HAS_VALUE (claim);
 
     const auto deadline = std::chrono::steady_clock::now () +
     std::chrono::milliseconds (inbox_constants::LIVE_POLL_INTERVAL_MS * 4);
@@ -520,7 +521,7 @@ TEST_F (InboxListenerTest, AReconnectTakesOverAClaimThatStoppedWriting) {
     set_config ("inboxLivePollIntervalMs", inbox_constants::MIN_LIVE_POLL_INTERVAL_MS);
     auto started    = start ();
     const auto dead = manager_->try_claim_live (started.info.inbox_id);
-    ASSERT_TRUE (dead.has_value ());
+    ASSERT_HAS_VALUE (dead);
 
     // Immediately after the last write the holder is presumed alive.
     EXPECT_FALSE (manager_->try_claim_live (started.info.inbox_id).has_value ());
@@ -528,7 +529,7 @@ TEST_F (InboxListenerTest, AReconnectTakesOverAClaimThatStoppedWriting) {
     std::this_thread::sleep_for (
     std::chrono::milliseconds (inbox_constants::MIN_LIVE_CLAIM_STALE_MS + 50));
     const auto reconnect = manager_->try_claim_live (started.info.inbox_id);
-    ASSERT_TRUE (reconnect.has_value ())
+    ASSERT_HAS_VALUE (reconnect)
     << "a reconnect met a 409 it cannot recover from";
 
     // The evicted holder learns it lost the slot the next time it writes, and
@@ -555,7 +556,7 @@ TEST_F (InboxListenerTest, SeedsTheThreeLimitsFromTheConstants) {
     for (const char* key :
     { "inboxMaxBodyBytes", "inboxMaxCaptures", "inboxLivePollIntervalMs" }) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key;
+        ASSERT_HAS_VALUE (entry) << key;
         // Services, not Observability: the Dock's word for inboxes, mock
         // servers and issuers, so the settings tree and the drawer name
         // the same group the same way (#586).
@@ -603,17 +604,20 @@ TEST_F (InboxListenerTest, AConfiguredRetentionIsWhatBoundsTheCaptureRing) {
 // a set truncated by a single rule rather than by whatever the setting was at
 // each arrival.
 TEST_F (InboxListenerTest, ARunningInboxKeepsTheLimitsItStartedWith) {
-    auto started = start ();
-    ASSERT_TRUE (manager_->limits (started.info.inbox_id).has_value ());
-    EXPECT_EQ (manager_->limits (started.info.inbox_id)->max_captures,
-    inbox_constants::MAX_CAPTURES);
+    auto started        = start ();
+    const auto at_start = manager_->limits (started.info.inbox_id);
+    ASSERT_HAS_VALUE (at_start);
+    EXPECT_EQ (at_start->max_captures, inbox_constants::MAX_CAPTURES);
 
     set_config ("inboxMaxCaptures", 3);
-    EXPECT_EQ (manager_->limits (started.info.inbox_id)->max_captures,
-    inbox_constants::MAX_CAPTURES);
+    const auto after_the_edit = manager_->limits (started.info.inbox_id);
+    ASSERT_HAS_VALUE (after_the_edit);
+    EXPECT_EQ (after_the_edit->max_captures, inbox_constants::MAX_CAPTURES);
 
-    auto restarted = start ();
-    EXPECT_EQ (manager_->limits (restarted.info.inbox_id)->max_captures, 3);
+    auto restarted           = start ();
+    const auto after_restart = manager_->limits (restarted.info.inbox_id);
+    ASSERT_HAS_VALUE (after_restart);
+    EXPECT_EQ (after_restart->max_captures, 3);
     EXPECT_FALSE (manager_->limits ("inbox_nope").has_value ());
 }
 
@@ -623,7 +627,8 @@ TEST_F (InboxListenerTest, ARunningInboxKeepsTheLimitsItStartedWith) {
 TEST_F (InboxListenerTest, AnOutOfRangeStoredValueFallsBackToItsSeed) {
     set_config ("inboxMaxBodyBytes", 0);
     set_config ("inboxMaxCaptures", -1);
-    set_config ("inboxLivePollIntervalMs", 10 * inbox_constants::MAX_LIVE_POLL_INTERVAL_MS);
+    set_config ("inboxLivePollIntervalMs",
+    int64_t{ 10 } * inbox_constants::MAX_LIVE_POLL_INTERVAL_MS);
 
     const auto limits = vayu::http::read_inbox_limits (*db_);
     EXPECT_EQ (limits.max_body_bytes, inbox_constants::MAX_BODY_BYTES);
@@ -762,7 +767,7 @@ TEST_F (InboxStorageTest, TheWireShapeCarriesWhatTheInboxIsHolding) {
     // Read back from the manager, as every route does: the count is filled in
     // from the database rather than carried on the record.
     auto info = manager.get (inbox_id);
-    ASSERT_TRUE (info.has_value ());
+    ASSERT_HAS_VALUE (info);
     EXPECT_EQ (vayu::http::routes::inbox_json (*db_, *info)["captureCount"], 3);
 }
 

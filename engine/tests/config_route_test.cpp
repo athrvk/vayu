@@ -19,6 +19,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
@@ -104,12 +105,12 @@ TEST_F (ConfigRouteTest, NonIntegerReportsType) {
 
 TEST_F (ConfigRouteTest, InvalidValueDoesNotPersist) {
     auto before = db_->get_config_entry ("workers");
-    ASSERT_TRUE (before.has_value ());
+    ASSERT_HAS_VALUE (before);
 
     vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"999"}})");
 
     auto after = db_->get_config_entry ("workers");
-    ASSERT_TRUE (after.has_value ());
+    ASSERT_HAS_VALUE (after);
     EXPECT_EQ (after->value, before->value); // rejected update left the DB untouched
 }
 
@@ -120,7 +121,7 @@ TEST_F (ConfigRouteTest, ValidUpdateSucceedsAndPersists) {
     EXPECT_TRUE (body["success"].get<bool> ());
 
     auto stored = db_->get_config_entry ("workers");
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->value, "4");
 }
 
@@ -131,7 +132,7 @@ TEST_F (ConfigRouteTest, SingleUpdateFormatSucceeds) {
     EXPECT_TRUE (body["success"].get<bool> ());
 
     auto stored = db_->get_config_entry ("workers");
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->value, "8");
 }
 
@@ -192,11 +193,11 @@ TEST_F (ConfigRouteTest, EnumUpdateAcceptsValidOption) {
     EXPECT_TRUE (body["success"].get<bool> ());
 
     auto stored = db_->get_config_entry ("defaultHttpVersion");
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->value, "http2");
     // save_config_entry replaces the whole row, so a value-only update must not
     // drop the option list - without it the entry becomes unrenderable.
-    ASSERT_TRUE (stored->options.has_value ());
+    ASSERT_HAS_VALUE (stored->options);
     EXPECT_EQ (nlohmann::json::parse (*stored->options).size (),
     vayu::all_http_versions ().size ());
 }
@@ -207,7 +208,7 @@ TEST_F (ConfigRouteTest, MalformedOptionsOmitsTheKeyInsteadOfFailingTheWholeList
     // entire GET /config payload - an unguarded parse here would 500 the whole
     // settings screen.
     auto entry = db_->get_config_entry ("defaultHttpVersion");
-    ASSERT_TRUE (entry.has_value ());
+    ASSERT_HAS_VALUE (entry);
     entry->options = "{not valid json";
     db_->save_config_entry (*entry);
 
@@ -231,8 +232,8 @@ TEST_F (ConfigRouteTest, MalformedOptionsOmitsTheKeyInsteadOfFailingTheWholeList
 // domain source production is supposed to consult.
 TEST_F (ConfigRouteTest, SeededDefaultHttpVersionOptionsMatchAllHttpVersionsInOrder) {
     auto entry = db_->get_config_entry ("defaultHttpVersion");
-    ASSERT_TRUE (entry.has_value ());
-    ASSERT_TRUE (entry->options.has_value ());
+    ASSERT_HAS_VALUE (entry);
+    ASSERT_HAS_VALUE (entry->options);
 
     json options         = json::parse (*entry->options);
     const auto& versions = vayu::all_http_versions ();
@@ -537,7 +538,7 @@ TEST_F (ConfigRouteTest, SeededUnitsCoverEveryKeyWhoseNameNamesOne) {
             continue;
         }
         ++checked;
-        ASSERT_TRUE (entry.unit.has_value ())
+        ASSERT_HAS_VALUE (entry.unit)
         << "entry '" << entry.key << "' names its unit in its key and declares "
         << "none, so the input renders a bare number";
         EXPECT_EQ (*entry.unit, expected) << "entry '" << entry.key << "'";
@@ -600,11 +601,11 @@ TEST_F (ConfigRouteTest, UpdatingAValueKeepsItsMetadataFlags) {
     ASSERT_EQ (status, 200);
 
     auto stored = db_->get_config_entry ("dbBusyTimeout");
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->value, "20000");
     EXPECT_TRUE (stored->requires_restart);
     EXPECT_TRUE (stored->advanced);
-    ASSERT_TRUE (stored->unit.has_value ());
+    ASSERT_HAS_VALUE (stored->unit);
     EXPECT_EQ (*stored->unit, "ms");
 
     json entry = find_entry (body, "dbBusyTimeout");
@@ -661,7 +662,7 @@ TEST_F (ConfigRouteTest, TheRetiredDatabaseCategoryIsGoneAndItsEntriesAreInCore)
 
     for (const char* key : { "dbCacheSize", "dbBusyTimeout", "dbSynchronous" }) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key;
+        ASSERT_HAS_VALUE (entry) << key;
         EXPECT_EQ (entry->category, "general_engine") << key;
     }
 }
@@ -697,7 +698,7 @@ TEST_F (ConfigRouteTest, TheAuditedEntriesSitOnTheShelfThatCoversThem) {
 
     for (const auto& [key, category] : placed) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key;
+        ASSERT_HAS_VALUE (entry) << key;
         EXPECT_EQ (entry->category, category) << key;
     }
 }
@@ -742,7 +743,7 @@ TEST_F (ConfigRouteTest, MovedEntriesStayFindableByTheWordsTheyAreSoughtWith) {
 
     for (const auto& [key, terms] : sought) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key;
+        ASSERT_HAS_VALUE (entry) << key;
 
         std::string haystack =
         lowered (entry->key + " " + entry->label + " " + entry->description);

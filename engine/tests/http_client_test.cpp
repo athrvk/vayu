@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "optional_assert.hpp"
 #include "vayu/http/client.hpp"
 
 namespace vayu::http {
@@ -30,14 +31,14 @@ namespace {
 /// Larger than curl's 16 KiB write buffer so a progress report has to be made
 /// of several calls rather than one - a single-call report would pass a test
 /// that only checked the final count.
-constexpr size_t SIZED_BYTES = 256 * 1024;
-constexpr size_t CHUNK_BYTES = 8 * 1024;
+constexpr size_t SIZED_BYTES = size_t{ 256 } * 1024;
+constexpr size_t CHUNK_BYTES = size_t{ 8 } * 1024;
 
 /// `/dribbles` sends this much, in these pieces, ~120ms apart - so the whole
 /// transfer runs well past any stall window short enough to test with, while
 /// never actually stalling.
-constexpr size_t DRIBBLE_CHUNK = 4 * 1024;
-constexpr size_t DRIBBLE_BYTES = 40 * 1024;
+constexpr size_t DRIBBLE_CHUNK = size_t{ 4 } * 1024;
+constexpr size_t DRIBBLE_BYTES = size_t{ 40 } * 1024;
 static_assert ((DRIBBLE_BYTES / DRIBBLE_CHUNK) * 120 > 300,
 "the dribble must outlast the 300ms total bound the tests set, or they prove "
 "nothing");
@@ -514,7 +515,7 @@ TEST_F (HttpClientTest, ReportsTheDeclaredTotalWhenTheServerDeclaresOne) {
     ASSERT_FALSE (ticks.empty ());
     // Content-Length arrives before the first body byte, so every tick has it.
     for (const auto& tick : ticks) {
-        ASSERT_TRUE (tick.total.has_value ());
+        ASSERT_HAS_VALUE (tick.total);
         EXPECT_EQ (*tick.total, SIZED_BYTES);
     }
 }

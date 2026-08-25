@@ -25,6 +25,7 @@
 
 #include <httplib.h>
 
+#include "optional_assert.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -144,7 +145,7 @@ std::string send_in_scope (CookieJar& jar, const std::string& scope, const std::
 TEST (CookieJarParse, ReadsEveryFieldOfALine) {
     auto cookie = parse_cookie_line (netscape_line (
     ".example.com", "TRUE", "/app", "TRUE", "1700000001", "session", "abc"));
-    ASSERT_TRUE (cookie.has_value ());
+    ASSERT_HAS_VALUE (cookie);
     EXPECT_EQ (cookie->domain, ".example.com");
     EXPECT_TRUE (cookie->include_subdomains);
     EXPECT_EQ (cookie->path, "/app");
@@ -158,7 +159,7 @@ TEST (CookieJarParse, ReadsEveryFieldOfALine) {
 TEST (CookieJarParse, TheHttpOnlyPrefixIsAFlagAndNotPartOfTheDomain) {
     auto cookie = parse_cookie_line ("#HttpOnly_" +
     netscape_line ("example.com", "FALSE", "/", "FALSE", "0", "session", "abc"));
-    ASSERT_TRUE (cookie.has_value ());
+    ASSERT_HAS_VALUE (cookie);
     EXPECT_TRUE (cookie->http_only);
     EXPECT_EQ (cookie->domain, "example.com")
     << "the marker leaked into the domain";
@@ -169,12 +170,12 @@ TEST (CookieJarParse, KeepsAnEmptyValueAndAValueWithAnEquals) {
     // value is what a server writes to delete one.
     auto padded = parse_cookie_line (
     netscape_line ("example.com", "FALSE", "/", "FALSE", "0", "t", "YWJj=="));
-    ASSERT_TRUE (padded.has_value ());
+    ASSERT_HAS_VALUE (padded);
     EXPECT_EQ (padded->value, "YWJj==");
 
     auto empty = parse_cookie_line (
     netscape_line ("example.com", "FALSE", "/", "FALSE", "0", "t", ""));
-    ASSERT_TRUE (empty.has_value ());
+    ASSERT_HAS_VALUE (empty);
     EXPECT_EQ (empty->value, "");
 }
 
@@ -287,8 +288,9 @@ TEST (CookieJarStore, SnapshotNamesTheScopeAndSkipsEmptyOnes) {
     ASSERT_EQ (scopes.size (), 2u);
     // Ordered by scope key, so the no-environment jar (empty key) comes first.
     EXPECT_FALSE (scopes[0].environment_id.has_value ());
-    ASSERT_TRUE (scopes[1].environment_id.has_value ());
-    EXPECT_EQ (*scopes[1].environment_id, "env_a");
+    const auto& scoped = scopes[1].environment_id;
+    ASSERT_HAS_VALUE (scoped);
+    EXPECT_EQ (*scoped, "env_a");
     EXPECT_EQ (scopes[1].cookies.size (), 1u);
 }
 
@@ -817,8 +819,9 @@ TEST (CookieJarWrite, ClearEmptiesOnlyThisEnvironmentsJar) {
     const auto scopes = jar.snapshot ();
     ASSERT_EQ (scopes.size (), 1u)
     << "clear() reached beyond its own environment";
-    ASSERT_TRUE (scopes[0].environment_id.has_value ());
-    EXPECT_EQ (*scopes[0].environment_id, "env_b");
+    const auto& survivor = scopes[0].environment_id;
+    ASSERT_HAS_VALUE (survivor);
+    EXPECT_EQ (*survivor, "env_b");
 }
 
 TEST (CookieJarWrite, AWrittenCookieDoesNotCrossAnEnvironmentBoundary) {
@@ -966,7 +969,7 @@ TEST (CookieJarWriteValue, ADefaultedCookieTakesItsDomainAndPathFromTheUrl) {
     const auto defaulted =
     vayu::http::cookie_for_url ("https://api.example.com/v1/orders/42",
     JarCookie{ "", false, "", false, false, 0, "session", "abc" });
-    ASSERT_TRUE (defaulted.has_value ());
+    ASSERT_HAS_VALUE (defaulted);
     EXPECT_EQ (defaulted->domain, "api.example.com");
     EXPECT_FALSE (defaulted->include_subdomains)
     << "a defaulted domain is host-only, as a Set-Cookie without Domain is";
@@ -977,14 +980,14 @@ TEST (CookieJarWriteValue, ADefaultedCookieTakesItsDomainAndPathFromTheUrl) {
     const auto explicit_domain =
     vayu::http::cookie_for_url ("https://api.example.com/",
     JarCookie{ ".example.com", false, "/", false, false, 0, "session", "abc" });
-    ASSERT_TRUE (explicit_domain.has_value ());
+    ASSERT_HAS_VALUE (explicit_domain);
     EXPECT_TRUE (explicit_domain->include_subdomains);
 
     // A round trip through the line is the point of formatting one: a written
     // cookie and a received one must be the same kind of thing.
     const auto round_tripped =
     parse_cookie_line (vayu::http::format_cookie_line (*defaulted));
-    ASSERT_TRUE (round_tripped.has_value ());
+    ASSERT_HAS_VALUE (round_tripped);
     EXPECT_EQ (round_tripped->domain, "api.example.com");
     EXPECT_EQ (round_tripped->path, "/v1/orders");
     EXPECT_EQ (round_tripped->value, "abc");
@@ -1057,8 +1060,16 @@ TEST (CookieJarRoute, AbsentScopeClearsEverythingAndAnEmptyOneClearsOnlyTheNoEnv
     auto cleared = vayu::http::routes::clear_cookies_response (
     jar, std::optional<std::string> (std::string (NO_ENVIRONMENT_SCOPE)));
     EXPECT_EQ (cleared["cleared"], 1u);
-    ASSERT_EQ (jar.snapshot ().size (), 1u) << "the environment's jar went too";
-    EXPECT_EQ (*jar.snapshot ()[0].environment_id, "env_a");
+    const auto remaining = jar.snapshot ();
+    ASSERT_EQ (remaining.size (), 1u) << "the environment's jar went too";
+    // Guarded rather than read straight through: were the wrong jar cleared,
+    // the surviving scope would be the no-environment one and this read would
+    // be undefined, so the regression would crash the suite instead of naming
+    // itself here.
+    const auto& kept = remaining[0].environment_id;
+    ASSERT_HAS_VALUE (kept)
+    << "the no-environment jar survived instead of env_a's";
+    EXPECT_EQ (*kept, "env_a");
 
     cleared = vayu::http::routes::clear_cookies_response (jar, std::nullopt);
     EXPECT_EQ (cleared["cleared"], 1u);
