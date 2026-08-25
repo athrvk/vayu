@@ -44,6 +44,18 @@ engine/
   - it names no rule, and the check reports it too, so it buys a `NOLINT` per
   site. That helper is for invariants only: an optional a client can empty is
   still handled, with its `if`, its 404 and its default.
+- **The reentrant spelling of a C call, always** (#945). `std::localtime` and
+  `std::strerror` hand back a pointer into storage the whole process shares, so
+  with a worker thread per connection what comes back is a timestamp or an
+  error message describing *another* call's subject - not a crash, which is why
+  it survived this long. `vayu/utils/reentrant.hpp` is the one place that
+  spells them safely (`format_local_time`, `errno_message`), and
+  `tests/reentrant_test.cpp` scans `src` and `include` for the classic names,
+  plus for the `setenv`/`putenv` that would make the single exempted `getenv`
+  (`transport_policy.cpp`, no reentrant spelling to move to) unsafe. The
+  daemon's force-shutdown branch is `std::_Exit` for the same family of reason:
+  it runs *inside* the signal handler, and `exit` there runs every static
+  destructor while the worker threads are still using what they destroy.
 - Formatter: clang-format, **19 exactly** (`.clang-format` at repo root; the
   version is pinned because 39 of the 285 engine sources format differently
   under 18). **A difference is a failure now** (#886): the `Engine formatting`

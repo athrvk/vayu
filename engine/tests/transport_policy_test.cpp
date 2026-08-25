@@ -126,6 +126,15 @@ class ScopedEnv {
      * suppressed - the same shape `script_types_test.cpp`'s `env_is_set` uses,
      * and for the same reason: a `#pragma warning(disable)` would be a
      * permanent suppression bought for a one-line read.
+     *
+     * This class is where `concurrency-mt-unsafe` (#945) has a real point:
+     * `setenv` and `unsetenv` are the only environment *writes* in the engine
+     * or its suite, and a write is what makes every `getenv` anywhere unsafe.
+     * It is silenced rather than fixed because there is no reentrant spelling
+     * to move to, and because gtest runs one test body at a time - the scoped
+     * write and every read of it are ordered by the suite's own structure. A
+     * future test that sets an environment variable from a worker thread would
+     * break that, which is what this note is here to stop.
      */
     static std::optional<std::string> read (const char* name) {
 #ifdef _WIN32
@@ -138,6 +147,7 @@ class ScopedEnv {
         std::free (value);
         return copy;
 #else
+        // NOLINTNEXTLINE(concurrency-mt-unsafe)
         if (const char* value = std::getenv (name)) {
             return std::string (value);
         }
@@ -152,8 +162,10 @@ class ScopedEnv {
         _putenv_s (name, value);
 #else
         if (value[0] == '\0') {
+            // NOLINTNEXTLINE(concurrency-mt-unsafe)
             unsetenv (name);
         } else {
+            // NOLINTNEXTLINE(concurrency-mt-unsafe)
             setenv (name, value, 1);
         }
 #endif

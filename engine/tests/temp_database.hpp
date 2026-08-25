@@ -43,7 +43,10 @@ namespace vayu::tests {
  * "off". MSVC deprecates `std::getenv` in favour of `_dupenv_s` (C4996) and
  * this suite is built `/W4 /WX`, so the deprecation is followed rather than
  * suppressed - the same shape, and for the same reason, as `env_is_set` in
- * `script_types_test.cpp`.
+ * `script_types_test.cpp`. Its `concurrency-mt-unsafe` silencing is the same
+ * one too (#945): the suite's only environment *write* is `ScopedEnv` in
+ * `transport_policy_test.cpp`, and gtest runs one test body at a time, so the
+ * write and this read never overlap.
  */
 inline bool scratch_isolation_disabled () {
 #ifdef _WIN32
@@ -55,6 +58,7 @@ inline bool scratch_isolation_disabled () {
     std::free (value);
     return true;
 #else
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     return std::getenv ("VAYU_TEST_NO_SCRATCH_ISOLATION") != nullptr;
 #endif
 }

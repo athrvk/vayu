@@ -22,10 +22,11 @@
 #include <atomic>
 #include <cerrno>
 #include <csignal>
-#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+
+#include "vayu/utils/reentrant.hpp"
 
 namespace vayu::platform {
 
@@ -148,8 +149,8 @@ void ensure_directory (const std::string& path) {
     if (stat (path.c_str (), &st) != 0) {
         // Directory doesn't exist, create it
         if (mkdir (path.c_str (), 0755) != 0 && errno != EEXIST) {
-            throw std::runtime_error (
-            "Failed to create directory: " + path + " - " + strerror (errno));
+            throw std::runtime_error ("Failed to create directory: " + path +
+            " - " + vayu::utils::errno_message (errno));
         }
     } else if (!S_ISDIR (st.st_mode)) {
         throw std::runtime_error ("Path exists but is not a directory: " + path);

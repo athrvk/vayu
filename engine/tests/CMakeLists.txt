@@ -135,6 +135,7 @@ add_executable(vayu_tests
     spec_coverage_test.cpp
     schema_validation_test.cpp
     version_isolation_test.cpp
+    reentrant_test.cpp
     ../src/http/routes/import.cpp
     ../src/http/routes/diagnostics.cpp
     ../src/http/routes/compose.cpp
