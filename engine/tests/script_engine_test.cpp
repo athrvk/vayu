@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <regex>
 
 #include "vayu/http/form_body.hpp"
@@ -568,7 +569,7 @@ TEST_F (ScriptEngineTest, ExpectEqlReportsACycleWhereItCloses) {
 // swallowing the exception.
 TEST_F (ScriptEngineTest, ExpectEqlOnACycleSurvivesAShallowInterpreterStack) {
     ScriptConfig tight;
-    tight.stack_size = 16 * 1024;
+    tight.stack_size = std::size_t{ 16 } * 1024;
     ScriptEngine shallow{ tight };
 
     auto result = shallow.execute_test (R"(
