@@ -528,6 +528,85 @@ TEST_F (ScriptEngineTest, ExpectEqlOnCyclicValuesFailsLoudly) {
     << result.tests[0].error_message;
 }
 
+// #959: the cyclic case must be reported because it *is* cyclic, not because
+// the walk happened to run out of levels. Nesting the cycle one level down
+// proves the detection is structural - a depth cap alone would report the same
+// thing here, but only after 64 fruitless levels, and which error won then
+// depended on how much C stack a frame of js_deep_equal happened to take on
+// the toolchain in use. That is how this passed everywhere except MSVC at /Od
+// under ASan, where QuickJS's own stack guard tripped first and the thrown
+// error was silently downgraded to "not equal".
+TEST_F (ScriptEngineTest, ExpectEqlReportsACycleWhereItCloses) {
+    auto result = engine.execute_test (R"(
+        pm.test("nested cycle", function() {
+            var a = { inner: {} }; a.inner.back = a;
+            var b = { inner: {} }; b.inner.back = b;
+            pm.expect(a).to.eql(b);
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("cyclic"), std::string::npos)
+    << result.tests[0].error_message;
+}
+
+// The #959 failure mode itself, reproduced on any platform.
+//
+// The Windows leg failed because QuickJS's own stack guard tripped before the
+// depth cap did, inside the JS_Call that reads an object's class tag. Frame
+// size is what decided which won, so the bug was invisible on GCC and Clang
+// and deterministic on MSVC at /Od under ASan. Shrinking the interpreter's
+// stack budget puts a Linux build on the same side of that race, which turns a
+// platform-specific report into a test.
+//
+// Mutation check: with the cycle detection removed and only the depth cap
+// left, this reports the matcher's generic "to deeply equal" message - the
+// exact string windows-asan produced - because the guard fires first and the
+// thrown error is dropped. It also fails if js_class_tag goes back to
+// swallowing the exception.
+TEST_F (ScriptEngineTest, ExpectEqlOnACycleSurvivesAShallowInterpreterStack) {
+    ScriptConfig tight;
+    tight.stack_size = 16 * 1024;
+    ScriptEngine shallow{ tight };
+
+    auto result = shallow.execute_test (R"(
+        pm.test("cyclic", function() {
+            var a = {}; a.self = a;
+            var b = {}; b.self = b;
+            pm.expect(a).to.eql(b);
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("cyclic"), std::string::npos)
+    << result.tests[0].error_message;
+}
+
+// A structure that repeats a *value* without being cyclic is not a cycle, and
+// must still compare normally. The path carries pairs on the current branch
+// only, so a sibling that reuses the same object is not mistaken for one.
+TEST_F (ScriptEngineTest, ExpectEqlDoesNotMistakeSharingForACycle) {
+    auto result = engine.execute_test (R"(
+        pm.test("shared leaf, equal", function() {
+            var leaf = { v: 1 };
+            pm.expect({ x: leaf, y: leaf }).to.eql({ x: { v: 1 }, y: { v: 1 } });
+        });
+        pm.test("shared leaf, unequal", function() {
+            var leaf = { v: 1 };
+            pm.expect({ x: leaf, y: leaf }).to.not.eql({ x: { v: 1 }, y: { v: 2 } });
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+}
+
 // Every matcher hands the expectation back, which is what `.and` continues.
 TEST_F (ScriptEngineTest, ExpectAndChainsAndKeepsAssertingAfterTheJoin) {
     auto result = engine.execute_test (R"(

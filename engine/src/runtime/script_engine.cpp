@@ -31,6 +31,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "vayu/http/client.hpp"
@@ -498,7 +499,17 @@ std::string js_to_json (JSContext* ctx, JSValueConst val) {
 // keeps its contents outside the own-property list, so comparing enumerable
 // keys alone would report every pair of them equal. `JS_IsDate` / `JS_IsRegExp`
 // exist only in quickjs-ng, so this asks the language instead of the C API.
-std::string js_class_tag (JSContext* ctx, JSValueConst val) {
+//
+// `failed`, when given, is set if the call threw and the exception was left
+// pending for the caller. That distinction matters: an empty tag is otherwise
+// indistinguishable from "a class this does not recognise", and a caller that
+// cannot tell them apart will report a *result* for a comparison that never
+// happened. See js_deep_equal, where exactly that turned a thrown error into a
+// silent "not equal" on one platform (#959).
+std::string js_class_tag (JSContext* ctx, JSValueConst val, bool* failed = nullptr) {
+    if (failed) {
+        *failed = false;
+    }
     JSValue global    = JS_GetGlobalObject (ctx);
     JSValue ctor      = JS_GetPropertyStr (ctx, global, "Object");
     JSValue proto     = JS_GetPropertyStr (ctx, ctor, "prototype");
@@ -509,6 +520,9 @@ std::string js_class_tag (JSContext* ctx, JSValueConst val) {
         JSValue result = JS_Call (ctx, to_string, val, 0, nullptr);
         if (!JS_IsException (result)) {
             tag = js_to_string (ctx, result);
+        } else if (failed) {
+            // Leave the exception pending - the caller propagates it.
+            *failed = true;
         } else {
             JS_FreeValue (ctx, JS_GetException (ctx));
         }
@@ -540,10 +554,35 @@ std::string js_describe (JSContext* ctx, JSValueConst val) {
     return js_to_string (ctx, val);
 }
 
-// A cyclic structure would recurse forever; the cap turns that into a thrown
-// error rather than a stack overflow. Nothing a script asserts on legitimately
-// nests this far.
+// A cyclic structure would recurse forever. Two things stop it.
+//
+// The **cycle check** is the real one: js_deep_equal carries the pair of
+// objects at each level of the current path, and a pair it is already
+// comparing is a cycle by definition. That reports at the depth the cycle
+// actually closes - depth 1 for `a.self = a` - rather than after an arbitrary
+// number of levels.
+//
+// The **depth cap** stays as a backstop for a structure that is merely
+// enormous rather than cyclic. Nothing a script asserts on legitimately nests
+// this far.
+//
+// The cap alone used to be the whole mechanism, and #959 is why it is not any
+// more: it only bounds the C recursion *after* the fact, and 64 frames of this
+// function is a different amount of stack on every toolchain. On MSVC at /Od
+// with AddressSanitizer's redzones the frames are fat enough that QuickJS's
+// own 256 KB stack guard tripped first, inside the JS_Call in js_class_tag -
+// which returned an empty tag, compared equal to the other empty tag, and fell
+// through to "a class I do not recognise" and a plain `return 0`. The pending
+// stack-overflow error was dropped and the caller reported an ordinary
+// "not deeply equal". Same source, same input, a different answer per
+// platform. Detecting the cycle where it closes means the cyclic case never
+// recurses deeply on any toolchain, so the result no longer depends on frame
+// size.
 constexpr int kDeepEqualMaxDepth = 64;
+
+// One level of the comparison path: the two objects being compared. Compared
+// by identity, which is what a cycle is.
+using DeepEqualPath = std::vector<std::pair<void*, void*>>;
 
 // Own enumerable string-keyed property names, in insertion order.
 bool js_own_enumerable_keys (JSContext* ctx, JSValueConst obj, std::vector<std::string>& out) {
@@ -572,7 +611,7 @@ bool js_own_enumerable_keys (JSContext* ctx, JSValueConst obj, std::vector<std::
 // implementation used: stringify is key-order sensitive ({a:1,b:2} vs {b:2,a:1}
 // compare unequal), silently drops `undefined` members, and cannot see a value
 // it fails to serialise.
-int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth) {
+int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, DeepEqualPath& path) {
     if (depth > kDeepEqualMaxDepth) {
         JS_ThrowRangeError (ctx,
         "deep equality gave up after %d levels - the compared values are "
@@ -605,8 +644,29 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth) {
         return 0;
     }
 
-    const std::string tag = js_class_tag (ctx, a);
-    if (tag != js_class_tag (ctx, b)) {
+    // Both objects, and neither is a function: this is the point the walk can
+    // revisit a pair it is already comparing, which is what a cycle is.
+    void* const a_id = JS_VALUE_GET_PTR (a);
+    void* const b_id = JS_VALUE_GET_PTR (b);
+    for (const auto& seen : path) {
+        if (seen.first == a_id && seen.second == b_id) {
+            JS_ThrowRangeError (ctx,
+            "deep equality cannot compare cyclic values - the same pair of "
+            "objects appears twice on one path");
+            return -1;
+        }
+    }
+
+    bool tag_failed        = false;
+    const std::string tag  = js_class_tag (ctx, a, &tag_failed);
+    if (tag_failed) {
+        return -1;
+    }
+    const std::string b_tag = js_class_tag (ctx, b, &tag_failed);
+    if (tag_failed) {
+        return -1;
+    }
+    if (tag != b_tag) {
         return 0;
     }
     if (tag == "[object Date]") {
@@ -639,7 +699,9 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth) {
         for (uint32_t i = 0; i < a_len; i++) {
             JSValue a_elem = JS_GetPropertyUint32 (ctx, a, i);
             JSValue b_elem = JS_GetPropertyUint32 (ctx, b, i);
-            const int same = js_deep_equal (ctx, a_elem, b_elem, depth + 1);
+            path.emplace_back (a_id, b_id);
+            const int same = js_deep_equal (ctx, a_elem, b_elem, depth + 1, path);
+            path.pop_back ();
             JS_FreeValue (ctx, a_elem);
             JS_FreeValue (ctx, b_elem);
             if (same != 1) {
@@ -664,7 +726,9 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth) {
         }
         JSValue a_val  = JS_GetPropertyStr (ctx, a, key.c_str ());
         JSValue b_val  = JS_GetPropertyStr (ctx, b, key.c_str ());
-        const int same = js_deep_equal (ctx, a_val, b_val, depth + 1);
+        path.emplace_back (a_id, b_id);
+        const int same = js_deep_equal (ctx, a_val, b_val, depth + 1, path);
+        path.pop_back ();
         JS_FreeValue (ctx, a_val);
         JS_FreeValue (ctx, b_val);
         if (same != 1) {
@@ -677,7 +741,11 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth) {
 // Compares by whichever rule the chain asked for: `deep` when a `deep` /
 // `eql` chain set it, strict otherwise. -1 signals a pending exception.
 int js_compare_for_chain (JSContext* ctx, JSValueConst a, JSValueConst b, bool deep) {
-    return deep ? js_deep_equal (ctx, a, b, 0) : (js_strict_equal (ctx, a, b) ? 1 : 0);
+    if (!deep) {
+        return js_strict_equal (ctx, a, b) ? 1 : 0;
+    }
+    DeepEqualPath path;
+    return js_deep_equal (ctx, a, b, 0, path);
 }
 
 JSValue expect_to_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {

@@ -228,6 +228,33 @@ if(VAYU_USE_TSAN)
     message(STATUS "ThreadSanitizer enabled")
     target_compile_options(vayu_sanitizers INTERFACE -fsanitize=thread -fno-omit-frame-pointer)
     target_link_options(vayu_sanitizers INTERFACE -fsanitize=thread)
+
+    # Turn cpp-httplib's non-blocking resolver off for this build only (#957).
+    #
+    # vcpkg's port sets CPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO as an INTERFACE
+    # definition on httplib::httplib. On glibc that selects a `getaddrinfo_a`
+    # implementation, and glibc services that call on a worker thread it creates
+    # *internally* - one that never passes ThreadSanitizer's `pthread_create`
+    # interceptor. The thread therefore has no TSan ThreadState, and the first
+    # malloc on it dereferences a null per-thread cache: `this=0x8` inside
+    # SizeClassAllocator64LocalCache::Allocate. That is a crash in the sanitizer
+    # runtime rather than a report, so no suppression can reach it, and it took
+    # out all 58 socket-opening tests on `linux-tsan` deterministically.
+    #
+    # Undefined rather than removed from the interface, because CMake emits
+    # <DEFINES> before <FLAGS> on the compile line, so a `-U` here reliably wins
+    # over the `-D` the imported target contributes. httplib then compiles its
+    # `#else` branch, a plain synchronous getaddrinfo.
+    #
+    # What this costs is one behaviour the TSan leg no longer exercises: the
+    # per-resolve timeout, which that branch does not implement (`timeout_sec`
+    # is explicitly ignored there). No test asserts on it - the suite resolves
+    # localhost - and the shipping build is untouched, so ASan on all three
+    # platforms and the ordinary builds keep the non-blocking resolver. Scoping
+    # it to VAYU_USE_TSAN is the whole point: the async path stays covered
+    # everywhere it can be.
+    target_compile_options(vayu_sanitizers INTERFACE
+        -UCPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO)
 endif()
 
 # ============================================================================
