@@ -135,9 +135,10 @@ bool os_at_least (DWORD major, DWORD minor, bool use_rtl) {
  * Scope: this proves it for vayu_tests. The binary that matters is
  * vayu-engine.exe, and no gtest can inspect a different executable - that half
  * is covered by .github/check-windows-deps.py, which scans the shipped artifact
- * for the same manifest. Both are wired up in engine/CMakeLists.txt via
- * vayu_embed_windows_manifest(); if you add a fourth executable that links
- * libcurl, call it there too.
+ * for the same manifest. Both are wired up via vayu_embed_windows_manifest() -
+ * defined in engine/CMakeLists.txt, called there for vayu-engine and vayu-cli
+ * and in engine/tests/CMakeLists.txt for this binary; if you add a fourth
+ * executable that links libcurl, call it from wherever that target is defined.
  */
 TEST (HttpVersionSupport, WindowsOsVersionIsNotShimmed) {
     const bool truth_81   = os_at_least (6, 3, /*use_rtl=*/true);
@@ -158,7 +159,7 @@ TEST (HttpVersionSupport, WindowsOsVersionIsNotShimmed) {
        "HTTPS request would be HTTP/1.1 no matter what httpVersion asks for "
        "(issue #215).\n"
        "Fix: engine/res/vayu-windows.manifest must reach this target via "
-       "vayu_embed_windows_manifest() in engine/CMakeLists.txt.";
+       "vayu_embed_windows_manifest() in engine/tests/CMakeLists.txt.";
 
     // The second id. The shim can only ever under-report, never over-report, so
     // equality is the exact statement "this process is not being lied to" - and

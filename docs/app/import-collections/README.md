@@ -549,6 +549,6 @@ All of it is engine-side (`engine/src/core/import_document.cpp`); nothing in
    still has to attach, so the Preview can warn them. A loss the preview never
    names is the defect this whole subsystem is organised around.
 4. Add cases to `engine/tests/fixtures/import-conformance.json` and register the
-   suite the way `engine/CMakeLists.txt` requires.
+   suite the way `engine/tests/CMakeLists.txt` requires.
 5. Add a `docs/app/import-collections/<format>.md` following the structure of the
    existing per-format docs, and a row in the table at the top of this file.

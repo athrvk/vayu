@@ -128,10 +128,14 @@ engine/
   in the overlay is a two-minute edit and only ever needed in this environment,
   since CI reaches the archives.
 - A new `tests/*_test.cpp` must be listed in `add_executable(vayu_tests ...)`
-  in `engine/CMakeLists.txt` - the source list is explicit, never a glob. A
-  guard beside it fails configure naming any unregistered file, because an
-  unbuilt test file reports nothing at all (#668: a 16-test suite sat unbuilt
-  for ~140 commits).
+  in **`engine/tests/CMakeLists.txt`** - the source list is explicit, never a
+  glob. A guard beside it fails configure naming any unregistered file, because
+  an unbuilt test file reports nothing at all (#668: a 16-test suite sat unbuilt
+  for ~140 commits). The list sits in its own file rather than in
+  `engine/CMakeLists.txt` because that one is a `sanitizers.yml` trigger path
+  (#970): while the two shared a file, adding a test ran the five-leg sanitizer
+  matrix. **Do not move the list back**, and think before putting anything else
+  a routine pull request edits into `engine/CMakeLists.txt`.
 - A fixture that opens a scratch `Database` cleans up with
   `vayu::tests::remove_database_files` (`engine/tests/temp_database.hpp`) - never
   a hand-written suffix list. An opened database writes six files, not the four
