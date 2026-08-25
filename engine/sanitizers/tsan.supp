@@ -23,7 +23,7 @@
 # `called_from_lib:<lib>` etc. per line; see
 # https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
 #
-# One entry as of the first run, below.
+# Two entries, below.
 
 # WARNING: ThreadSanitizer: data race
 #   Read of size 8 by thread T11:
@@ -47,3 +47,37 @@
 # test alone did not reproduce it - so this entry is justified by the captured
 # trace above rather than by a repeatable before/after.
 race:crypto/hashtable/hashtable.c
+
+# WARNING: ThreadSanitizer: data race
+#   Read of size 1 by thread T8 (mutexes: write M0):
+#     #0 std::ctype<char>::narrow(char, char) const
+#          /usr/include/c++/13/bits/locale_facets.h:941
+#     #1 std::__detail::_Scanner<char>::_M_scan_normal()
+#          /usr/include/c++/13/bits/regex_scanner.tcc:100
+#     #7 httplib::detail::parse_status_line(...)
+#     #8 httplib::ClientImpl::read_response_line(...) httplib.h:13856
+#   SUMMARY: data race in std::ctype<char>::narrow(char, char) const
+#
+# libstdc++'s narrowing cache, not anything this repository wrote. `narrow`
+# memoises char conversions into a mutable table on the facet
+# (`_M_narrow[]` plus its `_M_narrow_ok` flag) and fills it without
+# synchronization; two threads that both construct a std::regex race on that
+# fill. The facet is the process-wide classic locale, so every thread shares
+# it. httplib builds a std::regex per response in `parse_status_line`, which
+# is why concurrent HTTP clients reach it and nothing else does.
+#
+# Cannot be fixed here on either side: the racing write is in libstdc++'s
+# headers, and the caller is header-only third-party code. No engine frame
+# appears anywhere in the stack - frame #7 is the first non-libstdc++ frame
+# and it is httplib's.
+#
+# Tracked in #967. It is a real report rather than an artifact of missing
+# instrumentation, so unlike the OpenSSL entry above it is worth an upstream
+# fix; the practical remedies are upstream (libstdc++ synchronising the cache,
+# or httplib hoisting its regex to a function-local static).
+#
+# Seen on: linux-tsan, TransportPolicyPaths.LoadRunTraversesManualProxy, gcc 13
+# / libtsan 2. Only became visible once #957 was fixed - before that every test
+# that opens a socket segfaulted inside the sanitizer runtime and never got far
+# enough to report anything.
+race:std::ctype<char>::narrow

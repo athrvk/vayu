@@ -293,15 +293,24 @@ green over code TSan has things to say about.
 
 `engine/sanitizers/asan.supp` and `engine/sanitizers/tsan.supp` are checked in,
 and the weekly workflow below points `ASAN_OPTIONS`/`TSAN_OPTIONS` at them. They
-exist for the vcpkg dependencies: those are built uninstrumented, so TSan cannot
-see the synchronization inside OpenSSL and can report an edge that is really
-there.
+exist for frames this repository cannot fix. Two kinds qualify, and the
+difference is worth keeping straight:
+
+- **An edge TSan cannot see.** The vcpkg dependencies are built
+  uninstrumented, so TSan cannot observe the synchronization inside OpenSSL and
+  reports a happens-before edge that is really there. `tsan.supp`'s
+  `crypto/hashtable/hashtable.c` entry is this kind.
+- **A real race in code that is not ours.** `std::ctype<char>::narrow` fills a
+  mutable cache on the process-wide locale without synchronization, and
+  cpp-httplib reaches it by building a `std::regex` per response. That is a
+  genuine race; it simply has no engine frame anywhere in the stack and cannot
+  be fixed from here. Tracked in #967.
 
 **Never suppress engine code.** A finding in `engine/src` or `engine/include` is
 the thing the run exists to surface. Every entry must carry the report it
 silences, why the frame cannot be fixed here, and the issue tracking its
-removal - the same discipline #897 put on `// NOLINT`. Both files ship empty
-but present, with those rules in their headers.
+removal - the same discipline #897 put on `// NOLINT`. `asan.supp` ships empty
+but present; `tsan.supp` carries the two entries above, each with its trace.
 
 ### The weekly run, and the issues it files
 
@@ -329,45 +338,62 @@ from.** Closing it is a human act after the fix - the next failure comments
 again, or files fresh if it was closed. Getting it green by adding a
 suppression for engine code is not a fix.
 
-### Known first-run state
+### What the matrix found, and where it stands
 
-The state after #965, measured cold on #904's pull request, checkout to last
-test:
-
-| Leg | Wall | Result |
-|-----|------|--------|
-| `asan` / ubuntu-latest | 20 min | green, 2368/2368 |
-| `asan` / macos-latest | 15 min | green, 2368/2368 |
-| `asan` / windows-latest | 43 min | 2368/2369, #959 |
-| `tsan` / ubuntu-latest | 19 min | 2310/2368, #957 |
-| `tsan` / macos-latest | 69 min | green, 2368/2368 |
-
-Windows discovers one test more than the other two platforms, so its
-denominator is 2369 rather than 2368.
-
-Three findings came out of the first runs. One is already fixed:
+The first runs turned up four things. Three are fixed; one is suppressed with a
+tracking issue.
 
 - **#956** - a real data race: `RunContext`'s event loop was read by the metrics
   thread while the run thread constructed it. 13 of the 14 race reports were
-  this one race, on both TSan legs. **Fixed in #965**, which is the matrix
-  earning its keep - a race no assertion could express, found on its first run.
-- **#957** - `linux-tsan` segfaults in 58 socket-opening tests, because
-  cpp-httplib resolves through glibc's `getaddrinfo_a()` and glibc services that
-  on a thread TSan never sees created. It is a crash inside the sanitizer
-  runtime, so no suppression can reach it. Still open.
-- **#959** - `ScriptEngineTest.ExpectEqlOnCyclicValuesFailsLoudly` fails on
-  `windows-asan` and nowhere else. The cyclic-value guard in `js_deep_equal`
-  throws a `RangeError` naming "cyclic" on Linux and macOS; on that leg the
-  reported message is the matcher's generic `AssertionError`, so the thrown
-  error is being lost somewhere on the MSVC path. It is not a memory-safety
-  report - ASan found no error - which makes it a behaviour difference this
-  matrix is the first CI to cover, since the ordinary Windows job builds
-  Release. Still open.
+  this one race, on both TSan legs. **Fixed in #965.** A race no assertion could
+  express, found on the matrix's first run.
+- **#957** - `linux-tsan` segfaulted in all 58 socket-opening tests. vcpkg's
+  cpp-httplib port defines `CPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO`, which on
+  glibc selects `getaddrinfo_a()`; glibc services that on a worker thread it
+  creates internally, one that never passes ThreadSanitizer's `pthread_create`
+  interceptor, so the thread has no TSan state and its first `malloc`
+  dereferences a null cache. A crash inside the sanitizer runtime, which is why
+  no suppression could reach it. **Fixed** by undefining that macro for the TSan
+  build only, so httplib compiles its plain synchronous `getaddrinfo` branch.
+- **#959** - `windows-asan` failed one test, and it was not an MSVC quirk.
+  `js_class_tag` reads an object's class through a `JS_Call`, which checks
+  QuickJS's 256 KB interpreter stack; when 64 nested `js_deep_equal` frames
+  exceeded it the call threw, the tag came back empty, both empty tags compared
+  equal, and the walk returned a plain "not equal" with the pending
+  stack-overflow error discarded. Which guard fired first depended on frame
+  size, so the same source answered differently per toolchain. **Fixed** by
+  detecting the cycle where it closes instead of capping depth, and by
+  propagating the exception. See [Cycle detection, not a depth
+  cap](#cycle-detection-not-a-depth-cap) below.
+- **#967** - a data race in libstdc++'s locale narrowing cache, reached through
+  the `std::regex` cpp-httplib builds per response in `parse_status_line`. No
+  engine frame anywhere in the stack, so it is **suppressed** in `tsan.supp`
+  with its trace and that issue number. It only became visible once #957 was
+  fixed - before that the crash masked it.
 
-So **the `linux-tsan` leg is expected red until #957 is resolved**, and
-`windows-asan` until #959 is. The other three are green, and `macos-tsan` is the
-meaningful thread-safety signal until #957 unblocks its Linux counterpart: it
-went green the run after #965 landed, with zero race reports on either TSan leg.
+The matrix has therefore paid for itself twice over: two engine-side defects
+found and fixed, one of them a race the ordinary suite is structurally unable
+to see, and one third-party race documented rather than ignored.
+
+### Cycle detection, not a depth cap
+
+Worth stating separately, because the shape of the bug generalises.
+`js_deep_equal` used to bound cyclic input with a depth cap alone. A cap bounds
+the C recursion only *after* the fact, and N frames is a different amount of
+stack on every toolchain - so which guard fires first (ours, or the
+interpreter's own stack check) is decided by frame size, and frame size varies
+with compiler, optimisation level and sanitizer. That is how #959 passed on GCC
+and Clang and failed deterministically on MSVC at `/Od` under ASan.
+
+It now carries the pair of objects at each level of the current path; a pair it
+is already comparing *is* a cycle. `a.self = a` reports at depth 1 rather than
+65 and never recurses deep enough for frame size to matter. The cap stays as a
+backstop for structures that are merely enormous.
+
+`ScriptEngineTest.ExpectEqlOnACycleSurvivesAShallowInterpreterStack` pins it:
+shrinking the interpreter stack to 16 KB puts a Linux build on the same side of
+that race as MSVC, so the platform-specific failure is now a test that runs
+everywhere.
 
 The workflow also runs on a pull request that edits the sanitizer machinery
 itself (this workflow, `engine/sanitizers/**`, `engine/CMakeLists.txt`,
