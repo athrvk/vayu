@@ -657,8 +657,8 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
         }
     }
 
-    bool tag_failed        = false;
-    const std::string tag  = js_class_tag (ctx, a, &tag_failed);
+    bool tag_failed       = false;
+    const std::string tag = js_class_tag (ctx, a, &tag_failed);
     if (tag_failed) {
         return -1;
     }
@@ -724,8 +724,8 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
         if (std::find (b_keys.begin (), b_keys.end (), key) == b_keys.end ()) {
             return 0;
         }
-        JSValue a_val  = JS_GetPropertyStr (ctx, a, key.c_str ());
-        JSValue b_val  = JS_GetPropertyStr (ctx, b, key.c_str ());
+        JSValue a_val = JS_GetPropertyStr (ctx, a, key.c_str ());
+        JSValue b_val = JS_GetPropertyStr (ctx, b, key.c_str ());
         path.emplace_back (a_id, b_id);
         const int same = js_deep_equal (ctx, a_val, b_val, depth + 1, path);
         path.pop_back ();
