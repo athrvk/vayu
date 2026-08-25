@@ -26,6 +26,7 @@
 
 #include <httplib.h>
 
+#include "task_queue.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
@@ -61,7 +62,7 @@ class ScenarioMockServer {
 
     explicit ScenarioMockServer (size_t login_rendezvous = 0)
     : login_rendezvous_ (login_rendezvous) {
-        svr.new_task_queue = [] { return new httplib::ThreadPool (64); };
+        svr.new_task_queue = vayu::tests::pooled_task_queue (64);
 
         svr.Get ("/login", [this] (const httplib::Request& req, httplib::Response& res) {
             record (req, "/login");
@@ -117,6 +118,10 @@ class ScenarioMockServer {
         if (thread.joinable ())
             thread.join ();
     }
+    ScenarioMockServer (const ScenarioMockServer&)            = delete;
+    ScenarioMockServer& operator= (const ScenarioMockServer&) = delete;
+    ScenarioMockServer (ScenarioMockServer&&)                 = delete;
+    ScenarioMockServer& operator= (ScenarioMockServer&&)      = delete;
 
     [[nodiscard]] std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port) + path;

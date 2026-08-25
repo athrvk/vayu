@@ -56,6 +56,10 @@ struct ThreadPool::Impl {
             }
         }
     }
+    Impl (const Impl&)            = delete;
+    Impl& operator= (const Impl&) = delete;
+    Impl (Impl&&)                 = delete;
+    Impl& operator= (Impl&&)      = delete;
 
     void worker_loop () {
         while (true) {

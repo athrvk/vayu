@@ -16,6 +16,8 @@
 #include <string>
 #include <thread>
 
+#include "task_queue.hpp"
+
 namespace vayu::tests {
 
 class SlowMockServer {
@@ -25,7 +27,7 @@ class SlowMockServer {
         // concurrent /slow requests, and the worker drains active transfers on
         // stop(). A thread-starved mock would serialize them and make teardown
         // take tens of seconds (a harness artifact, not engine behavior).
-        svr.new_task_queue = [] { return new httplib::ThreadPool (128); };
+        svr.new_task_queue = vayu::tests::pooled_task_queue (128);
 
         svr.Get ("/slow", [] (const httplib::Request&, httplib::Response& res) {
             std::this_thread::sleep_for (std::chrono::milliseconds (500));
@@ -103,6 +105,10 @@ class SlowMockServer {
         if (thread.joinable ())
             thread.join ();
     }
+    SlowMockServer (const SlowMockServer&)            = delete;
+    SlowMockServer& operator= (const SlowMockServer&) = delete;
+    SlowMockServer (SlowMockServer&&)                 = delete;
+    SlowMockServer& operator= (SlowMockServer&&)      = delete;
 
     std::string slow_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/slow";

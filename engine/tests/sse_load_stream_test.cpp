@@ -113,6 +113,10 @@ class LoadStreamServer {
             thread_.join ();
         }
     }
+    LoadStreamServer (const LoadStreamServer&)            = delete;
+    LoadStreamServer& operator= (const LoadStreamServer&) = delete;
+    LoadStreamServer (LoadStreamServer&&)                 = delete;
+    LoadStreamServer& operator= (LoadStreamServer&&)      = delete;
 
     [[nodiscard]] std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port_) + path;

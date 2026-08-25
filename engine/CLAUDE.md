@@ -71,6 +71,42 @@ engine/
   *derived* from another - spell it out and pin the two together with a
   `static_assert`, rather than concatenating before `main`. A test-only
   constant is held to this too: the gate does not read `tests/` differently.
+- **Bytes become characters in one place, never at the site** (#945,
+  `cppcoreguidelines-pro-type-reinterpret-cast`). Reinterpreting a pointer
+  between character types is defined behaviour - [basic.lval] lets any object be
+  read through a `char`, `unsigned char` or `std::byte` lvalue - so a
+  hand-rolled copy *works*, which is exactly why eight of them accumulated. Two
+  primitives own the conversion now and a third owns its inverse:
+  **`vayu::utils::byte_view`** (`utils/encoding.hpp`) for a `std::span` of bytes
+  as the `std::string_view` every encoder here takes - a `sha256` /
+  `hmac_sha256` digest, and the six sites that spelled that themselves;
+  **`vayu::db::column_text`** (`db/database.hpp`) for a sqlite TEXT column,
+  which `sqlite3_column_text` hands back as `const unsigned char*` and nothing
+  consumes as one; and **`vayu::utils::detail::sodium_bytes`**
+  (`utils/sodium_init.hpp`) going the other way, for libsodium. A SQL NULL stays
+  a null pointer through `column_text` on purpose - absent and empty are
+  different answers, and defaulting one to the other erases the distinction its
+  callers read. `tests/character_cast_test.cpp` scans `engine/{src,include,tests}`
+  and names any file spelling one itself, with a per-file exemption list, because
+  the CI gate scopes to a pull request's changed lines and so holds nothing at
+  zero once these lines stop being new. The casts that are *not* this rule - a
+  `sockaddr_in*` off an `addrinfo`, a Windows function pointer off
+  `GetProcAddress` - have no primitive to route through and the scan does not
+  look at them.
+- **A class with a destructor states all five** (#945,
+  `cppcoreguidelines-special-member-functions`). Writing one of the five and
+  leaving the rest implicit is how a fixture that owns a listener and a thread
+  stays copyable: the copy compiles, both objects stop the same server, and
+  nothing says it was not meant to. Every RAII holder here - the `Impl` behind a
+  pImpl, `Database`, and the ~20 in-process mock servers in `tests/` - deletes
+  copy *and* move beside its destructor, in the spelling `client.hpp` uses
+  (`Foo (const Foo&) = delete;` and the three that follow). Deleting is the
+  default answer, not defaulting: none of these is meaningfully movable, and a
+  move would leave a hollow object whose methods still compile. A mock server's
+  thread pool is `vayu::tests::pooled_task_queue`
+  (`tests/task_queue.hpp`) - httplib's `new_task_queue` hook takes a raw owning
+  pointer, which is its contract and not a leak, said once there rather than at
+  each fixture.
 - Formatter: clang-format, **19 exactly** (`.clang-format` at repo root; the
   version is pinned because 39 of the 285 engine sources format differently
   under 18). **A difference is a failure now** (#886): the `Engine formatting`

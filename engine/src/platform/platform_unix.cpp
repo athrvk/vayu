@@ -57,6 +57,11 @@ bool acquire_file_lock (const std::string& path, LockHandle& handle) {
     // Open or create the lock file
     // Note: On Unix, file locks (flock) are automatically released when the process terminates
     // (even if it crashes or is killed), so stale locks are not a concern.
+    // POSIX declares `open` variadic so the mode argument can be omitted when
+    // O_CREAT is not passed; with O_CREAT it is required. There is no
+    // non-variadic spelling to move to - `std::fopen` cannot express the flags
+    // `flock` below needs a descriptor for.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     handle = open (path.c_str (), O_RDWR | O_CREAT, 0666);
     if (handle < 0) {
         return false;
@@ -126,7 +131,7 @@ void release_file_lock (LockHandle& handle) {
 // ============================================================================
 
 bool is_directory (const std::string& path) {
-    struct stat st;
+    struct stat st{};
     if (stat (path.c_str (), &st) != 0) {
         return false;
     }
@@ -145,7 +150,7 @@ bool create_directory (const std::string& path) {
 }
 
 void ensure_directory (const std::string& path) {
-    struct stat st;
+    struct stat st{};
     if (stat (path.c_str (), &st) != 0) {
         // Directory doesn't exist, create it
         if (mkdir (path.c_str (), 0755) != 0 && errno != EEXIST) {

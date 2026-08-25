@@ -25,6 +25,7 @@
 
 #include <httplib.h>
 
+#include "task_queue.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -70,7 +71,7 @@ constexpr int64_t NOW        = 1700000000; // 2023-11-14
 class CookieServer {
     public:
     CookieServer () {
-        svr.new_task_queue = [] { return new httplib::ThreadPool (8); };
+        svr.new_task_queue = vayu::tests::pooled_task_queue (8);
 
         // Sets a session cookie, the way a login endpoint does.
         svr.Get ("/login", [] (const httplib::Request&, httplib::Response& res) {
@@ -100,6 +101,10 @@ class CookieServer {
             thread.join ();
         }
     }
+    CookieServer (const CookieServer&)            = delete;
+    CookieServer& operator= (const CookieServer&) = delete;
+    CookieServer (CookieServer&&)                 = delete;
+    CookieServer& operator= (CookieServer&&)      = delete;
 
     std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port) + path;

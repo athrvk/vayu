@@ -65,16 +65,21 @@ std::string system_resolve (const std::string& hostname) {
             }
         }
 
+        // The two casts below are the sockets API's own idiom, not a defect:
+        // `ai_addr` is a `sockaddr*` precisely so one field can carry either
+        // family, and `ai_family` - tested first, on the same record - is what
+        // says which one it is. There is no narrower spelling; POSIX defines
+        // the family structs to be reinterpretable through `sockaddr`.
         if (best->ai_family == AF_INET6) {
             char ip_str[INET6_ADDRSTRLEN];
-            struct sockaddr_in6* addr6 =
-            reinterpret_cast<struct sockaddr_in6*> (best->ai_addr);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+            auto* addr6 = reinterpret_cast<sockaddr_in6*> (best->ai_addr);
             inet_ntop (AF_INET6, &(addr6->sin6_addr), ip_str, INET6_ADDRSTRLEN);
             ip = ip_str;
         } else if (best->ai_family == AF_INET) {
             char ip_str[INET_ADDRSTRLEN];
-            struct sockaddr_in* addr =
-            reinterpret_cast<struct sockaddr_in*> (best->ai_addr);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+            auto* addr = reinterpret_cast<sockaddr_in*> (best->ai_addr);
             inet_ntop (AF_INET, &(addr->sin_addr), ip_str, INET_ADDRSTRLEN);
             ip = ip_str;
         }
@@ -450,7 +455,12 @@ void EventLoopWorker::run_loop () {
             did_work = true;
 
             if (msg->msg == CURLMSG_DONE) {
-                CURL* easy      = msg->easy_handle;
+                CURL* easy = msg->easy_handle;
+                // `CURLMsg::data` is a union whose active member is named by
+                // `msg`, and libcurl documents `CURLMSG_DONE` as the one that
+                // selects `result` - the branch above is that check. A variant
+                // is not on offer: the struct is libcurl's.
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access)
                 CURLcode result = msg->data.result;
 
                 // Named for the transfer that just finished rather than `data`,

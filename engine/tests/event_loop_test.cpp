@@ -41,6 +41,10 @@ class MockServer {
         if (thread.joinable ())
             thread.join ();
     }
+    MockServer (const MockServer&)            = delete;
+    MockServer& operator= (const MockServer&) = delete;
+    MockServer (MockServer&&)                 = delete;
+    MockServer& operator= (MockServer&&)      = delete;
 
     std::string base_url () const {
         return "http://127.0.0.1:" + std::to_string (port);

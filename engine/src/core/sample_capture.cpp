@@ -42,12 +42,11 @@ bool text_shaped (std::string_view type) {
  * cap rather than anything about the body.
  */
 bool prefix_is_utf8_text (std::string_view bytes) {
-    const auto* p = reinterpret_cast<const unsigned char*> (bytes.data ());
     const size_t inspect = std::min (bytes.size (), SNIFF_BYTES);
 
     size_t i = 0;
     while (i < inspect) {
-        const unsigned char c = p[i];
+        const auto c = static_cast<unsigned char> (bytes[i]);
         if (c == 0x00) {
             return false; // NUL never appears in text; it is the strongest signal.
         }
@@ -70,7 +69,7 @@ bool prefix_is_utf8_text (std::string_view bytes) {
             return true;
         }
         for (size_t k = 1; k <= extra; k++) {
-            if ((p[i + k] & 0xC0) != 0x80) {
+            if ((static_cast<unsigned char> (bytes[i + k]) & 0xC0) != 0x80) {
                 return false;
             }
         }
@@ -120,8 +119,7 @@ bool looks_binary (std::string_view body, std::string_view content_type) {
 
 std::string body_digest (std::string_view stored_body) {
     const auto digest = vayu::utils::sha256 (stored_body);
-    return vayu::utils::hex_encode (std::string_view (
-    reinterpret_cast<const char*> (digest.data ()), digest.size ()));
+    return vayu::utils::hex_encode (vayu::utils::byte_view (digest));
 }
 
 } // namespace vayu::core

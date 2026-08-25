@@ -34,6 +34,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "task_queue.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -73,7 +74,7 @@ struct SeenRequest {
 class ScenarioMockServer {
     public:
     ScenarioMockServer () {
-        svr.new_task_queue = [] { return new httplib::ThreadPool (8); };
+        svr.new_task_queue = vayu::tests::pooled_task_queue (8);
 
         const auto record = [this] (const httplib::Request& req) {
             std::lock_guard<std::mutex> lock (mtx);
@@ -134,6 +135,10 @@ class ScenarioMockServer {
             thread.join ();
         }
     }
+    ScenarioMockServer (const ScenarioMockServer&)            = delete;
+    ScenarioMockServer& operator= (const ScenarioMockServer&) = delete;
+    ScenarioMockServer (ScenarioMockServer&&)                 = delete;
+    ScenarioMockServer& operator= (ScenarioMockServer&&)      = delete;
 
     [[nodiscard]] std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port) + path;

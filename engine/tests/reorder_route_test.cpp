@@ -569,6 +569,8 @@ class CompetingWriter {
     }
     CompetingWriter (const CompetingWriter&)            = delete;
     CompetingWriter& operator= (const CompetingWriter&) = delete;
+    CompetingWriter (CompetingWriter&&)                 = delete;
+    CompetingWriter& operator= (CompetingWriter&&)      = delete;
 
     /** The `before_write` probe: starts the writer, then waits out the window. */
     std::function<void ()> probe () {

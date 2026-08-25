@@ -75,6 +75,10 @@ class MethodEchoServer {
         if (thread.joinable ())
             thread.join ();
     }
+    MethodEchoServer (const MethodEchoServer&)            = delete;
+    MethodEchoServer& operator= (const MethodEchoServer&) = delete;
+    MethodEchoServer (MethodEchoServer&&)                 = delete;
+    MethodEchoServer& operator= (MethodEchoServer&&)      = delete;
 
     std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port) + path;

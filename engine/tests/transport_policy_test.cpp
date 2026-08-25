@@ -84,6 +84,10 @@ class MockUpstream {
         if (thread.joinable ())
             thread.join ();
     }
+    MockUpstream (const MockUpstream&)            = delete;
+    MockUpstream& operator= (const MockUpstream&) = delete;
+    MockUpstream (MockUpstream&&)                 = delete;
+    MockUpstream& operator= (MockUpstream&&)      = delete;
 
     std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port) + path;
@@ -116,6 +120,8 @@ class ScopedEnv {
     }
     ScopedEnv (const ScopedEnv&)            = delete;
     ScopedEnv& operator= (const ScopedEnv&) = delete;
+    ScopedEnv (ScopedEnv&&)                 = delete;
+    ScopedEnv& operator= (ScopedEnv&&)      = delete;
 
     private:
     /**

@@ -83,7 +83,7 @@ template <> struct row_extractor<vayu::HttpMethod> {
         return vayu::HttpMethod::GET;
     }
     vayu::HttpMethod extract (sqlite3_stmt* stmt, int columnIndex) const {
-        const char* str = (const char*)sqlite3_column_text (stmt, columnIndex);
+        const char* str = vayu::db::column_text (stmt, columnIndex);
         return this->extract (str ? str : "");
     }
 };
@@ -112,7 +112,7 @@ template <> struct row_extractor<vayu::RunType> {
         return vayu::RunType::Design;
     }
     vayu::RunType extract (sqlite3_stmt* stmt, int columnIndex) const {
-        const char* str = (const char*)sqlite3_column_text (stmt, columnIndex);
+        const char* str = vayu::db::column_text (stmt, columnIndex);
         return this->extract (str ? str : "");
     }
 };
@@ -141,7 +141,7 @@ template <> struct row_extractor<vayu::RunStatus> {
         return vayu::RunStatus::Pending;
     }
     vayu::RunStatus extract (sqlite3_stmt* stmt, int columnIndex) const {
-        const char* str = (const char*)sqlite3_column_text (stmt, columnIndex);
+        const char* str = vayu::db::column_text (stmt, columnIndex);
         return this->extract (str ? str : "");
     }
 };

@@ -35,30 +35,44 @@ int sequence_length (unsigned char lead) {
     return 0;
 }
 
-/// True when the @p length bytes at @p begin are a well-formed, minimally
-/// encoded sequence for a scalar value UTF-8 is allowed to carry. The overlong
-/// and surrogate checks are what separate this from a length-only test: both
-/// are byte patterns a decoder must reject rather than pass through.
-bool sequence_is_valid (const unsigned char* begin, int length) {
-    for (int i = 1; i < length; ++i) {
-        if ((begin[i] & 0xC0) != 0x80) {
+/// The byte at @p index of @p text, as the unsigned value every check below
+/// compares against. `char`'s signedness is implementation-defined, so the
+/// 0x80-and-above comparisons only mean what they say once it is spelled out.
+unsigned char byte_at (std::string_view text, std::size_t index) {
+    return static_cast<unsigned char> (text[index]);
+}
+
+/// True when @p sequence is a well-formed, minimally encoded sequence for a
+/// scalar value UTF-8 is allowed to carry. The overlong and surrogate checks
+/// are what separate this from a length-only test: both are byte patterns a
+/// decoder must reject rather than pass through.
+///
+/// Takes the sequence as a view rather than a pointer and a length so the
+/// caller cannot hand it a length its buffer does not hold - the caller's own
+/// `fits` test is then the only place that bound is decided.
+bool sequence_is_valid (std::string_view sequence) {
+    for (std::size_t i = 1; i < sequence.size (); ++i) {
+        if ((byte_at (sequence, i) & 0xC0) != 0x80) {
             return false;
         }
     }
-    switch (length) {
+    switch (sequence.size ()) {
     case 1: return true;
-    case 2: return begin[0] >= 0xC2; // C0/C1 encode 7-bit values overlong
+    case 2:
+        return byte_at (sequence, 0) >= 0xC2; // C0/C1 encode 7-bit values overlong
     case 3: {
-        const uint32_t code = (static_cast<uint32_t> (begin[0] & 0x0F) << 12) |
-        (static_cast<uint32_t> (begin[1] & 0x3F) << 6) |
-        static_cast<uint32_t> (begin[2] & 0x3F);
+        const uint32_t code =
+        (static_cast<uint32_t> (byte_at (sequence, 0) & 0x0F) << 12) |
+        (static_cast<uint32_t> (byte_at (sequence, 1) & 0x3F) << 6) |
+        static_cast<uint32_t> (byte_at (sequence, 2) & 0x3F);
         return code >= 0x800 && (code < 0xD800 || code > 0xDFFF);
     }
     case 4: {
-        const uint32_t code = (static_cast<uint32_t> (begin[0] & 0x07) << 18) |
-        (static_cast<uint32_t> (begin[1] & 0x3F) << 12) |
-        (static_cast<uint32_t> (begin[2] & 0x3F) << 6) |
-        static_cast<uint32_t> (begin[3] & 0x3F);
+        const uint32_t code =
+        (static_cast<uint32_t> (byte_at (sequence, 0) & 0x07) << 18) |
+        (static_cast<uint32_t> (byte_at (sequence, 1) & 0x3F) << 12) |
+        (static_cast<uint32_t> (byte_at (sequence, 2) & 0x3F) << 6) |
+        static_cast<uint32_t> (byte_at (sequence, 3) & 0x3F);
         return code >= 0x10000 && code <= 0x10FFFF;
     }
     default: return false;
@@ -70,13 +84,12 @@ bool sequence_is_valid (const unsigned char* begin, int length) {
 std::string sanitize_utf8 (std::string_view text) {
     std::string out;
     out.reserve (text.size ());
-    const auto* bytes = reinterpret_cast<const unsigned char*> (text.data ());
-    std::size_t i     = 0;
+    std::size_t i = 0;
     while (i < text.size ()) {
-        const int length = sequence_length (bytes[i]);
+        const int length = sequence_length (byte_at (text, i));
         const bool fits =
         length > 0 && i + static_cast<std::size_t> (length) <= text.size ();
-        if (fits && sequence_is_valid (bytes + i, length)) {
+        if (fits && sequence_is_valid (text.substr (i, static_cast<std::size_t> (length)))) {
             out.append (text.substr (i, static_cast<std::size_t> (length)));
             i += static_cast<std::size_t> (length);
             continue;

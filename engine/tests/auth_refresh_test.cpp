@@ -22,6 +22,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "task_queue.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/auth_refresh.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -59,7 +60,7 @@ int64_t now_ms () {
 class MockTarget {
     public:
     MockTarget () {
-        svr_.new_task_queue = [] { return new httplib::ThreadPool (16); };
+        svr_.new_task_queue = vayu::tests::pooled_task_queue (16);
 
         svr_.Get ("/api", [this] (const httplib::Request& req, httplib::Response& res) {
             const std::string auth = req.get_header_value ("Authorization");
@@ -82,9 +83,10 @@ class MockTarget {
         if (thread_.joinable ())
             thread_.join ();
     }
-
     MockTarget (const MockTarget&)            = delete;
     MockTarget& operator= (const MockTarget&) = delete;
+    MockTarget (MockTarget&&)                 = delete;
+    MockTarget& operator= (MockTarget&&)      = delete;
 
     std::string api_url () const {
         return "http://127.0.0.1:" + std::to_string (port_) + "/api";

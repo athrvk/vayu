@@ -77,9 +77,10 @@ class TempFile {
         std::error_code ignored;
         std::filesystem::remove (path_, ignored);
     }
-
     TempFile (const TempFile&)            = delete;
     TempFile& operator= (const TempFile&) = delete;
+    TempFile (TempFile&&)                 = delete;
+    TempFile& operator= (TempFile&&)      = delete;
 
     std::string path () const {
         return path_.string ();

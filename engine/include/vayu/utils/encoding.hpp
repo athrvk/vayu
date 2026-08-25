@@ -14,12 +14,35 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 namespace vayu::utils {
+
+/**
+ * @brief Raw bytes as the `std::string_view` this file's encoders take.
+ *
+ * `sha256` and `hmac_sha256` answer with a `std::array<uint8_t, 32>`, and every
+ * encoder here - plus `hmac_sha256` itself, when a digest is the key - reads a
+ * `std::string_view`. Six call sites spelled that conversion themselves before
+ * this existed, which is the shape the repo's "a hand-rolled copy of a
+ * primitive does not receive the primitive's fixes" rule is about.
+ *
+ * The cast is the one reinterpretation the standard blesses outright:
+ * [basic.lval] lets any object be read through a `char`, `unsigned char` or
+ * `std::byte` lvalue, so viewing a byte array as characters is defined rather
+ * than merely customary. That is why it is a NOLINT here and not a defect -
+ * and why it is written once, so nothing has to argue it again.
+ */
+inline std::string_view byte_view (std::span<const std::uint8_t> bytes) {
+    // [basic.lval] permits reading any object through a character type; see
+    // the note above for why that makes this a NOLINT and not a defect.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    return { reinterpret_cast<const char*> (bytes.data ()), bytes.size () };
+}
 
 namespace detail {
 
@@ -84,7 +107,10 @@ inline std::optional<std::string> base64_decode (std::string_view in) {
 
         // A null b64_end makes libsodium reject input it did not consume in
         // full, so trailing junk after a valid prefix is an error rather than a
-        // short decode.
+        // short decode. The cast is the writing direction of the [basic.lval]
+        // rule `byte_view` above documents - libsodium fills a byte buffer, and
+        // this string is one.
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         if (sodium_base642bin (reinterpret_cast<unsigned char*> (out.data ()),
             out.size (), in.empty () ? "" : in.data (), in.size (), ignore,
             &decoded_len, nullptr, variant) != 0) {
