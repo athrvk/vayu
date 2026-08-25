@@ -48,6 +48,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
@@ -194,7 +195,7 @@ TEST_F (ResourceWriteRouteTest, CollectionCreateOnExistingIdIsRejected) {
     EXPECT_EQ (body["error"]["message"], ENGINE_OWNS_ID);
 
     auto stored = db_->get_collection (id);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->name, "Original");
 }
 
@@ -206,7 +207,9 @@ TEST_F (ResourceWriteRouteTest, CollectionUpdateRejectsMismatchedBodyId) {
     EXPECT_EQ (status, 400);
     EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Body 'id'"),
     std::string::npos);
-    EXPECT_EQ (db_->get_collection (id)->name, "Original")
+    const auto stored_collection = db_->get_collection (id);
+    ASSERT_HAS_VALUE (stored_collection);
+    EXPECT_EQ (stored_collection->name, "Original")
     << "a body id naming another record must not write through the path id";
 }
 
@@ -219,7 +222,9 @@ TEST_F (ResourceWriteRouteTest, CollectionUpdateAcceptsMatchingBodyId) {
     *db_, id, json{ { "id", id }, { "name", "Renamed" } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["name"], "Renamed");
-    EXPECT_EQ (db_->get_collection (id)->name, "Renamed");
+    const auto stored_collection = db_->get_collection (id);
+    ASSERT_HAS_VALUE (stored_collection);
+    EXPECT_EQ (stored_collection->name, "Renamed");
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionUpdateRejectsNullBodyId) {
@@ -230,7 +235,9 @@ TEST_F (ResourceWriteRouteTest, CollectionUpdateRejectsNullBodyId) {
     EXPECT_EQ (status, 400);
     EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Body 'id'"),
     std::string::npos);
-    EXPECT_EQ (db_->get_collection (id)->name, "Original");
+    const auto stored_collection = db_->get_collection (id);
+    ASSERT_HAS_VALUE (stored_collection);
+    EXPECT_EQ (stored_collection->name, "Original");
 }
 
 TEST_F (ResourceWriteRouteTest, UpdateRejectsBodyIdBeforeLookingTheRecordUp) {
@@ -300,7 +307,9 @@ TEST_F (ResourceWriteRouteTest, CollectionNullNameIsRejected) {
     update_collection_response (*db_, id, json{ { "name", nullptr } });
     EXPECT_EQ (status, 400);
     EXPECT_NE (body["error"]["message"].get<std::string> ().find ("name"), std::string::npos);
-    EXPECT_EQ (db_->get_collection (id)->name, "Keep me");
+    const auto stored_collection = db_->get_collection (id);
+    ASSERT_HAS_VALUE (stored_collection);
+    EXPECT_EQ (stored_collection->name, "Keep me");
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionCreateNullMeansDefault) {
@@ -321,7 +330,9 @@ TEST_F (ResourceWriteRouteTest, CollectionWrongShapeObjectFieldIsRejected) {
     { "auth", { { "mode", "bearer" }, { "token", "t" } } } })
     .first,
     200);
-    const auto before = *db_->get_collection (id);
+    const auto before_row = db_->get_collection (id);
+    ASSERT_HAS_VALUE (before_row);
+    const auto before = *before_row;
 
     for (const char* field : { "variables", "auth", "dataSchema" }) {
         for (const json& bad : wrong_shapes ()) {
@@ -336,7 +347,9 @@ TEST_F (ResourceWriteRouteTest, CollectionWrongShapeObjectFieldIsRejected) {
 
     // The stored blobs are what matters: the old helper returned 200 and wrote
     // the junk, so asserting only the response would pass either way.
-    const auto after = *db_->get_collection (id);
+    const auto after_row = db_->get_collection (id);
+    ASSERT_HAS_VALUE (after_row);
+    const auto after = *after_row;
     EXPECT_EQ (after.variables, before.variables);
     EXPECT_EQ (after.auth, before.auth);
     EXPECT_EQ (after.data_schema, before.data_schema);
@@ -389,7 +402,9 @@ TEST_F (ResourceWriteRouteTest, CollectionDataSchemaRoundTripsAndFollowsTheNullR
     ASSERT_EQ (clear_status, 200);
     EXPECT_TRUE (cleared["dataSchema"].is_object ());
     EXPECT_TRUE (cleared["dataSchema"].empty ());
-    EXPECT_EQ (db_->get_collection (id)->data_schema, "{}");
+    const auto stored_collection = db_->get_collection (id);
+    ASSERT_HAS_VALUE (stored_collection);
+    EXPECT_EQ (stored_collection->data_schema, "{}");
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionDataSchemaContentsAreValidated) {
@@ -414,7 +429,9 @@ TEST_F (ResourceWriteRouteTest, CollectionDataSchemaContentsAreValidated) {
         EXPECT_EQ (status, 400) << schema.dump ();
         EXPECT_NE (body["error"]["message"].get<std::string> ().find (names), std::string::npos)
         << body["error"]["message"];
-        EXPECT_EQ (db_->get_collection (id)->data_schema, "{}")
+        const auto stored_collection = db_->get_collection (id);
+        ASSERT_HAS_VALUE (stored_collection);
+        EXPECT_EQ (stored_collection->data_schema, "{}")
         << "a rejected write must store nothing - " << schema.dump ();
     }
 
@@ -474,7 +491,9 @@ TEST_F (ResourceWriteRouteTest, RequestCreateRejectsClientId) {
     { "method", "POST" }, { "url", "https://evil.example" } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (body["error"]["message"], ENGINE_OWNS_ID);
-    EXPECT_EQ (db_->get_request (id)->name, "R");
+    const auto stored_request = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->name, "R");
     EXPECT_EQ (db_->get_requests_in_collection (collection).size (), 1U)
     << "a rejected create must not persist a second row under a generated id";
 }
@@ -488,7 +507,9 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateRejectsMismatchedBodyId) {
     EXPECT_EQ (status, 400);
     EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Body 'id'"),
     std::string::npos);
-    EXPECT_EQ (db_->get_request (id)->name, "R");
+    const auto stored_request = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->name, "R");
 }
 
 TEST_F (ResourceWriteRouteTest, RequestCreateRequiresItsNoDefaultFields) {
@@ -595,7 +616,9 @@ TEST_F (ResourceWriteRouteTest, RequestNullNoDefaultFieldIsRejected) {
         EXPECT_NE (body["error"]["message"].get<std::string> ().find (field),
         std::string::npos);
     }
-    EXPECT_EQ (db_->get_request (id)->url, "https://example.com");
+    const auto stored_request = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->url, "https://example.com");
 }
 
 TEST_F (ResourceWriteRouteTest, RequestInvalidMethodIsRejected) {
@@ -627,7 +650,9 @@ TEST_F (ResourceWriteRouteTest, RequestWrongShapeObjectFieldIsRejected) {
                { "auth", { { "mode", "bearer" }, { "token", "t" } } } })
                .first,
     200);
-    const auto before = *db_->get_request (id);
+    const auto before_row = db_->get_request (id);
+    ASSERT_HAS_VALUE (before_row);
+    const auto before = *before_row;
 
     for (const char* field : { "body", "auth" }) {
         for (const json& bad : wrong_shapes ()) {
@@ -639,7 +664,9 @@ TEST_F (ResourceWriteRouteTest, RequestWrongShapeObjectFieldIsRejected) {
         }
     }
 
-    const auto after = *db_->get_request (id);
+    const auto after_row = db_->get_request (id);
+    ASSERT_HAS_VALUE (after_row);
+    const auto after = *after_row;
     EXPECT_EQ (after.body, before.body);
     EXPECT_EQ (after.auth, before.auth)
     << "a stored non-object auth reads back as no auth, and the request goes "
@@ -688,7 +715,9 @@ TEST_F (ResourceWriteRouteTest, RequestCreateAbsentVerifySSLVerifies) {
     ASSERT_EQ (status, 200);
     ASSERT_TRUE (body.contains ("verifySSL"));
     EXPECT_EQ (body["verifySSL"], true);
-    EXPECT_TRUE (db_->get_request (body["id"].get<std::string> ())->verify_ssl);
+    const auto stored_request = db_->get_request (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_TRUE (stored_request->verify_ssl);
 }
 
 TEST_F (ResourceWriteRouteTest, RequestCreateStoresVerifySSLFalse) {
@@ -698,7 +727,9 @@ TEST_F (ResourceWriteRouteTest, RequestCreateStoresVerifySSLFalse) {
              { "url", "https://example.com" }, { "verifySSL", false } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["verifySSL"], false);
-    EXPECT_FALSE (db_->get_request (body["id"].get<std::string> ())->verify_ssl);
+    const auto stored_request = db_->get_request (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_FALSE (stored_request->verify_ssl);
 }
 
 TEST_F (ResourceWriteRouteTest, RequestUpdateKeepsVerifySSLWhenAbsent) {
@@ -802,7 +833,9 @@ TEST_F (ResourceWriteRouteTest, RequestCreateValidHttpVersionIsStored) {
              { "url", "https://example.com" }, { "httpVersion", "http1.1" } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["httpVersion"], "http1.1");
-    EXPECT_EQ (db_->get_request (body["id"].get<std::string> ())->http_version, "http1.1");
+    const auto stored_request = db_->get_request (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->http_version, "http1.1");
 }
 
 TEST_F (ResourceWriteRouteTest, RequestCreateInvalidHttpVersionIsRejectedAndNotStored) {
@@ -864,7 +897,9 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateNullHttpVersionReReadsGlobalAtWrite
     // vayu::DEFAULT_HTTP_VERSION) produces "http2" here.
     const std::string collection = make_collection ();
     const std::string id         = make_request (collection);
-    ASSERT_EQ (db_->get_request (id)->http_version, "auto");
+    const auto seeded_row = db_->get_request (id);
+    ASSERT_HAS_VALUE (seeded_row);
+    ASSERT_EQ (seeded_row->http_version, "auto");
 
     ASSERT_EQ (
     apply_config_update (*db_, R"({"entries":{"defaultHttpVersion":"http2"}})").first, 200);
@@ -873,7 +908,9 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateNullHttpVersionReReadsGlobalAtWrite
     update_request_response (*db_, id, json{ { "httpVersion", nullptr } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["httpVersion"], "http2");
-    EXPECT_EQ (db_->get_request (id)->http_version, "http2");
+    const auto reset_row = db_->get_request (id);
+    ASSERT_HAS_VALUE (reset_row);
+    EXPECT_EQ (reset_row->http_version, "http2");
 }
 
 TEST_F (ResourceWriteRouteTest, RequestUpdateValidHttpVersionIsStored) {
@@ -897,7 +934,9 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateInvalidHttpVersionIsRejectedAndUnch
     const auto message = body["error"]["message"].get<std::string> ();
     EXPECT_NE (message.find ("httpVersion"), std::string::npos);
     EXPECT_NE (message.find ("spdy"), std::string::npos);
-    EXPECT_EQ (db_->get_request (id)->http_version, "http2")
+    const auto stored_request = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->http_version, "http2")
     << "a rejected update must leave the stored value untouched";
 }
 
@@ -931,7 +970,9 @@ TEST_F (ResourceWriteRouteTest, EnvironmentCreateRejectsClientId) {
     create_environment_response (*db_, json{ { "id", id }, { "name", "Impostor" } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (body["error"]["message"], ENGINE_OWNS_ID);
-    EXPECT_EQ (db_->get_environment (id)->name, "Original");
+    const auto stored_environment = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored_environment);
+    EXPECT_EQ (stored_environment->name, "Original");
     EXPECT_EQ (db_->get_environments ().size (), 1U)
     << "a rejected create must not persist a second row under a generated id";
 }
@@ -947,7 +988,9 @@ TEST_F (ResourceWriteRouteTest, EnvironmentUpdateRejectsMismatchedBodyId) {
     EXPECT_EQ (status, 400);
     EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Body 'id'"),
     std::string::npos);
-    EXPECT_EQ (db_->get_environment (id)->name, "Original");
+    const auto stored_environment = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored_environment);
+    EXPECT_EQ (stored_environment->name, "Original");
 }
 
 TEST_F (ResourceWriteRouteTest, EnvironmentUpdateMissingIsNotFound) {
@@ -974,14 +1017,18 @@ TEST_F (ResourceWriteRouteTest, EnvironmentNullVariablesResetsToEmptyObject) {
     EXPECT_TRUE (body["variables"].empty ());
 
     // The stored blob is `{}`, not the string "null".
-    EXPECT_EQ (db_->get_environment (id)->variables, "{}");
+    const auto stored_environment = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored_environment);
+    EXPECT_EQ (stored_environment->variables, "{}");
 }
 
 TEST_F (ResourceWriteRouteTest, EnvironmentCreateNullVariablesIsEmptyObject) {
     auto [status, body] = create_environment_response (
     *db_, json{ { "name", "Env" }, { "variables", nullptr } });
     ASSERT_EQ (status, 200);
-    EXPECT_EQ (db_->get_environment (body["id"].get<std::string> ())->variables, "{}");
+    const auto stored_environment = db_->get_environment (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored_environment);
+    EXPECT_EQ (stored_environment->variables, "{}");
 }
 
 TEST_F (ResourceWriteRouteTest, EnvironmentUpdateHonoursIsActive) {
@@ -997,7 +1044,9 @@ TEST_F (ResourceWriteRouteTest, EnvironmentUpdateHonoursIsActive) {
     update_environment_response (*db_, id, json{ { "isActive", false } });
     ASSERT_EQ (status, 200);
     EXPECT_FALSE (body["isActive"].get<bool> ());
-    EXPECT_FALSE (db_->get_environment (id)->is_active);
+    const auto stored_environment = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored_environment);
+    EXPECT_FALSE (stored_environment->is_active);
 }
 
 TEST_F (ResourceWriteRouteTest, ActivatingOverTheRouteDeactivatesThePrevious) {
@@ -1018,8 +1067,12 @@ TEST_F (ResourceWriteRouteTest, ActivatingOverTheRouteDeactivatesThePrevious) {
     update_environment_response (*db_, prod, json{ { "isActive", true } });
     ASSERT_EQ (status, 200);
     EXPECT_TRUE (body["isActive"].get<bool> ());
-    EXPECT_TRUE (db_->get_environment (prod)->is_active);
-    EXPECT_FALSE (db_->get_environment (dev)->is_active);
+    const auto prod_row = db_->get_environment (prod);
+    ASSERT_HAS_VALUE (prod_row);
+    EXPECT_TRUE (prod_row->is_active);
+    const auto dev_row = db_->get_environment (dev);
+    ASSERT_HAS_VALUE (dev_row);
+    EXPECT_FALSE (dev_row->is_active);
 }
 
 TEST_F (ResourceWriteRouteTest, CreatingAnActiveEnvironmentDeactivatesThePrevious) {
@@ -1031,8 +1084,12 @@ TEST_F (ResourceWriteRouteTest, CreatingAnActiveEnvironmentDeactivatesThePreviou
     auto [status, body] = create_environment_response (
     *db_, json{ { "name", "Prod" }, { "isActive", true } });
     ASSERT_EQ (status, 200);
-    EXPECT_TRUE (db_->get_environment (body["id"].get<std::string> ())->is_active);
-    EXPECT_FALSE (db_->get_environment (dev)->is_active);
+    const auto stored_environment = db_->get_environment (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored_environment);
+    EXPECT_TRUE (stored_environment->is_active);
+    const auto dev_row = db_->get_environment (dev);
+    ASSERT_HAS_VALUE (dev_row);
+    EXPECT_FALSE (dev_row->is_active);
 }
 
 TEST_F (ResourceWriteRouteTest, EnvironmentUpdateAbsentKeepsVariables) {
@@ -1055,7 +1112,9 @@ TEST_F (ResourceWriteRouteTest, EnvironmentWrongShapeVariablesIsRejected) {
     { "variables", { { "token", { { "value", "abc" }, { "enabled", true } } } } } });
     ASSERT_EQ (created_status, 200);
     const std::string id     = created["id"].get<std::string> ();
-    const std::string before = db_->get_environment (id)->variables;
+    const auto before_row = db_->get_environment (id);
+    ASSERT_HAS_VALUE (before_row);
+    const std::string before = before_row->variables;
 
     for (const json& bad : wrong_shapes ()) {
         auto [status, body] =
@@ -1064,7 +1123,9 @@ TEST_F (ResourceWriteRouteTest, EnvironmentWrongShapeVariablesIsRejected) {
         EXPECT_NE (
         body["error"]["message"].get<std::string> ().find ("variables"), std::string::npos);
     }
-    EXPECT_EQ (db_->get_environment (id)->variables, before)
+    const auto stored_environment = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored_environment);
+    EXPECT_EQ (stored_environment->variables, before)
     << "a rejected write must not reach the column";
 }
 
@@ -1087,7 +1148,9 @@ TEST_F (ResourceWriteRouteTest, EnvironmentNullNameIsRejected) {
     auto [status, body] =
     update_environment_response (*db_, id, json{ { "name", nullptr } });
     EXPECT_EQ (status, 400);
-    EXPECT_EQ (db_->get_environment (id)->name, "Keep me");
+    const auto stored_environment = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored_environment);
+    EXPECT_EQ (stored_environment->name, "Keep me");
 }
 
 } // namespace

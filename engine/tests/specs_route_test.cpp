@@ -31,6 +31,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/scenario_plan.hpp"
@@ -235,7 +236,7 @@ TEST_F (SpecsRouteTest, RefusesADocumentOverTheConfiguredCapNamingBothNumbers) {
     // Below the compiled default, so this proves the *live* config entry is what
     // the write reads - not the constant.
     auto entry = db_->get_config_entry ("maxSpecDocumentBytes");
-    ASSERT_TRUE (entry.has_value ())
+    ASSERT_HAS_VALUE (entry)
     << "the cap must be a seeded, user-visible knob";
     entry->value = "64";
     db_->save_config_entry (*entry);
@@ -372,7 +373,7 @@ TEST_F (SpecsRouteTest, DeleteSucceedsOnceTheCollectionUnbinds) {
 TEST_F (SpecsRouteTest, AnUnboundCollectionSerializesAnEmptyBinding) {
     const std::string col_id = create_collection (json{ { "name", "Plain" } });
     auto stored              = db_->get_collection (col_id);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     const auto serialized = vayu::json::serialize (*stored);
     ASSERT_TRUE (serialized.contains ("openapi"));
     EXPECT_TRUE (serialized["openapi"].is_object ());
@@ -438,8 +439,9 @@ TEST_F (SpecsRouteTest, ABindingWrittenWithoutAVersionIsStampedFromTheStoredDocu
     routes::spec_content_hash (PETSTORE));
     EXPECT_GT (body["openapi"].value ("syncedAt", int64_t{ 0 }), 0);
 
-    const json stored =
-    json::parse (db_->get_collection (body["id"].get<std::string> ())->openapi);
+    const auto row = db_->get_collection (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (row) << "the create must have stored the collection it just returned";
+    const json stored = json::parse (row->openapi);
     EXPECT_EQ (stored.value ("specHash", std::string{}), routes::spec_content_hash (PETSTORE))
     << "the response must be the row, not a dressed-up copy of it";
 }
@@ -463,7 +465,9 @@ TEST_F (SpecsRouteTest, AStampFillsWhatIsMissingAndOverwritesNothing) {
     // not quietly "repair" it into agreement with whatever is stored today.
     const std::string col_id = create_collection (json{ { "name", "Pets" },
     { "openapi", { { "specId", spec_id }, { "specHash", "stale-hash" }, { "syncedAt", 42 } } } });
-    const json stored = json::parse (db_->get_collection (col_id)->openapi);
+    const auto row = db_->get_collection (col_id);
+    ASSERT_HAS_VALUE (row);
+    const json stored = json::parse (row->openapi);
     EXPECT_EQ (stored.value ("specHash", std::string{}), "stale-hash");
     EXPECT_EQ (stored.value ("syncedAt", int64_t{ 0 }), 42);
 }
@@ -488,8 +492,10 @@ TEST_F (SpecsRouteTest, StartupStampsAnUnstampedBindingFromTheDocumentItNames) {
     db_->init (); // idempotent, and where the repair pass runs
 
     const auto document = db_->get_spec_document (spec_id);
-    ASSERT_TRUE (document.has_value ());
-    const json stored = json::parse (db_->get_collection ("col_legacy")->openapi);
+    ASSERT_HAS_VALUE (document);
+    const auto legacy_row = db_->get_collection ("col_legacy");
+    ASSERT_HAS_VALUE (legacy_row);
+    const json stored = json::parse (legacy_row->openapi);
     EXPECT_EQ (stored.value ("specHash", std::string{}), document->hash);
     EXPECT_EQ (stored.value ("syncedAt", int64_t{ 0 }), document->fetched_at)
     << "the binding was made when the document was stored, not on this restart";
@@ -497,8 +503,9 @@ TEST_F (SpecsRouteTest, StartupStampsAnUnstampedBindingFromTheDocumentItNames) {
     // And a second start leaves it alone - a repair pass that re-stamped would
     // move `syncedAt` forward on every launch.
     db_->init ();
-    EXPECT_EQ (
-    json::parse (db_->get_collection ("col_legacy")->openapi).value ("syncedAt", int64_t{ 0 }),
+    const auto restarted_row = db_->get_collection ("col_legacy");
+    ASSERT_HAS_VALUE (restarted_row);
+    EXPECT_EQ (json::parse (restarted_row->openapi).value ("syncedAt", int64_t{ 0 }),
     document->fetched_at);
 }
 
@@ -514,7 +521,9 @@ TEST_F (SpecsRouteTest, StartupLeavesABindingWhoseDocumentIsGoneUntouched) {
 
     db_->init ();
 
-    const json stored = json::parse (db_->get_collection ("col_orphan")->openapi);
+    const auto orphan_row = db_->get_collection ("col_orphan");
+    ASSERT_HAS_VALUE (orphan_row);
+    const json stored = json::parse (orphan_row->openapi);
     EXPECT_EQ (stored["specId"].get<std::string> (), "spec_ghost");
     EXPECT_FALSE (stored.contains ("specHash"))
     << "there is nothing to stamp it from, and a run says so already";
@@ -581,7 +590,9 @@ TEST_F (SpecsRouteTest, OperationIdentityIsUnsetByAnExplicitNullOnUpdate) {
     *db_, req_id, json{ { "specOperation", nullptr } });
     ASSERT_EQ (reset, 200) << reset_body.dump ();
     EXPECT_TRUE (reset_body["specOperation"].is_null ());
-    EXPECT_FALSE (db_->get_request (req_id)->spec_operation.has_value ())
+    const auto reset_row = db_->get_request (req_id);
+    ASSERT_HAS_VALUE (reset_row);
+    EXPECT_FALSE (reset_row->spec_operation.has_value ())
     << "the column must be NULL, not the string \"{}\"";
 }
 
@@ -628,14 +639,14 @@ TEST_F (SpecsRouteTest, ImportWritesSpecsAndResolvesABindingThroughTheTempIdMap)
     const auto spec_id = body["idMap"]["s1"].get<std::string> ();
     EXPECT_TRUE (spec_id.starts_with ("spec_"));
     auto stored_spec = db_->get_spec_document (spec_id);
-    ASSERT_TRUE (stored_spec.has_value ());
+    ASSERT_HAS_VALUE (stored_spec);
     EXPECT_EQ (stored_spec->content, PETSTORE);
     // Computed on the import path too, never carried on the payload.
     EXPECT_EQ (stored_spec->hash, routes::spec_content_hash (PETSTORE));
     EXPECT_EQ (stored_spec->source_url.value_or (""), "https://example.test/openapi.json");
 
     auto stored_col = db_->get_collection (body["idMap"]["c1"].get<std::string> ());
-    ASSERT_TRUE (stored_col.has_value ());
+    ASSERT_HAS_VALUE (stored_col);
     const json binding = json::parse (stored_col->openapi);
     EXPECT_EQ (binding["specId"].get<std::string> (), spec_id)
     << "the temp id must have been rewritten to the engine's real id";
@@ -648,8 +659,8 @@ TEST_F (SpecsRouteTest, ImportWritesSpecsAndResolvesABindingThroughTheTempIdMap)
 
     // Operation identity rides the shared applier, so it arrives free.
     auto stored_req = db_->get_request (body["idMap"]["r1"].get<std::string> ());
-    ASSERT_TRUE (stored_req.has_value ());
-    ASSERT_TRUE (stored_req->spec_operation.has_value ());
+    ASSERT_HAS_VALUE (stored_req);
+    ASSERT_HAS_VALUE (stored_req->spec_operation);
     EXPECT_EQ (
     json::parse (*stored_req->spec_operation)["operationId"].get<std::string> (), "listPets");
 }
@@ -662,7 +673,7 @@ TEST_F (SpecsRouteTest, ImportMayBindASpecThatIsAlreadyStored) {
     auto [status, body] = routes::import_apply_response (*db_, payload);
     ASSERT_EQ (status, 200) << body.dump ();
     auto stored = db_->get_collection (body["idMap"]["c1"].get<std::string> ());
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     const json binding = json::parse (stored->openapi);
     EXPECT_EQ (binding["specId"].get<std::string> (), spec_id);
     // Stamped from the stored document, the same as the payload-local case -
@@ -729,7 +740,7 @@ TEST_F (SpecsRouteTest, ABindingWithNoVersionIsNamedRatherThanBlamedOnTheDocumen
 
     const auto resolved = resolve ("col_unstamped");
     ASSERT_TRUE (resolved.ok) << resolved.error;
-    ASSERT_TRUE (resolved.spec.schema_reason.has_value ());
+    ASSERT_HAS_VALUE (resolved.spec.schema_reason);
     EXPECT_EQ (vayu::core::to_string (*resolved.spec.schema_reason), "never_stamped");
 }
 
@@ -1124,7 +1135,7 @@ TEST_F (SpecsRouteTest, TheDesignPathAndTheScenarioPathResolveOneBinding) {
     ASSERT_TRUE (resolved.ok) << resolved.error;
     EXPECT_EQ (resolved.spec.spec_id, nearer_spec)
     << "nearest bound ancestor wins";
-    ASSERT_TRUE (resolved.spec.schema_reason.has_value ());
+    ASSERT_HAS_VALUE (resolved.spec.schema_reason);
     EXPECT_EQ (*resolved.spec.schema_reason, vayu::core::UncheckedReason::HashMismatch);
     EXPECT_TRUE (resolved.spec.declared_operations.empty ())
     << "the root's operations would mean the scenario walk took the wrong "
@@ -1132,7 +1143,7 @@ TEST_F (SpecsRouteTest, TheDesignPathAndTheScenarioPathResolveOneBinding) {
 
     const auto design = routes::resolve_design_schema_index (*db_, req_id);
     EXPECT_TRUE (design.bound);
-    ASSERT_TRUE (design.reason.has_value ())
+    ASSERT_HAS_VALUE (design.reason)
     << "a clean index here means the design walk took the root's binding";
     EXPECT_EQ (*design.reason, *resolved.spec.schema_reason)
     << "the two paths must resolve one binding, or a Send and a run of the "
