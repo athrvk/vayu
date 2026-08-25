@@ -96,8 +96,11 @@ engine/
   `hmac_sha256` digest, and the six sites that spelled that themselves;
   **`vayu::db::column_text`** (`db/database.hpp`) for a sqlite TEXT column,
   which `sqlite3_column_text` hands back as `const unsigned char*` and nothing
-  consumes as one; and **`vayu::utils::detail::sodium_bytes`**
-  (`utils/sodium_init.hpp`) going the other way, for libsodium. A SQL NULL stays
+  consumes as one; **`vayu::utils::detail::sodium_bytes`**
+  (`utils/sodium_init.hpp`) going the other way, for libsodium; and
+  **`tls_detail::openssl_bytes`** (`tests/tls_server.hpp`, #1013) going the same
+  way for OpenSSL, whose parameters are `const unsigned char*` with no
+  `string_view` seam. A SQL NULL stays
   a null pointer through `column_text` on purpose - absent and empty are
   different answers, and defaulting one to the other erases the distinction its
   callers read. `tests/character_cast_test.cpp` scans `engine/{src,include,tests}`
@@ -112,15 +115,41 @@ engine/
   leaving the rest implicit is how a fixture that owns a listener and a thread
   stays copyable: the copy compiles, both objects stop the same server, and
   nothing says it was not meant to. Every RAII holder here - the `Impl` behind a
-  pImpl, `Database`, and the ~20 in-process mock servers in `tests/` - deletes
-  copy *and* move beside its destructor, in the spelling `client.hpp` uses
-  (`Foo (const Foo&) = delete;` and the three that follow). Deleting is the
+  pImpl, `Database`, the ~20 in-process mock servers in `tests/`, and (#1013)
+  every manager and listener in `include/`: `Server`, `ManagedListener`,
+  `SseStreamManager`, `InboxManager`, `RunManager`, `EventLoopWorker`, `Logger`
+  and their kin - deletes copy *and* move beside its destructor, in the spelling
+  `client.hpp` uses (`Foo (const Foo&) = delete;` and the three that follow).
+  Deleting is the
   default answer, not defaulting: none of these is meaningfully movable, and a
-  move would leave a hollow object whose methods still compile. A mock server's
+  move would leave a hollow object whose methods still compile. **Declaring the
+  four suppresses the implicit default constructor**, so a class that had no
+  other constructor gains `Foo () = default;` beside them - `TransferData`,
+  `RunManager` and the `LoadStrategy` interface each needed it, and the build is
+  what says so. A mock server's
   thread pool is `vayu::tests::pooled_task_queue`
   (`tests/task_queue.hpp`) - httplib's `new_task_queue` hook takes a raw owning
   pointer, which is its contract and not a leak, said once there rather than at
   each fixture.
+- **A row struct's scalars all carry a default** (#1013,
+  `cppcoreguidelines-pro-type-member-init`). The `vayu::db` structs in
+  `types.hpp` are aggregates an insert site fills field by field, so one it
+  forgets is *indeterminate* rather than zero - and sqlite_orm binds and stores
+  whatever that was. `Run::end_time` had already made the argument for itself;
+  it now holds for every scalar in the namespace. The three enums
+  (`Request::method`, `Run::type`, `Run::status`) default to what
+  `database.cpp`'s `row_extractor` already falls back to for a stored value it
+  cannot parse, so the struct and the reader agree about an unset field rather
+  than each picking an answer. A default is not a substitute for setting the
+  field: it bounds what a wrong insert can persist, and stops an indeterminate
+  `bool` or enum being read at all.
+- **A whole-tree tidy measurement passes `-header-filter` itself** (#1013). The
+  `HeaderFilterRegex` in `engine/.clang-tidy` is *not* read by a
+  `run-clang-tidy` invocation that omits the command-line flag, so a scan
+  without it reports nothing found in a header - which is how 50 findings went
+  uncounted through four measurement rounds. Deduplicate the result by
+  (file, line, column, check): a header finding is reported once per including
+  translation unit. `docs/engine/building.md` carries the command.
 - Formatter: clang-format, **19 exactly** (`.clang-format` at repo root; the
   version is pinned because 39 of the 285 engine sources format differently
   under 18). **A difference is a failure now** (#886): the `Engine formatting`

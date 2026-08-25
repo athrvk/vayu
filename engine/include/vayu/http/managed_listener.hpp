@@ -60,6 +60,8 @@ class ManagedListener {
 
     ManagedListener (const ManagedListener&)            = delete;
     ManagedListener& operator= (const ManagedListener&) = delete;
+    ManagedListener (ManagedListener&&)                 = delete;
+    ManagedListener& operator= (ManagedListener&&)      = delete;
 
     /**
      * The server to register routes and options on, before `start()`.

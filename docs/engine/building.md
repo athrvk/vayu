@@ -995,6 +995,40 @@ down by whoever edits those lines - and, since #928, by its waves on purpose:
 findings down family by family, with promotion from changed-lines to whole-file
 gating decided in #946 once nothing pre-existing is left to surface.
 
+**"Clean" means the whole tree, headers included - and a scan has to be asked
+for that** (#1013). `run-clang-tidy` reports nothing found in a header unless
+`-header-filter` is passed **on the command line**: the `HeaderFilterRegex` in
+`engine/.clang-tidy` does not supply it. Every number the #928 paydown worked
+from before this was measured without it, so 50 findings sat in headers that no
+report had ever counted - the same seam as "CI lints translation units, never a
+header" (#940), reaching the measurement rather than the gate.
+
+That is a gap in the *measurement*, not in the standard. A header is part of the
+tree, the pre-commit hook lints one whenever a commit stages it, and #946's
+"zero findings tree-wide" is not true of a tree whose headers were never read.
+So the re-measure command is:
+
+```bash
+run-clang-tidy-19 -p engine/build -quiet \
+  -header-filter='.*/(src|include|tests)/.*' \
+  -extra-arg=-Wno-ignored-gch <every non-vendor translation unit>
+```
+
+and its output is **deduplicated by (file, line, column, check)** before it is
+counted, because a header finding is reported once per translation unit that
+includes it - which is what made the wave-0 table read 11 `concurrency-mt-unsafe`
+where 8 sites existed. `-extra-arg=-Wno-ignored-gch` is needed because the
+build's precompiled header is GCC's (#912).
+
+Two things this does **not** change. The gate still lints translation units,
+because a header has no `compile_commands.json` entry and a guessed command
+emits `clang-diagnostic-error`s that escape line filtering (#940) - so a
+promotion from changed-lines to whole-*file* scope, which #946 decides, still
+would not read a header; the hook is what does. And `engine/src/runtime/` stays
+out of scope in every count: its own `.clang-tidy` declines every check with a
+written reason, so the findings a check-list override surfaces there are that
+decision working, not a backlog.
+
 **What the config enables is a decision, not a default** (#928): the families
 that catch real defects - `bugprone-*`, `clang-analyzer-*`, `concurrency-*`,
 `cert-*`, a curated `cppcoreguidelines-*` safety subset, `performance-*` - plus

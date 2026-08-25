@@ -110,7 +110,15 @@ const ResultAnnotations& annotations = {});
  */
 class LoadStrategy {
     public:
+    LoadStrategy ()          = default;
     virtual ~LoadStrategy () = default;
+    // Deleted rather than protected: nothing copies a strategy - they are held
+    // by pointer and run in place - and deleting is what stops a derived one
+    // being sliced back to this interface.
+    LoadStrategy (const LoadStrategy&)            = delete;
+    LoadStrategy& operator= (const LoadStrategy&) = delete;
+    LoadStrategy (LoadStrategy&&)                 = delete;
+    LoadStrategy& operator= (LoadStrategy&&)      = delete;
 
     /**
      * @brief Execute the load test strategy

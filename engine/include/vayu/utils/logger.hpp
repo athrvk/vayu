@@ -60,6 +60,10 @@ class Logger {
     private:
     Logger () = default;
     ~Logger ();
+    Logger (const Logger&)            = delete;
+    Logger& operator= (const Logger&) = delete;
+    Logger (Logger&&)                 = delete;
+    Logger& operator= (Logger&&)      = delete;
 
     std::string level_to_string (Level level) const;
     std::string get_timestamp () const;

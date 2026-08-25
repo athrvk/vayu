@@ -199,7 +199,7 @@ constexpr std::array<ExemptFile, 5> kExempt = { {
 { "include/vayu/utils/encoding.hpp", "byte_view, and the base64 decoder's output buffer" },
 { "include/vayu/utils/sodium_init.hpp", "sodium_bytes - byte_view's inverse" },
 { "include/vayu/db/database.hpp", "column_text" },
-{ "tests/tls_server.hpp", "OpenSSL's C API takes const unsigned char* directly, with no string_view seam" },
+{ "tests/tls_server.hpp", "tls_detail::openssl_bytes - OpenSSL's C API takes const unsigned char* directly, with no string_view seam" },
 { "src/runtime/script_engine.cpp", "a JS ArrayBuffer's bytes arrive as uint8_t* from QuickJS, not as a span" },
 } };
 

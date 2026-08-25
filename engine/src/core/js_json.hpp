@@ -34,7 +34,7 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
-#include <cstdio>
+#include <format>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
@@ -122,13 +122,15 @@ inline std::string js_number_text (const json& value) {
         return "null"; // What `JSON.stringify` writes for NaN and Infinity.
     }
     if (std::trunc (real) == real && std::abs (real) < 1e21) {
-        std::array<char, 64> buffer{};
-        const int written = std::snprintf (buffer.data (), buffer.size (), "%.0f", real);
-        if (written > 0) {
-            std::string text (buffer.data (), static_cast<size_t> (written));
-            // `%.0f` writes "-0" for negative zero; JavaScript writes "0".
-            return text == "-0" ? "0" : text;
-        }
+        // `std::format` rather than `snprintf ("%.0f")`: the same fixed
+        // notation with no fractional digits, without the vararg call
+        // (`cppcoreguidelines-pro-type-vararg`), the fixed buffer, or the
+        // short-write branch that a value bounded by 1e21 could never take.
+        // Rounding cannot differ between the two here - the guard above admits
+        // only values that are already whole.
+        const std::string text = std::format ("{:.0f}", real);
+        // A negative zero formats as "-0"; JavaScript writes "0".
+        return text == "-0" ? "0" : text;
     }
     std::array<char, 64> buffer{};
     const auto result =
@@ -182,10 +184,10 @@ inline void append_json_string (const std::string& value, std::string& out) {
         case '\t': out += "\\t"; break;
         default:
             if (static_cast<unsigned char> (ch) < 0x20) {
-                std::array<char, 8> escape{};
-                std::snprintf (escape.data (), escape.size (), "\\u%04x",
+                // Same four lowercase hex digits `\\u%04x` wrote, without the
+                // vararg call or the fixed buffer.
+                out += std::format ("\\u{:04x}",
                 static_cast<unsigned int> (static_cast<unsigned char> (ch)));
-                out += escape.data ();
             } else {
                 out += ch;
             }
