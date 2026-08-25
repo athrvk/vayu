@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstddef>
 #include <regex>
+#include <vector>
 
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/request_builder.hpp"
@@ -553,38 +554,62 @@ TEST_F (ScriptEngineTest, ExpectEqlReportsACycleWhereItCloses) {
     << result.tests[0].error_message;
 }
 
-// The #959 failure mode itself, reproduced on any platform.
+// The #959 failure mode itself, and the invariant that retires it.
 //
 // The Windows leg failed because QuickJS's own stack guard tripped before the
 // depth cap did, inside the JS_Call that reads an object's class tag. Frame
-// size is what decided which won, so the bug was invisible on GCC and Clang
-// and deterministic on MSVC at /Od under ASan. Shrinking the interpreter's
-// stack budget puts a Linux build on the same side of that race, which turns a
-// platform-specific report into a test.
+// size decided which won, so the bug was invisible on GCC and Clang and
+// deterministic on MSVC at /Od under ASan.
+//
+// The property the fix establishes is therefore not "it works at 16 KB" - that
+// is another constant tuned to one toolchain, which is the mistake that caused
+// the bug. It is: **at every interpreter stack budget the engine can actually
+// run a script on, a cyclic compare reports the cycle.** Detecting the cycle
+// where it closes means the answer no longer depends on how much stack a frame
+// happens to take, so this sweeps the budget instead of picking a number.
+//
+// A budget too small to run the script at all is not a counter-example - the
+// script never reaches the comparison - so those are skipped, and the test
+// requires that at least one budget did run, so it cannot pass by sweeping a
+// range where nothing executed.
 //
 // Mutation check: with the cycle detection removed and only the depth cap
-// left, this reports the matcher's generic "to deeply equal" message - the
-// exact string windows-asan produced - because the guard fires first and the
-// thrown error is dropped. It also fails if js_class_tag goes back to
-// swallowing the exception.
-TEST_F (ScriptEngineTest, ExpectEqlOnACycleSurvivesAShallowInterpreterStack) {
-    ScriptConfig tight;
-    tight.stack_size = std::size_t{ 16 } * 1024;
-    ScriptEngine shallow{ tight };
+// left, the small budgets report the matcher's generic "to deeply equal"
+// message - the exact string windows-asan produced - and this fails.
+TEST_F (ScriptEngineTest, ExpectEqlOnACycleReportsItAtEveryUsableStackBudget) {
+    constexpr std::size_t kKiB             = 1024;
+    const std::vector<std::size_t> budgets = { 16 * kKiB, 32 * kKiB, 64 * kKiB,
+        128 * kKiB, 256 * kKiB };
 
-    auto result = shallow.execute_test (R"(
-        pm.test("cyclic", function() {
-            var a = {}; a.self = a;
-            var b = {}; b.self = b;
-            pm.expect(a).to.eql(b);
-        });
-    )",
-    request, response, env);
+    int ran = 0;
+    for (const std::size_t budget : budgets) {
+        ScriptConfig config;
+        config.stack_size = budget;
+        ScriptEngine engine_at_budget{ config };
 
-    ASSERT_EQ (result.tests.size (), 1);
-    EXPECT_FALSE (result.tests[0].passed);
-    EXPECT_NE (result.tests[0].error_message.find ("cyclic"), std::string::npos)
-    << result.tests[0].error_message;
+        auto result = engine_at_budget.execute_test (R"(
+            pm.test("cyclic", function() {
+                var a = {}; a.self = a;
+                var b = {}; b.self = b;
+                pm.expect(a).to.eql(b);
+            });
+        )",
+        request, response, env);
+
+        if (result.tests.empty ()) {
+            // Too small to run the script at all on this toolchain.
+            continue;
+        }
+        ran++;
+
+        ASSERT_EQ (result.tests.size (), 1u) << "budget " << budget;
+        EXPECT_FALSE (result.tests[0].passed) << "budget " << budget;
+        EXPECT_NE (result.tests[0].error_message.find ("cyclic"), std::string::npos)
+        << "budget " << budget << ": " << result.tests[0].error_message;
+    }
+
+    ASSERT_GT (ran, 0) << "no budget in the sweep ran the script - this test "
+                          "proved nothing";
 }
 
 // A structure that repeats a *value* without being cyclic is not a cycle, and
