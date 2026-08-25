@@ -393,11 +393,20 @@ endif()
 # `manifest.res`, and the two collide with
 # `CVT1100: duplicate resource. type:MANIFEST, name:1`. So do not "simplify"
 # this into linker flags.
+#
+# The manifest is located from **this file's** directory, not the caller's.
+# Inside a function `CMAKE_CURRENT_SOURCE_DIR` is whichever directory scope
+# called it, so once vayu_tests moved to `tests/CMakeLists.txt` (#970) the same
+# call resolved to `engine/tests/res/vayu-windows.manifest` and failed the
+# generate step - on Windows only, since the guard above returns first
+# everywhere else. `CMAKE_CURRENT_FUNCTION_LIST_DIR` is the definition site and
+# is the same answer from any caller.
 function(vayu_embed_windows_manifest target)
     if(NOT MSVC)
         return()
     endif()
-    target_sources(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/res/vayu-windows.manifest")
+    target_sources(${target} PRIVATE
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/res/vayu-windows.manifest")
 endfunction()
 
 # ============================================================================
