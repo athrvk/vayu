@@ -26,6 +26,7 @@
  */
 
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -60,7 +61,7 @@ inline std::string read_source (const std::filesystem::path& path) {
 inline std::string strip_comments (const std::string& source) {
     std::string out;
     out.reserve (source.size ());
-    enum class State { Code, Line, Block };
+    enum class State : std::uint8_t { Code, Line, Block };
     State state = State::Code;
 
     for (size_t i = 0; i < source.size (); ++i) {

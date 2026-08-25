@@ -35,6 +35,7 @@
 #include <ctime>
 #include <filesystem>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -125,6 +126,20 @@ TEST (FormatLocalTime, ConcurrentCallersEachGetTheirOwnInstant) {
         EXPECT_TRUE (mismatches[i].empty ())
         << "thread " << i << " expected " << expected[i] << " and read "
         << mismatches[i];
+    }
+}
+
+TEST (FormatLocalTime, AnUnrepresentableInstantRendersAsNothing) {
+    // The zero-initialised std::tm formats as a confident 1899-12-31, so a
+    // conversion that failed has to come back empty rather than plausible.
+    // 64-bit time_t reaches years the zone tables do not cover; a platform that
+    // does convert this one is not wrong, so the assertion is that whichever
+    // happens, the answer is honest.
+    constexpr std::time_t far_future = std::numeric_limits<std::time_t>::max ();
+    const std::string stamped        = format_local_time (far_future, kStamp);
+    if (!stamped.empty ()) {
+        EXPECT_NE (stamped.rfind ("1899", 0), 0u) << stamped;
+        EXPECT_NE (stamped.rfind ("1900", 0), 0u) << stamped;
     }
 }
 

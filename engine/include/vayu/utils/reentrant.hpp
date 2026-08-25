@@ -45,6 +45,8 @@ namespace vayu::utils {
  * @brief @p time in the local zone, formatted by @p format.
  * @param time The instant to render.
  * @param format A `std::strftime` format string.
+ * @return The formatted time, or an empty string for an instant the local zone
+ *         cannot represent.
  *
  * The platform split is the same one `request_composer.cpp` uses for the UTC
  * side: POSIX spells the reentrant form `localtime_r`, taking the output
@@ -52,14 +54,22 @@ namespace vayu::utils {
  * classic call returns is a pointer into shared storage; what this one fills
  * is a `std::tm` on the caller's own stack, which is what `std::put_time` then
  * reads.
+ *
+ * The conversion is checked rather than assumed, because the failure is silent
+ * otherwise: a `time_t` outside the zone's range leaves the zero-initialised
+ * `std::tm` untouched, which formats as a confident `1899-12-31 00:00:00`. A
+ * caller that gets nothing knows it got nothing.
  */
 inline std::string format_local_time (std::time_t time, const char* format) {
     std::tm local{};
 #if defined(_WIN32)
-    localtime_s (&local, &time);
+    const bool converted = localtime_s (&local, &time) == 0;
 #else
-    localtime_r (&time, &local);
+    const bool converted = localtime_r (&time, &local) != nullptr;
 #endif
+    if (!converted) {
+        return {};
+    }
     std::ostringstream out;
     out << std::put_time (&local, format);
     return out.str ();
