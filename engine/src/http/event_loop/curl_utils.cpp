@@ -551,7 +551,7 @@ Error curl_to_error (CURL* curl, CURLcode code, const char* error_buffer) {
     // The proxy hop is a distinct failure domain from the target's: "cannot
     // resolve the proxy" reported as a connection failure sent users hunting
     // an endpoint that was never the problem (issue #705).
-    case CURLE_COULDNT_RESOLVE_PROXY: error.code = ErrorCode::ProxyError; break;
+    case CURLE_COULDNT_RESOLVE_PROXY:
     case CURLE_PROXY: error.code = ErrorCode::ProxyError; break;
     case CURLE_COULDNT_CONNECT:
     case CURLE_COULDNT_RESOLVE_HOST:

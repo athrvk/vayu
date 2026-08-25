@@ -109,8 +109,7 @@ TEST_F (DatabaseConcurrencyTest, ConcurrentBatchWritesAndReadsReconcile) {
                 auto ticks = db_->get_metric_ticks_since ("run_1", 0);
                 auto run   = db_->get_run ("run_1");
                 if (run.has_value () &&
-                ticks.size () <=
-                static_cast<size_t> (kWriters * kBatchesPerWriter * kRowsPerBatch)) {
+                ticks.size () <= static_cast<size_t> (kWriters) * kBatchesPerWriter * kRowsPerBatch) {
                     reads_ok.fetch_add (1, std::memory_order_relaxed);
                 }
             }
@@ -126,7 +125,7 @@ TEST_F (DatabaseConcurrencyTest, ConcurrentBatchWritesAndReadsReconcile) {
     }
 
     // Every row landed exactly once - no write lost to the interleaving.
-    const auto expected = static_cast<size_t> (kWriters * kBatchesPerWriter * kRowsPerBatch);
+    const auto expected = static_cast<size_t> (kWriters) * kBatchesPerWriter * kRowsPerBatch;
     EXPECT_EQ (db_->get_metric_ticks_since ("run_1", 0).size (), expected);
     EXPECT_EQ (db_->count_metric_ticks ("run_1"), static_cast<int64_t> (expected));
     EXPECT_EQ (db_->get_results ("run_1").size (), expected);

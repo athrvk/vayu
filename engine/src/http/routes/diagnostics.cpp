@@ -56,7 +56,7 @@ constexpr int CONNECTION_TEST_TIMEOUT_MS = 10000;
  * `ErrorCode::ResponseTooLarge` is reported as a reachable endpoint below,
  * because the bytes came back and that is the whole question this route asks.
  */
-constexpr size_t CONNECTION_TEST_MAX_BYTES = 64 * 1024;
+constexpr size_t CONNECTION_TEST_MAX_BYTES = size_t{ 64 } * 1024;
 
 /**
  * The outcome word for @p code - the distinction the whole route exists for.

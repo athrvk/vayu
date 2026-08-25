@@ -411,17 +411,16 @@ json map_postman_oauth2 (const std::map<std::string, std::string>& detail) {
     if (const std::string* declared = detail_of (detail, "grant_type")) {
         if (*declared == "authorization_code") {
             grant_type = "authorization_code";
-        } else if (*declared == "authorization_code_with_pkce") {
+        } else if (*declared == "authorization_code_with_pkce" || *declared == "implicit") {
+            // Two spellings, one outcome: PKCE is what the first asks for, and
+            // Vayu has no implicit grant to offer the second - auth code with
+            // PKCE is the nearest thing it can actually run.
             grant_type = "authorization_code";
             pkce       = true;
         } else if (*declared == "password_credentials") {
             grant_type = "password";
         } else if (*declared == "client_credentials") {
             grant_type = "client_credentials";
-        } else if (*declared == "implicit") {
-            // Vayu has no implicit grant; map to auth code + PKCE.
-            grant_type = "authorization_code";
-            pkce       = true;
         }
     }
     if (stated ("challengeAlgorithm")) {

@@ -598,8 +598,8 @@ const std::string& body) const {
                 }
             }
         } catch (const std::exception&) {
-            // An unparseable stamp names no operation, which is what the
-            // absent-identity branch below already answers.
+            // @deliberate: an unparseable stamp names no operation, which is
+            // what the absent-identity branch below already answers.
         }
     }
     if (spec_operation.empty ()) {

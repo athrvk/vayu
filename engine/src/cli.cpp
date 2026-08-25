@@ -25,10 +25,15 @@
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <exception>
 #include <fstream>
 #include <iostream>
+#include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -265,27 +270,44 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
     }
 }
 
-} // namespace
-
-int main (int argc, char* argv[]) {
+/**
+ * The whole of the CLI, so that `main` is a catch and nothing else.
+ *
+ * `main` must not let an exception escape: an uncaught one terminates the
+ * process through `std::terminate`, which prints nothing a user can act on and
+ * returns no status a script can read. It cannot both be that guard and hold
+ * the body, so the body is here.
+ *
+ * @p args is the argument vector as a span rather than the `(count, pointer)`
+ * pair - the same arguments, with the length attached, which is what lets the
+ * parse below index them instead of walking a raw pointer.
+ */
+int run_cli (std::span<char* const> args) {
     // Initialize logger
     vayu::utils::Logger::instance ().init (vayu::core::constants::logging::DIR);
 
     // Parse arguments
-    if (argc < 2) {
+    if (args.size () < 2) {
         print_help ();
         return 1;
     }
 
-    std::string command = argv[1];
+    std::string command = args[1];
     int verbosity       = 0; // 0=warn/error, 1=info+, 2=debug+
     bool color          = true;
     std::string filepath;
     std::string daemon_url = DEFAULT_DAEMON_URL;
 
     // Parse flags
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
+    for (size_t i = 1; i < args.size (); ++i) {
+        const std::string arg = args[i];
+        // The argument a flag would consume, read once. `has_next` is kept
+        // apart from emptiness on purpose: `--daemon ""` is a value, badly
+        // chosen, and it stays the caller's to be told about downstream rather
+        // than silently reinterpreted as a missing one.
+        const bool has_next = i + 1 < args.size ();
+        const std::string_view next =
+        has_next ? std::string_view (args[i + 1]) : std::string_view ();
 
         if (arg == "-h" || arg == "--help") {
             print_help ();
@@ -299,8 +321,10 @@ int main (int argc, char* argv[]) {
 
         if (arg == "--verbose") {
             // Check if next arg is a number (verbosity level)
-            if (i + 1 < argc && std::isdigit (argv[i + 1][0])) {
-                verbosity = std::stoi (argv[++i]);
+            if (!next.empty () &&
+            std::isdigit (static_cast<unsigned char> (next.front ())) != 0) {
+                verbosity = std::stoi (std::string (next));
+                ++i;
                 // Clamp to valid range [0, 2]
                 verbosity = std::max (0, std::min (2, verbosity));
             } else {
@@ -315,13 +339,15 @@ int main (int argc, char* argv[]) {
             continue;
         }
 
-        if (arg == "--daemon" && i + 1 < argc) {
-            daemon_url = argv[++i];
+        if (arg == "--daemon" && has_next) {
+            daemon_url = next;
+            ++i;
             continue;
         }
 
-        if (arg == "run" && i + 1 < argc) {
-            filepath = argv[++i];
+        if (arg == "run" && has_next) {
+            filepath = next;
+            ++i;
             continue;
         }
 
@@ -366,4 +392,22 @@ int main (int argc, char* argv[]) {
     // vayu::http::global_cleanup();
 
     return result;
+}
+
+} // namespace
+
+int main (int argc, char* argv[]) {
+    try {
+        return run_cli (std::span<char* const> (argv, static_cast<size_t> (argc)));
+    } catch (const std::exception& e) {
+        // Reported rather than terminated on: an escape from main aborts with
+        // no message and a status no caller can distinguish from a crash.
+        std::cerr << "vayu-cli: " << e.what () << "\n";
+        vayu::utils::log_error (std::string ("vayu-cli: ") + e.what ());
+        return 1;
+    } catch (...) {
+        std::cerr << "vayu-cli: unknown error\n";
+        vayu::utils::log_error ("vayu-cli: unknown error");
+        return 1;
+    }
 }

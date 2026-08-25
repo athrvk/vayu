@@ -63,15 +63,12 @@ void Logger::log (Level level, const std::string& message) {
     // Level 0: Only ERROR and WARNING
     // Level 1: ERROR, WARNING, INFO
     // Level 2: ERROR, WARNING, INFO, DEBUG
-    bool should_print_to_console = false;
-
-    if (level == Level::ERROR || level == Level::WARNING) {
-        should_print_to_console = true; // Always show errors and warnings
-    } else if (level == Level::INFO && verbosity_level_ >= 1) {
-        should_print_to_console = true;
-    } else if (level == Level::DEBUG && verbosity_level_ >= 2) {
-        should_print_to_console = true;
-    }
+    // Errors and warnings are unconditional; the other two are what verbosity
+    // buys. One expression rather than a chain of branches that all assigned
+    // the same `true`, which said nothing about which condition earned it.
+    const bool should_print_to_console = level == Level::ERROR ||
+    level == Level::WARNING || (level == Level::INFO && verbosity_level_ >= 1) ||
+    (level == Level::DEBUG && verbosity_level_ >= 2);
 
     if (should_print_to_console) {
         if (level == Level::ERROR) {

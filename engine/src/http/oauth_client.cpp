@@ -50,7 +50,9 @@ nlohmann::json parse_token_body (const std::string& body) {
             return parsed;
         }
     } catch (const std::exception&) {
-        // fall through to form decoding
+        // @deliberate: a body that is not JSON is the legacy form-encoded
+        // shape, decoded below - which is the whole reason this function
+        // takes two passes rather than one.
     }
     if (body.find ('=') == std::string::npos) {
         return nlohmann::json ();
@@ -81,6 +83,10 @@ int64_t parse_expires_in (const nlohmann::json& body) {
             try {
                 return std::stoll (it->get<std::string> ());
             } catch (const std::exception&) {
+                // @deliberate: a lifetime we cannot read is reported as the
+                // same 0 an absent one is - "this token states no expiry" -
+                // and the refresh watchdog already treats that as a token it
+                // cannot schedule around.
             }
         }
     }

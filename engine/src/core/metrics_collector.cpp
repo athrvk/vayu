@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <chrono>
 #include <random>
+#include <utility>
 
 namespace vayu::core {
 
@@ -53,12 +54,16 @@ uint64_t next_random () {
  */
 template <typename T>
 bool insert_at_slot (std::vector<T>& store, size_t capacity, const ReservoirSlot& slot, T&& value) {
+    // `std::forward`, not `std::move`: `T&&` beside a `std::vector<T>&` is a
+    // forwarding reference, and spelling the transfer as an unconditional move
+    // is what would silently gut an lvalue the day the parameter stops being
+    // deduced from the store's element type.
     if (store.size () < capacity) {
-        store.push_back (std::move (value));
+        store.push_back (std::forward<T> (value));
         return false;
     }
     if (slot.index < store.size ()) {
-        store[slot.index] = std::move (value);
+        store[slot.index] = std::forward<T> (value);
         return true;
     }
     // Capacity is full and the slot points past the end: nothing to replace

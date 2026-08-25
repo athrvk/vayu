@@ -142,6 +142,51 @@ TEST (LiveRingSize, FallsBackOnInvalidInputsInsteadOfDividingByZero) {
     EXPECT_EQ (live_ring_size (50, 100), 1u);
 }
 
+// The reservation is duration x RPS x 1.2, and the duration has to be read by
+// `parse_duration_ms` rather than by a local strip-one-character-and-multiply.
+// Each case below is one the copy it replaced got wrong (#944): put that copy
+// back and every one of them fails.
+TEST (ExpectedRequestsFor, ReadsTheDurationTheWayTheStrategyDoes) {
+    // 300s x 1000 x 1.2. The old copy read "5m" as 5 seconds.
+    EXPECT_EQ (expected_requests_for ({ { "duration", "5m" }, { "rps", 1000 } }), 360000u);
+    // 60s x 1000 x 1.2 - a bare number is seconds, the same reading
+    // parse_duration_ms gives it. The old copy dropped the last digit and read
+    // "60" as 6 seconds.
+    EXPECT_EQ (expected_requests_for ({ { "duration", "60" }, { "rps", 1000 } }), 72000u);
+    // Half a second at 1000 RPS is 600 results, so the floor decides. The old
+    // copy read "500ms" as 500 seconds and reserved 600000.
+    EXPECT_EQ (expected_requests_for ({ { "duration", "500ms" }, { "rps", 1000 } }), 10000u);
+    // 7200s x 100 x 1.2, and the arithmetic stays in int64 on the way.
+    EXPECT_EQ (expected_requests_for ({ { "duration", "2h" }, { "rps", 100 } }), 864000u);
+}
+
+TEST (ExpectedRequestsFor, TakesTheRpsUnderEitherSpelling) {
+    EXPECT_EQ (expected_requests_for ({ { "duration", "10s" }, { "rps", 500 } }), 10000u);
+    EXPECT_EQ (
+    expected_requests_for ({ { "duration", "100s" }, { "targetRps", 500 } }), 60000u);
+    // `rps` wins when both are present, which is the order the report's
+    // targetRps is read in too.
+    EXPECT_EQ (expected_requests_for (
+               { { "duration", "100s" }, { "rps", 500 }, { "targetRps", 1 } }),
+    60000u);
+    // No RPS at all falls back to the 1000 estimate: 100s x 1000 x 1.2.
+    EXPECT_EQ (expected_requests_for ({ { "duration", "100s" } }), 120000u);
+}
+
+TEST (ExpectedRequestsFor, ADurationItCannotReadReservesForTheDefaultMinute) {
+    // 60s x 1000 x 1.2 in every case - an allocation hint never fails a run the
+    // config validator already passed, and never throws out of the constructor.
+    const size_t minute = 72000u;
+    EXPECT_EQ (expected_requests_for (nlohmann::json::object ()), minute);
+    EXPECT_EQ (expected_requests_for ({ { "duration", "5min" } }), minute);
+    EXPECT_EQ (expected_requests_for ({ { "duration", "" } }), minute);
+    EXPECT_EQ (expected_requests_for ({ { "duration", "-30s" } }), minute);
+    // Stored as a number rather than a string - `value<std::string>` would
+    // throw on this one, and a reservation is not the place to refuse a run.
+    EXPECT_EQ (expected_requests_for ({ { "duration", 30 } }), minute);
+    EXPECT_EQ (expected_requests_for ({ { "duration", nullptr } }), minute);
+}
+
 // A RunContext that never reaches collect_metrics (a test, or a run whose
 // metrics thread has not read config yet) must still be bounded.
 TEST (RunContextTopic, RingIsBoundedBeforeConfigIsRead) {

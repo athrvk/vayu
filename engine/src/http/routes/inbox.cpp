@@ -145,9 +145,13 @@ std::optional<unsigned> ipv4_first_octet (std::string_view bind) {
         if (part.empty () || part.size () > 3) {
             return std::nullopt;
         }
-        unsigned value        = 0;
-        const auto* const end = part.data () + part.size ();
-        const auto [ptr, ec]  = std::from_chars (part.data (), end, value);
+        // Both bounds named before the call: `from_chars` takes a range, but a
+        // bare `part.data ()` in argument position reads as - and is linted as -
+        // a pointer handed to something that will look for a terminator.
+        unsigned value          = 0;
+        const auto* const begin = part.data ();
+        const auto* const end   = begin + part.size ();
+        const auto [ptr, ec]    = std::from_chars (begin, end, value);
         if (ec != std::errc () || ptr != end || value > 255) {
             return std::nullopt;
         }

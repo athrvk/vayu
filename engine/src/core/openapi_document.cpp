@@ -689,9 +689,12 @@ nlohmann::ordered_json ref_roots_of (const nlohmann::ordered_json& document) {
             if (!entry.value ().is_object ()) {
                 continue;
             }
-            nlohmann::ordered_json nested = ref_roots_of (entry.value ());
-            inlined[entry.key ()] =
-            nested.is_null () ? to_json_schema (entry.value ()) : std::move (nested);
+            if (nlohmann::ordered_json nested = ref_roots_of (entry.value ());
+            !nested.is_null ()) {
+                inlined[entry.key ()] = std::move (nested);
+            } else {
+                inlined[entry.key ()] = to_json_schema (entry.value ());
+            }
         }
         if (!inlined.empty ()) {
             roots[BUNDLED_KEY] = std::move (inlined);

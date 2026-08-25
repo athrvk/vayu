@@ -3,7 +3,9 @@
  * @brief Google Test main entry point
  */
 
+#include <exception>
 #include <filesystem>
+#include <iostream>
 #include <system_error>
 
 #include <gtest/gtest.h>
@@ -11,7 +13,15 @@
 #include "temp_database.hpp"
 #include "vayu/http/client.hpp"
 
-int main (int argc, char** argv) {
+namespace {
+
+/// The suite plus the scratch-directory bracket around it, so that `main` below
+/// is a catch and nothing else. gtest already catches what a *test* throws; what
+/// reaches here is the setup around them - `global_init`, or
+/// `enter_process_scratch_dir` on a full disk - and an escape from `main` ends
+/// the process through `std::terminate`, which ctest reports as a crash with no
+/// reason attached rather than as a run that failed and said why.
+int run_all_tests (int argc, char** argv) {
     // Initialize curl globally for all tests
     vayu::http::global_init ();
 
@@ -49,4 +59,18 @@ int main (int argc, char** argv) {
     vayu::http::global_cleanup ();
 
     return result;
+}
+
+} // namespace
+
+int main (int argc, char** argv) {
+    try {
+        return run_all_tests (argc, argv);
+    } catch (const std::exception& e) {
+        std::cerr << "vayu_tests: " << e.what () << "\n";
+        return 1;
+    } catch (...) {
+        std::cerr << "vayu_tests: unknown error\n";
+        return 1;
+    }
 }

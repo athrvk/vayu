@@ -31,7 +31,7 @@ namespace vayu::http {
 
 namespace {
 
-constexpr int64_t kAttemptTtlMs = 5 * 60 * 1000; // 5 minutes
+constexpr int64_t kAttemptTtlMs = int64_t{ 5 } * 60 * 1000; // 5 minutes
 
 int64_t now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (

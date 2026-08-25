@@ -325,8 +325,9 @@ Json serialize (const vayu::db::SpecDocument& s) {
                 json["operations"] = std::move (parsed);
             }
         } catch (const std::exception&) {
-            // Unreadable stored index reads as absent, the same answer every
-            // reader of it gives; the write path is where a bad one is refused.
+            // @deliberate: an unreadable stored index reads as absent, the same
+            // answer every reader of it gives; the write path is where a bad
+            // one is refused.
         }
     }
     // The response schema index (#628), on the same null-means-none terms as
@@ -340,7 +341,8 @@ Json serialize (const vayu::db::SpecDocument& s) {
                 json["responseSchemas"] = std::move (parsed);
             }
         } catch (const std::exception&) {
-            // Same reading as above - absent, and refused at the write.
+            // @deliberate: same reading as above - absent, and refused at the
+            // write.
         }
     }
     return json;
@@ -631,7 +633,10 @@ vayu::Environment parse_variables (const std::string& json_str) {
             }
         }
     } catch (const std::exception&) {
-        // Return empty environment on parse error
+        // @deliberate: a stored variables blob that will not parse reads as an
+        // environment with no variables, which is what an environment that
+        // declares none reads as too - resolution then leaves every `{{token}}`
+        // unresolved, and that is visible to the user rather than substituted.
     }
     return env;
 }
