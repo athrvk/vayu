@@ -30,14 +30,15 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <ctime>
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -80,6 +81,7 @@ TEST (FormatLocalTime, RendersTheInstantInTheLocalZone) {
 TEST (FormatLocalTime, DistinctInstantsRenderDistinctly) {
     const auto instants = spread_of_instants (4);
     std::vector<std::string> stamped;
+    stamped.reserve (instants.size ());
     for (const std::time_t instant : instants) {
         stamped.push_back (format_local_time (instant, kStamp));
     }
@@ -152,16 +154,31 @@ TEST (ErrnoMessage, AnswersForACodeNoPlatformHasAMessageFor) {
 /// branch runs inside a signal handler, where `exit` runs every static
 /// destructor while the worker threads are still using what they destroy.
 /// `_Exit` is the spelling that stops now, and does not match this name.
-const std::vector<std::string> kUnsafeCalls = { "localtime", "strerror",
+constexpr std::array<std::string_view, 10> kUnsafeCalls = { "localtime", "strerror",
     "getenv", "setenv", "putenv", "gmtime", "asctime", "ctime", "rand", "exit" };
+
+/// One file, one call: `cert-err58-cpp` is why these are `constexpr` arrays of
+/// views rather than the `std::vector<std::string>` they read more naturally
+/// as - a namespace-scope container with a throwing constructor is a finding of
+/// this same paydown.
+struct ExemptSite {
+    std::string_view file;
+    std::string_view call;
+};
 
 /// The single site where one of them stays, silenced at the line with its
 /// reason: reading `CURL_CA_BUNDLE` has no reentrant spelling to move to. Per
 /// (file, call) rather than per file, so exempting the read does not also
 /// exempt a write nobody noticed being added beside it.
-const std::vector<std::pair<std::string, std::string>> kExempt = {
-    { "src/http/transport_policy.cpp", "getenv" },
+constexpr std::array<ExemptSite, 1> kExempt = {
+    { { "src/http/transport_policy.cpp", "getenv" } }
 };
+
+bool is_exempt (std::string_view file, std::string_view call) {
+    return std::any_of (kExempt.begin (), kExempt.end (), [&] (const ExemptSite& site) {
+        return site.file == file && site.call == call;
+    });
+}
 
 TEST (MtUnsafeCalls, TheEngineSourcesDoNotNameThem) {
     const std::filesystem::path root{ VAYU_ENGINE_SOURCE_DIR };
@@ -188,13 +205,14 @@ TEST (MtUnsafeCalls, TheEngineSourcesDoNotNameThem) {
             ++scanned_files;
             scanned_bytes += code.size ();
 
-            for (const auto& call : kUnsafeCalls) {
-                const bool exempt = std::find (kExempt.begin (), kExempt.end (),
-                                    std::pair<std::string, std::string>{
-                                    relative, call }) != kExempt.end ();
-                if (!exempt && tests::names_call (code, call)) {
-                    offenders.push_back (relative + " calls " + call);
+            for (const std::string_view call : kUnsafeCalls) {
+                if (is_exempt (relative, call) || !tests::names_call (code, call)) {
+                    continue;
                 }
+                std::string offender = relative;
+                offender += " calls ";
+                offender += call;
+                offenders.push_back (std::move (offender));
             }
         }
     }
@@ -205,7 +223,10 @@ TEST (MtUnsafeCalls, TheEngineSourcesDoNotNameThem) {
 
     std::string joined;
     for (const auto& offender : offenders) {
-        joined += (joined.empty () ? "" : "\n  ") + offender;
+        if (!joined.empty ()) {
+            joined += "\n  ";
+        }
+        joined += offender;
     }
     EXPECT_TRUE (offenders.empty ())
     << "these calls answer out of storage the whole process shares, so under "
