@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
@@ -57,7 +58,7 @@ TEST_F (DatabaseTest, CreatesAndRetrievesRun) {
     db.create_run (run);
 
     auto retrieved = db.get_run ("run_1");
-    ASSERT_TRUE (retrieved.has_value ());
+    ASSERT_HAS_VALUE (retrieved);
     EXPECT_EQ (retrieved->id, "run_1");
     EXPECT_EQ (retrieved->type, vayu::RunType::Load);
     EXPECT_EQ (retrieved->status, vayu::RunStatus::Pending);
@@ -78,7 +79,7 @@ TEST_F (DatabaseTest, UpdatesRunStatus) {
     db.update_run_status ("run_1", vayu::RunStatus::Completed);
 
     auto retrieved = db.get_run ("run_1");
-    ASSERT_TRUE (retrieved.has_value ());
+    ASSERT_HAS_VALUE (retrieved);
     EXPECT_EQ (retrieved->status, vayu::RunStatus::Completed);
 }
 
@@ -133,7 +134,7 @@ TEST_F (DatabaseTest, SavesAndRetrievesGlobals) {
     db.save_globals (globals);
 
     auto retrieved = db.get_globals ();
-    ASSERT_TRUE (retrieved.has_value ());
+    ASSERT_HAS_VALUE (retrieved);
     EXPECT_EQ (retrieved->id, "globals");
     EXPECT_EQ (retrieved->variables, globals.variables);
 }
@@ -156,7 +157,7 @@ TEST_F (DatabaseTest, UpdatesExistingGlobals) {
     db.save_globals (globals2);
 
     auto retrieved = db.get_globals ();
-    ASSERT_TRUE (retrieved.has_value ());
+    ASSERT_HAS_VALUE (retrieved);
     EXPECT_EQ (retrieved->variables, globals2.variables);
     EXPECT_EQ (retrieved->updated_at, 2000);
 }
@@ -281,7 +282,7 @@ TEST_F (DatabaseTest, SeedMovesAnEntryOutOfARetiredCategory) {
     db.init ();
 
     auto seeded = db.get_config_entry ("dbCacheSize");
-    ASSERT_TRUE (seeded.has_value ());
+    ASSERT_HAS_VALUE (seeded);
     ASSERT_EQ (seeded->category, "general_engine");
 
     ConfigEntry stale = *seeded;
@@ -290,12 +291,14 @@ TEST_F (DatabaseTest, SeedMovesAnEntryOutOfARetiredCategory) {
     stale.category = "database_performance";
     stale.value    = "33554432";
     db.save_config_entry (stale);
-    ASSERT_EQ (db.get_config_entry ("dbCacheSize")->category, "database_performance");
+    const auto chosen = db.get_config_entry ("dbCacheSize");
+    ASSERT_HAS_VALUE (chosen);
+    ASSERT_EQ (chosen->category, "database_performance");
 
     db.seed_default_config ();
 
     auto migrated = db.get_config_entry ("dbCacheSize");
-    ASSERT_TRUE (migrated.has_value ());
+    ASSERT_HAS_VALUE (migrated);
     EXPECT_EQ (migrated->category, "general_engine");
     EXPECT_EQ (migrated->value, "33554432")
     << "a category move must not reset the value the user stored";
@@ -313,7 +316,7 @@ TEST_F (DatabaseTest, SeedRehomesAnAuditedEntryWithoutResettingItsValue) {
     db.init ();
 
     auto seeded = db.get_config_entry ("oauth2RefreshLeadMs");
-    ASSERT_TRUE (seeded.has_value ());
+    ASSERT_HAS_VALUE (seeded);
     ASSERT_EQ (seeded->category, "services");
 
     ConfigEntry stale = *seeded;
@@ -324,7 +327,7 @@ TEST_F (DatabaseTest, SeedRehomesAnAuditedEntryWithoutResettingItsValue) {
     db.seed_default_config ();
 
     auto migrated = db.get_config_entry ("oauth2RefreshLeadMs");
-    ASSERT_TRUE (migrated.has_value ());
+    ASSERT_HAS_VALUE (migrated);
     EXPECT_EQ (migrated->category, "services");
     EXPECT_EQ (migrated->value, "120000")
     << "a category move must not reset the value the user stored";
@@ -381,7 +384,7 @@ TEST_F (DatabaseTest, CacheSizeConfigReachesTheConnection) {
         << "an unconfigured database opens at the compile-time default";
 
         auto entry = db.get_config_entry ("dbCacheSize");
-        ASSERT_TRUE (entry.has_value ()) << "the entry survived the sweep";
+        ASSERT_HAS_VALUE (entry) << "the entry survived the sweep";
         entry->value = std::to_string (kConfigured);
         db.save_config_entry (*entry);
 
@@ -435,7 +438,7 @@ TEST_F (DatabaseTest, SynchronousConfigStillWinsOverTheConstructorDefault) {
         Database db (TEST_DB_PATH);
         db.init ();
         auto entry = db.get_config_entry ("dbSynchronous");
-        ASSERT_TRUE (entry.has_value ());
+        ASSERT_HAS_VALUE (entry);
         entry->value = std::to_string (kConfigured);
         db.save_config_entry (*entry);
     }
@@ -461,7 +464,7 @@ TEST_F (DatabaseTest, ASeedInsideOneTransactionStillPreservesUserValues) {
     << "the seed is the many-row write this test is about";
 
     auto entry = db.get_config_entry ("dbBusyTimeout");
-    ASSERT_TRUE (entry.has_value ());
+    ASSERT_HAS_VALUE (entry);
     entry->value = "12345";
     db.save_config_entry (*entry);
 
@@ -470,7 +473,7 @@ TEST_F (DatabaseTest, ASeedInsideOneTransactionStillPreservesUserValues) {
     EXPECT_EQ (db.get_all_config_entries ().size (), seeded)
     << "a re-seed neither adds nor drops rows";
     auto preserved = db.get_config_entry ("dbBusyTimeout");
-    ASSERT_TRUE (preserved.has_value ());
+    ASSERT_HAS_VALUE (preserved);
     EXPECT_EQ (preserved->value, "12345")
     << "the seed keeps a user's value and only refreshes metadata";
 }
@@ -486,21 +489,23 @@ TEST_F (DatabaseTest, SeedBackfillsOptionsOnUpgradeWithoutLosingUserValue) {
     db.init ();
 
     auto seeded = db.get_config_entry ("defaultHttpVersion");
-    ASSERT_TRUE (seeded.has_value ());
-    ASSERT_TRUE (seeded->options.has_value ());
+    ASSERT_HAS_VALUE (seeded);
+    ASSERT_HAS_VALUE (seeded->options);
 
     ConfigEntry upgraded_row = *seeded;
     upgraded_row.value       = "http2";  // user's choice, must survive re-seed
     upgraded_row.options = std::nullopt; // pre-Task-4 row never had this column
     db.save_config_entry (upgraded_row);
-    ASSERT_FALSE (db.get_config_entry ("defaultHttpVersion")->options.has_value ());
+    const auto downgraded = db.get_config_entry ("defaultHttpVersion");
+    ASSERT_HAS_VALUE (downgraded);
+    ASSERT_FALSE (downgraded->options.has_value ());
 
     db.seed_default_config ();
 
     auto after = db.get_config_entry ("defaultHttpVersion");
-    ASSERT_TRUE (after.has_value ());
-    EXPECT_EQ (after->value, "http2");         // user's value preserved
-    ASSERT_TRUE (after->options.has_value ()); // metadata backfilled
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->value, "http2"); // user's value preserved
+    ASSERT_HAS_VALUE (after->options); // metadata backfilled
     EXPECT_EQ (*after->options, *seeded->options);
 }
 
@@ -910,7 +915,7 @@ TEST_F (DatabaseTest, DropsTheLegacyMetricsTableFromAPreUpgradeDatabase) {
 
         // Everything the run still owns is served normally after the drop.
         auto run = db.get_run ("run_pre_upgrade");
-        ASSERT_TRUE (run.has_value ());
+        ASSERT_HAS_VALUE (run);
         EXPECT_EQ (run->status, vayu::RunStatus::Completed);
         EXPECT_EQ (db.count_metric_ticks ("run_pre_upgrade"), 1);
     }
@@ -973,7 +978,7 @@ TEST_F (DatabaseTest, PruneRunsByCountKeepsMostRecentAndCascades) {
 
     // Five terminal runs, oldest first by start_time.
     for (int i = 1; i <= 5; ++i) {
-        seed_run_with_children (db, "run_" + std::to_string (i), i * 1000);
+        seed_run_with_children (db, "run_" + std::to_string (i), int64_t{ i } * 1000);
     }
 
     // Keep the 2 most-recent; age cap disabled.
@@ -1276,12 +1281,12 @@ TEST_F (DatabaseTest, SetRunBaselineTogglesAndPersists) {
         seed_run_with_children (db, "run_1", recent);
 
         auto stored = db.get_run ("run_1");
-        ASSERT_TRUE (stored.has_value ());
+        ASSERT_HAS_VALUE (stored);
         EXPECT_FALSE (stored->baseline)
         << "a run is not a baseline until pinned";
 
         auto pinned = db.set_run_baseline ("run_1", true);
-        ASSERT_TRUE (pinned.has_value ());
+        ASSERT_HAS_VALUE (pinned);
         EXPECT_TRUE (pinned->baseline);
         // The whole row comes back, not just the flag - the route answers with it.
         EXPECT_EQ (pinned->id, "run_1");
@@ -1291,13 +1296,15 @@ TEST_F (DatabaseTest, SetRunBaselineTogglesAndPersists) {
     Database db (TEST_DB_PATH);
     db.init ();
     auto reopened = db.get_run ("run_1");
-    ASSERT_TRUE (reopened.has_value ());
+    ASSERT_HAS_VALUE (reopened);
     EXPECT_TRUE (reopened->baseline);
 
     auto unpinned = db.set_run_baseline ("run_1", false);
-    ASSERT_TRUE (unpinned.has_value ());
+    ASSERT_HAS_VALUE (unpinned);
     EXPECT_FALSE (unpinned->baseline);
-    EXPECT_FALSE (db.get_run ("run_1")->baseline);
+    const auto unpinned_row = db.get_run ("run_1");
+    ASSERT_HAS_VALUE (unpinned_row);
+    EXPECT_FALSE (unpinned_row->baseline);
 }
 
 TEST_F (DatabaseTest, SetRunBaselineOnAMissingRunReportsNothingStored) {
@@ -1358,7 +1365,7 @@ TEST_F (DatabaseTest, RunsStoredBeforeTheBaselineColumnReadAsUnpinned) {
     Database db (TEST_DB_PATH);
     db.init ();
     auto legacy = db.get_run ("legacy");
-    ASSERT_TRUE (legacy.has_value ()) << "an older database no longer opens";
+    ASSERT_HAS_VALUE (legacy) << "an older database no longer opens";
     EXPECT_FALSE (legacy->baseline);
 }
 
@@ -1455,7 +1462,7 @@ TEST_F (DatabaseTest, ReconcileKeepsTheEndTimeTheRunAlreadyRecorded) {
     db.init ();
 
     auto run = db.get_run ("half_written");
-    ASSERT_TRUE (run.has_value ());
+    ASSERT_HAS_VALUE (run);
     EXPECT_EQ (run->status, vayu::RunStatus::Failed);
     EXPECT_EQ (run->end_time, RECORDED_END);
 }
@@ -1482,7 +1489,7 @@ TEST_F (DatabaseTest, ReconcileLeavesNoIndeterminateEndTimeOnAnUnseededRun) {
     db.init ();
 
     auto run = db.get_run ("unseeded");
-    ASSERT_TRUE (run.has_value ());
+    ASSERT_HAS_VALUE (run);
     EXPECT_EQ (run->status, vayu::RunStatus::Failed);
     // 0 is the "no end recorded" sentinel every reader guards on; anything
     // between 1 and start_time would be garbage posing as a real timestamp.
@@ -1582,13 +1589,13 @@ TEST_F (DatabaseTest, RunSummaryRoundTrips) {
     // A fresh run has no summary - that emptiness is what the report route
     // reads as "fall back to the legacy metrics rows".
     auto before = db.get_run ("run_1");
-    ASSERT_TRUE (before.has_value ());
+    ASSERT_HAS_VALUE (before);
     EXPECT_TRUE (before->summary.empty ());
 
     db.update_run_summary ("run_1", R"({"total_requests":42})");
 
     auto after = db.get_run ("run_1");
-    ASSERT_TRUE (after.has_value ());
+    ASSERT_HAS_VALUE (after);
     EXPECT_EQ (after->summary, R"({"total_requests":42})");
     // Writing the summary must not disturb the rest of the row.
     EXPECT_EQ (after->status, vayu::RunStatus::Completed);
