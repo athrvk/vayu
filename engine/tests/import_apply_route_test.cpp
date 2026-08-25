@@ -204,9 +204,9 @@ TEST_F (ImportApplyRouteTest, AnExplicitOrderIsHonoured) {
     auto [status, response] =
     import_apply_response (*db_, json{ { "collections", json::array ({ first }) } });
     ASSERT_EQ (status, 200) << response.dump ();
-    const auto stored_collection = db_->get_collection (response["idMap"]["c1"]);
-    ASSERT_HAS_VALUE (stored_collection);
-    EXPECT_EQ (stored_collection->order, 7);
+    const auto row = db_->get_collection (response["idMap"]["c1"]);
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->order, 7);
 }
 
 TEST_F (ImportApplyRouteTest, AppendsAfterCollectionsThatAlreadyExist) {

@@ -897,7 +897,7 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateNullHttpVersionReReadsGlobalAtWrite
     // vayu::DEFAULT_HTTP_VERSION) produces "http2" here.
     const std::string collection = make_collection ();
     const std::string id         = make_request (collection);
-    const auto seeded_row = db_->get_request (id);
+    const auto seeded_row        = db_->get_request (id);
     ASSERT_HAS_VALUE (seeded_row);
     ASSERT_EQ (seeded_row->http_version, "auto");
 
@@ -1026,9 +1026,9 @@ TEST_F (ResourceWriteRouteTest, EnvironmentCreateNullVariablesIsEmptyObject) {
     auto [status, body] = create_environment_response (
     *db_, json{ { "name", "Env" }, { "variables", nullptr } });
     ASSERT_EQ (status, 200);
-    const auto stored_environment = db_->get_environment (body["id"].get<std::string> ());
-    ASSERT_HAS_VALUE (stored_environment);
-    EXPECT_EQ (stored_environment->variables, "{}");
+    const auto row = db_->get_environment (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->variables, "{}");
 }
 
 TEST_F (ResourceWriteRouteTest, EnvironmentUpdateHonoursIsActive) {
@@ -1084,9 +1084,9 @@ TEST_F (ResourceWriteRouteTest, CreatingAnActiveEnvironmentDeactivatesThePreviou
     auto [status, body] = create_environment_response (
     *db_, json{ { "name", "Prod" }, { "isActive", true } });
     ASSERT_EQ (status, 200);
-    const auto stored_environment = db_->get_environment (body["id"].get<std::string> ());
-    ASSERT_HAS_VALUE (stored_environment);
-    EXPECT_TRUE (stored_environment->is_active);
+    const auto row = db_->get_environment (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (row);
+    EXPECT_TRUE (row->is_active);
     const auto dev_row = db_->get_environment (dev);
     ASSERT_HAS_VALUE (dev_row);
     EXPECT_FALSE (dev_row->is_active);
@@ -1111,7 +1111,7 @@ TEST_F (ResourceWriteRouteTest, EnvironmentWrongShapeVariablesIsRejected) {
     json{ { "name", "Env" },
     { "variables", { { "token", { { "value", "abc" }, { "enabled", true } } } } } });
     ASSERT_EQ (created_status, 200);
-    const std::string id     = created["id"].get<std::string> ();
+    const std::string id  = created["id"].get<std::string> ();
     const auto before_row = db_->get_environment (id);
     ASSERT_HAS_VALUE (before_row);
     const std::string before = before_row->variables;

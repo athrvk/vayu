@@ -504,7 +504,7 @@ TEST_F (DatabaseTest, SeedBackfillsOptionsOnUpgradeWithoutLosingUserValue) {
 
     auto after = db.get_config_entry ("defaultHttpVersion");
     ASSERT_HAS_VALUE (after);
-    EXPECT_EQ (after->value, "http2");         // user's value preserved
+    EXPECT_EQ (after->value, "http2"); // user's value preserved
     ASSERT_HAS_VALUE (after->options); // metadata backfilled
     EXPECT_EQ (*after->options, *seeded->options);
 }

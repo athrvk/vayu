@@ -236,8 +236,7 @@ TEST_F (SpecsRouteTest, RefusesADocumentOverTheConfiguredCapNamingBothNumbers) {
     // Below the compiled default, so this proves the *live* config entry is what
     // the write reads - not the constant.
     auto entry = db_->get_config_entry ("maxSpecDocumentBytes");
-    ASSERT_HAS_VALUE (entry)
-    << "the cap must be a seeded, user-visible knob";
+    ASSERT_HAS_VALUE (entry) << "the cap must be a seeded, user-visible knob";
     entry->value = "64";
     db_->save_config_entry (*entry);
     const std::string oversized (128, 'x');
@@ -440,7 +439,8 @@ TEST_F (SpecsRouteTest, ABindingWrittenWithoutAVersionIsStampedFromTheStoredDocu
     EXPECT_GT (body["openapi"].value ("syncedAt", int64_t{ 0 }), 0);
 
     const auto row = db_->get_collection (body["id"].get<std::string> ());
-    ASSERT_HAS_VALUE (row) << "the create must have stored the collection it just returned";
+    ASSERT_HAS_VALUE (row)
+    << "the create must have stored the collection it just returned";
     const json stored = json::parse (row->openapi);
     EXPECT_EQ (stored.value ("specHash", std::string{}), routes::spec_content_hash (PETSTORE))
     << "the response must be the row, not a dressed-up copy of it";
@@ -465,7 +465,7 @@ TEST_F (SpecsRouteTest, AStampFillsWhatIsMissingAndOverwritesNothing) {
     // not quietly "repair" it into agreement with whatever is stored today.
     const std::string col_id = create_collection (json{ { "name", "Pets" },
     { "openapi", { { "specId", spec_id }, { "specHash", "stale-hash" }, { "syncedAt", 42 } } } });
-    const auto row = db_->get_collection (col_id);
+    const auto row           = db_->get_collection (col_id);
     ASSERT_HAS_VALUE (row);
     const json stored = json::parse (row->openapi);
     EXPECT_EQ (stored.value ("specHash", std::string{}), "stale-hash");
