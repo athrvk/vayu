@@ -174,6 +174,28 @@ Configuration is in `electron-builder.json`:
 
 ## TypeScript Configuration
 
+### Two compilers, one on purpose
+
+`pnpm type-check` runs the **native TypeScript 7** compiler; `pnpm build`,
+`pnpm electron:compile` and `pnpm electron:watch` run **TypeScript 5.9**. That
+is a deliberate half-step (#467 Stage 1): 7.x takes the gate, where it is worth
+roughly 6x (31.8s → 4.9s on a cloud runner), while the compiler that *emits*
+the main process stays where it has been, and `typescript-eslint` keeps the 5.x
+it needs - its peer range is `>=4.8.4 <6.1.0`, so a single `typescript@7` would
+break `pnpm lint`, which CI enforces at zero warnings. The full swap waits for
+7.1, which is the release that gives typescript-eslint the stable API.
+
+TypeScript 7 is installed under the alias `tsc7` (`tsc7: npm:typescript@^7`), so
+both packages are present. **Both claim the `tsc` bin, and only one wins
+`node_modules/.bin/tsc`** - so no script may invoke a bare `tsc`. Each names its
+compiler by path (`node node_modules/typescript/bin/tsc`,
+`node node_modules/tsc7/bin/tsc`), because the alternative is letting a package
+manager's bin-conflict resolution decide which compiler emits the code that
+ships. `src/typescript-toolchain.test.ts` fails on a bare `tsc` in any script.
+
+The two compilers are held to identical diagnostics on all three projects - see
+`strict` under the main-process config below for the one place they diverged.
+
 ### React App (`tsconfig.json`)
 
 - Target: ES2020
@@ -200,6 +222,23 @@ neither reads this file, so a new alias has to be added in all three.
 - Includes `electron/`, emitting to `dist-electron/`
 - Excludes `electron/**/*.test.ts` - tests are not part of the main process, and
   emitting them put vitest imports in the shipped bundle
+- `strict: true`, stated rather than inherited
+
+`strict` is spelled out for the same reason `types` is in the renderer config,
+and it is the one thing a full two-compiler diff of this tree turned up.
+TypeScript 5 defaults it to `false` and TypeScript 7 defaults it to `true`, and
+this config had never set it - so the entire main process was checked
+non-strictly by the build and strictly by the gate. Exactly one error separated
+the two (a `string | undefined` that neither compiler's control flow can prove
+is set, in the MCP `spec_info` handler), which is why the answer was to state
+`true` and fix the one site rather than pin the laxer default: `app/CLAUDE.md`
+already gives strict TypeScript as the convention, the renderer already sets it,
+and `electron/` was written as though it held - its `!` assertions on
+guard-proved values are no-ops without it.
+
+`tsconfig.electron-test.json` inherits the value through `extends`.
+`src/typescript-toolchain.test.ts` fails on any of the three configs whose
+`extends` chain never states `strict`.
 
 ### Electron tests (`tsconfig.electron-test.json`)
 
@@ -235,7 +274,10 @@ Key settings in `vite.config.ts`:
 
 ### Development Dependencies
 
-- **TypeScript 5**: Type checking
+- **TypeScript 5.9**: Compilation (`build`, `electron:compile`) and the
+  `typescript-eslint` parser
+- **TypeScript 7** (installed as `tsc7`): the `pnpm type-check` gate - see
+  [Two compilers, one on purpose](#two-compilers-one-on-purpose)
 - **Vite**: Build tool
 - **ESLint**: Linting
 - **Electron Builder**: Packaging

@@ -4177,9 +4177,6 @@ export const TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			const collectionId = str(args, "collectionId");
 			const specIdArg = str(args, "specId");
-			if (!collectionId && !specIdArg) {
-				return errorResult('Pass either "collectionId" or "specId".');
-			}
 			if (collectionId && specIdArg) {
 				return errorResult(
 					'Pass either "collectionId" or "specId", not both - they would have to agree, and this tool cannot say which one you meant if they do not.'
@@ -4187,8 +4184,13 @@ export const TOOLS: McpTool[] = [
 			}
 			const includeContent = args.includeContent === true;
 
-			// Assigned on both arms below - by the argument, or by the binding the
-			// collection resolves to - so it is a string by the time it is read.
+			// Assigned on the first two arms below - by the binding the collection
+			// resolves to, or by the argument - so it is a string by the time it is
+			// read. The "neither was passed" case is the third arm rather than a
+			// guard above it: as a guard, proving the `else` still holds an id is a
+			// step across two conditions that `strict` control flow does not make in
+			// either compiler, and the assertion it would take is the kind that stops
+			// being true when someone edits the guard.
 			let specId: string;
 			let binding: SpecBinding | null = null;
 			if (collectionId) {
@@ -4212,8 +4214,10 @@ export const TOOLS: McpTool[] = [
 					);
 				}
 				specId = binding.specId;
-			} else {
+			} else if (specIdArg) {
 				specId = specIdArg;
+			} else {
+				return errorResult('Pass either "collectionId" or "specId".');
 			}
 
 			try {

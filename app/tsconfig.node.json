@@ -3,6 +3,20 @@
 		"composite": true,
 		"skipLibCheck": true,
 		/*
+		 * Stated, not inherited. TypeScript 5 defaults this to `false` and
+		 * TypeScript 7 defaults it to `true`, so an unset `strict` meant the main
+		 * process was checked one way by the build (5.x) and the other by the
+		 * type-check gate (7.x) - the only divergence a full two-compiler diff of
+		 * this tree turned up, and it was worth exactly one error.
+		 *
+		 * `true` because it is what the repo already believed: `app/CLAUDE.md`
+		 * states "strict TypeScript" as the convention, `tsconfig.json` sets it for
+		 * the renderer, and `electron/` is written as if it held - the `!`
+		 * assertions on guard-proved values through `mcp/tools.ts` are no-ops
+		 * without it. Turning it on cost one real fix, not a migration.
+		 */
+		"strict": true,
+		/*
 		 * NOT NodeNext, however much the main process looks like it wants it.
 		 * The package is `"type": "module"`, so NodeNext classifies preload.ts -
 		 * a script with no imports, only `require()` - as ESM and stamps
