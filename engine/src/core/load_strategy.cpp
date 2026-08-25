@@ -76,13 +76,18 @@ const ResultAnnotations& annotations) {
         return;
     }
 
+    // Past the early return the result holds a Response, so it is bound once
+    // here rather than re-read per use: every branch below reads the same
+    // object, and a single binding is what says so.
+    const auto& response = result.value ();
+
     // Counted for both branches below, before either splits: a transfer that
     // connected, negotiated HTTP/1.1 against an explicit `http2`, and then
     // failed still tells the truth about the protocol the run is measuring.
     // Reading it off the Response (rather than off the request's httpVersion
     // and a string compare here) keeps the one definition in
     // http_version_downgraded - see curl_version_map.hpp.
-    if (result.value ().http_version_downgraded) {
+    if (response.http_version_downgraded) {
         context->metrics_collector->record_http_version_downgrade ();
     }
 
@@ -92,14 +97,13 @@ const ResultAnnotations& annotations) {
     // ended cleanly would read highest on the runs that failed most. Only a
     // transfer that actually streamed carries the count - see
     // `Response::stream_events` for why it is optional rather than a zero.
-    if (result.value ().stream_events) {
+    if (response.stream_events) {
         context->metrics_collector->record_stream_completion (
-        *result.value ().stream_events, result.value ().stream_capped);
+        *response.stream_events, response.stream_capped);
     }
 
-    if (result.value ().has_error ()) {
+    if (response.has_error ()) {
         // Response carrying a client-side error
-        const auto& response = result.value ();
 
         // Build detailed error trace data
         nlohmann::json error_json = { { "error_code", static_cast<int> (response.error_code) },
@@ -132,8 +136,7 @@ const ResultAnnotations& annotations) {
         response.timing.bytes_up, response.timing.bytes_down);
     } else {
         // Successful response
-        const auto& response = result.value ();
-        double latency       = response.timing.total_ms;
+        double latency = response.timing.total_ms;
 
         // Two independent reasons to keep a trace, and both are decided before
         // anything is serialised: the 1-in-N sampler (which advances its period
@@ -781,9 +784,12 @@ class CapacityLoadStrategy : public LoadStrategy {
 
         // Written before this frame returns, and read by execute_load_test
         // after it - same thread, so the summary sees a complete search.
-        context->capacity = search.finish ();
-        vayu::utils::log_info ("Capacity search stopped: " + context->capacity->stop_reason +
-        " (" + std::to_string (context->capacity->levels.size ()) + " levels measured)");
+        // emplace rather than assign: it hands back the summary it stored, so
+        // the log line below reads the engaged optional rather than asking
+        // whether the write it just made took.
+        const CapacitySummary& capacity = context->capacity.emplace (search.finish ());
+        vayu::utils::log_info ("Capacity search stopped: " + capacity.stop_reason +
+        " (" + std::to_string (capacity.levels.size ()) + " levels measured)");
     }
 };
 

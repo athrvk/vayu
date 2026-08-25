@@ -291,8 +291,13 @@ nlohmann::json CoverageTally::build () const {
 
     for (size_t step = 0; step < counts_.size (); ++step) {
         OperationObservation* row = nullptr;
-        if (step < step_operation_.size () && step_operation_[step]) {
-            row = &observed[*step_operation_[step]];
+        if (step < step_operation_.size ()) {
+            // Resolved against `declared_` in the constructor, so an engaged
+            // entry indexes `observed` (sized from the same list) in range.
+            const std::optional<size_t>& operation = step_operation_[step];
+            if (operation) {
+                row = &observed[*operation];
+            }
         }
         for (size_t slot = 0; slot < SLOTS; ++slot) {
             const size_t count = counts_[step][slot].load (std::memory_order_relaxed);

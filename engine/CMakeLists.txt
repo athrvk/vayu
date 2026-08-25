@@ -670,6 +670,7 @@ if(VAYU_BUILD_TESTS)
         tests/main.cpp
         tests/http_client_test.cpp
         tests/json_test.cpp
+        tests/invariant_test.cpp
         tests/script_engine_test.cpp
         tests/script_expect_message_test.cpp
         tests/script_assertion_error_test.cpp

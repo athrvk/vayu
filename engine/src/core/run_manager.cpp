@@ -497,11 +497,12 @@ const std::vector<std::optional<ScriptValidationTotals>>& per_step) {
     }
     const size_t count = std::min (steps->size (), per_step.size ());
     for (size_t i = 0; i < count; ++i) {
-        if (!per_step[i]) {
+        const auto& tests = per_step[i];
+        if (!tests) {
             continue;
         }
-        (*steps)[i]["tests"] = { { "sampled", per_step[i]->sampled },
-            { "passed", per_step[i]->passed }, { "failed", per_step[i]->failed } };
+        (*steps)[i]["tests"] = { { "sampled", tests->sampled },
+            { "passed", tests->passed }, { "failed", tests->failed } };
     }
 }
 
