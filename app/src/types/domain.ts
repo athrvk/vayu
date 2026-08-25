@@ -2139,17 +2139,40 @@ export interface RunSamplesResponse {
  * What the engine's startup did about a database it could not open (issue
  * #922).
  *
- * `deleted_corrupt` is data loss: the database failed validation, no backup
- * restored it, and it was deleted so the daemon would start rather than
- * crash-loop. `restored_from_backup` is the recoverable half of the same
- * branch.
+ * Every outcome but `restored_from_backup` is data loss - the workspace the
+ * user comes back to is empty. What separates them is what is left to salvage:
+ *
+ * - `restored_from_backup` - the `<db>.bak` beside it passed the same
+ *   validation and was restored over it. Only what was saved since that backup
+ *   was taken is gone.
+ * - `started_fresh_quarantined` - nothing restored it (there was no backup), so
+ *   it was moved aside and a fresh one created (issue #984).
+ * - `backup_also_corrupt` - there *was* a backup and it failed the same
+ *   validation, so it was left untouched rather than written over the original.
+ * - `deleted_corrupt` - it was **deleted**. Written by engines before #984, and
+ *   still by one whose quarantine rename failed; there is nothing to recover.
+ *
+ * The first three leave the bytes on disk, and `quarantinedPath` says where.
  */
 export interface EngineRecovery {
-	outcome: "restored_from_backup" | "deleted_corrupt";
+	outcome:
+		| "restored_from_backup"
+		| "deleted_corrupt"
+		| "backup_also_corrupt"
+		| "started_fresh_quarantined";
 	/** Epoch milliseconds, as every engine timestamp is. */
 	at: number;
 	/** The database file the outcome happened to - the data directory, in effect. */
 	databasePath: string;
+	/**
+	 * Where the unopenable database was moved to, when it was moved rather than
+	 * deleted - the file `sqlite3 <path> .recover` reads.
+	 *
+	 * Absent for a `deleted_corrupt` marker and for any written by an engine
+	 * that predates the quarantine, so it is tested for rather than derived
+	 * from `outcome`.
+	 */
+	quarantinedPath?: string;
 }
 
 export interface EngineHealth {

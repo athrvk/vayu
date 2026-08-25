@@ -45,6 +45,13 @@ nlohmann::json build_health_response (const vayu::db::Database& db) {
         // deriving it renderer-side would mean a second copy of where the
         // engine keeps its database.
         node["databasePath"] = db.path ();
+        // Where the corrupt file was moved to, when it was moved (issue #984).
+        // Absent rather than null for the same reason the whole node is absent
+        // on a clean start - and absent for an outcome that deleted instead, so
+        // the app must not derive it from the outcome string.
+        if (recovery->quarantined_path) {
+            node["quarantinedPath"] = *recovery->quarantined_path;
+        }
         response["recovery"] = node;
     }
     return response;
