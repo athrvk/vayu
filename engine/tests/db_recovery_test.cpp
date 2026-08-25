@@ -23,9 +23,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -75,10 +75,21 @@ class DbRecoveryTest : public ::testing::Test {
         write_corrupt_file (DB_PATH, marker);
     }
 
+    /// The whole of @p path as bytes, empty when it could not be read - which
+    /// is what an assertion for "these are the corrupt bytes" fails against.
+    ///
+    /// Through `rdbuf ()` rather than a pair of `istreambuf_iterator`s, which
+    /// is the same choice `source_scan.hpp` and `http/transport_policy.cpp`
+    /// made: at `-O2` GCC 13 inlines the iterator's `sbumpc` far enough to lose
+    /// sight of the buffer being non-null and reports `gptr ()` as a potential
+    /// null dereference, which the prod presets' `-Werror` makes a build
+    /// failure. `VAYU_IGNORE_FALSE_NULL_DEREFERENCE` exists for the places that
+    /// need the iterator form; this one does not.
     static std::string read_file (const std::string& path) {
         std::ifstream in (path, std::ios::binary);
-        return std::string ((std::istreambuf_iterator<char> (in)),
-        std::istreambuf_iterator<char> ());
+        std::ostringstream buffer;
+        buffer << in.rdbuf ();
+        return buffer.str ();
     }
 
     /// The one quarantined set this database has, or "" when it has none.
