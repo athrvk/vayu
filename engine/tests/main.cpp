@@ -29,7 +29,7 @@ int main (int argc, char** argv) {
     // cut ubuntu from 3-5 min to 1m12s. What costs on Windows is concurrent
     // SQLite commits, not the directories, so the database tests now share a
     // CTest RESOURCE_LOCK there and the rest of the suite runs `-j4` beside
-    // them (#805 phase 5, `engine/CMakeLists.txt`).
+    // them (#805 phase 5, `engine/tests/CMakeLists.txt`).
     const bool isolate = !vayu::tests::scratch_isolation_disabled ();
     const std::filesystem::path scratch =
     isolate ? vayu::tests::enter_process_scratch_dir () : std::filesystem::path{};
