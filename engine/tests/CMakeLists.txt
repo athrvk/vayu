@@ -27,6 +27,7 @@ add_executable(vayu_tests
     http_client_test.cpp
     json_test.cpp
     invariant_test.cpp
+    optional_assert_test.cpp
     script_engine_test.cpp
     script_expect_message_test.cpp
     script_assertion_error_test.cpp

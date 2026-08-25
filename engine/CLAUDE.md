@@ -44,6 +44,20 @@ engine/
   - it names no rule, and the check reports it too, so it buys a `NOLINT` per
   site. That helper is for invariants only: an optional a client can empty is
   still handled, with its `if`, its 404 and its default.
+- **In a test the guard is `ASSERT_HAS_VALUE`** (`tests/optional_assert.hpp`,
+  #980), never `ASSERT_TRUE (opt.has_value ())`. The gtest spelling guards the
+  reads under it perfectly well at run time and the check cannot see it: the
+  condition goes through an `::testing::AssertionResult`, and the dataflow model
+  follows `has_value ()` only into a branch condition, which is where 561 of
+  `engine/tests`' findings came from. Nor can the near misses -
+  `ASSERT_TRUE (...) << "why"`, `ASSERT_NE (opt, std::nullopt)` and `.value ()`
+  are each still reported. The macro is the one `if` the model does follow, with
+  `FAIL ()`'s `return` in its failing branch, so the failure stays gtest's -
+  located at the call site, naming the expression, and streamable
+  (`ASSERT_HAS_VALUE (row) << "after the second write"`). It is a guard, not a
+  silencer: an optional the code under test may legitimately leave empty is
+  still tested over both outcomes, and `invariant_value` remains the answer for
+  a rule that lives in another function.
 - **The reentrant spelling of a C call, always** (#945). `std::localtime` and
   `std::strerror` hand back a pointer into storage the whole process shares, so
   with a worker thread per connection what comes back is a timestamp or an

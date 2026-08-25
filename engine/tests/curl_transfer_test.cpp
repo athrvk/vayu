@@ -17,6 +17,7 @@
 #include <thread>
 #include <vector>
 
+#include "optional_assert.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
@@ -84,7 +85,7 @@ class MethodEchoServer {
         return "http://127.0.0.1:" + std::to_string (port) + path;
     }
 
-    static constexpr size_t kBigBodyBytes = 256 * 1024;
+    static constexpr size_t kBigBodyBytes = size_t{ 256 } * 1024;
 
     httplib::Server svr;
     std::thread thread;
@@ -471,8 +472,7 @@ TEST (AddToMulti, RejectedHandleIsReportedRatherThanDiscarded) {
     EXPECT_FALSE (vayu::http::detail::add_to_multi (multi, easy).has_value ());
 
     auto rejected = vayu::http::detail::add_to_multi (multi, easy);
-    ASSERT_TRUE (rejected.has_value ())
-    << "a rejected add must not look like success";
+    ASSERT_HAS_VALUE (rejected) << "a rejected add must not look like success";
     EXPECT_EQ (rejected->code, vayu::ErrorCode::InternalError);
     EXPECT_NE (rejected->message.find ("Failed to submit transfer"), std::string::npos);
 
