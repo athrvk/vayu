@@ -1,3 +1,4 @@
+#include "optional_assert.hpp"
 #include "vayu/core/run_manager.hpp"
 #include <gtest/gtest.h>
 
@@ -353,13 +354,12 @@ TEST (CollectMetrics, SizesTheReplayRingFromTheConfiguredWindow) {
     // 20s of history at a 20ms cadence = 1000 ticks - deliberately neither the
     // default window nor the default cadence, so a hardcoded 3000 fails here.
     auto entry = db.get_config_entry ("liveReplayWindowMs");
-    ASSERT_TRUE (entry.has_value ())
-    << "seed_default_config did not seed the key";
+    ASSERT_HAS_VALUE (entry) << "seed_default_config did not seed the key";
     entry->value = "20000";
     db.save_config_entry (*entry);
 
     auto tick = db.get_config_entry ("liveTickIntervalMs");
-    ASSERT_TRUE (tick.has_value ());
+    ASSERT_HAS_VALUE (tick);
     tick->value = "20";
     db.save_config_entry (*tick);
 

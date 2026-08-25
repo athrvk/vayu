@@ -38,6 +38,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 
@@ -242,21 +243,21 @@ TEST_F (SpecDiffRouteTest, LeavesTheCollectionExactlyAsItFoundIt) {
     // read: no new document, no moved binding, and no stamp on any request.
     const std::string listed = create_listed_request (root_);
     const auto before        = db_->get_collection (root_);
-    ASSERT_TRUE (before.has_value ());
+    ASSERT_HAS_VALUE (before);
 
     diff ();
 
     const auto after = db_->get_collection (root_);
-    ASSERT_TRUE (after.has_value ());
+    ASSERT_HAS_VALUE (after);
     EXPECT_EQ (after->openapi, before->openapi);
     const auto request = db_->get_request (listed);
-    ASSERT_TRUE (request.has_value ());
-    ASSERT_TRUE (request->spec_operation.has_value ());
+    ASSERT_HAS_VALUE (request);
+    ASSERT_HAS_VALUE (request->spec_operation);
     EXPECT_EQ (json::parse (*request->spec_operation)["operationId"], "listPets");
     EXPECT_EQ (request->name, "List pets");
     // The bound document is still the bound document, byte for byte.
     const auto stored = db_->get_spec_document (bound_spec_);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->content, BOUND_DOC);
 }
 
@@ -285,7 +286,7 @@ TEST_F (SpecDiffRouteTest, RefusesABindingNamingADocumentTheStoreNoLongerHolds) 
      * and reporting every request as changed.
      */
     auto row = db_->get_collection (root_);
-    ASSERT_TRUE (row.has_value ());
+    ASSERT_HAS_VALUE (row);
     row->openapi = R"({"specId":"spec_missing","specHash":"seed","syncedAt":1})";
     db_->create_collection (*row);
 

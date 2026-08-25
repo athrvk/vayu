@@ -45,6 +45,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
@@ -167,7 +168,7 @@ TEST_F (RecordDesignResultTest, ATransientExecutionWritesNoResultRow) {
     // Untouched, not merely un-inserted: a transient execution must not move
     // some other run's status either.
     auto row = db_->get_run (existing);
-    ASSERT_TRUE (row.has_value ());
+    ASSERT_HAS_VALUE (row);
     EXPECT_EQ (row->status, vayu::RunStatus::Running);
 }
 
@@ -201,7 +202,7 @@ TEST_F (RecordDesignResultTest, ARecordedExecutionStoresTheTraceAndCompletesTheR
     EXPECT_EQ (trace["request"]["headers"]["Authorization"], "Bearer sk_live_secret");
 
     auto row = db_->get_run (id);
-    ASSERT_TRUE (row.has_value ());
+    ASSERT_HAS_VALUE (row);
     EXPECT_EQ (row->status, vayu::RunStatus::Completed);
 }
 
@@ -243,7 +244,7 @@ TEST_F (RecordDesignResultTest, AStreamRecordCarriesItsEventsAndItsOwnStatus) {
     EXPECT_EQ (trace["events"]["items"].size (), 1u);
 
     auto row = db_->get_run (id);
-    ASSERT_TRUE (row.has_value ());
+    ASSERT_HAS_VALUE (row);
     EXPECT_EQ (row->status, vayu::RunStatus::Stopped);
 }
 
@@ -261,7 +262,7 @@ TEST_F (RecordDesignResultTest, ARecordedFailureMarksTheRunFailed) {
     record_design_result (*db_, id, sent_request (), failed);
 
     auto row = db_->get_run (id);
-    ASSERT_TRUE (row.has_value ());
+    ASSERT_HAS_VALUE (row);
     EXPECT_EQ (row->status, vayu::RunStatus::Failed);
     ASSERT_EQ (db_->get_results (id).size (), 1u);
     EXPECT_EQ (db_->get_results (id)[0].error, "connection refused");

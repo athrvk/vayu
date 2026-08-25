@@ -31,6 +31,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 
@@ -153,7 +154,7 @@ TEST_F (SpecDescribeRouteTest, RefusesADocumentOverTheConfiguredCap) {
     // The live config entry, not the compiled default, exactly as a store of the
     // same bytes reads it.
     auto entry = db_->get_config_entry ("maxSpecDocumentBytes");
-    ASSERT_TRUE (entry.has_value ());
+    ASSERT_HAS_VALUE (entry);
     entry->value = "64";
     db_->save_config_entry (*entry);
 

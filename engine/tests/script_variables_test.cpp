@@ -27,6 +27,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/request_composer.hpp"
@@ -502,7 +503,7 @@ TEST_F (ScriptVariableScopesTest, AScriptThatReadsAnAncestorAndWritesPersistsOnl
     // blob and `updated_at` both.
     EXPECT_EQ (stored_variables ("col_root"), root_before);
     auto root = db_->get_collection ("col_root");
-    ASSERT_TRUE (root.has_value ());
+    ASSERT_HAS_VALUE (root);
     EXPECT_EQ (root->updated_at, 1);
 }
 

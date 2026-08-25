@@ -21,6 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/db/recovery.hpp"
@@ -98,7 +99,7 @@ TEST_F (DbRecoveryTest, DeletingACorruptDatabaseWithNoBackupIsRecorded) {
 
     auto db = std::make_unique<vayu::db::Database> (DB_PATH);
 
-    ASSERT_TRUE (db->recovery ().has_value ());
+    ASSERT_HAS_VALUE (db->recovery ());
     EXPECT_TRUE (recorded_outcome (*db) == RecoveryOutcome::DeletedCorrupt);
     EXPECT_GT (recorded_at (*db), 0);
 
@@ -128,7 +129,7 @@ TEST_F (DbRecoveryTest, RestoringFromABackupIsADifferentOutcome) {
     write_corrupt_database ();
     auto db = std::make_unique<vayu::db::Database> (DB_PATH);
 
-    ASSERT_TRUE (db->recovery ().has_value ());
+    ASSERT_HAS_VALUE (db->recovery ());
     EXPECT_TRUE (recorded_outcome (*db) == RecoveryOutcome::RestoredFromBackup);
     EXPECT_EQ (
     vayu::http::routes::build_health_response (*db)["recovery"]["outcome"],
@@ -146,7 +147,7 @@ TEST_F (DbRecoveryTest, TheRecordOutlivesTheEngineRunThatWroteIt) {
     }
 
     vayu::db::Database second (DB_PATH);
-    ASSERT_TRUE (second.recovery ().has_value ());
+    ASSERT_HAS_VALUE (second.recovery ());
     EXPECT_TRUE (recorded_outcome (second) == RecoveryOutcome::DeletedCorrupt);
 }
 

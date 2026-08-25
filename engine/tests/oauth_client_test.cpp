@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/http/oauth_client.hpp"
 
@@ -309,7 +310,9 @@ TEST_F (OAuthClientTest, ExpiredTokenRefreshesAndKeepsOldRefreshToken) {
     EXPECT_EQ (form["grant_type"], "refresh_token");
     EXPECT_EQ (form["refresh_token"], "RT_OLD");
     // Persisted rotation is durable
-    EXPECT_EQ (db_->get_oauth_token (stale.cache_key)->refresh_token, "RT_OLD");
+    const auto stored_token = db_->get_oauth_token (stale.cache_key);
+    ASSERT_HAS_VALUE (stored_token);
+    EXPECT_EQ (stored_token->refresh_token, "RT_OLD");
 }
 
 TEST_F (OAuthClientTest, RejectedRefreshFallsBackToFreshGrant) {
@@ -402,7 +405,7 @@ TEST_F (OAuthClientTest, DbRoundTrip) {
     t.raw_response  = "{}";
     db_->save_oauth_token (t);
     auto got = db_->get_oauth_token ("k1");
-    ASSERT_TRUE (got.has_value ());
+    ASSERT_HAS_VALUE (got);
     EXPECT_EQ (got->access_token, "a");
     EXPECT_EQ (got->created_at, 42);
     db_->delete_oauth_token ("k1");

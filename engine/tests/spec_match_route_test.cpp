@@ -28,6 +28,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 
@@ -124,10 +125,10 @@ TEST_F (SpecMatchRouteTest, LeavesTheCollectionExactlyAsItFoundIt) {
     { "operationId", "listPets" } } }));
 
     const auto stored = db_->get_request (list);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_FALSE (stored->spec_operation.has_value ());
     const auto collection = db_->get_collection (root_);
-    ASSERT_TRUE (collection.has_value ());
+    ASSERT_HAS_VALUE (collection);
     EXPECT_TRUE (collection->openapi.empty () || collection->openapi == "{}");
 }
 

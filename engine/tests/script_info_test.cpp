@@ -22,6 +22,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/request_composer.hpp"
@@ -88,7 +89,7 @@ TEST_F (ScriptRequestNameTest, PayloadNameWinsOverTheStoredRow) {
     json{ { "requestName", "Renamed in the editor" } }, std::string ("req_1"));
 
     ASSERT_TRUE (resolved.ok) << resolved.error;
-    ASSERT_TRUE (resolved.name.has_value ());
+    ASSERT_HAS_VALUE (resolved.name);
     EXPECT_EQ (*resolved.name, "Renamed in the editor");
 }
 
@@ -99,7 +100,7 @@ TEST_F (ScriptRequestNameTest, PayloadNameIsUsedWithNoRequestIdAtAll) {
     *db_, json{ { "requestName", "Untitled" } }, std::nullopt);
 
     ASSERT_TRUE (resolved.ok) << resolved.error;
-    ASSERT_TRUE (resolved.name.has_value ());
+    ASSERT_HAS_VALUE (resolved.name);
     EXPECT_EQ (*resolved.name, "Untitled");
 }
 
@@ -111,7 +112,7 @@ TEST_F (ScriptRequestNameTest, FallsBackToTheStoredRowWhenOnlyAnIdIsSent) {
     resolve_script_request_name (*db_, json::object (), std::string ("req_1"));
 
     ASSERT_TRUE (resolved.ok) << resolved.error;
-    ASSERT_TRUE (resolved.name.has_value ());
+    ASSERT_HAS_VALUE (resolved.name);
     EXPECT_EQ (*resolved.name, "Fetch users");
 }
 
@@ -140,7 +141,7 @@ TEST_F (ScriptRequestNameTest, EmptyPayloadNameDoesNotShadowTheStoredRow) {
     *db_, json{ { "requestName", "" } }, std::string ("req_1"));
 
     ASSERT_TRUE (resolved.ok) << resolved.error;
-    ASSERT_TRUE (resolved.name.has_value ());
+    ASSERT_HAS_VALUE (resolved.name);
     EXPECT_EQ (*resolved.name, "Fetch users");
 }
 

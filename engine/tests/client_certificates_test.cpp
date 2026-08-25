@@ -31,6 +31,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
@@ -474,14 +475,14 @@ TEST (ClientCertValidation, RejectsAFileThatIsNotThere) {
 
     const auto missing_cert = client_cert_rejection ("api.example.com",
     std::nullopt, ClientCertFormat::Pem, "/nope/client.pem", key.path ());
-    ASSERT_TRUE (missing_cert.has_value ());
+    ASSERT_HAS_VALUE (missing_cert);
     // The message has to name the file, or the user is left with "invalid
     // certificate" and two paths to check by hand.
     EXPECT_NE (missing_cert->find ("/nope/client.pem"), std::string::npos);
 
     const auto missing_key = client_cert_rejection ("api.example.com",
     std::nullopt, ClientCertFormat::Pem, cert.path (), "/nope/client.key");
-    ASSERT_TRUE (missing_key.has_value ());
+    ASSERT_HAS_VALUE (missing_key);
     EXPECT_NE (missing_key->find ("/nope/client.key"), std::string::npos);
 
     // A directory is not a file, and opening one succeeds on some platforms -
@@ -548,14 +549,14 @@ TEST (ClientCertValidation, APkcs12EntryCarriesItsOwnKeyAndMayNotNameOne) {
     // card would keep asking for a file nothing ever opens.
     const auto with_key = client_cert_rejection ("api.example.com",
     std::nullopt, ClientCertFormat::Pkcs12, bundle.path (), key.path ());
-    ASSERT_TRUE (with_key.has_value ());
+    ASSERT_HAS_VALUE (with_key);
     EXPECT_NE (with_key->find ("PKCS#12"), std::string::npos) << *with_key;
 
     // And the mirror: a PEM entry without a key names what is missing rather
     // than failing later against the endpoint.
     const auto without_key = client_cert_rejection (
     "api.example.com", std::nullopt, ClientCertFormat::Pem, bundle.path (), "");
-    ASSERT_TRUE (without_key.has_value ());
+    ASSERT_HAS_VALUE (without_key);
     EXPECT_NE (without_key->find ("key file"), std::string::npos) << *without_key;
 }
 
@@ -569,13 +570,13 @@ TEST (ClientCertValidation, RefusesAFileThatContradictsItsDeclaredFormat) {
     // endpoint, which is the misdiagnosis this registry exists to end.
     const auto bundle_as_pem = client_cert_rejection ("api.example.com",
     std::nullopt, ClientCertFormat::Pem, der.path (), key.path ());
-    ASSERT_TRUE (bundle_as_pem.has_value ());
+    ASSERT_HAS_VALUE (bundle_as_pem);
     EXPECT_NE (bundle_as_pem->find ("p12"), std::string::npos) << *bundle_as_pem;
     EXPECT_NE (bundle_as_pem->find (der.path ()), std::string::npos) << *bundle_as_pem;
 
     const auto pem_as_bundle = client_cert_rejection (
     "api.example.com", std::nullopt, ClientCertFormat::Pkcs12, pem.path (), "");
-    ASSERT_TRUE (pem_as_bundle.has_value ());
+    ASSERT_HAS_VALUE (pem_as_bundle);
     EXPECT_NE (pem_as_bundle->find ("pem"), std::string::npos) << *pem_as_bundle;
 }
 
@@ -612,9 +613,10 @@ TEST_F (ClientCertificateDbTest, CreatesAndListsAnEntry) {
 
     const auto rows = db_->get_client_certificates ();
     ASSERT_EQ (rows.size (), 1u);
-    EXPECT_EQ (rows.front ().host, "api.example.com");
-    ASSERT_TRUE (rows.front ().port.has_value ());
-    EXPECT_EQ (*rows.front ().port, 8443);
+    const auto& only = rows.front ();
+    EXPECT_EQ (only.host, "api.example.com");
+    ASSERT_HAS_VALUE (only.port);
+    EXPECT_EQ (*only.port, 8443);
 }
 
 TEST_F (ClientCertificateDbTest, RegistersAPkcs12EntryWithNoKeyPath) {

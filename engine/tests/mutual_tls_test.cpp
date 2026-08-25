@@ -66,6 +66,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "tls_backend.hpp"
 #include "tls_server.hpp"
@@ -221,7 +222,7 @@ class MutualTlsTest : public ::testing::TestWithParam<ClientIdentityFormat> {
 
     void set_config (const std::string& key, const std::string& value) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key << " is not seeded";
+        ASSERT_HAS_VALUE (entry) << key << " is not seeded";
         entry->value = value;
         db_->save_config_entry (*entry);
     }

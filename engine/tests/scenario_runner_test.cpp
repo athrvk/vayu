@@ -34,6 +34,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -188,7 +189,7 @@ class ScenarioRunnerTest : public ::testing::Test {
     /// Override a seeded config value, keeping the rest of its row intact.
     void set_config (const std::string& key, const std::string& value) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key << " is not a seeded config key";
+        ASSERT_HAS_VALUE (entry) << key << " is not a seeded config key";
         entry->value = value;
         db_->save_config_entry (*entry);
     }
@@ -240,7 +241,7 @@ class ScenarioRunnerTest : public ::testing::Test {
     /// validation resolve by.
     void stamp_spec_operation (const std::string& request_id, const json& identity) {
         auto row = db_->get_request (request_id);
-        ASSERT_TRUE (row.has_value ()) << request_id;
+        ASSERT_HAS_VALUE (row) << request_id;
         row->spec_operation = identity.dump ();
         db_->save_request (*row);
     }
@@ -257,7 +258,7 @@ class ScenarioRunnerTest : public ::testing::Test {
         db_->save_spec_document (spec);
 
         auto col = db_->get_collection ("col_1");
-        ASSERT_TRUE (col.has_value ());
+        ASSERT_HAS_VALUE (col);
         col->openapi =
         json{ { "specId", "spec_1" }, { "specHash", hash }, { "syncedAt", 1 } }.dump ();
         db_->create_collection (*col); // a replace, keyed on the id
@@ -389,7 +390,10 @@ class ScenarioRunnerTest : public ::testing::Test {
 
     [[nodiscard]] json summary_of (const std::string& run_id) {
         auto run = db_->get_run (run_id);
-        EXPECT_TRUE (run.has_value ());
+        if (!run.has_value ()) {
+            ADD_FAILURE () << "no run is stored under " << run_id;
+            return json::object ();
+        }
         return json::parse (run->summary);
     }
 
@@ -447,7 +451,7 @@ TEST_F (ScenarioRunnerTest, ADesignRunsSingleResultContractIsUntouched) {
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
     auto run = db_->get_run (run_id);
-    ASSERT_TRUE (run.has_value ());
+    ASSERT_HAS_VALUE (run);
     EXPECT_EQ (run->type, vayu::RunType::Scenario);
 
     // `GET /runs/:id` serves `result` from the first row *only* for a design
@@ -491,7 +495,7 @@ TEST_F (ScenarioRunnerTest, AVariableSetByAStepIsReadableByTheNextAndPersistedOn
     EXPECT_EQ (mid_run_value.find ("from-step-1"), std::string::npos);
 
     auto env = db_->get_environment ("env_1");
-    ASSERT_TRUE (env.has_value ());
+    ASSERT_HAS_VALUE (env);
     EXPECT_NE (env->variables.find ("from-step-1"), std::string::npos);
 }
 
@@ -1188,7 +1192,7 @@ TEST_F (ScenarioRunnerTest, ABoundDocumentWithNoSchemaIndexIsSaidSoRatherThanSil
     spec.fetched_at = 1;
     db_->save_spec_document (spec);
     auto col = db_->get_collection ("col_1");
-    ASSERT_TRUE (col.has_value ());
+    ASSERT_HAS_VALUE (col);
     col->openapi = json{ { "specId", "spec_1" }, { "specHash", "hash-1" } }.dump ();
     db_->create_collection (*col);
 

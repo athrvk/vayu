@@ -30,6 +30,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/routes.hpp"
@@ -288,9 +289,9 @@ TEST (StreamFlag, ReadsPerRequestCaps) {
     const auto flag = read_stream_flag (json{ { "stream", true },
     { "maxStreamDurationMs", 5000 }, { "maxStreamEvents", 12 } });
     ASSERT_TRUE (flag.ok);
-    ASSERT_TRUE (flag.max_duration_ms.has_value ());
+    ASSERT_HAS_VALUE (flag.max_duration_ms);
     EXPECT_EQ (*flag.max_duration_ms, 5000);
-    ASSERT_TRUE (flag.max_events.has_value ());
+    ASSERT_HAS_VALUE (flag.max_events);
     EXPECT_EQ (*flag.max_events, 12);
 }
 
@@ -330,7 +331,7 @@ class SseLimitsTest : public ::testing::Test {
 
     void set_config (const char* key, const std::string& value) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key;
+        ASSERT_HAS_VALUE (entry) << key;
         entry->value = value;
         db_->save_config_entry (*entry);
     }
@@ -773,7 +774,7 @@ class RelayTest : public ::testing::Test {
 
     void set_config (const char* key, const std::string& value) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key;
+        ASSERT_HAS_VALUE (entry) << key;
         entry->value = value;
         db_->save_config_entry (*entry);
     }
@@ -858,7 +859,7 @@ TEST_F (RelayTest, ASecondConcurrentWatcherIsRefused) {
     auto context = streamed (1);
     ASSERT_NE (context, nullptr);
     const auto held = context->try_claim ();
-    ASSERT_TRUE (held.has_value ());
+    ASSERT_HAS_VALUE (held);
 
     auto response = client ().Get ("/runs/run_test/events");
     ASSERT_TRUE (response);
@@ -1015,7 +1016,7 @@ class StreamExecuteTest : public ::testing::Test {
 
     void set_config (const char* key, const std::string& value) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key;
+        ASSERT_HAS_VALUE (entry) << key;
         entry->value = value;
         db_->save_config_entry (*entry);
     }

@@ -18,6 +18,7 @@
  * runs_route_test.cpp.
  */
 
+#include "optional_assert.hpp"
 #include "vayu/core/spec_coverage.hpp"
 
 #include "vayu/core/constants.hpp"
@@ -83,8 +84,9 @@ TEST (SpecCoverageIndex, AnAbsentOrUnreadableIndexIsNotMeasuredRatherThanEmpty) 
     EXPECT_FALSE (parse_declared_operations ("{\"operations\": []}").has_value ());
     // An array that *is* empty parses - the document declared nothing, which is
     // a different answer from having no index at all.
-    ASSERT_TRUE (parse_declared_operations ("[]").has_value ());
-    EXPECT_TRUE (parse_declared_operations ("[]")->empty ());
+    const auto empty_index = parse_declared_operations ("[]");
+    ASSERT_HAS_VALUE (empty_index);
+    EXPECT_TRUE (empty_index->empty ());
 }
 
 TEST (SpecCoverageIndex, OneUnusableRowIsSkippedRatherThanCostingTheWholeIndex) {
@@ -94,7 +96,7 @@ TEST (SpecCoverageIndex, OneUnusableRowIsSkippedRatherThanCostingTheWholeIndex) 
         "not an object",
         {"operationId": "createPet", "method": "post", "path": "/pets", "responses": ["201"]}
     ])");
-    ASSERT_TRUE (declared.has_value ());
+    ASSERT_HAS_VALUE (declared);
     ASSERT_EQ (declared->size (), 2u);
     // Methods are upper-cased on the way in, so a document that wrote `get`
     // matches a request stamped `GET`.

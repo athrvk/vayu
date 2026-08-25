@@ -28,6 +28,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/db/database.hpp"
@@ -120,7 +121,7 @@ TEST_F (ResponseCaptureTest, EveryStoredErrorCarriesItsExchange) {
 
     ASSERT_EQ (collector.errors ().size (), 5u);
     for (const auto& record : collector.errors ()) {
-        ASSERT_TRUE (record.capture.has_value ());
+        ASSERT_HAS_VALUE (record.capture);
         EXPECT_EQ (record.capture->body, R"({"err":true})");
     }
     // Past the cap the record is dropped, so no body was copied for it either.
@@ -158,7 +159,7 @@ TEST_F (ResponseCaptureTest, ExemplarStoreKeepsOnePerStatusUpToTheLimit) {
     2 * constants::metrics_collector::EXEMPLARS_PER_STATUS);
     std::set<int> statuses;
     for (const auto& record : collector.exemplar_results ()) {
-        ASSERT_TRUE (record.capture.has_value ());
+        ASSERT_HAS_VALUE (record.capture);
         statuses.insert (record.status_code);
     }
     EXPECT_EQ (statuses, (std::set<int>{ 200, 500 }));
@@ -182,8 +183,9 @@ TEST_F (ResponseCaptureTest, CaptureFollowsTheCallerNotTheStore) {
     collector.record_success (200, 9000.0, 0.0, "{}", SuccessTraceReason::Slow, nullptr);
 
     ASSERT_EQ (collector.success_results ().size (), 1u);
-    ASSERT_TRUE (collector.success_results ()[0].capture.has_value ());
-    EXPECT_EQ (collector.success_results ()[0].capture->body, "hello");
+    const auto& capture = collector.success_results ()[0].capture;
+    ASSERT_HAS_VALUE (capture);
+    EXPECT_EQ (capture->body, "hello");
     ASSERT_EQ (collector.slow_results ().size (), 1u);
     EXPECT_FALSE (collector.slow_results ()[0].capture.has_value ());
 }
@@ -224,7 +226,7 @@ TEST_F (ResponseCaptureTest, BodyOverThePerBodyCapIsTruncatedAndSaysSo) {
 
     ASSERT_EQ (collector.errors ().size (), 1u);
     const auto& captured = collector.errors ()[0].capture;
-    ASSERT_TRUE (captured.has_value ());
+    ASSERT_HAS_VALUE (captured);
     EXPECT_EQ (captured->body.size (), 16u);
     EXPECT_TRUE (captured->truncated);
     EXPECT_EQ (captured->body_bytes, 100);
@@ -247,7 +249,7 @@ TEST_F (ResponseCaptureTest, SpentBudgetKeepsMetadataAndCountsDroppedBodies) {
     ASSERT_EQ (collector.errors ().size (), 10u);
     size_t with_body = 0;
     for (const auto& record : collector.errors ()) {
-        ASSERT_TRUE (record.capture.has_value ())
+        ASSERT_HAS_VALUE (record.capture)
         << "metadata must survive a spent budget";
         EXPECT_EQ (record.capture->headers.size (), 2u);
         EXPECT_EQ (record.capture->body_bytes, 100);

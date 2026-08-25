@@ -31,6 +31,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/database.hpp"
@@ -170,7 +171,7 @@ TEST_F (SpecBindRouteTest, StoresTheDocumentMovesTheBindingAndStampsWhatMatched)
     // The document is stored verbatim, and the hash the binding names is the
     // one the row carries - a run stamps that, so the two must be one value.
     auto document = db_->get_spec_document (body["specId"].get<std::string> ());
-    ASSERT_TRUE (document.has_value ());
+    ASSERT_HAS_VALUE (document);
     EXPECT_EQ (document->content, pets_document ());
     EXPECT_EQ (document->hash, body["specHash"].get<std::string> ());
 
@@ -188,14 +189,14 @@ TEST_F (SpecBindRouteTest, DerivesBothIndexesFromTheDocumentItStores) {
     const auto body        = bind_ok (pets_document ());
 
     auto document = db_->get_spec_document (body["specId"].get<std::string> ());
-    ASSERT_TRUE (document.has_value ());
+    ASSERT_HAS_VALUE (document);
     auto declared = vayu::core::parse_declared_operations (document->operations);
-    ASSERT_TRUE (declared.has_value ());
+    ASSERT_HAS_VALUE (declared);
     EXPECT_EQ (declared->size (), 2u);
 
     const vayu::core::OperationIndex index (*declared);
     const auto resolved = index.resolve (stamp_of (list));
-    ASSERT_TRUE (resolved.has_value ());
+    ASSERT_HAS_VALUE (resolved);
     EXPECT_EQ ((*declared)[*resolved].operation_id, "listPets");
 }
 
@@ -369,14 +370,14 @@ TEST_F (SpecBindRouteTest, DoesNotRewriteARequestItNeitherStampedNorCleared) {
     // carried nothing is not part of the write.
     const std::string spare = create_request (root_, "POST", "{{baseUrl}}/unrelated");
     auto before = db_->get_request (spare);
-    ASSERT_TRUE (before.has_value ());
+    ASSERT_HAS_VALUE (before);
 
     const auto body = bind_ok (pets_document ());
     EXPECT_EQ (body["stamped"], 0u);
     EXPECT_EQ (body["cleared"], 0u);
 
     auto after = db_->get_request (spare);
-    ASSERT_TRUE (after.has_value ());
+    ASSERT_HAS_VALUE (after);
     EXPECT_EQ (after->updated_at, before->updated_at);
 }
 
