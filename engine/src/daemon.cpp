@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <thread>
 
@@ -136,7 +137,14 @@ int main (int argc, char* argv[]) {
         if (force) {
             vayu::utils::log_warning (
             "Force shutdown requested, exiting immediately");
-            std::exit (1);
+            // `_Exit` and not `exit` (#945): this runs inside the signal
+            // handler, and `exit` would run every atexit handler and static
+            // destructor *while the worker threads are still using what they
+            // destroy* - the database, the curl globals, the logger this line
+            // just wrote through. A second Ctrl-C is asking for the process to
+            // stop now, so it stops now; the ordered teardown is the first
+            // Ctrl-C's job, below.
+            std::_Exit (1);
         }
         vayu::utils::log_info ("Shutting down...");
         g_running.store (false);

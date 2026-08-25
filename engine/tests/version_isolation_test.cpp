@@ -26,78 +26,18 @@
  */
 
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "source_scan.hpp"
 #include "vayu/core/user_agent.hpp"
 
 namespace {
 
-std::string read_file (const std::filesystem::path& path) {
-    std::ifstream file (path);
-    std::stringstream buffer;
-    buffer << file.rdbuf ();
-    return buffer.str ();
-}
-
-/**
- * @p source with `//` and block comments blanked out.
- *
- * Needed rather than fussy: the rule below is *documented* in the very headers
- * it polices - `constants.hpp` explains why it does not include
- * `vayu/version.hpp`, and `user_agent.hpp` explains what it stands in for - so a
- * raw substring scan reports both of them and the only way to quiet it is to
- * delete the explanation. Scanning code and not prose is the honest version.
- *
- * Newlines are preserved so the remaining text keeps its shape. String literals
- * are not modelled: none of the scanned headers opens a comment of either kind
- * inside one, and the failure mode if one appeared would be over-stripping,
- * i.e. a lenient guard - which `TheGuardStillSeesTheVersionInCode` below is
- * what catches.
- */
-std::string strip_comments (const std::string& source) {
-    std::string out;
-    out.reserve (source.size ());
-    enum class State { Code, Line, Block };
-    State state = State::Code;
-
-    for (size_t i = 0; i < source.size (); ++i) {
-        const char c    = source[i];
-        const char next = i + 1 < source.size () ? source[i + 1] : '\0';
-        switch (state) {
-        case State::Code:
-            if (c == '/' && next == '/') {
-                state = State::Line;
-                ++i;
-            } else if (c == '/' && next == '*') {
-                state = State::Block;
-                ++i;
-            } else {
-                out.push_back (c);
-            }
-            break;
-        case State::Line:
-            if (c == '\n') {
-                state = State::Code;
-                out.push_back (c);
-            }
-            break;
-        case State::Block:
-            if (c == '*' && next == '/') {
-                state = State::Code;
-                ++i;
-            } else if (c == '\n') {
-                out.push_back (c);
-            }
-            break;
-        }
-    }
-    return out;
-}
+using vayu::tests::read_source;
+using vayu::tests::strip_comments;
 
 /// The headers a version bump must not reach, because nearly every TU does.
 const std::vector<std::string> kHubHeaders = {
@@ -118,7 +58,7 @@ TEST (VersionIsolationTest, TheHubHeadersDoNotNameTheVersion) {
         const auto path = root / relative;
         ASSERT_TRUE (std::filesystem::exists (path))
         << relative << " is not where the guard looks";
-        const std::string source = strip_comments (read_file (path));
+        const std::string source = strip_comments (read_source (path));
         ASSERT_FALSE (source.empty ()) << relative << " read as empty";
         total_bytes += source.size ();
 

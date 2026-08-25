@@ -14,6 +14,7 @@
 #include <thread>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/utils/reentrant.hpp"
 
 namespace vayu::utils {
 Logger& Logger::instance () {
@@ -29,11 +30,9 @@ void Logger::init (const std::string& log_dir) {
     // Open log file with timestamp
     auto now  = std::chrono::system_clock::now ();
     auto time = std::chrono::system_clock::to_time_t (now);
-    std::stringstream ss;
-    ss << std::put_time (std::localtime (&time), vayu::core::constants::logging::TIME_FORMAT);
 
-    std::string log_file =
-    log_dir_ + vayu::core::constants::logging::FILE_PREFIX + ss.str () + ".log";
+    std::string log_file = log_dir_ + vayu::core::constants::logging::FILE_PREFIX +
+    format_local_time (time, vayu::core::constants::logging::TIME_FORMAT) + ".log";
     log_file_ = std::make_unique<std::ofstream> (log_file, std::ios::app);
 
     if (!log_file_ || !log_file_->is_open ()) {
@@ -132,7 +131,7 @@ std::string Logger::get_timestamp () const {
     std::chrono::duration_cast<std::chrono::milliseconds> (now.time_since_epoch ()) % 1000;
 
     std::stringstream ss;
-    ss << std::put_time (std::localtime (&time), "%Y-%m-%d %H:%M:%S");
+    ss << format_local_time (time, "%Y-%m-%d %H:%M:%S");
     ss << '.' << std::setfill ('0') << std::setw (3) << ms.count ();
 
     return ss.str ();

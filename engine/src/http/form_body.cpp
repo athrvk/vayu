@@ -11,10 +11,10 @@
 
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
+#include "vayu/utils/reentrant.hpp"
 
 #include <cerrno>
 #include <cstdio>
-#include <cstring>
 
 namespace vayu::http {
 
@@ -235,7 +235,7 @@ std::optional<std::string> unsendable_file_part (const Body& body) {
         std::FILE* handle = std::fopen (field.src.c_str (), "rb");
         if (!handle) {
             return "Form field '" + name + "': cannot read file '" + field.src +
-            "' (" + std::strerror (errno) + ")";
+            "' (" + vayu::utils::errno_message (errno) + ")";
         }
         char probe           = 0;
         const size_t read    = std::fread (&probe, 1, 1, handle);
@@ -244,7 +244,7 @@ std::optional<std::string> unsendable_file_part (const Body& body) {
         std::fclose (handle);
         if (!readable) {
             return "Form field '" + name + "': cannot read file '" + field.src +
-            "' (" + std::strerror (read_errno) + ")";
+            "' (" + vayu::utils::errno_message (read_errno) + ")";
         }
     }
     return std::nullopt;

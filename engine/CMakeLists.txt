@@ -778,6 +778,7 @@ if(VAYU_BUILD_TESTS)
         tests/spec_coverage_test.cpp
         tests/schema_validation_test.cpp
         tests/version_isolation_test.cpp
+        tests/reentrant_test.cpp
         src/http/routes/import.cpp
         src/http/routes/diagnostics.cpp
         src/http/routes/compose.cpp

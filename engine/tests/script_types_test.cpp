@@ -54,6 +54,11 @@ bool contains (const std::string& haystack, const std::string& needle) {
  * suite is built with `/W4 /WX`, so the deprecation is followed rather than
  * suppressed: a `#pragma warning(disable)` here would be a permanent
  * suppression for a one-line read.
+ *
+ * `concurrency-mt-unsafe` is silenced rather than fixed (#945): `getenv` races
+ * only against a write to the environment, and the only writer in this suite
+ * is `ScopedEnv` in `transport_policy_test.cpp`. gtest runs one test body at a
+ * time, so that write and this read never overlap.
  */
 bool env_is_set (const char* name) {
 #ifdef _WIN32
@@ -65,6 +70,7 @@ bool env_is_set (const char* name) {
     std::free (value);
     return true;
 #else
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     return std::getenv (name) != nullptr;
 #endif
 }
