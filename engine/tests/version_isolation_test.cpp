@@ -25,6 +25,7 @@
  * the version at all.
  */
 
+#include <array>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -40,7 +41,9 @@ using vayu::tests::read_source;
 using vayu::tests::strip_comments;
 
 /// The headers a version bump must not reach, because nearly every TU does.
-const std::vector<std::string> kHubHeaders = {
+/// `constexpr`, so the list is the compiler's and not something built before
+/// `main` where an allocation failure cannot be caught (`cert-err58-cpp`).
+constexpr std::array<const char*, 6> kHubHeaders = {
     "include/vayu/core/constants.hpp",
     "include/vayu/core/user_agent.hpp",
     "include/vayu/types.hpp",
@@ -67,7 +70,7 @@ TEST (VersionIsolationTest, TheHubHeadersDoNotNameTheVersion) {
         // the `Version` struct's initialisers alike.
         if (source.find ("vayu/version.hpp") != std::string::npos ||
         source.find ("VAYU_VERSION") != std::string::npos) {
-            offenders.push_back (relative);
+            offenders.emplace_back (relative);
         }
     }
 

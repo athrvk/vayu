@@ -20,10 +20,13 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <regex>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -115,6 +118,67 @@ TEST (DynamicVariables, GuidIsAUuidV4AndDiffersPerOccurrence) {
     EXPECT_TRUE (std::regex_match (b, uuid_v4)) << b;
     // Once per occurrence: two {{$guid}} in one payload are two different ids.
     EXPECT_NE (a, b);
+}
+
+TEST (DynamicVariables, IsoTimestampIsTheShapeTheRendererProduces) {
+    // The renderer's `$isoTimestamp` is `new Date().toISOString()`, and the two
+    // tables are a contract: this is that shape, spelled out. The engine now
+    // assembles it from two pieces - a formatted `std::tm` and the
+    // milliseconds - so the assertion is on the whole string, joint included.
+    //
+    // Sampled over wall-clock time rather than in a tight loop, and that is the
+    // whole design of this test. The half a tight loop never reaches is the
+    // zero-padding: the millisecond field only needs it for one instant in ten,
+    // and 200 back-to-back calls complete inside a single millisecond, so they
+    // are 200 copies of one sample. The field visits every value once per
+    // second, so pausing between samples until a padded one turns up reaches
+    // that case instead of hoping for it - and the test says so afterwards,
+    // rather than passing on a run that never sampled it.
+    const vayu::http::VariableValues no_vars;
+    const std::regex iso_8601 (R"(^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$)");
+    constexpr size_t kMillisAt = std::string_view ("2026-08-25T16:30:45.").size ();
+
+    bool sampled_a_padded_millisecond = false;
+    const auto deadline = std::chrono::steady_clock::now () + std::chrono::seconds (3);
+    while (std::chrono::steady_clock::now () < deadline) {
+        const std::string stamped =
+        vayu::http::resolve_template ("{{$isoTimestamp}}", no_vars);
+        ASSERT_TRUE (std::regex_match (stamped, iso_8601)) << stamped;
+        if (stamped[kMillisAt] == '0') {
+            sampled_a_padded_millisecond = true;
+            break;
+        }
+        std::this_thread::sleep_for (std::chrono::milliseconds (1));
+    }
+    EXPECT_TRUE (sampled_a_padded_millisecond)
+    << "never sampled a millisecond below 100, so the padding went unchecked";
+}
+
+TEST (DynamicVariables, TheRandomAlphabetsAreTheOnesTheCharactersComeFrom) {
+    // Both alphabets are `constexpr std::string_view` now, indexed rather than
+    // copied. A view whose length or contents went wrong reads past the literal
+    // or draws from the wrong span, and either shows up here as a character
+    // that does not belong.
+    constexpr std::string_view alphanumeric =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    constexpr std::string_view password_chars =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*_-+"
+    "=";
+    const vayu::http::VariableValues no_vars;
+
+    for (int i = 0; i < 50; ++i) {
+        const std::string one =
+        vayu::http::resolve_template ("{{$randomAlphaNumeric}}", no_vars);
+        ASSERT_EQ (one.size (), 1u) << one;
+        EXPECT_NE (alphanumeric.find (one[0]), std::string_view::npos) << one;
+
+        const std::string password =
+        vayu::http::resolve_template ("{{$randomPassword}}", no_vars);
+        ASSERT_EQ (password.size (), 15u) << password;
+        for (const char c : password) {
+            EXPECT_NE (password_chars.find (c), std::string_view::npos) << password;
+        }
+    }
 }
 
 TEST (DynamicVariables, RandomIntStaysInRange) {

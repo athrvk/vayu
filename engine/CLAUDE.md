@@ -49,13 +49,28 @@ engine/
   with a worker thread per connection what comes back is a timestamp or an
   error message describing *another* call's subject - not a crash, which is why
   it survived this long. `vayu/utils/reentrant.hpp` is the one place that
-  spells them safely (`format_local_time`, `errno_message`), and
+  spells them safely (`format_local_time`, `format_utc_time`, `errno_message`), and
   `tests/reentrant_test.cpp` scans `src` and `include` for the classic names,
   plus for the `setenv`/`putenv` that would make the single exempted `getenv`
   (`transport_policy.cpp`, no reentrant spelling to move to) unsafe. The
   daemon's force-shutdown branch is `std::_Exit` for the same family of reason:
   it runs *inside* the signal handler, and `exit` there runs every static
   destructor while the worker threads are still using what they destroy.
+- **Nothing at namespace scope is built at run time** (#945, `cert-err58-cpp`).
+  A constant is `constexpr` - `std::string_view` for text, `std::array` for a
+  list, `const char*` for a path a `std::string` parameter will take anyway -
+  and an object that cannot be one (a `std::regex`, an `nlohmann::json`, a
+  `std::mt19937`, anything holding a `std::string`) lives inside a function as
+  a `static` the accessor returns a reference to. Both spellings answer the
+  same two questions: dynamic initialisation runs before `main`, where a throw
+  has no frame to land in and terminates the process, and its order against
+  another translation unit's statics is unspecified. A function-local static is
+  built on the first caller's stack, exactly once, thread-safely, and after
+  everything it depends on. `token_pattern` in `request_composer.cpp` is the
+  shape; the same file's `PASSWORD_CHARS` is what to do when a constant was
+  *derived* from another - spell it out and pin the two together with a
+  `static_assert`, rather than concatenating before `main`. A test-only
+  constant is held to this too: the gate does not read `tests/` differently.
 - Formatter: clang-format, **19 exactly** (`.clang-format` at repo root; the
   version is pinned because 39 of the 285 engine sources format differently
   under 18). **A difference is a failure now** (#886): the `Engine formatting`

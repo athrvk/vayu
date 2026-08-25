@@ -7,8 +7,9 @@
 
 /**
  * @file tests/reentrant_test.cpp
- * @brief `vayu::utils::format_local_time` and `errno_message` (issue #945), and
- *        the guard that keeps the calls they replaced out of `src`.
+ * @brief `vayu::utils::format_local_time`, `format_utc_time` and
+ *        `errno_message` (issue #945), and the guard that keeps the calls they
+ *        replaced out of `src`.
  *
  * Two halves, because the defect has two.
  *
@@ -140,6 +141,43 @@ TEST (FormatLocalTime, AnUnrepresentableInstantRendersAsNothing) {
     if (!stamped.empty ()) {
         EXPECT_NE (stamped.rfind ("1899", 0), 0u) << stamped;
         EXPECT_NE (stamped.rfind ("1900", 0), 0u) << stamped;
+    }
+}
+
+TEST (FormatUtcTime, RendersTheInstantInUtcAndNotTheLocalZone) {
+    // 2001-09-09T01:46:40Z - the epoch second every calendar agrees on, and one
+    // whose fields are all distinct, so a formatter reading the wrong ones
+    // could not pass by coincidence. Spelled in full rather than through
+    // `%F`/`%T`, since those are what the caller does not use.
+    constexpr std::time_t instant = 1'000'000'000;
+    EXPECT_EQ (format_utc_time (instant, "%Y-%m-%dT%H:%M:%S"), "2001-09-09T01:46:40");
+
+    // The two functions differ by the zone, which is the whole reason there are
+    // two. `TZ` is not set here, so on a UTC test host they agree - the
+    // assertion is on the pair being the same *shape*, which is what a caller
+    // swapping one for the other would break.
+    const std::string local = format_local_time (instant, "%Y-%m-%dT%H:%M:%S");
+    ASSERT_FALSE (local.empty ());
+    EXPECT_EQ (local.size (), std::string ("2001-09-09T01:46:40").size ());
+}
+
+TEST (FormatUtcTime, AnUnrepresentableInstantRendersAsNothing) {
+    // The epoch converts on every platform, which is what stops the second half
+    // being vacuous.
+    EXPECT_EQ (format_utc_time (0, "%Y"), "1970");
+
+    // `time_t::max()` is out of range wherever `time_t` is 64-bit and the
+    // broken-down year is an `int`, and a platform that converts it anyway is
+    // not wrong - so what is asserted is that whichever happens, the answer is
+    // honest. A formatter that ignored the conversion's verdict would render
+    // the zero-initialised 1900 as a fact; this one renders nothing at all.
+    // glibc makes that worth checking rather than obvious: it fills the fields
+    // before discovering the overflow, so there is no untouched state to detect
+    // afterwards - the return is the only thing carrying the verdict.
+    const std::string extreme =
+    format_utc_time (std::numeric_limits<std::time_t>::max (), "%Y");
+    if (!extreme.empty ()) {
+        EXPECT_NE (extreme, "1900") << extreme;
     }
 }
 

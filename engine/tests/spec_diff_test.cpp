@@ -118,22 +118,38 @@ field_named (const vayu::core::ChangedRequest& changed, SpecField field) {
     return found == changed.fields.end () ? nullptr : &*found;
 }
 
-/** The `createPet` operation, which several cases carry unchanged. */
-const std::string CREATE_PET = R"("post":{"operationId":"createPet","summary":"Create a pet",)" +
-json_body (R"("name":{"type":"string"})") + "}";
+/**
+ * The `createPet` operation, which several cases carry unchanged.
+ *
+ * A function rather than a namespace-scope `std::string`, here and for every
+ * document below: building one runs `json_body`/`document` before `main`,
+ * where the allocation cannot be caught (`cert-err58-cpp`) and where the order
+ * against another translation unit's statics is unspecified. Built on the first
+ * case's stack instead, and still built exactly once.
+ */
+const std::string& create_pet_operation () {
+    static const std::string operation =
+    R"("post":{"operationId":"createPet","summary":"Create a pet",)" +
+    json_body (R"("name":{"type":"string"})") + "}";
+    return operation;
+}
 
 /** The bound document every case below compares against. */
-const std::string BOUND = document (
-R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
-R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
+const std::string& bound_document () {
+    static const std::string text =
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" +
+    create_pet_operation () +
+    R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
+    return text;
+}
 
 class SpecDiffTest : public ::testing::Test {
     protected:
     void SetUp () override {
-        bound_ = drafts_of (BOUND);
+        bound_ = drafts_of (bound_document ());
     }
 
-    /** The whole collection as an import of `BOUND` left it. */
+    /** The whole collection as an import of `bound_document ()` left it. */
     [[nodiscard]] std::vector<ComparableRequest> bound_collection () const {
         std::vector<ComparableRequest> requests;
         for (size_t i = 0; i < bound_.size (); ++i) {
@@ -182,10 +198,10 @@ class SpecDiffTest : public ::testing::Test {
 class DuplicateOperationIdTest : public ::testing::Test {
     protected:
     void SetUp () override {
-        entries_ = drafts_of (DUP);
+        entries_ = drafts_of (dup ());
     }
 
-    static const std::string DUP;
+    static const std::string& dup ();
 
     /** Both requests, the second still carrying the id the first also claims. */
     [[nodiscard]] std::vector<ComparableRequest> collection () const {
@@ -206,9 +222,12 @@ class DuplicateOperationIdTest : public ::testing::Test {
     mutable std::vector<SpecRequestDraft> fetched_;
 };
 
-const std::string DuplicateOperationIdTest::DUP =
-document (R"({"/a":{"get":{"operationId":"list","summary":"List A"}},)"
-          R"("/b":{"post":{"operationId":"list","summary":"Create B"}}})");
+const std::string& DuplicateOperationIdTest::dup () {
+    static const std::string text =
+    document (R"({"/a":{"get":{"operationId":"list","summary":"List A"}},)"
+              R"("/b":{"post":{"operationId":"list","summary":"Create B"}}})");
+    return text;
+}
 
 TEST_F (DuplicateOperationIdTest, LeavesTheSecondRequestOnItsOwnOperationWhenTheFirstChanges) {
     const std::string tweaked = document (
@@ -238,7 +257,7 @@ TEST_F (DuplicateOperationIdTest, PrefersTheRequestsOwnEndpointOverAnIdNamingADi
     auto orphan = request_from ("req_b", entries_[1]);
     orphan.operation = vayu::core::DeclaredOperation{ "list", "POST", "/b", {} };
 
-    const SpecDiff diff = diff_dup (DUP, { orphan });
+    const SpecDiff diff = diff_dup (dup (), { orphan });
 
     ASSERT_EQ (diff.changed.size (), 1u);
     EXPECT_EQ (diff.changed[0].matched_by, vayu::core::IdentityMatch::Path);
@@ -271,7 +290,7 @@ TEST_F (DuplicateOperationIdTest, ReportsAMovedEndpointAsGoneRatherThanFollowing
 // ---------------------------------------------------------------------------
 
 TEST_F (SpecDiffTest, ReportsNothingChangedWhenTheDocumentIsTheSame) {
-    const SpecDiff diff = diff_against (BOUND, bound_collection ());
+    const SpecDiff diff = diff_against (bound_document (), bound_collection ());
 
     EXPECT_TRUE (diff.changed.empty ());
     EXPECT_TRUE (diff.added.empty ());
@@ -299,7 +318,7 @@ TEST_F (SpecDiffTest, CountsARequestThatCarriesNoOperationInsteadOfTreatingItAsR
     hand_written.operation.reset ();
     requests.push_back (hand_written);
 
-    const SpecDiff diff = diff_against (BOUND, requests);
+    const SpecDiff diff = diff_against (bound_document (), requests);
 
     EXPECT_EQ (diff.unmapped, 1u);
     EXPECT_TRUE (diff.removed.empty ());
@@ -307,8 +326,9 @@ TEST_F (SpecDiffTest, CountsARequestThatCarriesNoOperationInsteadOfTreatingItAsR
 }
 
 TEST_F (SpecDiffTest, FollowsAnOperationIdWhosePathMovedRatherThanReportingADeleteAndAnAdd) {
-    const std::string next = document (
-    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    const std::string next =
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" +
+    create_pet_operation () +
     R"(},"/animals/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
@@ -325,8 +345,9 @@ TEST_F (SpecDiffTest, FollowsAnOperationIdWhosePathMovedRatherThanReportingADele
 }
 
 TEST_F (SpecDiffTest, FollowsAPathWhoseOperationIdMovedAndReportsARenameWithNoFieldChange) {
-    const std::string next = document (
-    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    const std::string next =
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" +
+    create_pet_operation () +
     R"(},"/pets/{petId}":{"get":{"operationId":"readPet","summary":"Get a pet"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
@@ -343,8 +364,9 @@ TEST_F (SpecDiffTest, FollowsAPathWhoseOperationIdMovedAndReportsARenameWithNoFi
 }
 
 TEST_F (SpecDiffTest, DisclosesAnOperationWhoseIdAndPathBothMovedAsARemovalAndAnAddition) {
-    const std::string next = document (
-    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    const std::string next =
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" +
+    create_pet_operation () +
     R"(},"/animals/{animalId}":{"get":{"operationId":"readAnimal","summary":"Get an animal"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
@@ -382,7 +404,8 @@ TEST_F (SpecDiffTest, NamesEveryFieldTheDocumentMovedWithTheValueItWouldWrite) {
     const std::string next = document (
     R"({"/pets":{"get":{"operationId":"listPets","summary":"List all the pets",)"
     R"("parameters":[{"name":"limit","in":"query","required":true,"example":"10"}]},)" +
-    CREATE_PET + R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
+    create_pet_operation () +
+    R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
     const auto* listed  = changed_with_id (diff, "listPets");
@@ -469,7 +492,7 @@ TEST_F (SpecDiffTest, ReportsARequestTheUserEditedAsDivergenceFlaggedAsTheirs) {
     auto renamed_by_user = request_from ("req_2", draft_of (bound_, "getPet"));
     renamed_by_user.name = "Fetch one pet";
 
-    const SpecDiff diff = diff_against (BOUND, { renamed_by_user });
+    const SpecDiff diff = diff_against (bound_document (), { renamed_by_user });
 
     ASSERT_EQ (diff.changed.size (), 1u);
     EXPECT_EQ (field_names (diff.changed[0]), std::vector<std::string>{ "name" });
@@ -554,10 +577,10 @@ TEST_F (SpecDiffTest, TruncatesADisplayedValueWithoutTruncatingTheComparedOne) {
 class StubParameterTest : public ::testing::Test {
     protected:
     void SetUp () override {
-        stub_ = drafts_of (STUB);
+        stub_ = drafts_of (stub ());
     }
 
-    static const std::string STUB;
+    static const std::string& stub ();
 
     /** The imported request with `verbose` ticked on, as the Params table leaves it. */
     [[nodiscard]] ComparableRequest verbose_enabled () const {
@@ -574,9 +597,12 @@ class StubParameterTest : public ::testing::Test {
     std::vector<SpecRequestDraft> stub_;
 };
 
-const std::string StubParameterTest::STUB =
-document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
-          R"("parameters":[{"name":"verbose","in":"query"}]}}})");
+const std::string& StubParameterTest::stub () {
+    static const std::string text =
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
+              R"("parameters":[{"name":"verbose","in":"query"}]}}})");
+    return text;
+}
 
 TEST_F (StubParameterTest, ImportsDisabledWhichIsWhatLeavesAnythingToSurvive) {
     ASSERT_EQ (stub_[0].draft.params.size (), 1u);
@@ -643,7 +669,8 @@ TEST_F (SpecDiffTest, ReportsTheUsersMethodEditAsTheirsSoAnApplyCannotTakeItBack
     const SpecDiff diff = diff_against (
     document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets",)"
               R"("description":"Paged."},)" +
-    CREATE_PET + R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})"),
+    create_pet_operation () +
+    R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}}})"),
     { edited_to_head });
 
     ASSERT_EQ (diff.changed.size (), 1u);
@@ -678,8 +705,8 @@ TEST_F (SpecDiffTest, ReportsAMethodTheDocumentItselfMovedAsTheDocuments) {
 TEST_F (SpecDiffTest, LeavesARequestAloneWhenTheDocumentAgreesWithTheVerbItHolds) {
     // The other direction of the same field: comparing `method` must not make
     // every unchanged request report one.
-    const SpecDiff diff =
-    diff_against (BOUND, { request_from ("req_0", draft_of (bound_, "listPets")) });
+    const SpecDiff diff = diff_against (bound_document (),
+    { request_from ("req_0", draft_of (bound_, "listPets")) });
 
     EXPECT_TRUE (diff.changed.empty ());
     EXPECT_EQ (diff.unchanged, 1u);
@@ -717,8 +744,9 @@ TEST_F (SpecDiffTest, SafeApplyCreatesEveryAddedOperationAndDeletesNothing) {
     // The document drops `getPet` and adds `listOwners`. Creating what a contract
     // gained takes nothing away from anybody; deleting a request whose operation
     // is gone might, so it waits for a person.
-    const std::string next = document (
-    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    const std::string next =
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" +
+    create_pet_operation () +
     R"(},"/owners":{"get":{"operationId":"listOwners","summary":"List owners"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());
@@ -740,8 +768,9 @@ TEST_F (SpecDiffTest, SafeApplyLeavesAFieldTheUserEditedAndTakesOneOnlyTheDocume
      */
     auto edited = request_from ("req_0", draft_of (bound_, "listPets"));
     edited.name = "My list call";
-    const std::string next = document (
-    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    const std::string next =
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" +
+    create_pet_operation () +
     R"(},"/pets/{petId}":{"get":{"operationId":"getPet","summary":"Fetch one pet"}}})");
 
     const SpecDiff diff = diff_against (
@@ -800,8 +829,9 @@ TEST_F (SpecDiffTest, SafeApplyTakesARequestWhoseOnlyMovementIsItsIdentity) {
     // answers to moves, so the request is followed by its path and nothing it
     // holds is stale. Moving the *path* instead would change the url too, which
     // is a field and not this case.
-    const std::string next = document (
-    R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" + CREATE_PET +
+    const std::string next =
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" +
+    create_pet_operation () +
     R"(},"/pets/{petId}":{"get":{"operationId":"fetchPet","summary":"Get a pet"}}})");
 
     const SpecDiff diff =
@@ -818,8 +848,9 @@ TEST_F (SpecDiffTest, SafeApplyAnswersOneEntryPerBucketEntrySoNoReaderHasToAlign
     // The parallel-arrays contract every reader rests on: the marks a route
     // reports and the rows a policy sync builds are both "the entry I am holding,
     // at the index I am holding it".
-    const std::string next = document (
-    R"({"/pets":{"get":{"operationId":"listPets","summary":"Pets, listed"},)" + CREATE_PET +
+    const std::string next =
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"Pets, listed"},)" +
+    create_pet_operation () +
     R"(},"/owners":{"get":{"operationId":"listOwners","summary":"List owners"}}})");
 
     const SpecDiff diff = diff_against (next, bound_collection ());

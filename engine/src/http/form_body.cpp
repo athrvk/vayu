@@ -15,6 +15,7 @@
 
 #include <cerrno>
 #include <cstdio>
+#include <memory>
 
 namespace vayu::http {
 
@@ -234,16 +235,24 @@ std::optional<std::string> unsendable_file_part (const Body& body) {
         // read the bytes, which permissions and a dangling symlink both answer
         // differently from mere existence. A directory opens on some platforms
         // and fails to read, so it is rejected on the read attempt below.
-        std::FILE* handle = std::fopen (field.src.c_str (), "rb");
+        //
+        // The handle owns itself, which is what removes the two findings a bare
+        // `std::FILE*` and a matching `std::fclose` carried: a close return
+        // nobody read (`cert-err33-c`) and a resource held by a plain pointer
+        // (`cppcoreguidelines-owning-memory`). There is nothing to discard and
+        // no path out of the loop that forgets to close - including the early
+        // return below, which the hand-written version reached only because the
+        // close sat above it.
+        const std::unique_ptr<std::FILE, int (*) (std::FILE*)> handle (
+        std::fopen (field.src.c_str (), "rb"), &std::fclose);
         if (!handle) {
             return "Form field '" + name + "': cannot read file '" + field.src +
             "' (" + vayu::utils::errno_message (errno) + ")";
         }
         char probe           = 0;
-        const size_t read    = std::fread (&probe, 1, 1, handle);
-        const bool readable  = read == 1 || std::feof (handle) != 0;
+        const size_t read    = std::fread (&probe, 1, 1, handle.get ());
+        const bool readable  = read == 1 || std::feof (handle.get ()) != 0;
         const int read_errno = errno;
-        std::fclose (handle);
         if (!readable) {
             return "Form field '" + name + "': cannot read file '" + field.src +
             "' (" + vayu::utils::errno_message (read_errno) + ")";

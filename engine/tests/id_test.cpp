@@ -18,8 +18,16 @@ using vayu::utils::generate_id;
 
 // Canonical RFC 4122 version-4 UUID: 8-4-4-4-12 lowercase hex, the third group
 // starts with '4' (version) and the fourth with 8/9/a/b (variant 10xx).
-static const std::regex kUuidV4 (
-"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
+//
+// Compiled on the first call rather than before `main` - a namespace-scope
+// `std::regex` allocates, and a throw during dynamic initialisation has no
+// frame to land in (`cert-err58-cpp`). The same shape `request_composer.cpp`
+// gives its own pattern.
+const std::regex& uuid_v4 () {
+    static const std::regex pattern (
+    "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
+    return pattern;
+}
 
 // A timestamp implementation fails this instantly: in a tight single-threaded
 // loop every generation lands in the same millisecond, so the old scheme
@@ -75,7 +83,7 @@ TEST (GenerateId, FormatPrefixAndUuidV4) {
         const std::string prefix_str (prefix);
         ASSERT_EQ (id.rfind (prefix_str, 0), 0U) << "prefix missing in " << id;
         const std::string suffix = id.substr (prefix_str.size ());
-        EXPECT_TRUE (std::regex_match (suffix, kUuidV4))
+        EXPECT_TRUE (std::regex_match (suffix, uuid_v4 ()))
         << "suffix is not a UUIDv4: " << suffix;
     }
 }
@@ -83,5 +91,5 @@ TEST (GenerateId, FormatPrefixAndUuidV4) {
 // An empty prefix yields a bare UUID (the app's crypto.randomUUID() shape).
 TEST (GenerateId, EmptyPrefixIsBareUuid) {
     const std::string id = generate_id ("");
-    EXPECT_TRUE (std::regex_match (id, kUuidV4)) << id;
+    EXPECT_TRUE (std::regex_match (id, uuid_v4 ())) << id;
 }

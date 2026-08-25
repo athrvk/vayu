@@ -16,7 +16,7 @@
 #include "vayu/http/thread_pool.hpp"
 
 namespace {
-const std::string INVALID_URL = "http://127.0.0.1:1/"; // Port 1 - connection refused (fast fail)
+constexpr const char* INVALID_URL = "http://127.0.0.1:1/"; // Port 1 - connection refused (fast fail)
 
 class MockServer {
     public:

@@ -116,15 +116,30 @@ R"("/owners":{"get":{"operationId":"listOwners","responses":{"200":{}}}}}})";
 
 /// An operation neither fetched document declares - a request stamped with it is
 /// a *removal*, which a safe apply must leave standing.
-const nlohmann::json DELETE_PET = nlohmann::json{ { "operationId", "deletePet" },
-    { "method", "DELETE" }, { "path", "/pets/{petId}" } };
+///
+/// A function rather than a namespace-scope `json`, here and for the two
+/// identities below: building one allocates, and at namespace scope that runs
+/// before `main` where the throw cannot be caught (`cert-err58-cpp`). Built on
+/// the first case's stack instead, once.
+const json& delete_pet () {
+    static const json operation = json{ { "operationId", "deletePet" },
+        { "method", "DELETE" }, { "path", "/pets/{petId}" } };
+    return operation;
+}
 
 /// The identities `FETCHED_DOC` declares, as a request's stamp records them -
 /// which is how a refresh finds the responses the document documents for it.
-const json LIST_PETS =
-json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } };
-const json LIST_OWNERS =
-json{ { "operationId", "listOwners" }, { "method", "GET" }, { "path", "/owners" } };
+const json& list_pets () {
+    static const json operation =
+    json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } };
+    return operation;
+}
+
+const json& list_owners () {
+    static const json operation = json{ { "operationId", "listOwners" },
+        { "method", "GET" }, { "path", "/owners" } };
+    return operation;
+}
 
 class SpecSyncRouteTest : public ::testing::Test {
     protected:
@@ -450,7 +465,7 @@ TEST_F (SpecSyncRouteTest, RefusesAFolderParentedOutsideTheSyncedCollection) {
 
 TEST_F (SpecSyncRouteTest, WritesTheDocumentsResponsesAndKeepsTheUsersOwnExamples) {
     const std::string request =
-    create_request (root_, json{ { "specOperation", LIST_PETS } });
+    create_request (root_, json{ { "specOperation", list_pets () } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_USER, 0);
     const std::string replaced =
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 1);
@@ -481,7 +496,7 @@ TEST_F (SpecSyncRouteTest, WritesTheDocumentsResponsesAndKeepsTheUsersOwnExample
 // is a real state, and it is the one the empty list used to spell.
 TEST_F (SpecSyncRouteTest, ADocumentedNothingRemovesTheImportedExamplesOnly) {
     const std::string request =
-    create_request (root_, json{ { "specOperation", LIST_PETS } });
+    create_request (root_, json{ { "specOperation", list_pets () } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_USER, 0);
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 1);
 
@@ -497,7 +512,7 @@ TEST_F (SpecSyncRouteTest, ADocumentedNothingRemovesTheImportedExamplesOnly) {
 
 TEST_F (SpecSyncRouteTest, AnAbsentExamplesDecisionLeavesEveryExampleAlone) {
     const std::string request =
-    create_request (root_, json{ { "specOperation", LIST_PETS } });
+    create_request (root_, json{ { "specOperation", list_pets () } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0);
 
     auto [status, response] = routes::spec_sync_response (*db_,
@@ -513,7 +528,7 @@ TEST_F (SpecSyncRouteTest, AnAbsentExamplesDecisionLeavesEveryExampleAlone) {
 // seeded imported row is replaced by the document's two.
 TEST_F (SpecSyncRouteTest, AFalseExamplesDecisionLeavesEveryExampleAlone) {
     const std::string request =
-    create_request (root_, json{ { "specOperation", LIST_PETS } });
+    create_request (root_, json{ { "specOperation", list_pets () } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 500);
 
     auto [status, response] = routes::spec_sync_response (*db_,
@@ -533,7 +548,7 @@ TEST_F (SpecSyncRouteTest, AFalseExamplesDecisionLeavesEveryExampleAlone) {
 // 400 becomes a 200 with a row for a status `FETCHED_DOC` never mentions.
 TEST_F (SpecSyncRouteTest, RefusesAnExampleListWhereADecisionBelongs) {
     const std::string request =
-    create_request (root_, json{ { "specOperation", LIST_PETS } });
+    create_request (root_, json{ { "specOperation", list_pets () } });
 
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "update",
@@ -571,7 +586,7 @@ TEST_F (SpecSyncRouteTest, ACreatedRequestGetsTheResponsesTheDocumentDocuments) 
     body (json{ { "create",
     json::array ({ json{ { "tempId", "t_req" }, { "collectionId", root_ },
     { "name", "list owners" }, { "method", "GET" }, { "url", "https://example.test/owners" },
-    { "specOperation", LIST_OWNERS } } }) } }));
+    { "specOperation", list_owners () } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
 
     const auto created = response["idMap"]["t_req"].get<std::string> ();
@@ -585,8 +600,9 @@ TEST_F (SpecSyncRouteTest, ACreatedRequestGetsTheResponsesTheDocumentDocuments) 
 TEST_F (SpecSyncRouteTest, RefusesACreatedRequestThatStatesItsOwnExamples) {
     auto [status, response] = routes::spec_sync_response (*db_,
     body (json{ { "create",
-    json::array ({ json{ { "tempId", "t_req" }, { "collectionId", root_ }, { "name", "list owners" },
-    { "method", "GET" }, { "url", "https://example.test/owners" }, { "specOperation", LIST_OWNERS },
+    json::array ({ json{ { "tempId", "t_req" }, { "collectionId", root_ },
+    { "name", "list owners" }, { "method", "GET" },
+    { "url", "https://example.test/owners" }, { "specOperation", list_owners () },
     { "examples", json::array ({ json{ { "name", "418" }, { "status", 418 } } }) } } }) } }));
     ASSERT_EQ (status, 400) << response.dump ();
     EXPECT_EQ (db_->get_requests_in_collection (root_).size (), 0u);
@@ -600,7 +616,7 @@ TEST_F (SpecSyncRouteTest, RefusesACreatedRequestThatStatesItsOwnExamples) {
 // back, reddening both size assertions.
 TEST_F (SpecSyncRouteTest, ADeletedImportedExampleIsNotWrittenBackByALaterSync) {
     const std::string request =
-    create_request (root_, json{ { "specOperation", LIST_PETS } });
+    create_request (root_, json{ { "specOperation", list_pets () } });
     seed_example (request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 200);
     const std::string unwanted = seed_example (
     request, vayu::core::constants::request_example::ORIGIN_IMPORT, 1, 404);
@@ -630,7 +646,7 @@ TEST_F (SpecSyncRouteTest, ADeletedImportedExampleIsNotWrittenBackByALaterSync) 
 // what this fix makes durable (issue #722).
 TEST_F (SpecSyncRouteTest, ARewordedDescriptionDoesNotBringADeletedExampleBack) {
     const std::string request =
-    create_request (root_, json{ { "specOperation", LIST_PETS } });
+    create_request (root_, json{ { "specOperation", list_pets () } });
     const std::string unwanted = seed_example (
     request, vayu::core::constants::request_example::ORIGIN_IMPORT, 0, 404);
     ASSERT_EQ (routes::delete_request_example_response (*db_, request, unwanted).first, 200);
@@ -833,11 +849,12 @@ TEST_F (SpecSyncRouteTest, ASyncLeavesAnOlderRunsStoredCoverageAlone) {
 
 TEST_F (SpecSyncRouteTest, PolicyCreatesWhatTheDocumentAddedAndDeletesNothing) {
     const std::string stamped = create_request (
-    root_, json{ { "name", "listPets" }, { "specOperation", LIST_PETS } });
+    root_, json{ { "name", "listPets" }, { "specOperation", list_pets () } });
     // Stamped with an operation no fetched document declares - a removal, and the
     // one thing a safe apply may never act on.
     const std::string orphaned = create_request (root_,
-    json{ { "name", "deletePet" }, { "method", "DELETE" }, { "specOperation", DELETE_PET } });
+    json{ { "name", "deletePet" }, { "method", "DELETE" },
+    { "specOperation", delete_pet () } });
 
     auto [status, response] =
     routes::spec_sync_response (*db_, body (json{ { "policy", "safe" } }));
@@ -874,7 +891,7 @@ TEST_F (SpecSyncRouteTest, PolicyWritesAFieldOnlyTheDocumentMoved) {
     // sharper: one request, one field written and one left alone, decided field
     // by field rather than row by row.
     const std::string stamped = create_request (
-    root_, json{ { "name", "listPets" }, { "specOperation", LIST_PETS } });
+    root_, json{ { "name", "listPets" }, { "specOperation", list_pets () } });
     const std::string edited_url = db_->get_request (stamped)->url;
 
     auto [status, response] = routes::spec_sync_response (*db_,
@@ -901,8 +918,8 @@ TEST_F (SpecSyncRouteTest, PolicyLeavesAFieldSomebodyEditedExactlyAsTheyLeftIt) 
      * request. Dropping the `user_touched` guard in `safe_spec_apply` reddens
      * this: the name becomes "List all the pets" and somebody's work is gone.
      */
-    const std::string edited = create_request (
-    root_, json{ { "name", "My pets call" }, { "specOperation", LIST_PETS } });
+    const std::string edited = create_request (root_,
+    json{ { "name", "My pets call" }, { "specOperation", list_pets () } });
 
     auto [status, response] = routes::spec_sync_response (*db_,
     json{ { "collectionId", root_ },

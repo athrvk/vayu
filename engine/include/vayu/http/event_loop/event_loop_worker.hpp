@@ -221,8 +221,18 @@ class EventLoopWorker {
     EventLoopConfig config;
     RateLimiter rate_limiter;
 
-    // Shared DNS cache (static - shared across all workers)
-    static DnsCache dns_cache_;
+    /**
+     * The DNS cache every worker shares.
+     *
+     * A function rather than a static data member, and the difference is not
+     * cosmetic. `DnsCache`'s constructor allocates; as a data member it is
+     * constructed before `main`, where a throw has no frame to land in
+     * (`cert-err58-cpp`) and where its order against the other translation
+     * units' statics is unspecified. Constructed on the first caller's stack
+     * instead, both questions answer themselves - and C++11 guarantees the
+     * initialisation is thread-safe, which is what the workers need.
+     */
+    static DnsCache& dns_cache ();
 
     // Per-worker handle pool for reusing curl handles
     CurlHandlePool handle_pool_;

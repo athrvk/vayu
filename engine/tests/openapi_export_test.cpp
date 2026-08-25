@@ -44,7 +44,18 @@ using json = nlohmann::ordered_json;
 
 namespace {
 
-const ExportCollection PETSTORE{ "Petstore", "" };
+/**
+ * The collection every case exports unless it says otherwise.
+ *
+ * A function rather than a namespace-scope object: `ExportCollection` holds two
+ * `std::string`s, so building one before `main` is dynamic initialisation whose
+ * allocation cannot be caught (`cert-err58-cpp`). A reference to the
+ * function-local static is still usable as a default argument below.
+ */
+const ExportCollection& petstore () {
+    static const ExportCollection collection{ "Petstore", "" };
+    return collection;
+}
 
 std::string bound_fixture () {
     const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
@@ -99,7 +110,7 @@ struct Exported {
 
 Exported export_json (const std::vector<ExportRequest>& requests,
 const std::optional<std::string>& content = std::nullopt,
-const ExportCollection& collection        = PETSTORE) {
+const ExportCollection& collection        = petstore ()) {
     const ExportOutcome outcome =
     export_openapi (collection, requests, content, ExportFormat::Json);
     EXPECT_TRUE (outcome.ok ()) << outcome.error;
@@ -350,7 +361,7 @@ TEST (BoundExport, FailsLoudlyOnAStoredDocumentItCannotRead) {
     // drop every member of their spec Vayu does not model.
     for (const std::string content : { "{ not json: [", "[]", R"({"paths":{}})" }) {
         const ExportOutcome outcome =
-        export_openapi (PETSTORE, bound_requests (), content, ExportFormat::Json);
+        export_openapi (petstore (), bound_requests (), content, ExportFormat::Json);
         EXPECT_FALSE (outcome.ok ()) << content;
         EXPECT_TRUE (outcome.text.empty ()) << content;
     }
@@ -495,9 +506,9 @@ TEST (ExportSerialization, WritesTheSameDocumentAsJsonAndAsYaml) {
     const std::string content           = bound_fixture ();
 
     const ExportOutcome as_json =
-    export_openapi (PETSTORE, requests, content, ExportFormat::Json);
+    export_openapi (petstore (), requests, content, ExportFormat::Json);
     const ExportOutcome as_yaml =
-    export_openapi (PETSTORE, requests, content, ExportFormat::Yaml);
+    export_openapi (petstore (), requests, content, ExportFormat::Yaml);
     ASSERT_TRUE (as_yaml.ok ()) << as_yaml.error;
 
     const auto reread = vayu::core::read_document (as_yaml.text);
@@ -517,7 +528,7 @@ TEST (ExportSerialization, QuotesEveryScalarThatWouldComeBackAsSomethingElse) {
          "colon: space", "trailing ", " leading", "#hash", "line\nbreak", "" }) {
         entry.params = { row ("k", awkward) };
         const ExportOutcome outcome =
-        export_openapi (PETSTORE, { entry }, std::nullopt, ExportFormat::Yaml);
+        export_openapi (petstore (), { entry }, std::nullopt, ExportFormat::Yaml);
         ASSERT_TRUE (outcome.ok ()) << outcome.error;
         const auto reread = vayu::core::read_document (outcome.text);
         ASSERT_TRUE (reread.ok ()) << awkward << ": " << reread.error;
@@ -541,7 +552,7 @@ TEST (ExportSerialization, QuotesAMappingKeyThatWouldComeBackAsANumber) {
     entry.examples      = { example ("ok", 200, "{}", "application/json") };
 
     const ExportOutcome outcome =
-    export_openapi (PETSTORE, { entry }, std::nullopt, ExportFormat::Yaml);
+    export_openapi (petstore (), { entry }, std::nullopt, ExportFormat::Yaml);
     ASSERT_TRUE (outcome.ok ()) << outcome.error;
     EXPECT_NE (outcome.text.find ("\"200\":"), std::string::npos) << outcome.text;
 

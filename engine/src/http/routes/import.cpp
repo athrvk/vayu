@@ -336,9 +336,6 @@ namespace {
  */
 constexpr size_t MAX_IMPORT_ITEMS = 10000;
 
-/** Absent or null section - shared so `read_items` can hand out a stable empty list. */
-const nlohmann::json EMPTY_ITEMS = nlohmann::json::array ();
-
 /** A 400 about the payload as a whole. */
 RouteError body_error (const std::string& message) {
     return { 400, error_body (400, message) };
@@ -364,7 +361,13 @@ RouteError item_error (const std::string& message, const std::string& temp_id) {
  */
 RouteResult
 read_items (const nlohmann::json& body, const char* key, const nlohmann::json*& out) {
-    out = &EMPTY_ITEMS;
+    // The absent-section answer, built once on the first call rather than
+    // before `main`: a namespace-scope `nlohmann::json` allocates during
+    // dynamic initialisation, where the throw cannot be caught
+    // (`cert-err58-cpp`). Its address is what `out` hands back, so it has to
+    // outlive the call - a local would not.
+    static const nlohmann::json empty_items = nlohmann::json::array ();
+    out                                     = &empty_items;
     if (!body.contains (key) || body[key].is_null ()) {
         return {};
     }
