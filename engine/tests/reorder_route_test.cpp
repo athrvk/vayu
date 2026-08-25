@@ -51,6 +51,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 
@@ -133,7 +134,7 @@ class ReorderRouteTest : public ::testing::Test {
      */
     void set_collection_position (const std::string& id, int order, int64_t created_at) {
         auto row = db_->get_collection (id);
-        ASSERT_TRUE (row.has_value ());
+        ASSERT_HAS_VALUE (row);
         row->order      = order;
         row->created_at = created_at;
         db_->create_collection (*row);
@@ -142,7 +143,7 @@ class ReorderRouteTest : public ::testing::Test {
     /** Forces a row to a stored `order`, bypassing the routes - the legacy shape. */
     void set_request_order (const std::string& id, int order) {
         auto row = db_->get_request (id);
-        ASSERT_TRUE (row.has_value ());
+        ASSERT_HAS_VALUE (row);
         row->order = order;
         db_->save_request (*row);
     }
@@ -242,7 +243,9 @@ TEST_F (ReorderRouteTest, RejectsAMoveIntoACollectionThatDoesNotExist) {
     EXPECT_NE (
     response["error"]["message"].get<std::string> ().find ("col_gone"), std::string::npos);
     // The row stays where it was rather than being stranded under a missing owner.
-    EXPECT_EQ (db_->get_request (a)->collection_id, col);
+    const auto stored_request = db_->get_request (a);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->collection_id, col);
 }
 
 TEST_F (ReorderRouteTest, RejectsTwoPositionsForOneRow) {
@@ -305,8 +308,12 @@ TEST_F (ReorderRouteTest, RejectsACycleFormedOnlyByTheBatchAsAWhole) {
     auto [status, response] = reorder_response (*db_, body);
 
     ASSERT_EQ (status, 400) << response.dump ();
-    EXPECT_FALSE (db_->get_collection (a)->parent_id.has_value ());
-    EXPECT_FALSE (db_->get_collection (b)->parent_id.has_value ());
+    const auto a_row = db_->get_collection (a);
+    ASSERT_HAS_VALUE (a_row);
+    EXPECT_FALSE (a_row->parent_id.has_value ());
+    const auto b_row = db_->get_collection (b);
+    ASSERT_HAS_VALUE (b_row);
+    EXPECT_FALSE (b_row->parent_id.has_value ());
 }
 
 TEST_F (ReorderRouteTest, RejectsASelfParentAndAMoveIntoOwnDescendant) {
@@ -324,7 +331,9 @@ TEST_F (ReorderRouteTest, RejectsASelfParentAndAMoveIntoOwnDescendant) {
     json::array ({ json{ { "type", "collection" }, { "id", parent },
     { "order", 0 }, { "parentId", child } } }) } });
     EXPECT_EQ (desc_status, 400) << desc_body.dump ();
-    EXPECT_FALSE (db_->get_collection (parent)->parent_id.has_value ());
+    const auto stored_collection = db_->get_collection (parent);
+    ASSERT_HAS_VALUE (stored_collection);
+    EXPECT_FALSE (stored_collection->parent_id.has_value ());
 }
 
 TEST_F (ReorderRouteTest, AcceptsAReparentThatBreaksAnExistingChain) {
@@ -340,8 +349,14 @@ TEST_F (ReorderRouteTest, AcceptsAReparentThatBreaksAnExistingChain) {
     auto [status, response] = reorder_response (*db_, body);
 
     ASSERT_EQ (status, 200) << response.dump ();
-    EXPECT_EQ (*db_->get_collection (leaf)->parent_id, root);
-    EXPECT_EQ (*db_->get_collection (mid)->parent_id, leaf);
+    const auto leaf_row = db_->get_collection (leaf);
+    ASSERT_HAS_VALUE (leaf_row);
+    ASSERT_HAS_VALUE (leaf_row->parent_id);
+    EXPECT_EQ (*leaf_row->parent_id, root);
+    const auto mid_row = db_->get_collection (mid);
+    ASSERT_HAS_VALUE (mid_row);
+    ASSERT_HAS_VALUE (mid_row->parent_id);
+    EXPECT_EQ (*mid_row->parent_id, leaf);
 }
 
 // ---------------------------------------------------------------------------
@@ -424,10 +439,16 @@ TEST_F (ReorderRouteTest, NormalizesTheRootCollectionsWhenParentIdIsNull) {
     json::array ({ json{ { "type", "collection" }, { "parentId", nullptr } } }) } });
 
     ASSERT_EQ (status, 200) << response.dump ();
-    EXPECT_EQ (db_->get_collection (a)->order, 0);
-    EXPECT_EQ (db_->get_collection (b)->order, 1);
+    const auto a_row = db_->get_collection (a);
+    ASSERT_HAS_VALUE (a_row);
+    EXPECT_EQ (a_row->order, 0);
+    const auto b_row = db_->get_collection (b);
+    ASSERT_HAS_VALUE (b_row);
+    EXPECT_EQ (b_row->order, 1);
     // A nested collection is in a different scope and must be left alone.
-    EXPECT_EQ (db_->get_collection (child)->order, 0);
+    const auto child_row = db_->get_collection (child);
+    ASSERT_HAS_VALUE (child_row);
+    EXPECT_EQ (child_row->order, 0);
 }
 
 /**
@@ -453,8 +474,12 @@ TEST_F (ReorderRouteTest, NormalizesTiedRootsInStoredOrderNotCreationOrder) {
     json::array ({ json{ { "type", "collection" }, { "parentId", nullptr } } }) } });
 
     ASSERT_EQ (status, 200) << response.dump ();
-    EXPECT_EQ (db_->get_collection (b)->order, 0);
-    EXPECT_EQ (db_->get_collection (a)->order, 1);
+    const auto b_row = db_->get_collection (b);
+    ASSERT_HAS_VALUE (b_row);
+    EXPECT_EQ (b_row->order, 0);
+    const auto a_row = db_->get_collection (a);
+    ASSERT_HAS_VALUE (a_row);
+    EXPECT_EQ (a_row->order, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -505,8 +530,10 @@ TEST_F (ReorderRouteTest, AMoveWithoutAnOwnerKeepsTheOneItHas) {
     *db_, json{ { "moves", json::array ({ move_request (a, 7) }) } });
 
     ASSERT_EQ (status, 200) << response.dump ();
-    EXPECT_EQ (db_->get_request (a)->collection_id, col);
-    EXPECT_EQ (db_->get_request (a)->order, 7);
+    const auto a_row = db_->get_request (a);
+    ASSERT_HAS_VALUE (a_row);
+    EXPECT_EQ (a_row->collection_id, col);
+    EXPECT_EQ (a_row->order, 7);
 }
 
 TEST_F (ReorderRouteTest, AnEmptyBatchIsANoOp) {
@@ -535,7 +562,9 @@ TEST_F (ReorderRouteTest, TheResponseCarriesTheRowsAsWritten) {
     for (const auto& row : response["requests"]) {
         ASSERT_TRUE (row.contains ("id")) << row.dump ();
         EXPECT_EQ (row["collectionId"].get<std::string> (), col);
-        EXPECT_EQ (row["order"].get<int> (), db_->get_request (row["id"])->order);
+        const auto stored_request = db_->get_request (row["id"]);
+        ASSERT_HAS_VALUE (stored_request);
+        EXPECT_EQ (row["order"].get<int> (), stored_request->order);
     }
 }
 
@@ -624,8 +653,12 @@ TEST_F (ReorderRouteTest, AConflictingBatchWaitsAndIsRejectedAgainstTheCommitted
     other.join ();
 
     EXPECT_EQ (other_status, 400) << other_body.dump ();
-    EXPECT_EQ (db_->get_collection (a)->parent_id, std::optional<std::string> (b));
-    EXPECT_FALSE (db_->get_collection (b)->parent_id.has_value ());
+    const auto a_row = db_->get_collection (a);
+    ASSERT_HAS_VALUE (a_row);
+    EXPECT_EQ (a_row->parent_id, std::optional<std::string> (b));
+    const auto b_row = db_->get_collection (b);
+    ASSERT_HAS_VALUE (b_row);
+    EXPECT_FALSE (b_row->parent_id.has_value ());
 }
 
 TEST_F (ReorderRouteTest, ACreateDuringABatchWaitsAndAppendsPastTheRenumberedRange) {
@@ -646,7 +679,9 @@ TEST_F (ReorderRouteTest, ACreateDuringABatchWaitsAndAppendsPastTheRenumberedRan
     // The create's append scan reads `max_order + 1`. Let it run inside the
     // batch's window and it reads the pre-renumber rows - every one at 0 - and
     // takes slot 1, tying with the row the batch is renumbering to 1.
-    EXPECT_EQ (db_->get_request (late)->order, 3);
+    const auto stored_request = db_->get_request (late);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->order, 3);
     EXPECT_EQ (request_orders (col), (std::vector<int>{ 0, 1, 2, 3 }));
     EXPECT_EQ (request_ids (col).back (), late);
 }
@@ -671,7 +706,9 @@ TEST_F (ReorderRouteTest, ARowDeletedAfterStagingFailsTheBatchRatherThanBeingRes
     // `replace` would have written the staged row straight back.
     EXPECT_FALSE (db_->get_request (b).has_value ());
     // And the rows the batch had already updated roll back with it.
-    EXPECT_EQ (db_->get_request (a)->order, 0);
+    const auto stored_request = db_->get_request (a);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->order, 0);
 }
 
 } // namespace

@@ -37,6 +37,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 
@@ -134,13 +135,15 @@ TEST_F (ImportApplyRouteTest, WiresANestedTreeThroughRealIds) {
     const std::string req_id   = response["idMap"]["r1"];
 
     auto stored_child = db_->get_collection (child_id);
-    ASSERT_TRUE (stored_child.has_value ());
-    ASSERT_TRUE (stored_child->parent_id.has_value ());
+    ASSERT_HAS_VALUE (stored_child);
+    ASSERT_HAS_VALUE (stored_child->parent_id);
     EXPECT_EQ (*stored_child->parent_id, root_id);
-    EXPECT_FALSE (db_->get_collection (root_id)->parent_id.has_value ());
+    const auto stored_collection = db_->get_collection (root_id);
+    ASSERT_HAS_VALUE (stored_collection);
+    EXPECT_FALSE (stored_collection->parent_id.has_value ());
 
     auto stored_request = db_->get_request (req_id);
-    ASSERT_TRUE (stored_request.has_value ());
+    ASSERT_HAS_VALUE (stored_request);
     EXPECT_EQ (stored_request->collection_id, child_id);
     EXPECT_EQ (db_->get_requests_in_collection (child_id).size (), 1u);
 }
@@ -159,13 +162,13 @@ TEST_F (ImportApplyRouteTest, AppliesTheSameFieldDefaultsAsPerItemCreate) {
     ASSERT_EQ (status, 200) << response.dump ();
 
     auto stored_collection = db_->get_collection (response["idMap"]["c1"]);
-    ASSERT_TRUE (stored_collection.has_value ());
+    ASSERT_HAS_VALUE (stored_collection);
     EXPECT_EQ (stored_collection->auth, R"({"mode":"none"})"); // collection default
     EXPECT_EQ (json::parse (stored_collection->variables)["base"]["value"], "1");
     EXPECT_EQ (stored_collection->description, "");
 
     auto stored_request = db_->get_request (response["idMap"]["r1"]);
-    ASSERT_TRUE (stored_request.has_value ());
+    ASSERT_HAS_VALUE (stored_request);
     EXPECT_EQ (stored_request->auth, R"({"mode":"inherit"})"); // request default
     EXPECT_EQ (stored_request->params, "[]");
     EXPECT_EQ (stored_request->headers, "[]");
@@ -184,9 +187,15 @@ TEST_F (ImportApplyRouteTest, AppendsSiblingsInPayloadOrderWhenOrderIsOmitted) {
     collection_item ("c3", "c") }) } });
     ASSERT_EQ (status, 200) << response.dump ();
 
-    EXPECT_EQ (db_->get_collection (response["idMap"]["c1"])->order, 0);
-    EXPECT_EQ (db_->get_collection (response["idMap"]["c2"])->order, 1);
-    EXPECT_EQ (db_->get_collection (response["idMap"]["c3"])->order, 2);
+    const auto first_row = db_->get_collection (response["idMap"]["c1"]);
+    ASSERT_HAS_VALUE (first_row);
+    EXPECT_EQ (first_row->order, 0);
+    const auto second_row = db_->get_collection (response["idMap"]["c2"]);
+    ASSERT_HAS_VALUE (second_row);
+    EXPECT_EQ (second_row->order, 1);
+    const auto third_row = db_->get_collection (response["idMap"]["c3"]);
+    ASSERT_HAS_VALUE (third_row);
+    EXPECT_EQ (third_row->order, 2);
 }
 
 TEST_F (ImportApplyRouteTest, AnExplicitOrderIsHonoured) {
@@ -195,19 +204,25 @@ TEST_F (ImportApplyRouteTest, AnExplicitOrderIsHonoured) {
     auto [status, response] =
     import_apply_response (*db_, json{ { "collections", json::array ({ first }) } });
     ASSERT_EQ (status, 200) << response.dump ();
-    EXPECT_EQ (db_->get_collection (response["idMap"]["c1"])->order, 7);
+    const auto row = db_->get_collection (response["idMap"]["c1"]);
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->order, 7);
 }
 
 TEST_F (ImportApplyRouteTest, AppendsAfterCollectionsThatAlreadyExist) {
     auto [existing_status, existing] =
     create_collection_response (*db_, json{ { "name", "already here" } });
     ASSERT_EQ (existing_status, 200) << existing.dump ();
-    ASSERT_EQ (db_->get_collection (existing["id"])->order, 0);
+    const auto existing_row = db_->get_collection (existing["id"]);
+    ASSERT_HAS_VALUE (existing_row);
+    ASSERT_EQ (existing_row->order, 0);
 
     auto [status, response] = import_apply_response (*db_,
     json{ { "collections", json::array ({ collection_item ("c1", "new") }) } });
     ASSERT_EQ (status, 200) << response.dump ();
-    EXPECT_EQ (db_->get_collection (response["idMap"]["c1"])->order, 1);
+    const auto imported_row = db_->get_collection (response["idMap"]["c1"]);
+    ASSERT_HAS_VALUE (imported_row);
+    EXPECT_EQ (imported_row->order, 1);
 }
 
 TEST_F (ImportApplyRouteTest, WritesNothingWhenOneItemIsInvalid) {
@@ -441,7 +456,7 @@ TEST_F (ImportApplyRouteTest, CarriesADeclaredDataContractThroughTheSharedApplie
     import_apply_response (*db_, json{ { "collections", json::array ({ good }) } });
     ASSERT_EQ (status, 200) << response.dump ();
     auto stored = db_->get_collection (response["idMap"]["c1"]);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (json::parse (stored->data_schema)["columns"],
     json::array ({ "id", "email" }));
 

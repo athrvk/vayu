@@ -16,6 +16,7 @@
  * guarding line is removed.
  */
 
+#include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/schema_validation.hpp"
 
@@ -94,7 +95,7 @@ TEST (SchemaValidationPayloadTest, CheckedAlwaysCarriesTheTotal) {
 
 TEST (ResponseSchemaIndexTest, ValidBodyPasses) {
     const auto index = ResponseSchemaIndex::parse (one_operation_index (pet_schema ()));
-    ASSERT_TRUE (index.has_value ());
+    ASSERT_HAS_VALUE (index);
 
     const auto verdict =
     index->check (GET_PET, 200, "application/json", R"({"id":1,"name":"Rex"})");
@@ -107,7 +108,7 @@ TEST (ResponseSchemaIndexTest, ValidBodyPasses) {
 
 TEST (ResponseSchemaIndexTest, InvalidBodyFailsAndNamesWhere) {
     const auto index = ResponseSchemaIndex::parse (one_operation_index (pet_schema ()));
-    ASSERT_TRUE (index.has_value ());
+    ASSERT_HAS_VALUE (index);
 
     const auto verdict = index->check (GET_PET, 200, "application/json", R"({"id":"one"})");
     EXPECT_TRUE (verdict.checked);
@@ -127,7 +128,7 @@ TEST (ResponseSchemaIndexTest, InvalidBodyFailsAndNamesWhere) {
 
 TEST (ResponseSchemaIndexTest, ContentTypeParametersAreIgnored) {
     const auto index = ResponseSchemaIndex::parse (one_operation_index (pet_schema ()));
-    ASSERT_TRUE (index.has_value ());
+    ASSERT_HAS_VALUE (index);
 
     const auto verdict = index->check (
     GET_PET, 200, "application/json; charset=utf-8", R"({"id":1,"name":"Rex"})");
@@ -146,7 +147,7 @@ TEST (ResponseSchemaIndexTest, ExactStatusWinsOverARange) {
     { "schema", json{ { "type", "object" } } } } }) } } });
 
     const auto parsed = ResponseSchemaIndex::parse (index.dump ());
-    ASSERT_TRUE (parsed.has_value ());
+    ASSERT_HAS_VALUE (parsed);
 
     // The object passes only if the `200` schema was chosen; the `2XX` one
     // demands a string. Two distinct promises, and 200 answers the specific one.
@@ -159,14 +160,14 @@ TEST (ResponseSchemaIndexTest, ExactStatusWinsOverARange) {
 TEST (ResponseSchemaIndexTest, RangeAndDefaultAnswerWhenNothingExactDoes) {
     const auto ranged =
     ResponseSchemaIndex::parse (one_operation_index (pet_schema (), "2XX"));
-    ASSERT_TRUE (ranged.has_value ());
+    ASSERT_HAS_VALUE (ranged);
     EXPECT_EQ (
     ranged->check (GET_PET, 201, "application/json", R"({"id":1,"name":"a"})").matched_status,
     "2XX");
 
     const auto fallback =
     ResponseSchemaIndex::parse (one_operation_index (pet_schema (), "default"));
-    ASSERT_TRUE (fallback.has_value ());
+    ASSERT_HAS_VALUE (fallback);
     EXPECT_EQ (
     fallback->check (GET_PET, 503, "application/json", R"({"id":1,"name":"a"})").matched_status,
     "default");
@@ -175,7 +176,7 @@ TEST (ResponseSchemaIndexTest, RangeAndDefaultAnswerWhenNothingExactDoes) {
 TEST (ResponseSchemaIndexTest, AWildcardMediaTypeAnswersWhenNothingExactDoes) {
     const auto index =
     ResponseSchemaIndex::parse (one_operation_index (pet_schema (), "200", "*/*"));
-    ASSERT_TRUE (index.has_value ());
+    ASSERT_HAS_VALUE (index);
 
     const auto verdict =
     index->check (GET_PET, 200, "application/hal+json", R"({"id":1,"name":"Rex"})");
@@ -185,34 +186,39 @@ TEST (ResponseSchemaIndexTest, AWildcardMediaTypeAnswersWhenNothingExactDoes) {
 
 TEST (ResponseSchemaIndexTest, EveryUncheckableCaseNamesItself) {
     const auto index = ResponseSchemaIndex::parse (one_operation_index (pet_schema ()));
-    ASSERT_TRUE (index.has_value ());
+    ASSERT_HAS_VALUE (index);
     const std::string body = R"({"id":1,"name":"Rex"})";
 
     // Not an operation at all.
     auto verdict = index->check ("", 200, "application/json", body);
     EXPECT_FALSE (verdict.checked);
-    ASSERT_TRUE (verdict.reason.has_value ());
+    ASSERT_HAS_VALUE (verdict.reason);
     EXPECT_EQ (*verdict.reason, UncheckedReason::NoOperation);
 
     // An identity the document does not declare.
     verdict = index->check (
     R"({"method":"GET","path":"/ghosts"})", 200, "application/json", body);
+    ASSERT_HAS_VALUE (verdict.reason);
     EXPECT_EQ (*verdict.reason, UncheckedReason::OperationNotDeclared);
 
     // A status nothing covers.
     verdict = index->check (GET_PET, 404, "application/json", body);
+    ASSERT_HAS_VALUE (verdict.reason);
     EXPECT_EQ (*verdict.reason, UncheckedReason::NoSchemaForStatus);
 
     // A media type nothing declares.
     verdict = index->check (GET_PET, 200, "text/html", body);
+    ASSERT_HAS_VALUE (verdict.reason);
     EXPECT_EQ (*verdict.reason, UncheckedReason::NoSchemaForContentType);
 
     // A transport error is not a status the contract failed to declare.
     verdict = index->check (GET_PET, 0, "", "");
+    ASSERT_HAS_VALUE (verdict.reason);
     EXPECT_EQ (*verdict.reason, UncheckedReason::NoResponse);
 
     // A body no JSON Schema can speak about.
     verdict = index->check (GET_PET, 200, "application/json", "<html></html>");
+    ASSERT_HAS_VALUE (verdict.reason);
     EXPECT_EQ (*verdict.reason, UncheckedReason::BodyNotJson);
 }
 
@@ -220,7 +226,7 @@ TEST (ResponseSchemaIndexTest, IdentityResolvesByOperationIdBeforeMethodAndPath)
     // The path moved and the operationId did not: the document still describes
     // this request, and following the operationId is what says so.
     const auto index = ResponseSchemaIndex::parse (one_operation_index (pet_schema ()));
-    ASSERT_TRUE (index.has_value ());
+    ASSERT_HAS_VALUE (index);
 
     const auto verdict =
     index->check (R"({"operationId":"getPet","method":"GET","path":"/v2/pets/{petId}"})",
@@ -245,7 +251,7 @@ TEST (ResponseSchemaIndexTest, OneUnusableRowDoesNotCostTheDocumentItsIndex) {
     { "contentType", "application/json" }, { "schema", pet_schema () } } }) } } });
 
     const auto parsed = ResponseSchemaIndex::parse (index.dump ());
-    ASSERT_TRUE (parsed.has_value ());
+    ASSERT_HAS_VALUE (parsed);
     EXPECT_EQ (parsed->size (), 1u);
     EXPECT_TRUE (
     parsed->check (GET_PET, 200, "application/json", R"({"id":1,"name":"a"})").checked);
@@ -263,7 +269,7 @@ TEST (ResponseSchemaRefTest, RefsResolveThroughTheSharedRoots) {
     const auto index     = ResponseSchemaIndex::parse (
     one_operation_index (json::parse (R"({"$ref":"#/components/schemas/Pet"})"),
         "200", "application/json", ref_roots));
-    ASSERT_TRUE (index.has_value ());
+    ASSERT_HAS_VALUE (index);
 
     // Nested through two refs - the assertion that reddens if the shared roots
     // stop being merged in, because an unresolvable `$ref` validates nothing.
@@ -286,7 +292,7 @@ TEST (ResponseSchemaRefTest, ARecursiveSchemaTerminates) {
     const auto index     = ResponseSchemaIndex::parse (
     one_operation_index (json::parse (R"({"$ref":"#/components/schemas/Node"})"),
         "200", "application/json", ref_roots));
-    ASSERT_TRUE (index.has_value ());
+    ASSERT_HAS_VALUE (index);
 
     const auto verdict = index->check (GET_PET, 200, "application/json",
     R"({"name":"a","child":{"name":"b","child":{"name":"c"}}})");
@@ -413,7 +419,7 @@ TEST (SchemaValidationBoundsTest, ASchemaTheValidatorRefusesIsUncheckedNotInvali
     schema, json::object (), json::parse (R"({"a":1})"));
 
     EXPECT_FALSE (verdict.checked);
-    ASSERT_TRUE (verdict.reason.has_value ());
+    ASSERT_HAS_VALUE (verdict.reason);
     EXPECT_EQ (*verdict.reason, UncheckedReason::NoIndex);
 }
 
