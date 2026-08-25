@@ -279,7 +279,7 @@ cross-language conformance fixture. See `variable-resolution.md`.
 ## Key Technologies
 
 - **React 19**: UI framework
-- **TypeScript 5**: Type safety
+- **TypeScript**: Type safety - 5.9 compiles and lints, 7 runs the `pnpm type-check` gate (see [building](building.md#two-compilers-one-on-purpose))
 - **Electron 28**: Desktop app framework
 - **Zustand**: Lightweight state management
 - **TanStack Query**: Server state and caching
