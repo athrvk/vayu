@@ -51,6 +51,7 @@
 #include <nlohmann/json.hpp>
 
 #include "echo_server.hpp"
+#include "optional_assert.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -72,7 +73,7 @@ using vayu::http::routes::read_stream_flag;
 using vayu::http::routes::read_transient_flag;
 
 /// The engine's seeded `maxScenarioDataBytes`, as the route resolves it.
-constexpr size_t kDataBytes = 16 * 1024 * 1024;
+constexpr size_t kDataBytes = size_t{ 16 } * 1024 * 1024;
 
 // --- read_data_row -----------------------------------------------------------
 
@@ -92,7 +93,7 @@ TEST (ReadDataRow, ObjectIsTheRow) {
     auto row = read_data_row (
     json{ { "data", { { "id", "7" }, { "email", "a@b.c" } } } }, kDataBytes);
     ASSERT_TRUE (row.ok);
-    ASSERT_TRUE (row.value.has_value ());
+    ASSERT_HAS_VALUE (row.value);
     EXPECT_EQ ((*row.value)["id"], "7");
     EXPECT_EQ ((*row.value)["email"], "a@b.c");
 }
@@ -400,7 +401,7 @@ TEST_F (SendWithRowTest, BasicCredentialsBindBeforeTheyAreEncoded) {
     const std::string header = server_->header ("Authorization");
     ASSERT_EQ (header.rfind ("Basic ", 0), 0u) << header;
     const auto decoded = vayu::utils::base64_decode (header.substr (6));
-    ASSERT_TRUE (decoded.has_value ()) << header;
+    ASSERT_HAS_VALUE (decoded) << header;
     // A colon in the password is why this decodes rather than string-matches:
     // the base64 is of `user:pass` joined, and the row is allowed to contain
     // the separator.

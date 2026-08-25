@@ -40,6 +40,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/schema_validation.hpp"
@@ -55,7 +56,7 @@ using vayu::core::read_document;
 
 /// A cap no case here is trying to reach - the schema index's own limit is
 /// exercised by the one case that names it.
-constexpr size_t INDEX_CAP = 1024 * 1024;
+constexpr size_t INDEX_CAP = size_t{ 1024 } * 1024;
 
 nlohmann::ordered_json read_ok (const std::string& text) {
     const auto result = read_document (text);
@@ -364,7 +365,7 @@ TEST (DeriveSpecIndexes, StoresWhatTheDocumentDeclares) {
     // And what is stored reads back as what a run measures against - the two
     // halves of the column, held to each other.
     const auto parsed = vayu::core::parse_declared_operations (index.operations);
-    ASSERT_TRUE (parsed.has_value ());
+    ASSERT_HAS_VALUE (parsed);
     ASSERT_EQ (parsed->size (), 1U);
     EXPECT_EQ ((*parsed)[0].operation_id, "listPets");
     EXPECT_EQ ((*parsed)[0].responses, (std::vector<std::string>{ "200" }));
@@ -799,8 +800,7 @@ TEST (DeriveSpecIndexes, TheDerivedIndexIsWhatValidationThenReads) {
     ASSERT_TRUE (index.ok ()) << index.error;
 
     const auto parsed = vayu::core::ResponseSchemaIndex::parse (index.response_schemas);
-    ASSERT_TRUE (parsed.has_value ())
-    << "the engine's own index must parse back";
+    ASSERT_HAS_VALUE (parsed) << "the engine's own index must parse back";
     const auto verdict =
     parsed->check (R"({"operationId":"getPet","method":"GET","path":"/pets/{petId}"})",
     200, "application/json", R"({"name":null})");

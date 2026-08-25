@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 
+#include "optional_assert.hpp"
+
 using namespace vayu::core;
 
 class MetricsCollectorTest : public ::testing::Test {
@@ -237,8 +239,8 @@ TEST_F (MetricsCollectorTest, SampleWindowSafeUnderConcurrentWriters) {
     // Sample repeatedly from this (single reader) thread while writers run.
     while (!stop.load ()) {
         (void)collector->sample_window_percentiles ();
-        bool all_done = collector->total_requests () >=
-        static_cast<size_t> (kThreads * kPerThread);
+        bool all_done =
+        collector->total_requests () >= static_cast<size_t> (kThreads) * kPerThread;
         if (all_done)
             stop.store (true);
     }
@@ -1033,7 +1035,7 @@ TEST_F (MetricsCollectorTest, PhaseValuesLandInTheirOwnHistogram) {
     }
 
     auto phases = collector->phase_percentiles ();
-    ASSERT_TRUE (phases.has_value ());
+    ASSERT_HAS_VALUE (phases);
 
     constexpr double tolerance = 1.0;
     EXPECT_NEAR ((*phases)[kDns].p50, 1.0, tolerance);
@@ -1068,7 +1070,7 @@ TEST_F (MetricsCollectorTest, PhasePercentilesSeparateTailFromBody) {
     }
 
     auto phases = collector->phase_percentiles ();
-    ASSERT_TRUE (phases.has_value ());
+    ASSERT_HAS_VALUE (phases);
 
     // A zero p50 is the truthful reading of "most requests did no handshake" -
     // it must not be mistaken for a dropped record, which is why zeros are
@@ -1130,9 +1132,9 @@ TEST_F (MetricsCollectorTest, PhaseHistogramsSafeUnderConcurrentWriters) {
     }
 
     auto phases = collector->phase_percentiles ();
-    ASSERT_TRUE (phases.has_value ());
+    ASSERT_HAS_VALUE (phases);
     for (const auto& phase : *phases) {
-        EXPECT_EQ (phase.count, static_cast<size_t> (kThreads * kPerThread));
+        EXPECT_EQ (phase.count, static_cast<size_t> (kThreads) * kPerThread);
     }
 }
 
@@ -1153,7 +1155,7 @@ TEST_F (MetricsCollectorTest, StreamTotalsSumEventsAndCountCappedSeparately) {
     collector->record_stream_completion (30, false);
 
     auto totals = collector->stream_totals ();
-    ASSERT_TRUE (totals.has_value ());
+    ASSERT_HAS_VALUE (totals);
     EXPECT_EQ (totals->completions, 3u);
     EXPECT_EQ (totals->total_events, 60u);
     // The server ended one of them, so it is not among the capped - which is
@@ -1172,7 +1174,7 @@ TEST_F (MetricsCollectorTest, StreamTotalsCountAnEmptyStreamAsACompletion) {
     collector->record_stream_completion (0, false);
 
     auto totals = collector->stream_totals ();
-    ASSERT_TRUE (totals.has_value ());
+    ASSERT_HAS_VALUE (totals);
     EXPECT_EQ (totals->completions, 1u);
     EXPECT_EQ (totals->total_events, 0u);
 }
