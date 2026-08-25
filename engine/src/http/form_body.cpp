@@ -187,8 +187,10 @@ std::string implied_content_type (const Body& body) {
     }
     switch (body.mode) {
     case BodyMode::Form: return "application/x-www-form-urlencoded";
-    case BodyMode::Json: return "application/json";
-    case BodyMode::GraphQL: return "application/json";
+    // GraphQL and JSON-RPC are JSON on the wire - `wire_body` above builds each
+    // one's envelope, and the envelope is what the header describes.
+    case BodyMode::Json:
+    case BodyMode::GraphQL:
     case BodyMode::JsonRpc: return "application/json";
     case BodyMode::Xml: return "application/xml";
     // `text` is the one content mode with no answer, and that is a decision

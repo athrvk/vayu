@@ -30,6 +30,7 @@
 #include <chrono>
 #include <cstddef>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <string_view>
 #include <thread>
@@ -145,9 +146,16 @@ std::optional<unsigned> ipv4_first_octet (std::string_view bind) {
         if (part.empty () || part.size () > 3) {
             return std::nullopt;
         }
-        unsigned value        = 0;
-        const auto* const end = part.data () + part.size ();
-        const auto [ptr, ec]  = std::from_chars (part.data (), end, value);
+        // The view's two ends, taken as pointers from its own iterators.
+        // `from_chars` wants a range and `part` is one; spelling that as
+        // `part.data ()` plus arithmetic on it says neither - the `.data ()`
+        // reads as a pointer handed to something that will look for a
+        // terminator, and the `+` is unbounded pointer arithmetic. `to_address`
+        // is the same two addresses with the bound still attached to them.
+        unsigned value          = 0;
+        const auto* const begin = std::to_address (part.begin ());
+        const auto* const end   = std::to_address (part.end ());
+        const auto [ptr, ec]    = std::from_chars (begin, end, value);
         if (ec != std::errc () || ptr != end || value > 255) {
             return std::nullopt;
         }

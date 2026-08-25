@@ -98,7 +98,11 @@ double duration_s) {
                     }
                 }
             } catch (const std::exception&) {
-                // Skip invalid JSON
+                // @deliberate: one unreadable trace row contributes nothing to
+                // the derived tallies and the loop keeps going - the per-result
+                // counters above it are already recorded, and a report that
+                // stopped at the first bad row would describe fewer requests
+                // than the run made.
             }
         }
     }

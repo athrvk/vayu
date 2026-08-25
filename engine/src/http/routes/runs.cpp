@@ -109,7 +109,9 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
             add_scenario (summary, config);
         }
     } catch (...) {
-        // Malformed snapshot -> empty summary (never a 500).
+        // @deliberate: a malformed snapshot reads as an empty summary, never a
+        // 500 - the run happened, and its report is not the place to relitigate
+        // what was stored beside it.
     }
     return summary;
 }
@@ -117,6 +119,16 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
 // Report fields that live outside the DetailedReport struct: whole-run counters
 // the report injects into its `summary` object. Filled from the run's stored
 // summary.
+//
+// `optin.performance.Padding` is right that size-ordering these fields would
+// save 44 bytes, and the trade is refused deliberately: the layout is by report
+// section - each `has_*` flag sits with the block it gates and the paragraph
+// explaining why absent is not zero - and size order interleaves all six
+// sections, leaving every comment describing fields that no longer follow it.
+// One of these exists per `GET /runs/:id/report` call, on the stack, so the
+// 44 bytes buy nothing measurable; the grouping is read by everyone who touches
+// the report. Revisit if this is ever held per run or per result.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct ReportExtras {
     double peak_concurrency = 0.0;
     double dropped_total    = 0.0;
@@ -382,7 +394,8 @@ ReportExtras& extras) {
             try {
                 report.status_codes[std::stoi (code_str)] = count.get<size_t> ();
             } catch (...) {
-                // Skip an unparseable code rather than losing the whole map.
+                // @deliberate: skip an unparseable code rather than losing the
+                // whole map - every other key is still an honest count.
             }
         }
     }
@@ -877,6 +890,9 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
             target_rps = config["targetRps"].get<double> ();
         }
     } catch (...) {
+        // @deliberate: a snapshot that will not read leaves the target at 0,
+        // which `rps_achievement` below already spells as "no target was
+        // declared" - the same answer a run that declared none gives.
     }
 
     report.target_rps = target_rps;
@@ -940,6 +956,9 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
             }
         }
     } catch (...) {
+        // @deliberate: metadata is describing a run that already happened, so
+        // an unreadable snapshot costs the `configuration` block and nothing
+        // else - the measured half of the report is built above this.
     }
 
     nlohmann::json json_report;

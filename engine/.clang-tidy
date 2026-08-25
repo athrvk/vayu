@@ -198,6 +198,21 @@ Checks: '
 # math-missing-parentheses (precedence confusion), and use-std-min-max
 # (hand-rolled clamps get the comparison backwards). Decided in #942.
 
+# `bugprone-empty-catch` has three outcomes in #944's reading - a real swallowed
+# error, a deliberate ignore that states its reason at the site, or dead code -
+# and only the first and last of them are reachable without this line. A comment
+# does not satisfy the check (measured): its `IgnoreCatchWithKeywords` option is
+# the *only* way a catch can say "empty on purpose" in its own body, and without
+# a project keyword in that list the deliberate case has to be spelled as a
+# NOLINT, which records nothing about why. `@deliberate` is that outcome written
+# once here rather than as a suppression per site, and it reads at the site as
+# what it is - prose about a recovery path, not a silenced linter. It carries no
+# authority a NOLINT would not have carried: the reason beside it is the whole
+# of the argument, and a catch that cannot state one is the first outcome, not
+# this one.
+CheckOptions:
+  bugprone-empty-catch.IgnoreCatchWithKeywords: '@TODO;@FIXME;@deliberate'
+
 # No `ExtraArgs` here, deliberately (issue #912). `-Wno-ignored-gch` used to
 # live on this line, for the pre-commit hook's benefit. It broke CI for every
 # pull request that changed a header: `compile_commands.json` has one entry per

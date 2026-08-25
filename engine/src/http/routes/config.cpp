@@ -226,8 +226,9 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
                         allowed_list += (allowed_list.empty () ? "" : ", ") + opt_value;
                     }
                 } catch (const std::exception&) {
-                    // Malformed options - fall through with an empty allowed
-                    // list so the value is rejected rather than accepted.
+                    // @deliberate: malformed options fall through with an empty
+                    // allowed list, so the value is rejected rather than
+                    // accepted - the safe direction for a validator.
                 }
             }
             if (std::find (allowed.begin (), allowed.end (), value) == allowed.end ()) {

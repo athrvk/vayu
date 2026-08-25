@@ -48,13 +48,13 @@ namespace {
 /// refusal happened while the bytes were arriving.
 constexpr size_t CHUNK_BYTES = 1024;
 
-constexpr size_t CHUNKED_TOTAL_BYTES = 4 * 1024 * 1024;
+constexpr size_t CHUNKED_TOTAL_BYTES = size_t{ 4 } * 1024 * 1024;
 
 class MockSpecServer {
     public:
     /// @param large_bytes size of the `/large` body, which is served with a
     ///        `Content-Length` - the header-time half of the bound.
-    explicit MockSpecServer (size_t large_bytes = 64 * 1024) {
+    explicit MockSpecServer (size_t large_bytes = size_t{ 64 } * 1024) {
         svr_.Get ("/spec.json", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content (R"({"openapi":"3.0.0"})", "application/json");
         });
@@ -245,7 +245,7 @@ TEST (ImportFetchBound, AStatedBoundOverTheCeilingIsClampedRatherThanRefused) {
     // paths pass that number straight through. Asking for more than the engine
     // allows is answered by the ceiling, not by a 400 that would break an
     // import the setting explicitly permits.
-    static_assert (vayu::core::constants::import_fetch::MAX_BYTES > 100 * 1024 * 1024,
+    static_assert (vayu::core::constants::import_fetch::MAX_BYTES > size_t{ 100 } * 1024 * 1024,
     "the transport ceiling must sit above the largest configurable "
     "maxSpecDocumentBytes");
 
@@ -310,7 +310,7 @@ class Recorder {
 };
 
 TEST (ImportFetchStream, ReportsProgressAndThenTheResult) {
-    MockSpecServer mock (64 * 1024);
+    MockSpecServer mock (size_t{ 64 } * 1024);
     Recorder recorder;
 
     const auto [status, body] =
@@ -332,7 +332,8 @@ TEST (ImportFetchStream, ReportsProgressAndThenTheResult) {
     ASSERT_FALSE (recorder.events.empty ());
     EXPECT_EQ (recorder.events.back ().event, "result");
     const auto& result = recorder.events.back ().data;
-    EXPECT_EQ (result["content"].get<std::string> (), std::string (64 * 1024, 'x'));
+    EXPECT_EQ (result["content"].get<std::string> (),
+    std::string (size_t{ 64 } * 1024, 'x'));
     EXPECT_EQ (result["contentType"].get<std::string> (), "application/octet-stream");
 }
 
@@ -387,7 +388,7 @@ TEST (ImportFetchStream, ReportsAFailedFetchAsAnErrorEvent) {
 }
 
 TEST (ImportFetchStream, ReportsAnOverBoundResponseAsAnErrorEvent) {
-    MockSpecServer mock (64 * 1024);
+    MockSpecServer mock (size_t{ 64 } * 1024);
     Recorder recorder;
 
     vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/large"), 1024),

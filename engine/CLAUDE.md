@@ -116,6 +116,14 @@ engine/
   time: the commented-out `CMAKE_CXX_CLANG_TIDY` block went with #885, because a
   lint that runs when someone uncomments it never runs. See
   `docs/engine/building.md`.
+- **An empty `catch` opens with `@deliberate` and then says why** (#944).
+  `bugprone-empty-catch` is enabled and a plain comment does not satisfy it - the
+  check reads only the keywords in `IgnoreCatchWithKeywords`, which
+  `engine/.clang-tidy` sets to `@TODO;@FIXME;@deliberate`. Write what the
+  recovery is and what the caller gets instead of the exception; the keyword is
+  the marker, the sentence after it is the argument. It is not a way past the
+  check: a `catch` with no reason to give is swallowing an error, and that one
+  gets a fix or a log line, not a keyword.
 - Install the git pre-commit hook: `bash scripts/install-git-hooks.sh`
 - vcpkg manages all C++ dependencies - do not add one without updating
   `engine/vcpkg.json`. **In the cloud dev environment, adding one needs a second

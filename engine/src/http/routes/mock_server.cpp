@@ -398,12 +398,15 @@ const std::string& path) {
 
     if (!routes[*best].has_response) {
         match.miss          = MockMissKind::NoExample;
-        match.matched_route = *best;
+        match.matched_route = best;
         return match;
     }
 
-    match.route_index   = *best;
-    match.matched_route = *best;
+    // `best` carried whole rather than dereferenced and re-wrapped: both fields
+    // are the same optional, and the round trip is a dereference that only the
+    // `if` above makes safe.
+    match.route_index   = best;
+    match.matched_route = best;
     return match;
 }
 

@@ -1006,6 +1006,16 @@ nothing reports twice). The gate holds new code to the newly enabled families
 immediately, on changed lines, while their backlog is paid down - the same
 posture every enabled check has always had.
 
+**An empty `catch` says so in words** (#944). `bugprone-empty-catch` is enabled,
+and a comment does not satisfy it: the check reads only the keywords in its
+`IgnoreCatchWithKeywords` option, so that option carries `@deliberate` beside
+clang-tidy's own `@TODO`/`@FIXME`. A `catch` block that is meant to be empty
+opens with that keyword and then says why - what the recovery is, and what the
+caller sees instead of the exception. Without it the only way to a clean tree is
+a `NOLINT` per site, which records nothing. The keyword is not an argument on its
+own: a `catch` that cannot state a reason is swallowing an error, and the answer
+there is to fix it or to log it, not to name it deliberate.
+
 The hook used to be the stricter of the two - it gated whole staged files, so a
 one-line edit to a legacy file was refused a commit over findings CI would let
 through, and `--no-verify` was the only way past it. #902 aligned them: a hook

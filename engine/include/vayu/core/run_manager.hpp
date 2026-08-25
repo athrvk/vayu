@@ -7,6 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -24,6 +25,7 @@
 #include "vayu/core/auth_refresh.hpp"
 #include "vayu/core/capacity_controller.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/core/load_pacing.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/monitor.hpp"
 #include "vayu/core/scenario_plan.hpp"
@@ -92,6 +94,51 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
         ticks = 1;
     }
     return ticks > max_ticks ? max_ticks : ticks;
+}
+
+/**
+ * @brief How many results to reserve a run's metrics stores for: duration x
+ * target RPS, plus a 20% buffer, floored so a short run still starts with a
+ * usable store.
+ *
+ * A reservation, never a bound - nothing refuses a run that exceeds it. It only
+ * decides what the collector allocates up front, and both of `MetricsCollector`'s
+ * derived reserves scale with it.
+ *
+ * The duration goes through `parse_duration_ms`, which is why this is a named
+ * function rather than four lines in RunContext's constructor: the constructor
+ * stripped one character and multiplied by 1000, so "5m" reserved five seconds'
+ * worth and "500ms" five hundred seconds' worth - the identical defect
+ * `parse_duration_ms` exists to remove from the strategy path, left behind in a
+ * hand-rolled copy (#944).
+ *
+ * A duration the parser refuses - or one stored as something other than a
+ * string - reserves as if for the 60s the field itself defaults to. Refusing a
+ * malformed run is the config validator's job, upstream of here; this is an
+ * allocation hint and has no business failing a run that the validator passed.
+ */
+[[nodiscard]] inline size_t expected_requests_for (const nlohmann::json& config) {
+    constexpr int64_t DEFAULT_DURATION_MS = 60'000;
+    // Small runs still get a store worth having - a 1s smoke test reserving for
+    // 1200 results reallocates its way through the first burst.
+    constexpr size_t MIN_RESERVED = 10'000;
+
+    int64_t duration_ms = DEFAULT_DURATION_MS;
+    if (const auto declared = config.find ("duration");
+    declared != config.end () && declared->is_string ()) {
+        duration_ms =
+        parse_duration_ms (declared->get_ref<const std::string&> ()).value_or (DEFAULT_DURATION_MS);
+    }
+
+    double target_rps = config.value ("rps", 0.0);
+    if (target_rps == 0.0)
+        target_rps = config.value ("targetRps", 0.0);
+    if (target_rps == 0.0)
+        target_rps = 1000.0; // default estimate
+
+    const auto reserved = static_cast<size_t> (
+    (static_cast<double> (duration_ms) / 1000.0) * target_rps * 1.2);
+    return std::max (reserved, MIN_RESERVED);
 }
 
 /**

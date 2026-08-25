@@ -514,25 +514,7 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     MetricsCollectorConfig mc_config;
     mc_config.max_errors = max_errors;
 
-    // Calculate expected requests from duration and RPS
-    std::string duration_str = config.value ("duration", "60s");
-    int64_t duration_ms      = 60000; // default 60s
-    try {
-        duration_ms =
-        std::stoll (duration_str.substr (0, duration_str.length () - 1)) * 1000;
-    } catch (...) {
-    }
-
-    double target_rps = config.value ("rps", 0.0);
-    if (target_rps == 0.0)
-        target_rps = config.value ("targetRps", 0.0);
-    if (target_rps == 0.0)
-        target_rps = 1000.0; // default estimate
-
-    // Pre-allocate with 20% buffer
-    mc_config.expected_requests = static_cast<size_t> (
-    (static_cast<double> (duration_ms) / 1000.0) * target_rps * 1.2);
-    mc_config.expected_requests = std::max (mc_config.expected_requests, size_t (10000));
+    mc_config.expected_requests = expected_requests_for (config);
 
     // Get sampling config
     mc_config.success_sample_rate =
@@ -737,7 +719,10 @@ void RunManager::start_sweeper (std::function<int64_t ()> ttl_provider) {
                 try {
                     sweep_retained (ttl);
                 } catch (...) {
-                    // Defensive: never let an exception escape the sweeper thread.
+                    // @deliberate: never let an exception escape the sweeper
+                    // thread - it runs with no catch above it, so anything that
+                    // got out would take the process down over a retention
+                    // sweep. The next tick sweeps again.
                 }
             }
             lock.lock ();
@@ -766,6 +751,8 @@ RunManager::~RunManager () {
     try {
         shutdown ();
     } catch (...) {
+        // @deliberate: a destructor must not throw, and there is no one left to
+        // report to - the manager is going away with the daemon.
     }
     stop_sweeper ();
 }
@@ -1796,8 +1783,16 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
                     db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
                     build_metric_tick_payload (sample).dump () });
-                } catch (const std::exception&) {
-                    // Continue on error
+                } catch (const std::exception& e) {
+                    // A dropped tick is a hole in the run's history series and
+                    // nothing downstream can tell a hole from a quiet second,
+                    // so the reason is logged rather than swallowed. It never
+                    // fails the run: the live stream and the final report are
+                    // built from the collector, not from these rows. At most
+                    // one line per tick, and the tick gate is 1 Hz.
+                    vayu::utils::log_warning (
+                    "Metric tick not persisted for run " + context->run_id +
+                    ": " + e.what ());
                 }
 
                 last_update = now;
