@@ -101,6 +101,16 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         /WX
         /permissive-
         /FS
+        # Not a warning flag, and here for the same reason /FS is: it is MSVC
+        # build hygiene the whole tree needs. `database.cpp` instantiates
+        # enough of sqlite_orm's templates to exceed the COFF section limit -
+        # `fatal error C1128` - as soon as inlining is off, which is every
+        # Debug configuration. Release never hit it (/O2 folds the sections
+        # away) and windows-dev has no CI leg, so the first build to fail on it
+        # was windows-asan, where /Od plus ASan instrumentation makes it
+        # unmissable. /bigobj only raises that limit; it costs nothing where it
+        # is not needed.
+        /bigobj
         # 4324: 'structure was padded due to alignas' - deliberate, on the
         # cache-line-aligned SPSC queue members (spsc_queue.hpp); the padding
         # is the point. Permanent.
@@ -142,14 +152,109 @@ add_library(vayu_sanitizers INTERFACE)
 
 if(VAYU_USE_ASAN)
     message(STATUS "AddressSanitizer enabled")
-    target_compile_options(vayu_sanitizers INTERFACE -fsanitize=address -fno-omit-frame-pointer)
-    target_link_options(vayu_sanitizers INTERFACE -fsanitize=address)
+    if(MSVC)
+        # MSVC spells it with a slash and links the ASan runtime itself, so
+        # there is no link option to match - passing `-fsanitize=address` here
+        # would be swallowed as an unknown flag and the build would come out
+        # unsanitized while looking green.
+        #
+        # Two MSVC features are incompatible with it, and both are on by
+        # default in the configurations this repo builds: `/RTC1`, which CMake
+        # puts in CMAKE_<LANG>_FLAGS_DEBUG, and incremental linking. Neither is
+        # load-bearing - /RTC1's stack checks are a strict subset of what ASan
+        # reports - so they are removed rather than made the caller's problem.
+        # ASan against the static CRT this repo links (CMAKE_MSVC_RUNTIME_LIBRARY
+        # MultiThreaded... in the windows-* presets) is supported from VS 2019
+        # 16.9 on.
+        target_compile_options(vayu_sanitizers INTERFACE /fsanitize=address)
+        target_link_options(vayu_sanitizers INTERFACE /INCREMENTAL:NO)
+        # The vcpkg dependencies are prebuilt without ASan, and MSVC's STL
+        # makes that a *link* error rather than a silent mismatch: under
+        # /fsanitize=address it turns on container overflow annotations for
+        # string, vector and optional, and stamps each translation unit with a
+        # `detect_mismatch` record. Ours say 1, ryml's and c4core's say 0, and
+        # the linker refuses - `LNK2038 ... annotate_string`, 18 of them,
+        # ending in LNK1319.
+        #
+        # Turning the annotations off on our side is Microsoft's documented
+        # answer for linking against libraries that were not built with ASan,
+        # and it is the only one available here: instrumenting the dependencies
+        # would need a custom triplet, and their archives are shared byte for
+        # byte with every other workflow's vcpkg cache.
+        #
+        # `_DISABLE_STL_ANNOTATION` is the STL's own umbrella switch: it
+        # defines _DISABLE_STRING_ANNOTATION, _DISABLE_VECTOR_ANNOTATION and
+        # _DISABLE_OPTIONAL_ANNOTATION itself
+        # (stl/inc/__msvc_sanitizer_annotate_container.hpp). Naming the three
+        # individually would work today and rot the day Microsoft annotates a
+        # fourth container - the link would fail again on a record nobody
+        # listed. It must also be all or nothing: microsoft/STL#6186 documents
+        # that disabling *some* annotations leaves the runtime's
+        # `_Asan_..._should_annotate` flags true against uninstrumented code,
+        # which is a genuine memory-safety hazard, while disabling all of them
+        # is benign.
+        #
+        # What it costs is bounded and worth naming: ASan on Windows no longer
+        # catches an overflow that stays inside a container's *spare capacity*
+        # - writing past `size()` but within `capacity()` of a vector, string
+        # or optional. Every other check is untouched: heap, stack and global
+        # overflow, use-after-free, double-free, use-after-return. The Linux
+        # and macOS legs keep container annotations, so nothing is lost from
+        # the matrix as a whole - only from the Windows leg alone.
+        target_compile_definitions(vayu_sanitizers INTERFACE _DISABLE_STL_ANNOTATION)
+        foreach(_vayu_rtc_flags
+                CMAKE_C_FLAGS_DEBUG CMAKE_CXX_FLAGS_DEBUG
+                CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+            string(REGEX REPLACE "/RTC[1csu]+" "" ${_vayu_rtc_flags} "${${_vayu_rtc_flags}}")
+        endforeach()
+    else()
+        target_compile_options(vayu_sanitizers INTERFACE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(vayu_sanitizers INTERFACE -fsanitize=address)
+    endif()
 endif()
 
 if(VAYU_USE_TSAN)
+    # ThreadSanitizer does not exist on MSVC, and clang-cl does not implement it
+    # on Windows either. Without this the flags below would be dropped as
+    # unknown and the build would report "ThreadSanitizer enabled" while
+    # producing an ordinary binary - a green run that proves nothing. Fail at
+    # configure instead.
+    if(MSVC)
+        message(FATAL_ERROR
+            "VAYU_USE_TSAN is not supported on MSVC - ThreadSanitizer has no "
+            "Windows implementation. Use VAYU_USE_ASAN on Windows, and run TSan "
+            "on Linux or macOS (presets linux-tsan / macos-tsan).")
+    endif()
     message(STATUS "ThreadSanitizer enabled")
-    target_compile_options(vayu_sanitizers INTERFACE -fsanitize=thread)
+    target_compile_options(vayu_sanitizers INTERFACE -fsanitize=thread -fno-omit-frame-pointer)
     target_link_options(vayu_sanitizers INTERFACE -fsanitize=thread)
+
+    # Turn cpp-httplib's non-blocking resolver off for this build only (#957).
+    #
+    # vcpkg's port sets CPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO as an INTERFACE
+    # definition on httplib::httplib. On glibc that selects a `getaddrinfo_a`
+    # implementation, and glibc services that call on a worker thread it creates
+    # *internally* - one that never passes ThreadSanitizer's `pthread_create`
+    # interceptor. The thread therefore has no TSan ThreadState, and the first
+    # malloc on it dereferences a null per-thread cache: `this=0x8` inside
+    # SizeClassAllocator64LocalCache::Allocate. That is a crash in the sanitizer
+    # runtime rather than a report, so no suppression can reach it, and it took
+    # out all 58 socket-opening tests on `linux-tsan` deterministically.
+    #
+    # Undefined rather than removed from the interface, because CMake emits
+    # <DEFINES> before <FLAGS> on the compile line, so a `-U` here reliably wins
+    # over the `-D` the imported target contributes. httplib then compiles its
+    # `#else` branch, a plain synchronous getaddrinfo.
+    #
+    # What this costs is one behaviour the TSan leg no longer exercises: the
+    # per-resolve timeout, which that branch does not implement (`timeout_sec`
+    # is explicitly ignored there). No test asserts on it - the suite resolves
+    # localhost - and the shipping build is untouched, so ASan on all three
+    # platforms and the ordinary builds keep the non-blocking resolver. Scoping
+    # it to VAYU_USE_TSAN is the whole point: the async path stays covered
+    # everywhere it can be.
+    target_compile_options(vayu_sanitizers INTERFACE
+        -UCPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO)
 endif()
 
 # ============================================================================
@@ -930,7 +1035,40 @@ if(VAYU_BUILD_TESTS)
 
     # Discover tests for CTest. A per-test TIMEOUT acts as a safety net so a
     # deadlock (e.g. a thread-pool teardown hang) is reported as a failure
-    # instead of blocking the suite indefinitely; healthy tests finish in <10s.
+    # instead of blocking the suite indefinitely; healthy tests finish in <10s
+    # in an ordinary build, and the slowest measured is ~10s.
+    #
+    # **The net scales with the instrumentation** (issue #904). 60s is six times
+    # the slowest healthy test *uninstrumented*, which is thin once
+    # AddressSanitizer's documented ~2x or ThreadSanitizer's 5-15x is applied to
+    # it. The multipliers below keep roughly that same ratio rather than being
+    # tuned to any one runner.
+    #
+    # **This is headroom, not a fix for anything observed.** It is worth being
+    # exact about that, because the first `windows-asan` run looked like it
+    # needed a bigger net and did not. Every one of its 2368 tests reported
+    # `***Timeout`, including ones that only create a file - which no slowdown
+    # factor explains. The binary was not slow, it could not start: a /MTd
+    # binary still needs `clang_rt.asan_dynamic-x86_64.dll` at runtime, and the
+    # ctest step ran in neither a debugging session nor a developer command
+    # prompt, which is where Microsoft documents that DLL's directory as being
+    # on PATH. Raising the net made that failure slower, not better. The
+    # workflow now enters a developer environment (ilammy/msvc-dev-cmd) and
+    # smoke-loads the binary before running anything, so the same failure would
+    # now report in seconds. With that in place `windows-asan` runs all 2368
+    # tests in ~1018s with zero timeouts - the net was never the constraint.
+    #
+    # Measured, so the numbers here are not guesses: a full `linux-tsan` run in
+    # CI reported 70 failures out of 2367 and **zero** timeouts, finishing its
+    # test phase in 275s, with the slowest passing test around 10s. Nothing came
+    # close to even the ordinary 60s net.
+    #
+    # The direction of the trade-off is the one this block already argues for
+    # DISCOVERY_TIMEOUT - being too generous costs a slower failure, being too
+    # tight costs a red run over healthy code - with one correction the Windows
+    # run taught: when a hang is *systemic*, a generous net multiplies the cost
+    # by the number of tests, and only the job timeout saves you. So these are
+    # sized to cover a slow healthy test and no further.
     #
     # DISCOVERY_TIMEOUT bounds something else entirely, and the two are easy to
     # confuse: `PROPERTIES TIMEOUT` is handed to CTest for each discovered test,
@@ -971,7 +1109,15 @@ if(VAYU_BUILD_TESTS)
     list(TRANSFORM vayu_scratch_database_patterns APPEND ".*")
     list(JOIN vayu_scratch_database_patterns ":" vayu_scratch_database_filter)
 
-    set(vayu_scratch_database_properties TIMEOUT 60)
+    set(vayu_test_timeout 60)
+    if(VAYU_USE_ASAN)
+        set(vayu_test_timeout 180)
+    elseif(VAYU_USE_TSAN)
+        set(vayu_test_timeout 300)
+    endif()
+    message(STATUS "Per-test CTest timeout: ${vayu_test_timeout}s")
+
+    set(vayu_scratch_database_properties TIMEOUT ${vayu_test_timeout})
     if(WIN32)
         list(APPEND vayu_scratch_database_properties RESOURCE_LOCK vayu_scratch_database)
     endif()
@@ -985,7 +1131,7 @@ if(VAYU_BUILD_TESTS)
     gtest_discover_tests(vayu_tests
         TEST_FILTER "-${vayu_scratch_database_filter}"
         DISCOVERY_TIMEOUT 150
-        PROPERTIES TIMEOUT 60
+        PROPERTIES TIMEOUT ${vayu_test_timeout}
     )
 endif()
 

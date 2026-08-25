@@ -65,6 +65,24 @@
       }
     },
     {
+      "name": "windows-asan",
+      "displayName": "Windows Debug + AddressSanitizer",
+      "description": "Debug build with MSVC /fsanitize=address. There is no windows-tsan: ThreadSanitizer has no Windows implementation, and VAYU_USE_TSAN fails at configure on MSVC.",
+      "inherits": ["base", "base-fallback"],
+      "binaryDir": "${sourceDir}/build-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>",
+        "VAYU_USE_ASAN": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
       "name": "windows-prod",
       "displayName": "Windows Release",
       "description": "Production build for Windows (Release)",
@@ -116,6 +134,23 @@
       }
     },
     {
+      "name": "linux-tsan",
+      "displayName": "Linux Debug + ThreadSanitizer",
+      "description": "Debug build with TSan, for data races in the event loop, the SPSC queues and MetricsCollector (issue #904)",
+      "inherits": ["base", "base-fallback"],
+      "binaryDir": "${sourceDir}/build-tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "VAYU_USE_TSAN": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
       "name": "linux-prod",
       "displayName": "Linux Release",
       "description": "Production build for Linux (Release)",
@@ -140,6 +175,40 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "VCPKG_TARGET_TRIPLET": "arm64-osx"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
+      "name": "macos-asan",
+      "displayName": "macOS Debug + AddressSanitizer",
+      "description": "Debug build with ASan, for lifetime bugs the ordinary suite only shows as an intermittent crash. LeakSanitizer is not available on macOS, so this reports memory errors only.",
+      "inherits": ["base", "base-fallback"],
+      "binaryDir": "${sourceDir}/build-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "VAYU_USE_ASAN": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
+      "name": "macos-tsan",
+      "displayName": "macOS Debug + ThreadSanitizer",
+      "description": "Debug build with TSan, for data races in the event loop, the SPSC queues and MetricsCollector (issue #904)",
+      "inherits": ["base", "base-fallback"],
+      "binaryDir": "${sourceDir}/build-tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "VAYU_USE_TSAN": "ON"
       },
       "condition": {
         "type": "equals",
@@ -206,6 +275,12 @@
       "jobs": 0
     },
     {
+      "name": "windows-asan",
+      "displayName": "Build Windows Debug + AddressSanitizer",
+      "configurePreset": "windows-asan",
+      "jobs": 0
+    },
+    {
       "name": "windows-prod",
       "displayName": "Build Windows Release",
       "configurePreset": "windows-prod",
@@ -224,6 +299,12 @@
       "jobs": 0
     },
     {
+      "name": "linux-tsan",
+      "displayName": "Build Linux Debug + ThreadSanitizer",
+      "configurePreset": "linux-tsan",
+      "jobs": 0
+    },
+    {
       "name": "linux-prod",
       "displayName": "Build Linux Release",
       "configurePreset": "linux-prod",
@@ -233,6 +314,18 @@
       "name": "macos-dev",
       "displayName": "Build macOS Debug",
       "configurePreset": "macos-dev",
+      "jobs": 0
+    },
+    {
+      "name": "macos-asan",
+      "displayName": "Build macOS Debug + AddressSanitizer",
+      "configurePreset": "macos-asan",
+      "jobs": 0
+    },
+    {
+      "name": "macos-tsan",
+      "displayName": "Build macOS Debug + ThreadSanitizer",
+      "configurePreset": "macos-tsan",
       "jobs": 0
     },
     {
@@ -275,6 +368,15 @@
       }
     },
     {
+      "name": "windows-asan",
+      "displayName": "Test Windows Debug + AddressSanitizer",
+      "configurePreset": "windows-asan",
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 4
+      }
+    },
+    {
       "name": "windows-prod",
       "displayName": "Test Windows Release",
       "configurePreset": "windows-prod",
@@ -293,7 +395,19 @@
       "name": "linux-asan",
       "displayName": "Test Linux Debug + AddressSanitizer",
       "configurePreset": "linux-asan",
-      "inherits": ["test-base"]
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 2
+      }
+    },
+    {
+      "name": "linux-tsan",
+      "displayName": "Test Linux Debug + ThreadSanitizer",
+      "configurePreset": "linux-tsan",
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 2
+      }
     },
     {
       "name": "linux-prod",
@@ -306,6 +420,24 @@
       "displayName": "Test macOS Debug",
       "configurePreset": "macos-dev",
       "inherits": ["test-base"]
+    },
+    {
+      "name": "macos-asan",
+      "displayName": "Test macOS Debug + AddressSanitizer",
+      "configurePreset": "macos-asan",
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 2
+      }
+    },
+    {
+      "name": "macos-tsan",
+      "displayName": "Test macOS Debug + ThreadSanitizer",
+      "configurePreset": "macos-tsan",
+      "inherits": ["test-base"],
+      "execution": {
+        "jobs": 2
+      }
     },
     {
       "name": "macos-prod",

@@ -1,0 +1,83 @@
+# ThreadSanitizer suppressions for the Vayu engine.
+#
+# THE RULE: never suppress engine code. The busy-poll event loop, the SPSC
+# queues and the relaxed-atomic MetricsCollector are precisely what the weekly
+# TSan run is pointed at, and #129 - a writer-vs-writer histogram race that no
+# ordinary test could see - is the reason. A race reported in engine/src is a
+# bug to fix, not a line to add here.
+#
+# The one legitimate entry is a *third-party* frame: the vcpkg dependencies are
+# built without instrumentation, so TSan cannot observe the synchronization
+# inside them and can report a happens-before edge it never saw (OpenSSL's
+# locking callbacks and curl's global init are the usual candidates).
+#
+# Every entry must carry, in a comment directly above it:
+#   1. the `WARNING: ThreadSanitizer:` report it silences, trimmed to the frames
+#      that matter;
+#   2. why the frame cannot be fixed here (upstream, uninstrumented, by design);
+#   3. the issue number tracking its removal, if one is expected.
+# An entry without those three is removed on sight - the same discipline #897
+# put on `// NOLINT` pragmas.
+#
+# Syntax is one `race:<substring>`, `deadlock:<substring>`,
+# `called_from_lib:<lib>` etc. per line; see
+# https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
+#
+# Two entries, below.
+
+# WARNING: ThreadSanitizer: data race
+#   Read of size 8 by thread T11:
+#     #0 memcmp
+#     #2 match_key crypto/hashtable/hashtable.c:549
+#     #3 httplib::SSLServer::process_and_close_socket(int)
+#   Previous write by the accepting thread, same hashtable bucket.
+#
+# OpenSSL's own lock-free property hashtable, reached through httplib's TLS
+# accept path. OpenSSL is a vcpkg static dependency built without
+# instrumentation, so TSan cannot observe the atomics that order these two
+# accesses and reports an edge that is really there. Nothing in engine/ is on
+# either side of it: frame #3 is the first non-OpenSSL frame and it is
+# header-only third-party code.
+#
+# Not tracked for removal - it goes away when OpenSSL is built instrumented,
+# which is not something this repository does.
+# Seen on: linux-tsan, once in a full `ctest --preset linux-tsan` run
+# (PerClientIdentityFormat/MutualTlsTest.*, gcc 13 / libtsan 2 / OpenSSL 3.6.3).
+# It needs the concurrent accepts a loaded suite produces - six runs of that
+# test alone did not reproduce it - so this entry is justified by the captured
+# trace above rather than by a repeatable before/after.
+race:crypto/hashtable/hashtable.c
+
+# WARNING: ThreadSanitizer: data race
+#   Read of size 1 by thread T8 (mutexes: write M0):
+#     #0 std::ctype<char>::narrow(char, char) const
+#          /usr/include/c++/13/bits/locale_facets.h:941
+#     #1 std::__detail::_Scanner<char>::_M_scan_normal()
+#          /usr/include/c++/13/bits/regex_scanner.tcc:100
+#     #7 httplib::detail::parse_status_line(...)
+#     #8 httplib::ClientImpl::read_response_line(...) httplib.h:13856
+#   SUMMARY: data race in std::ctype<char>::narrow(char, char) const
+#
+# libstdc++'s narrowing cache, not anything this repository wrote. `narrow`
+# memoises char conversions into a mutable table on the facet
+# (`_M_narrow[]` plus its `_M_narrow_ok` flag) and fills it without
+# synchronization; two threads that both construct a std::regex race on that
+# fill. The facet is the process-wide classic locale, so every thread shares
+# it. httplib builds a std::regex per response in `parse_status_line`, which
+# is why concurrent HTTP clients reach it and nothing else does.
+#
+# Cannot be fixed here on either side: the racing write is in libstdc++'s
+# headers, and the caller is header-only third-party code. No engine frame
+# appears anywhere in the stack - frame #7 is the first non-libstdc++ frame
+# and it is httplib's.
+#
+# Tracked in #967. It is a real report rather than an artifact of missing
+# instrumentation, so unlike the OpenSSL entry above it is worth an upstream
+# fix; the practical remedies are upstream (libstdc++ synchronising the cache,
+# or httplib hoisting its regex to a function-local static).
+#
+# Seen on: linux-tsan, TransportPolicyPaths.LoadRunTraversesManualProxy, gcc 13
+# / libtsan 2. Only became visible once #957 was fixed - before that every test
+# that opens a socket segfaulted inside the sanitizer runtime and never got far
+# enough to report anything.
+race:std::ctype<char>::narrow

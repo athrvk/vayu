@@ -75,18 +75,8 @@ cmake --build --preset linux-asan
 ctest --preset linux-asan
 ```
 
-`linux-asan` is a separate tree rather than a flag on `linux-dev`, so an ASan
-run never invalidates the ordinary build's objects. It is the tool for a
-**lifetime** bug - a crash the ordinary suite only produces intermittently and
-without an assertion failure, which is what a use-after-free across threads
-looks like. Two things worth knowing when you reach for it:
-
-- Run the suspect tests **under load**, not alone. Issue #646 was a worker
-  thread writing through a `Database` its fixture had already destroyed; it
-  passed 5/5 in isolation and reproduced on every attempt with four copies of
-  the binary running concurrently (each from its own working directory, since
-  the fixtures write scratch `test_*.db` files into it).
-- `ASAN_OPTIONS=detect_leaks=0` keeps the report to the memory error itself.
+There are four more sanitizer presets - `linux-tsan`, `macos-asan`,
+`macos-tsan`, `windows-asan` - see [Sanitizers](#sanitizers) below.
 
 ### Traditional CMake
 
@@ -120,12 +110,295 @@ cmake -B build -DVAYU_BUILD_TESTS=OFF
 # Enable AddressSanitizer (debug builds)
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DVAYU_USE_ASAN=ON
 
-# Enable ThreadSanitizer (debug builds)
+# Enable ThreadSanitizer (debug builds; Linux and macOS only - it stops at
+# configure with a FATAL_ERROR on MSVC)
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DVAYU_USE_TSAN=ON
 
 # Treat compiler warnings as errors (what CI does)
 cmake -B build -DVAYU_WERROR=ON
 ```
+
+## Sanitizers
+
+Five preset trios, one per sanitizer-and-platform combination that exists:
+
+| Preset | Platform | Finds |
+|--------|----------|-------|
+| `linux-asan` | Linux | Memory errors **and leaks** - LeakSanitizer is on by default here |
+| `linux-tsan` | Linux | Data races, lock-order inversions |
+| `macos-asan` | macOS | Memory errors. **No leak detection in practice** - see below |
+| `macos-tsan` | macOS | Data races, lock-order inversions |
+| `windows-asan` | Windows | Memory errors, via MSVC `/fsanitize=address`. **No container-overflow detection** - see below |
+
+**The Windows leg detects slightly less than the other two.** MSVC's STL turns
+on ASan container annotations for `string`, `vector` and `optional` under
+`/fsanitize=address` and stamps every translation unit with a `detect_mismatch`
+record; the vcpkg dependencies are prebuilt without ASan and stamp the opposite
+value, so the linker refuses the whole binary (`LNK2038 ... annotate_string`,
+ending in `LNK1319`). The engine turns those annotations off on its own side,
+which is Microsoft's documented answer for linking against uninstrumented
+libraries - instrumenting the dependencies would need a custom triplet, and
+their archives are shared byte for byte with every other workflow's vcpkg
+cache. The cost is bounded: Windows no longer catches an overflow that stays
+inside a container's *spare capacity* (past `size()`, within `capacity()`).
+Heap, stack and global overflow, use-after-free, double-free and
+use-after-return are all untouched, and Linux and macOS keep the annotations -
+so the matrix as a whole loses nothing.
+
+There is deliberately no `windows-tsan`. ThreadSanitizer has no Windows
+implementation - MSVC ships none, and clang-cl does not implement it either - so
+`-DVAYU_USE_TSAN=ON` on MSVC stops at configure with a `FATAL_ERROR` rather than
+dropping the flag and handing back an unsanitized binary that looks sanitized.
+
+Each preset name is a trio - configure, build and test - so a run is three
+commands with the same word in them:
+
+```bash
+cd engine
+cmake --preset linux-tsan          # or macos-tsan, macos-asan, windows-asan
+cmake --build --preset linux-tsan
+ctest --preset linux-tsan
+```
+
+Every sanitizer preset builds into **its own tree** (`build-asan/`,
+`build-tsan/`) rather than turning a flag on inside `build/`, so a sanitizer run
+never invalidates the ordinary build's objects - and ASan and TSan, which cannot
+coexist in one binary, never fight over one directory. Their test presets run
+`ctest -j2` rather than the usual `-j8`: sanitizer processes are memory-hungry
+(TSan's shadow memory alone is gigabytes per process) and oversubscribing turns
+findings into noise.
+
+`windows-asan` is the exception, and keeps the platform's usual `-j4`. ASan's
+memory overhead is roughly 3x rather than TSan's 10x, and the scratch-database
+tests there already share a CTest `RESOURCE_LOCK`, so `-j2` bought nothing.
+
+**Parallelism is not what governs that leg's wall time, and it is worth knowing
+why before reaching for `-j`.** On Windows the scratch-database tests are
+serialized by that `RESOURCE_LOCK` and are ~81% of the serial wall (see the root
+`CLAUDE.md`), so no `-j` setting can shorten them. What actually cost the first
+run was neither: see [the ASan runtime DLL](#the-asan-runtime-dll-on-windows).
+
+### The per-test timeout scales with the sanitizer
+
+CTest kills any test that runs longer than a per-test `TIMEOUT`, set in
+`engine/CMakeLists.txt`. It is a deadlock net, not a budget - and it scales
+with the instrumentation:
+
+| Build | Per-test timeout |
+|-------|------------------|
+| Ordinary | 60s |
+| `VAYU_USE_ASAN` | 300s |
+| `VAYU_USE_TSAN` | 600s |
+
+60s is six times the slowest healthy test (~10s) in an ordinary build, which is
+thin once AddressSanitizer's ~2x or ThreadSanitizer's 5-15x is applied to it.
+The multipliers hold roughly that same ratio.
+
+**This is headroom, not a fix for anything observed**, and the distinction
+matters. No leg has ever needed it: a `linux-tsan` run in CI reported 70
+failures out of 2367 with **zero** timeouts, finishing its test phase in 275s
+with the slowest passing test around 10s. Configure prints the value it chose
+(`Per-test CTest timeout: ...s`), so a leg that is slow for some other reason is
+not mistaken for this one.
+
+The trade-off has one correction the Windows run below taught: when a hang is
+*systemic* rather than confined to one test, a generous net multiplies the cost
+by the number of tests and only the job timeout saves you. So these are sized to
+cover a slow healthy test and no further.
+
+### The ASan runtime DLL on Windows
+
+A `/MT` or `/MTd` binary still has a **runtime** dependency on
+`clang_rt.asan_dynamic-x86_64.dll`. Statically linking the CRT does not
+statically link the ASan runtime, and has not since VS 2022 17.7. Microsoft
+ships that DLL next to the compiler and documents that the directory is on PATH
+*"in debugging sessions and in Visual Studio developer command prompts"* - which
+a plain CI shell is not.
+
+Without it every test process fails to start, prints nothing, and is killed by
+the per-test timeout. `windows-asan` showed exactly that twice before the
+developer environment was applied: **2368 tests, every one `***Timeout`**,
+including ones that do nothing but create a file. With it, the same suite runs.
+
+**A wall of identical timeouts on that leg means the binary cannot start.** It
+reads like a slow sanitizer and is not one - no slowdown factor makes a test
+that creates a file take three minutes. Check the runtime before touching `-j`
+or the timeout; both have been tried and neither was the cause.
+
+The workflow gets that PATH the supported way - `ilammy/msvc-dev-cmd`, which is
+what the ecosystem uses - rather than searching for the DLL by hand. Two
+revisions did search by hand and both got it wrong, once by taking whichever
+host/target copy the filesystem returned first (an install ships one per pair
+and they are not interchangeable).
+
+It also sets `ASAN_WIN_CONTINUE_ON_INTERCEPTION_FAILURE`. That is Microsoft's
+documented escape from a *hang*: the runtime hotpatches interceptors into system
+functions, and where a prologue is too short to patch, "the program throws a
+`debugbreak` and halts" - with no debugger attached, a process that never exits
+and never prints, which CTest can only call a timeout. Newer Windows builds are
+known to trip this.
+
+Finally, before ctest runs at all, the step loads the test binary once with
+`--gtest_list_tests`. That separates "cannot start" from "tests fail" in seconds
+and prints the loader's own exit code instead of costing a job timeout and
+reporting nothing. It runs on every leg, because a loader problem is not a
+Windows-only category.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `124` | Hung - the `timeout` fired |
+| `3221225781` | `STATUS_DLL_NOT_FOUND` |
+| `3221225595` | `STATUS_INVALID_IMAGE_FORMAT` - wrong-architecture DLL |
+| `3221225794` | `STATUS_DLL_INIT_FAILED` (`0xc0000142`) - see below |
+
+**`STATUS_DLL_INIT_FAILED` has not been seen on this runner.** Once the
+developer environment was applied, `windows-asan` started and ran the whole
+suite - 2368 tests in 1018s on Windows Server 2025, VS 18, MSVC 19.51.
+[actions/runner-images#8891](https://github.com/actions/runner-images/issues/8891)
+is an open report of an ASan binary refusing to start on a hosted Windows image
+even with the DLL at the documented path, and is worth knowing about, but it is
+filed against `windows-2022` / VS 2022 17.7 / MSVC 14.37 - three toolchain
+generations behind what this leg uses - so it is a reference, not the verdict on
+a fresh `0xc0000142`. Reproduce one against the image actually in use before
+concluding the leg is unviable on hosted runners.
+
+### Which one to reach for
+
+**ASan** is the tool for a **lifetime** bug - a crash the ordinary suite only
+produces intermittently and without an assertion failure, which is what a
+use-after-free across threads looks like. Two things worth knowing:
+
+- Run the suspect tests **under load**, not alone. Issue #646 was a worker
+  thread writing through a `Database` its fixture had already destroyed; it
+  passed 5/5 in isolation and reproduced on every attempt with four copies of
+  the binary running concurrently (each from its own working directory, since
+  the fixtures write scratch `test_*.db` files into it).
+- `ASAN_OPTIONS=detect_leaks=0` keeps the report to the memory error itself.
+  That is a Linux switch in practice. LeakSanitizer is only **on by default**
+  on Linux; on macOS it is off by default and can in principle be turned on
+  with `detect_leaks=1`, but that needs an open-source clang - Apple's clang
+  may not implement it - and it false-positives inside `libobjc` on Apple
+  Silicon. CI builds macOS with AppleClang, so treat `macos-asan` as reporting
+  memory errors only.
+
+**TSan** is the tool for a result that is wrong rather than absent: a counter
+that drifts, a histogram whose buckets do not add up, a flag observed in an
+order no thread wrote. Issue #129 was exactly that - a writer-vs-writer
+histogram race - and the busy-poll event loop, the SPSC queues and the
+relaxed-atomic `MetricsCollector` are the same material. No assertion can
+express "these two writes were unordered", which is why the ordinary suite is
+green over code TSan has things to say about.
+
+### Suppressions
+
+`engine/sanitizers/asan.supp` and `engine/sanitizers/tsan.supp` are checked in,
+and the weekly workflow below points `ASAN_OPTIONS`/`TSAN_OPTIONS` at them. They
+exist for frames this repository cannot fix. Two kinds qualify, and the
+difference is worth keeping straight:
+
+- **An edge TSan cannot see.** The vcpkg dependencies are built
+  uninstrumented, so TSan cannot observe the synchronization inside OpenSSL and
+  reports a happens-before edge that is really there. `tsan.supp`'s
+  `crypto/hashtable/hashtable.c` entry is this kind.
+- **A real race in code that is not ours.** `std::ctype<char>::narrow` fills a
+  mutable cache on the process-wide locale without synchronization, and
+  cpp-httplib reaches it by building a `std::regex` per response. That is a
+  genuine race; it simply has no engine frame anywhere in the stack and cannot
+  be fixed from here. Tracked in #967.
+
+**Never suppress engine code.** A finding in `engine/src` or `engine/include` is
+the thing the run exists to surface. Every entry must carry the report it
+silences, why the frame cannot be fixed here, and the issue tracking its
+removal - the same discipline #897 put on `// NOLINT`. `asan.supp` ships empty
+but present; `tsan.supp` carries the two entries above, each with its trace.
+
+### The weekly run, and the issues it files
+
+`.github/workflows/sanitizers.yml` runs all five legs against `master` every
+Monday at 09:00 UTC, and on demand via **Run workflow**. Both of those only
+begin once the file is on the default branch - GitHub registers a `schedule`
+and offers `workflow_dispatch` from `master` only - so the first cron fires
+after the merge, not on the pull request that adds it. It is weekly rather
+than per-pull-request because TSan costs 5-15x in wall time: paying that on
+every pull request would push the engine job past an hour for a class of bug
+that surfaces on the order of once a release. `VAYU_WERROR` is off there - the
+workflow answers "is the engine memory- and thread-correct", not "does it
+compile warning-free", which is `pr-tests.yml`'s gate.
+
+A red leg **files a GitHub issue by itself**, from the runner, through
+`GITHUB_TOKEN` - no model and no tokens are involved. The issue is titled
+`sanitizer: <sanitizer> failure on <runner>` and labelled `sanitizer-failure`,
+`component:engine` and `type:bug`, and carries the run link plus the first
+sanitizer report block from the log; the full log is attached to the run as an
+artifact for 14 days. The title is the dedup key, so a leg that stays red
+accumulates comments on one issue instead of filing a new one every Monday.
+
+So: **if you are reading a `sanitizer-failure` issue, that is where it came
+from.** Closing it is a human act after the fix - the next failure comments
+again, or files fresh if it was closed. Getting it green by adding a
+suppression for engine code is not a fix.
+
+### What the matrix found, and where it stands
+
+The first runs turned up four things. Three are fixed; one is suppressed with a
+tracking issue.
+
+- **#956** - a real data race: `RunContext`'s event loop was read by the metrics
+  thread while the run thread constructed it. 13 of the 14 race reports were
+  this one race, on both TSan legs. **Fixed in #965.** A race no assertion could
+  express, found on the matrix's first run.
+- **#957** - `linux-tsan` segfaulted in all 58 socket-opening tests. vcpkg's
+  cpp-httplib port defines `CPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO`, which on
+  glibc selects `getaddrinfo_a()`; glibc services that on a worker thread it
+  creates internally, one that never passes ThreadSanitizer's `pthread_create`
+  interceptor, so the thread has no TSan state and its first `malloc`
+  dereferences a null cache. A crash inside the sanitizer runtime, which is why
+  no suppression could reach it. **Fixed** by undefining that macro for the TSan
+  build only, so httplib compiles its plain synchronous `getaddrinfo` branch.
+- **#959** - `windows-asan` failed one test, and it was not an MSVC quirk.
+  `js_class_tag` reads an object's class through a `JS_Call`, which checks
+  QuickJS's 256 KB interpreter stack; when 64 nested `js_deep_equal` frames
+  exceeded it the call threw, the tag came back empty, both empty tags compared
+  equal, and the walk returned a plain "not equal" with the pending
+  stack-overflow error discarded. Which guard fired first depended on frame
+  size, so the same source answered differently per toolchain. **Fixed** by
+  detecting the cycle where it closes instead of capping depth, and by
+  propagating the exception. See [Cycle detection, not a depth
+  cap](#cycle-detection-not-a-depth-cap) below.
+- **#967** - a data race in libstdc++'s locale narrowing cache, reached through
+  the `std::regex` cpp-httplib builds per response in `parse_status_line`. No
+  engine frame anywhere in the stack, so it is **suppressed** in `tsan.supp`
+  with its trace and that issue number. It only became visible once #957 was
+  fixed - before that the crash masked it.
+
+The matrix has therefore paid for itself twice over: two engine-side defects
+found and fixed, one of them a race the ordinary suite is structurally unable
+to see, and one third-party race documented rather than ignored.
+
+### Cycle detection, not a depth cap
+
+Worth stating separately, because the shape of the bug generalises.
+`js_deep_equal` used to bound cyclic input with a depth cap alone. A cap bounds
+the C recursion only *after* the fact, and N frames is a different amount of
+stack on every toolchain - so which guard fires first (ours, or the
+interpreter's own stack check) is decided by frame size, and frame size varies
+with compiler, optimisation level and sanitizer. That is how #959 passed on GCC
+and Clang and failed deterministically on MSVC at `/Od` under ASan.
+
+It now carries the pair of objects at each level of the current path; a pair it
+is already comparing *is* a cycle. `a.self = a` reports at depth 1 rather than
+65 and never recurses deep enough for frame size to matter. The cap stays as a
+backstop for structures that are merely enormous.
+
+`ScriptEngineTest.ExpectEqlOnACycleSurvivesAShallowInterpreterStack` pins it:
+shrinking the interpreter stack to 16 KB puts a Linux build on the same side of
+that race as MSVC, so the platform-specific failure is now a test that runs
+everywhere.
+
+The workflow also runs on a pull request that edits the sanitizer machinery
+itself (this workflow, `engine/sanitizers/**`, `engine/CMakeLists.txt`,
+`engine/CMakePresets.json`) and on nothing else, so a change to the presets or
+the flags is proved by the thing it changes before it reaches the cron.
 
 ## Build Outputs
 
@@ -484,7 +757,8 @@ check that scans an empty set passes for the wrong reason.
 ### Debugging
 
 1. Build in Debug mode: `cmake -B build -DCMAKE_BUILD_TYPE=Debug`
-2. Use AddressSanitizer: `-DVAYU_USE_ASAN=ON`
+2. Use a sanitizer preset - `linux-asan` for lifetime bugs, `linux-tsan` for
+   races. See [Sanitizers](#sanitizers)
 3. Generate compile commands: `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (enabled by default)
 
 ### The version string stays out of the widely-included headers

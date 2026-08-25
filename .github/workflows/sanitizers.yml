@@ -1,0 +1,462 @@
+name: Sanitizers
+
+# ASan and TSan over the engine test suite, weekly on master (#904).
+#
+# **Why weekly and not per-pull-request.** TSan costs 5-15x in wall time and
+# roughly 5-10x in memory; ASan is cheaper but still doubles the suite. Paying
+# that on every pull request would move the engine job from ~11 min to the far
+# side of an hour for a class of bug that appears on the order of once a
+# release. Weekly on master is the cadence that matches the finding rate.
+#
+# **What it is pointed at.** The engine's own history: #129 was a silent
+# writer-vs-writer histogram race, and the busy-poll event loop, the SPSC queues
+# and the relaxed-atomic MetricsCollector are the same material. Those are races
+# no assertion can express, which is why the ordinary suite is green and this
+# workflow exists.
+#
+# **The matrix is five jobs, not six.** ThreadSanitizer has no Windows
+# implementation - MSVC ships none and clang-cl does not implement it - so
+# Windows runs ASan alone, through MSVC's `/fsanitize=address`
+# (engine/CMakeLists.txt). `VAYU_USE_TSAN` fails at configure on MSVC rather
+# than silently building unsanitized. LeakSanitizer rides along with ASan on
+# Linux only; macOS ASan ships without it.
+#
+# **A failure files an issue, with no AI and no tokens involved** - a
+# `github-script` step against `GITHUB_TOKEN`, keyed on sanitizer+platform so a
+# persistently red leg accumulates comments on one issue rather than filing a
+# fresh one every Monday. See docs/engine/building.md.
+#
+# **VAYU_WERROR is deliberately off here.** This workflow answers "is the engine
+# memory- and thread-correct", not "does it compile warning-free" - that gate is
+# pr-tests.yml's. One job, one job's meaning.
+
+on:
+  schedule:
+    # Monday 09:00 UTC. Cron here is always UTC. Deliberately not 06:00, which
+    # is when codeql.yml and cache-warm.yml already run - three cold
+    # three-platform builds starting in the same minute compete for the same
+    # runner pool.
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+  # The pull request that edits this machinery runs it. A new workflow cannot be
+  # dispatched before it exists on the default branch, so without this the first
+  # evidence that any of these five legs configures, builds and runs would
+  # arrive after merge, on a cron, as a red master. The path list is narrow on
+  # purpose: only the sanitizer machinery itself is in it, so ordinary engine
+  # pull requests keep paying nothing. `paths` here does not need the
+  # `ci-gate`-style caveat pr-tests.yml carries - this workflow is not a
+  # required check.
+  pull_request:
+    paths:
+      - '.github/workflows/sanitizers.yml'
+      - 'engine/sanitizers/**'
+      - 'engine/CMakeLists.txt'
+      - 'engine/CMakePresets.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sanitizers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sanitize:
+    name: ${{ matrix.sanitizer }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      # For the auto-filing step below, which is the only thing that needs it.
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            sanitizer: asan
+            preset: linux-asan
+          - os: ubuntu-latest
+            sanitizer: tsan
+            preset: linux-tsan
+          - os: macos-latest
+            sanitizer: asan
+            preset: macos-asan
+          - os: macos-latest
+            sanitizer: tsan
+            preset: macos-tsan
+          # No tsan leg: ThreadSanitizer has no Windows implementation. See the
+          # header, and the FATAL_ERROR in engine/CMakeLists.txt that makes a
+          # wrong invocation fail loudly.
+          - os: windows-latest
+            sanitizer: asan
+            preset: windows-asan
+    # A runaway guard, not a budget. Measured cold on the first run in which
+    # every leg reached its ctest summary, checkout to last test: ASan 20 min on
+    # Linux, 21 on macOS, 42 on Windows; TSan 20 on Linux and 71 on macOS.
+    # `macos-tsan` sets the ceiling, at TSan's documented 5-15x over a suite the
+    # other legs finish in a fifth of that. 150 keeps better than 2x headroom
+    # over it while still catching a genuine hang in one weekly run rather than
+    # three.
+    timeout-minutes: 150
+    env:
+      # Byte-identical to pr-tests.yml, release.yml and cache-warm.yml on
+      # purpose - the vcpkg *dependencies* are not sanitized (the flags land on
+      # the engine's own targets, through the vayu_sanitizers interface
+      # library), so their archives are the same artifacts those workflows
+      # build and this reads them out of the master scope rather than
+      # recompiling OpenSSL weekly.
+      VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+      # No sccache, on purpose. The engine's own objects compile with sanitizer
+      # flags, so they hash differently from every other workflow's - sharing
+      # the scope would fill it with entries nothing else can hit while never
+      # hitting one itself. A weekly cold compile is the cheaper trade.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      # The supported way to get a Visual Studio developer command prompt in
+      # Actions, and it is here instead of a hand-rolled PATH edit for a
+      # reason: MSVC's ASan runtime DLL lives beside the compiler, and
+      # Microsoft documents that directory as being on PATH "in debugging
+      # sessions and in Visual Studio developer command prompts". The supported
+      # way to have it on PATH is therefore to *be* in one. Two earlier
+      # revisions searched for the DLL by hand and picked the wrong copy; this
+      # is what the ecosystem uses.
+      - name: Set up the MSVC developer environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            build-essential \
+            pkg-config \
+            ca-certificates \
+            autoconf \
+            autoconf-archive \
+            automake \
+            libtool
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        # vcpkg builds libsodium from source through its autotools path and runs
+        # autoreconf first; brew's libtool provides the glibtoolize it accepts.
+        run: |
+          command -v ninja || brew install ninja
+          for pkg in autoconf autoconf-archive automake libtool; do
+            brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
+          done
+
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
+          vcpkgJsonGlob: 'engine/vcpkg.json'
+
+      # Each sanitizer preset carries its own binaryDir (build-asan/,
+      # build-tsan/), so a sanitizer run never invalidates the objects of an
+      # ordinary build sharing the checkout.
+      - name: Build engine under ${{ matrix.sanitizer }}
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          configurePreset: ${{ matrix.preset }}
+          buildPreset: ${{ matrix.preset }}
+          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      # Parallelism is set on the test presets themselves rather than here, so
+      # a local `ctest --preset linux-tsan` gets the same restraint: `-j2`
+      # everywhere except `windows-asan`, which keeps the platform's usual
+      # `-j4`. Sanitizer runs are memory-hungry - TSan shadow memory alone is
+      # several GB per process - and the InboxListener port race seen under
+      # load on #875 is a reminder that `-j8` under a sanitizer adds noise of
+      # its own on top of the findings this is here to read.
+      #
+      # The per-test CTest timeout also scales with the sanitizer, in
+      # engine/CMakeLists.txt. It is headroom, not a lever on wall time: with
+      # the binary actually starting, `windows-asan` runs all 2368 tests in
+      # ~1018s at `-j4` with zero timeouts. It earns its place by bounding a
+      # single stuck test, not by rescuing a systemic hang - when the hang is
+      # systemic a generous net just multiplies its cost. See
+      # docs/engine/building.md.
+      #
+      # `< /dev/null` matches pr-tests.yml and release.yml: the suite must see
+      # one kind of stdin everywhere (#589).
+      #
+      # `halt_on_error=1` with the default `abort_on_error` means the first
+      # finding aborts the test process, which ctest reports as a failure - a
+      # sanitizer finding fails the job rather than scrolling past.
+      - name: Run the engine suite under ${{ matrix.sanitizer }}
+        working-directory: engine
+        shell: bash
+        env:
+          SANITIZER: ${{ matrix.sanitizer }}
+          PRESET: ${{ matrix.preset }}
+        run: |
+          set -o pipefail
+          supp="$PWD/sanitizers"
+          if [[ "$SANITIZER" == "asan" ]]; then
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
+              # MSVC's ASan runtime accepts a much smaller ASAN_OPTIONS set than
+              # clang's and errors out on a flag it does not know, so it is not
+              # given the suppressions file. It has no LeakSanitizer either.
+              export ASAN_OPTIONS="halt_on_error=1"
+
+              # A /MT or /MTd binary still has a *runtime* dependency on
+              # clang_rt.asan_dynamic-x86_64.dll - static linking of the CRT
+              # does not statically link the ASan runtime, and has not since
+              # VS 2022 17.7. The `msvc-dev-cmd` step above is what puts that
+              # directory on PATH; nothing is hand-rolled here any more.
+              #
+              # `ASAN_WIN_CONTINUE_ON_INTERCEPTION_FAILURE` is Microsoft's
+              # documented escape from a *hang* at startup. The runtime
+              # hotpatches its interceptors into system functions, and when a
+              # prologue is too short to patch, "the program throws a
+              # `debugbreak` and halts" - with no debugger attached that is a
+              # process which never exits and never prints, which ctest can only
+              # report as a timeout. Newer Windows builds are known to trip this:
+              # system functions are no longer padded with enough `int 3` for
+              # the hotpatch, so ASan falls back to a trampoline whose decoder
+              # does not understand every instruction it now meets.
+              #
+              # This is the leading explanation for a leg that produced 2368
+              # identical `***Timeout` lines and no output. It is not proven -
+              # see the smoke check below, which is what will actually say.
+              export ASAN_WIN_CONTINUE_ON_INTERCEPTION_FAILURE=1
+            else
+              export ASAN_OPTIONS="halt_on_error=1:detect_stack_use_after_return=1:suppressions=$supp/asan.supp"
+              # LeakSanitizer reads its own variable, and only exists on Linux -
+              # macOS ASan ships without it. Harmless where it is absent.
+              export LSAN_OPTIONS="suppressions=$supp/asan.supp"
+            fi
+          else
+            export TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1:suppressions=$supp/tsan.supp"
+          fi
+          # Prove the test binary can start before handing ctest 2368 of them.
+          #
+          # A binary that cannot load its runtime does not error - Windows
+          # refuses to start the process and ctest sees only silence, so the
+          # failure costs a per-test timeout each, 2368 times, and reports
+          # nothing about itself. That is exactly how windows-asan burned two
+          # full job timeouts saying only `***Timeout`. `--gtest_list_tests`
+          # loads the binary and its dependencies without running a single
+          # test, so it separates "cannot start" from "tests fail" in seconds,
+          # and the `timeout` turns a hang into exit 124 rather than another
+          # silent wait.
+          #
+          # Cheap enough to run on every leg rather than only the one that has
+          # bitten: a loader problem is not a Windows-only category, and a
+          # check that only guards the platform you already debugged is worth
+          # very little.
+          # Located with a loop rather than `find`, because this step runs
+          # under GitHub's default `bash -e -o pipefail`: `find` over a path
+          # that does not exist exits non-zero, pipefail carries that through
+          # the pipe, and errexit kills the step at the assignment - silently,
+          # since the failing command is inside a substitution. Only one build
+          # tree exists on any given leg, so naming both always handed `find` a
+          # missing one.
+          #
+          # It passed local validation because a developer machine that has run
+          # both presets has both trees. That is the whole lesson: the check was
+          # exercised in the one environment where its bug could not appear.
+          test_bin=""
+          for candidate in build-asan/vayu_tests build-asan/vayu_tests.exe \
+                           build-tsan/vayu_tests build-tsan/vayu_tests.exe; do
+            if [[ -x "$candidate" ]]; then
+              test_bin="$candidate"
+              break
+            fi
+          done
+          if [[ -z "$test_bin" ]]; then
+            echo "::error::no vayu_tests binary under build-asan/ or build-tsan/"
+            exit 1
+          fi
+          # `timeout` is GNU coreutils and macOS does not ship it - Homebrew
+          # installs it as `gtimeout`. Calling it unconditionally is how this
+          # check took both previously green macOS legs down with exit 127 the
+          # first time it ran. Windows is its own trap: System32 has a
+          # `timeout.exe` that pauses rather than bounding a command, so the
+          # bare name is not safe to trust there either. Resolve it, prefer a
+          # coreutils one, and run unbounded rather than not at all if there is
+          # none - an unbounded smoke check still catches a binary that cannot
+          # start, it just cannot cap one that hangs.
+          timeout_bin=$(command -v gtimeout || true)
+          if [[ -z "$timeout_bin" && -x /usr/bin/timeout ]]; then
+            timeout_bin=/usr/bin/timeout
+          fi
+          if [[ -z "$timeout_bin" ]]; then
+            candidate=$(command -v timeout || true)
+            case "$candidate" in
+              /c/Windows/*|/C/Windows/*|*System32*) candidate="" ;;
+            esac
+            timeout_bin="$candidate"
+          fi
+          echo "Smoke-checking $test_bin can load (timeout: ${timeout_bin:-none})"
+          smoke_rc=0
+          if [[ -n "$timeout_bin" ]]; then
+            "$timeout_bin" 120 "./$test_bin" --gtest_list_tests > /dev/null 2> smoke.err || smoke_rc=$?
+          else
+            "./$test_bin" --gtest_list_tests > /dev/null 2> smoke.err || smoke_rc=$?
+          fi
+          if [[ "$smoke_rc" -ne 0 ]]; then
+            echo "::error::$test_bin could not enumerate its tests (exit $smoke_rc)." \
+                 "124 means it hung. On Windows: 3221225781 STATUS_DLL_NOT_FOUND," \
+                 "3221225595 STATUS_INVALID_IMAGE_FORMAT (wrong-architecture DLL)," \
+                 "3221225794 (0xc0000142) STATUS_DLL_INIT_FAILED - compare that" \
+                 "last one against actions/runner-images#8891, but note it is filed" \
+                 "against windows-2022 / MSVC 14.37 and this leg runs a much newer" \
+                 "image, so reproduce before calling it unfixable here."
+            echo "--- stderr ---"
+            head -50 smoke.err || true
+            exit 1
+          fi
+          echo "Test binary loads and enumerates cleanly."
+
+          ctest --preset "$PRESET" --output-on-failure < /dev/null 2>&1 | tee ../sanitizer.log
+
+      - name: Upload the sanitizer log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sanitizer-${{ matrix.sanitizer }}-${{ matrix.os }}
+          path: |
+            sanitizer.log
+            engine/build-*/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Auto-filing, plain GitHub API from the runner - no model, no tokens.
+      # Keyed on sanitizer+platform so a leg that stays red accumulates comments
+      # on one issue instead of filing a new one every Monday. Closing it is a
+      # human act after the fix; the next failure comments again, or files
+      # fresh if it was closed.
+      #
+      # On a pull request from a fork GITHUB_TOKEN is read-only regardless of
+      # the `permissions:` block, so this step would fail there. That is
+      # acceptable: the `pull_request` trigger above exists for the branch that
+      # edits this machinery, and the run's own log and artifact still carry
+      # everything the issue would have said.
+      - name: File or update the sanitizer-failure issue
+        if: failure()
+        uses: actions/github-script@v8
+        env:
+          SANITIZER: ${{ matrix.sanitizer }}
+          PLATFORM: ${{ matrix.os }}
+          PRESET: ${{ matrix.preset }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { SANITIZER, PLATFORM, PRESET } = process.env;
+            const { owner, repo } = context.repo;
+            const label = 'sanitizer-failure';
+            const title = `sanitizer: ${SANITIZER} failure on ${PLATFORM}`;
+            const runUrl =
+              `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            // The first sanitizer report in the log, not the tail: ctest prints
+            // its own summary after the report, so a plain tail is the least
+            // useful part of the output. Falls back to the tail when the job
+            // died before any report - a build failure, or a timeout.
+            const reportStart =
+              /==\d+==ERROR: (Address|Leak)Sanitizer|^WARNING: ThreadSanitizer:|^SUMMARY: (Address|Thread|Leak)Sanitizer/;
+            let excerpt = '';
+            let excerptKind = 'the end of the run log';
+            try {
+              const lines = fs.readFileSync('sanitizer.log', 'utf8').split('\n');
+              const at = lines.findIndex((l) => reportStart.test(l));
+              if (at >= 0) {
+                excerpt = lines.slice(at, at + 120).join('\n');
+                excerptKind = 'the first sanitizer report';
+              } else {
+                excerpt = lines.slice(-80).join('\n');
+              }
+            } catch {
+              excerpt = '(no run log - the job failed before or during the build)';
+              excerptKind = 'no log';
+            }
+            // Issue bodies and comments cap at 65536 characters; leave room for
+            // the prose around it.
+            const MAX = 12000;
+            if (excerpt.length > MAX) {
+              excerpt = `${excerpt.slice(0, MAX)}\n... truncated, full log in the run artifact`;
+            }
+
+            const body = [
+              `**\`${PRESET}\` went red.**`,
+              '',
+              `- run: ${runUrl}`,
+              `- ref: \`${context.ref}\` (event \`${context.eventName}\`, commit \`${context.sha}\`)`,
+              `- job: \`${SANITIZER} on ${PLATFORM}\``,
+              '',
+              excerptKind === 'no log'
+                ? 'The job produced no test log at all - read the run itself.'
+                : `Below is ${excerptKind}; the full log is attached to the run` +
+                  ` as the \`sanitizer-${SANITIZER}-${PLATFORM}\` artifact.`,
+              '',
+              '```',
+              excerpt,
+              '```',
+              '',
+              'Suppressing engine code to get this green is not a fix - see the',
+              'headers in `engine/sanitizers/`.',
+            ].join('\n');
+
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: label });
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: label,
+                color: 'b60205',
+                description: 'A scheduled ASan/TSan run went red',
+              });
+            }
+
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              labels: label,
+              per_page: 100,
+            });
+            const existing = open.find((i) => i.title === title);
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+              core.notice(`Commented on #${existing.number}: ${title}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                labels: [label, 'component:engine', 'type:bug'],
+              });
+              core.notice(`Filed #${created.data.number}: ${title}`);
+            }
