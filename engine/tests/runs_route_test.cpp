@@ -149,13 +149,15 @@ TEST_F (RunsRouteTest, PaginationHasMoreAndOffset) {
     for (int i = 0; i < 5; ++i)
         seed ({ .id = "run_" + std::to_string (i), .start_time = i });
 
-    auto [_, page1] = vayu::http::routes::get_runs_response (*db_, {}, 2, 0);
+    auto [page1_status, page1] = vayu::http::routes::get_runs_response (*db_, {}, 2, 0);
+    EXPECT_EQ (page1_status, 200);
     EXPECT_EQ (page1["data"].size (), 2u);
     EXPECT_EQ (page1["pagination"]["total"], 5);
     EXPECT_EQ (page1["pagination"]["hasMore"], true);
     EXPECT_EQ (page1["pagination"]["returned"], 2);
 
-    auto [__, page3] = vayu::http::routes::get_runs_response (*db_, {}, 2, 4);
+    auto [page3_status, page3] = vayu::http::routes::get_runs_response (*db_, {}, 2, 4);
+    EXPECT_EQ (page3_status, 200);
     EXPECT_EQ (page3["data"].size (), 1u);
     EXPECT_EQ (page3["pagination"]["hasMore"], false);
 }
