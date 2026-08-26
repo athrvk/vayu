@@ -31,6 +31,78 @@ bool starts_with_ci (const std::string& text, std::string_view prefix) {
     });
 }
 
+/** The scrape cadence, when the block names one of its own. */
+std::optional<std::string> read_monitor_interval (const nlohmann::json& monitor, MonitorConfig& out) {
+    if (monitor.contains ("intervalMs") && !monitor["intervalMs"].is_null ()) {
+        const auto& interval = monitor["intervalMs"];
+        if (!interval.is_number ()) {
+            return "'monitor.intervalMs' must be a number of milliseconds "
+                   "(got " +
+            std::string (interval.type_name ()) + ")";
+        }
+        const double value = interval.get<double> ();
+        if (!(value >= monitor_limits::MIN_INTERVAL_MS) ||
+        !(value <= monitor_limits::MAX_INTERVAL_MS)) {
+            return "'monitor.intervalMs' must be between " +
+            std::to_string (monitor_limits::MIN_INTERVAL_MS) + " and " +
+            std::to_string (monitor_limits::MAX_INTERVAL_MS) +
+            " - the scrape is one blocking request per interval, and a faster "
+            "one measures the scraper rather than the target";
+        }
+        out.interval_ms = static_cast<int> (value);
+    }
+
+    return std::nullopt;
+}
+
+/** Which exposition format the endpoint answers in. */
+std::optional<std::string> read_monitor_format (const nlohmann::json& monitor, MonitorConfig& out) {
+    if (monitor.contains ("format") && !monitor["format"].is_null ()) {
+        if (!monitor["format"].is_string ()) {
+            return "'monitor.format' must be \"prometheus\" or \"json\"";
+        }
+        const std::string format = monitor["format"].get<std::string> ();
+        if (format == "prometheus") {
+            out.format = MonitorFormat::Prometheus;
+        } else if (format == "json") {
+            out.format = MonitorFormat::Json;
+        } else {
+            return "'monitor.format' must be \"prometheus\" or \"json\" (got "
+                   "\"" +
+            format + "\")";
+        }
+    }
+
+    return std::nullopt;
+}
+
+/** The metrics to chart, and the bounds on how many. */
+std::optional<std::string> read_monitor_series (
+const nlohmann::json& monitor, const MonitorLimits& limits, MonitorConfig& out) {
+    if (!monitor.contains ("series") || !monitor["series"].is_array ()) {
+        return "'monitor.series' is required and must be an array of metric "
+               "names";
+    }
+    const auto& series = monitor["series"];
+    if (series.empty ()) {
+        return "'monitor.series' must name at least one metric - a scrape with "
+               "nothing to read would record empty samples for the whole run";
+    }
+    if (series.size () > limits.max_series) {
+        return "'monitor.series' may name at most " + std::to_string (limits.max_series) +
+        " metrics (got " + std::to_string (series.size ()) +
+        ") - raise 'monitorMaxSeries' in settings to chart more";
+    }
+    for (const auto& entry : series) {
+        if (!entry.is_string () || entry.get<std::string> ().empty ()) {
+            return "'monitor.series' entries must be non-empty metric names";
+        }
+        out.series.push_back (entry.get<std::string> ());
+    }
+
+    return std::nullopt;
+}
+
 /**
  * The one description of a `monitor` block: fills @p out and returns the reason
  * the block is unusable, or nullopt. Both public entry points go through here,
@@ -62,62 +134,13 @@ MonitorConfig& out) {
         return "'monitor.url' must be an http:// or https:// URL (got \"" + out.url + "\")";
     }
 
-    if (monitor.contains ("intervalMs") && !monitor["intervalMs"].is_null ()) {
-        const auto& interval = monitor["intervalMs"];
-        if (!interval.is_number ()) {
-            return "'monitor.intervalMs' must be a number of milliseconds "
-                   "(got " +
-            std::string (interval.type_name ()) + ")";
-        }
-        const double value = interval.get<double> ();
-        if (!(value >= monitor_limits::MIN_INTERVAL_MS) ||
-        !(value <= monitor_limits::MAX_INTERVAL_MS)) {
-            return "'monitor.intervalMs' must be between " +
-            std::to_string (monitor_limits::MIN_INTERVAL_MS) + " and " +
-            std::to_string (monitor_limits::MAX_INTERVAL_MS) +
-            " - the scrape is one blocking request per interval, and a faster "
-            "one measures the scraper rather than the target";
-        }
-        out.interval_ms = static_cast<int> (value);
+    if (auto rejection = read_monitor_interval (monitor, out)) {
+        return rejection;
     }
-
-    if (monitor.contains ("format") && !monitor["format"].is_null ()) {
-        if (!monitor["format"].is_string ()) {
-            return "'monitor.format' must be \"prometheus\" or \"json\"";
-        }
-        const std::string format = monitor["format"].get<std::string> ();
-        if (format == "prometheus") {
-            out.format = MonitorFormat::Prometheus;
-        } else if (format == "json") {
-            out.format = MonitorFormat::Json;
-        } else {
-            return "'monitor.format' must be \"prometheus\" or \"json\" (got "
-                   "\"" +
-            format + "\")";
-        }
+    if (auto rejection = read_monitor_format (monitor, out)) {
+        return rejection;
     }
-
-    if (!monitor.contains ("series") || !monitor["series"].is_array ()) {
-        return "'monitor.series' is required and must be an array of metric "
-               "names";
-    }
-    const auto& series = monitor["series"];
-    if (series.empty ()) {
-        return "'monitor.series' must name at least one metric - a scrape with "
-               "nothing to read would record empty samples for the whole run";
-    }
-    if (series.size () > limits.max_series) {
-        return "'monitor.series' may name at most " + std::to_string (limits.max_series) +
-        " metrics (got " + std::to_string (series.size ()) +
-        ") - raise 'monitorMaxSeries' in settings to chart more";
-    }
-    for (const auto& entry : series) {
-        if (!entry.is_string () || entry.get<std::string> ().empty ()) {
-            return "'monitor.series' entries must be non-empty metric names";
-        }
-        out.series.push_back (entry.get<std::string> ());
-    }
-
+    return read_monitor_series (monitor, limits, out);
     return std::nullopt;
 }
 
@@ -195,6 +218,103 @@ monitor_config_from (const nlohmann::json& config, const MonitorLimits& limits) 
     return parsed;
 }
 
+namespace {
+
+/** One exposition line, trimmed of the whitespace and the CRLF it may carry. */
+std::string_view trim_exposition_line (std::string_view line) {
+    while (!line.empty () && std::isspace (static_cast<unsigned char> (line.front ()))) {
+        line.remove_prefix (1);
+    }
+    while (!line.empty () && std::isspace (static_cast<unsigned char> (line.back ()))) {
+        line.remove_suffix (1);
+    }
+    return line;
+}
+
+/**
+ * Past the label set that starts at @p cursor, honouring quoted label values -
+ * a label may legally contain '}' inside its quotes.
+ *
+ * @return the index after the closing brace, or nothing for an unterminated set.
+ */
+std::optional<size_t> skip_exposition_labels (std::string_view line, size_t cursor) {
+    bool in_quotes = false;
+    bool escaped   = false;
+    ++cursor;
+    for (; cursor < line.size (); ++cursor) {
+        const char ch = line[cursor];
+        if (escaped) {
+            escaped = false;
+        } else if (ch == '\\') {
+            escaped = true;
+        } else if (ch == '"') {
+            in_quotes = !in_quotes;
+        } else if (ch == '}' && !in_quotes) {
+            return cursor + 1; // step over '}'
+        }
+    }
+    return std::nullopt;
+}
+
+/**
+ * The value token of one sample line, or nothing when the line is a comment, a
+ * metric nobody asked for, or not a sample this can read.
+ *
+ * A trailing exposition timestamp (the token after the value) is deliberately
+ * ignored: the sample's time is when this engine scraped it, which is the axis
+ * the overlay joins on.
+ */
+std::optional<std::pair<std::string, double>> read_exposition_sample (
+std::string_view line, const std::set<std::string>& wanted) {
+    line = trim_exposition_line (line);
+    if (line.empty () || line.front () == '#') {
+        return std::nullopt;
+    }
+
+    const size_t name_end = line.find_first_of ("{ \t");
+    if (name_end == std::string_view::npos) {
+        return std::nullopt; // a name with no value is not a sample
+    }
+    std::string name (line.substr (0, name_end));
+    if (wanted.find (name) == wanted.end ()) {
+        return std::nullopt;
+    }
+
+    size_t cursor = name_end;
+    if (line[cursor] == '{') {
+        const auto after_labels = skip_exposition_labels (line, cursor);
+        if (!after_labels) {
+            return std::nullopt;
+        }
+        cursor = *after_labels;
+    }
+
+    while (cursor < line.size () && std::isspace (static_cast<unsigned char> (line[cursor]))) {
+        ++cursor;
+    }
+    if (cursor >= line.size ()) {
+        return std::nullopt;
+    }
+    size_t value_end = cursor;
+    while (value_end < line.size () &&
+    !std::isspace (static_cast<unsigned char> (line[value_end]))) {
+        ++value_end;
+    }
+    const std::string token (line.substr (cursor, value_end - cursor));
+    try {
+        size_t consumed  = 0;
+        const double val = std::stod (token, &consumed);
+        if (consumed != token.size () || !std::isfinite (val)) {
+            return std::nullopt; // NaN, +Inf, or trailing garbage
+        }
+        return std::make_pair (std::move (name), val);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+} // namespace
+
 std::map<std::string, double> parse_prometheus_exposition (const std::string& body,
 const std::vector<std::string>& series) {
     const std::set<std::string> wanted (series.begin (), series.end ());
@@ -206,85 +326,15 @@ const std::vector<std::string>& series) {
         if (line_end == std::string::npos) {
             line_end = body.size ();
         }
-        std::string_view line =
+        const std::string_view line =
         std::string_view (body).substr (line_start, line_end - line_start);
         line_start = line_end + 1;
 
-        // Trim both ends: exposition files are frequently CRLF, and a trailing
-        // '\r' would otherwise ride into the value token.
-        while (!line.empty () &&
-        std::isspace (static_cast<unsigned char> (line.front ()))) {
-            line.remove_prefix (1);
-        }
-        while (!line.empty () && std::isspace (static_cast<unsigned char> (line.back ()))) {
-            line.remove_suffix (1);
-        }
-        if (line.empty () || line.front () == '#') {
-            continue;
-        }
-
-        const size_t name_end = line.find_first_of ("{ \t");
-        if (name_end == std::string_view::npos) {
-            continue; // a name with no value is not a sample
-        }
-        const std::string name (line.substr (0, name_end));
-        if (wanted.find (name) == wanted.end ()) {
-            continue;
-        }
-
-        size_t cursor = name_end;
-        if (line[cursor] == '{') {
-            // Scan to the closing brace, honouring quoted label values - a
-            // label may legally contain '}' inside its quotes.
-            bool in_quotes = false;
-            bool escaped   = false;
-            ++cursor;
-            for (; cursor < line.size (); ++cursor) {
-                const char ch = line[cursor];
-                if (escaped) {
-                    escaped = false;
-                } else if (ch == '\\') {
-                    escaped = true;
-                } else if (ch == '"') {
-                    in_quotes = !in_quotes;
-                } else if (ch == '}' && !in_quotes) {
-                    break;
-                }
-            }
-            if (cursor >= line.size ()) {
-                continue; // unterminated label set - not a sample this can read
-            }
-            ++cursor; // step over '}'
-        }
-
-        while (cursor < line.size () &&
-        std::isspace (static_cast<unsigned char> (line[cursor]))) {
-            ++cursor;
-        }
-        if (cursor >= line.size ()) {
-            continue;
-        }
-        size_t value_end = cursor;
-        while (value_end < line.size () &&
-        !std::isspace (static_cast<unsigned char> (line[value_end]))) {
-            ++value_end;
-        }
-        // A trailing exposition timestamp (the token after the value) is
-        // deliberately ignored: the sample's time is when this engine scraped
-        // it, which is the axis the overlay joins on.
-        const std::string token (line.substr (cursor, value_end - cursor));
-        try {
-            size_t consumed  = 0;
-            const double val = std::stod (token, &consumed);
-            if (consumed != token.size () || !std::isfinite (val)) {
-                continue; // NaN, +Inf, or trailing garbage
-            }
-            auto [it, inserted] = values.emplace (name, val);
+        if (auto sample = read_exposition_sample (line, wanted)) {
+            auto [it, inserted] = values.emplace (sample->first, sample->second);
             if (!inserted) {
-                it->second += val; // one labelled family is one series
+                it->second += sample->second; // one labelled family is one series
             }
-        } catch (const std::exception&) {
-            continue;
         }
     }
 
