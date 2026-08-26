@@ -553,10 +553,46 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
 // SseStreamManager
 // ---------------------------------------------------------------------------
 
+namespace {
+
+/**
+ * @brief Report a failure from a frame that must not let one escape.
+ *
+ * The `noexcept` is the point, not decoration. Both callers are frames where an
+ * escaping exception ends the process rather than being handled - a destructor,
+ * and a `std::thread` entry function - so their handlers cannot themselves be
+ * allowed to throw, and building a log message allocates. Routing the report
+ * through a function that cannot throw is what makes those handlers total.
+ */
+void log_unrecoverable (std::string_view what, std::string_view detail) noexcept {
+    try {
+        vayu::utils::log_error (std::string (what) + ": " + std::string (detail));
+    } catch (...) {
+        // @deliberate the logger failed while reporting a failure in a frame
+        // that terminates if anything escapes it. There is nowhere left to
+        // report to, and dropping the message is this handler's whole job.
+    }
+}
+
+} // namespace
+
 SseStreamManager::SseStreamManager () = default;
 
 SseStreamManager::~SseStreamManager () {
-    shutdown ();
+    // `shutdown` takes the manager's lock and joins every worker, and both of
+    // those throw `std::system_error` when the OS refuses. A destructor that
+    // lets one out calls `std::terminate`, so this frame turns a teardown
+    // failure into a log line - which a process already on its way down can
+    // still use, unlike a crash. Only the Windows leg's clang-tidy reports it
+    // (`bugprone-exception-escape`, #1023): MSVC's STL marks these surfaces
+    // differently from libstdc++, and the defect is real on both.
+    try {
+        shutdown ();
+    } catch (const std::exception& e) {
+        log_unrecoverable ("SSE stream manager shutdown failed", e.what ());
+    } catch (...) {
+        log_unrecoverable ("SSE stream manager shutdown failed", "unknown exception");
+    }
 }
 
 void SseStreamManager::shutdown () {
@@ -597,28 +633,38 @@ std::shared_ptr<SseStreamContext> SseStreamManager::start (SseStreamRequest requ
     auto& stream   = streams_[run_id];
     stream.context = context;
     stream.worker = std::thread ([context, spec = std::move (request)] () mutable {
-        vayu::Response response;
+        // The outermost frame this thread has: `std::thread` calls
+        // `std::terminate` if its entry function throws. The inner handlers
+        // below recover the *stream*, and each of them allocates while doing
+        // so, so a second failure raised inside one of them would escape by
+        // exactly the route they exist to close.
         try {
-            response = consume_sse_stream (spec, *context);
-        } catch (const std::exception& e) {
-            // A worker thread has no handler above it, and a stream that threw
-            // must still reach a terminal state or its run is stranded running
-            // forever.
-            vayu::utils::log_error (
-            "SSE stream failed: " + context->run_id + ": " + e.what ());
-            response.status_code   = 0;
-            response.status_text   = vayu::http::status_text (0);
-            response.error_code    = vayu::ErrorCode::InternalError;
-            response.error_message = e.what ();
-            context->close (SseEndReason::Error);
-        }
-        if (spec.on_complete) {
+            vayu::Response response;
             try {
-                spec.on_complete (spec.request, response, *context);
+                response = consume_sse_stream (spec, *context);
             } catch (const std::exception& e) {
-                vayu::utils::log_error ("Failed to record SSE stream result: " +
-                context->run_id + ": " + e.what ());
+                // A worker thread has no handler above it, and a stream that
+                // threw must still reach a terminal state or its run is
+                // stranded running forever.
+                vayu::utils::log_error (
+                "SSE stream failed: " + context->run_id + ": " + e.what ());
+                response.status_code   = 0;
+                response.status_text   = vayu::http::status_text (0);
+                response.error_code    = vayu::ErrorCode::InternalError;
+                response.error_message = e.what ();
+                context->close (SseEndReason::Error);
             }
+            if (spec.on_complete) {
+                try {
+                    spec.on_complete (spec.request, response, *context);
+                } catch (const std::exception& e) {
+                    vayu::utils::log_error (
+                    "Failed to record SSE stream result: " + context->run_id +
+                    ": " + e.what ());
+                }
+            }
+        } catch (...) {
+            log_unrecoverable ("SSE stream worker failed unrecoverably", context->run_id);
         }
     });
     return context;

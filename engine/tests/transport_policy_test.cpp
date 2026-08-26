@@ -151,9 +151,14 @@ class ScopedEnv {
         if (_dupenv_s (&value, &length, name) != 0 || value == nullptr) {
             return std::nullopt;
         }
-        std::string copy (value);
-        std::free (value);
-        return copy;
+        // Owned rather than freed by hand, for two reasons that point the same
+        // way. The `std::string` built from it allocates, so a throw there
+        // leaked the buffer in the spelling this replaces; and a bare
+        // `std::free` here is `cppcoreguidelines-owning-memory`, reported only
+        // by the Windows leg because this branch is the only code in it and no
+        // Linux lint ever compiles it (#1023).
+        const std::unique_ptr<char, decltype (&std::free)> owned (value, &std::free);
+        return std::string (owned.get ());
 #else
         // NOLINTNEXTLINE(concurrency-mt-unsafe)
         if (const char* value = std::getenv (name)) {
