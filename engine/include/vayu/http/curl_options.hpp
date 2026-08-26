@@ -55,7 +55,6 @@
 
 #include <curl/curl.h>
 
-#include <cstddef>
 #include <type_traits>
 
 namespace vayu::http {
@@ -70,11 +69,12 @@ constexpr long option_category (long option) {
 }
 
 /// True for anything libcurl can take through a `void*`-shaped slot: an object
-/// pointer, a function pointer, a `curl_slist*`, a literal `nullptr`.
+/// pointer, a `curl_slist*`, a callback, a literal `nullptr`. A callback needs
+/// no case of its own - the wrappers take the value by value, so a function
+/// name has already decayed to a function pointer by the time this sees it.
 template <typename Value>
-constexpr bool is_pointer_like = std::is_pointer_v<Value> ||
-std::is_null_pointer_v<Value> || std::is_member_pointer_v<Value> ||
-std::is_function_v<std::remove_reference_t<Value>>;
+constexpr bool is_pointer_like =
+std::is_pointer_v<Value> || std::is_null_pointer_v<Value>;
 
 /// The category an info constant asks to be written back through.
 constexpr long info_category (long info) {
