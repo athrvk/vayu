@@ -745,6 +745,73 @@ std::optional<std::vector<MockRoute>> MockServerManager::routes (const std::stri
 
 namespace vayu::http::routes {
 
+namespace {
+
+void handle_start_mock (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    nlohmann::json body;
+    try {
+        body = req.body.empty () ? nlohmann::json::object () :
+                                   nlohmann::json::parse (req.body);
+    } catch (const std::exception& e) {
+        send_error (res, 400, std::string ("Invalid JSON body: ") + e.what ());
+        return;
+    }
+    const auto start = parse_mock_start (body);
+    if (!start) {
+        const auto& refusal = start.error ();
+        vayu::utils::log_warning ("POST /mock/start - " + refusal.message);
+        send_error (res, refusal.http_status, refusal.message, refusal.code);
+        return;
+    }
+    try {
+        auto result = ctx.mock_server_manager.start (ctx.db, *start);
+        if (!result.ok) {
+            vayu::utils::log_warning ("POST /mock/start - " + result.error_message);
+            send_error (res, result.http_status, result.error_message,
+            result.error_code);
+            return;
+        }
+        send_json (res, mock_server_info_json (result.info));
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "POST /mock/start - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_stop_mock (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string mock_id = req.matches[1];
+    if (!ctx.mock_server_manager.stop (mock_id)) {
+        send_error (res, 404, "Mock server not found");
+        return;
+    }
+    send_json (res, nlohmann::json{ { "mockId", mock_id }, { "stopped", true } });
+}
+
+void handle_list_mocks (RouteContext& ctx, const httplib::Request&, httplib::Response& res) {
+    nlohmann::json data = nlohmann::json::array ();
+    for (const auto& info : ctx.mock_server_manager.list ()) {
+        data.push_back (mock_server_info_json (info));
+    }
+    send_json (res, nlohmann::json{ { "data", std::move (data) } });
+}
+
+void handle_mock_routes (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string mock_id = req.matches[1];
+    const auto routes         = ctx.mock_server_manager.routes (mock_id);
+    if (!routes) {
+        send_error (res, 404, "Mock server not found");
+        return;
+    }
+    nlohmann::json data = nlohmann::json::array ();
+    for (const auto& route : *routes) {
+        data.push_back (mock_route_json (route));
+    }
+    send_json (res, nlohmann::json{ { "data", std::move (data) } });
+}
+
+} // namespace
+
 void register_mock_server_routes (RouteContext& ctx) {
     /**
      * POST /mock/start
@@ -756,35 +823,7 @@ void register_mock_server_routes (RouteContext& ctx) {
      */
     ctx.server.Post (
     "/mock/start", [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = req.body.empty () ? nlohmann::json::object () :
-                                       nlohmann::json::parse (req.body);
-        } catch (const std::exception& e) {
-            send_error (res, 400, std::string ("Invalid JSON body: ") + e.what ());
-            return;
-        }
-        const auto start = parse_mock_start (body);
-        if (!start) {
-            const auto& refusal = start.error ();
-            vayu::utils::log_warning ("POST /mock/start - " + refusal.message);
-            send_error (res, refusal.http_status, refusal.message, refusal.code);
-            return;
-        }
-        try {
-            auto result = ctx.mock_server_manager.start (ctx.db, *start);
-            if (!result.ok) {
-                vayu::utils::log_warning ("POST /mock/start - " + result.error_message);
-                send_error (res, result.http_status, result.error_message,
-                result.error_code);
-                return;
-            }
-            send_json (res, mock_server_info_json (result.info));
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "POST /mock/start - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_start_mock (ctx, req, res);
     });
 
     /**
@@ -795,21 +834,12 @@ void register_mock_server_routes (RouteContext& ctx) {
      */
     ctx.server.Post (R"(/mock/([^/]+)/stop)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const std::string mock_id = req.matches[1];
-        if (!ctx.mock_server_manager.stop (mock_id)) {
-            send_error (res, 404, "Mock server not found");
-            return;
-        }
-        send_json (res, nlohmann::json{ { "mockId", mock_id }, { "stopped", true } });
+        handle_stop_mock (ctx, req, res);
     });
 
     /** GET /mock - every running mock server. */
     ctx.server.Get ("/mock", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        nlohmann::json data = nlohmann::json::array ();
-        for (const auto& info : ctx.mock_server_manager.list ()) {
-            data.push_back (mock_server_info_json (info));
-        }
-        send_json (res, nlohmann::json{ { "data", std::move (data) } });
+        handle_list_mocks (ctx, {}, res);
     });
 
     /**
@@ -820,17 +850,7 @@ void register_mock_server_routes (RouteContext& ctx) {
      */
     ctx.server.Get (R"(/mock/([^/]+)/routes)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const std::string mock_id = req.matches[1];
-        const auto routes         = ctx.mock_server_manager.routes (mock_id);
-        if (!routes) {
-            send_error (res, 404, "Mock server not found");
-            return;
-        }
-        nlohmann::json data = nlohmann::json::array ();
-        for (const auto& route : *routes) {
-            data.push_back (mock_route_json (route));
-        }
-        send_json (res, nlohmann::json{ { "data", std::move (data) } });
+        handle_mock_routes (ctx, req, res);
     });
 }
 

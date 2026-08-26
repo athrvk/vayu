@@ -766,6 +766,259 @@ parse_capture_pagination (const httplib::Request& req, int64_t retained) {
 
 } // namespace
 
+namespace {
+
+void handle_start_inbox (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    nlohmann::json body;
+    if (!read_json_body (req, res, body)) {
+        return;
+    }
+    const auto start = parse_inbox_start (body);
+    if (!start) {
+        vayu::utils::log_warning ("POST /inbox/start - " + start.error ().message);
+        send_parse_error (res, start.error ());
+        return;
+    }
+    try {
+        auto result = ctx.inbox_manager.start (ctx.db, *start);
+        if (!result.ok) {
+            vayu::utils::log_warning ("POST /inbox/start - " + result.error_message);
+            send_error (res, result.http_status, result.error_message,
+            result.error_code);
+            return;
+        }
+        send_json (res, inbox_json (ctx.db, result.info));
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "POST /inbox/start - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_stop_inbox (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string inbox_id = req.matches[1];
+    if (!ctx.inbox_manager.stop (inbox_id)) {
+        send_error (res, 404, "Inbox not found");
+        return;
+    }
+    auto info = ctx.inbox_manager.get (inbox_id);
+    if (!info) {
+        send_error (res, 404, "Inbox not found");
+        return;
+    }
+    send_json (res, inbox_json (ctx.db, *info));
+}
+
+void handle_delete_inbox (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string inbox_id = req.matches[1];
+    try {
+        const auto deleted = ctx.inbox_manager.remove (ctx.db, inbox_id);
+        if (!deleted) {
+            send_error (res, 404, "Inbox not found");
+            return;
+        }
+        send_json (res,
+        nlohmann::json{ { "inboxId", inbox_id }, { "capturesDeleted", *deleted } });
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "DELETE /inbox/:id - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_list_inboxes (RouteContext& ctx, const httplib::Request&, httplib::Response& res) {
+    nlohmann::json data = nlohmann::json::array ();
+    for (const auto& info : ctx.inbox_manager.list ()) {
+        data.push_back (inbox_json (ctx.db, info));
+    }
+    send_json (res, nlohmann::json{ { "data", std::move (data) } });
+}
+
+void handle_update_inbox (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string inbox_id = req.matches[1];
+    auto current               = ctx.inbox_manager.get (inbox_id);
+    if (!current) {
+        send_error (res, 404, "Inbox not found");
+        return;
+    }
+    nlohmann::json body;
+    if (!read_json_body (req, res, body)) {
+        return;
+    }
+    if (body.is_null ()) {
+        body = nlohmann::json::object ();
+    }
+    const auto updated = parse_inbox_response_update (body, current->response);
+    if (!updated) {
+        vayu::utils::log_warning ("PUT /inbox/:id - " + updated.error ().message);
+        send_parse_error (res, updated.error ());
+        return;
+    }
+    auto info = ctx.inbox_manager.update_response (inbox_id, *updated);
+    if (!info) {
+        send_error (res, 404, "Inbox not found");
+        return;
+    }
+    send_json (res, inbox_json (ctx.db, *info));
+}
+
+void handle_list_inbox_requests (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string inbox_id = req.matches[1];
+    // The cap follows the inbox's own retention rather than the constant:
+    // with `inboxMaxCaptures` raised, a page of 50 would otherwise be the
+    // most the engine would ever hand back.
+    const auto limits    = ctx.inbox_manager.limits (inbox_id);
+    auto [limit, offset] = parse_capture_pagination (
+    req, limits ? limits->max_captures : constants::inbox::MAX_CAPTURES);
+    try {
+        auto [status, body] = inbox_captures_response (
+        ctx.db, ctx.inbox_manager, inbox_id, limit, offset);
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "GET /inbox/:id/requests - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_clear_inbox_requests (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string inbox_id = req.matches[1];
+    if (!ctx.inbox_manager.get (inbox_id)) {
+        send_error (res, 404, "Inbox not found");
+        return;
+    }
+    try {
+        const int64_t cleared = ctx.db.clear_inbox_requests (inbox_id);
+        send_json (res,
+        nlohmann::json{ { "inboxId", inbox_id }, { "cleared", cleared } });
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "DELETE /inbox/:id/requests - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+/** What one poll of an inbox stream leaves it in. */
+enum class InboxStep {
+    Wrote, ///< Captures went out; poll again without waiting.
+    Idle, ///< Nothing new - waited for the next poll.
+    Ended, ///< The inbox has stopped, or a read failed: end the stream.
+    Closed, ///< The client is gone - a write failed.
+    ClaimLost, ///< A reconnect took the slot over; this stream is no longer it.
+};
+
+/**
+ * One poll: every capture since @p last_id, and - when there are none - a
+ * keep-alive on a still-running inbox.
+ *
+ * A write that lands is the only evidence this socket is alive, and therefore
+ * what holds the claim. Losing it means a reconnect already took the slot over,
+ * so the stream ends without releasing what is no longer its own.
+ */
+InboxStep stream_inbox_step (RouteContext& ctx,
+const std::string& inbox_id,
+const InboxLimits& limits,
+vayu::http::LiveClaim claim,
+int64_t& last_id,
+httplib::DataSink& sink) {
+    std::vector<vayu::db::InboxRequest> fresh;
+    try {
+        fresh = ctx.db.get_inbox_requests_since (inbox_id, last_id);
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning ("GET /inbox/:id/live - " + std::string (e.what ()));
+        return InboxStep::Ended;
+    }
+    for (const auto& capture : fresh) {
+        const std::string payload = "id: " + std::to_string (capture.id) +
+        "\ndata: " + inbox_capture_json (capture).dump () + "\n\n";
+        if (!sink.write (payload.data (), payload.size ())) {
+            return InboxStep::Closed;
+        }
+        last_id = capture.id;
+    }
+    if (!fresh.empty ()) {
+        if (!ctx.inbox_manager.note_live_write (inbox_id, claim)) {
+            return InboxStep::ClaimLost;
+        }
+        return InboxStep::Wrote;
+    }
+
+    // A stopped inbox captures nothing more, but the record and its history
+    // stay - so the stream ends rather than polling a listener that is gone.
+    auto info = ctx.inbox_manager.get (inbox_id);
+    if (!info || !info->running) {
+        return InboxStep::Ended;
+    }
+    const std::string keep_alive = ": keep-alive\n\n";
+    if (!sink.write (keep_alive.data (), keep_alive.size ())) {
+        return InboxStep::Closed;
+    }
+    if (!ctx.inbox_manager.note_live_write (inbox_id, claim)) {
+        return InboxStep::ClaimLost;
+    }
+    std::this_thread::sleep_for (std::chrono::milliseconds (limits.live_poll_interval_ms));
+    return InboxStep::Idle;
+}
+
+/**
+ * The inbox stream itself. Always answers `false` - the provider is done when
+ * this returns - and releases the claim on every ending except a lost one,
+ * where the slot already belongs to the stream that took it over.
+ */
+bool stream_inbox_live (RouteContext& ctx,
+const std::string& inbox_id,
+const InboxLimits& limits,
+vayu::http::LiveClaim claim,
+int64_t last_id,
+httplib::DataSink& sink) {
+    while (sink.is_writable ()) {
+        const InboxStep step =
+        stream_inbox_step (ctx, inbox_id, limits, claim, last_id, sink);
+        if (step == InboxStep::ClaimLost) {
+            return false;
+        }
+        if (step == InboxStep::Ended || step == InboxStep::Closed) {
+            break;
+        }
+    }
+    ctx.inbox_manager.release_live (inbox_id, claim);
+    return false;
+}
+
+void handle_inbox_live (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string inbox_id = req.matches[1];
+    if (!ctx.inbox_manager.get (inbox_id)) {
+        send_error (res, 404, "Inbox not found");
+        return;
+    }
+    const auto limits = ctx.inbox_manager.limits (inbox_id).value_or (InboxLimits{});
+
+    const auto resume_point = parse_live_resume_point (
+    req.get_header_value ("Last-Event-ID"), req.get_param_value ("lastEventId"));
+    if (!resume_point) {
+        const auto& refusal = resume_point.error ();
+        send_error (res, refusal.http_status, refusal.message, refusal.code);
+        return;
+    }
+
+    const auto claim = ctx.inbox_manager.try_claim_live (inbox_id);
+    if (!claim) {
+        send_error (res, 409,
+        "This inbox is already being watched; close the other stream first",
+        "inbox_live_in_use");
+        return;
+    }
+
+    res.set_content_provider ("text/event-stream",
+    [&ctx, inbox_id, last_id = *resume_point, limits, claim = *claim] (
+    size_t, httplib::DataSink& sink) {
+        return stream_inbox_live (ctx, inbox_id, limits, claim, last_id, sink);
+    });
+}
+
+} // namespace
+
 void register_inbox_routes (RouteContext& ctx) {
     /**
      * POST /inbox/start
@@ -776,30 +1029,7 @@ void register_inbox_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/inbox/start",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        if (!read_json_body (req, res, body)) {
-            return;
-        }
-        const auto start = parse_inbox_start (body);
-        if (!start) {
-            vayu::utils::log_warning ("POST /inbox/start - " + start.error ().message);
-            send_parse_error (res, start.error ());
-            return;
-        }
-        try {
-            auto result = ctx.inbox_manager.start (ctx.db, *start);
-            if (!result.ok) {
-                vayu::utils::log_warning ("POST /inbox/start - " + result.error_message);
-                send_error (res, result.http_status, result.error_message,
-                result.error_code);
-                return;
-            }
-            send_json (res, inbox_json (ctx.db, result.info));
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "POST /inbox/start - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_start_inbox (ctx, req, res);
     });
 
     /**
@@ -809,17 +1039,7 @@ void register_inbox_routes (RouteContext& ctx) {
      */
     ctx.server.Post (R"(/inbox/([^/]+)/stop)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const std::string inbox_id = req.matches[1];
-        if (!ctx.inbox_manager.stop (inbox_id)) {
-            send_error (res, 404, "Inbox not found");
-            return;
-        }
-        auto info = ctx.inbox_manager.get (inbox_id);
-        if (!info) {
-            send_error (res, 404, "Inbox not found");
-            return;
-        }
-        send_json (res, inbox_json (ctx.db, *info));
+        handle_stop_inbox (ctx, req, res);
     });
 
     /**
@@ -835,29 +1055,12 @@ void register_inbox_routes (RouteContext& ctx) {
      */
     ctx.server.Delete (R"(/inbox/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const std::string inbox_id = req.matches[1];
-        try {
-            const auto deleted = ctx.inbox_manager.remove (ctx.db, inbox_id);
-            if (!deleted) {
-                send_error (res, 404, "Inbox not found");
-                return;
-            }
-            send_json (res,
-            nlohmann::json{ { "inboxId", inbox_id }, { "capturesDeleted", *deleted } });
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "DELETE /inbox/:id - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_delete_inbox (ctx, req, res);
     });
 
     /** GET /inbox - every inbox this process has started, running or stopped. */
     ctx.server.Get ("/inbox", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        nlohmann::json data = nlohmann::json::array ();
-        for (const auto& info : ctx.inbox_manager.list ()) {
-            data.push_back (inbox_json (ctx.db, info));
-        }
-        send_json (res, nlohmann::json{ { "data", std::move (data) } });
+        handle_list_inboxes (ctx, {}, res);
     });
 
     /**
@@ -867,31 +1070,7 @@ void register_inbox_routes (RouteContext& ctx) {
      */
     ctx.server.Put (R"(/inbox/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const std::string inbox_id = req.matches[1];
-        auto current               = ctx.inbox_manager.get (inbox_id);
-        if (!current) {
-            send_error (res, 404, "Inbox not found");
-            return;
-        }
-        nlohmann::json body;
-        if (!read_json_body (req, res, body)) {
-            return;
-        }
-        if (body.is_null ()) {
-            body = nlohmann::json::object ();
-        }
-        const auto updated = parse_inbox_response_update (body, current->response);
-        if (!updated) {
-            vayu::utils::log_warning ("PUT /inbox/:id - " + updated.error ().message);
-            send_parse_error (res, updated.error ());
-            return;
-        }
-        auto info = ctx.inbox_manager.update_response (inbox_id, *updated);
-        if (!info) {
-            send_error (res, 404, "Inbox not found");
-            return;
-        }
-        send_json (res, inbox_json (ctx.db, *info));
+        handle_update_inbox (ctx, req, res);
     });
 
     /**
@@ -900,42 +1079,13 @@ void register_inbox_routes (RouteContext& ctx) {
      */
     ctx.server.Get (R"(/inbox/([^/]+)/requests)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const std::string inbox_id = req.matches[1];
-        // The cap follows the inbox's own retention rather than the constant:
-        // with `inboxMaxCaptures` raised, a page of 50 would otherwise be the
-        // most the engine would ever hand back.
-        const auto limits    = ctx.inbox_manager.limits (inbox_id);
-        auto [limit, offset] = parse_capture_pagination (
-        req, limits ? limits->max_captures : constants::inbox::MAX_CAPTURES);
-        try {
-            auto [status, body] = inbox_captures_response (
-            ctx.db, ctx.inbox_manager, inbox_id, limit, offset);
-            res.status = status;
-            res.set_content (body.dump (), "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "GET /inbox/:id/requests - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_list_inbox_requests (ctx, req, res);
     });
 
     /** DELETE /inbox/:id/requests - clear the captures, keep the listener. */
     ctx.server.Delete (R"(/inbox/([^/]+)/requests)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const std::string inbox_id = req.matches[1];
-        if (!ctx.inbox_manager.get (inbox_id)) {
-            send_error (res, 404, "Inbox not found");
-            return;
-        }
-        try {
-            const int64_t cleared = ctx.db.clear_inbox_requests (inbox_id);
-            send_json (res,
-            nlohmann::json{ { "inboxId", inbox_id }, { "cleared", cleared } });
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "DELETE /inbox/:id/requests - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_clear_inbox_requests (ctx, req, res);
     });
 
     /**
@@ -948,83 +1098,7 @@ void register_inbox_routes (RouteContext& ctx) {
      */
     ctx.server.Get (R"(/inbox/([^/]+)/live)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const std::string inbox_id = req.matches[1];
-        if (!ctx.inbox_manager.get (inbox_id)) {
-            send_error (res, 404, "Inbox not found");
-            return;
-        }
-        const auto limits = ctx.inbox_manager.limits (inbox_id).value_or (InboxLimits{});
-
-        const auto resume_point = parse_live_resume_point (
-        req.get_header_value ("Last-Event-ID"), req.get_param_value ("lastEventId"));
-        if (!resume_point) {
-            const auto& refusal = resume_point.error ();
-            send_error (res, refusal.http_status, refusal.message, refusal.code);
-            return;
-        }
-        int64_t last_id = *resume_point;
-
-        const auto claim = ctx.inbox_manager.try_claim_live (inbox_id);
-        if (!claim) {
-            send_error (res, 409,
-            "This inbox is already being watched; close the other stream first",
-            "inbox_live_in_use");
-            return;
-        }
-
-        res.set_content_provider ("text/event-stream",
-        [&ctx, inbox_id, last_id, limits, claim = *claim] (size_t, httplib::DataSink& sink) mutable {
-            while (true) {
-                if (!sink.is_writable ()) {
-                    break;
-                }
-                std::vector<vayu::db::InboxRequest> fresh;
-                try {
-                    fresh = ctx.db.get_inbox_requests_since (inbox_id, last_id);
-                } catch (const std::exception& e) {
-                    vayu::utils::log_warning (
-                    "GET /inbox/:id/live - " + std::string (e.what ()));
-                    break;
-                }
-                for (const auto& capture : fresh) {
-                    const std::string payload = "id: " + std::to_string (capture.id) +
-                    "\ndata: " + inbox_capture_json (capture).dump () + "\n\n";
-                    if (!sink.write (payload.data (), payload.size ())) {
-                        ctx.inbox_manager.release_live (inbox_id, claim);
-                        return false;
-                    }
-                    last_id = capture.id;
-                }
-                // A write that lands is the only evidence this socket is alive,
-                // and therefore what holds the claim. Losing it means a
-                // reconnect already took the slot over, so this stream ends
-                // without releasing what is no longer its own.
-                if (!fresh.empty () && !ctx.inbox_manager.note_live_write (inbox_id, claim)) {
-                    return false;
-                }
-                if (fresh.empty ()) {
-                    // A stopped inbox captures nothing more, but the record and
-                    // its history stay - so the stream ends rather than polling
-                    // a listener that is gone.
-                    auto info = ctx.inbox_manager.get (inbox_id);
-                    if (!info || !info->running) {
-                        break;
-                    }
-                    const std::string keep_alive = ": keep-alive\n\n";
-                    if (!sink.write (keep_alive.data (), keep_alive.size ())) {
-                        ctx.inbox_manager.release_live (inbox_id, claim);
-                        return false;
-                    }
-                    if (!ctx.inbox_manager.note_live_write (inbox_id, claim)) {
-                        return false;
-                    }
-                    std::this_thread::sleep_for (
-                    std::chrono::milliseconds (limits.live_poll_interval_ms));
-                }
-            }
-            ctx.inbox_manager.release_live (inbox_id, claim);
-            return false;
-        });
+        handle_inbox_live (ctx, req, res);
     });
 }
 

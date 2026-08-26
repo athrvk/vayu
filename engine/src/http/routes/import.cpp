@@ -1245,6 +1245,183 @@ import_response (vayu::db::Database& db, const nlohmann::json& body) {
         { "globals", globals.size () } } };
 }
 
+namespace {
+
+void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const bool streaming = req.get_header_value ("Accept").find (
+                           "text/event-stream") != std::string::npos;
+    vayu::utils::log_info (
+    std::string ("POST /import/fetch") + (streaming ? " (streaming)" : ""));
+
+    if (!streaming) {
+        auto [status, body] =
+        import_fetch (req.body, vayu::http::resolve_transport_policy (ctx.db));
+        res.status = status;
+        res.set_content (
+        body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+        return;
+    }
+
+    // Validated before the provider is installed, while a status is still
+    // available to answer with: `set_content_provider` commits a 200, and a
+    // client that sent a malformed body should read the same 400 on both
+    // forms of this route. `import_fetch_stream` reads the body again for
+    // itself - one parse of a two-field object - rather than the two of them
+    // holding separate opinions about what a valid request is.
+    if (const auto refusal = import_fetch_refusal (req.body)) {
+        res.status = refusal->first;
+        res.set_content (refusal->second.dump (-1, ' ', false,
+                         nlohmann::json::error_handler_t::replace),
+        "application/json");
+        return;
+    }
+
+    // Copied, not captured by reference: the provider runs after this
+    // handler has returned and the `Request` is gone.
+    const std::string body = req.body;
+    const auto transport   = vayu::http::resolve_transport_policy (ctx.db);
+    res.set_content_provider ("text/event-stream",
+    [body, transport] (size_t, httplib::DataSink& sink) {
+        size_t frame    = 0;
+        const auto emit = [&sink, &frame] (const std::string& event,
+                          const nlohmann::json& data) {
+            if (!sink.is_writable ()) {
+                return false;
+            }
+            // The shared framer, so this stream's frames cannot drift from
+            // the run topics' shape.
+            const std::string payload = vayu::core::build_sse_frame (event,
+            data.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+            frame++);
+            return sink.write (payload.data (), payload.size ());
+        };
+        import_fetch_stream (body, transport, emit);
+        sink.done ();
+        return false;
+    });
+}
+
+void handle_import_apply (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    nlohmann::json body;
+    try {
+        body = nlohmann::json::parse (req.body);
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "POST /import/apply - invalid JSON body: " + std::string (e.what ()));
+        send_error (res, 400, "Invalid JSON body");
+        return;
+    }
+    // A validation failure is the core's 400; only a write or serialization
+    // failure reaches this catch, and that is a 500, not the client's fault.
+    try {
+        auto [status, response] = import_apply_response (ctx.db, body);
+        if (status != 200) {
+            vayu::utils::log_warning ("POST /import/apply - " +
+            std::to_string (status) + ": " + error_message_of (response));
+        } else {
+            vayu::utils::log_info ("POST /import/apply - applied " +
+            std::to_string (response["idMap"].size ()) + " items");
+        }
+        res.status = status;
+        res.set_content (response.dump (), "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "POST /import/apply - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_import_parse (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    nlohmann::json body;
+    try {
+        body = nlohmann::json::parse (req.body);
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "POST /import/parse - invalid JSON body: " + std::string (e.what ()));
+        send_error (res, 400, "Invalid JSON body");
+        return;
+    }
+    try {
+        auto [status, response] = import_parse_response (ctx.db, body);
+        if (status != 200) {
+            vayu::utils::log_warning ("POST /import/parse - " +
+            std::to_string (status) + ": " + error_message_of (response));
+        } else {
+            vayu::utils::log_info ("POST /import/parse - " +
+            response["meta"]["format"].get<std::string> () + ", " +
+            std::to_string (response["meta"]["requestCount"].get<int> ()) + " request(s)");
+        }
+        res.status = status;
+        res.set_content (
+        response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "POST /import/parse - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_import_document (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    nlohmann::json body;
+    try {
+        body = nlohmann::json::parse (req.body);
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "POST /import/document - invalid JSON body: " + std::string (e.what ()));
+        send_error (res, 400, "Invalid JSON body");
+        return;
+    }
+    try {
+        auto [status, response] = import_document_response (ctx.db, body);
+        if (status != 200) {
+            vayu::utils::log_warning ("POST /import/document - " +
+            std::to_string (status) + ": " + error_message_of (response));
+        }
+        res.status = status;
+        res.set_content (
+        response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "POST /import/document - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_import_preview (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    nlohmann::json body;
+    try {
+        body = nlohmann::json::parse (req.body);
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "POST /import - invalid JSON body: " + std::string (e.what ()));
+        send_error (res, 400, "Invalid JSON body");
+        return;
+    }
+    try {
+        auto [status, response] = import_response (ctx.db, body);
+        if (status != 200) {
+            vayu::utils::log_warning ("POST /import - " +
+            std::to_string (status) + ": " + error_message_of (response));
+        } else {
+            vayu::utils::log_info ("POST /import - imported " +
+            std::to_string (response["requests"].get<size_t> ()) +
+            " request(s) from " + response["meta"]["format"].get<std::string> ());
+        }
+        res.status = status;
+        res.set_content (
+        response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("POST /import - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+} // namespace
+
 void register_import_routes (RouteContext& ctx) {
     /**
      * POST /import/fetch
@@ -1268,58 +1445,7 @@ void register_import_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/import/fetch",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const bool streaming = req.get_header_value ("Accept").find (
-                               "text/event-stream") != std::string::npos;
-        vayu::utils::log_info (
-        std::string ("POST /import/fetch") + (streaming ? " (streaming)" : ""));
-
-        if (!streaming) {
-            auto [status, body] =
-            import_fetch (req.body, vayu::http::resolve_transport_policy (ctx.db));
-            res.status = status;
-            res.set_content (
-            body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
-            "application/json");
-            return;
-        }
-
-        // Validated before the provider is installed, while a status is still
-        // available to answer with: `set_content_provider` commits a 200, and a
-        // client that sent a malformed body should read the same 400 on both
-        // forms of this route. `import_fetch_stream` reads the body again for
-        // itself - one parse of a two-field object - rather than the two of them
-        // holding separate opinions about what a valid request is.
-        if (const auto refusal = import_fetch_refusal (req.body)) {
-            res.status = refusal->first;
-            res.set_content (refusal->second.dump (-1, ' ', false,
-                             nlohmann::json::error_handler_t::replace),
-            "application/json");
-            return;
-        }
-
-        // Copied, not captured by reference: the provider runs after this
-        // handler has returned and the `Request` is gone.
-        const std::string body = req.body;
-        const auto transport   = vayu::http::resolve_transport_policy (ctx.db);
-        res.set_content_provider ("text/event-stream",
-        [body, transport] (size_t, httplib::DataSink& sink) {
-            size_t frame    = 0;
-            const auto emit = [&sink, &frame] (const std::string& event,
-                              const nlohmann::json& data) {
-                if (!sink.is_writable ()) {
-                    return false;
-                }
-                // The shared framer, so this stream's frames cannot drift from
-                // the run topics' shape.
-                const std::string payload = vayu::core::build_sse_frame (event,
-                data.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
-                frame++);
-                return sink.write (payload.data (), payload.size ());
-            };
-            import_fetch_stream (body, transport, emit);
-            sink.done ();
-            return false;
-        });
+        handle_import_fetch (ctx, req, res);
     });
 
     /**
@@ -1342,33 +1468,7 @@ void register_import_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/import/apply",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = nlohmann::json::parse (req.body);
-        } catch (const std::exception& e) {
-            vayu::utils::log_warning (
-            "POST /import/apply - invalid JSON body: " + std::string (e.what ()));
-            send_error (res, 400, "Invalid JSON body");
-            return;
-        }
-        // A validation failure is the core's 400; only a write or serialization
-        // failure reaches this catch, and that is a 500, not the client's fault.
-        try {
-            auto [status, response] = import_apply_response (ctx.db, body);
-            if (status != 200) {
-                vayu::utils::log_warning ("POST /import/apply - " +
-                std::to_string (status) + ": " + error_message_of (response));
-            } else {
-                vayu::utils::log_info ("POST /import/apply - applied " +
-                std::to_string (response["idMap"].size ()) + " items");
-            }
-            res.status = status;
-            res.set_content (response.dump (), "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "POST /import/apply - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_import_apply (ctx, req, res);
     });
 
     /**
@@ -1388,34 +1488,7 @@ void register_import_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/import/parse",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = nlohmann::json::parse (req.body);
-        } catch (const std::exception& e) {
-            vayu::utils::log_warning (
-            "POST /import/parse - invalid JSON body: " + std::string (e.what ()));
-            send_error (res, 400, "Invalid JSON body");
-            return;
-        }
-        try {
-            auto [status, response] = import_parse_response (ctx.db, body);
-            if (status != 200) {
-                vayu::utils::log_warning ("POST /import/parse - " +
-                std::to_string (status) + ": " + error_message_of (response));
-            } else {
-                vayu::utils::log_info ("POST /import/parse - " +
-                response["meta"]["format"].get<std::string> () + ", " +
-                std::to_string (response["meta"]["requestCount"].get<int> ()) + " request(s)");
-            }
-            res.status = status;
-            res.set_content (
-            response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
-            "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "POST /import/parse - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_import_parse (ctx, req, res);
     });
 
     /**
@@ -1429,30 +1502,7 @@ void register_import_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/import/document",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = nlohmann::json::parse (req.body);
-        } catch (const std::exception& e) {
-            vayu::utils::log_warning (
-            "POST /import/document - invalid JSON body: " + std::string (e.what ()));
-            send_error (res, 400, "Invalid JSON body");
-            return;
-        }
-        try {
-            auto [status, response] = import_document_response (ctx.db, body);
-            if (status != 200) {
-                vayu::utils::log_warning ("POST /import/document - " +
-                std::to_string (status) + ": " + error_message_of (response));
-            }
-            res.status = status;
-            res.set_content (
-            response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
-            "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "POST /import/document - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_import_document (ctx, req, res);
     });
 
     /**
@@ -1469,33 +1519,7 @@ void register_import_routes (RouteContext& ctx) {
      * `maxSpecDocumentBytes`.
      */
     ctx.server.Post ("/import", [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = nlohmann::json::parse (req.body);
-        } catch (const std::exception& e) {
-            vayu::utils::log_warning (
-            "POST /import - invalid JSON body: " + std::string (e.what ()));
-            send_error (res, 400, "Invalid JSON body");
-            return;
-        }
-        try {
-            auto [status, response] = import_response (ctx.db, body);
-            if (status != 200) {
-                vayu::utils::log_warning ("POST /import - " +
-                std::to_string (status) + ": " + error_message_of (response));
-            } else {
-                vayu::utils::log_info ("POST /import - imported " +
-                std::to_string (response["requests"].get<size_t> ()) +
-                " request(s) from " + response["meta"]["format"].get<std::string> ());
-            }
-            res.status = status;
-            res.set_content (
-            response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
-            "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /import - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_import_preview (ctx, req, res);
     });
 }
 
