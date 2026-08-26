@@ -14,6 +14,7 @@
 #include <string_view>
 
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
@@ -34,7 +35,7 @@ class DnsCache;
  *             where no handle is available; the mapping then falls back to the
  *             code alone.
  */
-Error curl_to_error (CURL* curl, CURLcode code, const char* error_buffer);
+Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors);
 
 /**
  * @brief Put the transport policy on a handle: TLS verification and the proxy.

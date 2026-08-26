@@ -17,6 +17,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <utility>
 
@@ -71,17 +72,17 @@ std::string system_resolve (const std::string& hostname) {
         // says which one it is. There is no narrower spelling; POSIX defines
         // the family structs to be reinterpretable through `sockaddr`.
         if (best->ai_family == AF_INET6) {
-            char ip_str[INET6_ADDRSTRLEN];
+            std::array<char, INET6_ADDRSTRLEN> ip_str{};
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
             auto* addr6 = reinterpret_cast<sockaddr_in6*> (best->ai_addr);
-            inet_ntop (AF_INET6, &(addr6->sin6_addr), ip_str, INET6_ADDRSTRLEN);
-            ip = ip_str;
+            inet_ntop (AF_INET6, &(addr6->sin6_addr), ip_str.data (), ip_str.size ());
+            ip = ip_str.data ();
         } else if (best->ai_family == AF_INET) {
-            char ip_str[INET_ADDRSTRLEN];
+            std::array<char, INET_ADDRSTRLEN> ip_str{};
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
             auto* addr = reinterpret_cast<sockaddr_in*> (best->ai_addr);
-            inet_ntop (AF_INET, &(addr->sin_addr), ip_str, INET_ADDRSTRLEN);
-            ip = ip_str;
+            inet_ntop (AF_INET, &(addr->sin_addr), ip_str.data (), ip_str.size ());
+            ip = ip_str.data ();
         }
         freeaddrinfo (result);
     }

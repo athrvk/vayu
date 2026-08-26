@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 
+#include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/sse_frame_counter.hpp"
 #include "vayu/types.hpp"
 
@@ -67,9 +68,9 @@ struct TransferData {
     /// to buffer, the stream caps are the stream's intended end.
     bool stream_cap_reached = false;
 
-    char error_buffer[CURL_ERROR_SIZE] = { 0 };
-    struct curl_slist* headers_list    = nullptr;
-    struct curl_slist* resolve_list    = nullptr; // DNS pre-resolution list
+    CurlErrorBuffer errors;
+    struct curl_slist* headers_list = nullptr;
+    struct curl_slist* resolve_list = nullptr; // DNS pre-resolution list
     /// Multipart body attached to the handle, freed with the rest of this
     /// transfer's curl state. Only a `form-data` body has one.
     curl_mime* mime = nullptr;

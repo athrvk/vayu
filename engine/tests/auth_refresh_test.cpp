@@ -13,11 +13,13 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <array>
 #include <chrono>
 #include <memory>
 #include <set>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -264,9 +266,10 @@ TEST_F (AuthRefreshTuningTest, EveryKnobIsSeededAsAUserSetting) {
 // Mutation check for the reader: revert any one key to its constant and the
 // value the user stored stops reaching the run.
 TEST_F (AuthRefreshTuningTest, TheStoredValuesAreWhatARunReads) {
-    const std::pair<const char*, int> edits[] = { { "oauth2RefreshLeadMs", 12'345 },
-        { "oauth2RefreshMinIntervalMs", 321 }, { "oauth2RefreshRetryMs", 777 },
-        { "oauth2RefreshRetryMaxMs", 99'000 }, { "oauth2RefreshPollIntervalMs", 42 } };
+    const auto edits =
+    std::to_array<std::pair<const char*, int>> ({ { "oauth2RefreshLeadMs", 12'345 },
+    { "oauth2RefreshMinIntervalMs", 321 }, { "oauth2RefreshRetryMs", 777 },
+    { "oauth2RefreshRetryMaxMs", 99'000 }, { "oauth2RefreshPollIntervalMs", 42 } });
     for (const auto& [key, value] : edits) {
         auto entry = db->get_config_entry (key);
         ASSERT_HAS_VALUE (entry) << key;

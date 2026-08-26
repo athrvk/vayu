@@ -206,7 +206,8 @@ const std::vector<std::string>& series) {
         if (line_end == std::string::npos) {
             line_end = body.size ();
         }
-        std::string_view line (body.data () + line_start, line_end - line_start);
+        std::string_view line =
+        std::string_view (body).substr (line_start, line_end - line_start);
         line_start = line_end + 1;
 
         // Trim both ends: exposition files are frequently CRLF, and a trailing

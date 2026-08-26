@@ -325,15 +325,15 @@ const DraftRequest* previous) {
 
     std::vector<SpecFieldDiff> out;
     for (size_t i = 0; i < FIELDS.size (); ++i) {
-        if (current[i].compare == fetched[i].compare) {
+        if (current.at (i).compare == fetched.at (i).compare) {
             continue;
         }
         SpecFieldDiff field;
-        field.field   = FIELDS[i];
-        field.current = current[i].display;
-        field.next    = fetched[i].display;
+        field.field   = FIELDS.at (i);
+        field.current = current.at (i).display;
+        field.next    = fetched.at (i).display;
         field.user_touched =
-        bound.has_value () && current[i].compare != (*bound)[i].compare;
+        bound.has_value () && current.at (i).compare != bound->at (i).compare;
         out.push_back (std::move (field));
     }
     return out;

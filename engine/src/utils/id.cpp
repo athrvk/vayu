@@ -66,8 +66,8 @@ std::string generate_id (const char* prefix) {
     // 128 bits land big-endian: hi fills bytes 0-7, lo fills bytes 8-15.
     std::array<uint8_t, 16> bytes{};
     for (size_t i = 8; i-- > 0;) {
-        bytes[i]     = static_cast<uint8_t> (hi & 0xFF);
-        bytes[i + 8] = static_cast<uint8_t> (lo & 0xFF);
+        bytes.at (i)     = static_cast<uint8_t> (hi & 0xFF);
+        bytes.at (i + 8) = static_cast<uint8_t> (lo & 0xFF);
         hi >>= 8;
         lo >>= 8;
     }
@@ -86,8 +86,9 @@ std::string generate_id (const char* prefix) {
         if (i == 4 || i == 6 || i == 8 || i == 10) {
             out.push_back ('-');
         }
-        out.push_back (hex[static_cast<size_t> (bytes[i] >> 4)]);
-        out.push_back (hex[static_cast<size_t> (bytes[i] & 0x0F)]);
+        const uint8_t byte = bytes.at (i);
+        out.push_back (hex[static_cast<size_t> (byte >> 4)]);
+        out.push_back (hex[static_cast<size_t> (byte & 0x0F)]);
     }
     return out;
 }

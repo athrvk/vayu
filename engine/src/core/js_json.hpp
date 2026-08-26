@@ -300,7 +300,8 @@ inline bool contains_variable_token (const std::string& text) {
             return false;
         }
         // `[^{}]+` between the braces: a `{` inside is not this token's close.
-        const std::string_view inner (text.data () + at + 2, close - at - 2);
+        const std::string_view inner =
+        std::string_view (text).substr (at + 2, close - at - 2);
         if (!inner.empty () && inner.find_first_of ("{}") == std::string_view::npos) {
             return true;
         }

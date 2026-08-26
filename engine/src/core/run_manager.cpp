@@ -1474,10 +1474,11 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // reader that finds no `phases` key is looking at a run whose phase data
     // was never collected, not at a target with a free TLS handshake.
     if (inputs.phases.has_value ()) {
-        nlohmann::json phases = nlohmann::json::object ();
+        nlohmann::json phases      = nlohmann::json::object ();
+        const auto& phase_measured = *inputs.phases;
         for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
-            const auto& p                = (*inputs.phases)[i];
-            phases[TIMING_PHASE_KEYS[i]] = { { "p50", p.p50 }, { "p95", p.p95 },
+            const auto& p = phase_measured.at (i);
+            phases[TIMING_PHASE_KEYS.at (i)] = { { "p50", p.p50 }, { "p95", p.p95 },
                 { "p99", p.p99 }, { "max", p.max }, { "count", p.count } };
         }
         summary["phases"] = phases;

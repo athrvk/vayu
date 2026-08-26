@@ -31,6 +31,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <memory>
 #include <string>
 #include <utility>
@@ -412,13 +413,13 @@ TEST_F (ImportApplyRouteTest, RejectsAnObjectFieldGivenANonObject) {
     json request    = request_item ("r1", "c1", "get users");
     json environment{ { "tempId", "e1" }, { "name", "Prod" } };
 
-    const Case cases[] = {
-        { "collections", collection, "variables" },
-        { "collections", collection, "auth" },
-        { "requests", request, "body" },
-        { "requests", request, "auth" },
-        { "environments", environment, "variables" },
-    };
+    const auto cases = std::to_array<Case> ({
+    { "collections", collection, "variables" },
+    { "collections", collection, "auth" },
+    { "requests", request, "body" },
+    { "requests", request, "auth" },
+    { "environments", environment, "variables" },
+    });
 
     for (const auto& c : cases) {
         for (const json& bad_shape :

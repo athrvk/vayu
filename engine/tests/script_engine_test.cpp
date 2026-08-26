@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <regex>
@@ -1000,20 +1001,20 @@ TEST_F (ScriptEngineTest, ResponseToBeStatusClassMatchersAssertOnBothSides) {
         const char* matches;
         const char* does_not_match;
     };
-    const Case cases[] = {
-        { 100, "info", "ok" },
-        { 202, "accepted", "notFound" },
-        { 301, "redirection", "success" },
-        { 400, "badRequest", "serverError" },
-        { 401, "unauthorized", "forbidden" },
-        { 403, "forbidden", "unauthorized" },
-        { 404, "notFound", "badRequest" },
-        { 429, "rateLimited", "serverError" },
-        { 404, "clientError", "serverError" },
-        { 503, "serverError", "clientError" },
-        { 503, "error", "redirection" },
-        { 404, "error", "info" },
-    };
+    const auto cases = std::to_array<Case> ({
+    { 100, "info", "ok" },
+    { 202, "accepted", "notFound" },
+    { 301, "redirection", "success" },
+    { 400, "badRequest", "serverError" },
+    { 401, "unauthorized", "forbidden" },
+    { 403, "forbidden", "unauthorized" },
+    { 404, "notFound", "badRequest" },
+    { 429, "rateLimited", "serverError" },
+    { 404, "clientError", "serverError" },
+    { 503, "serverError", "clientError" },
+    { 503, "error", "redirection" },
+    { 404, "error", "info" },
+    });
 
     for (const auto& c : cases) {
         response.status_code = c.status;
@@ -1067,13 +1068,13 @@ TEST_F (ScriptEngineTest, ResponseToBeJsonAndWithBody) {
 // A name nothing implements must fail loudly. Silently returning undefined is
 // the whole defect - a misspelled matcher would otherwise report PASS.
 TEST_F (ScriptEngineTest, ResponseToChainRejectsUnknownAssertions) {
-    const char* scripts[] = {
-        R"(pm.test("t", function() { pm.response.to.be.definitelyNotAMatcher; });)",
-        R"(pm.test("t", function() { pm.response.to.have.definitelyNotAMatcher; });)",
-        R"(pm.test("t", function() { pm.response.to.definitelyNotAMatcher; });)",
-        // The negated form is not implemented; it must throw, not pass.
-        R"(pm.test("t", function() { pm.response.to.not.be.ok; });)",
-    };
+    const auto scripts = std::to_array<const char*> ({
+    R"(pm.test("t", function() { pm.response.to.be.definitelyNotAMatcher; });)",
+    R"(pm.test("t", function() { pm.response.to.have.definitelyNotAMatcher; });)",
+    R"(pm.test("t", function() { pm.response.to.definitelyNotAMatcher; });)",
+    // The negated form is not implemented; it must throw, not pass.
+    R"(pm.test("t", function() { pm.response.to.not.be.ok; });)",
+    });
 
     for (const char* script : scripts) {
         auto result = engine.execute_test (script, request, response, env);
@@ -3466,17 +3467,16 @@ TEST_F (ScriptEngineTest, DocExampleSetsAQueryParamAcrossItsThreeCases) {
         const char* url;
         const char* expected;
     };
-    const Case cases[] = {
-        // No query at all.
-        { "https://api.example.com/users", "https://api.example.com/users?traceId=t1" },
-        // Query present, parameter absent.
-        { "https://api.example.com/users?page=2", "https://api.example.com/users?page=2&traceId=t1" },
-        // Parameter already present - replaced, not duplicated.
-        { "https://api.example.com/users?traceId=old&page=2",
-        "https://api.example.com/users?traceId=t1&page=2" },
-        // Fragment is preserved and never searched for the parameter.
-        { "https://api.example.com/users#section", "https://api.example.com/users?traceId=t1#section" },
-    };
+    const auto cases = std::to_array<Case> ({
+    // No query at all.
+    { "https://api.example.com/users", "https://api.example.com/users?traceId=t1" },
+    // Query present, parameter absent.
+    { "https://api.example.com/users?page=2", "https://api.example.com/users?page=2&traceId=t1" },
+    // Parameter already present - replaced, not duplicated.
+    { "https://api.example.com/users?traceId=old&page=2", "https://api.example.com/users?traceId=t1&page=2" },
+    // Fragment is preserved and never searched for the parameter.
+    { "https://api.example.com/users#section", "https://api.example.com/users?traceId=t1#section" },
+    });
 
     for (const auto& c : cases) {
         Request req;
@@ -3912,12 +3912,12 @@ TEST_F (ScriptEngineTest, SetNextRequestRejectsEveryArgumentThatNamesNothing) {
     // Omitting the argument is not a synonym for null: "end the iteration" and
     // "I forgot the name" are different intents, and guessing between them
     // would silently end runs.
-    const Case cases[] = {
-        { "pm.execution.setNextRequest();", "no argument" },
-        { "pm.execution.setNextRequest(3);", "number" },
-        { "pm.execution.setNextRequest(undefined);", "undefined" },
-        { "pm.execution.setNextRequest('');", "empty name" },
-    };
+    const auto cases = std::to_array<Case> ({
+    { "pm.execution.setNextRequest();", "no argument" },
+    { "pm.execution.setNextRequest(3);", "number" },
+    { "pm.execution.setNextRequest(undefined);", "undefined" },
+    { "pm.execution.setNextRequest('');", "empty name" },
+    });
 
     for (const auto& test_case : cases) {
         auto ctx    = scenario_test (request, response, env);

@@ -10,6 +10,7 @@
  * @brief Scripting API routes - provides script engine capabilities for UI autocomplete
  */
 
+#include <array>
 #include <string>
 
 #include "vayu/http/routes.hpp"
@@ -300,23 +301,23 @@ nlohmann::json get_script_completions () {
         const char* name;
         const char* condition;
     };
-    constexpr StatusClassCompletion status_classes[] = {
-        { "ok", "a 2xx status code" },
-        { "success", "a 2xx status code" },
-        { "info", "a 1xx status code" },
-        { "redirection", "a 3xx status code" },
-        { "clientError", "a 4xx status code" },
-        { "serverError", "a 5xx status code" },
-        { "error", "a 4xx or 5xx status code" },
-        { "accepted", "status 202" },
-        { "badRequest", "status 400" },
-        { "unauthorized", "status 401" },
-        { "forbidden", "status 403" },
-        { "notFound", "status 404" },
-        { "rateLimited", "status 429" },
-        { "json", "a body that parses as JSON" },
-        { "withBody", "a non-empty body" },
-    };
+    constexpr auto status_classes = std::to_array<StatusClassCompletion> ({
+    { "ok", "a 2xx status code" },
+    { "success", "a 2xx status code" },
+    { "info", "a 1xx status code" },
+    { "redirection", "a 3xx status code" },
+    { "clientError", "a 4xx status code" },
+    { "serverError", "a 5xx status code" },
+    { "error", "a 4xx or 5xx status code" },
+    { "accepted", "status 202" },
+    { "badRequest", "status 400" },
+    { "unauthorized", "status 401" },
+    { "forbidden", "status 403" },
+    { "notFound", "status 404" },
+    { "rateLimited", "status 429" },
+    { "json", "a body that parses as JSON" },
+    { "withBody", "a non-empty body" },
+    });
 
     for (const auto& status_class : status_classes) {
         const std::string label =
@@ -675,11 +676,11 @@ nlohmann::json get_script_completions () {
         const char* noun;     // what its variables are called in prose
         const char* example;  // a variable name that reads naturally for it
     };
-    constexpr VariableScopeCompletion variable_scopes[] = {
-        { "environment", "environment variable", "auth_token" },
-        { "globals", "global variable", "api_key" },
-        { "collectionVariables", "collection variable", "base_url" },
-    };
+    constexpr auto variable_scopes = std::to_array<VariableScopeCompletion> ({
+    { "environment", "environment variable", "auth_token" },
+    { "globals", "global variable", "api_key" },
+    { "collectionVariables", "collection variable", "base_url" },
+    });
 
     for (const auto& scope : variable_scopes) {
         const std::string accessor = std::string ("pm.") + scope.accessor;

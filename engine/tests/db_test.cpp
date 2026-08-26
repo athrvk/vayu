@@ -418,8 +418,9 @@ TEST_F (DatabaseTest, TheFirstConnectionCarriesTheEnginesDurabilitySettings) {
     // journal, 2 for WAL - and it persists, which is the point of the check.
     std::ifstream header (TEST_DB_PATH, std::ios::binary);
     ASSERT_TRUE (header.is_open ());
-    char format[20] = {};
-    ASSERT_TRUE (header.read (format, sizeof (format)))
+    std::array<char, 20> format{};
+    ASSERT_TRUE (
+    header.read (format.data (), static_cast<std::streamsize> (format.size ())))
     << "a database this engine created is longer than its own header";
     EXPECT_EQ (static_cast<int> (format[18]), 2)
     << "the schema was written under a rollback journal, before init() set WAL";

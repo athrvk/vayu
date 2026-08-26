@@ -502,7 +502,7 @@ std::string escape_json_string_content (const std::string& text) {
         case '\t': out += "\\t"; break;
         default:
             if (static_cast<unsigned char> (c) < 0x20) {
-                constexpr const char* kHex = "0123456789abcdef";
+                constexpr std::string_view kHex = "0123456789abcdef";
                 out += "\\u00";
                 out += kHex[(static_cast<unsigned char> (c) >> 4U) & 0x0FU];
                 out += kHex[static_cast<unsigned char> (c) & 0x0FU];

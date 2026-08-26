@@ -36,6 +36,7 @@ add_executable(vayu_tests
     event_loop_test.cpp
     db_test.cpp
     character_cast_test.cpp
+    bounds_primitives_test.cpp
     db_concurrency_test.cpp
     db_recovery_test.cpp
     rate_limit_test.cpp

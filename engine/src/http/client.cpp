@@ -21,6 +21,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
@@ -32,7 +33,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -414,7 +414,7 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
 struct Client::Impl {
     CURL* curl = nullptr;
     ClientConfig config;
-    char error_buffer[CURL_ERROR_SIZE] = { 0 };
+    CurlErrorBuffer errors;
 
     explicit Impl (ClientConfig cfg) : config (std::move (cfg)) {
         curl = curl_easy_init ();
@@ -435,7 +435,7 @@ struct Client::Impl {
 
     void reset () {
         curl_easy_reset (curl);
-        std::memset (error_buffer, 0, sizeof (error_buffer));
+        errors.clear ();
     }
 };
 
@@ -474,8 +474,7 @@ Result<Response> Client::send (const Request& request) {
     // build_request_header_list below, from the very appends that build the
     // slist - see its contract for why it is not snapshotted here.
 
-    // Set error buffer
-    curl_easy_setopt (curl, CURLOPT_ERRORBUFFER, impl_->error_buffer);
+    impl_->errors.attach (curl);
 
     // Set URL
     curl_easy_setopt (curl, CURLOPT_URL, request.url.c_str ());
@@ -643,7 +642,7 @@ Result<Response> Client::send (const Request& request) {
         Error error = sink.limit_exceeded ?
         Error{ ErrorCode::ResponseTooLarge,
             too_large_message (response.headers, sink.max_bytes) } :
-        detail::curl_to_error (curl, res, impl_->error_buffer);
+        detail::curl_to_error (curl, res, impl_->errors);
 
         // Return Response object with error details (Postman-compatible approach)
         response.status_code = 0; // 0 indicates client-side error (no server response)
@@ -696,7 +695,7 @@ Client::post (const std::string& url, const std::string& body, const Headers& he
 }
 
 std::string Client::last_error () const {
-    return impl_->error_buffer;
+    return std::string (impl_->errors.message ());
 }
 
 // ============================================================================

@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <span>
 #include <thread>
 
 #include "vayu/core/constants.hpp"
@@ -63,22 +64,27 @@ int main (int argc, char* argv[]) {
     int verbosity        = 0; // 0=warn/error, 1=info+, 2=debug+
     std::string data_dir = get_default_data_dir ();
 
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
+    // The argument vector as the bounded range it is: `argv[i]` is arithmetic
+    // on a pointer that carries no length, and the count is right there.
+    const std::span<char* const> args (argv, static_cast<size_t> (argc));
+
+    for (size_t i = 1; i < args.size (); ++i) {
+        std::string arg = args[i];
 
         if (arg == vayu::core::constants::cli::ARG_PORT_SHORT ||
         arg == vayu::core::constants::cli::ARG_PORT_LONG) {
-            if (i + 1 < argc) {
-                port = std::stoi (argv[++i]);
+            if (i + 1 < args.size ()) {
+                port = std::stoi (args[++i]);
             }
         } else if (arg == "-d" || arg == "--data-dir") {
-            if (i + 1 < argc) {
-                data_dir = argv[++i];
+            if (i + 1 < args.size ()) {
+                data_dir = args[++i];
             }
         } else if (arg == "-v" || arg == "--verbose") {
             // Check if next arg is a number (verbosity level)
-            if (i + 1 < argc && std::isdigit (argv[i + 1][0])) {
-                verbosity = std::stoi (argv[++i]);
+            if (i + 1 < args.size () &&
+            std::isdigit (static_cast<unsigned char> (*args[i + 1])) != 0) {
+                verbosity = std::stoi (args[++i]);
                 // Clamp to valid range [0, 2]
                 verbosity = std::max (0, std::min (2, verbosity));
             } else {

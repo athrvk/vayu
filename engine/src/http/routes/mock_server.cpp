@@ -84,7 +84,7 @@ std::string normalize_colon_segment (const std::string& segment) {
     if (segment.size () < 2 || segment[0] != ':') {
         return segment;
     }
-    const std::string_view name (segment.data () + 1, segment.size () - 1);
+    const std::string_view name = std::string_view (segment).substr (1);
     if (!std::all_of (name.begin (), name.end (), is_path_template_char)) {
         return segment;
     }
