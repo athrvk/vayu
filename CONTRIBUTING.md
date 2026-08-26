@@ -138,9 +138,11 @@ vayu/
   apart again.
 
   A finding fails in both places - the hook refuses the commit, CI fails the
-  engine job - and both gate the **whole of every file** you touch (#946; the
-  tree is clean, so every finding in a file you edit is yours to fix or to
-  NOLINT with a reason). A hook refusal is therefore a merge blocker you are
+  engine job - and the hook and CI's Linux leg gate the **whole of every
+  file** you touch (#946; the tree is clean on that toolchain, so every
+  finding in a file you edit is yours to fix or to NOLINT with a reason).
+  CI's Windows leg still gates changed lines until #1023 zeroes what only
+  its toolchain sees. A hook refusal is therefore a merge blocker you are
   seeing early. See
   [Static Analysis](docs/engine/building.md#static-analysis).
 

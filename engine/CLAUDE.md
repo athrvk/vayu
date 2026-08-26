@@ -231,13 +231,17 @@ engine/
   surface through every changed translation unit that includes it (#946); a
   header-only change relies on the hook, which lints a staged header directly
   against the local build tree.
-  **Both gate whole files** (#946, the promotion that closed the #928 backlog
-  paydown; #902 is why the two scopes match). Changed-lines scoping existed
-  only to quarantine a backlog older than any diff, and went with the backlog:
-  a finding anywhere in a file a commit stages or a pull request changes is
-  that change's to fix, or to NOLINT with the reason at the site. Both gates
-  invoke clang-tidy directly per file - the `clang-tidy-diff.py` driver, the
-  `VAYU_TIDY_FULL` opt-in and the line-filter machinery are gone. Nothing
+  **The hook and CI's Linux leg gate whole files** (#946, the promotion that
+  closed the #928 backlog paydown). Changed-lines scoping existed only to
+  quarantine a backlog older than any diff, and went with the backlog *where
+  the zero was measured* - the Linux toolchain: a finding anywhere in a file a
+  commit stages or a Linux-visible pull request change is that change's to
+  fix, or to NOLINT with the reason at the site; the `VAYU_TIDY_FULL` opt-in
+  and the hook's line-filter machinery are gone. **CI's Windows leg stays at
+  changed lines** (#1023): its clang-tidy 20 over MSVC sees a backlog no
+  Linux scan could (`pro-type-vararg` on every `curl_easy_setopt`, 20-only
+  checks, Windows-only code), measured at ~85 findings by the promotion's own
+  PR - it promotes when #1023 zeroes that. Nothing
   lints at *build*
   time: the commented-out `CMAKE_CXX_CLANG_TIDY` block went with #885, because a
   lint that runs when someone uncomments it never runs. See

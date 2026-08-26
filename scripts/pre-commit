@@ -216,8 +216,9 @@ for FILE in $FILES; do
 done
 
 # Whole staged files, not changed lines (#946 - the promotion that closed the
-# #928 backlog paydown; #902 aligned the two gates and they stay aligned, so CI
-# gates whole changed files too).
+# #928 backlog paydown; CI's Linux leg gates whole changed files too, its
+# Windows leg still changed lines until #1023 zeroes what only that
+# toolchain sees).
 #
 # Line scoping existed to quarantine a backlog: the engine had never been
 # linted, so most files carried findings older than any diff, and a whole-file

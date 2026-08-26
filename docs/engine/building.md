@@ -978,7 +978,7 @@ clang-tidy runs in two places, and both of them can stop a change:
 | Where | What it lints | What a finding does |
 |-------|---------------|---------------------|
 | `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **whole** of every staged `.c/.cpp/.h/.hpp` file | Refuses the commit |
-| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **whole** of every changed `engine/{src,include,tests}` **translation unit** - headers are never direct inputs - on Linux and Windows | Fails CI |
+| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | On Linux, the **whole** of every changed `engine/{src,include,tests}` **translation unit**; on Windows, the **changed lines** of those units until #1023 zeroes that leg's own backlog. Headers are never direct inputs | Fails CI |
 
 A finding is a failure because `engine/.clang-tidy` sets
 `WarningsAsErrors: '*'`; with that empty, clang-tidy prints every diagnostic it
@@ -1010,6 +1010,19 @@ scan-guard tests (`reentrant_test.cpp`, `character_cast_test.cpp`,
 `bounds_primitives_test.cpp`, `optional_assert_test.cpp`) keep their job of
 holding *unedited* files to the spellings they pin.
 
+**One leg is deliberately not promoted yet.** The zero above was measured on
+the Linux toolchain - clang-tidy 19 over GCC compile commands, the only
+toolchain any #928 wave scanned with - and the promotion's own PR proved the
+zero does not transfer: the first whole-file lint ever run on the Windows leg
+reported ~85 findings in the touched files alone, none on a line the diff
+wrote (`pro-type-vararg` on every `curl_easy_setopt`, which curl's GCC
+typecheck macro hides from Linux; checks that exist only in that leg's
+clang-tidy 20; findings in Windows-only code a Linux lint never compiles).
+Promoting a leg ahead of its measured zero is the original failure back
+again, so the Windows leg keeps changed-lines scope - the `clang-tidy-diff.py`
+mechanism, unchanged - until #1023 measures its real backlog, zeroes it, and
+collapses the branch.
+
 **"Clean" means the whole tree, headers included - and a scan has to be asked
 for that** (#1013). `run-clang-tidy` reports nothing found in a header unless
 `-header-filter` is passed **on the command line**: the `HeaderFilterRegex` in
@@ -1025,7 +1038,7 @@ So the re-measure command is:
 
 ```bash
 run-clang-tidy-19 -p engine/build -quiet \
-  -header-filter='.*/(src|include|tests)/.*' \
+  -header-filter='.*[/\\]engine[/\\](src|include|tests)[/\\].*' \
   -extra-arg=-Wno-ignored-gch <every non-vendor translation unit>
 ```
 
@@ -1072,12 +1085,15 @@ whole staged files against a tree full of backlog, so a one-line edit to a
 legacy file was refused a commit over findings CI would let through, and
 `--no-verify` was the only way past it. #902 brought it down to CI's
 changed-lines scope, because a hook that has to be bypassed to commit is
-advisory in practice. #946 brought *both* up to whole files, because the
-backlog whose existence was the whole argument for line scoping was gone. The
-`VAYU_TIDY_FULL=1` escape hatch went with it - whole-file linting is simply
-what the hook does now - as did CI's `clang-tidy-diff.py` driver and the Python
-interpreter it needed: both gates invoke clang-tidy directly on each file, with
-no line filter to compute.
+advisory in practice. #946 brought the hook and CI's Linux leg up to whole
+files, because the backlog whose existence was the whole argument for line
+scoping was gone there. The `VAYU_TIDY_FULL=1` escape hatch went with it -
+whole-file linting is simply what the hook does now - and those two invoke
+clang-tidy directly on each file, with no line filter to compute; only CI's
+Windows leg still carries `clang-tidy-diff.py`, for the reason above, until
+#1023 retires it. A Windows contributor's hook may therefore surface
+findings CI's Windows leg does not yet gate - `git commit --no-verify` is
+the escape while #1023 is open, and CI remains the gate of record.
 
 **A bulk reformat is the one change this gate cannot price fairly**, and the
 escape is a label. The gate's unit of cost is the translation-unit parse, and a

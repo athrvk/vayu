@@ -234,7 +234,12 @@ CheckOptions:
 # which could stop anything. Set here rather than as a `--warnings-as-errors`
 # flag at each call site so the two cannot disagree about what counts.
 WarningsAsErrors: '*'
-HeaderFilterRegex: '.*/(?:src|include|tests)/.*'
+# Anchored to `engine/` deliberately (#946): the unanchored spelling
+# `.*/(src|include|tests)/.*` matched every toolchain's own `include`
+# directory, and the first whole-file lint on Windows reported a finding
+# inside MSVC's `xfilesystem_abi.h`. Both separators, because MSVC paths
+# arrive with backslashes.
+HeaderFilterRegex: '.*[/\\]engine[/\\](?:src|include|tests)[/\\].*'
 ExcludeHeaderFilterRegex: '.*/vendor/.*'
 FormatStyle: file
 ...
