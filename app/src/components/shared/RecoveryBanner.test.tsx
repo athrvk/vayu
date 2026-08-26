@@ -71,6 +71,57 @@ describe("RecoveryBanner", () => {
 		expect(screen.queryByText(/Your Vayu data was reset/)).toBeNull();
 	});
 
+	it("names the quarantined file and how to read it", () => {
+		// The engine keeps the unreadable database rather than deleting it
+		// (issue #984), and this banner is the only thing that tells the user -
+		// so a path the engine sent and the app drops is the whole salvage
+		// route lost.
+		useEngineStore.setState({
+			recovery: {
+				...DELETED,
+				outcome: "started_fresh_quarantined",
+				quarantinedPath: "/home/someone/.vayu/vayu.db.corrupt-1755870000000",
+			},
+		});
+		render(<RecoveryBanner />);
+
+		expect(screen.getByText(/Your Vayu data was reset/)).toBeTruthy();
+		expect(
+			screen.getByText(
+				/sqlite3 \/home\/someone\/\.vayu\/vayu\.db\.corrupt-1755870000000 \.recover/
+			)
+		).toBeTruthy();
+	});
+
+	it("does not promise a kept copy when the engine deleted the file", () => {
+		// `deleted_corrupt` still happens - an engine older than #984, or one
+		// whose rename failed - and it carries no path. Telling that user to
+		// run `.recover` on a file that is not there is worse than saying
+		// nothing.
+		useEngineStore.setState({ recovery: DELETED });
+		render(<RecoveryBanner />);
+
+		expect(screen.queryByText(/\.recover/)).toBeNull();
+		expect(screen.getByText(/it was deleted/)).toBeTruthy();
+	});
+
+	it("says the backup was unusable rather than absent when it was", () => {
+		// The two reasons a wipe happened are different facts about the user's
+		// machine: no backup existed, or the one that did was also unreadable.
+		// The second is the one that says the disk may be at fault.
+		useEngineStore.setState({
+			recovery: {
+				...DELETED,
+				outcome: "backup_also_corrupt",
+				quarantinedPath: "/home/someone/.vayu/vayu.db.corrupt-1755870000000",
+			},
+		});
+		render(<RecoveryBanner />);
+
+		expect(screen.getByText(/the backup beside it could not be opened either/)).toBeTruthy();
+		expect(screen.queryByText(/no usable backup was found/)).toBeNull();
+	});
+
 	it("stays dismissed, and persists the acknowledgment so the next launch is quiet", () => {
 		useEngineStore.setState({ recovery: DELETED });
 		const { container } = render(<RecoveryBanner />);

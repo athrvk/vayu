@@ -1306,19 +1306,26 @@ useHealthQuery() // Polls every TIMING.HEALTH_CHECK_INTERVAL_MS (30s)
   version: "0.3.0",
   workers: 8,
   // Optional (issue #922): present only when this engine startup restored the
-  // database from its backup or deleted it as unrecoverable. Absent on a clean
-  // start, which is also what a genuine first run gives.
+  // database from its backup or started fresh because it could not. Absent on a
+  // clean start, which is also what a genuine first run gives.
   recovery?: {
-    outcome: "restored_from_backup" | "deleted_corrupt",
+    outcome: "restored_from_backup" | "started_fresh_quarantined"
+           | "backup_also_corrupt" | "deleted_corrupt",
     at: 1755870000000,   // epoch ms
-    databasePath: "/home/someone/.local/share/vayu/vayu.db"
+    databasePath: "/home/someone/.local/share/vayu/vayu.db",
+    // Optional (issue #984): where the unopenable database was moved to, when
+    // it was moved rather than deleted. Absent for `deleted_corrupt`.
+    quarantinedPath?: "/home/someone/.local/share/vayu/vayu.db.corrupt-1755870000000"
   }
 }
 ```
 
 `useHealthQuery` mirrors `recovery` onto `engine-store`, and `RecoveryBanner` is
 its only reader - it is the one thing that tells the user their data was
-restored or wiped.
+restored or wiped, and the only place the quarantined file and its `sqlite3
+... .recover` command are named. Its copy is a `Record` over the outcome union,
+so an outcome the engine adds without copy for it fails `pnpm type-check` rather
+than being announced as whichever branch came last.
 
 ### Engine Startup
 

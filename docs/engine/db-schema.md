@@ -24,13 +24,46 @@ whether that succeeded:
 | Outcome | What happens to the files | What is recorded |
 |---------|---------------------------|------------------|
 | Opens cleanly | The whole file set is copied to `<db>.bak` (sidecars included), so the backup is only ever taken from a database that validated | Nothing |
-| Fails, `<db>.bak` restores over it | The corrupted file set is removed and the backup copied back | `restored_from_backup` |
-| Fails, no backup restores it | `<db>`, `<db>-wal` and `<db>-shm` are **deleted** and a fresh empty database is created | `deleted_corrupt` |
+| Fails, `<db>.bak` passes the same validation | The corrupt file set is quarantined and the backup copied back over it | `restored_from_backup` |
+| Fails, `<db>.bak` fails the same validation | The backup is left untouched as evidence, the corrupt file set is quarantined, and a fresh empty database is created | `backup_also_corrupt` |
+| Fails, there is no backup | The corrupt file set is quarantined and a fresh empty database is created | `started_fresh_quarantined` |
+| Fails, and the quarantine rename fails too | `<db>`, `<db>-wal` and `<db>-shm` are **deleted** so the daemon can still start | `deleted_corrupt` |
 
-The deletion is deliberate - the alternative is a daemon that fails to start on
-every launch forever - but it is total: collections, requests, environments,
+Starting fresh is deliberate - the alternative is a daemon that fails to start
+on every launch forever - but it is total: collections, requests, environments,
 saved examples, spec documents and run history are all gone, and the app comes
 up looking like a fresh install.
+
+### The quarantine (issue #984)
+
+A database that fails validation is **moved, not deleted**: `<db>` becomes
+`<db>.corrupt-<epoch-ms>` with its `-wal` and `-shm` sidecars renamed alongside.
+SQLite's own tooling can usually pull most rows back out of a damaged file, and
+only while the file exists:
+
+```
+sqlite3 /path/to/vayu.db.corrupt-1755870000000 .recover > salvage.sql
+```
+
+Two rules bound it:
+
+- **At most two sets are kept.** These are full-size copies written unattended
+  into the user's data directory; the newest two survive each recovery and older
+  ones are pruned. Two, not one, because the set before the current one is what
+  says this has happened before.
+- **The backup is validated before it is trusted.** It gets the same open plus
+  `sync_schema()` probe the main file gets - which also migrates a backup taken
+  by an older build before it is committed to. A backup that fails is left
+  exactly where it is rather than written over the original, which is what
+  `backup_also_corrupt` records.
+
+One implementation detail worth knowing before changing the order of that code:
+the validation probe cannot be the first thing to touch the file. SQLite
+**deletes the `-wal` and `-shm`** when it opens a file whose header is not a
+database's, and a `-wal` holds committed transactions the main file does not, so
+the sidecars would be gone before the quarantine could move them. The
+constructor reads the 16-byte SQLite header itself first and only opens a file
+that could plausibly be a database.
 
 ### The recovery marker (issue #922)
 
@@ -39,11 +72,17 @@ thing that just went away, so it is a small JSON file beside it, `<db>.recovery`
 written by `engine/src/db/recovery.cpp`:
 
 ```json
-{ "outcome": "deleted_corrupt", "at": 1755870000000 }
+{
+  "outcome": "started_fresh_quarantined",
+  "at": 1755870000000,
+  "quarantinedPath": "/home/someone/.local/share/vayu/vayu.db.corrupt-1755870000000"
+}
 ```
 
-`at` is epoch milliseconds, as every other engine timestamp is. Two rules the
-readers depend on:
+`at` is epoch milliseconds, as every other engine timestamp is.
+`quarantinedPath` is present only when a set was moved aside - absent for
+`deleted_corrupt` and for any marker written before #984 - so a reader tests for
+it rather than deriving it from `outcome`. Two rules the readers depend on:
 
 - **A clean start writes no marker.** The file's presence alone is what
   distinguishes a wiped database from a genuine first run, which produces an
@@ -58,7 +97,8 @@ readers depend on:
 `Database::recovery()`, so the polled `GET /health` costs no file access. That
 endpoint reports it as a `recovery` node, absent on a clean start - see
 [api-reference.md](api-reference.md#get-health) - and the app renders it as a
-dismissible banner naming the database path.
+dismissible banner naming the database path and, when there is one, the
+quarantined file and the `.recover` command that reads it.
 
 ---
 

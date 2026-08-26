@@ -455,18 +455,20 @@ to recover the database, and **absent** on a clean start rather than `null`:
   "version": "0.3.0",
   "workers": 8,
   "recovery": {
-    "outcome": "deleted_corrupt",
+    "outcome": "started_fresh_quarantined",
     "at": 1755870000000,
-    "databasePath": "/home/someone/.local/share/vayu/vayu.db"
+    "databasePath": "/home/someone/.local/share/vayu/vayu.db",
+    "quarantinedPath": "/home/someone/.local/share/vayu/vayu.db.corrupt-1755870000000"
   }
 }
 ```
 
 | Field | Meaning |
 |-------|---------|
-| `outcome` | `restored_from_backup` - the database failed validation and `<db>.bak` was restored over it. `deleted_corrupt` - it failed validation, no backup restored it, and it was **deleted** so the daemon could start |
+| `outcome` | `restored_from_backup` - `<db>.bak` passed the same validation and was restored over the corrupt database. `started_fresh_quarantined` - no backup restored it, so it was moved aside and a fresh one created. `backup_also_corrupt` - a backup existed, failed the same validation, and was left untouched rather than restored. `deleted_corrupt` - it was **deleted**, which an engine older than issue #984 always did and this one does only when the quarantine rename fails |
 | `at` | When that happened, epoch milliseconds |
 | `databasePath` | The database file it happened to |
+| `quarantinedPath` | Where the unopenable database was moved to, readable with `sqlite3 <path> .recover`. **Optional** - absent for `deleted_corrupt` and for markers written before #984, so test for it rather than deriving it from `outcome` |
 
 The node is read from a marker file beside the database and stands until a later
 recovery overwrites it, so a client that has already told the user about an
