@@ -433,6 +433,381 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     return summary;
 }
 
+/** What one step of an iteration needs from the run around it. */
+struct StepContext {
+    const std::shared_ptr<RunContext>& context;
+    const std::shared_ptr<const ScenarioExecution>& execution;
+    const std::optional<ResponseSchemaIndex>& schema_index;
+    const vayu::http::TransportPolicy& transport;
+    const std::string& cookie_scope;
+    const std::vector<nlohmann::json>& data_rows;
+    std::optional<size_t> data_row_index;
+    size_t iteration       = 0;
+    size_t iteration_count = 0;
+    bool fail_on_schema_error = false;
+    size_t max_trace_body_bytes = 0;
+};
+
+/**
+ * The exchange one step performs: its inputs, the row bound into them, and the
+ * send itself.
+ *
+ * Composition left every `{{data.column}}` written as it stands, because only
+ * this loop knows which row is bound. A token naming a column the row does not
+ * carry ends the step here rather than sending a request with a hole in it - the
+ * partially bound request is still kept, because the trace is where the user
+ * sees the token that had no column.
+ *
+ * @return the binding failure, empty when the step was sent.
+ */
+std::string run_step_exchange (vayu::runtime::ScriptEngine& script_engine,
+vayu::http::CookieJar* cookie_jar,
+const std::string& cookie_scope,
+bool verbose,
+vayu::http::routes::ScriptVariableScopes& scopes,
+const StepContext& ctx,
+const ScenarioStep& step,
+vayu::http::routes::ExchangeOutcome& exchange) {
+    vayu::http::routes::ExchangeInputs inputs;
+    // A copy, not a move: the pre-request script writes back into
+    // this request, and the next iteration must start from the
+    // composed one rather than from whatever the last pass left.
+    inputs.request         = step.request;
+    inputs.pre_script      = step.pre_script;
+    inputs.post_script     = step.post_script;
+    inputs.request_id      = step.request_id;
+    inputs.request_name    = step.name;
+    inputs.iteration       = ctx.iteration;
+    inputs.iteration_count = ctx.iteration_count;
+    inputs.transport       = ctx.transport;
+    // The one caller that sets it: `pm.execution` throws
+    // everywhere else, because nowhere else has a sequence to
+    // redirect (issue #355).
+    inputs.in_scenario = true;
+
+    // The data pass, per iteration and before the send: composition
+    // left every `{{data.column}}` written as it stands, because
+    // only this loop knows which row is bound. A token naming a
+    // column the row does not carry ends the step here rather than
+    // sending a request with a hole in it.
+    std::string data_bind_error;
+    if (ctx.data_row_index) {
+        inputs.iteration_data = &ctx.data_rows[*ctx.data_row_index];
+        // Through the step's own template rather than re-splitting
+        // the request here: one binder for both executors, so a
+        // step cannot bind differently depending on which one ran
+        // it.
+        auto bound = apply_data_template (inputs.request,
+        step.data_template, ctx.data_rows[*ctx.data_row_index], *ctx.data_row_index);
+        if (bound.ok) {
+            // Then the credentials, for a step whose auth the plan
+            // deliberately left unresolved: they have to carry the
+            // row's values *before* `apply_auth` base64-encodes
+            // them onto the request (issue #591). A no-op for every
+            // other step.
+            bound = bind_step_auth (inputs.request, step,
+            ctx.data_rows[*ctx.data_row_index], *ctx.data_row_index);
+        }
+        if (!bound.ok) {
+            data_bind_error = std::move (bound.error);
+        }
+    }
+
+    if (data_bind_error.empty ()) {
+        exchange = vayu::http::routes::execute_exchange (script_engine,
+        *cookie_jar, cookie_scope, scopes, std::move (inputs), verbose);
+    } else {
+        // Nothing was sent and no script ran. The partially bound
+        // request is kept anyway: the trace is where the user sees
+        // the `{{data.*}}` token that had no column, which is the
+        // thing they have to go and fix.
+        exchange.request = std::move (inputs.request);
+        exchange.sent    = false;
+    }
+    return data_bind_error;
+}
+
+/**
+ * What the step did, as the row and the frame a reader sees.
+ *
+ * A row that could not bind is this step's failure and is not classifiable from
+ * the exchange - there is no exchange. It errors rather than skipping: a skip is
+ * a script's decision, this is a request that could not be built.
+ */
+StepRecord record_step (const StepContext& ctx,
+const ScenarioStep& step,
+const vayu::http::routes::ExchangeOutcome& exchange,
+const std::string& data_bind_error,
+ScenarioSummaryInputs& summary) {
+    StepRecord record;
+    record.iteration      = ctx.iteration;
+    record.data_row_index = ctx.data_row_index;
+    record.step_index     = step.index;
+    record.step_name      = step.name;
+    record.request_id     = step.request_id;
+    // A row that could not bind is this step's failure and is not
+    // classifiable from the exchange - there is no exchange. It
+    // errors rather than skipping: a skip is a script's decision,
+    // this is a request that could not be built.
+    if (!data_bind_error.empty ()) {
+        record.outcome = StepOutcome::Errored;
+        record.error   = data_bind_error;
+    } else {
+        record.outcome = classify_step (exchange, record.error);
+    }
+    record.status_code = exchange.response.status_code;
+    record.status_text = exchange.response.status_text;
+    record.latency_ms  = exchange.response.timing.total_ms;
+    // The assertions this step made (issue #724), for the frame a
+    // live watcher reads. A step whose row could not bind ran no
+    // script and gets no tally - `exchange` is the default one.
+    record.tests =
+    tally_tests (exchange.pre_script_result, exchange.post_script_result);
+
+    // What the contract says about what came back (issue #681).
+    // Only for a step that sent: a skipped step and one whose data
+    // row would not bind produced no response, and a `checked:
+    // false` verdict for them would be reporting on a request
+    // nobody made - the same reading that erases `response` from
+    // their trace below.
+    if (exchange.sent) {
+        record.validation = validate_step_response (
+        ctx.execution->spec, ctx.schema_index, step, exchange.response);
+        if (record.validation) {
+            // The step's name and status ride the tally so a failure
+            // example read far from the step list still says which
+            // step produced it - the load pass's reason, unchanged.
+            summary.validation.record (*record.validation,
+            record.step_name, record.status_code);
+        }
+    }
+
+    // The opt-in, applied before flow control reads the outcome. It
+    // demotes **only a step that passed everything else**: a step
+    // already failing an assertion or a transport error keeps the
+    // error that named it, because that is the one a reader has to
+    // fix first. With the flag off - the default - a schema failure
+    // changes nothing here and lives entirely in its own channel.
+    if (ctx.fail_on_schema_error &&
+    record.outcome == StepOutcome::Passed && record.validation &&
+    record.validation->checked && !record.validation->valid) {
+        record.outcome = StepOutcome::Failed;
+        record.error = describe_schema_failure (*record.validation);
+    }
+    return record;
+}
+
+/**
+ * Where this iteration goes next, decided before the row is written: an
+ * instruction that cannot be honoured is this step's error, and the record has
+ * to say so.
+ *
+ * @return the position the iteration continues at; @p end_iteration says whether
+ *         it continues at all.
+ */
+size_t decide_next_step (const vayu::http::routes::ExchangeOutcome& exchange,
+const ScenarioStepNameIndex& name_index,
+const std::deque<std::string>& recent_steps,
+size_t position,
+size_t steps_this_iteration,
+size_t max_steps_per_iteration,
+StepRecord& record,
+bool& end_iteration) {
+    // Where this iteration goes next, decided before the row is
+    // written: an instruction that cannot be honoured is this
+    // step's failure, so it has to reach `record.outcome` while the
+    // row and the SSE event are still ahead of us.
+    size_t next_position = position + 1;
+    if (!end_iteration) {
+        // The test script ran later, so its instruction wins over
+        // the pre-request script's - "last call wins", across the
+        // two scripts as within one. A skip comes only from the
+        // pre-request script; the binding throws in a test script.
+        const auto& control = exchange.post_script_result.control.kind !=
+        vayu::ScriptControl::Kind::None ?
+        exchange.post_script_result.control :
+        exchange.pre_script_result.control;
+
+        switch (control.kind) {
+        case vayu::ScriptControl::Kind::None:
+        case vayu::ScriptControl::Kind::Skip:
+            // A skip has already happened - the exchange sent
+            // nothing - and skipping one step is not a reason to
+            // stop walking the plan.
+            break;
+        case vayu::ScriptControl::Kind::EndIteration:
+            end_iteration = true;
+            break;
+        case vayu::ScriptControl::Kind::Next:
+            if (steps_this_iteration >= max_steps_per_iteration) {
+                record.outcome = StepOutcome::Errored;
+                record.error =
+                "Iteration exceeded maxStepsPerIteration (" +
+                std::to_string (max_steps_per_iteration) +
+                ") - setNextRequest is cycling through: " +
+                describe_recent_steps (recent_steps);
+                end_iteration = true;
+            } else if (auto next =
+                       resolve_next_step (name_index, control.target);
+            !next.ok) {
+                record.outcome = StepOutcome::Errored;
+                record.error   = next.error;
+                end_iteration  = true;
+            } else {
+                next_position = next.index;
+            }
+            break;
+        }
+    }
+    return next_position;
+}
+
+/**
+ * What the step leaves behind: its trace, the run's tallies, the stored row and
+ * the live frame.
+ */
+void store_step_record (const StepContext& ctx,
+const ScenarioStep& step,
+const vayu::http::routes::ExchangeOutcome& exchange,
+StepRecord& record,
+CoverageTally& coverage,
+ScenarioSummaryInputs& summary,
+ScenarioStepStore& store) {
+    record.trace = vayu::http::routes::build_result_trace (
+    exchange.request, exchange.response);
+    if (!exchange.sent) {
+        // A skipped step has no response, and the empty one
+        // `build_result_trace` writes for a default `Response`
+        // would read in the step's expanded view as a server that
+        // answered with nothing. The row keeps the request, which
+        // is what the step actually amounted to.
+        record.trace.erase ("response");
+    }
+    stamp_step_identity (record.trace, record);
+    vayu::json::cap_trace_bodies (record.trace, ctx.max_trace_body_bytes);
+
+    // What the scripts produced, on the node design mode already
+    // writes and `restore-response.ts` already reads (issue #724).
+    // Without it a step's detail could only ever show the one-line
+    // summary `classify_step` folded the assertions into, while the
+    // same request sent on its own shows every one of them.
+    //
+    // After the body cap for the reason `record_design_result`
+    // gives: `cap_trace_bodies` walks the request and response body
+    // nodes and does not reach this one, so writing it here makes
+    // that impossible to misread as covered. Only when the scripts
+    // said something - an empty node would put a Tests pane's worth
+    // of nothing on every stored step.
+    if (auto scripts = vayu::http::routes::build_script_result_node (
+        exchange.pre_script_result, exchange.post_script_result);
+    !scripts.empty ()) {
+        record.trace["scripts"] = std::move (scripts);
+    }
+
+    ++summary.steps_executed;
+    // Only a step that actually sent counts towards coverage: a
+    // skipped step exercised no operation, and counting it would
+    // report a contract as covered by a request nobody made.
+    if (exchange.sent) {
+        coverage.record (step.index, record.status_code);
+    }
+    switch (record.outcome) {
+    case StepOutcome::Passed: ++summary.passed; break;
+    case StepOutcome::Failed: ++summary.failed; break;
+    case StepOutcome::Skipped: ++summary.skipped; break;
+    case StepOutcome::Errored: ++summary.errored; break;
+    }
+
+    vayu::db::Result row;
+    row.run_id      = ctx.context->run_id;
+    row.timestamp   = runner_now_ms ();
+    row.status_code = record.status_code;
+    row.status_text = record.status_text;
+    row.latency_ms  = record.latency_ms;
+    row.error       = record.error;
+    // A capped body may split a UTF-8 sequence and a response body
+    // can be arbitrary bytes, so a lone continuation byte becomes
+    // U+FFFD instead of throwing (store_result does the same).
+    row.trace_data = record.trace.dump (
+    -1, ' ', false, nlohmann::json::error_handler_t::replace);
+    store.add (std::move (row), record.outcome != StepOutcome::Passed);
+
+    ctx.context->append_tick (
+    build_step_payload (record, ctx.context->published_count.load ()));
+}
+
+/**
+ * One iteration: a walk over the plan rather than a pass through it.
+ *
+ * A script may send it backwards, forwards or out early, so the position is a
+ * variable and the loop is bounded by the per-iteration budget rather than by
+ * the plan's length.
+ */
+void run_iteration (vayu::runtime::ScriptEngine& script_engine,
+vayu::http::CookieJar* cookie_jar,
+const std::string& cookie_scope,
+bool verbose,
+vayu::http::routes::ScriptVariableScopes& scopes,
+const StepContext& base,
+const ScenarioPlan& plan,
+const ScenarioStepNameIndex& name_index,
+size_t max_steps_per_iteration,
+CoverageTally& coverage,
+ScenarioSummaryInputs& summary,
+ScenarioStepStore& store) {
+    size_t position             = 0;
+    size_t steps_this_iteration = 0;
+    std::deque<std::string> recent_steps;
+
+    while (position < plan.steps.size ()) {
+        // Checked per step, not per iteration: a 50-step iteration
+        // would otherwise keep sending for minutes after the stop.
+        if (base.context->should_stop) {
+            break;
+        }
+
+        const auto& step = plan.steps[position];
+
+        vayu::http::routes::ExchangeOutcome exchange;
+        const StepContext& step_ctx = base;
+        const std::string data_bind_error = run_step_exchange (script_engine,
+        cookie_jar, cookie_scope, verbose, scopes, step_ctx, step, exchange);
+
+        ++steps_this_iteration;
+        recent_steps.push_back (step.name);
+        if (recent_steps.size () > CYCLE_TRAIL_LENGTH) {
+            recent_steps.pop_front ();
+        }
+
+        StepRecord record = record_step (
+        step_ctx, step, exchange, data_bind_error, summary);
+
+        bool end_iteration = record.outcome == StepOutcome::Errored;
+        const size_t next_position = decide_next_step (exchange, name_index,
+        recent_steps, position, steps_this_iteration, max_steps_per_iteration,
+        record, end_iteration);
+
+        store_step_record (
+        step_ctx, step, exchange, record, coverage, summary, store);
+
+        if (record.outcome == StepOutcome::Errored) {
+            // The iteration is over - a step that did not complete
+            // leaves the ones after it standing on state that never
+            // arrived. The run continues with the next iteration;
+            // continue-on-failure is deliberately not invented ahead of
+            // demand (design doc, "Deliberately left open").
+            vayu::utils::log_warning ("Scenario run " + base.context->run_id +
+            ": iteration " + std::to_string (base.iteration) +
+            " ended at step '" + record.step_name + "' - " + record.error);
+            break;
+        }
+        if (end_iteration) {
+            break;
+        }
+        position = next_position;
+    }
+}
+
 void execute_scenario_run (const std::shared_ptr<RunContext>& context,
 const std::shared_ptr<const ScenarioExecution>& execution,
 vayu::db::Database* db_ptr,
@@ -547,265 +922,11 @@ RunManager& manager) {
             // it: a script may send it backwards, forwards or out early, so the
             // position is a variable and the loop is bounded by the budget
             // above rather than by the plan's length.
-            size_t position             = 0;
-            size_t steps_this_iteration = 0;
-            std::deque<std::string> recent_steps;
-
-            while (position < plan.steps.size ()) {
-                // Checked per step, not per iteration: a 50-step iteration
-                // would otherwise keep sending for minutes after the stop.
-                if (context->should_stop) {
-                    break;
-                }
-
-                const auto& step = plan.steps[position];
-
-                vayu::http::routes::ExchangeInputs inputs;
-                // A copy, not a move: the pre-request script writes back into
-                // this request, and the next iteration must start from the
-                // composed one rather than from whatever the last pass left.
-                inputs.request         = step.request;
-                inputs.pre_script      = step.pre_script;
-                inputs.post_script     = step.post_script;
-                inputs.request_id      = step.request_id;
-                inputs.request_name    = step.name;
-                inputs.iteration       = iteration;
-                inputs.iteration_count = asked.iterations;
-                inputs.transport       = transport;
-                // The one caller that sets it: `pm.execution` throws
-                // everywhere else, because nowhere else has a sequence to
-                // redirect (issue #355).
-                inputs.in_scenario = true;
-
-                // The data pass, per iteration and before the send: composition
-                // left every `{{data.column}}` written as it stands, because
-                // only this loop knows which row is bound. A token naming a
-                // column the row does not carry ends the step here rather than
-                // sending a request with a hole in it.
-                std::string data_bind_error;
-                if (data_row_index) {
-                    inputs.iteration_data = &data_rows[*data_row_index];
-                    // Through the step's own template rather than re-splitting
-                    // the request here: one binder for both executors, so a
-                    // step cannot bind differently depending on which one ran
-                    // it.
-                    auto bound = apply_data_template (inputs.request,
-                    step.data_template, data_rows[*data_row_index], *data_row_index);
-                    if (bound.ok) {
-                        // Then the credentials, for a step whose auth the plan
-                        // deliberately left unresolved: they have to carry the
-                        // row's values *before* `apply_auth` base64-encodes
-                        // them onto the request (issue #591). A no-op for every
-                        // other step.
-                        bound = bind_step_auth (inputs.request, step,
-                        data_rows[*data_row_index], *data_row_index);
-                    }
-                    if (!bound.ok) {
-                        data_bind_error = std::move (bound.error);
-                    }
-                }
-
-                vayu::http::routes::ExchangeOutcome exchange;
-                if (data_bind_error.empty ()) {
-                    exchange = vayu::http::routes::execute_exchange (script_engine,
-                    *cookie_jar, cookie_scope, scopes, std::move (inputs), verbose);
-                } else {
-                    // Nothing was sent and no script ran. The partially bound
-                    // request is kept anyway: the trace is where the user sees
-                    // the `{{data.*}}` token that had no column, which is the
-                    // thing they have to go and fix.
-                    exchange.request = std::move (inputs.request);
-                    exchange.sent    = false;
-                }
-
-                ++steps_this_iteration;
-                recent_steps.push_back (step.name);
-                if (recent_steps.size () > CYCLE_TRAIL_LENGTH) {
-                    recent_steps.pop_front ();
-                }
-
-                StepRecord record;
-                record.iteration      = iteration;
-                record.data_row_index = data_row_index;
-                record.step_index     = step.index;
-                record.step_name      = step.name;
-                record.request_id     = step.request_id;
-                // A row that could not bind is this step's failure and is not
-                // classifiable from the exchange - there is no exchange. It
-                // errors rather than skipping: a skip is a script's decision,
-                // this is a request that could not be built.
-                if (!data_bind_error.empty ()) {
-                    record.outcome = StepOutcome::Errored;
-                    record.error   = data_bind_error;
-                } else {
-                    record.outcome = classify_step (exchange, record.error);
-                }
-                record.status_code = exchange.response.status_code;
-                record.status_text = exchange.response.status_text;
-                record.latency_ms  = exchange.response.timing.total_ms;
-                // The assertions this step made (issue #724), for the frame a
-                // live watcher reads. A step whose row could not bind ran no
-                // script and gets no tally - `exchange` is the default one.
-                record.tests =
-                tally_tests (exchange.pre_script_result, exchange.post_script_result);
-
-                // What the contract says about what came back (issue #681).
-                // Only for a step that sent: a skipped step and one whose data
-                // row would not bind produced no response, and a `checked:
-                // false` verdict for them would be reporting on a request
-                // nobody made - the same reading that erases `response` from
-                // their trace below.
-                if (exchange.sent) {
-                    record.validation = validate_step_response (
-                    execution->spec, schema_index, step, exchange.response);
-                    if (record.validation) {
-                        // The step's name and status ride the tally so a failure
-                        // example read far from the step list still says which
-                        // step produced it - the load pass's reason, unchanged.
-                        summary.validation.record (*record.validation,
-                        record.step_name, record.status_code);
-                    }
-                }
-
-                // The opt-in, applied before flow control reads the outcome. It
-                // demotes **only a step that passed everything else**: a step
-                // already failing an assertion or a transport error keeps the
-                // error that named it, because that is the one a reader has to
-                // fix first. With the flag off - the default - a schema failure
-                // changes nothing here and lives entirely in its own channel.
-                if (fail_on_schema_error &&
-                record.outcome == StepOutcome::Passed && record.validation &&
-                record.validation->checked && !record.validation->valid) {
-                    record.outcome = StepOutcome::Failed;
-                    record.error = describe_schema_failure (*record.validation);
-                }
-
-                // Where this iteration goes next, decided before the row is
-                // written: an instruction that cannot be honoured is this
-                // step's failure, so it has to reach `record.outcome` while the
-                // row and the SSE event are still ahead of us.
-                size_t next_position = position + 1;
-                bool end_iteration   = record.outcome == StepOutcome::Errored;
-                if (!end_iteration) {
-                    // The test script ran later, so its instruction wins over
-                    // the pre-request script's - "last call wins", across the
-                    // two scripts as within one. A skip comes only from the
-                    // pre-request script; the binding throws in a test script.
-                    const auto& control = exchange.post_script_result.control.kind !=
-                    vayu::ScriptControl::Kind::None ?
-                    exchange.post_script_result.control :
-                    exchange.pre_script_result.control;
-
-                    switch (control.kind) {
-                    case vayu::ScriptControl::Kind::None:
-                    case vayu::ScriptControl::Kind::Skip:
-                        // A skip has already happened - the exchange sent
-                        // nothing - and skipping one step is not a reason to
-                        // stop walking the plan.
-                        break;
-                    case vayu::ScriptControl::Kind::EndIteration:
-                        end_iteration = true;
-                        break;
-                    case vayu::ScriptControl::Kind::Next:
-                        if (steps_this_iteration >= max_steps_per_iteration) {
-                            record.outcome = StepOutcome::Errored;
-                            record.error =
-                            "Iteration exceeded maxStepsPerIteration (" +
-                            std::to_string (max_steps_per_iteration) +
-                            ") - setNextRequest is cycling through: " +
-                            describe_recent_steps (recent_steps);
-                            end_iteration = true;
-                        } else if (auto next =
-                                   resolve_next_step (name_index, control.target);
-                        !next.ok) {
-                            record.outcome = StepOutcome::Errored;
-                            record.error   = next.error;
-                            end_iteration  = true;
-                        } else {
-                            next_position = next.index;
-                        }
-                        break;
-                    }
-                }
-
-                record.trace = vayu::http::routes::build_result_trace (
-                exchange.request, exchange.response);
-                if (!exchange.sent) {
-                    // A skipped step has no response, and the empty one
-                    // `build_result_trace` writes for a default `Response`
-                    // would read in the step's expanded view as a server that
-                    // answered with nothing. The row keeps the request, which
-                    // is what the step actually amounted to.
-                    record.trace.erase ("response");
-                }
-                stamp_step_identity (record.trace, record);
-                vayu::json::cap_trace_bodies (record.trace, max_trace_body_bytes);
-
-                // What the scripts produced, on the node design mode already
-                // writes and `restore-response.ts` already reads (issue #724).
-                // Without it a step's detail could only ever show the one-line
-                // summary `classify_step` folded the assertions into, while the
-                // same request sent on its own shows every one of them.
-                //
-                // After the body cap for the reason `record_design_result`
-                // gives: `cap_trace_bodies` walks the request and response body
-                // nodes and does not reach this one, so writing it here makes
-                // that impossible to misread as covered. Only when the scripts
-                // said something - an empty node would put a Tests pane's worth
-                // of nothing on every stored step.
-                if (auto scripts = vayu::http::routes::build_script_result_node (
-                    exchange.pre_script_result, exchange.post_script_result);
-                !scripts.empty ()) {
-                    record.trace["scripts"] = std::move (scripts);
-                }
-
-                ++summary.steps_executed;
-                // Only a step that actually sent counts towards coverage: a
-                // skipped step exercised no operation, and counting it would
-                // report a contract as covered by a request nobody made.
-                if (exchange.sent) {
-                    coverage.record (step.index, record.status_code);
-                }
-                switch (record.outcome) {
-                case StepOutcome::Passed: ++summary.passed; break;
-                case StepOutcome::Failed: ++summary.failed; break;
-                case StepOutcome::Skipped: ++summary.skipped; break;
-                case StepOutcome::Errored: ++summary.errored; break;
-                }
-
-                vayu::db::Result row;
-                row.run_id      = context->run_id;
-                row.timestamp   = runner_now_ms ();
-                row.status_code = record.status_code;
-                row.status_text = record.status_text;
-                row.latency_ms  = record.latency_ms;
-                row.error       = record.error;
-                // A capped body may split a UTF-8 sequence and a response body
-                // can be arbitrary bytes, so a lone continuation byte becomes
-                // U+FFFD instead of throwing (store_result does the same).
-                row.trace_data = record.trace.dump (
-                -1, ' ', false, nlohmann::json::error_handler_t::replace);
-                store.add (std::move (row), record.outcome != StepOutcome::Passed);
-
-                context->append_tick (
-                build_step_payload (record, context->published_count.load ()));
-
-                if (record.outcome == StepOutcome::Errored) {
-                    // The iteration is over - a step that did not complete
-                    // leaves the ones after it standing on state that never
-                    // arrived. The run continues with the next iteration;
-                    // continue-on-failure is deliberately not invented ahead of
-                    // demand (design doc, "Deliberately left open").
-                    vayu::utils::log_warning ("Scenario run " + context->run_id +
-                    ": iteration " + std::to_string (iteration) +
-                    " ended at step '" + record.step_name + "' - " + record.error);
-                    break;
-                }
-                if (end_iteration) {
-                    break;
-                }
-                position = next_position;
-            }
+            const StepContext step_ctx{ context, execution, schema_index, transport,
+                cookie_scope, data_rows, data_row_index, iteration, asked.iterations,
+                fail_on_schema_error, max_trace_body_bytes };
+            run_iteration (script_engine, cookie_jar, cookie_scope, verbose, scopes,
+            step_ctx, plan, name_index, max_steps_per_iteration, coverage, summary, store);
 
             if (!context->should_stop) {
                 ++summary.iterations_completed;
