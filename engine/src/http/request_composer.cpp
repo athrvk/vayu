@@ -641,37 +641,22 @@ const std::vector<vayu::db::Collection>& chain) {
 
 } // namespace
 
-std::pair<int, nlohmann::json>
-compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
-    if (!body.is_object ()) {
-        return compose_error (
-        400, "invalid_compose_request", "Request body must be a JSON object");
-    }
+namespace {
 
-    const bool has_request_id =
-    body.contains ("requestId") && !body["requestId"].is_null ();
-    const bool has_inline = body.contains ("request") && !body["request"].is_null ();
-    if (has_request_id && !body["requestId"].is_string ()) {
-        return compose_error (400, "invalid_compose_request", "'requestId' must be a string");
-    }
-    if (has_inline && !body["request"].is_object ()) {
-        return compose_error (400, "invalid_compose_request", "'request' must be a JSON object");
-    }
-    if (!has_request_id && !has_inline) {
-        return compose_error (400, "invalid_compose_request",
-        "Provide 'requestId' (compose a saved request) and/or 'request' (an "
-        "inline request to compose)");
-    }
-
-    std::optional<vayu::db::Request> stored;
-    if (has_request_id) {
-        stored = db.get_request (body["requestId"].get<std::string> ());
-        if (!stored) {
-            return compose_error (404, "request_not_found",
-            "No saved request with id '" + body["requestId"].get<std::string> () + "'");
-        }
-    }
-
+/**
+ * The variables this composition resolves through, and the collection chain they
+ * come from.
+ *
+ * Scope: the saved request's own collection wins; an explicit `collectionId` is
+ * the inline path's scope (and a fallback for a stored request without one).
+ * Unknown ids degrade to an empty scope, the same tolerance the clients had -
+ * composition must still work with no collection at all.
+ */
+VariableValues resolve_compose_variables (vayu::db::Database& db,
+const nlohmann::json& body,
+const std::optional<vayu::db::Request>& stored,
+std::vector<vayu::db::Collection>& chain,
+std::string& environment_id) {
     // Scope: the saved request's own collection wins; an explicit collectionId
     // is the inline path's scope (and a fallback for a stored request without
     // one). Unknown ids degrade to an empty scope, the same tolerance the
@@ -682,13 +667,12 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
     } else if (body.contains ("collectionId") && body["collectionId"].is_string ()) {
         scope_collection_id = body["collectionId"].get<std::string> ();
     }
-    const auto chain = collection_chain (db, scope_collection_id);
+    chain = collection_chain (db, scope_collection_id);
 
     vayu::Environment globals, environment;
     if (auto db_globals = db.get_globals ()) {
         globals = vayu::json::parse_variables (db_globals->variables);
     }
-    std::string environment_id;
     if (body.contains ("environmentId") && body["environmentId"].is_string ()) {
         environment_id = body["environmentId"].get<std::string> ();
         if (auto db_env = db.get_environment (environment_id)) {
@@ -702,20 +686,22 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
     }
     const VariableValues vars =
     build_variable_values (globals, chain_variables, environment);
+    return vars;
+}
 
-    // Base payload from the stored request (raw), then the inline request laid
-    // over it field by field - so a `start_load_run { requestId, url }` style
-    // override replaces the stored URL but keeps everything else. Inline-only
-    // composition starts from an empty object. Both paths then resolve through
-    // the same code below, so overrides and stored fields follow one rule.
-    nlohmann::json payload =
-    stored ? payload_from_stored (*stored, chain) : nlohmann::json::object ();
-    if (has_inline) {
-        for (const auto& [key, value] : body["request"].items ()) {
-            payload[key] = value;
-        }
-    }
-
+/**
+ * The method, the URL and the headers.
+ *
+ * A header is the one field composition refuses a payload over, because it is
+ * the one whose text has a terminator and no escape for it: a substituted CR or
+ * LF does not sit in the header, it ends the line and makes the remainder a
+ * header nobody wrote. See `http/header_text.hpp` for the rule and for the
+ * pre-send gate that catches every other origin.
+ *
+ * @return the refusal, or nothing.
+ */
+std::optional<std::pair<int, nlohmann::json>> resolve_compose_head (
+const VariableValues& vars, nlohmann::json& payload) {
     if (auto method = payload.find ("method");
     method != payload.end () && method->is_string ()) {
         std::string verb = method->get<std::string> ();
@@ -749,45 +735,62 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
         }
         *headers = resolved;
     }
+    return std::nullopt;
+}
 
-    if (auto it = payload.find ("body"); it != payload.end ()) {
-        if (!it->is_object ()) {
-            payload.erase ("body");
-        } else {
-            const auto mode = it->find ("mode");
-            if (mode == it->end () || !mode->is_string () ||
-            mode->get<std::string> () == "none") {
-                payload.erase ("body");
-            } else {
-                if (auto content = it->find ("content");
-                content != it->end () && content->is_string ()) {
-                    *content = resolve_template (content->get<std::string> (), vars);
-                }
-                if (auto fields = it->find ("fields");
-                fields != it->end () && fields->is_array ()) {
-                    for (auto& field : *fields) {
-                        if (!field.is_object ()) {
-                            continue;
-                        }
-                        // Every string a form field carries, including a file
-                        // part's path: a fixture directory is exactly the kind
-                        // of thing an environment variable holds, and an
-                        // unresolved `{{...}}` reaching the transfer would be
-                        // opened as a literal filename.
-                        for (const char* name :
-                        { "key", "value", "src", "fileName", "contentType" }) {
-                            if (auto entry = field.find (name);
-                            entry != field.end () && entry->is_string ()) {
-                                *entry =
-                                resolve_template (entry->get<std::string> (), vars);
-                            }
-                        }
-                    }
-                }
-            }
+/** The body: its content, and every string its form fields carry. */
+/**
+ * Every string a form field carries, including a file part's path: a fixture
+ * directory is exactly the kind of thing an environment variable holds, and an
+ * unresolved `{{...}}` reaching the transfer would be opened as a literal
+ * filename.
+ */
+void resolve_form_field (const VariableValues& vars, nlohmann::json& field) {
+    if (!field.is_object ()) {
+        return;
+    }
+    for (const char* name : { "key", "value", "src", "fileName", "contentType" }) {
+        if (auto entry = field.find (name); entry != field.end () && entry->is_string ()) {
+            *entry = resolve_template (entry->get<std::string> (), vars);
         }
     }
+}
 
+/** The body: its content, and every string its form fields carry. */
+void resolve_compose_body (const VariableValues& vars, nlohmann::json& payload) {
+    auto it = payload.find ("body");
+    if (it == payload.end ()) {
+        return;
+    }
+    if (!it->is_object ()) {
+        payload.erase ("body");
+        return;
+    }
+    const auto mode = it->find ("mode");
+    if (mode == it->end () || !mode->is_string () || mode->get<std::string> () == "none") {
+        payload.erase ("body");
+        return;
+    }
+    if (auto content = it->find ("content");
+    content != it->end () && content->is_string ()) {
+        *content = resolve_template (content->get<std::string> (), vars);
+    }
+    if (auto fields = it->find ("fields"); fields != it->end () && fields->is_array ()) {
+        for (auto& field : *fields) {
+            resolve_form_field (vars, field);
+        }
+    }
+}
+
+/**
+ * Auth: `inherit` resolved through the chain first, then `{{vars}}` inside
+ * whatever concrete block won - strictly before any OAuth 2.0 cache key can be
+ * computed from it (D10). An empty result means "send nothing", which is an
+ * absent field, not a null.
+ */
+void resolve_compose_auth (const std::vector<vayu::db::Collection>& chain,
+const VariableValues& vars,
+nlohmann::json& payload) {
     // Auth: resolve `inherit` through the chain first, then `{{vars}}` inside
     // whatever concrete block won - strictly before any OAuth 2.0 cache key can
     // be computed from it (D10). An empty result means "send nothing", which is
@@ -803,6 +806,64 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
             *it = resolve_json_strings (auth, vars);
         }
     }
+}
+
+} // namespace
+
+std::pair<int, nlohmann::json>
+compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
+    if (!body.is_object ()) {
+        return compose_error (
+        400, "invalid_compose_request", "Request body must be a JSON object");
+    }
+
+    const bool has_request_id =
+    body.contains ("requestId") && !body["requestId"].is_null ();
+    const bool has_inline = body.contains ("request") && !body["request"].is_null ();
+    if (has_request_id && !body["requestId"].is_string ()) {
+        return compose_error (400, "invalid_compose_request", "'requestId' must be a string");
+    }
+    if (has_inline && !body["request"].is_object ()) {
+        return compose_error (400, "invalid_compose_request", "'request' must be a JSON object");
+    }
+    if (!has_request_id && !has_inline) {
+        return compose_error (400, "invalid_compose_request",
+        "Provide 'requestId' (compose a saved request) and/or 'request' (an "
+        "inline request to compose)");
+    }
+
+    std::optional<vayu::db::Request> stored;
+    if (has_request_id) {
+        stored = db.get_request (body["requestId"].get<std::string> ());
+        if (!stored) {
+            return compose_error (404, "request_not_found",
+            "No saved request with id '" + body["requestId"].get<std::string> () + "'");
+        }
+    }
+
+    std::vector<vayu::db::Collection> chain;
+    std::string environment_id;
+    const VariableValues vars =
+    resolve_compose_variables (db, body, stored, chain, environment_id);
+
+    // Base payload from the stored request (raw), then the inline request laid
+    // over it field by field - so a `start_load_run { requestId, url }` style
+    // override replaces the stored URL but keeps everything else. Inline-only
+    // composition starts from an empty object. Both paths then resolve through
+    // the same code below, so overrides and stored fields follow one rule.
+    nlohmann::json payload =
+    stored ? payload_from_stored (*stored, chain) : nlohmann::json::object ();
+    if (has_inline) {
+        for (const auto& [key, value] : body["request"].items ()) {
+            payload[key] = value;
+        }
+    }
+
+    if (auto refusal = resolve_compose_head (vars, payload)) {
+        return *refusal;
+    }
+    resolve_compose_body (vars, payload);
+    resolve_compose_auth (chain, vars, payload);
 
     // Scripts are never interpolated (D16): a `{{...}}` inside script text is
     // user JavaScript, and rewriting it cannot tell a string literal from
