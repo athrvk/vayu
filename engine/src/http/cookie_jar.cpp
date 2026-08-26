@@ -18,9 +18,10 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <charconv>
 #include <ctime>
 #include <utility>
+
+#include "vayu/utils/parse.hpp"
 
 namespace vayu::http {
 
@@ -86,11 +87,11 @@ std::optional<JarCookie> parse_cookie_line (std::string_view line) {
         // The value (last field) may itself be empty and may contain no tab;
         // every earlier field must be tab-terminated.
         if (tab == std::string_view::npos) {
-            fields[count++] = line.substr (start);
+            fields.at (count++) = line.substr (start);
             break;
         }
-        fields[count++] = line.substr (start, tab - start);
-        start           = tab + 1;
+        fields.at (count++) = line.substr (start, tab - start);
+        start               = tab + 1;
     }
     if (count != NETSCAPE_FIELDS) {
         return std::nullopt;
@@ -108,12 +109,12 @@ std::optional<JarCookie> parse_cookie_line (std::string_view line) {
     // An expiry libcurl did not write as a number is not a cookie we can
     // reason about; refuse the line rather than treat it as a session cookie
     // that never expires.
-    const auto* first     = fields[4].data ();
-    const auto* last      = first + fields[4].size ();
-    const auto conversion = std::from_chars (first, last, cookie.expires);
-    if (conversion.ec != std::errc{} || conversion.ptr != last) {
+    const auto expires =
+    vayu::utils::parse_number<decltype (cookie.expires)> (fields[4]);
+    if (!expires.has_value ()) {
         return std::nullopt;
     }
+    cookie.expires = *expires;
 
     // A cookie with no name is not addressable by any reader (`pm.cookies.get`
     // takes a name), so it is dropped here for the same reason parse_set_cookie

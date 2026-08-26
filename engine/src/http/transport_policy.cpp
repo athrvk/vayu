@@ -139,8 +139,7 @@ std::filesystem::path system_ca_bundle_path () {
         // process, so a `CURL_CA_BUNDLE` exported for a later run would go
         // unread with nothing to say why.
         // NOLINTNEXTLINE(concurrency-mt-unsafe)
-        if (const char* value = std::getenv (variable);
-        value != nullptr && value[0] != '\0') {
+        if (const char* value = std::getenv (variable); value != nullptr && *value != '\0') {
             std::error_code ec;
             if (std::filesystem::is_regular_file (value, ec)) {
                 return { value };
@@ -150,7 +149,7 @@ std::filesystem::path system_ca_bundle_path () {
 
     const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
     if (info != nullptr && info->age >= CURLVERSION_SEVENTH &&
-    info->cainfo != nullptr && info->cainfo[0] != '\0') {
+    info->cainfo != nullptr && *info->cainfo != '\0') {
         std::error_code ec;
         if (std::filesystem::is_regular_file (info->cainfo, ec)) {
             return { info->cainfo };

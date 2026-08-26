@@ -29,6 +29,7 @@
  */
 
 #include <algorithm>
+#include <array>
 // <cctype> for isalpha/isalnum and <cstddef> for size_t: libstdc++ pulls both
 // in transitively through <string>, MSVC and libc++ do not promise to, and this
 // file is built on all three.
@@ -97,39 +98,39 @@ struct AbsentGlobal {
     const char* name;
     const char* reason;
 };
-constexpr AbsentGlobal ABSENT_GLOBALS[] = {
-    { "setTimeout",
-    "The sandbox is synchronous - a script runs to completion "
-    "before the request is sent, so there is no later to defer to." },
-    { "setInterval",
-    "The sandbox is synchronous and a script has a wall-clock "
-    "deadline (scriptTimeout)." },
-    { "clearTimeout", "There is no setTimeout to cancel." },
-    { "clearInterval", "There is no setInterval to cancel." },
-    { "fetch",
-    "Scripts cannot make network calls. The request being built is "
-    "the only one sent; edit it through pm.request." },
-    { "XMLHttpRequest", "Scripts cannot make network calls." },
-    { "require",
-    "No module system - QuickJS here has no loader, and there is "
-    "no filesystem to load from." },
-    { "process", "Not Node. There is no process, no argv and no env." },
-    { "Buffer", "Not Node. Use btoa/atob, or pm.crypto for hashing." },
-    { "URL", "No URL parser in the sandbox. pm.request.url is a plain string." },
-    { "URLSearchParams", "No URL parser in the sandbox." },
-    { "TextEncoder", "Absent. pm.crypto accepts strings directly." },
-    { "TextDecoder", "Absent. pm.crypto accepts strings directly." },
-    { "structuredClone", "Absent. Use JSON.parse(JSON.stringify(value))." },
-    { "localStorage",
-    "No browser storage. Persist through pm.environment or "
-    "pm.globals, which outlive the script." },
-    { "sessionStorage", "No browser storage. Use pm.variables instead." },
-    { "window", "Not a browser." },
-    { "document", "Not a browser." },
-    { "alert",
-    "Not a browser. Use console.log, shown in the response pane's "
-    "Console tab." },
-};
+constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
+{ "setTimeout",
+"The sandbox is synchronous - a script runs to completion "
+"before the request is sent, so there is no later to defer to." },
+{ "setInterval",
+"The sandbox is synchronous and a script has a wall-clock "
+"deadline (scriptTimeout)." },
+{ "clearTimeout", "There is no setTimeout to cancel." },
+{ "clearInterval", "There is no setInterval to cancel." },
+{ "fetch",
+"Scripts cannot make network calls. The request being built is "
+"the only one sent; edit it through pm.request." },
+{ "XMLHttpRequest", "Scripts cannot make network calls." },
+{ "require",
+"No module system - QuickJS here has no loader, and there is "
+"no filesystem to load from." },
+{ "process", "Not Node. There is no process, no argv and no env." },
+{ "Buffer", "Not Node. Use btoa/atob, or pm.crypto for hashing." },
+{ "URL", "No URL parser in the sandbox. pm.request.url is a plain string." },
+{ "URLSearchParams", "No URL parser in the sandbox." },
+{ "TextEncoder", "Absent. pm.crypto accepts strings directly." },
+{ "TextDecoder", "Absent. pm.crypto accepts strings directly." },
+{ "structuredClone", "Absent. Use JSON.parse(JSON.stringify(value))." },
+{ "localStorage",
+"No browser storage. Persist through pm.environment or "
+"pm.globals, which outlive the script." },
+{ "sessionStorage", "No browser storage. Use pm.variables instead." },
+{ "window", "Not a browser." },
+{ "document", "Not a browser." },
+{ "alert",
+"Not a browser. Use console.log, shown in the response pane's "
+"Console tab." },
+});
 
 bool is_chain_continuation (const std::string& name) {
     return std::find (std::begin (CHAIN_CONTINUATIONS),

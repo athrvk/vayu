@@ -113,13 +113,14 @@ MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorC
     // leaves the bank null: the run is still fully measurable without phase
     // percentiles, which is not true of the two histograms above.
     if (config_.phase_histograms) {
-        for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+        for (auto*& histogram : phase_histograms_) {
             if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
-                constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,
-                &phase_histograms_[i]) != 0 ||
-            phase_histograms_[i] == nullptr) {
-                for (size_t j = 0; j < i; ++j) {
-                    hdr_close (phase_histograms_[j]);
+                constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES, &histogram) != 0 ||
+            histogram == nullptr) {
+                // The bank is null-initialised and filled in order, so closing
+                // every non-null slot closes exactly the ones already built.
+                for (auto* built : phase_histograms_) {
+                    hdr_close (built);
                 }
                 phase_histograms_.fill (nullptr);
                 vayu::utils::log_warning ("Run " + run_id_ +
@@ -231,8 +232,8 @@ bool MetricsCollector::claim_status_exemplar (int status_code) {
     const int slot = (status_code >= 0 && status_code < STATUS_CODE_SLOTS - 1) ?
     status_code :
     STATUS_CODE_SLOTS - 1;
-    const size_t claimed = exemplar_claims_[static_cast<size_t> (slot)].fetch_add (
-    1, std::memory_order_relaxed);
+    const size_t claimed =
+    exemplar_claims_.at (static_cast<size_t> (slot)).fetch_add (1, std::memory_order_relaxed);
     return claimed < constants::metrics_collector::EXEMPLARS_PER_STATUS;
 }
 
@@ -324,8 +325,8 @@ const Timing* phases) {
             // a 0ms phase is the common case (a reused connection does no DNS
             // and no handshake), so flooring it to 1us would inflate every
             // percentile of the phases that legitimately did not run.
-            hdr_record_value_atomic (phase_histograms_[i],
-            static_cast<int64_t> (std::max (0.0, values[i]) * 1000.0));
+            hdr_record_value_atomic (phase_histograms_.at (i),
+            static_cast<int64_t> (std::max (0.0, values.at (i)) * 1000.0));
         }
     }
 
@@ -633,16 +634,17 @@ MetricsCollector::phase_percentiles () const {
 
     std::array<Percentiles, TIMING_PHASE_COUNT> result;
     for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
-        auto* histogram = phase_histograms_[i];
-        result[i].count = static_cast<size_t> (histogram->total_count);
-        result[i].min   = us_to_ms (hdr_min (histogram));
-        result[i].max   = us_to_ms (hdr_max (histogram));
-        result[i].p50   = us_to_ms (hdr_value_at_percentile (histogram, 50.0));
-        result[i].p75   = us_to_ms (hdr_value_at_percentile (histogram, 75.0));
-        result[i].p90   = us_to_ms (hdr_value_at_percentile (histogram, 90.0));
-        result[i].p95   = us_to_ms (hdr_value_at_percentile (histogram, 95.0));
-        result[i].p99   = us_to_ms (hdr_value_at_percentile (histogram, 99.0));
-        result[i].p999  = us_to_ms (hdr_value_at_percentile (histogram, 99.9));
+        auto* histogram    = phase_histograms_.at (i);
+        Percentiles& phase = result.at (i);
+        phase.count        = static_cast<size_t> (histogram->total_count);
+        phase.min          = us_to_ms (hdr_min (histogram));
+        phase.max          = us_to_ms (hdr_max (histogram));
+        phase.p50  = us_to_ms (hdr_value_at_percentile (histogram, 50.0));
+        phase.p75  = us_to_ms (hdr_value_at_percentile (histogram, 75.0));
+        phase.p90  = us_to_ms (hdr_value_at_percentile (histogram, 90.0));
+        phase.p95  = us_to_ms (hdr_value_at_percentile (histogram, 95.0));
+        phase.p99  = us_to_ms (hdr_value_at_percentile (histogram, 99.0));
+        phase.p999 = us_to_ms (hdr_value_at_percentile (histogram, 99.9));
     }
     return result;
 }
@@ -737,8 +739,7 @@ MetricsCollector::Percentiles MetricsCollector::sample_window_percentiles () {
 void MetricsCollector::record_status_code (int status_code) {
     if (status_code >= 0 && status_code < STATUS_CODE_SLOTS) {
         // Hot path: single relaxed atomic increment, no lock.
-        status_code_counts_[static_cast<size_t> (status_code)].fetch_add (
-        1, std::memory_order_relaxed);
+        status_code_counts_.at (static_cast<size_t> (status_code)).fetch_add (1, std::memory_order_relaxed);
         return;
     }
     // Out-of-range (non-standard) code: dead path for real HTTP traffic.
@@ -749,8 +750,8 @@ void MetricsCollector::record_status_code (int status_code) {
 std::map<int, size_t> MetricsCollector::status_code_distribution () const {
     std::map<int, size_t> result;
     for (int code = 0; code < STATUS_CODE_SLOTS; ++code) {
-        size_t count = status_code_counts_[static_cast<size_t> (code)].load (
-        std::memory_order_relaxed);
+        size_t count =
+        status_code_counts_.at (static_cast<size_t> (code)).load (std::memory_order_relaxed);
         if (count > 0) {
             result[code] = count;
         }

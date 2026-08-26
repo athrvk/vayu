@@ -113,8 +113,7 @@ class SseFrameCounter {
     enum class FieldMatch : std::uint8_t { Matching, MatchedName, Decided };
 
     void advance_field_match (char c) {
-        static constexpr char FIELD[]          = "data";
-        static constexpr std::size_t FIELD_LEN = 4;
+        static constexpr std::string_view FIELD = "data";
 
         if (field_match_ == FieldMatch::MatchedName) {
             // `data:` is the field; `database:` is a different one whose name
@@ -123,9 +122,9 @@ class SseFrameCounter {
             field_match_  = FieldMatch::Decided;
             return;
         }
-        if (matched_ < FIELD_LEN && c == FIELD[matched_]) {
+        if (matched_ < FIELD.size () && c == FIELD[matched_]) {
             ++matched_;
-            if (matched_ == FIELD_LEN) {
+            if (matched_ == FIELD.size ()) {
                 // A colonless line is a field with an empty value, so a line
                 // that is exactly `data` is one - resolved here in case the
                 // line ends before another byte arrives.

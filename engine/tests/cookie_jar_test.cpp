@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <string>
 #include <thread>
@@ -872,27 +873,27 @@ TEST (CookieJarWrite, BadInputIsRefusedLoudlyRatherThanStoredWrong) {
         const char* script;
         const char* expected;
     };
-    const Case cases[] = {
-        { "pm.cookies.jar().set('http://example.com/', { value: 'v' });", "name" },
-        { "pm.cookies.jar().set('http://example.com/', { name: 'n', value: 1 "
-          "});",
-        "value" },
-        { "pm.cookies.jar().set('http://example.com/', { name: 'n', value: "
-          "'v', secure: 'yes' });",
-        "true or false" },
-        { "pm.cookies.jar().set('http://example.com/', { name: 'n', value: "
-          "'v', expires: '2030' });",
-        "seconds since the epoch" },
-        // A tab is the Netscape line's own separator: stored, the cookie would
-        // be unreadable on the next parse and would simply vanish.
-        { "pm.cookies.jar().set('http://example.com/', { name: 'n', value: "
-          "'a\\tb' });",
-        "tab or newline" },
-        { "pm.cookies.jar().set('not a url', { name: 'n', value: 'v' });", "parseable" },
-        { "pm.cookies.jar().set();", "URL string" },
-        { "pm.cookies.jar().unset('http://example.com/');", "cookie name string" },
-        { "pm.cookies.jar().clear('nope');", "callback must be a function" },
-    };
+    const auto cases = std::to_array<Case> ({
+    { "pm.cookies.jar().set('http://example.com/', { value: 'v' });", "name" },
+    { "pm.cookies.jar().set('http://example.com/', { name: 'n', value: 1 "
+      "});",
+    "value" },
+    { "pm.cookies.jar().set('http://example.com/', { name: 'n', value: "
+      "'v', secure: 'yes' });",
+    "true or false" },
+    { "pm.cookies.jar().set('http://example.com/', { name: 'n', value: "
+      "'v', expires: '2030' });",
+    "seconds since the epoch" },
+    // A tab is the Netscape line's own separator: stored, the cookie would
+    // be unreadable on the next parse and would simply vanish.
+    { "pm.cookies.jar().set('http://example.com/', { name: 'n', value: "
+      "'a\\tb' });",
+    "tab or newline" },
+    { "pm.cookies.jar().set('not a url', { name: 'n', value: 'v' });", "parseable" },
+    { "pm.cookies.jar().set();", "URL string" },
+    { "pm.cookies.jar().unset('http://example.com/');", "cookie name string" },
+    { "pm.cookies.jar().clear('nope');", "callback must be a function" },
+    });
 
     for (const auto& one : cases) {
         vayu::Environment scratch = env;

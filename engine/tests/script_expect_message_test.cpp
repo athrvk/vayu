@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <string>
 
 #include "vayu/runtime/script_engine.hpp"
@@ -89,34 +90,34 @@ TEST_F (ExpectMessageTest, EveryMatcherCarriesTheMessage) {
         const char* generic; // a fragment of the matcher's own failure text
     };
 
-    const Case cases[] = {
-        { R"(pm.expect(1, "M").to.equal(2))", "to equal" },
-        { R"(pm.expect({ a: 1 }, "M").to.eql({ a: 2 }))", "deeply equal" },
-        { R"(pm.expect(undefined, "M").to.exist)", "to exist" },
-        { R"(pm.expect(false, "M").to.be.true)", "truthy" },
-        { R"(pm.expect(true, "M").to.be.false)", "to be false" },
-        { R"(pm.expect(1, "M").to.be.above(2))", "to be above" },
-        { R"(pm.expect(2, "M").to.be.below(1))", "to be below" },
-        { R"(pm.expect([1], "M").to.include(2))", "to include" },
-        { R"(pm.expect({}, "M").to.have.property("a"))", "to have property" },
-        { R"(pm.expect(1, "M").to.be.null)", "to be null" },
-        { R"(pm.expect(1, "M").to.be.undefined)", "to be undefined" },
-        { R"(pm.expect(0, "M").to.be.ok)", "truthy" },
-        { R"(pm.expect([1], "M").to.be.empty)", "to be empty" },
-        { R"(pm.expect(1, "M").to.be.at.least(2))", "at least" },
-        { R"(pm.expect(3, "M").to.be.at.most(2))", "at most" },
-        { R"(pm.expect([1], "M").to.have.length(2))", "Expected length" },
-        { R"(pm.expect(1, "M").to.be.a("string"))", "Expected type" },
-        { R"(pm.expect("abc", "M").to.match(/z/))", "to match the pattern" },
-        { R"(pm.expect(1, "M").to.be.oneOf([2, 3]))", "to be one of" },
-        { R"(pm.expect({ a: 1 }, "M").to.have.keys("b"))", "exactly the keys" },
-        { R"(pm.expect([1], "M").to.have.members([2]))", "to have members" },
-        { R"(pm.expect(function () {}, "M").to.throw())", "to throw" },
-        { R"(pm.expect({}, "M").to.be.instanceOf(Array))", "instance of" },
-        { R"(pm.expect(1, "M").to.be.closeTo(5, 0.1))", "to be within" },
-        { R"(pm.expect(1, "M").to.satisfy(function (v) { return v > 2; }))", "satisfy the predicate" },
-        { R"(pm.expect("abc", "M").to.have.string("z"))", "to contain" },
-    };
+    const auto cases = std::to_array<Case> ({
+    { R"(pm.expect(1, "M").to.equal(2))", "to equal" },
+    { R"(pm.expect({ a: 1 }, "M").to.eql({ a: 2 }))", "deeply equal" },
+    { R"(pm.expect(undefined, "M").to.exist)", "to exist" },
+    { R"(pm.expect(false, "M").to.be.true)", "truthy" },
+    { R"(pm.expect(true, "M").to.be.false)", "to be false" },
+    { R"(pm.expect(1, "M").to.be.above(2))", "to be above" },
+    { R"(pm.expect(2, "M").to.be.below(1))", "to be below" },
+    { R"(pm.expect([1], "M").to.include(2))", "to include" },
+    { R"(pm.expect({}, "M").to.have.property("a"))", "to have property" },
+    { R"(pm.expect(1, "M").to.be.null)", "to be null" },
+    { R"(pm.expect(1, "M").to.be.undefined)", "to be undefined" },
+    { R"(pm.expect(0, "M").to.be.ok)", "truthy" },
+    { R"(pm.expect([1], "M").to.be.empty)", "to be empty" },
+    { R"(pm.expect(1, "M").to.be.at.least(2))", "at least" },
+    { R"(pm.expect(3, "M").to.be.at.most(2))", "at most" },
+    { R"(pm.expect([1], "M").to.have.length(2))", "Expected length" },
+    { R"(pm.expect(1, "M").to.be.a("string"))", "Expected type" },
+    { R"(pm.expect("abc", "M").to.match(/z/))", "to match the pattern" },
+    { R"(pm.expect(1, "M").to.be.oneOf([2, 3]))", "to be one of" },
+    { R"(pm.expect({ a: 1 }, "M").to.have.keys("b"))", "exactly the keys" },
+    { R"(pm.expect([1], "M").to.have.members([2]))", "to have members" },
+    { R"(pm.expect(function () {}, "M").to.throw())", "to throw" },
+    { R"(pm.expect({}, "M").to.be.instanceOf(Array))", "instance of" },
+    { R"(pm.expect(1, "M").to.be.closeTo(5, 0.1))", "to be within" },
+    { R"(pm.expect(1, "M").to.satisfy(function (v) { return v > 2; }))", "satisfy the predicate" },
+    { R"(pm.expect("abc", "M").to.have.string("z"))", "to contain" },
+    });
 
     for (const auto& c : cases) {
         const std::string reported = failure_of (c.assertion);

@@ -12,12 +12,10 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
-#include <charconv>
 #include <chrono>
 #include <mutex>
 #include <optional>
 #include <string_view>
-#include <system_error>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/curl_version_map.hpp"
@@ -28,6 +26,7 @@
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/parse.hpp"
 
 namespace vayu::http::detail {
 
@@ -47,15 +46,12 @@ int scheme_default_port (const std::string& url) {
 }
 
 /// A digit run from a user-supplied URL can exceed any integer type.
-/// std::from_chars reports that in its return value where std::stoi would
+/// `parse_number` reports that as an empty optional where std::stoi would
 /// throw - and this runs on the event loop worker thread, which has no
 /// handler, so an escaping exception terminates the whole daemon.
 std::optional<int> parse_port (std::string_view digits) {
-    int port             = 0;
-    const char* first    = digits.data ();
-    const char* last     = first + digits.size ();
-    const auto [ptr, ec] = std::from_chars (first, last, port);
-    if (ec == std::errc () && ptr == last && port >= kMinPort && port <= kMaxPort) {
+    const std::optional<int> port = vayu::utils::parse_number<int> (digits);
+    if (port.has_value () && *port >= kMinPort && *port <= kMaxPort) {
         return port;
     }
     // Out of range for a port (or for int): the caller falls back to the scheme
@@ -530,9 +526,10 @@ bool tls_connection_never_answered (CURL* curl) {
 
 } // namespace
 
-Error curl_to_error (CURL* curl, CURLcode code, const char* error_buffer) {
+Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors) {
     Error error;
-    error.message = error_buffer[0] ? error_buffer : curl_easy_strerror (code);
+    const std::string_view message = errors.message ();
+    error.message = message.empty () ? curl_easy_strerror (code) : std::string (message);
 
     // Checked before the code, not as a fallback under it: a proxy that
     // answered the CONNECT with a 4xx is a proxy failure whatever CURLcode
@@ -763,8 +760,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
 
     const Request& request = data->request;
 
-    // Set error buffer
-    curl_easy_setopt (curl, CURLOPT_ERRORBUFFER, data->error_buffer);
+    data->errors.attach (curl);
 
     // Set URL
     curl_easy_setopt (curl, CURLOPT_URL, request.url.c_str ());
@@ -1059,7 +1055,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
              Error{ ErrorCode::InternalError,
             "Response body exceeded the " + std::to_string (data->max_response_bytes) +
             " byte cap (maxResponseBodyBytes)" } :
-             curl_to_error (curl, result, data->error_buffer);
+             curl_to_error (curl, result, data->errors);
         response.error_code    = error.code;
         response.error_message = error.message;
         response.status_code   = 0;

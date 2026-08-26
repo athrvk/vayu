@@ -131,6 +131,29 @@ engine/
   (`tests/task_queue.hpp`) - httplib's `new_task_queue` hook takes a raw owning
   pointer, which is its contract and not a leak, said once there rather than at
   each fixture.
+- **A length is kept, never re-derived** (#945, `cppcoreguidelines-pro-bounds-*`).
+  Every finding in this family is a place where a bound was thrown away and then
+  written out again by hand, and the answer is almost never a `NOLINT`: a
+  subrange of a string is `substr` on a view, not `data () + offset`; a fixed
+  table is a `constexpr std::array` (`std::to_array` so the count is not
+  restated) or a `std::string_view`, not a C array; `argv` is a
+  `std::span<char* const>` built from `argc`; and an index a caller computed
+  goes through **`.at ()`**, which costs one predictable compare and turns a
+  wrong index into a throw instead of a read past the end. Two shapes had grown
+  hand-rolled copies and now have primitives: **`vayu::utils::parse_number`**
+  (`utils/parse.hpp`) is a whole `std::string_view` as an integer or nothing -
+  the five sites that spelled `from_chars`'s pointer range themselves each had
+  to remember the `ptr != end` half that separates "42abc is 42" from "42abc is
+  not a number" - and **`vayu::http::CurlErrorBuffer`**
+  (`http/curl_error_buffer.hpp`) owns `CURLOPT_ERRORBUFFER`, whose three rules
+  (at least `CURL_ERROR_SIZE` bytes, alive for the whole transfer, written only
+  on failure so a reused handle must be cleared between transfers) a bare
+  `char[CURL_ERROR_SIZE]` states none of. `tests/bounds_primitives_test.cpp`
+  scans `engine/{src,include,tests}` for both spellings with a per-(file, token)
+  exemption list, on batch 1's reasoning: the CI gate scopes to a pull request's
+  changed lines and so holds nothing at zero once these lines stop being new.
+  The rest of the family is a subscript, which is not a token - there the gate
+  is the whole of the guard, decided rather than omitted.
 - **A row struct's scalars all carry a default** (#1013,
   `cppcoreguidelines-pro-type-member-init`). The `vayu::db` structs in
   `types.hpp` are aggregates an insert site fills field by field, so one it

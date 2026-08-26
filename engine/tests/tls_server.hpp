@@ -57,6 +57,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -111,12 +112,12 @@ using Pkcs12Ptr   = std::unique_ptr<PKCS12, Pkcs12Deleter>;
 /// silently degraded fixture would leave the tests below asserting nothing.
 [[noreturn]] inline void fail (const std::string& what) {
     const unsigned long reason = ERR_get_error ();
-    char detail[256]           = { 0 };
+    std::array<char, 256> detail{};
     if (reason != 0) {
-        ERR_error_string_n (reason, detail, sizeof (detail));
+        ERR_error_string_n (reason, detail.data (), detail.size ());
     }
     throw std::runtime_error ("tls_server.hpp: " + what +
-    (reason != 0 ? std::string (": ") + detail : std::string ()));
+    (reason != 0 ? std::string (": ") + detail.data () : std::string ()));
 }
 
 /**

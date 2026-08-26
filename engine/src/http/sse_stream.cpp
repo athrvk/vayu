@@ -15,17 +15,20 @@
 #include <curl/curl.h>
 
 #include <algorithm>
-#include <charconv>
 #include <chrono>
+#include <optional>
+#include <string_view>
 #include <utility>
 
 #include "vayu/core/run_manager.hpp"
+#include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/sse_parser.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/parse.hpp"
 
 namespace vayu::http {
 
@@ -342,11 +345,14 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
             // as the status of a perfectly healthy 200.
             const auto code_end =
             second_space == std::string::npos ? line.size () : second_space;
-            int parsed        = 0;
-            const auto result = std::from_chars (
-            line.data () + first_space + 1, line.data () + code_end, parsed);
-            if (result.ec == std::errc{}) {
-                response->status_code = parsed;
+            // Whole-token, so a code with a tail glued to it ("200OK") leaves
+            // the status unread rather than reporting the digits it starts
+            // with - a malformed status line is not a 200.
+            const std::string_view code = std::string_view (line).substr (
+            first_space + 1, code_end - first_space - 1);
+            const std::optional<int> parsed = vayu::utils::parse_number<int> (code);
+            if (parsed.has_value ()) {
+                response->status_code = *parsed;
             }
         }
         // Headers are cleared between redirect hops so the final hop's set is
@@ -407,7 +413,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         return failed;
     }
 
-    char error_buffer[CURL_ERROR_SIZE] = { 0 };
+    CurlErrorBuffer errors;
     SseParser parser (request.limits.max_event_bytes);
 
     TransferState state;
@@ -420,7 +426,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     request.max_duration_ms.value_or (request.limits.max_stream_duration_ms);
     state.started_at = std::chrono::steady_clock::now ();
 
-    curl_easy_setopt (curl, CURLOPT_ERRORBUFFER, error_buffer);
+    errors.attach (curl);
     curl_easy_setopt (curl, CURLOPT_URL, request.request.url.c_str ());
     curl_mime* mime = detail::apply_method_and_body (curl, request.request);
 
@@ -522,8 +528,8 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         // rather than a deadline on a healthy stream.
         reason = SseEndReason::Idle;
     } else if (result != CURLE_OK) {
-        reason            = SseEndReason::Error;
-        const Error error = detail::curl_to_error (curl, result, error_buffer);
+        reason                 = SseEndReason::Error;
+        const Error error      = detail::curl_to_error (curl, result, errors);
         response.status_code   = 0;
         response.status_text   = vayu::http::status_text (0);
         response.error_code    = error.code;

@@ -167,7 +167,7 @@ class ScopedEnv {
         // restore path wants when there was nothing to restore.
         _putenv_s (name, value);
 #else
-        if (value[0] == '\0') {
+        if (*value == '\0') {
             // NOLINTNEXTLINE(concurrency-mt-unsafe)
             unsetenv (name);
         } else {
@@ -612,9 +612,11 @@ TEST (TlsBackend, IsTheBackendEveryTrustStatementHereAssumes) {
     ASSERT_NE (available, nullptr)
     << "libcurl enumerates no TLS backend at all, so nothing here is checked";
     std::vector<std::string> compiled_in;
-    for (int i = 0; available[i] != nullptr; ++i) {
-        compiled_in.emplace_back (
-        available[i]->name != nullptr ? available[i]->name : "unnamed");
+    // libcurl hands back a null-terminated array of pointers and no count, so
+    // walking it is the only way to read it - there is no bound to keep.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    for (const curl_ssl_backend* const* it = available; *it != nullptr; ++it) {
+        compiled_in.emplace_back ((*it)->name != nullptr ? (*it)->name : "unnamed");
     }
     EXPECT_EQ (vayu::http::pin_tls_backend (), vayu::http::TlsBackendSelection::Selected)
     << "this process never selected its TLS backend, so on the MultiSSL build "

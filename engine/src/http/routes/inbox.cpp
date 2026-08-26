@@ -21,12 +21,12 @@
 #include "vayu/utils/diagnostics.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/parse.hpp"
 
 #include <httplib.h>
 
 #include <algorithm>
 #include <cctype>
-#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <expected>
@@ -146,21 +146,12 @@ std::optional<unsigned> ipv4_first_octet (std::string_view bind) {
         if (part.empty () || part.size () > 3) {
             return std::nullopt;
         }
-        // The view's two ends, taken as pointers from its own iterators.
-        // `from_chars` wants a range and `part` is one; spelling that as
-        // `part.data ()` plus arithmetic on it says neither - the `.data ()`
-        // reads as a pointer handed to something that will look for a
-        // terminator, and the `+` is unbounded pointer arithmetic. `to_address`
-        // is the same two addresses with the bound still attached to them.
-        unsigned value          = 0;
-        const auto* const begin = std::to_address (part.begin ());
-        const auto* const end   = std::to_address (part.end ());
-        const auto [ptr, ec]    = std::from_chars (begin, end, value);
-        if (ec != std::errc () || ptr != end || value > 255) {
+        const std::optional<unsigned> value = vayu::utils::parse_number<unsigned> (part);
+        if (!value.has_value () || *value > 255) {
             return std::nullopt;
         }
         if (octet == 0) {
-            first = value;
+            first = *value;
         }
         start = dot + 1;
     }
@@ -355,16 +346,13 @@ parse_live_resume_point (const std::string& header_value, const std::string& par
         return 0;
     }
 
-    int64_t parsed_id = 0;
-    const char* begin = value.data ();
-    const char* end   = begin + value.size ();
-    const auto parsed = std::from_chars (begin, end, parsed_id);
-    if (parsed.ec != std::errc{} || parsed.ptr != end || parsed_id < 0) {
+    const std::optional<int64_t> parsed_id = vayu::utils::parse_number<int64_t> (value);
+    if (!parsed_id.has_value () || *parsed_id < 0) {
         return std::unexpected (InboxParseError{ .http_status = 400,
         .code = "invalid_last_event_id",
         .message = std::string (source) + " must be a non-negative capture id" });
     }
-    return parsed_id;
+    return *parsed_id;
 }
 
 nlohmann::json inbox_capture_json (const vayu::db::InboxRequest& capture) {

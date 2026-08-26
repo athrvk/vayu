@@ -79,7 +79,8 @@ std::string normalize (const std::string& path, bool path_templates) {
             const bool doubled = close != std::string::npos &&
             close + 1 < path.size () && path[close + 1] == '}';
             if (close != std::string::npos && close > i + 1 && !doubled) {
-                const std::string_view name (path.data () + i + 1, close - i - 1);
+                const std::string_view name =
+                std::string_view (path).substr (i + 1, close - i - 1);
                 if (std::all_of (name.begin (), name.end (), is_path_template_char)) {
                     out += "{{" + std::string (name) + "}}";
                     i = close + 1;

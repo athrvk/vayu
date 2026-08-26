@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <string>
 #include <utility>
 
@@ -1192,14 +1193,15 @@ TEST_F (RunsRouteTest, ReportCarriesPerPhasePercentiles) {
 
     std::array<vayu::core::MetricsCollector::Percentiles, vayu::core::TIMING_PHASE_COUNT> phases{};
     // Five distinct magnitudes, so a phase written into the wrong key fails here.
-    const double p50s[] = { 0.1, 0.3, 0.0, 2.9, 0.1 };
-    const double p99s[] = { 1.4, 8.2, 22.0, 6.1, 0.9 };
+    const auto p50s = std::to_array<double> ({ 0.1, 0.3, 0.0, 2.9, 0.1 });
+    const auto p99s = std::to_array<double> ({ 1.4, 8.2, 22.0, 6.1, 0.9 });
     for (size_t i = 0; i < vayu::core::TIMING_PHASE_COUNT; ++i) {
-        phases[i].count = 4321;
-        phases[i].p50   = p50s[i];
-        phases[i].p95   = p50s[i] * 2.0;
-        phases[i].p99   = p99s[i];
-        phases[i].max   = p99s[i] * 3.0;
+        auto& phase = phases.at (i);
+        phase.count = 4321;
+        phase.p50   = p50s.at (i);
+        phase.p95   = p50s.at (i) * 2.0;
+        phase.p99   = p99s.at (i);
+        phase.max   = p99s.at (i) * 3.0;
     }
     inputs.phases = phases;
     db_->update_run_summary (

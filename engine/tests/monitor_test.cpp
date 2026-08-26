@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -74,30 +75,25 @@ TEST (MonitorConfigValidation, RejectsAnUnusableBlock) {
         json monitor;
         const char* what;
     };
-    const Case cases[] = {
-        { json::array (), "not an object" },
-        { json{ { "series", json::array ({ "up" }) } }, "no url" },
-        { json{ { "url", "ftp://localhost/metrics" }, { "series", json::array ({ "up" }) } },
-        "not http(s)" },
-        { json{ { "url", "http://x/m" } }, "no series" },
-        { json{ { "url", "http://x/m" }, { "series", json::array () } }, "empty series" },
-        { json{ { "url", "http://x/m" }, { "series", json::array ({ "" }) } }, "empty series name" },
-        { json{ { "url", "http://x/m" },
-          { "series", json::array ({ "a", "b", "c", "d", "e", "f", "g", "h", "i" }) } },
-        "too many series" },
-        { json{ { "url", "http://x/m" }, { "series", json::array ({ "up" }) },
-          { "intervalMs", 10 } },
-        "interval below the floor" },
-        { json{ { "url", "http://x/m" }, { "series", json::array ({ "up" }) },
-          { "intervalMs", 90000 } },
-        "interval above the ceiling" },
-        { json{ { "url", "http://x/m" }, { "series", json::array ({ "up" }) },
-          { "intervalMs", "1s" } },
-        "interval not a number" },
-        { json{ { "url", "http://x/m" }, { "series", json::array ({ "up" }) },
-          { "format", "influx" } },
-        "unknown format" },
-    };
+    const auto cases = std::to_array<Case> ({
+    { json::array (), "not an object" },
+    { json{ { "series", json::array ({ "up" }) } }, "no url" },
+    { json{ { "url", "ftp://localhost/metrics" }, { "series", json::array ({ "up" }) } }, "not http(s)" },
+    { json{ { "url", "http://x/m" } }, "no series" },
+    { json{ { "url", "http://x/m" }, { "series", json::array () } }, "empty series" },
+    { json{ { "url", "http://x/m" }, { "series", json::array ({ "" }) } }, "empty series name" },
+    { json{ { "url", "http://x/m" },
+      { "series", json::array ({ "a", "b", "c", "d", "e", "f", "g", "h", "i" }) } },
+    "too many series" },
+    { json{ { "url", "http://x/m" }, { "series", json::array ({ "up" }) }, { "intervalMs", 10 } },
+    "interval below the floor" },
+    { json{ { "url", "http://x/m" }, { "series", json::array ({ "up" }) }, { "intervalMs", 90000 } },
+    "interval above the ceiling" },
+    { json{ { "url", "http://x/m" }, { "series", json::array ({ "up" }) }, { "intervalMs", "1s" } },
+    "interval not a number" },
+    { json{ { "url", "http://x/m" }, { "series", json::array ({ "up" }) }, { "format", "influx" } },
+    "unknown format" },
+    });
     for (const auto& c : cases) {
         auto config = monitor_config (c.monitor);
         EXPECT_TRUE (validate_monitor_config (config).has_value ())

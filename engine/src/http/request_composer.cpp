@@ -69,7 +69,7 @@ int random_int (int min_inclusive, int max_inclusive) {
 }
 
 template <size_t N> const char* pick (const std::array<const char*, N>& items) {
-    return items[static_cast<size_t> (random_int (0, static_cast<int> (N) - 1))];
+    return items.at (static_cast<size_t> (random_int (0, static_cast<int> (N) - 1)));
 }
 
 std::string random_string (size_t length, std::string_view alphabet) {

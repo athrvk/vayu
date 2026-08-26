@@ -96,7 +96,7 @@ inline std::optional<std::string> base64_decode (std::string_view in) {
 
     // ASCII whitespace is skipped wherever it appears, so wrapped base64 (a
     // PEM-ish blob, a value pasted out of a config file) decodes.
-    static constexpr char ignore[] = " \t\n\r\f";
+    static constexpr std::string_view ignore = " \t\n\r\f";
 
     const auto attempt = [&in] (int variant) -> std::optional<std::string> {
         // Base64 never shrinks by less than a quarter, so the input length is
@@ -112,8 +112,8 @@ inline std::optional<std::string> base64_decode (std::string_view in) {
         // this string is one.
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         if (sodium_base642bin (reinterpret_cast<unsigned char*> (out.data ()),
-            out.size (), in.empty () ? "" : in.data (), in.size (), ignore,
-            &decoded_len, nullptr, variant) != 0) {
+            out.size (), in.empty () ? "" : in.data (), in.size (),
+            ignore.data (), &decoded_len, nullptr, variant) != 0) {
             return std::nullopt;
         }
 
@@ -165,7 +165,7 @@ inline std::string base64url_encode (std::string_view in) {
  * application/x-www-form-urlencoded values.
  */
 inline std::string url_encode (std::string_view in) {
-    static constexpr char hex[] = "0123456789ABCDEF";
+    static constexpr std::string_view hex = "0123456789ABCDEF";
 
     std::string out;
     out.reserve (in.size () * 3);
