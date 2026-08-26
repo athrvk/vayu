@@ -20,13 +20,28 @@
 name: Engine tidy scan
 
 on:
-  # TEMPORARY, removed before this branch merges: `workflow_dispatch` cannot be
-  # fired on a ref whose workflow file is not yet on the default branch, and
-  # #1023's whole-tree Windows measurement has to happen *before* the promotion
-  # it justifies is reviewed. This is how that run is produced.
-  push:
+  # Two triggers, and the narrow one is not a convenience.
+  #
+  # `workflow_dispatch` is how the scan is normally run: on demand, when a
+  # runner image moves its clang-tidy, or to re-establish the zero after a
+  # paydown. A whole-tree scan parses every translation unit and has no
+  # business on the ordinary pull-request path, where the gate already lints
+  # what changed.
+  #
+  # The `pull_request` trigger fires only for the three files that can
+  # *invalidate* the measurement: the check list the scan reads, and the two
+  # files that are the scan. A pull request that edits `engine/.clang-tidy`
+  # changes what "zero findings" means, and the promotion in `pr-tests.yml`
+  # rests on that zero - so it is re-established in the same pull request that
+  # moves it, rather than discovered to be stale later. Nothing else in the
+  # tree reaches this; an engine change is the gate's business, not the scan's.
+  pull_request:
     branches:
-      - 'claude/issue-1023-**'
+      - master
+    paths:
+      - 'engine/.clang-tidy'
+      - '.github/workflows/engine-tidy-scan.yml'
+      - '.github/dedupe-tidy-findings.py'
   workflow_dispatch:
     inputs:
       os:
