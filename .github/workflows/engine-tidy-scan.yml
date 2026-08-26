@@ -77,6 +77,9 @@ concurrency:
 
 permissions:
   contents: read
+  # For the failure issue below. `sanitizers.yml` needs it for the same reason
+  # and for the same kind of run: nobody is watching a cron.
+  issues: write
 
 jobs:
   scan:
@@ -256,3 +259,129 @@ jobs:
             tidy-units.txt
           if-no-files-found: error
           retention-days: 14
+
+      # Where a weekly run reports, which is the question a cron has to answer
+      # before it is worth having. The step summary above and the artifact
+      # beside it are read by whoever opens the run - and on a Monday morning
+      # nobody opens the run. GitHub's own notification for a failed schedule
+      # goes to whoever last edited the cron line and to nobody else, which is
+      # an accident of git history rather than a way to reach a maintainer.
+      #
+      # So: the same auto-filing `sanitizers.yml` uses, for the same reason and
+      # by the same plain GitHub API - no model, no tokens. Keyed on the runner
+      # so a leg that stays red accumulates comments on one issue instead of
+      # filing a fresh one every Monday. Closing it is a human act after the
+      # fix; the next failure comments again, or files anew if it was closed.
+      #
+      # **Not on a pull request**, exactly as #970 decided for the sanitizers:
+      # this step exists because nobody is watching the cron, and a pull
+      # request already has a reviewer watching its checks. Filing there would
+      # write a tracker entry about a ref that is not master and code that may
+      # never reach it. The artifact and summary stay ungated - they are what
+      # that reviewer needs, and they file nothing.
+      #
+      # The body is the report itself rather than a log excerpt: unlike a
+      # sanitizer log, this scan's output is already the deduplicated finding
+      # table, which is the whole of what a reader needs.
+      - name: File or update the tidy-scan-failure issue
+        if: ${{ failure() && github.event_name != 'pull_request' }}
+        uses: actions/github-script@v8
+        env:
+          RUNNER_PICKED: ${{ github.event.inputs.os || 'windows-latest' }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { RUNNER_PICKED } = process.env;
+            const { owner, repo } = context.repo;
+            const label = 'tidy-scan-failure';
+            const title = `tidy: whole-tree scan failure on ${RUNNER_PICKED}`;
+            const runUrl =
+              `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            // The report is Markdown already. Falling back to the log's tail
+            // covers the job dying before the report step - a build failure, or
+            // the deadline.
+            let report = '';
+            let reportKind = 'the deduplicated finding table';
+            try {
+              report = fs.readFileSync('tidy-scan-report.md', 'utf8');
+            } catch {
+              reportKind = 'the end of the clang-tidy log';
+              try {
+                report = '```\n' +
+                  fs.readFileSync('tidy-scan.log', 'utf8').split('\n').slice(-80).join('\n') +
+                  '\n```';
+              } catch {
+                reportKind = 'nothing';
+                report = '(no report and no log - the job failed before or during the build,' +
+                  ' or hit its deadline; the scan step alone runs well over an hour)';
+              }
+            }
+            // Issue bodies cap at 65536 characters; leave room for the prose.
+            const MAX = 12000;
+            if (report.length > MAX) {
+              report = `${report.slice(0, MAX)}\n... truncated, full report in the run artifact`;
+            }
+
+            const body = [
+              '**The whole-tree clang-tidy scan is not zero.**',
+              '',
+              `- run: ${runUrl}`,
+              `- ref: \`${context.ref}\` (event \`${context.eventName}\`, commit \`${context.sha}\`)`,
+              `- runner: \`${RUNNER_PICKED}\``,
+              '',
+              reportKind === 'nothing'
+                ? 'The job produced neither a report nor a log - read the run itself.'
+                : `Below is ${reportKind}; the full log, report and unit list are` +
+                  ` attached to the run as the \`engine-tidy-scan-${RUNNER_PICKED}\` artifact.`,
+              '',
+              report,
+              '',
+              'This scan is the denominator the per-change gate cannot give, so a',
+              'finding here is in a file no recent change touched: read it as the',
+              'ground having moved (a runner image bumping clang-tidy, or an',
+              '`engine/.clang-tidy` edit) rather than as someone having broken',
+              'something. Fix it, or decline the check in the config with a written',
+              'reason - see `docs/engine/building.md`.',
+            ].join('\n');
+
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: label });
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: label,
+                color: 'b60205',
+                description: 'A scheduled whole-tree clang-tidy scan went red',
+              });
+            }
+
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              labels: label,
+              per_page: 100,
+            });
+            const existing = open.find((i) => i.title === title);
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+              core.notice(`Commented on #${existing.number}: ${title}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                labels: [label, 'component:engine', 'component:ci'],
+              });
+              core.notice(`Filed #${created.data.number}: ${title}`);
+            }

@@ -990,6 +990,18 @@ clang-tidy, or a `.clang-tidy` edit changing what the checks mean. That is
 what the weekly run is for, on `sanitizers.yml`'s model (Monday 11:00 UTC,
 clear of the 06:00 and 09:00 that other workflows already use).
 
+**A weekly failure files an issue**, because a cron nobody watches reports
+nowhere useful otherwise: the job summary and the uploaded artifact are read
+by whoever opens the run, and on a Monday morning nobody opens the run.
+GitHub's own notification for a failed schedule reaches only whoever last
+edited the cron line, which is an accident of git history rather than a way to
+reach a maintainer. So the scan does what the sanitizers do - plain GitHub
+API, no model and no tokens - filing one `tidy-scan-failure` issue keyed on
+the runner, and commenting on it rather than filing again while it stays red.
+The body is the deduplicated finding table itself. It does **not** file on a
+pull request (#970's reasoning): a reviewer is already watching those checks,
+and the artifact is what they need.
+
 **Note which legs the gate covers: Linux and Windows, not macOS.** The lint
 step carries `runner.os != 'macOS'`, because clang-tidy 19 *and* 20 both die
 there with an `llvm_unreachable` trap on the runner's AppleClang SDK - a
