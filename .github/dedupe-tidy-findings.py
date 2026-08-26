@@ -22,10 +22,26 @@ import sys
 # `path:line:col: warning: text [check-name]`. clang-tidy also emits `error:`
 # for a `clang-diagnostic-*` under WarningsAsErrors and for a genuine parse
 # failure; both are findings a scan must count, not skip.
-FINDING = re.compile(
+LOCATED = re.compile(
     r"^(?P<file>[^:]*[^:\s][^:]*):(?P<line>\d+):(?P<col>\d+): "
     r"(?:warning|error): (?P<text>.*?) \[(?P<check>[\w.-]+(?:,[\w.-]+)*)\]\s*$"
 )
+
+# The same diagnostic with **no location at all** - `error: no such file or
+# directory: '...' [clang-diagnostic-error]`. A driver failure is reported this
+# way, and matching only the located form is how a scan in which every
+# translation unit failed to parse read as a clean tree: 206 units, 821 lines of
+# error, zero findings counted. These carry no (file, line, column) to
+# deduplicate on, so they are keyed by their own text.
+UNLOCATED = re.compile(
+    r"^(?:warning|error): (?P<text>.*?) \[(?P<check>[\w.-]+(?:,[\w.-]+)*)\]\s*$"
+)
+
+# clang-tidy's own line for a translation unit it could not finish. A unit that
+# did not lint is not a unit that linted clean, so this fails the scan
+# separately from the finding count - the denominator has to be units actually
+# read, and this is the only line that says one was not.
+NOT_PROCESSED = re.compile(r"^Error while processing ")
 
 
 def repo_relative(path: str, root: pathlib.PurePath) -> str:
@@ -70,19 +86,30 @@ def main() -> int:
 
     root = pathlib.PurePath(args.root)
     findings = {}
+    unfinished = 0
     for line in text.splitlines():
-        match = FINDING.match(line)
-        if not match:
+        line = line.rstrip("\r")
+        if NOT_PROCESSED.match(line):
+            unfinished += 1
             continue
-        # An alias reports under both names on one line; the first is canonical.
-        check = match.group("check").split(",")[0]
-        key = (
-            repo_relative(match.group("file"), root),
-            int(match.group("line")),
-            int(match.group("col")),
-            check,
-        )
-        findings.setdefault(key, match.group("text"))
+        match = LOCATED.match(line)
+        if match:
+            # An alias reports under both names on one line; the first is
+            # canonical.
+            check = match.group("check").split(",")[0]
+            key = (
+                repo_relative(match.group("file"), root),
+                int(match.group("line")),
+                int(match.group("col")),
+                check,
+            )
+            findings.setdefault(key, match.group("text"))
+            continue
+        match = UNLOCATED.match(line)
+        if match:
+            check = match.group("check").split(",")[0]
+            key = ("(no location)", 0, 0, check + ": " + match.group("text"))
+            findings.setdefault(key, match.group("text"))
 
     print(f"## {args.label}")
     print()
@@ -92,9 +119,19 @@ def main() -> int:
     )
     print()
 
-    if not findings:
+    if unfinished:
+        print(
+            f"::error::{unfinished} translation unit(s) clang-tidy could not finish "
+            f"(`Error while processing`). A unit that did not lint is not a unit that "
+            f"linted clean, so this scan measured nothing it can be trusted on."
+        )
+        print()
+
+    if not findings and not unfinished:
         print("Zero findings.")
         return 0
+    if not findings:
+        return 1
 
     by_check = collections.Counter(key[3] for key in findings)
     print("| Check | Findings |")

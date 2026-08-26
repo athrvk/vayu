@@ -185,7 +185,13 @@ jobs:
           #
           # Findings are the output, so the exit status is deliberately not the
           # verdict here - the report step below is.
-          tr '\n' '\0' < tidy-units.txt \
+          # `tr -d '\r'` first, and it is not defensive noise: the unit list is
+          # written by a Python whose stdout is a Windows text stream, so every
+          # path arrives CRLF-terminated. Without this each path reaches
+          # clang-tidy with a trailing carriage return and every one of the 206
+          # translation units answers `no such file or directory` - a whole-tree
+          # scan that lints nothing in five seconds.
+          tr -d '\r' < tidy-units.txt | tr '\n' '\0' \
             | xargs -0 -n 1 -P 4 \
                 "$tidy" -p engine/build-release --quiet --allow-no-checks \
                   --header-filter='.*[/\\]engine[/\\](src|include|tests)[/\\].*' \
