@@ -31,6 +31,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -222,7 +223,7 @@ class LoadReplayEventsTest : public ::testing::Test {
     /// Write a config value through the catalogue, as POST /config does.
     void set_config (const char* key, const std::string& value) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key;
+        ASSERT_HAS_VALUE (entry) << key;
         entry->value = value;
         db_->save_config_entry (*entry);
     }
@@ -260,7 +261,7 @@ TEST_F (LoadReplayEventsTest, AStreamedSampleReplaysWithItsEvents) {
     streamed_response (THREE_EVENTS, 3));
 
     const auto validation = vayu::core::validate_scripts (context, *db_, false);
-    ASSERT_TRUE (validation.run.has_value ());
+    ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u);
     EXPECT_EQ (validation.run->passed, 1u);
 }
@@ -281,7 +282,7 @@ TEST_F (LoadReplayEventsTest, ANonStreamSampleLeavesTheFieldUndefined) {
     context->metrics_collector->record_response_sample (plain);
 
     const auto validation = vayu::core::validate_scripts (context, *db_, false);
-    ASSERT_TRUE (validation.run.has_value ());
+    ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->passed, 1u);
     EXPECT_EQ (validation.run->failed, 0u);
 }
@@ -302,7 +303,7 @@ TEST_F (LoadReplayEventsTest, TheStoredEventsSettingBoundsWhatAReplayedScriptSee
     streamed_response (event_body (6), 6));
 
     const auto validation = vayu::core::validate_scripts (context, *db_, false);
-    ASSERT_TRUE (validation.run.has_value ());
+    ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u);
     EXPECT_EQ (validation.run->passed, 1u);
 }

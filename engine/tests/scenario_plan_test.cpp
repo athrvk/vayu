@@ -38,6 +38,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/scenario_plan.hpp"
@@ -281,7 +282,7 @@ TEST_F (ScenarioPlanTest, TiedOrdersRunInTheSameSequenceTheSidebarShows) {
     seed_request ("earlier", "root", /*order=*/0);
     auto make_older = [&] (const std::string& id, int64_t created_at) {
         auto row = db_->get_request (id);
-        ASSERT_TRUE (row.has_value ());
+        ASSERT_HAS_VALUE (row);
         row->created_at = created_at;
         db_->save_request (*row);
     };

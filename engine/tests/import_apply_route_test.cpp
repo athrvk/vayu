@@ -113,7 +113,7 @@ TEST_F (ImportApplyRouteTest, MapsEveryTempIdToAPrefixedEngineId) {
     EXPECT_EQ (id_map["e1"].get<std::string> ().rfind ("env_", 0), 0u);
 
     // The temp ids are opaque client strings and must not be stored anywhere.
-    ASSERT_TRUE (db_->get_collection (id_map["c1"].get<std::string> ()).has_value ());
+    ASSERT_HAS_VALUE (db_->get_collection (id_map["c1"].get<std::string> ()));
     EXPECT_FALSE (db_->get_collection ("c1").has_value ());
     EXPECT_FALSE (db_->get_request ("r1").has_value ());
     EXPECT_FALSE (db_->get_environment ("e1").has_value ());

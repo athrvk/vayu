@@ -21,6 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/spec_coverage.hpp"
@@ -1297,13 +1298,17 @@ TEST_F (RunsRouteTest, BaselinePutPinsTheRunAndAnswersTheUpdatedRow) {
     // than re-listing - the compact summary travels with it.
     EXPECT_TRUE (body.contains ("summary"));
 
-    EXPECT_TRUE (db_->get_run ("run_a")->baseline);
+    const auto stored_run3 = db_->get_run ("run_a");
+    ASSERT_HAS_VALUE (stored_run3);
+    EXPECT_TRUE (stored_run3->baseline);
 
     auto [unpin_status, unpin_body] = vayu::http::routes::set_run_baseline_response (
     *db_, "run_a", R"({"baseline":false})");
     ASSERT_EQ (unpin_status, 200);
     EXPECT_FALSE (unpin_body["baseline"].get<bool> ());
-    EXPECT_FALSE (db_->get_run ("run_a")->baseline);
+    const auto stored_run2 = db_->get_run ("run_a");
+    ASSERT_HAS_VALUE (stored_run2);
+    EXPECT_FALSE (stored_run2->baseline);
 }
 
 TEST_F (RunsRouteTest, BaselinePutOnAMissingRunIs404) {
@@ -1325,8 +1330,9 @@ TEST_F (RunsRouteTest, BaselinePutRejectsABodyWithoutABoolean) {
         vayu::http::routes::set_run_baseline_response (*db_, "run_a", body);
         EXPECT_EQ (status, 400) << "accepted: " << body;
     }
-    EXPECT_FALSE (db_->get_run ("run_a")->baseline)
-    << "a rejected body still wrote";
+    const auto stored_run = db_->get_run ("run_a");
+    ASSERT_HAS_VALUE (stored_run);
+    EXPECT_FALSE (stored_run->baseline) << "a rejected body still wrote";
 }
 
 TEST_F (RunsRouteTest, ListRowsCarryTheBaselineFlag) {
@@ -1369,7 +1375,7 @@ TEST_F (RunsRouteTest, SingleRunPayloadCarriesTheBaselineFlag) {
     vayu::http::routes::set_run_baseline_response (*db_, "run_a", R"({"baseline":true})");
 
     auto run = db_->get_run ("run_a");
-    ASSERT_TRUE (run.has_value ());
+    ASSERT_HAS_VALUE (run);
     EXPECT_TRUE (vayu::json::serialize (*run)["baseline"].get<bool> ());
 }
 

@@ -229,7 +229,7 @@ TEST_F (DatabaseTest, SeedRemovesRetiredRequestBatchSizeEntry) {
     stale.default_value = "5";
     stale.updated_at    = 1;
     db.save_config_entry (stale);
-    ASSERT_TRUE (db.get_config_entry ("requestBatchSize").has_value ());
+    ASSERT_HAS_VALUE (db.get_config_entry ("requestBatchSize"));
 
     db.seed_default_config ();
 
@@ -258,7 +258,7 @@ TEST_F (DatabaseTest, SeedRemovesRetiredContextPoolSizeEntry) {
     stale.default_value = "64";
     stale.updated_at    = 1;
     db.save_config_entry (stale);
-    ASSERT_TRUE (db.get_config_entry ("contextPoolSize").has_value ());
+    ASSERT_HAS_VALUE (db.get_config_entry ("contextPoolSize"));
 
     db.seed_default_config ();
 
@@ -356,7 +356,7 @@ TEST_F (DatabaseTest, SeedRemovesTheSweepRetiredEntries) {
         stale.default_value = "1";
         stale.updated_at    = 1;
         db.save_config_entry (stale);
-        ASSERT_TRUE (db.get_config_entry (key).has_value ());
+        ASSERT_HAS_VALUE (db.get_config_entry (key));
     }
 
     db.seed_default_config ();
@@ -524,7 +524,7 @@ TEST_F (DatabaseTest, DeletesEnvironment) {
     db.save_environment (env);
 
     auto retrieved = db.get_environment ("env_1");
-    ASSERT_TRUE (retrieved.has_value ());
+    ASSERT_HAS_VALUE (retrieved);
 
     db.delete_environment ("env_1");
 
@@ -1045,7 +1045,7 @@ TEST_F (DatabaseTest, PruneRunsNeverDeletesABaselineRun) {
     seed_run_with_children (db, "pinned", 1000);
     seed_run_with_children (db, "old", 2000);
     seed_run_with_children (db, "recent", 3000);
-    ASSERT_TRUE (db.set_run_baseline ("pinned", true).has_value ());
+    ASSERT_HAS_VALUE (db.set_run_baseline ("pinned", true));
 
 
     // Cap of one: without the exemption "pinned" is the oldest and the first
@@ -1075,7 +1075,7 @@ TEST_F (DatabaseTest, PruneRunsByAgeSparesABaselineRun) {
     const int64_t ninety_days_ago = now - 90 * day;
     seed_run_with_children (db, "pinned_stale", ninety_days_ago);
     seed_run_with_children (db, "stale", ninety_days_ago);
-    ASSERT_TRUE (db.set_run_baseline ("pinned_stale", true).has_value ());
+    ASSERT_HAS_VALUE (db.set_run_baseline ("pinned_stale", true));
 
     db.prune_runs (0, 30);
 

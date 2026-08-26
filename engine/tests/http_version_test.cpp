@@ -1,3 +1,4 @@
+#include "optional_assert.hpp"
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/types.hpp"
 #include <gtest/gtest.h>
@@ -19,7 +20,7 @@ TEST (HttpVersionDomain, EnumerationCoversTheWholeEnum) {
 TEST (HttpVersionDomain, RoundTripsEveryMember) {
     for (auto v : vayu::all_http_versions ()) {
         auto parsed = vayu::http_version_from_string (vayu::to_string (v));
-        ASSERT_TRUE (parsed.has_value ()) << vayu::to_string (v);
+        ASSERT_HAS_VALUE (parsed) << vayu::to_string (v);
         EXPECT_EQ (*parsed, v);
     }
 }

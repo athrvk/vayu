@@ -13,6 +13,7 @@
 #include <climits>
 #include <string>
 
+#include "optional_assert.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 
 using vayu::http::detail::apply_phase_timings;
@@ -155,7 +156,7 @@ TEST (ValidateTransferable, HeadWithABodyIsRefusedWithAReason) {
     request.body.content = R"({"q":1})";
 
     auto error = validate_transferable (request);
-    ASSERT_TRUE (error.has_value ());
+    ASSERT_HAS_VALUE (error);
     EXPECT_EQ (error->code, vayu::ErrorCode::InvalidMethod);
     EXPECT_NE (error->message.find ("HEAD"), std::string::npos)
     << "the error must name what is wrong: " << error->message;
@@ -207,7 +208,7 @@ TEST (ValidateTransferable, AHeaderCarryingALineBreakIsRefused) {
     { "ok\r\nX-Admin: true", "ok\nX-Admin: true", "ok\rX-Admin: true" }) {
         request.headers = { { "X-Note", forged } };
         auto error      = validate_transferable (request);
-        ASSERT_TRUE (error.has_value ()) << forged;
+        ASSERT_HAS_VALUE (error) << forged;
         EXPECT_NE (error->message.find ("X-Note"), std::string::npos)
         << "the refusal must name the header: " << error->message;
         EXPECT_NE (error->message.find ("CR or LF"), std::string::npos) << error->message;
@@ -217,7 +218,7 @@ TEST (ValidateTransferable, AHeaderCarryingALineBreakIsRefused) {
     // quoted - quoting it would break the message the same way.
     request.headers = { { "X-A\r\nX-Admin: true", "v" } };
     auto error      = validate_transferable (request);
-    ASSERT_TRUE (error.has_value ());
+    ASSERT_HAS_VALUE (error);
     EXPECT_NE (error->message.find ("header name"), std::string::npos) << error->message;
     EXPECT_EQ (error->message.find ('\n'), std::string::npos)
     << "the message must not carry the injected line break: " << error->message;
@@ -232,7 +233,7 @@ TEST (ValidateTransferable, AHeaderCarryingANulIsRefused) {
     request.headers = { { "X-Note", std::string ("ok\0dropped", 10) } };
 
     auto error = validate_transferable (request);
-    ASSERT_TRUE (error.has_value ());
+    ASSERT_HAS_VALUE (error);
     EXPECT_NE (error->message.find ("NUL"), std::string::npos) << error->message;
 }
 

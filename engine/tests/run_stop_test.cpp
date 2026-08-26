@@ -29,6 +29,7 @@
 #include <nlohmann/json.hpp>
 
 #include "mock_server.hpp"
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -312,7 +313,7 @@ TEST_F (RunStopAccountingTest, StoppedRunReachesTerminalStatusPromptly) {
     << "ms to reach a terminal status against a hung upstream";
 
     auto stored = db->get_run (run_id);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->status, vayu::RunStatus::Stopped);
 
     EXPECT_LE (context->requests_sent.load () - sent_at_stop, 10u)

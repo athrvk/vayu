@@ -3,6 +3,7 @@
  * @brief Tests for JSON utilities
  */
 
+#include "optional_assert.hpp"
 #include "vayu/utils/json.hpp"
 
 #include <gtest/gtest.h>
@@ -192,7 +193,7 @@ TEST (JsonTest, TryParseBodyReturnsNulloptForInvalidJson) {
 TEST (JsonTest, TryParseBodyReturnsJsonForValidInput) {
     auto result = try_parse_body (R"({"key": "value"})");
 
-    ASSERT_TRUE (result.has_value ());
+    ASSERT_HAS_VALUE (result);
     EXPECT_EQ ((*result)["key"], "value");
 }
 

@@ -25,6 +25,7 @@
 #include <nlohmann/json.hpp>
 
 #include "mock_server.hpp"
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
@@ -131,7 +132,7 @@ TEST_F (RunShutdownTest, ShutdownStopsAndJoinsAWorkerMidRun) {
     // A joined worker has finished its writes; the status cannot still be
     // in-flight once shutdown has returned.
     auto stored = db->get_run (run_id);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_NE (stored->status, vayu::RunStatus::Running);
     EXPECT_NE (stored->status, vayu::RunStatus::Pending);
     EXPECT_FALSE (context->is_running.load ());
@@ -159,7 +160,7 @@ TEST_F (RunShutdownTest, DestructorDrainsAnActiveRun) {
     EXPECT_LT (elapsed, 20000) << "the destructor took " << elapsed << "ms to drain";
 
     auto stored = db->get_run (run_id);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_NE (stored->status, vayu::RunStatus::Running)
     << "~RunManager returned while the run was still executing - its worker "
        "outlives the manager and the database";

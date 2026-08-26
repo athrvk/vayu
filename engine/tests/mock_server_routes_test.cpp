@@ -25,6 +25,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -53,7 +54,7 @@ int64_t now_ms () {
 TEST (MockParseStart, RequiresACollectionAndDefaultsTheRest) {
     const auto parsed =
     vayu::http::parse_mock_start (json{ { "collectionId", "col_1" } });
-    ASSERT_TRUE (parsed.has_value ());
+    ASSERT_HAS_VALUE (parsed);
     EXPECT_EQ (parsed->collection_id, "col_1");
     EXPECT_EQ (parsed->port, 0);
     EXPECT_EQ (parsed->latency_ms, 0);
@@ -79,7 +80,7 @@ TEST (MockParseStart, RequiresACollectionAndDefaultsTheRest) {
 TEST (MockParseStart, ReadsAndBoundsEveryTuningField) {
     const auto parsed = vayu::http::parse_mock_start (json{ { "collectionId", "col_1" },
     { "port", 41234 }, { "latencyMs", 25 }, { "errorRatePct", 10 } });
-    ASSERT_TRUE (parsed.has_value ());
+    ASSERT_HAS_VALUE (parsed);
     EXPECT_EQ (parsed->port, 41234);
     EXPECT_EQ (parsed->latency_ms, 25);
     EXPECT_EQ (parsed->error_rate_pct, 10);
@@ -358,11 +359,11 @@ TEST_F (MockServerTest, ALiteralRouteBeatsATemplatedOneWhateverOrderTheyWereWrit
     ASSERT_EQ (routes[0].path_template, "/pets/{{petId}}")
     << "the wildcard must come first";
     const auto mine = vayu::http::resolve_mock_route (routes, "GET", "/pets/mine");
-    ASSERT_TRUE (mine.route_index.has_value ());
+    ASSERT_HAS_VALUE (mine.route_index);
     EXPECT_EQ (routes[*mine.route_index].response.body, "literal");
 
     const auto other = vayu::http::resolve_mock_route (routes, "GET", "/pets/42");
-    ASSERT_TRUE (other.route_index.has_value ());
+    ASSERT_HAS_VALUE (other.route_index);
     EXPECT_EQ (routes[*other.route_index].response.body, "wildcard");
 }
 
@@ -486,7 +487,7 @@ TEST_F (MockServerTest, AStartedMockServesItsExamplesAndReportsItsTable) {
     EXPECT_EQ (json::parse (bare->body)["error"]["code"], "mock_no_example");
 
     const auto table = manager.routes (started.info.mock_id);
-    ASSERT_TRUE (table.has_value ());
+    ASSERT_HAS_VALUE (table);
     EXPECT_EQ (table->size (), 4u);
     EXPECT_FALSE (manager.routes ("mock_nope").has_value ());
 }
@@ -550,7 +551,7 @@ TEST_F (MockServerTest, StopEndsTheListenerAndDropsTheRecord) {
     const int port = started.info.port;
 
     ASSERT_EQ (manager.list ().size (), 1u);
-    ASSERT_TRUE (manager.get (started.info.mock_id).has_value ());
+    ASSERT_HAS_VALUE (manager.get (started.info.mock_id));
 
     EXPECT_TRUE (manager.stop (started.info.mock_id));
     // A stop is a delete: a mock holds nothing that outlives its listener, so
@@ -648,7 +649,7 @@ TEST_F (MockServerTest, ALoadRunCanTargetAMockEndToEnd) {
     run_manager.shutdown (std::chrono::milliseconds (15000));
 
     const auto stored = db_->get_run (row.id);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     ASSERT_FALSE (stored->summary.empty ()) << "the run produced no summary";
     const json summary = json::parse (stored->summary);
     // The point of the workflow: a realistic, zero-cost upstream that actually

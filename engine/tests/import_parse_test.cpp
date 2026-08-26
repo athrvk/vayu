@@ -41,6 +41,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/db/database.hpp"
@@ -302,7 +303,7 @@ TEST_F (ImportParseRoute, RefusesADocumentOverTheStoredCap) {
     // document is read into memory whatever format claims it, and an OpenAPI
     // import stores exactly these bytes.
     auto entry = db_->get_config_entry ("maxSpecDocumentBytes");
-    ASSERT_TRUE (entry.has_value ());
+    ASSERT_HAS_VALUE (entry);
     entry->value = "64";
     db_->save_config_entry (*entry);
     auto [status, body] = vayu::http::routes::import_parse_response (

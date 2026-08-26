@@ -11,6 +11,7 @@
  * visible in any aggregate.
  */
 
+#include "optional_assert.hpp"
 #include "vayu/core/scenario_load.hpp"
 
 #include <gtest/gtest.h>
@@ -274,7 +275,7 @@ TEST (ScenarioLoadConfig, ConstantRpsIsRefusedForAScenario) {
 
     ASSERT_TRUE (vayu::core::is_scenario_load_run (config));
     const auto refusal = vayu::core::validate_scenario_load_config (config);
-    ASSERT_TRUE (refusal.has_value ())
+    ASSERT_HAS_VALUE (refusal)
     << "constant_rps with a scenario must be refused, not silently run "
        "closed-loop";
     EXPECT_NE (refusal->find ("constant_rps"), std::string::npos)
@@ -287,7 +288,7 @@ TEST (ScenarioLoadConfig, CapacityIsRefusedForAScenario) {
 
     ASSERT_TRUE (vayu::core::is_scenario_load_run (config));
     const auto refusal = vayu::core::validate_scenario_load_config (config);
-    ASSERT_TRUE (refusal.has_value ())
+    ASSERT_HAS_VALUE (refusal)
     << "capacity with a scenario must be refused: the search judges one "
        "windowed p99 and a sequence has one per step";
     EXPECT_NE (refusal->find ("capacity"), std::string::npos)
@@ -694,16 +695,17 @@ TEST_F (ScenarioLoadTest, EachStepsScriptIsReplayedAgainstItsOwnSamples) {
     const auto validation = vayu::core::validate_scripts (context_, *db_, false);
 
     ASSERT_EQ (validation.steps.size (), 2u);
-    ASSERT_TRUE (validation.steps[0].has_value ())
+    const auto& first_step = validation.steps[0];
+    ASSERT_HAS_VALUE (first_step)
     << "the scripted step reported no tallies, so its assertions went "
        "unchecked";
-    EXPECT_EQ (validation.steps[0]->sampled, 3u);
-    EXPECT_EQ (validation.steps[0]->passed, 3u);
-    EXPECT_EQ (validation.steps[0]->failed, 0u);
+    EXPECT_EQ (first_step->sampled, 3u);
+    EXPECT_EQ (first_step->passed, 3u);
+    EXPECT_EQ (first_step->failed, 0u);
     EXPECT_FALSE (validation.steps[1].has_value ())
     << "a step with no script must report nothing rather than a row of zeros";
 
-    ASSERT_TRUE (validation.run.has_value ());
+    ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->sampled, 3u);
     EXPECT_EQ (validation.run->passed, 3u);
 }
@@ -728,17 +730,19 @@ TEST_F (ScenarioLoadTest, AFailingAssertionIsAttributedToItsOwnStep) {
     const auto validation = vayu::core::validate_scripts (context_, *db_, false);
 
     ASSERT_EQ (validation.steps.size (), 3u);
-    ASSERT_TRUE (validation.steps[0].has_value ());
-    EXPECT_EQ (validation.steps[0]->failed, 0u);
-    EXPECT_EQ (validation.steps[0]->passed, 2u);
-    ASSERT_TRUE (validation.steps[1].has_value ());
-    EXPECT_EQ (validation.steps[1]->failed, 2u)
+    const auto& first_step = validation.steps[0];
+    ASSERT_HAS_VALUE (first_step);
+    EXPECT_EQ (first_step->failed, 0u);
+    EXPECT_EQ (first_step->passed, 2u);
+    const auto& second_step = validation.steps[1];
+    ASSERT_HAS_VALUE (second_step);
+    EXPECT_EQ (second_step->failed, 2u)
     << "step 2's failing assertion was not attributed to step 2";
-    EXPECT_EQ (validation.steps[1]->passed, 0u);
+    EXPECT_EQ (second_step->passed, 0u);
     EXPECT_FALSE (validation.steps[2].has_value ());
 
     // The run's headline still says something failed; the breakdown says where.
-    ASSERT_TRUE (validation.run.has_value ());
+    ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 2u);
     EXPECT_EQ (validation.run->passed, 2u);
 }
@@ -766,9 +770,10 @@ TEST_F (ScenarioLoadTest, ADeferredStepScriptReadsItsIterationAndDataRow) {
 
     const auto validation = vayu::core::validate_scripts (context_, *db_, false);
     ASSERT_EQ (validation.steps.size (), 1u);
-    ASSERT_TRUE (validation.steps[0].has_value ());
-    EXPECT_EQ (validation.steps[0]->passed, 2u);
-    EXPECT_EQ (validation.steps[0]->failed, 0u);
+    const auto& first_step = validation.steps[0];
+    ASSERT_HAS_VALUE (first_step);
+    EXPECT_EQ (first_step->passed, 2u);
+    EXPECT_EQ (first_step->failed, 0u);
 }
 
 // `pm.execution` still throws, naming itself: a script that has already run
@@ -795,9 +800,10 @@ TEST_F (ScenarioLoadTest, PmExecutionStillThrowsInADeferredStepScript) {
 
     const auto validation = vayu::core::validate_scripts (context_, *db_, false);
     ASSERT_EQ (validation.steps.size (), 1u);
-    ASSERT_TRUE (validation.steps[0].has_value ());
-    EXPECT_EQ (validation.steps[0]->passed, 1u);
-    EXPECT_EQ (validation.steps[0]->failed, 0u);
+    const auto& first_step = validation.steps[0];
+    ASSERT_HAS_VALUE (first_step);
+    EXPECT_EQ (first_step->passed, 1u);
+    EXPECT_EQ (first_step->failed, 0u);
 }
 
 // The tallies land on the step they belong to in the stored summary, which is

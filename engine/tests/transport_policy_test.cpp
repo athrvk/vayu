@@ -33,6 +33,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "proxy_server.hpp"
 #include "temp_database.hpp"
 #include "tls_backend.hpp"
@@ -232,7 +233,7 @@ class TransportPolicyDbTest : public ::testing::Test {
 
     void set_config (const std::string& key, const std::string& value) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key << " is not seeded";
+        ASSERT_HAS_VALUE (entry) << key << " is not seeded";
         entry->value = value;
         db_->save_config_entry (*entry);
     }
@@ -349,8 +350,8 @@ TEST_F (TransportPolicyDbTest, EveryModeIsOfferedBySettings) {
     // mode is ever added to the enum without reaching the settings row - which
     // would make it a value the engine honours and POST /config rejects.
     const auto entry = db_->get_config_entry ("proxyMode");
-    ASSERT_TRUE (entry.has_value ());
-    ASSERT_TRUE (entry->options.has_value ());
+    ASSERT_HAS_VALUE (entry);
+    ASSERT_HAS_VALUE (entry->options);
     const auto options = nlohmann::json::parse (*entry->options);
     ASSERT_EQ (options.size (), all_proxy_modes ().size ());
     for (const auto mode : all_proxy_modes ()) {
@@ -424,7 +425,7 @@ TEST (CaPemValidation, NamesAPastedPrivateKeyForWhatItIs) {
     // a formatting problem instead of telling them what they pasted.
     const auto rejection = ca_pem_rejection (
     "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n");
-    ASSERT_TRUE (rejection.has_value ());
+    ASSERT_HAS_VALUE (rejection);
     EXPECT_NE (rejection->find ("private key"), std::string::npos) << *rejection;
 }
 
@@ -570,7 +571,7 @@ TEST (TlsBackend, IsTheBackendEveryTrustStatementHereAssumes) {
 
     const std::optional<bool> bundle_file_backend =
     verifies_through_a_bundle_file (backend);
-    ASSERT_TRUE (bundle_file_backend.has_value ())
+    ASSERT_HAS_VALUE (bundle_file_backend)
     << "TLS backend '" << backend
     << "' is one no statement in this repo covers - decide which trust model "
        "it "
@@ -642,7 +643,7 @@ TEST (TlsBackend, FindsTheSystemAnchorsTheMergeExtends) {
     ASSERT_FALSE (backend.empty ());
     const std::optional<bool> bundle_file_backend =
     verifies_through_a_bundle_file (backend);
-    ASSERT_TRUE (bundle_file_backend.has_value ()) << backend;
+    ASSERT_HAS_VALUE (bundle_file_backend) << backend;
     ASSERT_TRUE (*bundle_file_backend)
     << "TLS backend '" << backend << "' does not verify through a bundle file";
 

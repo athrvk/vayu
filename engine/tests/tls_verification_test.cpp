@@ -58,6 +58,7 @@
 #include <string>
 #include <system_error>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "tls_server.hpp"
 #include "vayu/db/database.hpp"
@@ -126,7 +127,7 @@ class CustomCaVerificationTest : public ::testing::Test {
 
     void set_config (const std::string& key, const std::string& value) {
         auto entry = db_->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key << " is not seeded";
+        ASSERT_HAS_VALUE (entry) << key << " is not seeded";
         entry->value = value;
         db_->save_config_entry (*entry);
     }
