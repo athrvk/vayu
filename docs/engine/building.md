@@ -979,7 +979,24 @@ clang-tidy runs in two places, and both of them can stop a change:
 |-------|---------------|---------------------|
 | `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **whole** of every staged `.c/.cpp/.h/.hpp` file | Refuses the commit |
 | `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **whole** of every changed `engine/{src,include,tests}` **translation unit**, on Linux and Windows alike. Headers are never direct inputs | Fails CI |
-| `Engine tidy scan` (`.github/workflows/engine-tidy-scan.yml`), `workflow_dispatch` only | The **whole tree**, on the runner you pick. Not a pull-request gate - the denominator no per-change gate can give | Fails the run |
+| `Engine tidy scan` (`.github/workflows/engine-tidy-scan.yml`), **weekly** plus `workflow_dispatch` | The **whole tree**, on the runner you pick. Not a pull-request gate - the denominator no per-change gate can give | Fails the run |
+
+The two rows answer different questions, which is why both exist. The gate
+lints the files a change *touches*, and so can never say what an **untouched**
+file holds; the scan says exactly that and nothing about any particular
+change. Drift into the rest of the tree therefore cannot arrive through a
+diff - it arrives when the ground moves: a runner image bumping its
+clang-tidy, or a `.clang-tidy` edit changing what the checks mean. That is
+what the weekly run is for, on `sanitizers.yml`'s model (Monday 11:00 UTC,
+clear of the 06:00 and 09:00 that other workflows already use).
+
+**Note which legs the gate covers: Linux and Windows, not macOS.** The lint
+step carries `runner.os != 'macOS'`, because clang-tidy 19 *and* 20 both die
+there with an `llvm_unreachable` trap on the runner's AppleClang SDK - a
+settled decision (#940), re-openable only by a Homebrew LLVM that survives
+both heavy translation units. So a macOS-only diagnostic is unlinted on every
+path, gate and scan alike; what that costs is small and measured (the engine's
+macOS-conditional surface is four `#define`s with no statement in them).
 
 A finding is a failure because `engine/.clang-tidy` sets
 `WarningsAsErrors: '*'`; with that empty, clang-tidy prints every diagnostic it

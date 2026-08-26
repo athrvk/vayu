@@ -20,21 +20,38 @@
 name: Engine tidy scan
 
 on:
-  # Two triggers, and the narrow one is not a convenience.
+  # Three triggers, on `sanitizers.yml`'s model, and for its reasons.
   #
-  # `workflow_dispatch` is how the scan is normally run: on demand, when a
-  # runner image moves its clang-tidy, or to re-establish the zero after a
-  # paydown. A whole-tree scan parses every translation unit and has no
-  # business on the ordinary pull-request path, where the gate already lints
-  # what changed.
+  # **The cron is the one that matters.** The per-change gate holds every file
+  # a pull request *touches* at zero, so drift into the rest of the tree cannot
+  # arrive through a diff - it arrives when the ground moves underneath: a
+  # runner image bumping clang-tidy (the Windows leg takes whatever LLVM its
+  # image ships, currently 20.1.8, and a new minor can add checks), or a new
+  # `.clang-tidy` reading differently than it did. A weekly whole-tree run is
+  # how that is noticed in a week rather than by whichever pull request happens
+  # to touch a stale file next.
+  #
+  # 11:00 Monday, deliberately clear of the 06:00 that codeql.yml and
+  # cache-warm.yml already use and of the 09:00 that sanitizers.yml takes: this
+  # is a two-hour job on a Windows runner and has no reason to compete with a
+  # five-leg matrix for the same pool.
+  #
+  # `workflow_dispatch` is the on-demand spelling - after a paydown, or to
+  # re-establish the zero on a runner you pick.
   #
   # The `pull_request` trigger fires only for the three files that can
   # *invalidate* the measurement: the check list the scan reads, and the two
   # files that are the scan. A pull request that edits `engine/.clang-tidy`
   # changes what "zero findings" means, and the promotion in `pr-tests.yml`
   # rests on that zero - so it is re-established in the same pull request that
-  # moves it, rather than discovered to be stale later. Nothing else in the
-  # tree reaches this; an engine change is the gate's business, not the scan's.
+  # moves it, rather than discovered to be stale later. It also carries
+  # `sanitizers.yml`'s caveat: a new workflow cannot be dispatched before it
+  # exists on the default branch, so without this the first evidence that this
+  # one configures, builds and scans at all would arrive after merge, on a
+  # cron, as a red master. Nothing else in the tree reaches it; an engine
+  # change is the gate's business, not the scan's.
+  schedule:
+    - cron: '0 11 * * 1'
   pull_request:
     branches:
       - master
