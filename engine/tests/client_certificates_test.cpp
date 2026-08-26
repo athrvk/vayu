@@ -35,6 +35,7 @@
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/curl_options.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/sse_stream.hpp"
@@ -1111,18 +1112,17 @@ TEST (ClientCertificateBackend, TakesTheCertificateOptionsOnThisPlatform) {
     const char* backend =
     info != nullptr && info->ssl_version != nullptr ? info->ssl_version : "unknown";
 
-    EXPECT_EQ (curl_easy_setopt (curl, CURLOPT_SSLCERT, "/certs/client.pem"), CURLE_OK)
+    EXPECT_EQ (set_opt<CURLOPT_SSLCERT> (curl, "/certs/client.pem"), CURLE_OK)
     << "TLS backend '" << backend << "' refuses CURLOPT_SSLCERT";
-    EXPECT_EQ (curl_easy_setopt (curl, CURLOPT_SSLKEY, "/certs/client.key"), CURLE_OK)
+    EXPECT_EQ (set_opt<CURLOPT_SSLKEY> (curl, "/certs/client.key"), CURLE_OK)
     << "TLS backend '" << backend << "' refuses CURLOPT_SSLKEY";
-    EXPECT_EQ (curl_easy_setopt (curl, CURLOPT_KEYPASSWD, "secret"), CURLE_OK)
+    EXPECT_EQ (set_opt<CURLOPT_KEYPASSWD> (curl, "secret"), CURLE_OK)
     << "TLS backend '" << backend << "' refuses CURLOPT_KEYPASSWD";
     // Both types, on every leg: the option is how a stored format reaches
     // libcurl at all (#833), and a backend that refused one of them would leave
     // entries in that format going out as something else, or not at all.
     for (const auto format : all_client_cert_formats ()) {
-        EXPECT_EQ (
-        curl_easy_setopt (curl, CURLOPT_SSLCERTTYPE, curl_ssl_cert_type (format)), CURLE_OK)
+        EXPECT_EQ (set_opt<CURLOPT_SSLCERTTYPE> (curl, curl_ssl_cert_type (format)), CURLE_OK)
         << "TLS backend '" << backend << "' refuses CURLOPT_SSLCERTTYPE '"
         << curl_ssl_cert_type (format) << "'";
     }

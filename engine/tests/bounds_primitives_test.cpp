@@ -47,6 +47,7 @@
 
 #include "source_scan.hpp"
 #include "vayu/http/curl_error_buffer.hpp"
+#include "vayu/http/curl_options.hpp"
 #include "vayu/utils/parse.hpp"
 
 namespace vayu {
@@ -110,7 +111,7 @@ TEST (CurlErrorBuffer, ReportsWhatAFailedTransferWroteAndForgetsItOnTheNext) {
 
     // A scheme libcurl does not support fails before any socket is opened, so
     // this is a message with no network behind it.
-    curl_easy_setopt (curl, CURLOPT_URL, "not-a-scheme://vayu.invalid/");
+    http::set_opt<CURLOPT_URL> (curl, "not-a-scheme://vayu.invalid/");
     ASSERT_NE (curl_easy_perform (curl), CURLE_OK);
     EXPECT_FALSE (errors.message ().empty ())
     << "libcurl reported a failure and the buffer did not carry its text";

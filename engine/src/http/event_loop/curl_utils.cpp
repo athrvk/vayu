@@ -18,6 +18,7 @@
 #include <string_view>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/curl_options.hpp"
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/event_loop/curl_callbacks.hpp"
 #include "vayu/http/event_loop/event_loop_worker.hpp"
@@ -235,7 +236,7 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
         }
         // Like POSTFIELDS below, this switches curl's method to POST, so the
         // method is (re-)asserted afterwards.
-        curl_easy_setopt (curl, CURLOPT_MIMEPOST, mime);
+        set_opt<CURLOPT_MIMEPOST> (curl, mime);
     } else if (has_body) {
         // Setting POSTFIELDS switches curl's method to POST, so it goes first
         // and the method is (re-)asserted below.
@@ -244,8 +245,8 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
         // and dies at the end of this scope, while POSTFIELDS keeps only a
         // pointer that has to outlive the transfer.
         const std::string body = vayu::http::wire_body_bytes (request.body);
-        curl_easy_setopt (curl, CURLOPT_POSTFIELDSIZE, static_cast<long> (body.size ()));
-        curl_easy_setopt (curl, CURLOPT_COPYPOSTFIELDS, body.c_str ());
+        set_opt<CURLOPT_POSTFIELDSIZE> (curl, static_cast<long> (body.size ()));
+        set_opt<CURLOPT_COPYPOSTFIELDS> (curl, body.c_str ());
     }
 
     switch (request.method) {
@@ -253,9 +254,9 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
         // A body-bearing GET (Elasticsearch-style search) keeps its method only
         // via CUSTOMREQUEST; CURLOPT_HTTPGET would drop the body it just set.
         if (has_body) {
-            curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "GET");
+            set_opt<CURLOPT_CUSTOMREQUEST> (curl, "GET");
         } else {
-            curl_easy_setopt (curl, CURLOPT_HTTPGET, 1L);
+            set_opt<CURLOPT_HTTPGET> (curl, 1L);
         }
         break;
     case HttpMethod::POST:
@@ -264,7 +265,7 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
         // MIMEPOST already makes the request a POST, so re-asserting the verb
         // is both unnecessary and destructive here.
         if (!mime) {
-            curl_easy_setopt (curl, CURLOPT_POST, 1L);
+            set_opt<CURLOPT_POST> (curl, 1L);
             // CURLOPT_POST alone does not say "no body" - it says "a body, of a
             // length I have not told you", and libcurl then reads that body
             // from its default read callback, which is `stdin`. Declaring the
@@ -284,23 +285,21 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
             // The body-bearing branch above sets POSTFIELDSIZE for the same
             // reason; this is the case with no body to set it for.
             if (!has_body) {
-                curl_easy_setopt (curl, CURLOPT_POSTFIELDSIZE, 0L);
+                set_opt<CURLOPT_POSTFIELDSIZE> (curl, 0L);
             }
         }
         break;
-    case HttpMethod::PUT:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "PUT");
-        break;
+    case HttpMethod::PUT: set_opt<CURLOPT_CUSTOMREQUEST> (curl, "PUT"); break;
     case HttpMethod::DELETE:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+        set_opt<CURLOPT_CUSTOMREQUEST> (curl, "DELETE");
         break;
     case HttpMethod::PATCH:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "PATCH");
+        set_opt<CURLOPT_CUSTOMREQUEST> (curl, "PATCH");
         break;
     // A body here is refused by validate_transferable, so NOBODY cannot drop one.
-    case HttpMethod::HEAD: curl_easy_setopt (curl, CURLOPT_NOBODY, 1L); break;
+    case HttpMethod::HEAD: set_opt<CURLOPT_NOBODY> (curl, 1L); break;
     case HttpMethod::OPTIONS:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "OPTIONS");
+        set_opt<CURLOPT_CUSTOMREQUEST> (curl, "OPTIONS");
         break;
     }
 
@@ -400,16 +399,16 @@ void apply_jar_cookies (CURL* curl,
 CookieJar& jar,
 const std::string& scope,
 const std::vector<CookieWrite>& writes) {
-    curl_easy_setopt (curl, CURLOPT_COOKIEFILE, "");
-    curl_easy_setopt (curl, CURLOPT_COOKIELIST, "ALL");
+    set_opt<CURLOPT_COOKIEFILE> (curl, "");
+    set_opt<CURLOPT_COOKIELIST> (curl, "ALL");
     for (const auto& line : apply_cookie_writes (jar.lines_for (scope), writes)) {
-        curl_easy_setopt (curl, CURLOPT_COOKIELIST, line.c_str ());
+        set_opt<CURLOPT_COOKIELIST> (curl, line.c_str ());
     }
 }
 
 void capture_jar_cookies (CURL* curl, CookieJar& jar, const std::string& scope) {
     struct curl_slist* held = nullptr;
-    if (curl_easy_getinfo (curl, CURLINFO_COOKIELIST, &held) != CURLE_OK) {
+    if (get_info<CURLINFO_COOKIELIST> (curl, &held) != CURLE_OK) {
         return;
     }
     std::vector<std::string> lines;
@@ -424,11 +423,11 @@ void capture_jar_cookies (CURL* curl, CookieJar& jar, const std::string& scope) 
 
 CurlPhaseTimes read_phase_times (CURL* curl) {
     CurlPhaseTimes times;
-    curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &times.total);
-    curl_easy_getinfo (curl, CURLINFO_NAMELOOKUP_TIME, &times.namelookup);
-    curl_easy_getinfo (curl, CURLINFO_CONNECT_TIME, &times.connect);
-    curl_easy_getinfo (curl, CURLINFO_APPCONNECT_TIME, &times.appconnect);
-    curl_easy_getinfo (curl, CURLINFO_STARTTRANSFER_TIME, &times.starttransfer);
+    get_info<CURLINFO_TOTAL_TIME> (curl, &times.total);
+    get_info<CURLINFO_NAMELOOKUP_TIME> (curl, &times.namelookup);
+    get_info<CURLINFO_CONNECT_TIME> (curl, &times.connect);
+    get_info<CURLINFO_APPCONNECT_TIME> (curl, &times.appconnect);
+    get_info<CURLINFO_STARTTRANSFER_TIME> (curl, &times.starttransfer);
     return times;
 }
 
@@ -465,7 +464,7 @@ bool proxy_refused_tunnel (CURL* curl) {
         return false;
     }
     long connect_code = 0;
-    if (curl_easy_getinfo (curl, CURLINFO_HTTP_CONNECTCODE, &connect_code) != CURLE_OK) {
+    if (get_info<CURLINFO_HTTP_CONNECTCODE> (curl, &connect_code) != CURLE_OK) {
         return false;
     }
     return connect_code >= 400;
@@ -503,7 +502,7 @@ bool tls_connection_never_answered (CURL* curl) {
         return false;
     }
     char* scheme = nullptr;
-    if (curl_easy_getinfo (curl, CURLINFO_SCHEME, &scheme) != CURLE_OK || scheme == nullptr) {
+    if (get_info<CURLINFO_SCHEME> (curl, &scheme) != CURLE_OK || scheme == nullptr) {
         return false;
     }
     // curl reports the scheme upper-cased; compared case-insensitively anyway,
@@ -518,7 +517,7 @@ bool tls_connection_never_answered (CURL* curl) {
     // A response line, even a 4xx, means the TLS layer did its job and whatever
     // failed after it is not a trust decision.
     long response_code = 0;
-    if (curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &response_code) != CURLE_OK) {
+    if (get_info<CURLINFO_RESPONSE_CODE> (curl, &response_code) != CURLE_OK) {
         return false;
     }
     return response_code == 0;
@@ -574,8 +573,8 @@ const ClientCertRule* apply_transport_policy (CURL* curl,
 const TransportPolicy& policy,
 bool verify_ssl,
 const std::string& url) {
-    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYPEER, verify_ssl ? 1L : 0L);
-    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYHOST, verify_ssl ? 2L : 0L);
+    set_opt<CURLOPT_SSL_VERIFYPEER> (curl, verify_ssl ? 1L : 0L);
+    set_opt<CURLOPT_SSL_VERIFYHOST> (curl, verify_ssl ? 2L : 0L);
 
     // The user's trust anchors (issue #706). Written on every handle, empty
     // path included, for the reason the proxy options are: handles are reused,
@@ -588,7 +587,7 @@ const std::string& url) {
     // request fails verification with nothing anywhere saying the certificates
     // were never loaded. Logged once per process: the load path applies a
     // policy per transfer, and a per-request line would be the log.
-    const CURLcode ca_result = curl_easy_setopt (curl, CURLOPT_CAINFO,
+    const CURLcode ca_result = set_opt<CURLOPT_CAINFO> (curl,
     policy.ca_bundle_path.empty () ? static_cast<const char*> (nullptr) :
                                      policy.ca_bundle_path.c_str ());
     if (ca_result != CURLE_OK && !policy.ca_bundle_path.empty ()) {
@@ -629,14 +628,14 @@ const std::string& url) {
         ssl_options |= static_cast<long> (CURLSSLOPT_NATIVE_CA);
     }
 #endif
-    curl_easy_setopt (curl, CURLOPT_SSL_OPTIONS, ssl_options);
+    set_opt<CURLOPT_SSL_OPTIONS> (curl, ssl_options);
 
     switch (policy.proxy_mode) {
     case ProxyMode::Environment:
         // Null restores libcurl's default, which *is* the environment pickup.
         // Written rather than skipped so a reused handle cannot keep a proxy
         // the previous policy set - see the header.
-        curl_easy_setopt (curl, CURLOPT_PROXY, static_cast<const char*> (nullptr));
+        set_opt<CURLOPT_PROXY> (curl, static_cast<const char*> (nullptr));
         break;
     case ProxyMode::System:
         // What the app resolved from the OS, or - when nothing resolved, which
@@ -644,18 +643,18 @@ const std::string& url) {
         // The resolver has already decided which of those this is; an empty
         // `proxy_url` under `system` *is* the documented fallback, not a
         // half-configured state to guess about here (issue #708).
-        curl_easy_setopt (curl, CURLOPT_PROXY,
+        set_opt<CURLOPT_PROXY> (curl,
         policy.proxy_url.empty () ? static_cast<const char*> (nullptr) :
                                     policy.proxy_url.c_str ());
         break;
     case ProxyMode::Manual:
-        curl_easy_setopt (curl, CURLOPT_PROXY, policy.proxy_url.c_str ());
+        set_opt<CURLOPT_PROXY> (curl, policy.proxy_url.c_str ());
         break;
     case ProxyMode::Off:
         // Empty string, not null: an empty CURLOPT_PROXY is what disables the
         // environment pickup. Null would re-enable it, and "off" that still
         // proxies because a shell exported https_proxy is not off.
-        curl_easy_setopt (curl, CURLOPT_PROXY, "");
+        set_opt<CURLOPT_PROXY> (curl, "");
         break;
     }
 
@@ -681,24 +680,24 @@ const std::string& url) {
     switch (policy.proxy_mode) {
     case ProxyMode::System:
         if (!policy.proxy_url.empty () || !policy.proxy_bypass.empty ()) {
-            curl_easy_setopt (curl, CURLOPT_NOPROXY, policy.proxy_bypass.c_str ());
+            set_opt<CURLOPT_NOPROXY> (curl, policy.proxy_bypass.c_str ());
         } else {
             // Nothing resolved and nothing exempted: the environment mode's
             // null, so an inherited `no_proxy` still applies to the proxy this
             // mode has fallen back to reading from the environment.
-            curl_easy_setopt (curl, CURLOPT_NOPROXY, static_cast<const char*> (nullptr));
+            set_opt<CURLOPT_NOPROXY> (curl, static_cast<const char*> (nullptr));
         }
         break;
     case ProxyMode::Manual:
-        curl_easy_setopt (curl, CURLOPT_NOPROXY, policy.proxy_bypass.c_str ());
+        set_opt<CURLOPT_NOPROXY> (curl, policy.proxy_bypass.c_str ());
         break;
     case ProxyMode::Environment:
-        curl_easy_setopt (curl, CURLOPT_NOPROXY,
+        set_opt<CURLOPT_NOPROXY> (curl,
         policy.proxy_bypass.empty () ? static_cast<const char*> (nullptr) :
                                        policy.proxy_bypass.c_str ());
         break;
     case ProxyMode::Off:
-        curl_easy_setopt (curl, CURLOPT_NOPROXY, static_cast<const char*> (nullptr));
+        set_opt<CURLOPT_NOPROXY> (curl, static_cast<const char*> (nullptr));
         break;
     }
 
@@ -720,7 +719,7 @@ const std::string& url) {
         const UrlAuthority authority = parse_authority (url);
         matched = match_client_certificate (policy, authority.host, authority.port);
     }
-    curl_easy_setopt (curl, CURLOPT_SSLCERT,
+    set_opt<CURLOPT_SSLCERT> (curl,
     matched != nullptr ? matched->cert_path.c_str () : static_cast<const char*> (nullptr));
     // What that file is (issue #833). Without it libcurl reads whatever is
     // there as PEM, so a registered `p12` bundle would be handed to the wrong
@@ -728,13 +727,13 @@ const std::string& url) {
     // meant presenting nothing a user registered. Written on every handle for
     // the same reason as the path beside it, and null on no match so a pooled
     // handle cannot keep the type a previous transfer set.
-    curl_easy_setopt (curl, CURLOPT_SSLCERTTYPE,
+    set_opt<CURLOPT_SSLCERTTYPE> (curl,
     matched != nullptr ? curl_ssl_cert_type (matched->format) :
                          static_cast<const char*> (nullptr));
     // A PKCS#12 bundle carries its own key and stores no key path, so this is
     // null there rather than "" - an empty string is a path, and libcurl would
     // fail to open it.
-    curl_easy_setopt (curl, CURLOPT_SSLKEY,
+    set_opt<CURLOPT_SSLKEY> (curl,
     matched != nullptr && !matched->key_path.empty () ?
     matched->key_path.c_str () :
     static_cast<const char*> (nullptr));
@@ -742,7 +741,7 @@ const std::string& url) {
     // passphrase attempt, and on a key that has none the backend answers by
     // failing the load. One field for both formats, because libcurl reads it as
     // the PKCS#12 import password too.
-    curl_easy_setopt (curl, CURLOPT_KEYPASSWD,
+    set_opt<CURLOPT_KEYPASSWD> (curl,
     matched != nullptr && !matched->passphrase.empty () ?
     matched->passphrase.c_str () :
     static_cast<const char*> (nullptr));
@@ -763,7 +762,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     data->errors.attach (curl);
 
     // Set URL
-    curl_easy_setopt (curl, CURLOPT_URL, request.url.c_str ());
+    set_opt<CURLOPT_URL> (curl, request.url.c_str ());
 
     // DNS Pre-resolution: Use cached DNS to bypass system resolver
     // This is critical for high-RPS loads (prevents DNS saturation)
@@ -775,7 +774,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
             struct curl_slist* resolve_list = dns_cache->get_resolve_list (
             authority.host, authority.port, config.dns_cache_timeout);
             if (resolve_list) {
-                curl_easy_setopt (curl, CURLOPT_RESOLVE, resolve_list);
+                set_opt<CURLOPT_RESOLVE> (curl, resolve_list);
                 data->resolve_list = resolve_list; // Store for cleanup
             }
         }
@@ -809,7 +808,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     data->headers_list = build_request_header_list (request, config.user_agent, nullptr);
 
     if (data->headers_list) {
-        curl_easy_setopt (curl, CURLOPT_HTTPHEADER, data->headers_list);
+        set_opt<CURLOPT_HTTPHEADER> (curl, data->headers_list);
     }
 
     // Per-transfer cookie state, for the scenario load path's virtual users.
@@ -826,26 +825,26 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // implementation detail on a path where the failure is silent - a load run
     // that reported numbers for a session it should never have had.
     if (request.track_cookies) {
-        curl_easy_setopt (curl, CURLOPT_COOKIEFILE, "");
-        curl_easy_setopt (curl, CURLOPT_COOKIELIST, "ALL");
+        set_opt<CURLOPT_COOKIEFILE> (curl, "");
+        set_opt<CURLOPT_COOKIELIST> (curl, "ALL");
         for (const auto& line : request.cookie_lines) {
-            curl_easy_setopt (curl, CURLOPT_COOKIELIST, line.c_str ());
+            set_opt<CURLOPT_COOKIELIST> (curl, line.c_str ());
         }
     }
 
     // Set callbacks
-    curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt (curl, CURLOPT_WRITEDATA, data);
-    curl_easy_setopt (curl, CURLOPT_HEADERFUNCTION, header_callback);
-    curl_easy_setopt (curl, CURLOPT_HEADERDATA, data);
+    set_opt<CURLOPT_WRITEFUNCTION> (curl, write_callback);
+    set_opt<CURLOPT_WRITEDATA> (curl, data);
+    set_opt<CURLOPT_HEADERFUNCTION> (curl, header_callback);
+    set_opt<CURLOPT_HEADERDATA> (curl, data);
 
     // Progress callback. A bounded stream needs it whether or not the caller
     // asked for progress: it is where the duration cap is enforced, and a quiet
     // stream produces no writes to enforce it from (issue #576).
     if (data->progress || data->stream_bounds) {
-        curl_easy_setopt (curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
-        curl_easy_setopt (curl, CURLOPT_XFERINFODATA, data);
-        curl_easy_setopt (curl, CURLOPT_NOPROGRESS, 0L);
+        set_opt<CURLOPT_XFERINFOFUNCTION> (curl, progress_callback);
+        set_opt<CURLOPT_XFERINFODATA> (curl, data);
+        set_opt<CURLOPT_NOPROGRESS> (curl, 0L);
     }
 
     // Set timeout. For a bounded stream the whole-transfer deadline is a
@@ -860,12 +859,12 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     static_cast<long> (request.stream_bounds->max_duration_ms +
     vayu::core::constants::sse::LOAD_STREAM_TIMEOUT_GRACE_MS) :
     static_cast<long> (request.timeout_ms);
-    curl_easy_setopt (curl, CURLOPT_TIMEOUT_MS, transfer_timeout_ms);
+    set_opt<CURLOPT_TIMEOUT_MS> (curl, transfer_timeout_ms);
 
     // Set redirect options
     if (request.follow_redirects) {
-        curl_easy_setopt (curl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt (curl, CURLOPT_MAXREDIRS, static_cast<long> (request.max_redirects));
+        set_opt<CURLOPT_FOLLOWLOCATION> (curl, 1L);
+        set_opt<CURLOPT_MAXREDIRS> (curl, static_cast<long> (request.max_redirects));
     }
 
     // TLS verification and the proxy, both from the run-scoped policy. Run-
@@ -883,7 +882,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // DNS Caching: Cache DNS lookups to avoid resolver saturation
     // This is critical - DNS was causing 84% of errors at 10k RPS
     // Setting to 0 disables caching (resolves every request)
-    curl_easy_setopt (curl, CURLOPT_DNS_CACHE_TIMEOUT, config.dns_cache_timeout);
+    set_opt<CURLOPT_DNS_CACHE_TIMEOUT> (curl, config.dns_cache_timeout);
 
     // TCP Keep-Alive: Reuse connections and detect dead sockets faster
     // Setting idle time to 0 disables keep-alive entirely
@@ -892,36 +891,36 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     long keepalive_interval = vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS;
 
     if (keepalive_idle > 0) {
-        curl_easy_setopt (curl, CURLOPT_TCP_KEEPALIVE, 1L);
-        curl_easy_setopt (curl, CURLOPT_TCP_KEEPIDLE, keepalive_idle);
-        curl_easy_setopt (curl, CURLOPT_TCP_KEEPINTVL, keepalive_interval);
+        set_opt<CURLOPT_TCP_KEEPALIVE> (curl, 1L);
+        set_opt<CURLOPT_TCP_KEEPIDLE> (curl, keepalive_idle);
+        set_opt<CURLOPT_TCP_KEEPINTVL> (curl, keepalive_interval);
     } else {
         // Disable TCP keep-alive when idle time is 0
-        curl_easy_setopt (curl, CURLOPT_TCP_KEEPALIVE, 0L);
+        set_opt<CURLOPT_TCP_KEEPALIVE> (curl, 0L);
     }
 
     // Protocol selection. Until nghttp2 was linked this was a hardcoded
     // CURL_HTTP_VERSION_2TLS that libcurl silently ignored, so every request
     // went out as HTTP/1.1 regardless. It now follows the request's field.
-    curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
-    vayu::http::to_curl_http_version (request.http_version));
+    set_opt<CURLOPT_HTTP_VERSION> (
+    curl, vayu::http::to_curl_http_version (request.http_version));
 
     // Connection reuse: Don't close connection after request
-    curl_easy_setopt (curl, CURLOPT_FORBID_REUSE, 0L);
+    set_opt<CURLOPT_FORBID_REUSE> (curl, 0L);
 
     // TCP_NODELAY: Disable Nagle's algorithm for lower latency
-    curl_easy_setopt (curl, CURLOPT_TCP_NODELAY, 1L);
+    set_opt<CURLOPT_TCP_NODELAY> (curl, 1L);
 
     // =========================================================================
 
     // Verbose output for debugging
     if (config.verbose) {
-        curl_easy_setopt (curl, CURLOPT_VERBOSE, 1L);
-        curl_easy_setopt (curl, CURLOPT_DEBUGFUNCTION, debug_callback);
+        set_opt<CURLOPT_VERBOSE> (curl, 1L);
+        set_opt<CURLOPT_DEBUGFUNCTION> (curl, debug_callback);
     }
 
     // Store private data pointer
-    curl_easy_setopt (curl, CURLOPT_PRIVATE, data);
+    set_opt<CURLOPT_PRIVATE> (curl, data);
 
     return curl;
 }
@@ -943,7 +942,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // doesn't recognize; see http_version_from_curl for why that's not
     // coerced into a guessed "HTTP/1.1".
     long negotiated_version = 0;
-    curl_easy_getinfo (curl, CURLINFO_HTTP_VERSION, &negotiated_version);
+    get_info<CURLINFO_HTTP_VERSION> (curl, &negotiated_version);
     response.http_version = vayu::http::http_version_from_curl (negotiated_version);
 
     // Same question the single-request driver asks, through the same helper -
@@ -988,10 +987,10 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // Wire byte counts (body + headers), for throughput-in-bytes metrics.
     curl_off_t dl_bytes = 0, ul_bytes = 0;
     long header_bytes = 0, request_bytes = 0;
-    curl_easy_getinfo (curl, CURLINFO_SIZE_DOWNLOAD_T, &dl_bytes);
-    curl_easy_getinfo (curl, CURLINFO_SIZE_UPLOAD_T, &ul_bytes);
-    curl_easy_getinfo (curl, CURLINFO_HEADER_SIZE, &header_bytes);
-    curl_easy_getinfo (curl, CURLINFO_REQUEST_SIZE, &request_bytes);
+    get_info<CURLINFO_SIZE_DOWNLOAD_T> (curl, &dl_bytes);
+    get_info<CURLINFO_SIZE_UPLOAD_T> (curl, &ul_bytes);
+    get_info<CURLINFO_HEADER_SIZE> (curl, &header_bytes);
+    get_info<CURLINFO_REQUEST_SIZE> (curl, &request_bytes);
     response.timing.bytes_down = static_cast<size_t> (std::max<curl_off_t> (0, dl_bytes)) +
     static_cast<size_t> (std::max<long> (0, header_bytes));
     response.timing.bytes_up = static_cast<size_t> (std::max<curl_off_t> (0, ul_bytes)) +
@@ -1008,7 +1007,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // that loses them re-authenticates on its next step.
     if (data->request.track_cookies) {
         struct curl_slist* held = nullptr;
-        if (curl_easy_getinfo (curl, CURLINFO_COOKIELIST, &held) == CURLE_OK && held) {
+        if (get_info<CURLINFO_COOKIELIST> (curl, &held) == CURLE_OK && held) {
             for (struct curl_slist* item = held; item; item = item->next) {
                 if (item->data) {
                     response.cookie_lines.emplace_back (item->data);
@@ -1040,7 +1039,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // byte cap without ever setting `stream_cap_reached`.
     if (result != CURLE_OK && data->stream_cap_reached && !data->body_limit_exceeded) {
         long stream_code = 0;
-        curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &stream_code);
+        get_info<CURLINFO_RESPONSE_CODE> (curl, &stream_code);
         response.status_code = static_cast<int> (stream_code);
         if (response.status_text.empty ()) {
             response.status_text = vayu::http::status_text (response.status_code);
@@ -1065,7 +1064,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
 
     // Get response info
     long http_code = 0;
-    curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &http_code);
+    get_info<CURLINFO_RESPONSE_CODE> (curl, &http_code);
     response.status_code = static_cast<int> (http_code);
     // header_callback captures the wire reason phrase. Only fall back to
     // the code→phrase lookup when the server (or HTTP/2+ stack) didn't

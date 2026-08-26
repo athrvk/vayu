@@ -32,6 +32,8 @@
 #include <array>
 #include <string_view>
 
+#include "vayu/http/curl_options.hpp"
+
 namespace vayu::http {
 
 class CurlErrorBuffer {
@@ -46,7 +48,7 @@ class CurlErrorBuffer {
      */
     void attach (CURL* curl) {
         clear ();
-        curl_easy_setopt (curl, CURLOPT_ERRORBUFFER, storage_.data ());
+        set_opt<CURLOPT_ERRORBUFFER> (curl, storage_.data ());
     }
 
     /// Forget any message, leaving the buffer attached where it already is.

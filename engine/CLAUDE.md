@@ -163,6 +163,23 @@ engine/
   The rest of the family is a subscript, which is not a token - there the gate
   is the whole of the guard, decided rather than omitted, and since #946 the
   gate re-checks the whole of every file an edit opens.
+- **libcurl's variadic calls go through `set_opt` / `get_info`** (#1023,
+  `cppcoreguidelines-pro-type-vararg`). `curl_easy_setopt`,
+  `curl_multi_setopt` and `curl_easy_getinfo` read their third argument back as
+  whatever the constant says, and nothing checks that the caller passed that -
+  an `int` for a `long` option is read out of the wrong promotion slot, and an
+  `int*` where `CURLINFO_RESPONSE_CODE` writes a `long` is a write past the
+  object. **`vayu::http::set_opt<CURLOPT_...>` and
+  `vayu::http::get_info<CURLINFO_...>`** (`http/curl_options.hpp`) take the
+  constant as a template argument, decode the argument category libcurl encodes
+  in it, and `static_assert` the value against it; the three vararg calls left
+  in the engine are the ones inside those wrappers, holding the one `NOLINT`
+  between them. Only the Windows leg ever reported this: libcurl's
+  type-checking macros are `#if !defined(__cplusplus)`, so what C++ gets is
+  `curl_exactly_three_arguments`, defined only under `__STDC__` - which GCC and
+  Clang define and MSVC does not, so the call is inside a system-header macro
+  on Linux and a plain call on Windows. `clang-tidy --extra-arg=-U__STDC__`
+  reproduces the Windows reading anywhere.
 - **A row struct's scalars all carry a default** (#1013,
   `cppcoreguidelines-pro-type-member-init`). The `vayu::db` structs in
   `types.hpp` are aggregates an insert site fills field by field, so one it

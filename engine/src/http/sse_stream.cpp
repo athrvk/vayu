@@ -22,6 +22,7 @@
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/http/curl_error_buffer.hpp"
+#include "vayu/http/curl_options.hpp"
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/form_body.hpp"
@@ -249,9 +250,9 @@ bool body_complete) {
     // The wire count, not the parsed one: a body cut by the capture budget
     // still delivered every event the counter saw, and reporting the shorter
     // number would make a truncated capture read as a shorter stream.
-    node["totalEvents"]     = total_events;
-    node["eventsTruncated"] = !body_complete ||
-    total_events > static_cast<int64_t> (node["items"].size ());
+    node["totalEvents"] = total_events;
+    node["eventsTruncated"] =
+    !body_complete || std::cmp_greater (total_events, node["items"].size ());
     return node;
 }
 
@@ -263,8 +264,7 @@ nlohmann::json stream_trace_node (const SseStreamContext& context) {
     // Truthful rather than derived from the cap: a stream that ended under the
     // cap and one whose tail was dropped must be distinguishable without the
     // reader knowing what the cap was when the run happened.
-    node["eventsTruncated"] =
-    context.total_events () > static_cast<int64_t> (stored.size ());
+    node["eventsTruncated"] = std::cmp_greater (context.total_events (), stored.size ());
     node["endReason"] = to_string (context.end_reason ());
     return node;
 }
@@ -429,22 +429,22 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     state.started_at = std::chrono::steady_clock::now ();
 
     errors.attach (curl);
-    curl_easy_setopt (curl, CURLOPT_URL, request.request.url.c_str ());
+    set_opt<CURLOPT_URL> (curl, request.request.url.c_str ());
     curl_mime* mime = detail::apply_method_and_body (curl, request.request);
 
     struct curl_slist* headers_list = detail::build_request_header_list (
     request.request, request.user_agent, &response.request_headers);
     if (headers_list) {
-        curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers_list);
+        set_opt<CURLOPT_HTTPHEADER> (curl, headers_list);
     }
 
-    curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, stream_write_callback);
-    curl_easy_setopt (curl, CURLOPT_WRITEDATA, &state);
-    curl_easy_setopt (curl, CURLOPT_HEADERFUNCTION, stream_header_callback);
-    curl_easy_setopt (curl, CURLOPT_HEADERDATA, &state);
-    curl_easy_setopt (curl, CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt (curl, CURLOPT_XFERINFOFUNCTION, stream_progress_callback);
-    curl_easy_setopt (curl, CURLOPT_XFERINFODATA, &state);
+    set_opt<CURLOPT_WRITEFUNCTION> (curl, stream_write_callback);
+    set_opt<CURLOPT_WRITEDATA> (curl, &state);
+    set_opt<CURLOPT_HEADERFUNCTION> (curl, stream_header_callback);
+    set_opt<CURLOPT_HEADERDATA> (curl, &state);
+    set_opt<CURLOPT_NOPROGRESS> (curl, 0L);
+    set_opt<CURLOPT_XFERINFOFUNCTION> (curl, stream_progress_callback);
+    set_opt<CURLOPT_XFERINFODATA> (curl, &state);
 
     // **No `CURLOPT_TIMEOUT_MS`.** A whole-transfer deadline is exactly what
     // made a stream unusable before this path existed: it kills a healthy
@@ -453,14 +453,13 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     // `CURLOPT_LOW_SPEED_LIMIT`/`_TIME`, the first use of the pair in this
     // codebase - and the duration cap above ends a stream that is talking
     // forever, by a rule that can say its own name.
-    curl_easy_setopt (curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
-    curl_easy_setopt (curl, CURLOPT_LOW_SPEED_TIME,
-    idle_timeout_seconds (request.limits.idle_timeout_ms));
+    set_opt<CURLOPT_LOW_SPEED_LIMIT> (curl, 1L);
+    set_opt<CURLOPT_LOW_SPEED_TIME> (
+    curl, idle_timeout_seconds (request.limits.idle_timeout_ms));
 
     if (request.request.follow_redirects) {
-        curl_easy_setopt (curl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt (curl, CURLOPT_MAXREDIRS,
-        static_cast<long> (request.request.max_redirects));
+        set_opt<CURLOPT_FOLLOWLOCATION> (curl, 1L);
+        set_opt<CURLOPT_MAXREDIRS> (curl, static_cast<long> (request.request.max_redirects));
     }
     // Until #705 this path set no proxy option at all, so a configured proxy
     // covered every send and every load run and silently skipped streams. The
@@ -469,8 +468,8 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         request.transport, request.request.verify_ssl, request.request.url)) {
         response.client_certificate = client_cert_label (*certificate);
     }
-    curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
-    vayu::http::to_curl_http_version (request.request.http_version));
+    set_opt<CURLOPT_HTTP_VERSION> (
+    curl, vayu::http::to_curl_http_version (request.request.http_version));
     if (request.cookie_jar) {
         detail::apply_jar_cookies (
         curl, *request.cookie_jar, request.cookie_scope, request.cookie_writes);
@@ -506,11 +505,11 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     detail::apply_phase_timings (response.timing, phase_times);
 
     long negotiated_version = 0;
-    curl_easy_getinfo (curl, CURLINFO_HTTP_VERSION, &negotiated_version);
+    get_info<CURLINFO_HTTP_VERSION> (curl, &negotiated_version);
     response.http_version = vayu::http::http_version_from_curl (negotiated_version);
 
     long http_code = 0;
-    curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &http_code);
+    get_info<CURLINFO_RESPONSE_CODE> (curl, &http_code);
     if (http_code > 0) {
         response.status_code = static_cast<int> (http_code);
         if (response.status_text.empty ()) {

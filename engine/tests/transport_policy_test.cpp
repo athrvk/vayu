@@ -39,6 +39,7 @@
 #include "tls_backend.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/curl_options.hpp"
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/oauth_client.hpp"
@@ -672,9 +673,8 @@ TEST (TlsBackend, FindsTheSystemAnchorsTheMergeExtends) {
     // asserted where it applies rather than assumed away.
     CURL* curl = curl_easy_init ();
     ASSERT_NE (curl, nullptr);
-    EXPECT_EQ (curl_easy_setopt (curl, CURLOPT_SSL_OPTIONS,
-               static_cast<long> (CURLSSLOPT_NATIVE_CA)),
-    CURLE_OK)
+    EXPECT_EQ (
+    set_opt<CURLOPT_SSL_OPTIONS> (curl, static_cast<long> (CURLSSLOPT_NATIVE_CA)), CURLE_OK)
     << "TLS backend '" << backend
     << "' refuses CURLSSLOPT_NATIVE_CA, which is the only thing loading the "
        "Windows certificate store on this build - so this leg trusts nothing "
@@ -707,8 +707,7 @@ TEST (TlsBackend, AcceptsACustomCaBundleOnThisPlatform) {
     // discovered by a user whose requests all stop verifying.
     CURL* curl = curl_easy_init ();
     ASSERT_NE (curl, nullptr);
-    const CURLcode result =
-    curl_easy_setopt (curl, CURLOPT_CAINFO, "/nonexistent/ca-bundle.pem");
+    const CURLcode result = set_opt<CURLOPT_CAINFO> (curl, "/nonexistent/ca-bundle.pem");
     const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
     EXPECT_EQ (result, CURLE_OK)
     << "TLS backend '"
