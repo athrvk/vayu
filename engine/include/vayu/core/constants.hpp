@@ -52,6 +52,16 @@ constexpr const char* DIR = "engine/logs";
 constexpr const char* FILE_PREFIX = "/vayu_";
 /// Timestamp format for log filenames
 constexpr const char* TIME_FORMAT = "%Y%m%d_%H%M%S";
+/// How many per-start log files survive a start; the rest are deleted oldest
+/// first. One file is written per process start and nothing else ever removes
+/// them, so without this an install accumulates a file per launch forever.
+constexpr int RETAINED_FILES = 10;
+/// Default value of the `maxLogFileBytes` config entry: the size one log file
+/// may reach before it is rotated once to `.log.1`. 0 means unlimited.
+constexpr int DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024;
+/// Default value of the `logLevel` config entry. `debug` preserves the
+/// behaviour the file sink had before it was filtered at all.
+constexpr const char* DEFAULT_LEVEL = "debug";
 } // namespace logging
 
 /**

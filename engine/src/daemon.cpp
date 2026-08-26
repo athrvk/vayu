@@ -173,6 +173,23 @@ int main (int argc, char* argv[]) {
         return 1;
     }
 
+    // Apply the file sink's configuration, which needs the database the logger
+    // is initialised before: the log directory has to exist and be writable
+    // from the first line, and the first lines are written opening this file.
+    // Both entries are restart-required for that reason - the value in force is
+    // the one read here.
+    const std::string configured_level =
+    db.get_config_string ("logLevel", vayu::core::constants::logging::DEFAULT_LEVEL);
+    if (auto level = vayu::utils::parse_log_level (configured_level)) {
+        vayu::utils::Logger::instance ().set_file_level (*level);
+    } else {
+        vayu::utils::log_warning ("Ignoring unrecognised logLevel '" +
+        configured_level + "' - the log file keeps its default level (" +
+        vayu::core::constants::logging::DEFAULT_LEVEL + ")");
+    }
+    vayu::utils::Logger::instance ().set_max_file_bytes (db.get_config_int (
+    "maxLogFileBytes", vayu::core::constants::logging::DEFAULT_MAX_FILE_BYTES));
+
     // Initialize curl
     vayu::http::global_init ();
 
