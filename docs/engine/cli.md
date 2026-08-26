@@ -159,6 +159,10 @@ The Vayu Engine daemon must be running before using the CLI:
 vayu-cli run request.json
 ```
 
+The daemon exits **1** if it cannot take its port, naming the address on
+stderr - another process is listening there. Use `--port` to pick a different
+one, and `--daemon` to point the CLI at it. An ordinary shutdown exits **0**.
+
 ## Error Handling
 
 The CLI returns non-zero exit codes on errors:
