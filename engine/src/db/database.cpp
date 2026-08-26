@@ -2428,6 +2428,14 @@ std::string proxy_mode_options_json () {
     return options.dump ();
 }
 
+std::string log_level_options_json () {
+    const nlohmann::json options = { { { "value", "debug" }, { "label", "Debug" } },
+        { { "value", "info" }, { "label", "Info" } },
+        { { "value", "warn" }, { "label", "Warning" } },
+        { { "value", "error" }, { "label", "Error" } } };
+    return options.dump ();
+}
+
 std::string db_synchronous_options_json () {
     const nlohmann::json options = { { { "value", "0" }, { "label", "Off" } },
         { { "value", "1" }, { "label", "Normal" } },
@@ -3056,6 +3064,30 @@ void Database::seed_default_config () {
     "the run is evicted and the dashboard falls back to the stored report. 0 "
     "disables retention, so that fallback is immediate.",
     "observability", "60000", "0", "600000", std::nullopt, now }));
+
+    upsert_config (restart_required (keywords ({ "verbosity", "logging" }) (
+    ConfigEntry{ "logLevel", vayu::core::constants::logging::DEFAULT_LEVEL, "enum", "Engine Log Level",
+    "The lowest severity the engine writes to its log file. Debug records "
+    "everything, which is what a bug report wants and what fills a disk "
+    "fastest; "
+    "Warning and Error keep a long-running install quiet. The console is "
+    "separate - it follows the daemon's -v flag, so raising this does not "
+    "silence a terminal you started the engine in.",
+    "observability", vayu::core::constants::logging::DEFAULT_LEVEL,
+    std::nullopt, std::nullopt, log_level_options_json (), now })));
+
+    upsert_config (advanced (restart_required (unit ("bytes") (
+    keywords ({ "rotation", "retention" }) (ConfigEntry{ "maxLogFileBytes",
+    std::to_string (vayu::core::constants::logging::DEFAULT_MAX_FILE_BYTES), "integer", "Max Log File Size",
+    "How large one log file may grow before it is rotated once to a '.1' "
+    "beside it and writing continues in a fresh one. A start already gets its "
+    "own file, and the newest " +
+    std::to_string (vayu::core::constants::logging::RETAINED_FILES) +
+    " of those are what the log directory keeps, so this bounds the one case "
+    "that naming cannot: a single run chatty enough to fill the disk by "
+    "itself. 0 removes the bound.",
+    "observability", std::to_string (vayu::core::constants::logging::DEFAULT_MAX_FILE_BYTES),
+    "0", "1073741824", std::nullopt, now })))));
 
     upsert_config (keywords ({ "ttfb", "timings" }) (ConfigEntry{
     "phaseHistograms", vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",

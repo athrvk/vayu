@@ -180,6 +180,12 @@ one app instance may drive it:
   refuses to start an engine, and a restart already in flight is waited out
   rather than raced - otherwise a freshly spawned engine outlives the process
   that was supposed to kill it.
+- **A taken port is a loud failure, not a silent one.** The engine binds 9876
+  before it serves, so anything already holding the port makes it print
+  `Could not bind 127.0.0.1:9876 - ...` to stderr and exit **1** rather than
+  report itself listening. It never falls back to another port: the app and CLI
+  both address the engine at a fixed one, so an engine on a different port would
+  be a quieter failure than no engine at all.
 - **A startup that cannot succeed fails immediately.** The readiness poll allows
   45 seconds, but it watches the spawned child as well as the port: an engine
   that exits first - a missing shared library, a lock it could not acquire -

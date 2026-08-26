@@ -334,6 +334,7 @@ Every entry below was verified by locating the read site in the engine source.
 | `oauth2RefreshLeadMs`, `oauth2RefreshMinIntervalMs`, `oauth2RefreshRetryMs`, `oauth2RefreshRetryMaxMs`, `oauth2RefreshPollIntervalMs` | `core/auth_refresh.cpp` (read at `core/run_manager.cpp`) | Per run. Mid-run OAuth 2.0 renewal: lead time, floor between renewals, the retry backoff's first wait and ceiling, and how often the watchdog wakes to notice the run ended |
 | `inboxMaxBodyBytes`, `inboxMaxCaptures`, `inboxLivePollIntervalMs` | `http/routes/inbox.cpp` (`read_inbox_limits`) | **Per inbox.** Resolved when `POST /inbox/start` runs; a running inbox keeps what it was started with |
 | `dbSynchronous`, `dbBusyTimeout`, `dbCacheSize` | `db/database.cpp` | DB open. **Restart required.** `dbCacheSize` is per-connection state, so it is re-applied to every connection from the value read at startup |
+| `logLevel`, `maxLogFileBytes` | `daemon.cpp` (applied to `utils/logger.cpp`) | Daemon start, just after the database opens. **Restart required.** The lines written before that point are the ones the file sink's default level allows |
 
 The dead entries this table used to list - `maxConnections` and `statsInterval`,
 plus `tcpKeepAliveIdle` / `tcpKeepAliveInterval`, `maxJsonFieldSize`, the three
