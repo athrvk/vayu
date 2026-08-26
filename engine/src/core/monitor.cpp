@@ -32,7 +32,8 @@ bool starts_with_ci (const std::string& text, std::string_view prefix) {
 }
 
 /** The scrape cadence, when the block names one of its own. */
-std::optional<std::string> read_monitor_interval (const nlohmann::json& monitor, MonitorConfig& out) {
+std::optional<std::string>
+read_monitor_interval (const nlohmann::json& monitor, MonitorConfig& out) {
     if (monitor.contains ("intervalMs") && !monitor["intervalMs"].is_null ()) {
         const auto& interval = monitor["intervalMs"];
         if (!interval.is_number ()) {
@@ -56,7 +57,8 @@ std::optional<std::string> read_monitor_interval (const nlohmann::json& monitor,
 }
 
 /** Which exposition format the endpoint answers in. */
-std::optional<std::string> read_monitor_format (const nlohmann::json& monitor, MonitorConfig& out) {
+std::optional<std::string>
+read_monitor_format (const nlohmann::json& monitor, MonitorConfig& out) {
     if (monitor.contains ("format") && !monitor["format"].is_null ()) {
         if (!monitor["format"].is_string ()) {
             return "'monitor.format' must be \"prometheus\" or \"json\"";
@@ -77,8 +79,9 @@ std::optional<std::string> read_monitor_format (const nlohmann::json& monitor, M
 }
 
 /** The metrics to chart, and the bounds on how many. */
-std::optional<std::string> read_monitor_series (
-const nlohmann::json& monitor, const MonitorLimits& limits, MonitorConfig& out) {
+std::optional<std::string> read_monitor_series (const nlohmann::json& monitor,
+const MonitorLimits& limits,
+MonitorConfig& out) {
     if (!monitor.contains ("series") || !monitor["series"].is_array ()) {
         return "'monitor.series' is required and must be an array of metric "
                "names";
@@ -264,8 +267,8 @@ std::optional<size_t> skip_exposition_labels (std::string_view line, size_t curs
  * ignored: the sample's time is when this engine scraped it, which is the axis
  * the overlay joins on.
  */
-std::optional<std::pair<std::string, double>> read_exposition_sample (
-std::string_view line, const std::set<std::string>& wanted) {
+std::optional<std::pair<std::string, double>>
+read_exposition_sample (std::string_view line, const std::set<std::string>& wanted) {
     line = trim_exposition_line (line);
     if (line.empty () || line.front () == '#') {
         return std::nullopt;
@@ -289,7 +292,8 @@ std::string_view line, const std::set<std::string>& wanted) {
         cursor = *after_labels;
     }
 
-    while (cursor < line.size () && std::isspace (static_cast<unsigned char> (line[cursor]))) {
+    while (cursor < line.size () &&
+    std::isspace (static_cast<unsigned char> (line[cursor]))) {
         ++cursor;
     }
     if (cursor >= line.size ()) {

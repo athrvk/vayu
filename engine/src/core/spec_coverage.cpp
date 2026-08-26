@@ -414,8 +414,8 @@ size_t undeclared_operation_requests) {
 
     const OperationObservation nothing;
     for (size_t i = 0; i < declared.size (); ++i) {
-        rows.push_back (coverage_row (declared[i],
-        i < observed.size () ? observed[i] : nothing, totals));
+        rows.push_back (coverage_row (
+        declared[i], i < observed.size () ? observed[i] : nothing, totals));
     }
 
     // Uncovered first - they are what the block exists to surface - and document
@@ -436,10 +436,9 @@ size_t undeclared_operation_requests) {
         { "declaredResponsesTotal", totals.declared_total },
         { "declaredResponsesHit", totals.declared_hit_total },
         { "declaredResponseCoveragePct",
-        totals.declared_total > 0 ?
-        static_cast<double> (totals.declared_hit_total) * 100.0 /
-        static_cast<double> (totals.declared_total) :
-        0.0 },
+        totals.declared_total > 0 ? static_cast<double> (totals.declared_hit_total) *
+        100.0 / static_cast<double> (totals.declared_total) :
+                                    0.0 },
         { "undeclaredStatusesSeen", totals.undeclared_total },
         { "operations", std::move (operations) } };
     if (totals.transport_errors_total > 0) {

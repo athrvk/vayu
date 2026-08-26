@@ -403,8 +403,8 @@ ScenarioPlan& plan) {
     }
     auto [status, payload] = vayu::http::compose_request_core (db, compose_body);
     if (status != 200) {
-        return ("Cannot compose " + describe_step (index, row) +
-        ": " + compose_error_message (payload));
+        return ("Cannot compose " + describe_step (index, row) + ": " +
+        compose_error_message (payload));
     }
 
     // Auth is resolved into headers/url here, which is what makes the plan
@@ -444,8 +444,7 @@ ScenarioPlan& plan) {
     auto built =
     vayu::http::build_request (payload, &db, options.timeout_ms, auth_resolution);
     if (!built.ok || built.parse_failed) {
-        return ("Cannot compose " + describe_step (index, row) +
-        ": " + built.error_message);
+        return ("Cannot compose " + describe_step (index, row) + ": " + built.error_message);
     }
 
     // Split once, here, so no executor re-scans this step per iteration -
@@ -543,8 +542,8 @@ const ScenarioResolveOptions& options) {
 
     resolution.plan.steps.reserve (rows.size ());
     for (size_t index = 0; index < rows.size (); ++index) {
-        if (auto reason = resolve_step (db, options, *collection, has_data, index,
-            rows[index], resolution.plan)) {
+        if (auto reason = resolve_step (db, options, *collection, has_data,
+            index, rows[index], resolution.plan)) {
             return invalid (*reason);
         }
     }

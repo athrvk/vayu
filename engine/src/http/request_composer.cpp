@@ -700,8 +700,8 @@ std::string& environment_id) {
  *
  * @return the refusal, or nothing.
  */
-std::optional<std::pair<int, nlohmann::json>> resolve_compose_head (
-const VariableValues& vars, nlohmann::json& payload) {
+std::optional<std::pair<int, nlohmann::json>>
+resolve_compose_head (const VariableValues& vars, nlohmann::json& payload) {
     if (auto method = payload.find ("method");
     method != payload.end () && method->is_string ()) {
         std::string verb = method->get<std::string> ();
@@ -771,8 +771,7 @@ void resolve_compose_body (const VariableValues& vars, nlohmann::json& payload) 
         payload.erase ("body");
         return;
     }
-    if (auto content = it->find ("content");
-    content != it->end () && content->is_string ()) {
+    if (auto content = it->find ("content"); content != it->end () && content->is_string ()) {
         *content = resolve_template (content->get<std::string> (), vars);
     }
     if (auto fields = it->find ("fields"); fields != it->end () && fields->is_array ()) {

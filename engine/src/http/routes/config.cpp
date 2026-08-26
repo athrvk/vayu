@@ -141,7 +141,8 @@ std::unordered_map<std::string, std::string>& out) {
     }
     // Single update format: { "key": "key1", "value": "value1" }
     else if (json.contains ("key") && json.contains ("value")) {
-        out[json["key"].get<std::string> ()] = config_value_string (json["value"]);
+        out[json["key"].get<std::string> ()] =
+        config_value_string (json["value"]);
     } else {
         return "Invalid request format. Expected { \"entries\": {...} } "
                "or { \"key\": \"...\", \"value\": \"...\" }";
@@ -168,8 +169,8 @@ Parse parse) {
     try {
         const Value parsed = parse (value);
         if (entry.min_value && parsed < parse (*entry.min_value)) {
-            return std::format ("'{}' must be at least {} (got {})", key,
-            *entry.min_value, value);
+            return std::format (
+            "'{}' must be at least {} (got {})", key, *entry.min_value, value);
         }
         if (entry.max_value && parsed > parse (*entry.max_value)) {
             return std::format (
@@ -201,8 +202,7 @@ const std::string& value) {
         }
     }
     if (std::find (allowed.begin (), allowed.end (), value) == allowed.end ()) {
-        return std::format (
-        "'{}' must be one of [{}] (got '{}')", key, allowed_list, value);
+        return std::format ("'{}' must be one of [{}] (got '{}')", key, allowed_list, value);
     }
     return {};
 }
@@ -221,8 +221,7 @@ const std::string& value) {
     }
     if (entry.type == "boolean") {
         if (value != "true" && value != "false") {
-            return std::format (
-            "'{}' must be 'true' or 'false' (got '{}')", key, value);
+            return std::format ("'{}' must be 'true' or 'false' (got '{}')", key, value);
         }
         return {};
     }

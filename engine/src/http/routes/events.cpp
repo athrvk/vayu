@@ -47,10 +47,10 @@ namespace {
 
 /** What one poll of the relay leaves the stream in. */
 enum class RelayStep {
-    Wrote, ///< Frames went out; poll again without waiting.
-    Idle, ///< Nothing to send - wait before the next poll.
-    Drained, ///< The producer has closed and the ring is empty.
-    Closed, ///< The client is gone - a write failed.
+    Wrote,     ///< Frames went out; poll again without waiting.
+    Idle,      ///< Nothing to send - wait before the next poll.
+    Drained,   ///< The producer has closed and the ring is empty.
+    Closed,    ///< The client is gone - a write failed.
     ClaimLost, ///< A reconnect took the slot over; this stream is no longer it.
 };
 

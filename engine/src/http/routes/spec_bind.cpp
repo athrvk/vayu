@@ -88,7 +88,8 @@ nlohmann::json operation_json (const vayu::core::MatchableOperation& operation) 
  * read is a 400 *before* anything is written, which is what leaves the
  * collection bound to whatever it was bound to.
  */
-std::optional<std::pair<int, nlohmann::json>> read_bound_document (const nlohmann::json& spec_item,
+std::optional<std::pair<int, nlohmann::json>> read_bound_document (
+const nlohmann::json& spec_item,
 const std::string& content,
 size_t cap,
 int64_t now,
@@ -102,7 +103,8 @@ vayu::db::SpecDocument& spec) {
     }
     if (spec_item.contains ("sourceUrl") && !spec_item["sourceUrl"].is_null ()) {
         if (!spec_item["sourceUrl"].is_string ()) {
-            return body_error ("Invalid 'spec.sourceUrl': must be a string or null");
+            return body_error (
+            "Invalid 'spec.sourceUrl': must be a string or null");
         }
         const auto url = spec_item["sourceUrl"].get<std::string> ();
         if (!url.empty ()) {
@@ -114,8 +116,8 @@ vayu::db::SpecDocument& spec) {
 
 /** What the matching pass did, which is what the route answers with. */
 struct StampOutcome {
-    size_t stamped = 0;
-    size_t cleared = 0;
+    size_t stamped                      = 0;
+    size_t cleared                      = 0;
     nlohmann::json unmatched_requests   = nlohmann::json::array ();
     nlohmann::json unmatched_operations = nlohmann::json::array ();
 };
@@ -141,7 +143,8 @@ StampOutcome& outcome) {
     std::vector<vayu::core::MatchableRequest> matchable;
     matchable.reserve (stored.size ());
     for (const auto& request : stored) {
-        matchable.push_back ({ request.id, vayu::to_string (request.method), request.url });
+        matchable.push_back (
+        { request.id, vayu::to_string (request.method), request.url });
     }
 
     std::vector<vayu::core::MatchableOperation> operations;
@@ -235,17 +238,17 @@ const std::string& content) {
 
     // The binding moves with the stamps.
     batch.binding         = *root;
-    batch.binding.openapi = nlohmann::json{ { "specId", batch.spec.id },
-        { "specHash", batch.spec.hash }, { "syncedAt", now } }
-                            .dump ();
+    batch.binding.openapi = nlohmann::json{
+        { "specId", batch.spec.id }, { "specHash", batch.spec.hash }, { "syncedAt", now }
+    }.dump ();
     batch.binding.updated_at = now;
 
     db.spec_sync_apply (batch);
 
     return { 200,
-        nlohmann::json{ { "specId", batch.spec.id }, { "specHash", batch.spec.hash },
-        { "syncedAt", now }, { "stamped", outcome.stamped },
-        { "cleared", outcome.cleared },
+        nlohmann::json{ { "specId", batch.spec.id },
+        { "specHash", batch.spec.hash }, { "syncedAt", now },
+        { "stamped", outcome.stamped }, { "cleared", outcome.cleared },
         { "unmatchedRequests", std::move (outcome.unmatched_requests) },
         { "unmatchedOperations", std::move (outcome.unmatched_operations) } } };
 }
@@ -301,7 +304,8 @@ bind_spec_response (vayu::db::Database& db, const nlohmann::json& body) {
     }
 
     std::pair<int, nlohmann::json> result;
-    db.with_lock ([&] { result = bind_locked (db, collection_id, spec_item, content); });
+    db.with_lock (
+    [&] { result = bind_locked (db, collection_id, spec_item, content); });
     return result;
 }
 

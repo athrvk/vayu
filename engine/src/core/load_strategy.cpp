@@ -69,8 +69,7 @@ const ResultAnnotations& annotations) {
         error_json["timing"] = { { "totalMs", response.timing.total_ms },
             { "wireMs", response.timing.wire_ms },
             { "queueWaitMs", response.timing.queue_wait_ms },
-            { "dnsMs", response.timing.dns_ms },
-            { "connectMs", response.timing.connect_ms },
+            { "dnsMs", response.timing.dns_ms }, { "connectMs", response.timing.connect_ms },
             { "tlsMs", response.timing.tls_ms },
             { "firstByteMs", response.timing.first_byte_ms },
             { "downloadMs", response.timing.download_ms } };
@@ -140,8 +139,7 @@ const ResultAnnotations& annotations) {
         nlohmann::json timing_json = { { "totalMs", response.timing.total_ms },
             { "wireMs", response.timing.wire_ms },
             { "queueWaitMs", response.timing.queue_wait_ms },
-            { "dnsMs", response.timing.dns_ms },
-            { "connectMs", response.timing.connect_ms },
+            { "dnsMs", response.timing.dns_ms }, { "connectMs", response.timing.connect_ms },
             { "tlsMs", response.timing.tls_ms },
             { "firstByteMs", response.timing.first_byte_ms },
             { "downloadMs", response.timing.download_ms } };
@@ -167,8 +165,8 @@ const ResultAnnotations& annotations) {
     // decided: `trace_data` carries these same five numbers for the ~1% of
     // completions something retains, and the histograms are how the other
     // 99% reach the report.
-    context->metrics_collector->record_success (response.status_code,
-    latency, response.timing.queue_wait_ms, trace_data, trace_reason,
+    context->metrics_collector->record_success (response.status_code, latency,
+    response.timing.queue_wait_ms, trace_data, trace_reason,
     capture_body ? &response : nullptr, &response.timing);
     context->metrics_collector->record_bytes (
     response.timing.bytes_up, response.timing.bytes_down);
@@ -427,8 +425,7 @@ class ConstantLoadStrategy : public LoadStrategy {
     int64_t duration_ms,
     double target_rps) {
         // Rate-limited mode
-        vayu::utils::log_info (
-        "Starting Constant Load Test (Rate-Limited)");
+        vayu::utils::log_info ("Starting Constant Load Test (Rate-Limited)");
         vayu::utils::log_info ("  Duration: " + std::to_string (duration_ms) + " ms");
         vayu::utils::log_info ("  Target RPS: " + std::to_string (target_rps));
 
@@ -504,8 +501,7 @@ class ConstantLoadStrategy : public LoadStrategy {
             // next tick accrues the extra elapsed time - so the sleep can be
             // the full remainder; on Windows short waits still spin, since
             // 15.6ms timer rounding would make sub-tick sleeps bursty.
-            const auto next_tick =
-            accrued_through + std::chrono::microseconds (tick_us);
+            const auto next_tick = accrued_through + std::chrono::microseconds (tick_us);
             const auto sleep_us = std::chrono::duration_cast<std::chrono::microseconds> (
             next_tick - std::chrono::steady_clock::now ())
                                   .count ();

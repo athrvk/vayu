@@ -476,8 +476,9 @@ std::optional<std::string> client_cert_host_rejection (std::string_view host) {
  * and says nothing about which setting named a file that is not there. A PKCS#12
  * row has one file to check, which is the whole difference the format makes.
  */
-std::optional<std::string> client_cert_file_rejection (
-ClientCertFormat format, std::string_view cert_path, std::string_view key_path) {
+std::optional<std::string> client_cert_file_rejection (ClientCertFormat format,
+std::string_view cert_path,
+std::string_view key_path) {
     // Both files are checked *here*, at the moment the user can still fix the
     // path, rather than at handshake time where curl reports
     // `CURLE_SSL_CERTPROBLEM` against the endpoint and says nothing about which

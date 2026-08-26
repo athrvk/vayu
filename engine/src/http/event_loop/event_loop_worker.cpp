@@ -445,8 +445,7 @@ bool EventLoopWorker::drain_completions () {
             }
 
             if (completed) {
-                auto response_result =
-                extract_response (easy, completed.get (), result);
+                auto response_result = extract_response (easy, completed.get (), result);
                 if (completed->callback)
                     completed->callback (completed->request_id, response_result);
                 if (completed->has_promise)
@@ -526,7 +525,8 @@ void EventLoopWorker::run_loop () {
         size_t local_active = current_active_count.load (std::memory_order_relaxed);
         // When stop(false) is in progress, skip new work so the queue remains
         // untouched for the caller's post-join cancel drain.
-        if (!stop_requested.load (std::memory_order_acquire) || drain_on_stop.load (std::memory_order_acquire)) {
+        if (!stop_requested.load (std::memory_order_acquire) ||
+        drain_on_stop.load (std::memory_order_acquire)) {
             did_work = submit_pending_transfers (local_active);
         }
 

@@ -118,7 +118,8 @@ struct CallbackOutcome {
 
 /** The one-page reply the callback tab gets, whatever happened. */
 std::string callback_page (const char* heading) {
-    return std::string ("<html><body style='font-family:sans-serif;padding:2rem'><h3>") +
+    return std::string (
+           "<html><body style='font-family:sans-serif;padding:2rem'><h3>") +
     heading + "</h3><p>You can close this tab.</p></body></html>";
 }
 

@@ -372,7 +372,8 @@ void advance_xml_text (char c, XmlScanState& state) {
             opened = true;
             break;
         }
-        partial = partial || opener.text.substr (0, state.pending.size ()) == state.pending;
+        partial = partial ||
+        opener.text.substr (0, state.pending.size ()) == state.pending;
     }
     if (opened || partial) {
         return;

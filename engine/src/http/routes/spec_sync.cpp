@@ -689,7 +689,8 @@ RouteResult read_sync_policy (const nlohmann::json& body, std::string& policy) {
         return {};
     }
     if (!stated_policy->is_string ()) {
-        return std::unexpected (body_error ("Invalid 'policy': must be a string"));
+        return std::unexpected (
+        body_error ("Invalid 'policy': must be a string"));
     }
     policy = stated_policy->get<std::string> ();
     if (policy != "safe") {
@@ -701,8 +702,8 @@ RouteResult read_sync_policy (const nlohmann::json& body, std::string& policy) {
     }
     for (const char* section : { "collections", "create", "update", "delete" }) {
         if (body.contains (section) && !body[section].is_null ()) {
-            return std::unexpected (body_error (std::string ("Invalid '") + section +
-            "': a policy sync decides its own rows; send 'policy' or the rows, not both"));
+            return std::unexpected (body_error (std::string ("Invalid '") +
+            section + "': a policy sync decides its own rows; send 'policy' or the rows, not both"));
         }
     }
     return {};
@@ -789,13 +790,11 @@ RouteResult read_sync_request (const nlohmann::json& body, SyncRequest& out) {
 RouteResult
 resolve_sync_scope (vayu::db::Database& db, const SyncRequest& request, SyncScope& out) {
     out.stored_collections = db.get_collections ();
-    auto root = std::find_if (out.stored_collections.begin (),
-    out.stored_collections.end (), [&] (const vayu::db::Collection& c) {
-        return c.id == request.collection_id;
-    });
+    auto root =
+    std::find_if (out.stored_collections.begin (), out.stored_collections.end (),
+    [&] (const vayu::db::Collection& c) { return c.id == request.collection_id; });
     if (root == out.stored_collections.end ()) {
-        return std::unexpected (
-        RouteError{ 404, error_body (404, "Collection not found") });
+        return std::unexpected (RouteError{ 404, error_body (404, "Collection not found") });
     }
     out.root     = *root;
     out.bound_id = bound_spec_id (out.root.openapi);
@@ -803,14 +802,13 @@ resolve_sync_scope (vayu::db::Database& db, const SyncRequest& request, SyncScop
         return std::unexpected (body_error ("Collection '" + request.collection_id +
         "' is not bound to a spec; bind it before syncing"));
     }
-    out.subtree =
-    collection_subtree_ids (out.stored_collections, request.collection_id);
+    out.subtree = collection_subtree_ids (out.stored_collections, request.collection_id);
 
     out.cap = spec_size_cap (db);
     if (request.content.size () > out.cap) {
-        return std::unexpected (body_error ("Spec document is " +
-        std::to_string (request.content.size ()) + " bytes, over the limit of " +
-        std::to_string (out.cap) +
+        return std::unexpected (
+        body_error ("Spec document is " + std::to_string (request.content.size ()) +
+        " bytes, over the limit of " + std::to_string (out.cap) +
         " (raise the 'maxSpecDocumentBytes' setting to allow more)"));
     }
     out.now = now_ms ();
@@ -932,7 +930,9 @@ SyncPlan& plan) {
     folder.created_at = scope.now;
     folder.updated_at = scope.now;
     if (auto outcome = apply_item_fields (
-        [&] { return apply_collection_fields (db, folder, fields, /*is_create=*/true); },
+        [&] {
+            return apply_collection_fields (db, folder, fields, /*is_create=*/true);
+        },
         "collection", temp);
     !outcome) {
         return outcome;
@@ -954,8 +954,8 @@ SyncPlan& plan,
 std::string& owner) {
     if (item.contains ("collectionTempId") && !item["collectionTempId"].is_null ()) {
         if (!item["collectionTempId"].is_string ()) {
-            return std::unexpected (item_error (
-            400, "Invalid 'collectionTempId': must be a string", temp));
+            return std::unexpected (
+            item_error (400, "Invalid 'collectionTempId': must be a string", temp));
         }
         const auto named = item["collectionTempId"].get<std::string> ();
         if (!plan.claimed.collections.contains (named)) {
@@ -1061,7 +1061,9 @@ SyncPlan& plan) {
     row.created_at = scope.now;
     row.updated_at = scope.now;
     if (auto outcome = apply_item_fields (
-        [&] { return apply_request_fields (db, row, fields, /*is_create=*/true); },
+        [&] {
+            return apply_request_fields (db, row, fields, /*is_create=*/true);
+        },
         "request", temp);
     !outcome) {
         return outcome;
@@ -1069,7 +1071,8 @@ SyncPlan& plan) {
     if (!item.contains ("order") || item["order"].is_null ()) {
         row.order = plan.next_request_order[owner]++;
     }
-    if (auto outcome = plan_created_examples (row, temp, scope.now, documented, plan); !outcome) {
+    if (auto outcome = plan_created_examples (row, temp, scope.now, documented, plan);
+    !outcome) {
         return outcome;
     }
     plan.batch.created.push_back (std::move (row));
@@ -1089,7 +1092,7 @@ SyncPlan& plan) {
  */
 RouteResult
 read_examples_decision (const nlohmann::json& item, const std::string& id, bool& refresh) {
-    refresh = false;
+    refresh             = false;
     const auto decision = item.find ("examples");
     if (decision == item.end () || decision->is_null ()) {
         return {};
@@ -1135,8 +1138,7 @@ SyncPlan& plan) {
     plan.batch.deleted_examples.insert (plan.batch.deleted_examples.end (),
     plan_for_examples.replaced.begin (), plan_for_examples.replaced.end ());
     return build_example_rows (*rows, id, id, plan_for_examples.base_order, now,
-    plan.batch.examples, plan_for_examples.surviving,
-    plan_for_examples.suppressed_statuses);
+    plan.batch.examples, plan_for_examples.surviving, plan_for_examples.suppressed_statuses);
 }
 
 /** One updated request: the row it names, merge-patched. */
@@ -1147,8 +1149,8 @@ const SyncScope& scope,
 DocumentedExamples& documented,
 SyncPlan& plan) {
     if (!item.is_object ()) {
-        return std::unexpected (body_error (
-        "Invalid update at index " + std::to_string (index) + ": must be an object"));
+        return std::unexpected (body_error ("Invalid update at index " +
+        std::to_string (index) + ": must be an object"));
     }
     if (!item.contains ("id") || !item["id"].is_string () ||
     item["id"].get<std::string> ().empty ()) {
@@ -1157,8 +1159,8 @@ SyncPlan& plan) {
     }
     const std::string id = item["id"].get<std::string> ();
     if (!plan.touched.insert (id).second) {
-        return std::unexpected (item_error (
-        400, "Request '" + id + "' appears twice in this sync", id));
+        return std::unexpected (
+        item_error (400, "Request '" + id + "' appears twice in this sync", id));
     }
     auto stored = db.get_request (id);
     if (!stored) {
@@ -1183,8 +1185,7 @@ SyncPlan& plan) {
     vayu::db::Request row = *stored;
     row.updated_at        = scope.now;
     if (auto outcome = apply_item_fields (
-        [&] { return apply_request_fields (db, row, item, /*is_create=*/false); },
-        "request", id);
+        [&] { return apply_request_fields (db, row, item, /*is_create=*/false); }, "request", id);
     !outcome) {
         return outcome;
     }
@@ -1215,8 +1216,8 @@ SyncPlan& plan) {
     }
     const std::string id = item.get<std::string> ();
     if (!plan.touched.insert (id).second) {
-        return std::unexpected (item_error (
-        400, "Request '" + id + "' appears twice in this sync", id));
+        return std::unexpected (
+        item_error (400, "Request '" + id + "' appears twice in this sync", id));
     }
     auto stored = db.get_request (id);
     if (!stored) {
@@ -1240,8 +1241,8 @@ const SyncScope& scope,
 DocumentedExamples& documented,
 SyncPlan& plan) {
     for (size_t i = 0; i < request.new_collections->size (); ++i) {
-        if (auto outcome = plan_folder (
-            db, (*request.new_collections)[i], i, request, scope, plan);
+        if (auto outcome =
+            plan_folder (db, (*request.new_collections)[i], i, request, scope, plan);
         !outcome) {
             return outcome;
         }
@@ -1261,8 +1262,7 @@ SyncPlan& plan) {
         }
     }
     for (size_t i = 0; i < request.deletes->size (); ++i) {
-        if (auto outcome =
-            plan_deleted_request (db, (*request.deletes)[i], i, scope, plan);
+        if (auto outcome = plan_deleted_request (db, (*request.deletes)[i], i, scope, plan);
         !outcome) {
             return outcome;
         }
@@ -1294,8 +1294,7 @@ apply_sync_locked (vayu::db::Database& db, SyncRequest& request) {
     DocumentedExamples documented (document);
 
     nlohmann::json policy_rows;
-    if (auto outcome = plan_policy_rows (db, scope, document, request, policy_rows);
-    !outcome) {
+    if (auto outcome = plan_policy_rows (db, scope, document, request, policy_rows); !outcome) {
         return as_response (outcome.error ());
     }
 
@@ -1316,9 +1315,10 @@ apply_sync_locked (vayu::db::Database& db, SyncRequest& request) {
 
     // The binding moves with the rows.
     plan.batch.binding         = scope.root;
-    plan.batch.binding.openapi = nlohmann::json{ { "specId", plan.batch.spec.id },
-        { "specHash", plan.batch.spec.hash }, { "syncedAt", scope.now } }
-                                 .dump ();
+    plan.batch.binding.openapi = nlohmann::json{
+        { "specId", plan.batch.spec.id }, { "specHash", plan.batch.spec.hash },
+        { "syncedAt", scope.now }
+    }.dump ();
     plan.batch.binding.updated_at = scope.now;
 
     db.spec_sync_apply (plan.batch);

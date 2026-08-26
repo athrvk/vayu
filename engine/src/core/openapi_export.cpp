@@ -271,8 +271,8 @@ const std::vector<Json>& values) {
  * the response still lands (a 204 documents itself) and the count says a body
  * was left out.
  */
-std::vector<const ExportExample*> writable_examples (
-const std::vector<const ExportExample*>& group, ExportNotes& notes) {
+std::vector<const ExportExample*>
+writable_examples (const std::vector<const ExportExample*>& group, ExportNotes& notes) {
     std::vector<const ExportExample*> writable;
     for (const ExportExample* example : group) {
         if (example->body_truncated) {
@@ -337,11 +337,13 @@ bool derive_schema) {
             // which beats a generated line - and an existing description is
             // never replaced.
             responses[status] = Json{ { "description",
-            group.front ()->name.empty () ? status + " response" : group.front ()->name } };
+            group.front ()->name.empty () ? status + " response" :
+                                            group.front ()->name } };
         }
         Json& response = responses[status];
 
-        const std::vector<const ExportExample*> writable = writable_examples (group, notes);
+        const std::vector<const ExportExample*> writable =
+        writable_examples (group, notes);
         if (writable.empty ()) {
             continue;
         }
@@ -349,8 +351,8 @@ bool derive_schema) {
         Json& content = child_record (response, "content");
         for (const auto& [content_type, media_group] : group_by (
              writable, [] (const ExportExample& e) { return e.content_type; })) {
-            write_media_examples (
-            child_record (content, content_type), media_group, notes, derive_schema);
+            write_media_examples (child_record (content, content_type),
+            media_group, notes, derive_schema);
         }
     }
 }

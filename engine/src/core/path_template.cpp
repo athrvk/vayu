@@ -62,7 +62,8 @@ read_double_brace (const std::string& path, std::size_t i, std::string& out) {
     if (close == std::string::npos) {
         return std::nullopt;
     }
-    const std::string name = trimmed (std::string_view (path).substr (i + 2, close - i - 2));
+    const std::string name =
+    trimmed (std::string_view (path).substr (i + 2, close - i - 2));
     if (name.empty () || !std::all_of (name.begin (), name.end (), is_simple_var_char)) {
         return std::nullopt;
     }
@@ -82,8 +83,8 @@ read_double_brace (const std::string& path, std::size_t i, std::string& out) {
 std::optional<std::size_t>
 read_path_template (const std::string& path, std::size_t i, std::string& out) {
     const auto close   = path.find ('}', i + 1);
-    const bool doubled =
-    close != std::string::npos && close + 1 < path.size () && path[close + 1] == '}';
+    const bool doubled = close != std::string::npos &&
+    close + 1 < path.size () && path[close + 1] == '}';
     if (close == std::string::npos || close <= i + 1 || doubled) {
         return std::nullopt;
     }

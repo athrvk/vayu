@@ -1612,9 +1612,9 @@ class InsomniaTree {
         request["headers"] = with_required_content_type (map_key_values (&headers), body);
         request["body"] = std::move (body);
         request["auth"] = insomnia_auth (prop (resource, "authentication"), counts_);
-        request["preRequestScript"] = counts_.options.import_scripts ?
-        as_string (prop (resource, "preRequestScript")) :
-        "";
+        request["preRequestScript"]  = counts_.options.import_scripts ?
+         as_string (prop (resource, "preRequestScript")) :
+         "";
         request["postRequestScript"] = counts_.options.import_scripts ?
         as_string (prop (resource, "afterResponseScript")) :
         "";
@@ -1664,18 +1664,19 @@ class InsomniaTree {
         to_env_vars (as_record (prop (node, "environment"))) :
         json::object ();
         // Collections never inherit.
-        collection["auth"] = auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
+        collection["auth"] =
+        auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
         // Insomnia 9.3+ lets a folder carry scripts, and its v4 export writes
         // model fields verbatim - so these are the request-level key names. An
         // export that spells them differently reads as absent.
-        collection["preRequestScript"] = counts_.options.import_scripts ?
-        as_string (prop (node, "preRequestScript")) :
-        "";
+        collection["preRequestScript"]  = counts_.options.import_scripts ?
+         as_string (prop (node, "preRequestScript")) :
+         "";
         collection["postRequestScript"] = counts_.options.import_scripts ?
         as_string (prop (node, "afterResponseScript")) :
         "";
-        collection["children"] = std::move (children);
-        collection["requests"] = std::move (requests);
+        collection["children"]          = std::move (children);
+        collection["requests"]          = std::move (requests);
         return collection;
     }
 

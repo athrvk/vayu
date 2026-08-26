@@ -352,7 +352,8 @@ nlohmann::json build_sampled_validation_payload (const SampledValidationTotals& 
  * `items` is a subschema in draft-07 and a list in draft-04's tuple form; both
  * spellings reach schemas, so both are followed.
  */
-void queue_subschemas (const nlohmann::json& node, std::vector<const nlohmann::json*>& pending) {
+void queue_subschemas (const nlohmann::json& node,
+std::vector<const nlohmann::json*>& pending) {
     for (const auto& key : subschema_keys ()) {
         if (auto found = node.find (key); found != node.end () && found->is_object ()) {
             pending.push_back (&*found);
@@ -499,8 +500,8 @@ const nlohmann::json& body) {
  * A row missing a status, a media type or a schema declares nothing checkable
  * and is skipped rather than costing the document its index.
  */
-void ResponseSchemaIndex::read_declared_responses (
-const nlohmann::json& row, IndexedOperation& operation) {
+void ResponseSchemaIndex::read_declared_responses (const nlohmann::json& row,
+IndexedOperation& operation) {
     auto responses = row.find ("responses");
     if (responses == row.end () || !responses->is_array ()) {
         return;
@@ -510,9 +511,9 @@ const nlohmann::json& row, IndexedOperation& operation) {
             continue;
         }
         DeclaredSchema declared;
-        declared.status       = response.value ("status", std::string ());
+        declared.status = response.value ("status", std::string ());
         declared.content_type = lower (response.value ("contentType", std::string ()));
-        auto schema           = response.find ("schema");
+        auto schema = response.find ("schema");
         if (declared.status.empty () || declared.content_type.empty () ||
         schema == response.end ()) {
             continue;
@@ -601,10 +602,9 @@ const std::unordered_map<std::string, size_t>& by_method_path) {
             }
             if (!at) {
                 const auto method = stamped.value ("method", std::string ());
-                const auto path = stamped.value ("path", std::string ());
+                const auto path   = stamped.value ("path", std::string ());
                 if (!method.empty () && !path.empty ()) {
-                    if (auto found =
-                        by_method_path.find (method_path_key (method, path));
+                    if (auto found = by_method_path.find (method_path_key (method, path));
                     found != by_method_path.end ()) {
                         at = found->second;
                     }

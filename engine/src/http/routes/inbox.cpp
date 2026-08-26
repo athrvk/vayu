@@ -783,14 +783,12 @@ void handle_start_inbox (RouteContext& ctx, const httplib::Request& req, httplib
         auto result = ctx.inbox_manager.start (ctx.db, *start);
         if (!result.ok) {
             vayu::utils::log_warning ("POST /inbox/start - " + result.error_message);
-            send_error (res, result.http_status, result.error_message,
-            result.error_code);
+            send_error (res, result.http_status, result.error_message, result.error_code);
             return;
         }
         send_json (res, inbox_json (ctx.db, result.info));
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
-        "POST /inbox/start - Error: " + std::string (e.what ()));
+        vayu::utils::log_error ("POST /inbox/start - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -820,8 +818,7 @@ void handle_delete_inbox (RouteContext& ctx, const httplib::Request& req, httpli
         send_json (res,
         nlohmann::json{ { "inboxId", inbox_id }, { "capturesDeleted", *deleted } });
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
-        "DELETE /inbox/:id - Error: " + std::string (e.what ()));
+        vayu::utils::log_error ("DELETE /inbox/:id - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -862,7 +859,9 @@ void handle_update_inbox (RouteContext& ctx, const httplib::Request& req, httpli
     send_json (res, inbox_json (ctx.db, *info));
 }
 
-void handle_list_inbox_requests (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+void handle_list_inbox_requests (RouteContext& ctx,
+const httplib::Request& req,
+httplib::Response& res) {
     const std::string inbox_id = req.matches[1];
     // The cap follows the inbox's own retention rather than the constant:
     // with `inboxMaxCaptures` raised, a page of 50 would otherwise be the
@@ -871,8 +870,8 @@ void handle_list_inbox_requests (RouteContext& ctx, const httplib::Request& req,
     auto [limit, offset] = parse_capture_pagination (
     req, limits ? limits->max_captures : constants::inbox::MAX_CAPTURES);
     try {
-        auto [status, body] = inbox_captures_response (
-        ctx.db, ctx.inbox_manager, inbox_id, limit, offset);
+        auto [status, body] =
+        inbox_captures_response (ctx.db, ctx.inbox_manager, inbox_id, limit, offset);
         res.status = status;
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
@@ -882,7 +881,9 @@ void handle_list_inbox_requests (RouteContext& ctx, const httplib::Request& req,
     }
 }
 
-void handle_clear_inbox_requests (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+void handle_clear_inbox_requests (RouteContext& ctx,
+const httplib::Request& req,
+httplib::Response& res) {
     const std::string inbox_id = req.matches[1];
     if (!ctx.inbox_manager.get (inbox_id)) {
         send_error (res, 404, "Inbox not found");
@@ -890,8 +891,7 @@ void handle_clear_inbox_requests (RouteContext& ctx, const httplib::Request& req
     }
     try {
         const int64_t cleared = ctx.db.clear_inbox_requests (inbox_id);
-        send_json (res,
-        nlohmann::json{ { "inboxId", inbox_id }, { "cleared", cleared } });
+        send_json (res, nlohmann::json{ { "inboxId", inbox_id }, { "cleared", cleared } });
     } catch (const std::exception& e) {
         vayu::utils::log_error (
         "DELETE /inbox/:id/requests - Error: " + std::string (e.what ()));
@@ -901,10 +901,10 @@ void handle_clear_inbox_requests (RouteContext& ctx, const httplib::Request& req
 
 /** What one poll of an inbox stream leaves it in. */
 enum class InboxStep {
-    Wrote, ///< Captures went out; poll again without waiting.
-    Idle, ///< Nothing new - waited for the next poll.
-    Ended, ///< The inbox has stopped, or a read failed: end the stream.
-    Closed, ///< The client is gone - a write failed.
+    Wrote,     ///< Captures went out; poll again without waiting.
+    Idle,      ///< Nothing new - waited for the next poll.
+    Ended,     ///< The inbox has stopped, or a read failed: end the stream.
+    Closed,    ///< The client is gone - a write failed.
     ClaimLost, ///< A reconnect took the slot over; this stream is no longer it.
 };
 
@@ -1004,8 +1004,7 @@ void handle_inbox_live (RouteContext& ctx, const httplib::Request& req, httplib:
 
     const auto claim = ctx.inbox_manager.try_claim_live (inbox_id);
     if (!claim) {
-        send_error (res, 409,
-        "This inbox is already being watched; close the other stream first",
+        send_error (res, 409, "This inbox is already being watched; close the other stream first",
         "inbox_live_in_use");
         return;
     }

@@ -309,9 +309,11 @@ bool& consumed_next) {
     if (arg == "--verbose") {
         // The level is optional: `--verbose` on its own means info. Clamped to
         // the range the logger has.
-        if (!next.empty () && std::isdigit (static_cast<unsigned char> (next.front ())) != 0) {
-            options.verbosity = std::max (0, std::min (2, std::stoi (std::string (next))));
-            consumed_next     = true;
+        if (!next.empty () &&
+        std::isdigit (static_cast<unsigned char> (next.front ())) != 0) {
+            options.verbosity =
+            std::max (0, std::min (2, std::stoi (std::string (next))));
+            consumed_next = true;
         } else {
             options.verbosity = 1;
         }
@@ -405,8 +407,8 @@ int run_cli (std::span<char* const> args) {
             vayu::utils::log_error (msg);
             result = 1;
         } else {
-            result = run_via_daemon (
-            options.daemon_url, options.filepath, options.verbosity, options.color);
+            result = run_via_daemon (options.daemon_url, options.filepath,
+            options.verbosity, options.color);
         }
     } else if (options.command[0] == '-') {
         // Already handled flags above

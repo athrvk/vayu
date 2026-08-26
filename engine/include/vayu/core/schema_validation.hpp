@@ -239,7 +239,8 @@ class ResponseSchemaIndex {
     /// The responses one indexed row declares. A response missing a status, a
     /// media type or a schema declares nothing checkable and is skipped rather
     /// than costing the document its index.
-    static void read_declared_responses (const nlohmann::json& row, IndexedOperation& operation);
+    static void read_declared_responses (const nlohmann::json& row,
+    IndexedOperation& operation);
 
     /// The declaration that answers for @p media under @p status, or nullptr.
     /// A wildcard media type is considered only after every exact one, so a

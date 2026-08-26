@@ -381,21 +381,23 @@ std::vector<Move>& moves) {
     const nlohmann::json* norm_in  = &empty;
     if (body.contains ("moves") && !body["moves"].is_null ()) {
         if (!body["moves"].is_array ()) {
-            return std::unexpected (body_error ("Invalid 'moves': must be an array"));
+            return std::unexpected (
+            body_error ("Invalid 'moves': must be an array"));
         }
         moves_in = &body["moves"];
     }
     if (body.contains ("normalize") && !body["normalize"].is_null ()) {
         if (!body["normalize"].is_array ()) {
-            return std::unexpected (body_error ("Invalid 'normalize': must be an array"));
+            return std::unexpected (
+            body_error ("Invalid 'normalize': must be an array"));
         }
         norm_in = &body["normalize"];
     }
 
     const size_t total = moves_in->size () + norm_in->size ();
     if (total > MAX_REORDER_ENTRIES) {
-        return std::unexpected (
-        body_error ("Reorder too large: " + std::to_string (total) + " entries exceeds the limit of " +
+        return std::unexpected (body_error (
+        "Reorder too large: " + std::to_string (total) + " entries exceeds the limit of " +
         std::to_string (MAX_REORDER_ENTRIES) + " per call"));
     }
 

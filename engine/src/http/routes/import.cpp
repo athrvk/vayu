@@ -1096,9 +1096,9 @@ RouteResult read_string_option (const nlohmann::json& body, const char* key, std
 }
 
 /** Which halves of a document `POST /import/parse` is asked to read. */
-RouteResult read_import_options (const nlohmann::json& body, vayu::core::ImportOptions& options) {
-    if (auto outcome =
-        read_bool_option (body, "importEnvironments", options.import_environments);
+RouteResult read_import_options (const nlohmann::json& body,
+vayu::core::ImportOptions& options) {
+    if (auto outcome = read_bool_option (body, "importEnvironments", options.import_environments);
     !outcome) {
         return outcome;
     }
@@ -1118,8 +1118,8 @@ RouteResult read_import_source (const nlohmann::json& body, vayu::core::ImportSo
         return {};
     }
     if (!found->is_number_integer () || found->get<long long> () < 0) {
-        return std::unexpected (
-        body_error ("Invalid 'unresolvedRefs': must be a non-negative integer"));
+        return std::unexpected (body_error (
+        "Invalid 'unresolvedRefs': must be a non-negative integer"));
     }
     source.unresolved_refs = found->get<int> ();
     return {};
@@ -1298,8 +1298,8 @@ import_response (vayu::db::Database& db, const nlohmann::json& body) {
 namespace {
 
 void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
-    const bool streaming = req.get_header_value ("Accept").find (
-                           "text/event-stream") != std::string::npos;
+    const bool streaming =
+    req.get_header_value ("Accept").find ("text/event-stream") != std::string::npos;
     vayu::utils::log_info (
     std::string ("POST /import/fetch") + (streaming ? " (streaming)" : ""));
 
@@ -1307,8 +1307,7 @@ void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httpli
         auto [status, body] =
         import_fetch (req.body, vayu::http::resolve_transport_policy (ctx.db));
         res.status = status;
-        res.set_content (
-        body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
         "application/json");
         return;
     }
@@ -1321,8 +1320,8 @@ void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httpli
     // holding separate opinions about what a valid request is.
     if (const auto refusal = import_fetch_refusal (req.body)) {
         res.status = refusal->first;
-        res.set_content (refusal->second.dump (-1, ' ', false,
-                         nlohmann::json::error_handler_t::replace),
+        res.set_content (
+        refusal->second.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
         "application/json");
         return;
     }
@@ -1331,19 +1330,18 @@ void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httpli
     // handler has returned and the `Request` is gone.
     const std::string body = req.body;
     const auto transport   = vayu::http::resolve_transport_policy (ctx.db);
-    res.set_content_provider ("text/event-stream",
-    [body, transport] (size_t, httplib::DataSink& sink) {
+    res.set_content_provider (
+    "text/event-stream", [body, transport] (size_t, httplib::DataSink& sink) {
         size_t frame    = 0;
-        const auto emit = [&sink, &frame] (const std::string& event,
-                          const nlohmann::json& data) {
+        const auto emit = [&sink, &frame] (
+                          const std::string& event, const nlohmann::json& data) {
             if (!sink.is_writable ()) {
                 return false;
             }
             // The shared framer, so this stream's frames cannot drift from
             // the run topics' shape.
             const std::string payload = vayu::core::build_sse_frame (event,
-            data.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
-            frame++);
+            data.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace), frame++);
             return sink.write (payload.data (), payload.size ());
         };
         import_fetch_stream (body, transport, emit);
@@ -1376,8 +1374,7 @@ void handle_import_apply (RouteContext& ctx, const httplib::Request& req, httpli
         res.status = status;
         res.set_content (response.dump (), "application/json");
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
-        "POST /import/apply - Error: " + std::string (e.what ()));
+        vayu::utils::log_error ("POST /import/apply - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -1407,13 +1404,14 @@ void handle_import_parse (RouteContext& ctx, const httplib::Request& req, httpli
         response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
         "application/json");
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
-        "POST /import/parse - Error: " + std::string (e.what ()));
+        vayu::utils::log_error ("POST /import/parse - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
 
-void handle_import_document (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+void handle_import_document (RouteContext& ctx,
+const httplib::Request& req,
+httplib::Response& res) {
     nlohmann::json body;
     try {
         body = nlohmann::json::parse (req.body);

@@ -1070,24 +1070,24 @@ nlohmann::json build_report_body (const vayu::DetailedReport& report,
 const ReportExtras& extras,
 double target_rps) {
     nlohmann::json json_report;
-    json_report["summary"]  = { { "totalRequests", report.total_requests },
-         { "successfulRequests", report.successful_requests },
-         { "failedRequests", report.failed_requests }, { "errorRate", report.error_rate },
-         { "totalDurationSeconds", report.total_duration_s },
-         { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
-         { "sendRate", report.send_rate }, { "throughput", report.throughput },
-         { "setupOverhead", report.setup_overhead_s },
-         { "peakConcurrency", static_cast<size_t> (extras.peak_concurrency) },
-         { "droppedRequests", static_cast<size_t> (extras.dropped_total) },
-         { "avgQueueWaitMs", extras.queue_wait_avg },
-         { "bytesSent", static_cast<size_t> (extras.bytes_sent) },
-         { "bytesReceived", static_cast<size_t> (extras.bytes_received) },
-         // Sits in `summary` rather than `metadata.configuration` on purpose:
-         // configuration is what was asked for, and this is what happened.
-         // LoadTestDetail reads both and only trusts the requested-protocol
-         // label when this is 0.
-         { "httpVersionDowngraded", static_cast<size_t> (extras.http_version_downgraded) },
-         { "throughputBytesPerSec",
+    json_report["summary"] = { { "totalRequests", report.total_requests },
+        { "successfulRequests", report.successful_requests },
+        { "failedRequests", report.failed_requests }, { "errorRate", report.error_rate },
+        { "totalDurationSeconds", report.total_duration_s },
+        { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
+        { "sendRate", report.send_rate }, { "throughput", report.throughput },
+        { "setupOverhead", report.setup_overhead_s },
+        { "peakConcurrency", static_cast<size_t> (extras.peak_concurrency) },
+        { "droppedRequests", static_cast<size_t> (extras.dropped_total) },
+        { "avgQueueWaitMs", extras.queue_wait_avg },
+        { "bytesSent", static_cast<size_t> (extras.bytes_sent) },
+        { "bytesReceived", static_cast<size_t> (extras.bytes_received) },
+        // Sits in `summary` rather than `metadata.configuration` on purpose:
+        // configuration is what was asked for, and this is what happened.
+        // LoadTestDetail reads both and only trusts the requested-protocol
+        // label when this is 0.
+        { "httpVersionDowngraded", static_cast<size_t> (extras.http_version_downgraded) },
+        { "throughputBytesPerSec",
         report.total_duration_s > 0 ? extras.bytes_received / report.total_duration_s : 0.0 } };
     json_report["latency"] = { { "min", report.latency_min }, { "max", report.latency_max },
         { "avg", report.latency_avg }, { "median", report.latency_p50 },
@@ -1305,8 +1305,7 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
     if (req.has_param ("type"))
         filter.type = vayu::parse_run_type (req.get_param_value ("type"));
     if (req.has_param ("status"))
-        filter.status =
-        vayu::parse_run_status (req.get_param_value ("status"));
+        filter.status = vayu::parse_run_status (req.get_param_value ("status"));
     if (req.has_param ("requestId"))
         filter.request_id = req.get_param_value ("requestId");
     if (req.has_param ("collectionId"))
@@ -1328,7 +1327,7 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
     ", offset=" + std::to_string (offset) + ")");
     try {
         auto [status, body] = get_runs_response (ctx.db, filter, limit, offset);
-        res.status = status;
+        res.status          = status;
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
         vayu::utils::log_error ("GET /runs - Error: " + std::string (e.what ()));
@@ -1410,16 +1409,14 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
     try {
         auto run = ctx.db.get_run (run_id);
         if (!run) {
-            vayu::utils::log_warning (
-            "POST /runs/:id/stop - Run not found: " + run_id);
+            vayu::utils::log_warning ("POST /runs/:id/stop - Run not found: " + run_id);
             send_error (res, 404, "Run not found");
             return;
         }
 
         // Check if run is already completed or stopped
         if (run->status == vayu::RunStatus::Completed ||
-        run->status == vayu::RunStatus::Stopped ||
-        run->status == vayu::RunStatus::Failed) {
+        run->status == vayu::RunStatus::Stopped || run->status == vayu::RunStatus::Failed) {
             vayu::utils::log_info (
             "POST /runs/:id/stop - Run already finished: " + run_id +
             ", status=" + to_string (run->status));
@@ -1456,12 +1453,11 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
             const bool settled = !stream || stream->closed ();
 
             nlohmann::json response;
-            response["runId"]  = run_id;
-            response["status"] = to_string (
-            settled ? vayu::RunStatus::Stopped : vayu::RunStatus::Running);
-            response["message"] = settled ?
-            "Stream stopped" :
-            "Stop signalled; the stream has not settled yet";
+            response["runId"] = run_id;
+            response["status"] =
+            to_string (settled ? vayu::RunStatus::Stopped : vayu::RunStatus::Running);
+            response["message"] =
+            settled ? "Stream stopped" : "Stop signalled; the stream has not settled yet";
             if (stream) {
                 response["totalEvents"] = stream->total_events ();
             }
@@ -1498,8 +1494,7 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
             "POST /runs/:id/stop - Run not active, updating DB: " + run_id);
             ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Stopped);
 
-            auto response =
-            vayu::utils::MetricsHelper::create_inactive_response (run_id);
+            auto response = vayu::utils::MetricsHelper::create_inactive_response (run_id);
             res.set_content (response.dump (), "application/json");
         }
     } catch (const std::exception& e) {
@@ -1516,8 +1511,7 @@ void handle_get_run_report (RouteContext& ctx, const httplib::Request& req, http
     try {
         auto [status, body] = run_report_response (ctx.db, run_id);
         if (status == 404) {
-            vayu::utils::log_warning (
-            "GET /runs/:id/report - Run not found: " + run_id);
+            vayu::utils::log_warning ("GET /runs/:id/report - Run not found: " + run_id);
         }
         res.status = status;
         res.set_content (body.dump (2), "application/json");
@@ -1526,7 +1520,9 @@ void handle_get_run_report (RouteContext& ctx, const httplib::Request& req, http
     }
 }
 
-void handle_get_run_samples (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+void handle_get_run_samples (RouteContext& ctx,
+const httplib::Request& req,
+httplib::Response& res) {
     std::string run_id = req.matches[1];
     vayu::utils::log_info (
     "GET /runs/:id/samples - Fetching captured samples for run: " + run_id);
@@ -1606,7 +1602,8 @@ void register_run_routes (RouteContext& ctx) {
      * GET /runs/:runId  (alias: GET /run/:runId, deprecated)
      * Retrieves details for a specific test run by its ID.
      */
-    httplib::Server::Handler get_run = [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler get_run = [&ctx] (const httplib::Request& req,
+                                       httplib::Response& res) {
         handle_get_run (ctx, req, res);
     };
     ctx.server.Get (R"(/runs/([^/]+))", get_run);
@@ -1618,7 +1615,8 @@ void register_run_routes (RouteContext& ctx) {
      * run is stopped first and only deleted once its worker has settled; see
      * delete_run_response.
      */
-    httplib::Server::Handler delete_run = [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler delete_run = [&ctx] (const httplib::Request& req,
+                                          httplib::Response& res) {
         handle_delete_run (ctx, req, res);
     };
     ctx.server.Delete (R"(/runs/([^/]+))", delete_run);
@@ -1640,7 +1638,8 @@ void register_run_routes (RouteContext& ctx) {
      * POST /runs/:runId/stop  (alias: POST /run/:runId/stop, deprecated)
      * Stops a running load test.
      */
-    httplib::Server::Handler stop_run = [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler stop_run = [&ctx] (const httplib::Request& req,
+                                        httplib::Response& res) {
         handle_stop_run (ctx, req, res);
     };
     ctx.server.Post (R"(/runs/([^/]+)/stop)", stop_run);
@@ -1650,7 +1649,8 @@ void register_run_routes (RouteContext& ctx) {
      * GET /runs/:runId/report  (alias: GET /run/:runId/report, deprecated)
      * Retrieves a detailed statistical report for a specific test run.
      */
-    httplib::Server::Handler get_run_report = [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler get_run_report = [&ctx] (const httplib::Request& req,
+                                              httplib::Response& res) {
         handle_get_run_report (ctx, req, res);
     };
     ctx.server.Get (R"(/runs/([^/]+)/report)", get_run_report);

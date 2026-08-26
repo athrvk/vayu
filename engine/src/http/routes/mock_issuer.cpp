@@ -404,8 +404,8 @@ using Issuer = detail::MockIssuerState;
 bool read_password_grant (const httplib::Request& req, httplib::Response& res, std::string& subject) {
     const std::string username = req.get_param_value ("username");
     if (username.empty () || !req.has_param ("password")) {
-        send_oauth_error (
-        res, 400, "invalid_request", "password grant needs username and password");
+        send_oauth_error (res, 400, "invalid_request",
+        "password grant needs username and password");
         return false;
     }
     subject = username;
@@ -441,8 +441,8 @@ std::string& scope) {
     }
     if (const std::string redirect = req.get_param_value ("redirect_uri");
     redirect != issued.redirect_uri) {
-        send_oauth_error (
-        res, 400, "invalid_grant", "redirect_uri does not match the authorize call");
+        send_oauth_error (res, 400, "invalid_grant",
+        "redirect_uri does not match the authorize call");
         return false;
     }
     if (!issued.code_challenge.empty ()) {
@@ -474,15 +474,13 @@ std::string& scope) {
     const std::string token = req.get_param_value ("refresh_token");
     const auto it           = issuer.refresh_tokens.find (token);
     if (token.empty () || it == issuer.refresh_tokens.end ()) {
-        send_oauth_error (
-        res, 400, "invalid_grant", "Unknown or already-rotated refresh token");
+        send_oauth_error (res, 400, "invalid_grant", "Unknown or already-rotated refresh token");
         return false;
     }
     const Issuer::IssuedRefresh issued = it->second;
     issuer.refresh_tokens.erase (it);
     if (issued.client_id != auth.client_id) {
-        send_oauth_error (
-        res, 400, "invalid_grant", "Refresh token was issued to another client");
+        send_oauth_error (res, 400, "invalid_grant", "Refresh token was issued to another client");
         return false;
     }
     if (!issued.subject.empty ()) {

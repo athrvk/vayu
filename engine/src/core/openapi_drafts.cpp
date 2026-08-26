@@ -257,7 +257,8 @@ class Sampler {
     }
 
     /** The stub a scalar type is sampled as, or nothing for a structured one. */
-    [[nodiscard]] static std::optional<json> scalar_stub (const json* node, const std::string& type) {
+    [[nodiscard]] static std::optional<json>
+    scalar_stub (const json* node, const std::string& type) {
         if (type == "string") {
             const json* values = prop (node, "enum");
             if (values != nullptr && values->is_array () && !values->empty ()) {
@@ -803,7 +804,8 @@ std::vector<std::string> produced_types (const json& document, const json* opera
     std::vector<std::string> produces;
     if (declared != nullptr && declared->is_array ()) {
         for (const json& entry : *declared) {
-            produces.push_back (entry.is_string () ? entry.get<std::string> () : std::string ());
+            produces.push_back (
+            entry.is_string () ? entry.get<std::string> () : std::string ());
         }
     }
     return produces;
@@ -853,8 +855,10 @@ ImportTally* tally) {
 
     for (auto entry = map->begin (); entry != map->end (); ++entry) {
         const json* response = sampler.deref (&entry.value ());
-        auto example         = response_example (entry.key (), response, tally,
-                [&] (const json& node) { return response_payload_v2 (node, sampler, content_type); });
+        auto example =
+        response_example (entry.key (), response, tally, [&] (const json& node) {
+            return response_payload_v2 (node, sampler, content_type);
+        });
         if (example) {
             out.push_back (std::move (*example));
         }
@@ -938,9 +942,9 @@ std::vector<DraftField>& form_fields) {
     const json* name_node = prop (parameter, "name");
     const std::string name =
     name_node == nullptr ? std::string () : js_string_of (*name_node);
-    const std::string* in  = as_str (prop (parameter, "in"));
-    const std::string kind = in == nullptr ? std::string () : *in;
-    const json* required   = prop (parameter, "required");
+    const std::string* in          = as_str (prop (parameter, "in"));
+    const std::string kind         = in == nullptr ? std::string () : *in;
+    const json* required           = prop (parameter, "required");
     const std::string* description = as_str (prop (parameter, "description"));
 
     if (kind == "query") {
@@ -949,8 +953,7 @@ std::vector<DraftField>& form_fields) {
         // 2.0 states a non-body parameter's value inline as `default`;
         // it has no `example` keyword (that arrived with 3.x).
         prop (parameter, "default");
-        draft.params.push_back (
-        declared_param_row (name, value, required, description));
+        draft.params.push_back (declared_param_row (name, value, required, description));
     } else if (kind == "header") {
         if (is_self_produced_header (name)) {
             return;
@@ -963,10 +966,9 @@ std::vector<DraftField>& form_fields) {
         draft.headers.push_back (declared_param_row (name, value, required, nullptr));
     } else if (dialect == walk::Dialect::V2 && kind == "body") {
         const json* schema = prop (parameter, "schema");
-        const json sample =
-        truthy (schema) ? sampler.sample (schema) : json::object ();
+        const json sample = truthy (schema) ? sampler.sample (schema) : json::object ();
         draft.body.content = js_json_text (sample);
-        draft.body.mode = "json"; // Corrected below against `consumes`.
+        draft.body.mode    = "json"; // Corrected below against `consumes`.
     } else if (dialect == walk::Dialect::V2 && kind == "formData") {
         DraftField field;
         field.key                   = name;
@@ -1035,20 +1037,18 @@ DraftRequest& draft) {
         // wire form, so a document declaring one under a urlencoded-only
         // `consumes` contradicts itself; multipart is the half of that
         // contradiction which can carry the field.
-        const bool urlencoded = std::any_of (consumes.begin (),
-        consumes.end (), [] (const std::string& type) {
+        const bool urlencoded =
+        std::any_of (consumes.begin (), consumes.end (), [] (const std::string& type) {
             return media_type (type) == "application/x-www-form-urlencoded";
         });
-        const bool multipart  = std::any_of (consumes.begin (),
-         consumes.end (), [] (const std::string& type) {
+        const bool multipart =
+        std::any_of (consumes.begin (), consumes.end (), [] (const std::string& type) {
             return media_type (type) == "multipart/form-data";
         });
-        const bool has_file =
-        std::any_of (form_fields.begin (), form_fields.end (),
-        [] (const DraftField& field) { return field.file; });
-        draft.body.mode    = (urlencoded && !multipart && !has_file) ?
-           "x-www-form-urlencoded" :
-           "form-data";
+        const bool has_file = std::any_of (form_fields.begin (),
+        form_fields.end (), [] (const DraftField& field) { return field.file; });
+        draft.body.mode =
+        (urlencoded && !multipart && !has_file) ? "x-www-form-urlencoded" : "form-data";
         draft.body.content = "";
         draft.body.fields  = std::move (form_fields);
     }
@@ -1089,8 +1089,7 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         name_draft (operation, walked, draft);
 
         std::vector<DraftField> form_fields;
-        read_draft_parameters (
-        document, walked, dialect, sampler, tally, draft, form_fields);
+        read_draft_parameters (document, walked, dialect, sampler, tally, draft, form_fields);
 
         if (dialect == walk::Dialect::V2) {
             apply_v2_body_encoding (document, operation, form_fields, draft);

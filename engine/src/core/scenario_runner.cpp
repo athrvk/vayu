@@ -442,9 +442,9 @@ struct StepContext {
     const std::string& cookie_scope;
     const std::vector<nlohmann::json>& data_rows;
     std::optional<size_t> data_row_index;
-    size_t iteration       = 0;
-    size_t iteration_count = 0;
-    bool fail_on_schema_error = false;
+    size_t iteration            = 0;
+    size_t iteration_count      = 0;
+    bool fail_on_schema_error   = false;
     size_t max_trace_body_bytes = 0;
 };
 
@@ -497,8 +497,8 @@ vayu::http::routes::ExchangeOutcome& exchange) {
         // the request here: one binder for both executors, so a
         // step cannot bind differently depending on which one ran
         // it.
-        auto bound = apply_data_template (inputs.request,
-        step.data_template, ctx.data_rows[*ctx.data_row_index], *ctx.data_row_index);
+        auto bound = apply_data_template (inputs.request, step.data_template,
+        ctx.data_rows[*ctx.data_row_index], *ctx.data_row_index);
         if (bound.ok) {
             // Then the credentials, for a step whose auth the plan
             // deliberately left unresolved: they have to carry the
@@ -561,8 +561,7 @@ ScenarioSummaryInputs& summary) {
     // The assertions this step made (issue #724), for the frame a
     // live watcher reads. A step whose row could not bind ran no
     // script and gets no tally - `exchange` is the default one.
-    record.tests =
-    tally_tests (exchange.pre_script_result, exchange.post_script_result);
+    record.tests = tally_tests (exchange.pre_script_result, exchange.post_script_result);
 
     // What the contract says about what came back (issue #681).
     // Only for a step that sent: a skipped step and one whose data
@@ -577,8 +576,8 @@ ScenarioSummaryInputs& summary) {
             // The step's name and status ride the tally so a failure
             // example read far from the step list still says which
             // step produced it - the load pass's reason, unchanged.
-            summary.validation.record (*record.validation,
-            record.step_name, record.status_code);
+            summary.validation.record (
+            *record.validation, record.step_name, record.status_code);
         }
     }
 
@@ -588,11 +587,10 @@ ScenarioSummaryInputs& summary) {
     // error that named it, because that is the one a reader has to
     // fix first. With the flag off - the default - a schema failure
     // changes nothing here and lives entirely in its own channel.
-    if (ctx.fail_on_schema_error &&
-    record.outcome == StepOutcome::Passed && record.validation &&
-    record.validation->checked && !record.validation->valid) {
+    if (ctx.fail_on_schema_error && record.outcome == StepOutcome::Passed &&
+    record.validation && record.validation->checked && !record.validation->valid) {
         record.outcome = StepOutcome::Failed;
-        record.error = describe_schema_failure (*record.validation);
+        record.error   = describe_schema_failure (*record.validation);
     }
     return record;
 }
@@ -641,14 +639,11 @@ bool& end_iteration) {
         case vayu::ScriptControl::Kind::Next:
             if (steps_this_iteration >= max_steps_per_iteration) {
                 record.outcome = StepOutcome::Errored;
-                record.error =
-                "Iteration exceeded maxStepsPerIteration (" +
+                record.error   = "Iteration exceeded maxStepsPerIteration (" +
                 std::to_string (max_steps_per_iteration) +
-                ") - setNextRequest is cycling through: " +
-                describe_recent_steps (recent_steps);
+                ") - setNextRequest is cycling through: " + describe_recent_steps (recent_steps);
                 end_iteration = true;
-            } else if (auto next =
-                       resolve_next_step (name_index, control.target);
+            } else if (auto next = resolve_next_step (name_index, control.target);
             !next.ok) {
                 record.outcome = StepOutcome::Errored;
                 record.error   = next.error;
@@ -673,8 +668,8 @@ StepRecord& record,
 CoverageTally& coverage,
 ScenarioSummaryInputs& summary,
 ScenarioStepStore& store) {
-    record.trace = vayu::http::routes::build_result_trace (
-    exchange.request, exchange.response);
+    record.trace =
+    vayu::http::routes::build_result_trace (exchange.request, exchange.response);
     if (!exchange.sent) {
         // A skipped step has no response, and the empty one
         // `build_result_trace` writes for a default `Response`
@@ -728,8 +723,8 @@ ScenarioStepStore& store) {
     // A capped body may split a UTF-8 sequence and a response body
     // can be arbitrary bytes, so a lone continuation byte becomes
     // U+FFFD instead of throwing (store_result does the same).
-    row.trace_data = record.trace.dump (
-    -1, ' ', false, nlohmann::json::error_handler_t::replace);
+    row.trace_data =
+    record.trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
     store.add (std::move (row), record.outcome != StepOutcome::Passed);
 
     ctx.context->append_tick (
@@ -769,7 +764,7 @@ ScenarioStepStore& store) {
         const auto& step = plan.steps[position];
 
         vayu::http::routes::ExchangeOutcome exchange;
-        const StepContext& step_ctx = base;
+        const StepContext& step_ctx       = base;
         const std::string data_bind_error = run_step_exchange (script_engine,
         cookie_jar, cookie_scope, verbose, scopes, step_ctx, step, exchange);
 
@@ -779,16 +774,15 @@ ScenarioStepStore& store) {
             recent_steps.pop_front ();
         }
 
-        StepRecord record = record_step (
-        step_ctx, step, exchange, data_bind_error, summary);
+        StepRecord record =
+        record_step (step_ctx, step, exchange, data_bind_error, summary);
 
         bool end_iteration = record.outcome == StepOutcome::Errored;
-        const size_t next_position = decide_next_step (exchange, name_index,
-        recent_steps, position, steps_this_iteration, max_steps_per_iteration,
-        record, end_iteration);
+        const size_t next_position =
+        decide_next_step (exchange, name_index, recent_steps, position,
+        steps_this_iteration, max_steps_per_iteration, record, end_iteration);
 
-        store_step_record (
-        step_ctx, step, exchange, record, coverage, summary, store);
+        store_step_record (step_ctx, step, exchange, record, coverage, summary, store);
 
         if (record.outcome == StepOutcome::Errored) {
             // The iteration is over - a step that did not complete
@@ -922,11 +916,11 @@ RunManager& manager) {
             // it: a script may send it backwards, forwards or out early, so the
             // position is a variable and the loop is bounded by the budget
             // above rather than by the plan's length.
-            const StepContext step_ctx{ context, execution, schema_index, transport,
-                cookie_scope, data_rows, data_row_index, iteration, asked.iterations,
-                fail_on_schema_error, max_trace_body_bytes };
-            run_iteration (script_engine, cookie_jar, cookie_scope, verbose, scopes,
-            step_ctx, plan, name_index, max_steps_per_iteration, coverage, summary, store);
+            const StepContext step_ctx{ context, execution, schema_index,
+                transport, cookie_scope, data_rows, data_row_index, iteration,
+                asked.iterations, fail_on_schema_error, max_trace_body_bytes };
+            run_iteration (script_engine, cookie_jar, cookie_scope, verbose, scopes, step_ctx,
+            plan, name_index, max_steps_per_iteration, coverage, summary, store);
 
             if (!context->should_stop) {
                 ++summary.iterations_completed;

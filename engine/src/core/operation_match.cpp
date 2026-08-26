@@ -373,8 +373,8 @@ const std::vector<MatchableOperation>& operations) {
     std::vector<bool> operation_claimed (operations.size (), false);
     match_exact_shapes (requests, operations, request_shapes, operation_shapes,
     result, request_claimed, operation_claimed);
-    match_filled_templates (requests, operations, request_shapes, operation_shapes,
-    result, request_claimed, operation_claimed);
+    match_filled_templates (requests, operations, request_shapes,
+    operation_shapes, result, request_claimed, operation_claimed);
 
     for (size_t i = 0; i < requests.size (); ++i) {
         if (!request_claimed[i]) {

@@ -577,7 +577,9 @@ struct MockConfig {
  * A free function rather than the handler lambda itself so the responder each
  * listener installs is one line, and this reads as what a mock answers with.
  */
-void serve_mock_request (const MockConfig& mock, const httplib::Request& req, httplib::Response& res) {
+void serve_mock_request (const MockConfig& mock,
+const httplib::Request& req,
+httplib::Response& res) {
 
     if (mock.latency_ms > 0) {
         std::this_thread::sleep_for (std::chrono::milliseconds (mock.latency_ms));
@@ -586,8 +588,7 @@ void serve_mock_request (const MockConfig& mock, const httplib::Request& req, ht
         res.status = 500;
         res.set_content (
         routes::error_body (500,
-        "Injected failure (errorRatePct=" + std::to_string (mock.error_rate_pct) + ")",
-        "mock_injected_error")
+        "Injected failure (errorRatePct=" + std::to_string (mock.error_rate_pct) + ")", "mock_injected_error")
         .dump (),
         "application/json");
         return;
@@ -595,8 +596,7 @@ void serve_mock_request (const MockConfig& mock, const httplib::Request& req, ht
 
     const auto match = resolve_mock_route (mock.routes, req.method, req.path);
     if (!match.route_index) {
-        const auto body =
-        mock_miss_body (mock.routes, match, req.method, req.path);
+        const auto body = mock_miss_body (mock.routes, match, req.method, req.path);
         res.status = match.miss == MockMissKind::NoExample ? 501 : 404;
         res.set_content (body.dump (), "application/json");
         return;
@@ -678,10 +678,9 @@ const MockStartRequest& request) {
 
     MockServer* raw = server.get ();
     httplib::Server::Handler responder =
-    [config = MockConfig{ server->latency_ms, server->error_rate_pct, raw->routes, raw->served }] (
-    const httplib::Request& req, httplib::Response& res) {
-        serve_mock_request (config, req, res);
-    };
+    [config = MockConfig{ server->latency_ms, server->error_rate_pct,
+     raw->routes, raw->served }] (const httplib::Request& req,
+    httplib::Response& res) { serve_mock_request (config, req, res); };
 
     httplib::Server& svr = server->listener.server ();
     // Every method cpp-httplib routes, on every path: the route table decides
@@ -792,14 +791,12 @@ void handle_start_mock (RouteContext& ctx, const httplib::Request& req, httplib:
         auto result = ctx.mock_server_manager.start (ctx.db, *start);
         if (!result.ok) {
             vayu::utils::log_warning ("POST /mock/start - " + result.error_message);
-            send_error (res, result.http_status, result.error_message,
-            result.error_code);
+            send_error (res, result.http_status, result.error_message, result.error_code);
             return;
         }
         send_json (res, mock_server_info_json (result.info));
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
-        "POST /mock/start - Error: " + std::string (e.what ()));
+        vayu::utils::log_error ("POST /mock/start - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }

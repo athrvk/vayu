@@ -714,9 +714,8 @@ std::optional<fs::path> quarantine_db_files (const fs::path& original) {
 
     fs::rename (original, quarantined, ec);
     if (ec) {
-        vayu::utils::log_error (
-        "Could not move the corrupt database aside (" + ec.message () +
-        "); it will be deleted so the engine can start.");
+        vayu::utils::log_error ("Could not move the corrupt database aside (" +
+        ec.message () + "); it will be deleted so the engine can start.");
         return std::nullopt;
     }
     for (const char* suffix : { "-wal", "-shm" }) {
@@ -744,58 +743,57 @@ void recover_database (const fs::path& db_file,
 const fs::path& backup_file,
 const std::string& db_path,
 const std::function<bool (const std::string&)>& probe) {
-// The backup is validated *before* the corrupt original is touched, so
-// a start that finds both files broken still has both of them
-// afterwards.
-const bool backup_exists = fs::exists (backup_file);
-const bool backup_valid  = backup_exists &&
-has_sqlite_header (backup_file) && probe (backup_file.string ());
-if (backup_exists && !backup_valid) {
-    vayu::utils::log_error ("The backup at " +
-    backup_file.string () + " does not open either; it is left in place and will not be restored.");
-}
-
-// Nothing to recover from when the file is simply absent - that is a
-// first run, and the fresh database below is the right answer to it.
-if (fs::exists (db_file)) {
-    const std::optional<fs::path> quarantined = quarantine_db_files (db_file);
-    std::optional<std::string> quarantined_path;
-    if (quarantined) {
-        quarantined_path = quarantined->string ();
-        prune_quarantined_databases (db_path, QUARANTINE_SETS_KEPT);
-    } else {
-        // Quarantining is what this branch exists to do, but a rename
-        // that fails must not become a daemon that will not start: the
-        // corrupt files are removed as before, and the marker says so
-        // rather than claiming a copy the user could go and look for.
-        std::error_code ec;
-        fs::remove (db_file, ec);
-        fs::remove (db_file.string () + "-wal", ec);
-        fs::remove (db_file.string () + "-shm", ec);
+    // The backup is validated *before* the corrupt original is touched, so
+    // a start that finds both files broken still has both of them
+    // afterwards.
+    const bool backup_exists = fs::exists (backup_file);
+    const bool backup_valid  = backup_exists &&
+    has_sqlite_header (backup_file) && probe (backup_file.string ());
+    if (backup_exists && !backup_valid) {
+        vayu::utils::log_error ("The backup at " + backup_file.string () +
+        " does not open either; it is left in place and will not be restored.");
     }
 
-    RecoveryOutcome outcome = quarantined ?
-    RecoveryOutcome::StartedFreshQuarantined :
-    RecoveryOutcome::DeletedCorrupt;
-    if (backup_valid && copy_db_files (backup_file, db_file)) {
-        vayu::utils::log_info (
-        "Database restored from backup. Retrying...");
-        outcome = RecoveryOutcome::RestoredFromBackup;
-    } else if (backup_valid) {
-        vayu::utils::log_error ("The backup validated but could not be "
-                                "copied back; starting fresh.");
-    } else if (backup_exists && quarantined) {
-        outcome = RecoveryOutcome::BackupAlsoCorrupt;
-    }
+    // Nothing to recover from when the file is simply absent - that is a
+    // first run, and the fresh database below is the right answer to it.
+    if (fs::exists (db_file)) {
+        const std::optional<fs::path> quarantined = quarantine_db_files (db_file);
+        std::optional<std::string> quarantined_path;
+        if (quarantined) {
+            quarantined_path = quarantined->string ();
+            prune_quarantined_databases (db_path, QUARANTINE_SETS_KEPT);
+        } else {
+            // Quarantining is what this branch exists to do, but a rename
+            // that fails must not become a daemon that will not start: the
+            // corrupt files are removed as before, and the marker says so
+            // rather than claiming a copy the user could go and look for.
+            std::error_code ec;
+            fs::remove (db_file, ec);
+            fs::remove (db_file.string () + "-wal", ec);
+            fs::remove (db_file.string () + "-shm", ec);
+        }
 
-    // The marker is what tells the user what happened to their data
-    // (issue #922). It has to be written by this branch rather than
-    // inferred later from an empty database, which is exactly what a
-    // genuine first run also looks like. It is written *after* the
-    // files have been moved so a marker never claims an outcome that
-    // did not happen.
-    write_recovery_marker (db_path, outcome, quarantined_path);
-}
+        RecoveryOutcome outcome = quarantined ? RecoveryOutcome::StartedFreshQuarantined :
+                                                RecoveryOutcome::DeletedCorrupt;
+        if (backup_valid && copy_db_files (backup_file, db_file)) {
+            vayu::utils::log_info (
+            "Database restored from backup. Retrying...");
+            outcome = RecoveryOutcome::RestoredFromBackup;
+        } else if (backup_valid) {
+            vayu::utils::log_error ("The backup validated but could not be "
+                                    "copied back; starting fresh.");
+        } else if (backup_exists && quarantined) {
+            outcome = RecoveryOutcome::BackupAlsoCorrupt;
+        }
+
+        // The marker is what tells the user what happened to their data
+        // (issue #922). It has to be written by this branch rather than
+        // inferred later from an empty database, which is exactly what a
+        // genuine first run also looks like. It is written *after* the
+        // files have been moved so a marker never claims an outcome that
+        // did not happen.
+        write_recovery_marker (db_path, outcome, quarantined_path);
+    }
 }
 
 } // namespace
@@ -833,7 +831,8 @@ Database::Database (const std::string& db_path) {
         // 2. The database is valid. Update the backup for *next* time - only
         // ever from a database that validated, so a bad one cannot overwrite a
         // good backup.
-        vayu::utils::log_debug ("Database validation successful. Updating backup...");
+        vayu::utils::log_debug (
+        "Database validation successful. Updating backup...");
         copy_db_files (db_file, backup_file);
     } else {
         recover_database (db_file, backup_file, db_path, probe_database);

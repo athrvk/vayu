@@ -612,7 +612,9 @@ void apply_proxy_options (CURL* curl, const TransportPolicy& policy) {
  * follows: a reused handle must not keep an identity the current policy never
  * asked for.
  */
-const ClientCertRule* apply_client_certificate (CURL* curl, const TransportPolicy& policy, const std::string& url) {
+const ClientCertRule* apply_client_certificate (CURL* curl,
+const TransportPolicy& policy,
+const std::string& url) {
     // Cookies need no thought here, and that is worth stating because it looks
     // like they should: libcurl owns the wire cookies and matches them on the
     // *origin* host, never the proxy hop, and curl 8.21's cross-origin

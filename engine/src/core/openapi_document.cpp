@@ -178,7 +178,8 @@ nlohmann::ordered_json plain_scalar (const std::string& text) {
 
     const bool negative     = text[0] == '-';
     const bool signed_token = negative || text[0] == '+';
-    const std::string_view digits = std::string_view (text).substr (signed_token ? 1 : 0);
+    const std::string_view digits =
+    std::string_view (text).substr (signed_token ? 1 : 0);
     if (digits.empty ()) {
         return text;
     }

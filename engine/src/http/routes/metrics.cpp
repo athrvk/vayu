@@ -239,8 +239,7 @@ void handle_run_monitor (RouteContext& ctx, const httplib::Request& req, httplib
     "GET /runs/:id/monitor - Fetching monitor samples for run: " + run_id);
     auto [limit, offset] = parse_time_series_pagination (req);
     try {
-        auto [status, body] =
-        run_monitor_series_response (ctx.db, run_id, limit, offset);
+        auto [status, body] = run_monitor_series_response (ctx.db, run_id, limit, offset);
         if (status == 404) {
             vayu::utils::log_warning (
             "GET /runs/:id/monitor - Run not found: " + run_id);
@@ -274,8 +273,8 @@ nlohmann::json empty_stream_metrics () {
 /** What one poll of the stats stream leaves the stream in. */
 enum class StreamStep {
     Continue, ///< Wrote a frame (or a keep-alive); poll again.
-    Done, ///< The run has finished and its completion event is written.
-    Closed, ///< The client is gone - a write failed.
+    Done,     ///< The run has finished and its completion event is written.
+    Closed,   ///< The client is gone - a write failed.
 };
 
 /**
@@ -306,14 +305,13 @@ httplib::DataSink& sink) {
 
     auto run = db.get_run (run_id);
     if (run &&
-    (run->status == vayu::RunStatus::Completed ||
-    run->status == vayu::RunStatus::Stopped || run->status == vayu::RunStatus::Failed)) {
+    (run->status == vayu::RunStatus::Completed || run->status == vayu::RunStatus::Stopped ||
+    run->status == vayu::RunStatus::Failed)) {
         nlohmann::json completion_event;
         completion_event["event"]  = "complete";
         completion_event["runId"]  = run_id;
         completion_event["status"] = to_string (run->status);
-        std::string payload =
-        "event: complete\ndata: " + completion_event.dump () + "\n\n";
+        std::string payload = "event: complete\ndata: " + completion_event.dump () + "\n\n";
         sink.write (payload.data (), payload.size ());
         return StreamStep::Done;
     }
@@ -332,7 +330,7 @@ httplib::DataSink& sink) {
  * run finished, the client went away or a read threw.
  */
 bool stream_run_stats (vayu::db::Database& db, const std::string& run_id, httplib::DataSink& sink) {
-    int64_t last_tick_id = 0; // metric_ticks cursor
+    int64_t last_tick_id              = 0; // metric_ticks cursor
     nlohmann::json aggregated_metrics = empty_stream_metrics ();
 
     while (sink.is_writable ()) {
@@ -464,7 +462,7 @@ void handle_live_metrics (RouteContext& ctx, const httplib::Request& req, httpli
         res.status = 404;
         nlohmann::json error;
         error["error"] = "Run not found or expired";
-        error["hint"]  = "Use /runs/" + run_id + "/report for the stored report";
+        error["hint"] = "Use /runs/" + run_id + "/report for the stored report";
         res.set_content (error.dump (), "application/json");
         return;
     }
@@ -473,7 +471,8 @@ void handle_live_metrics (RouteContext& ctx, const httplib::Request& req, httpli
     size_t start_offset = 0;
     if (req.has_header ("Last-Event-ID")) {
         try {
-            start_offset = std::stoull (req.get_header_value ("Last-Event-ID")) + 1;
+            start_offset =
+            std::stoull (req.get_header_value ("Last-Event-ID")) + 1;
         } catch (...) {
             start_offset = 0;
         }
@@ -539,8 +538,8 @@ void register_metrics_routes (RouteContext& ctx) {
      * GET /runs/:runId/live  (alias: GET /metrics/live/:runId, deprecated)
      * Streams real-time metrics directly from MetricsCollector (lock-free, faster).
      */
-    httplib::Server::Handler live_metrics =
-    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler live_metrics = [&ctx] (const httplib::Request& req,
+                                            httplib::Response& res) {
         handle_live_metrics (ctx, req, res);
     };
     ctx.server.Get (R"(/runs/([^/]+)/live)", live_metrics);

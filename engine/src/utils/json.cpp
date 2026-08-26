@@ -704,8 +704,7 @@ std::optional<Error> read_form_field_type (const Json& item, BodyMode mode, Form
  */
 Result<FormField> parse_form_field (const Json& item, BodyMode mode) {
     if (!item.is_object ()) {
-        return Error{ ErrorCode::InternalError,
-            "Each entry of body 'fields' must be an object" };
+        return Error{ ErrorCode::InternalError, "Each entry of body 'fields' must be an object" };
     }
     const auto key = item.find ("key");
     if (key == item.end () || !key->is_string ()) {
@@ -715,8 +714,7 @@ Result<FormField> parse_form_field (const Json& item, BodyMode mode) {
 
     FormField field;
     field.key = key->get<std::string> ();
-    if (const auto value = item.find ("value");
-    value != item.end () && value->is_string ()) {
+    if (const auto value = item.find ("value"); value != item.end () && value->is_string ()) {
         field.value = value->get<std::string> ();
     }
     if (const auto enabled = item.find ("enabled");
@@ -744,7 +742,8 @@ Result<FormField> parse_form_field (const Json& item, BodyMode mode) {
     // that matters: the caller pointed at a file and nothing would send it.
     if (field.type == FormFieldType::Text && !field.src.empty ()) {
         return Error{ ErrorCode::InternalError,
-            "Body field '" + field.key + "' has a 'src' but is not a file part - set 'type' to \"file\"" };
+            "Body field '" + field.key +
+            "' has a 'src' but is not a file part - set 'type' to \"file\"" };
     }
     return field;
 }
@@ -1088,8 +1087,7 @@ const char* paint (const char* code, bool color) {
 void pretty_print_impl (std::ostringstream& ss, const Json& json, int indent, int current_indent, bool color);
 
 /** An object, one `"key": value` per line. */
-void pretty_print_object (
-std::ostringstream& ss, const Json& json, int indent, int current_indent, bool color) {
+void pretty_print_object (std::ostringstream& ss, const Json& json, int indent, int current_indent, bool color) {
     const std::string next_indent_str (static_cast<size_t> (current_indent + indent), ' ');
     ss << paint (WHITE, color) << "{" << paint (RESET, color) << "\n";
 
@@ -1106,13 +1104,12 @@ std::ostringstream& ss, const Json& json, int indent, int current_indent, bool c
         ss << "\n";
     }
 
-    ss << std::string (static_cast<size_t> (current_indent), ' ') << paint (WHITE, color)
-       << "}" << paint (RESET, color);
+    ss << std::string (static_cast<size_t> (current_indent), ' ')
+       << paint (WHITE, color) << "}" << paint (RESET, color);
 }
 
 /** An array, one element per line. */
-void pretty_print_array (
-std::ostringstream& ss, const Json& json, int indent, int current_indent, bool color) {
+void pretty_print_array (std::ostringstream& ss, const Json& json, int indent, int current_indent, bool color) {
     const std::string next_indent_str (static_cast<size_t> (current_indent + indent), ' ');
     ss << paint (WHITE, color) << "[" << paint (RESET, color) << "\n";
 
@@ -1126,8 +1123,8 @@ std::ostringstream& ss, const Json& json, int indent, int current_indent, bool c
         ss << "\n";
     }
 
-    ss << std::string (static_cast<size_t> (current_indent), ' ') << paint (WHITE, color)
-       << "]" << paint (RESET, color);
+    ss << std::string (static_cast<size_t> (current_indent), ' ')
+       << paint (WHITE, color) << "]" << paint (RESET, color);
 }
 
 void pretty_print_impl (std::ostringstream& ss, const Json& json, int indent, int current_indent, bool color) {
