@@ -579,43 +579,43 @@ jobs:
       # that survives both translation units on the runner's current SDK - try
       # it by dropping this `if`, and put it back if it traps.
       #
-      # **It lints the changed lines, not the changed files.** The engine had
-      # never been linted, so most files carry findings that predate the diff -
-      # `openapi_drafts.cpp` alone answered with nine on a tree nobody had
-      # touched. Gating on whole files would fail a pull request for code it did
-      # not write, in every file it happened to open, which ends one of two ways:
-      # unrelated refactors smuggled into every diff, or the gate turned off. New
-      # code is held to the config from its first line, and the backlog is paid
-      # down by whoever edits it. `clang-tidy-diff.py` is LLVM's own driver for
-      # exactly this - the line ranges come out of the diff and go in as
-      # `--line-filter`, so nothing here reimplements them.
+      # **It lints the whole of every changed file** (#946, the promotion that
+      # closed the #928 backlog paydown). The gate opened at changed-*lines*
+      # scope (#885), because the engine had never been linted and most files
+      # carried findings older than any diff - whole-file gating then would have
+      # failed pull requests for code they did not write. That quarantine was
+      # the scoping's only job, and #928 paid the backlog to zero tree-wide -
+      # while measuring what the scoping cost: a retyped constant created a
+      # finding on a line its diff never touched (#979), and one branch's
+      # whole-file lint of its own 30 changed files found 98 findings where the
+      # changed-lines gate, correctly, reported 0 (#946). With nothing
+      # pre-existing left to surface, every edited file is fully re-checked.
+      # This also retired `clang-tidy-diff.py` and the Python interpreter it
+      # needed - clang-tidy is invoked directly on each changed translation
+      # unit.
       #
       # `HEAD^1` is the base side of the pull request's merge commit, which is
       # what actions/checkout leaves at HEAD for a `pull_request` event; hence
       # `fetch-depth: 2` above, and the check below rather than a silent empty
       # diff if that ever stops being true.
       #
-      # **A bulk reformat is the one change line scoping cannot help**, because
-      # it rewrites a line in every file it touches: clang-tidy would parse a
-      # whole translation unit per reformatted file and, for the ones it does
-      # lint, widen the line filter to almost the whole file, so the backlog
-      # older than the diff surfaces as failures. #886's 149-file bulk format
-      # asked for 152 translation units and hit this job's timeout. The escape
-      # is the `reformat-pr` label in the `if` below: a reviewer applies it to a
-      # pull request that is nothing but the formatter's output, sees it on the
-      # pull request, and the lint step does not run. It is deliberately not
+      # **A bulk reformat is the one change this gate cannot price fairly**: it
+      # touches a line in every file, so the gate would parse one translation
+      # unit per reformatted file - #886's 149-file bulk format asked for 152
+      # translation units and hit this job's timeout. The escape is the
+      # `reformat-pr` label in the `if` below: a reviewer applies it to a pull
+      # request that is nothing but the formatter's output, sees it on the pull
+      # request, and the lint step does not run. It is deliberately not
       # machinery - a commit walk that read the skip out of a file in the diff
       # was tried (#909's bootstrap) and deleted (#940), because a gate whose
       # exemption is an author-writable input needs a second gate to guard it.
       # `.git-blame-ignore-revs` still gets the reformat's SHA, for blame, which
       # is the only thing it is for.
       #
-      # `-allow-no-checks` is for `engine/src/runtime/`, whose `.clang-tidy` sets
-      # `Checks: '-*'`: without it clang-tidy calls an empty check list a usage
-      # error and exits 1, so the directory that is meant to be exempt would be
-      # the one that fails. `-clang-tidy-binary` because the driver otherwise
-      # calls whatever plain `clang-tidy` resolves to, which on the Linux image
-      # is 18 - old enough to reject `engine/.clang-tidy` outright.
+      # `--allow-no-checks` is for `engine/src/runtime/`, whose `.clang-tidy`
+      # sets `Checks: '-*'`: without it clang-tidy calls an empty check list a
+      # usage error and exits 1, so the directory that is meant to be exempt
+      # would be the one that fails.
       #
       # The two legs run different clang-tidy versions, and neither is a free
       # choice. Linux pins 19 from apt, which is what CONTRIBUTING.md tells
@@ -630,9 +630,6 @@ jobs:
       # leg alone may be a version difference rather than a platform one - worth
       # knowing when you read a failure, and much cheaper than having no
       # coverage of the per-OS branches at all.
-      #
-      # `-j 0` rather than a CPU count: the driver reads 0 as
-      # `multiprocessing.cpu_count()`, and `nproc` does not exist on macOS.
       - name: Lint changed engine sources
         if: >-
           runner.os != 'macOS'
@@ -670,31 +667,21 @@ jobs:
           # the standard library - `no template named 'optional' in namespace
           # 'std'`, twenty errors deep, in files no diff line touched (#926 on
           # Windows, where the same run linted every changed `.cpp` cleanly).
-          #
-          # It is worse than one leg failing, and this is the part that decided
-          # it: **a `clang-diagnostic-error` is not line-filtered**. Measured on
-          # clang-tidy 19.1.1 - an error in an included header is reported even
-          # when `-line-filter` names only the translation unit and only one of
-          # its lines. So a bad synthesised command does not merely fail, it
-          # takes the gate out of changed-lines scope entirely, which is the one
-          # property the whole design rests on. Feeding clang-tidy a file the
-          # compilation database has no entry for is the only way this tree
-          # produces a compiler error at all.
+          # Feeding clang-tidy a file the compilation database has no entry for
+          # is the only way this tree produces a compiler error at all, so
+          # headers stay out of the input list.
           #
           # The MSVC include paths could be passed through instead
           # (`--extra-arg=-imsvc...`, re-derived per image). Rejected: it buys
           # header-as-input coverage on one more leg, at the price of toolchain
-          # plumbing that breaks when an image moves, and it leaves the
-          # error-bypass above wide open.
+          # plumbing that breaks when an image moves.
           #
-          # What this costs is **not** what #926 assumed. `HeaderFilterRegex`
-          # does report diagnostics inside a header, but `clang-tidy-diff.py`
-          # builds one invocation per changed file with a `-line-filter` naming
-          # *only that file* (`clang-tidy-diff.py:344-351`), and clang-tidy
-          # drops a diagnostic in any file its filter does not list - so a
-          # changed header was never reaching this gate through its consumers
-          # either. The hook is the gate that does lint headers: it builds one
-          # filter naming every staged file, which is why it can.
+          # What the promotion changed here (#946): with no line filter on the
+          # invocation, the config's `HeaderFilterRegex` applies, so a header's
+          # findings now surface through every *changed* translation unit that
+          # includes it. What a header-only pull request still needs is the
+          # hook, which lints a staged header directly against the
+          # contributor's own build tree - the summary note below says so.
           headers=()
           translation_units=()
           for file in ${changed[@]+"${changed[@]}"}; do
@@ -705,7 +692,7 @@ jobs:
           done
           if [[ ${#headers[@]} -gt 0 ]]; then
             {
-              echo "- clang-tidy: **${#headers[@]}** changed header(s) are not linted here - this gate lints translation units only (#940). \`scripts/pre-commit\` lints them through the sources that include them:"
+              echo "- clang-tidy: **${#headers[@]}** changed header(s) are not direct inputs here - this gate lints translation units only (#940). Their findings surface through any changed source that includes them (#946); \`scripts/pre-commit\` lints them directly:"
               printf '  - `%s`\n' "${headers[@]}"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -721,29 +708,22 @@ jobs:
             exit 0
           fi
           {
-            echo "- clang-tidy linted the changed lines of **${#changed[@]}** engine source(s), against \`$(git rev-parse --short HEAD^1)\`:"
+            echo "- clang-tidy linted **${#changed[@]}** whole engine source(s) changed against \`$(git rev-parse --short HEAD^1)\` (#946):"
             printf '  - `%s`\n' "${changed[@]}"
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Installed here rather than in a step of its own so a pull request
-          # that changed no engine source pays for none of it. Each package
-          # brings LLVM's own `clang-tidy-diff.py` with the binary, at a path
-          # that differs per packager - which is the whole of the per-platform
-          # difference below.
+          # that changed no engine source pays for none of it.
           case "$RUNNER_OS" in
             Linux)
               sudo apt-get install -y --no-install-recommends clang-tidy-19
               tidy=clang-tidy-19
-              tidy_diff=/usr/bin/clang-tidy-diff-19.py
-              python=python3
               ;;
             Windows)
               # Nothing to install: the image ships LLVM 20.1.8, and asking
               # chocolatey for 19.1.1 failed outright rather than downgrading
               # ("A newer version of llvm is already installed").
               tidy="/c/Program Files/LLVM/bin/clang-tidy.exe"
-              tidy_diff="/c/Program Files/LLVM/share/clang/clang-tidy-diff.py"
-              python=python
               ;;
             *)
               echo "::error::No clang-tidy 19 recipe for $RUNNER_OS"
@@ -796,18 +776,15 @@ jobs:
             exit 1
           fi
 
-          if [[ ! -f "$tidy_diff" ]]; then
-            echo "::error::clang-tidy-diff.py not found at $tidy_diff"
-            exit 1
-          fi
-
-          # `"${changed[@]}"`, not `"${roots[@]}"`: the roots would re-admit the
-          # headers dropped above, which is the one narrowing this list carries.
-          git diff -U0 HEAD^1 HEAD -- "${changed[@]}" \
-            | "$python" "$tidy_diff" \
-                -clang-tidy-binary "$tidy" \
-                -p1 -path engine/build-release \
-                -quiet -allow-no-checks -j 0
+          # Whole files, one clang-tidy invocation per changed translation
+          # unit, in parallel. GNU xargs (both remaining legs have it; macOS is
+          # excluded above) exits non-zero when any invocation fails, which
+          # `WarningsAsErrors: '*'` makes every finding do. Header findings
+          # surface through the translation units that include them, per the
+          # config's `HeaderFilterRegex` - headers are still never inputs.
+          printf '%s\0' "${changed[@]}" \
+            | xargs -0 -n 1 -P "$(nproc)" \
+                "$tidy" -p engine/build-release --quiet --allow-no-checks
 
       # The escape says so in the job summary as well as on the pull request.
       # Same rule as the step above: a gate that narrowed to nothing must not
@@ -851,12 +828,13 @@ jobs:
   # then run it three times for one answer. Out here it reports in under a
   # minute, beside the suites.
   #
-  # **Whole tree, not changed lines** - the opposite of the clang-tidy gate one
-  # job up, and for the opposite reason. That gate is line-scoped because the
-  # engine carries a lint backlog older than any current diff. Formatting has no
-  # backlog: the bulk-format commit in `.git-blame-ignore-revs` left all 285
-  # non-vendor sources clean at the pinned version, so the strict check is the
-  # cheap one and it cannot fail a pull request for code it did not write.
+  # **Whole tree** - wider still than the clang-tidy gate one job up, which
+  # since #946 lints the whole of every changed file but never parses an
+  # unchanged one (a lint costs a translation-unit parse; a format check does
+  # not). Formatting never had a backlog: the bulk-format commit in
+  # `.git-blame-ignore-revs` left all 285 non-vendor sources clean at the
+  # pinned version, so the strict check is the cheap one and it cannot fail a
+  # pull request for code it did not write.
   #
   # `engine/vendor/` is excluded by the roots below, and carries
   # `DisableFormat: true` of its own besides.

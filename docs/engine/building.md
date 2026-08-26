@@ -937,8 +937,9 @@ rather than a missing one. That two-name lookup is
 it formats the changed lines, and a staged file it called clean could still fail
 this whole-file check.
 
-The gate checks the **whole tree**, not the changed lines - the opposite of the
-clang-tidy gate below, because formatting has no backlog to grandfather. Issue
+The gate checks the **whole tree** - wider still than the clang-tidy gate
+below, which lints the whole of every changed file but never parses an
+unchanged one, because formatting never had a backlog to grandfather. Issue
 #886 replaced an imported 2015 template with a config derived by measurement,
 and bulk-formatted all 285 sources in one commit; that commit's SHA is in
 `.git-blame-ignore-revs`, so `git blame` on a formatted file still attributes
@@ -976,8 +977,8 @@ clang-tidy runs in two places, and both of them can stop a change:
 
 | Where | What it lints | What a finding does |
 |-------|---------------|---------------------|
-| `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **changed lines** of staged `.c/.cpp/.h/.hpp` files | Refuses the commit |
-| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **changed lines** of changed `engine/{src,include,tests}` **translation units** - not headers - on Linux and Windows | Fails CI |
+| `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **whole** of every staged `.c/.cpp/.h/.hpp` file | Refuses the commit |
+| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **whole** of every changed `engine/{src,include,tests}` **translation unit** - headers are never direct inputs - on Linux and Windows | Fails CI |
 
 A finding is a failure because `engine/.clang-tidy` sets
 `WarningsAsErrors: '*'`; with that empty, clang-tidy prints every diagnostic it
@@ -985,15 +986,29 @@ found and still exits 0. That single setting is what both places read their
 verdict from - do not re-state it as a `--warnings-as-errors` flag at a call
 site, or the two can disagree about what counts.
 
-**Both gate the changed lines, not the changed files.** The engine had never
-been linted, so most files carry findings older than any current diff -
-`openapi_drafts.cpp` answered with nine on an untouched tree. Gating whole files
-would fail a pull request for code it did not write, in every file it happened
-to open. New code is held to the config from its first line; the backlog is paid
-down by whoever edits those lines - and, since #928, by its waves on purpose:
-#942 measured the whole tree against the decided config and #943-#946 pay the
-findings down family by family, with promotion from changed-lines to whole-file
-gating decided in #946 once nothing pre-existing is left to surface.
+**Both gate whole files - the promotion decided in #946.** The gates opened at
+changed-*lines* scope (#885, aligned across the two in #902), and that scoping
+had exactly one job: the engine had never been linted, most files carried
+findings older than any current diff (`openapi_drafts.cpp` answered with nine
+on an untouched tree), and whole-file gating then would have failed pull
+requests for code they did not write. #928 paid that backlog down family by
+family (#942-#946) to zero findings tree-wide, which removed the only argument
+for scoping - and its waves measured what the scoping cost while it lasted:
+
+- #979 found that retyping a constant created a finding on a line its diff
+  never touched, which a changed-lines gate structurally cannot see.
+- #946's batch-4 measurement made the gap concrete: a whole-file lint of one
+  branch's 30 changed translation units reported **98** findings; the same lint
+  filtered to the branch's changed lines reported **0**. CI passed, correctly,
+  with 98 findings standing in the very files the pull request opened.
+
+So every edited file is fully re-checked, forever: a finding anywhere in a file
+a pull request touches is that pull request's to fix, or to `NOLINT` with the
+reason at the site. A file nobody edits is still not re-parsed - the gate's
+unit of cost stays the translation-unit parse - which is why the tree-wide
+scan-guard tests (`reentrant_test.cpp`, `character_cast_test.cpp`,
+`bounds_primitives_test.cpp`, `optional_assert_test.cpp`) keep their job of
+holding *unedited* files to the spellings they pin.
 
 **"Clean" means the whole tree, headers included - and a scan has to be asked
 for that** (#1013). `run-clang-tidy` reports nothing found in a header unless
@@ -1021,10 +1036,12 @@ where 8 sites existed. `-extra-arg=-Wno-ignored-gch` is needed because the
 build's precompiled header is GCC's (#912).
 
 Two things this does **not** change. The gate still lints translation units,
-because a header has no `compile_commands.json` entry and a guessed command
-emits `clang-diagnostic-error`s that escape line filtering (#940) - so a
-promotion from changed-lines to whole-*file* scope, which #946 decides, still
-would not read a header; the hook is what does. And `engine/src/runtime/` stays
+never a header as an input, because a header has no `compile_commands.json`
+entry and a guessed command emits `clang-diagnostic-error`s (#940) - though
+since the #946 promotion removed the line filter, a header's findings do
+surface through every changed translation unit that includes it
+(`HeaderFilterRegex` applies); a header-only pull request still relies on the
+hook, which lints a staged header directly. And `engine/src/runtime/` stays
 out of scope in every count: its own `.clang-tidy` declines every check with a
 written reason, so the findings a check-list override surfaces there are that
 decision working, not a backlog.
@@ -1036,9 +1053,8 @@ the `readability-*`/`modernize-*` remainder after the style-motivated checks
 were declined with a written reason each. `engine/.clang-tidy` is the single
 source of truth for both lists and the reasons; it also documents the alias
 rule (one name per defect - a `cert-*` alias of an enabled check is off so
-nothing reports twice). The gate holds new code to the newly enabled families
-immediately, on changed lines, while their backlog is paid down - the same
-posture every enabled check has always had.
+nothing reports twice). Every enabled family is at zero tree-wide since #946's
+close-out, and the whole-file gates are what hold an edited file there.
 
 **An empty `catch` says so in words** (#944). `bugprone-empty-catch` is enabled,
 and a comment does not satisfy it: the check reads only the keywords in its
@@ -1050,43 +1066,24 @@ a `NOLINT` per site, which records nothing. The keyword is not an argument on it
 own: a `catch` that cannot state a reason is swallowing an error, and the answer
 there is to fix it or to log it, not to name it deliberate.
 
-The hook used to be the stricter of the two - it gated whole staged files, so a
-one-line edit to a legacy file was refused a commit over findings CI would let
-through, and `--no-verify` was the only way past it. #902 aligned them: a hook
-that has to be bypassed to commit is advisory in practice, which is the state
-#885 set out to end.
+The scope has been aligned across the two gates twice, in opposite directions,
+and the second one is where it settled. The hook opened stricter than CI -
+whole staged files against a tree full of backlog, so a one-line edit to a
+legacy file was refused a commit over findings CI would let through, and
+`--no-verify` was the only way past it. #902 brought it down to CI's
+changed-lines scope, because a hook that has to be bypassed to commit is
+advisory in practice. #946 brought *both* up to whole files, because the
+backlog whose existence was the whole argument for line scoping was gone. The
+`VAYU_TIDY_FULL=1` escape hatch went with it - whole-file linting is simply
+what the hook does now - as did CI's `clang-tidy-diff.py` driver and the Python
+interpreter it needed: both gates invoke clang-tidy directly on each file, with
+no line filter to compute.
 
-**The two compute those lines differently, and that is deliberate.** CI runs
-LLVM's own `clang-tidy-diff.py`. The hook parses the staged diff's hunk headers
-itself and passes clang-tidy `--line-filter` directly, because the driver is a
-Python script whose version has to match the binary - an 18-era copy rejects the
-`-allow-no-checks` that `engine/src/runtime/` needs - and it is packaged
-differently on each platform (`/usr/bin/clang-tidy-diff-19.py` from apt,
-`share/clang/clang-tidy-diff.py` beside the binary under Homebrew and the
-Windows LLVM installer). A CI image pins all of that; a contributor's machine
-does not, and a hook that fell back to whole-file linting whenever it could not
-find a driver or an interpreter would put the asymmetry back for exactly the
-people it hurts. `git diff --cached -U0` is always available, and with no
-context lines a hunk header's new-side range *is* the set of lines the commit
-adds, so the hook reads the headers and never the diff body.
-
-**`VAYU_TIDY_FULL=1` restores whole-file linting** for one commit:
-
-```bash
-VAYU_TIDY_FULL=1 git commit
-```
-
-That is for someone paying the backlog down on purpose - the one case where the
-findings CI ignores are the point. Everything else about the hook is unchanged
-by it.
-
-**A bulk reformat is the one change line scoping cannot help**, and the escape
-is a label. Line scoping bounds the *diagnostics* clang-tidy reports, not the
-number of translation units it must parse - and a reformat touches a line in
-every file it rewrites, so the gate parses one translation unit per reformatted
-file and widens the line filter on each to nearly the whole file, surfacing a
-backlog older than the diff. #886's 149-file bulk format made the gate ask for
-152 translation units and killed the job at its timeout.
+**A bulk reformat is the one change this gate cannot price fairly**, and the
+escape is a label. The gate's unit of cost is the translation-unit parse, and a
+reformat touches a line in every file it rewrites, so the gate would parse one
+translation unit per reformatted file - #886's 149-file bulk format made the
+gate ask for 152 translation units and killed the job at its timeout.
 
 So a pull request that is nothing but the formatter's output carries the
 **`reformat-pr` label**, and the lint step does not run:
@@ -1155,60 +1152,38 @@ does not find the MSVC STL and the whole standard library fails to parse - `no
 template named 'optional' in namespace 'std'` - which `WarningsAsErrors: '*'`
 turns into a failed job.
 
-What settled it is sharper than one leg failing. **A `clang-diagnostic-error` is
-not line-filtered.** Measured on clang-tidy 19.1.1: an error inside an included
-header is reported even when `-line-filter` names only the translation unit and
-only one of its lines, and clang-tidy then exits `Found compiler error(s)`. So a
-wrong synthesised command does not just fail a leg - it takes the gate out of
-changed-lines scope altogether, and handing clang-tidy a file the compilation
-database has no entry for is the only way this tree produces a compiler error at
-all. The rejected alternative was passing MSVC's include paths through
-(`--extra-arg=-imsvc...`): it buys one more leg of header-as-input coverage, in
-exchange for toolchain plumbing that breaks when a runner image moves, and it
-leaves that bypass open.
+A wrong synthesised command is worse than one leg failing: a
+`clang-diagnostic-error` sprays from files nobody touched, and handing
+clang-tidy a file the compilation database has no entry for is the only way
+this tree produces a compiler error at all. The rejected alternative was
+passing MSVC's include paths through (`--extra-arg=-imsvc...`): it buys one
+more leg of header-as-input coverage, in exchange for toolchain plumbing that
+breaks when a runner image moves.
 
-**What this costs is less than #926 and #930 assumed, because the coverage they
-credited was never there.** `HeaderFilterRegex` does report diagnostics inside a
-header - but `clang-tidy-diff.py` builds one invocation per changed file, each
-with a `-line-filter` naming *only that file* (`clang-tidy-diff.py:344-351`),
-and clang-tidy drops a diagnostic in any file its filter does not list.
-Measured, same tree, same header, three filters:
-
-| Line filter passed with the `.cpp` | Header finding reported? |
-|---|---|
-| none | yes |
-| names the `.cpp` only - what CI's driver builds | **no** |
-| names the `.cpp` and the header - what the hook builds | yes |
-
-So a changed header has never reached the CI gate through its consumers. It
-reaches the **hook**, which builds one filter over every staged file for exactly
-this reason (the comment at `scripts/pre-commit:229-234` says so). What CI
-genuinely loses by this decision is a header-only change on a machine with no
-hook installed. To lint one by hand, point clang-tidy at a consumer:
+**What this costs shrank with the #946 promotion.** Under the changed-lines
+gate, `clang-tidy-diff.py` built one invocation per changed file with a
+`-line-filter` naming only that file, and clang-tidy drops a diagnostic in any
+file its filter does not list - so a changed header never reached the CI gate
+through its consumers at all. With no line filter on the invocation, the
+config's `HeaderFilterRegex` applies, and a header's findings surface through
+every **changed** translation unit that includes it. What CI still loses is a
+header-only pull request from a machine with no hook installed - the hook
+lints a staged header directly, against the contributor's own build tree. To
+lint one by hand, point clang-tidy at a consumer:
 
 ```bash
-clang-tidy-19 --allow-no-checks -p engine/build \
-  '-line-filter=[{"name":"engine/src/http/routes.cpp"},{"name":"engine/include/vayu/http/routes.hpp"}]' \
-  engine/src/http/routes.cpp
+clang-tidy-19 --allow-no-checks -p engine/build engine/src/http/routes.cpp
 ```
 
-**This also answers #929's header-in-the-diff anomaly** - the one it recorded as
-observed but not explained. A header in the diff does not widen anything: the
-`.cpp`'s invocation is byte-identical whether or not a header is in the diff
-(the driver builds it from that file's hunks alone). What a header adds is *one
-more invocation, with the header as input* - and that is the invocation whose
-synthesised command can fail, spraying unfiltered `clang-diagnostic-error`s from
-files nobody touched. "The gate stops being line-scoped when a header is in the
-diff" and "the Windows leg fails on headers" were one defect seen from two
-sides, and dropping headers as inputs closes both.
-
 **`readability-function-cognitive-complexity` stays off, with no report-only
-job** (#940, closing #929). It anchors on the function declaration, which a
-line-scoped gate can never honour. A whole-tree report job would restate a list
-[#928](https://github.com/athrvk/vayu/issues/928) already holds, and #928's
-completion *is* the re-enable condition - the check becomes honourable the
-moment nothing pre-existing is left for it to anchor on. Turn it back on there.
-The reason sits beside the disable in `engine/.clang-tidy`.
+job** (#940, closing #929; declined while it could not be honoured by a
+line-scoped gate, since it anchors on the function declaration). #928's
+completion met the re-enable condition that decision attached - nothing
+pre-existing is left for the check to anchor on except the over-threshold
+functions themselves - so whether to pay that refactor, NOLINT it, or decline
+the check permanently is now
+[#1021](https://github.com/athrvk/vayu/issues/1021)'s decision. The reason
+sits beside the disable in `engine/.clang-tidy`.
 
 ### The precompiled header
 
@@ -1283,10 +1258,10 @@ To lint by hand, point clang-tidy at a configured build tree:
 python build.py -e                       # writes engine/build/compile_commands.json
 clang-tidy-19 --allow-no-checks -p engine/build engine/src/http/routes.cpp
 
-# Or exactly what CI does, against your own changes:
-git diff -U0 master... -- engine/src engine/include engine/tests \
-  | clang-tidy-diff-19.py -clang-tidy-binary clang-tidy-19 \
-      -p1 -path engine/build -quiet -allow-no-checks -j "$(nproc)"
+# Or exactly what CI does, against your own changes (#946: whole changed files):
+git diff --name-only master... -- engine/src engine/include engine/tests \
+  | grep -E '\.(c|cpp)$' \
+  | xargs -n 1 -P "$(nproc)" clang-tidy-19 --allow-no-checks -p engine/build
 ```
 
 clang-tidy is deliberately **not** wired into the build itself. A

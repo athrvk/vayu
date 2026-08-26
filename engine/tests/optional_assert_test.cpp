@@ -132,8 +132,8 @@ constexpr std::string_view kScanExempt = "tests/optional_assert_test.cpp";
 /**
  * Every test file guards an engaged optional with `ASSERT_HAS_VALUE`. The
  * gtest spelling reads the same at run time and the optional check cannot
- * follow it, which is where 561 findings came from (#980); a file that brings
- * it back would pass CI, because the gate lints changed lines only.
+ * follow it, which is where 561 findings came from (#980); an untouched file
+ * that carries it would pass CI, because the gate lints only changed files.
  */
 TEST (OptionalAssertGuard, NoTestFileGuardsWithAssertTrue) {
     const std::filesystem::path tests =
