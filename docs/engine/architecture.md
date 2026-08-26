@@ -993,9 +993,29 @@ data/
 ├── db/
 │   └── vayu.db          # SQLite database
 ├── logs/
-│   └── vayu_*.log       # Rotating log files
+│   ├── vayu_<stamp>.log # One file per process start (local time, %Y%m%d_%H%M%S)
+│   └── vayu_<stamp>.log.1  # The rotated half of a file that reached the size cap
 └── vayu.lock            # Single-instance lock file
 ```
+
+### Log retention, level and size
+
+Three bounds, all applied by the engine itself (issue #985):
+
+- **Retention.** A start opens its own file and then deletes every
+  `vayu_*.log` beyond the newest 10, taking each pruned file's `.1` with it.
+  Newest is decided by the timestamp in the name, which is what makes those
+  names sortable. Nothing else in the directory is a candidate.
+- **Level.** The `logLevel` config entry (`debug` | `info` | `warn` | `error`,
+  default `debug`) is the lowest severity the **file** takes. The console is
+  separate and still follows the daemon's `-v` flag. The value is read once,
+  when the database opens, so the few lines a start writes before that always
+  land and a change needs a restart.
+- **Size.** `maxLogFileBytes` (default 64 MiB, `0` = unlimited) caps one file.
+  On reaching it the file is renamed to `<name>.1` - overwriting whatever that
+  held - and writing continues in a fresh one. One rotation generation is
+  enough because history is the per-start files, which retention already
+  bounds.
 
 ## Security
 
