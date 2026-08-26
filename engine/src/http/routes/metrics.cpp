@@ -211,6 +211,282 @@ std::pair<int64_t, int64_t> parse_time_series_pagination (const httplib::Request
 
 } // namespace
 
+namespace {
+
+void handle_run_metrics (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    std::string run_id = req.matches[1];
+    vayu::utils::log_info (
+    "GET /runs/:id/metrics - Fetching time-series for run: " + run_id);
+    auto [limit, offset] = parse_time_series_pagination (req);
+    try {
+        auto [status, body] = run_time_series_response (ctx.db, run_id, limit, offset);
+        if (status == 404) {
+            vayu::utils::log_warning (
+            "GET /runs/:id/metrics - Run not found: " + run_id);
+        }
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "GET /runs/:id/metrics - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_run_monitor (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    std::string run_id = req.matches[1];
+    vayu::utils::log_info (
+    "GET /runs/:id/monitor - Fetching monitor samples for run: " + run_id);
+    auto [limit, offset] = parse_time_series_pagination (req);
+    try {
+        auto [status, body] =
+        run_monitor_series_response (ctx.db, run_id, limit, offset);
+        if (status == 404) {
+            vayu::utils::log_warning (
+            "GET /runs/:id/monitor - Run not found: " + run_id);
+        }
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "GET /runs/:id/monitor - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+/** The counters a stats stream starts from, before the first tick lands. */
+nlohmann::json empty_stream_metrics () {
+    nlohmann::json aggregated_metrics;
+    aggregated_metrics["totalRequests"]     = 0;
+    aggregated_metrics["totalErrors"]       = 0;
+    aggregated_metrics["totalSuccess"]      = 0;
+    aggregated_metrics["errorRate"]         = 0.0;
+    aggregated_metrics["avgLatencyMs"]      = 0.0;
+    aggregated_metrics["currentRps"]        = 0.0;
+    aggregated_metrics["sendRate"]          = 0.0;
+    aggregated_metrics["throughput"]        = 0.0;
+    aggregated_metrics["backpressure"]      = 0;
+    aggregated_metrics["activeConnections"] = 0;
+    aggregated_metrics["elapsedSeconds"]    = 0.0;
+    return aggregated_metrics;
+}
+
+/** What one poll of the stats stream leaves the stream in. */
+enum class StreamStep {
+    Continue, ///< Wrote a frame (or a keep-alive); poll again.
+    Done, ///< The run has finished and its completion event is written.
+    Closed, ///< The client is gone - a write failed.
+};
+
+/**
+ * One poll: the ticks since @p last_tick_id, or - when there are none - the
+ * run's completion event or a keep-alive.
+ */
+StreamStep write_stats_frame (vayu::db::Database& db,
+const std::string& run_id,
+int64_t& last_tick_id,
+nlohmann::json& aggregated_metrics,
+httplib::DataSink& sink) {
+    auto ticks = db.get_metric_ticks_since (run_id, last_tick_id);
+    if (!ticks.empty ()) {
+        bool tick_updates = false;
+        for (const auto& tick : ticks) {
+            last_tick_id = tick.id;
+            tick_updates |= apply_tick_to_stream (tick, aggregated_metrics, run_id);
+        }
+        if (tick_updates) {
+            std::string payload =
+            "event: metrics\ndata: " + aggregated_metrics.dump () + "\n\n";
+            if (!sink.write (payload.data (), payload.size ())) {
+                return StreamStep::Closed;
+            }
+        }
+        return StreamStep::Continue;
+    }
+
+    auto run = db.get_run (run_id);
+    if (run &&
+    (run->status == vayu::RunStatus::Completed ||
+    run->status == vayu::RunStatus::Stopped || run->status == vayu::RunStatus::Failed)) {
+        nlohmann::json completion_event;
+        completion_event["event"]  = "complete";
+        completion_event["runId"]  = run_id;
+        completion_event["status"] = to_string (run->status);
+        std::string payload =
+        "event: complete\ndata: " + completion_event.dump () + "\n\n";
+        sink.write (payload.data (), payload.size ());
+        return StreamStep::Done;
+    }
+
+    std::string keep_alive = ": keep-alive\n\n";
+    if (!sink.write (keep_alive.data (), keep_alive.size ())) {
+        return StreamStep::Closed;
+    }
+    return StreamStep::Continue;
+}
+
+/**
+ * The legacy `GET /stats/:id` stream, polled off the database.
+ *
+ * Always answers `false`: the provider is done when this returns, whether the
+ * run finished, the client went away or a read threw.
+ */
+bool stream_run_stats (vayu::db::Database& db, const std::string& run_id, httplib::DataSink& sink) {
+    int64_t last_tick_id = 0; // metric_ticks cursor
+    nlohmann::json aggregated_metrics = empty_stream_metrics ();
+
+    while (sink.is_writable ()) {
+        StreamStep step = StreamStep::Done;
+        try {
+            step = write_stats_frame (db, run_id, last_tick_id, aggregated_metrics, sink);
+        } catch (const std::exception&) {
+            break;
+        }
+        if (step != StreamStep::Continue) {
+            break;
+        }
+        std::this_thread::sleep_for (std::chrono::milliseconds (500));
+    }
+
+    return false;
+}
+
+/** The `format=json` half of `GET /stats/:id` - the same core as GET /runs/:id/metrics. */
+void send_run_stats_json (RouteContext& ctx,
+const httplib::Request& req,
+httplib::Response& res,
+const std::string& run_id) {
+    vayu::utils::log_info (
+    "GET /stats/:id?format=json - Fetching time-series for run: " + run_id);
+
+    auto [limit, offset] = parse_time_series_pagination (req);
+    try {
+        auto [status, body] = run_time_series_response (ctx.db, run_id, limit, offset);
+        if (status == 404) {
+            vayu::utils::log_warning ("GET /stats/:id - Run not found: " + run_id);
+        }
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "GET /stats/:id?format=json - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_run_stats (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    std::string run_id = req.matches[1];
+
+    // Check for JSON format (batch retrieval for charts)
+    if (req.has_param ("format") && req.get_param_value ("format") == "json") {
+        send_run_stats_json (ctx, req, res, run_id);
+        return;
+    }
+
+    // SSE streaming mode (existing behavior)
+    vayu::utils::log_info ("GET /stats/:id - Starting SSE stream for run: " + run_id);
+
+    try {
+        auto run = ctx.db.get_run (run_id);
+        if (!run) {
+            vayu::utils::log_warning ("GET /stats/:id - Run not found: " + run_id);
+            send_error (res, 404, "Run not found");
+            return;
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("GET /stats/:id - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+        return;
+    }
+
+    res.set_content_provider ("text/event-stream",
+    [&db = ctx.db, run_id] (size_t, httplib::DataSink& sink) {
+        return stream_run_stats (db, run_id, sink);
+    });
+}
+
+/**
+ * The live stream itself: every tick the run's topic has published from
+ * @p start_offset on, then its completion event.
+ *
+ * Always answers `false` - the provider is done when this returns, whether the
+ * run ended or the client went away.
+ */
+bool stream_live_metrics (const std::string& run_id,
+const std::shared_ptr<vayu::core::RunContext>& context,
+size_t start_offset,
+httplib::DataSink& sink) {
+    size_t offset = start_offset;
+    while (sink.is_writable ()) {
+        auto batch = context->ticks_since (offset);
+        for (const auto& payload : batch.payloads) {
+            if (!sink.write (payload.data (), payload.size ())) {
+                return false;
+            }
+        }
+        // Adopt the producer's offset rather than advancing by the batch
+        // size: a resume from before the retained window skips ahead.
+        offset = batch.next_offset;
+
+        // Terminate only once the producer has appended its final tick
+        // (closed) AND we have drained the buffer - never gate on
+        // is_running, which can flip before the final tick lands.
+        if (context->closed.load (std::memory_order_acquire) &&
+        offset >= context->published_count.load (std::memory_order_acquire)) {
+            nlohmann::json completion_event;
+            completion_event["event"] = "complete";
+            completion_event["runId"] = run_id;
+            std::string payload =
+            "event: complete\ndata: " + completion_event.dump () + "\n\n";
+            sink.write (payload.data (), payload.size ());
+            return false;
+        }
+        if (batch.payloads.empty ()) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (50));
+        }
+    }
+    return false;
+}
+
+/**
+ * The live metrics stream, read straight off MetricsCollector rather than the
+ * database (lock-free, faster).
+ */
+void handle_live_metrics (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    std::string run_id = req.matches[1];
+
+    // Evict expired retained topics, then resolve active OR within-retention.
+    int retention_ms = ctx.db.get_config_int ("liveRetentionMs", 60000);
+    ctx.run_manager.sweep_retained (retention_ms);
+
+    auto context = ctx.run_manager.get_run_or_retained (run_id);
+    if (!context) {
+        res.status = 404;
+        nlohmann::json error;
+        error["error"] = "Run not found or expired";
+        error["hint"]  = "Use /runs/" + run_id + "/report for the stored report";
+        res.set_content (error.dump (), "application/json");
+        return;
+    }
+
+    // Honor Last-Event-ID for reconnect resume (offset = last seen + 1).
+    size_t start_offset = 0;
+    if (req.has_header ("Last-Event-ID")) {
+        try {
+            start_offset = std::stoull (req.get_header_value ("Last-Event-ID")) + 1;
+        } catch (...) {
+            start_offset = 0;
+        }
+    }
+
+    res.set_content_provider ("text/event-stream",
+    [run_id, context, start_offset] (size_t, httplib::DataSink& sink) {
+        return stream_live_metrics (run_id, context, start_offset, sink);
+    });
+}
+
+} // namespace
+
 void register_metrics_routes (RouteContext& ctx) {
     /**
      * GET /runs/:runId/metrics
@@ -225,23 +501,7 @@ void register_metrics_routes (RouteContext& ctx) {
      */
     ctx.server.Get (R"(/runs/([^/]+)/metrics)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        std::string run_id = req.matches[1];
-        vayu::utils::log_info (
-        "GET /runs/:id/metrics - Fetching time-series for run: " + run_id);
-        auto [limit, offset] = parse_time_series_pagination (req);
-        try {
-            auto [status, body] = run_time_series_response (ctx.db, run_id, limit, offset);
-            if (status == 404) {
-                vayu::utils::log_warning (
-                "GET /runs/:id/metrics - Run not found: " + run_id);
-            }
-            res.status = status;
-            res.set_content (body.dump (), "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "GET /runs/:id/metrics - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_run_metrics (ctx, req, res);
     });
 
     /**
@@ -255,24 +515,7 @@ void register_metrics_routes (RouteContext& ctx) {
      */
     ctx.server.Get (R"(/runs/([^/]+)/monitor)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        std::string run_id = req.matches[1];
-        vayu::utils::log_info (
-        "GET /runs/:id/monitor - Fetching monitor samples for run: " + run_id);
-        auto [limit, offset] = parse_time_series_pagination (req);
-        try {
-            auto [status, body] =
-            run_monitor_series_response (ctx.db, run_id, limit, offset);
-            if (status == 404) {
-                vayu::utils::log_warning (
-                "GET /runs/:id/monitor - Run not found: " + run_id);
-            }
-            res.status = status;
-            res.set_content (body.dump (), "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "GET /runs/:id/monitor - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_run_monitor (ctx, req, res);
     });
 
     /**
@@ -289,197 +532,16 @@ void register_metrics_routes (RouteContext& ctx) {
      */
     ctx.server.Get (R"(/stats/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        std::string run_id = req.matches[1];
-
-        // Check for JSON format (batch retrieval for charts)
-        bool json_format =
-        req.has_param ("format") && req.get_param_value ("format") == "json";
-
-        if (json_format) {
-            vayu::utils::log_info (
-            "GET /stats/:id?format=json - Fetching time-series for run: " + run_id);
-
-            auto [limit, offset] = parse_time_series_pagination (req);
-            try {
-                auto [status, body] =
-                run_time_series_response (ctx.db, run_id, limit, offset);
-                if (status == 404) {
-                    vayu::utils::log_warning (
-                    "GET /stats/:id - Run not found: " + run_id);
-                }
-                res.status = status;
-                res.set_content (body.dump (), "application/json");
-            } catch (const std::exception& e) {
-                vayu::utils::log_error (
-                "GET /stats/:id?format=json - Error: " + std::string (e.what ()));
-                send_error (res, 500, e.what ());
-            }
-            return;
-        }
-
-        // SSE streaming mode (existing behavior)
-        vayu::utils::log_info (
-        "GET /stats/:id - Starting SSE stream for run: " + run_id);
-
-        try {
-            auto run = ctx.db.get_run (run_id);
-            if (!run) {
-                vayu::utils::log_warning ("GET /stats/:id - Run not found: " + run_id);
-                send_error (res, 404, "Run not found");
-                return;
-            }
-        } catch (const std::exception& e) {
-            vayu::utils::log_error ("GET /stats/:id - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-            return;
-        }
-
-        res.set_content_provider ("text/event-stream",
-        [&ctx, run_id] (size_t offset, httplib::DataSink& sink) {
-            int64_t last_tick_id = 0; // metric_ticks cursor
-            bool test_completed  = false;
-
-            nlohmann::json aggregated_metrics;
-            aggregated_metrics["totalRequests"]     = 0;
-            aggregated_metrics["totalErrors"]       = 0;
-            aggregated_metrics["totalSuccess"]      = 0;
-            aggregated_metrics["errorRate"]         = 0.0;
-            aggregated_metrics["avgLatencyMs"]      = 0.0;
-            aggregated_metrics["currentRps"]        = 0.0;
-            aggregated_metrics["sendRate"]          = 0.0;
-            aggregated_metrics["throughput"]        = 0.0;
-            aggregated_metrics["backpressure"]      = 0;
-            aggregated_metrics["activeConnections"] = 0;
-            aggregated_metrics["elapsedSeconds"]    = 0.0;
-
-            while (!test_completed) {
-                if (!sink.is_writable ()) {
-                    break;
-                }
-
-                try {
-                    auto ticks = ctx.db.get_metric_ticks_since (run_id, last_tick_id);
-                    if (!ticks.empty ()) {
-                        bool tick_updates = false;
-                        for (const auto& tick : ticks) {
-                            last_tick_id = tick.id;
-                            tick_updates |=
-                            apply_tick_to_stream (tick, aggregated_metrics, run_id);
-                        }
-                        if (tick_updates) {
-                            std::string payload =
-                            "event: metrics\ndata: " + aggregated_metrics.dump () + "\n\n";
-                            if (!sink.write (payload.data (), payload.size ())) {
-                                return false;
-                            }
-                        }
-                    } else {
-                        auto run = ctx.db.get_run (run_id);
-                        if (run &&
-                        (run->status == vayu::RunStatus::Completed ||
-                        run->status == vayu::RunStatus::Stopped ||
-                        run->status == vayu::RunStatus::Failed)) {
-                            test_completed = true;
-
-                            nlohmann::json completion_event;
-                            completion_event["event"] = "complete";
-                            completion_event["runId"] = run_id;
-                            completion_event["status"] = to_string (run->status);
-                            std::string payload =
-                            "event: complete\ndata: " + completion_event.dump () + "\n\n";
-                            sink.write (payload.data (), payload.size ());
-                            break;
-                        }
-
-                        std::string keep_alive = ": keep-alive\n\n";
-                        if (!sink.write (keep_alive.data (), keep_alive.size ())) {
-                            return false;
-                        }
-                    }
-                } catch (const std::exception&) {
-                    break;
-                }
-
-                if (test_completed) {
-                    break;
-                }
-
-                std::this_thread::sleep_for (std::chrono::milliseconds (500));
-            }
-
-            return false;
-        });
+        handle_run_stats (ctx, req, res);
     });
 
     /**
      * GET /runs/:runId/live  (alias: GET /metrics/live/:runId, deprecated)
      * Streams real-time metrics directly from MetricsCollector (lock-free, faster).
      */
-    httplib::Server::Handler live_metrics = [&ctx] (const httplib::Request& req,
-                                            httplib::Response& res) {
-        std::string run_id = req.matches[1];
-
-        // Evict expired retained topics, then resolve active OR within-retention.
-        int retention_ms = ctx.db.get_config_int ("liveRetentionMs", 60000);
-        ctx.run_manager.sweep_retained (retention_ms);
-
-        auto context = ctx.run_manager.get_run_or_retained (run_id);
-        if (!context) {
-            res.status = 404;
-            nlohmann::json error;
-            error["error"] = "Run not found or expired";
-            error["hint"] = "Use /runs/" + run_id + "/report for the stored report";
-            res.set_content (error.dump (), "application/json");
-            return;
-        }
-
-        // Honor Last-Event-ID for reconnect resume (offset = last seen + 1).
-        size_t start_offset = 0;
-        if (req.has_header ("Last-Event-ID")) {
-            try {
-                start_offset =
-                std::stoull (req.get_header_value ("Last-Event-ID")) + 1;
-            } catch (...) {
-                start_offset = 0;
-            }
-        }
-
-        res.set_content_provider ("text/event-stream",
-        [run_id, context, start_offset] (size_t, httplib::DataSink& sink) {
-            size_t offset = start_offset;
-            while (true) {
-                if (!sink.is_writable ())
-                    return false;
-
-                auto batch = context->ticks_since (offset);
-                for (const auto& payload : batch.payloads) {
-                    if (!sink.write (payload.data (), payload.size ()))
-                        return false;
-                }
-                // Adopt the producer's offset rather than advancing by the batch
-                // size: a resume from before the retained window skips ahead.
-                offset = batch.next_offset;
-
-                // Terminate only once the producer has appended its final tick
-                // (closed) AND we have drained the buffer - never gate on
-                // is_running, which can flip before the final tick lands.
-                if (context->closed.load (std::memory_order_acquire) &&
-                offset >= context->published_count.load (std::memory_order_acquire)) {
-                    break;
-                }
-                if (batch.payloads.empty ()) {
-                    std::this_thread::sleep_for (std::chrono::milliseconds (50));
-                }
-            }
-
-            nlohmann::json completion_event;
-            completion_event["event"] = "complete";
-            completion_event["runId"] = run_id;
-            std::string payload =
-            "event: complete\ndata: " + completion_event.dump () + "\n\n";
-            sink.write (payload.data (), payload.size ());
-            return false;
-        });
+    httplib::Server::Handler live_metrics =
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        handle_live_metrics (ctx, req, res);
     };
     ctx.server.Get (R"(/runs/([^/]+)/live)", live_metrics);
     ctx.server.Get (R"(/metrics/live/([^/]+))", deprecated_alias (live_metrics));
