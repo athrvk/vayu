@@ -900,7 +900,7 @@ httplib::Response& res) {
 }
 
 /** What one poll of an inbox stream leaves it in. */
-enum class InboxStep {
+enum class InboxStep : std::uint8_t {
     Wrote,     ///< Captures went out; poll again without waiting.
     Idle,      ///< Nothing new - waited for the next poll.
     Ended,     ///< The inbox has stopped, or a read failed: end the stream.

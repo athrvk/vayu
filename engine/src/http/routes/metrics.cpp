@@ -271,7 +271,7 @@ nlohmann::json empty_stream_metrics () {
 }
 
 /** What one poll of the stats stream leaves the stream in. */
-enum class StreamStep {
+enum class StreamStep : std::uint8_t {
     Continue, ///< Wrote a frame (or a keep-alive); poll again.
     Done,     ///< The run has finished and its completion event is written.
     Closed,   ///< The client is gone - a write failed.

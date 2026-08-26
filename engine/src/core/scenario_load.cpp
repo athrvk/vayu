@@ -424,7 +424,8 @@ class ScenarioLoadDriver {
     size_t live_vus_       = 0;
 };
 
-std::shared_ptr<ScenarioLoadState> execute_scenario_load (std::shared_ptr<RunContext> context,
+std::shared_ptr<ScenarioLoadState> execute_scenario_load (
+const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 const ScenarioExecution& execution) {
     const ScenarioPlan& plan = execution.plan;

@@ -46,7 +46,7 @@ int64_t stream_retention_ms (vayu::db::Database& db) {
 namespace {
 
 /** What one poll of the relay leaves the stream in. */
-enum class RelayStep {
+enum class RelayStep : std::uint8_t {
     Wrote,     ///< Frames went out; poll again without waiting.
     Idle,      ///< Nothing to send - wait before the next poll.
     Drained,   ///< The producer has closed and the ring is empty.

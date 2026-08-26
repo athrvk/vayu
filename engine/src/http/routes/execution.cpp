@@ -39,6 +39,7 @@
 #include "vayu/http/status.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/id.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -906,7 +907,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // Beside the transient flag and for the same reason: `stream` changes
     // the execution model, so a malformed one must be a 400 before anything
     // is built or written rather than a send the caller did not ask for.
-    const auto stream = read_stream_flag (json);
+    auto stream = read_stream_flag (json);
     if (!stream.ok) {
         vayu::utils::log_warning ("POST /execute - " + stream.error);
         return stream.error;
@@ -916,7 +917,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // here with the other pre-row validation for the reason the bind below
     // is also placed before the run record: a request whose tokens could
     // not bind must leave no trace of an execution that never happened.
-    const auto data_row = read_data_row (json,
+    auto data_row = read_data_row (json,
     static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataBytes",
     static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES))));
     if (!data_row.ok) {
@@ -929,7 +930,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // The refusal it can carry - an oauth2 config with a data token - is a
     // 400 here, beside the row's own, and for the same reason: nothing has
     // been recorded or sent yet.
-    const auto row_auth = plan_send_row_auth (json, data_row.value.has_value ());
+    auto row_auth = plan_send_row_auth (json, data_row.value.has_value ());
     if (!row_auth.ok) {
         vayu::utils::log_warning ("POST /execute - " + row_auth.error);
         return row_auth.error;
@@ -1143,8 +1144,15 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         execute_script (script_engine, send.pre_script, pre_ctx, "Pre-request");
     }
 
+    // `stream` and `transient` are mutually exclusive - `read_stream_flag`
+    // refuses the pair with a 400 - so a streaming send always has a run row.
+    // The rule holds in `read_execute_payload`, not here, which is what
+    // `invariant_value` is for.
+    const std::string run_id = vayu::utils::invariant_value (
+    send.run_id, "a streaming send has a run row: stream and transient are mutually exclusive");
+
     vayu::http::SseStreamRequest spec;
-    spec.run_id          = *send.run_id;
+    spec.run_id          = run_id;
     spec.request         = std::move (send.request);
     spec.limits          = vayu::http::read_sse_limits (ctx.db);
     spec.transport       = transport;
@@ -1164,7 +1172,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // long after this handler's frame - and its row must be the one the
     // pre-request script and the transfer used.
     spec.on_complete =
-    [&db = ctx.db, &jar = ctx.cookie_jar, id = *send.run_id,
+    [&db = ctx.db, &jar = ctx.cookie_jar, id = run_id,
     cookie_scope = send.cookie_scope, run = send.run,
     script_config = send.script_config, post_request_script = send.post_script,
     request_name = send.script_request_name, scopes, iteration_data = send.data_row,
@@ -1237,10 +1245,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         // The daemon is draining its workers, or - impossibly - the id
         // collided. The row exists but nothing will consume it, so it
         // is failed here rather than left `running` forever.
-        vayu::utils::log_warning (
-        "POST /execute - Stream refused for run: " + *send.run_id);
+        vayu::utils::log_warning ("POST /execute - Stream refused for run: " + run_id);
         try {
-            ctx.db.update_run_status_with_retry (*send.run_id, vayu::RunStatus::Failed);
+            ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "Failed to fail a refused stream run: " + std::string (e.what ()));
@@ -1250,12 +1257,11 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     }
 
     nlohmann::json body;
-    body["runId"]     = *send.run_id;
-    body["eventsUrl"] = "/runs/" + *send.run_id + "/events";
+    body["runId"]     = run_id;
+    body["eventsUrl"] = "/runs/" + run_id + "/events";
     body["status"]    = to_string (vayu::RunStatus::Running);
     res.status        = 202;
     res.set_content (body.dump (), "application/json");
-    return;
 }
 
 /**

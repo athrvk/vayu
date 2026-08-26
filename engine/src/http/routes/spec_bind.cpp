@@ -179,8 +179,8 @@ StampOutcome& outcome) {
         // Only a request that *carries* one: clearing a column that is
         // already NULL would rewrite rows a bind never touched, and
         // `updated_at` is read.
-        if (matched_requests.contains (i) || !stored[i].spec_operation ||
-        stored[i].spec_operation->empty ()) {
+        const auto& carried = stored[i].spec_operation;
+        if (matched_requests.contains (i) || !carried || carried->empty ()) {
             continue;
         }
         vayu::db::Request row = stored[i];

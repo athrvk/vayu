@@ -288,7 +288,7 @@ build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan&
  * error branch already guards against.
  */
 [[nodiscard]] std::shared_ptr<ScenarioLoadState> execute_scenario_load (
-std::shared_ptr<RunContext> context,
+const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 const ScenarioExecution& execution);
 

@@ -352,7 +352,7 @@ std::optional<int> read_cli_flags (std::span<char* const> args, CliOptions& opti
         has_next ? std::string_view (args[i + 1]) : std::string_view ();
         bool consumed_next = false;
         if (auto stop = read_cli_flag (args[i], next, has_next, options, consumed_next)) {
-            return *stop;
+            return stop;
         }
         if (consumed_next) {
             ++i;
