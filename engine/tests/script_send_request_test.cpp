@@ -27,6 +27,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "task_queue.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
@@ -47,7 +48,7 @@ constexpr int SLOW_MS = 3000;
 class SendRequestServer {
     public:
     SendRequestServer () {
-        svr.new_task_queue = [] { return new httplib::ThreadPool (16); };
+        svr.new_task_queue = vayu::tests::pooled_task_queue (16);
 
         svr.Get ("/token", [this] (const httplib::Request&, httplib::Response& res) {
             hits.fetch_add (1, std::memory_order_relaxed);
@@ -91,6 +92,10 @@ class SendRequestServer {
         if (thread.joinable ())
             thread.join ();
     }
+    SendRequestServer (const SendRequestServer&)            = delete;
+    SendRequestServer& operator= (const SendRequestServer&) = delete;
+    SendRequestServer (SendRequestServer&&)                 = delete;
+    SendRequestServer& operator= (SendRequestServer&&)      = delete;
 
     std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port) + path;

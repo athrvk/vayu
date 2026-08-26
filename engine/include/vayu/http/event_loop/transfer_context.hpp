@@ -74,7 +74,12 @@ struct TransferData {
     /// transfer's curl state. Only a `form-data` body has one.
     curl_mime* mime = nullptr;
 
+    TransferData () = default;
     ~TransferData ();
+    TransferData (const TransferData&)            = delete;
+    TransferData& operator= (const TransferData&) = delete;
+    TransferData (TransferData&&)                 = delete;
+    TransferData& operator= (TransferData&&)      = delete;
 };
 
 } // namespace detail

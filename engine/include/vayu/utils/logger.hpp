@@ -32,6 +32,16 @@ class Logger {
 
     static Logger& instance ();
 
+    // Public although the constructor and destructor below are not: a deleted
+    // member that is also private reports as inaccessible rather than as
+    // deleted, which says nothing about why (`modernize-use-equals-delete`).
+    // The singleton is enforced by the private constructor; these say that even
+    // `instance()`'s reference cannot be copied out of it.
+    Logger (const Logger&)            = delete;
+    Logger& operator= (const Logger&) = delete;
+    Logger (Logger&&)                 = delete;
+    Logger& operator= (Logger&&)      = delete;
+
     void init (const std::string& log_dir = vayu::core::constants::logging::DIR);
     void log (Level level, const std::string& message);
     void debug (const std::string& message);

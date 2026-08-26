@@ -349,6 +349,8 @@ class SseStreamManager {
 
     SseStreamManager (const SseStreamManager&)            = delete;
     SseStreamManager& operator= (const SseStreamManager&) = delete;
+    SseStreamManager (SseStreamManager&&)                 = delete;
+    SseStreamManager& operator= (SseStreamManager&&)      = delete;
 
     /**
      * Start consuming @p request on a worker thread.

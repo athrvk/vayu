@@ -92,6 +92,71 @@ engine/
   *derived* from another - spell it out and pin the two together with a
   `static_assert`, rather than concatenating before `main`. A test-only
   constant is held to this too: the gate does not read `tests/` differently.
+- **Bytes become characters in one place, never at the site** (#945,
+  `cppcoreguidelines-pro-type-reinterpret-cast`). Reinterpreting a pointer
+  between character types is defined behaviour - [basic.lval] lets any object be
+  read through a `char`, `unsigned char` or `std::byte` lvalue - so a
+  hand-rolled copy *works*, which is exactly why eight of them accumulated. Two
+  primitives own the conversion now and a third owns its inverse:
+  **`vayu::utils::byte_view`** (`utils/encoding.hpp`) for a `std::span` of bytes
+  as the `std::string_view` every encoder here takes - a `sha256` /
+  `hmac_sha256` digest, and the six sites that spelled that themselves;
+  **`vayu::db::column_text`** (`db/database.hpp`) for a sqlite TEXT column,
+  which `sqlite3_column_text` hands back as `const unsigned char*` and nothing
+  consumes as one; **`vayu::utils::detail::sodium_bytes`**
+  (`utils/sodium_init.hpp`) going the other way, for libsodium; and
+  **`tls_detail::openssl_bytes`** (`tests/tls_server.hpp`, #1013) going the same
+  way for OpenSSL, whose parameters are `const unsigned char*` with no
+  `string_view` seam. A SQL NULL stays
+  a null pointer through `column_text` on purpose - absent and empty are
+  different answers, and defaulting one to the other erases the distinction its
+  callers read. `tests/character_cast_test.cpp` scans `engine/{src,include,tests}`
+  and names any file spelling one itself, with a per-file exemption list, because
+  the CI gate scopes to a pull request's changed lines and so holds nothing at
+  zero once these lines stop being new. The casts that are *not* this rule - a
+  `sockaddr_in*` off an `addrinfo`, a Windows function pointer off
+  `GetProcAddress` - have no primitive to route through and the scan does not
+  look at them.
+- **A class with a destructor states all five** (#945,
+  `cppcoreguidelines-special-member-functions`). Writing one of the five and
+  leaving the rest implicit is how a fixture that owns a listener and a thread
+  stays copyable: the copy compiles, both objects stop the same server, and
+  nothing says it was not meant to. Every RAII holder here - the `Impl` behind a
+  pImpl, `Database`, the ~20 in-process mock servers in `tests/`, and (#1013)
+  every manager and listener in `include/`: `Server`, `ManagedListener`,
+  `SseStreamManager`, `InboxManager`, `RunManager`, `EventLoopWorker`, `Logger`
+  and their kin - deletes copy *and* move beside its destructor, in the spelling
+  `client.hpp` uses (`Foo (const Foo&) = delete;` and the three that follow).
+  Deleting is the
+  default answer, not defaulting: none of these is meaningfully movable, and a
+  move would leave a hollow object whose methods still compile. **Declaring the
+  four suppresses the implicit default constructor**, so a class that had no
+  other constructor gains `Foo () = default;` beside them - `TransferData`,
+  `RunManager` and the `LoadStrategy` interface each needed it, and the build is
+  what says so. A mock server's
+  thread pool is `vayu::tests::pooled_task_queue`
+  (`tests/task_queue.hpp`) - httplib's `new_task_queue` hook takes a raw owning
+  pointer, which is its contract and not a leak, said once there rather than at
+  each fixture.
+- **A row struct's scalars all carry a default** (#1013,
+  `cppcoreguidelines-pro-type-member-init`). The `vayu::db` structs in
+  `types.hpp` are aggregates an insert site fills field by field, so one it
+  forgets is *indeterminate* rather than zero - and sqlite_orm binds and stores
+  whatever that was. `Run::end_time` had already made the argument for itself;
+  it now holds for every scalar in the namespace. The three enums
+  (`Request::method`, `Run::type`, `Run::status`) default to what
+  `database.cpp`'s `row_extractor` already falls back to for a stored value it
+  cannot parse, so the struct and the reader agree about an unset field rather
+  than each picking an answer. A default is not a substitute for setting the
+  field: it bounds what a wrong insert can persist, and stops an indeterminate
+  `bool` or enum being read at all.
+- **A whole-tree tidy measurement passes `-header-filter` itself** (#1013). The
+  `HeaderFilterRegex` in `engine/.clang-tidy` is *not* read by a
+  `run-clang-tidy` invocation that omits the command-line flag, so a scan
+  without it reports nothing found in a header - which is how 50 findings went
+  uncounted through four measurement rounds. Deduplicate the result by
+  (file, line, column, check): a header finding is reported once per including
+  translation unit. `docs/engine/building.md` carries the command.
 - Formatter: clang-format, **19 exactly** (`.clang-format` at repo root; the
   version is pinned because 39 of the 285 engine sources format differently
   under 18). **A difference is a failure now** (#886): the `Engine formatting`

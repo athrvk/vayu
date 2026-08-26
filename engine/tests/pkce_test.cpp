@@ -16,8 +16,7 @@ namespace {
 // Delegates rather than repeating the table: vayu::utils::hex_encode is the one
 // hex encoder, and a second copy here would not receive its fixes.
 std::string hex (const std::array<uint8_t, 32>& d) {
-    return vayu::utils::hex_encode (
-    std::string_view (reinterpret_cast<const char*> (d.data ()), d.size ()));
+    return vayu::utils::hex_encode (vayu::utils::byte_view (d));
 }
 
 TEST (Sha256, Fips180Vectors) {
@@ -80,9 +79,8 @@ TEST (HmacSha256, KeyLengthsAroundTheBlockBoundary) {
     // construction. So the equality below is the specification, not an
     // accident: pass the digest of an over-long key and you get the same MAC.
     const auto digest = vayu::utils::sha256 (std::string (65, 'k'));
-    const std::string_view digest_bytes (
-    reinterpret_cast<const char*> (digest.data ()), digest.size ());
-    EXPECT_EQ (hex (over), hex (vayu::utils::hmac_sha256 (digest_bytes, "payload")));
+    EXPECT_EQ (hex (over),
+    hex (vayu::utils::hmac_sha256 (vayu::utils::byte_view (digest), "payload")));
 }
 
 TEST (Base64Url, NoPaddingUrlSafeAlphabet) {

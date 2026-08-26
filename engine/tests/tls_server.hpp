@@ -62,6 +62,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace vayu::tests {
@@ -116,6 +117,25 @@ using Pkcs12Ptr   = std::unique_ptr<PKCS12, Pkcs12Deleter>;
     }
     throw std::runtime_error ("tls_server.hpp: " + what +
     (reason != 0 ? std::string (": ") + detail : std::string ()));
+}
+
+/**
+ * @brief A string's bytes as the `const unsigned char*` OpenSSL parameters take.
+ *
+ * `vayu::utils::byte_view` goes the other way (bytes to text) and
+ * `utils::detail::sodium_bytes` is libsodium's own, so this is the third
+ * direction rather than a fourth copy: three call sites here hand a
+ * passphrase, a DER blob and a common name to a C API whose parameter is
+ * `const unsigned char*` and which offers no `string_view` seam.
+ *
+ * [basic.lval] permits reading any object through a character type, which is
+ * why the cast is a NOLINT rather than a defect - written once, per the rule
+ * `tests/character_cast_test.cpp` enforces (this file is that guard's one
+ * exemption, and this is now the only cast the exemption covers).
+ */
+inline const unsigned char* openssl_bytes (std::string_view s) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    return reinterpret_cast<const unsigned char*> (s.data ());
 }
 
 inline std::string read_bio (const BioPtr& bio, const char* what) {
@@ -209,7 +229,7 @@ struct CertificateAndKey {
         // terminal, which a test process does not have.
         if (!bio ||
         PEM_write_bio_PrivateKey (bio.get (), key.get (), EVP_aes_256_cbc (),
-        reinterpret_cast<const unsigned char*> (passphrase.data ()),
+        tls_detail::openssl_bytes (passphrase),
         static_cast<int> (passphrase.size ()), nullptr, nullptr) != 1) {
             tls_detail::fail ("could not serialize an encrypted private key");
         }
@@ -361,7 +381,7 @@ class TestCertificateAuthority {
         if (der.empty ()) {
             return "nothing was served";
         }
-        const auto* data = reinterpret_cast<const unsigned char*> (der.data ());
+        const auto* data = tls_detail::openssl_bytes (der);
         tls_detail::CrlPtr crl (
         d2i_X509_CRL (nullptr, &data, static_cast<long> (der.size ())));
         if (!crl) {
@@ -399,6 +419,10 @@ class TestCertificateAuthority {
         ASN1_INTEGER* serial = X509_get_serialNumber (certificate);
         if (serial == nullptr ||
         ASN1_INTEGER_set_uint64 (serial,
+        // The pointer is the serial: unique for as long as this process runs,
+        // which is all these certificates live. Not a character-type cast, so
+        // no primitive stands in for it.
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         static_cast<uint64_t> (reinterpret_cast<uintptr_t> (certificate))) != 1) {
             tls_detail::fail ("could not set a serial number");
         }
@@ -406,7 +430,7 @@ class TestCertificateAuthority {
 
     static void set_name (X509_NAME* name, const std::string& common_name) {
         if (X509_NAME_add_entry_by_txt (name, "CN", MBSTRING_ASC,
-            reinterpret_cast<const unsigned char*> (common_name.c_str ()), -1, -1, 0) != 1) {
+            tls_detail::openssl_bytes (common_name), -1, -1, 0) != 1) {
             tls_detail::fail ("could not set a subject name");
         }
     }
@@ -558,6 +582,8 @@ class CrlServer {
 
     CrlServer (const CrlServer&)            = delete;
     CrlServer& operator= (const CrlServer&) = delete;
+    CrlServer (CrlServer&&)                 = delete;
+    CrlServer& operator= (CrlServer&&)      = delete;
 
     /// What a leaf's distribution point names, and where the guard fetches.
     std::string url () const {
@@ -569,6 +595,9 @@ class CrlServer {
     /// regular expression, and a literal here reads as one.
     std::string path () const {
         std::ostringstream token;
+        // The address distinguishes one CrlServer's route from another's; see
+        // set_serial above for why a pointer is spelled as a number here.
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         token << "/crl-" << std::hex << reinterpret_cast<uintptr_t> (this);
         return token.str ();
     }
@@ -619,6 +648,8 @@ class TlsServer {
 
     TlsServer (const TlsServer&)            = delete;
     TlsServer& operator= (const TlsServer&) = delete;
+    TlsServer (TlsServer&&)                 = delete;
+    TlsServer& operator= (TlsServer&&)      = delete;
 
     std::string url (const std::string& path) const {
         return "https://127.0.0.1:" + std::to_string (port_) + path;

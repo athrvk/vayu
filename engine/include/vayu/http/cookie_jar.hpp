@@ -225,13 +225,16 @@ struct CookieScopeView {
  */
 class CookieJar {
     public:
-    CookieJar () = default;
+    CookieJar ()  = default;
+    ~CookieJar () = default;
 
     // Non-copyable, non-movable: it is held by reference (RouteContext, and
     // ClientConfig for the duration of a send), so a copy would silently
     // become a second jar that no reader ever sees again.
     CookieJar (const CookieJar&)            = delete;
     CookieJar& operator= (const CookieJar&) = delete;
+    CookieJar (CookieJar&&)                 = delete;
+    CookieJar& operator= (CookieJar&&)      = delete;
 
     /**
      * @brief The scope's stored lines, ready for `CURLOPT_COOKIELIST`.

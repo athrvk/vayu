@@ -24,6 +24,31 @@
 namespace vayu::db {
 
 /**
+ * @brief A TEXT column's bytes as the `const char*` every caller wants.
+ *
+ * `sqlite3_column_text` answers with `const unsigned char*` and nothing in this
+ * engine consumes one: the value goes straight into a `std::string`, a
+ * `std::string_view` or a parser that reads characters. Eight call sites - the
+ * enum adapters in `database.cpp` and the schema assertions in `db_test.cpp` -
+ * each spelled that conversion themselves, three of them as a C-style cast, and
+ * a copy of a primitive does not receive the primitive's fixes.
+ *
+ * Reading bytes through a character type is what [basic.lval] permits outright,
+ * which is why the cast is a NOLINT rather than a defect - written once here so
+ * nothing has to argue it again.
+ *
+ * A SQL NULL comes back as `nullptr`, exactly as the C API reports it: the
+ * distinction between an absent value and an empty string belongs to the
+ * caller, and defaulting it here would erase it silently.
+ */
+inline const char* column_text (sqlite3_stmt* stmt, int column_index) {
+    // [basic.lval] permits reading any object through a character type; see
+    // the note above for why that makes this a NOLINT and not a defect.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    return reinterpret_cast<const char*> (sqlite3_column_text (stmt, column_index));
+}
+
+/**
  * Optional filters for the paginated GET /runs list. An unset field is a
  * wildcard - it does not constrain the query. `q` is a case-insensitive
  * substring matched against the stored `config_snapshot` text (via SQL LIKE);
@@ -125,6 +150,16 @@ class Database {
     public:
     explicit Database (const std::string& db_path);
     ~Database ();
+
+    // Neither copyable nor movable: the handle behind the pImpl owns the open
+    // SQLite connection and the mutex every write is serialized on, and every
+    // holder in the engine keeps it in place (a stack local in `daemon.cpp`, a
+    // `unique_ptr` in the fixtures). A move would leave a hollow instance whose
+    // methods still compile.
+    Database (const Database&)            = delete;
+    Database& operator= (const Database&) = delete;
+    Database (Database&&)                 = delete;
+    Database& operator= (Database&&)      = delete;
 
     // Initialize database (create tables, etc.)
     void init ();

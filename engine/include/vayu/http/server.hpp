@@ -28,6 +28,10 @@ class Server {
     public:
     Server (vayu::db::Database& db, vayu::core::RunManager& run_manager, int port, bool verbose = false);
     ~Server ();
+    Server (const Server&)            = delete;
+    Server& operator= (const Server&) = delete;
+    Server (Server&&)                 = delete;
+    Server& operator= (Server&&)      = delete;
 
     void start ();
     void stop ();

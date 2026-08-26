@@ -658,9 +658,9 @@ std::set<std::string> read_index_names (const std::string& path) {
     }
 
     while (sqlite3_step (stmt) == SQLITE_ROW) {
-        const auto* name = sqlite3_column_text (stmt, 0);
+        const auto* name = vayu::db::column_text (stmt, 0);
         if (name != nullptr) {
-            names.emplace (reinterpret_cast<const char*> (name));
+            names.emplace (name);
         }
     }
 
@@ -808,9 +808,8 @@ TEST_F (DatabaseTest, MigratesHttpVersionColumnOntoAPreExistingRequestsTable) {
         SQLITE_OK);
         bool has_column = false;
         while (sqlite3_step (stmt) == SQLITE_ROW) {
-            const auto* col_name = sqlite3_column_text (stmt, 1);
-            if (col_name != nullptr &&
-            std::string (reinterpret_cast<const char*> (col_name)) == "http_version") {
+            const auto* col_name = vayu::db::column_text (stmt, 1);
+            if (col_name != nullptr && std::string (col_name) == "http_version") {
                 has_column = true;
             }
         }
@@ -844,11 +843,8 @@ TEST_F (DatabaseTest, MigratesHttpVersionColumnOntoAPreExistingRequestsTable) {
                -1, &row_stmt, nullptr),
     SQLITE_OK);
     ASSERT_EQ (sqlite3_step (row_stmt), SQLITE_ROW);
-    EXPECT_EQ (
-    std::string (reinterpret_cast<const char*> (sqlite3_column_text (row_stmt, 0))),
-    "Pre-migration request");
-    EXPECT_EQ (
-    std::string (reinterpret_cast<const char*> (sqlite3_column_text (row_stmt, 1))), "auto");
+    EXPECT_EQ (std::string (vayu::db::column_text (row_stmt, 0)), "Pre-migration request");
+    EXPECT_EQ (std::string (vayu::db::column_text (row_stmt, 1)), "auto");
     sqlite3_finalize (row_stmt);
     sqlite3_close (handle);
 }
@@ -1351,9 +1347,8 @@ TEST_F (DatabaseTest, RunsStoredBeforeTheBaselineColumnReadAsUnpinned) {
         SQLITE_OK);
         bool has_column = false;
         while (sqlite3_step (stmt) == SQLITE_ROW) {
-            const auto* col_name = sqlite3_column_text (stmt, 1);
-            if (col_name != nullptr &&
-            std::string (reinterpret_cast<const char*> (col_name)) == "baseline") {
+            const auto* col_name = vayu::db::column_text (stmt, 1);
+            if (col_name != nullptr && std::string (col_name) == "baseline") {
                 has_column = true;
             }
         }

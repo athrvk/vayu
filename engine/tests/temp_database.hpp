@@ -144,6 +144,17 @@ inline void remove_database_files (const std::string& path) {
     // unrelated case.
     std::error_code ec;
     std::filesystem::remove (vayu::db::recovery_marker_path (path), ec);
+    // The quarantined sets a recovering start moves aside (issue #984). Their
+    // names carry a timestamp, so they cannot be spelled out the way the trio
+    // above can - and unlike the marker they are not overwritten by the next
+    // run, so a leaked one accumulates a full-size database copy per recovering
+    // test rather than one stale file.
+    for (const std::string& quarantined : vayu::db::quarantined_database_paths (path)) {
+        for (const char* suffix : { "", "-wal", "-shm" }) {
+            std::error_code quarantine_ec;
+            std::filesystem::remove (quarantined + suffix, quarantine_ec);
+        }
+    }
 }
 
 } // namespace vayu::tests

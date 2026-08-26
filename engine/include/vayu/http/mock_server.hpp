@@ -231,6 +231,8 @@ class MockServerManager {
 
     MockServerManager (const MockServerManager&)            = delete;
     MockServerManager& operator= (const MockServerManager&) = delete;
+    MockServerManager (MockServerManager&&)                 = delete;
+    MockServerManager& operator= (MockServerManager&&)      = delete;
 
     struct StartResult {
         bool ok         = true;

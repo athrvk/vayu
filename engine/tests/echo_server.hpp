@@ -90,6 +90,10 @@ class EchoServer {
             thread_.join ();
         }
     }
+    EchoServer (const EchoServer&)            = delete;
+    EchoServer& operator= (const EchoServer&) = delete;
+    EchoServer (EchoServer&&)                 = delete;
+    EchoServer& operator= (EchoServer&&)      = delete;
 
     std::string url () const {
         return "http://127.0.0.1:" + std::to_string (port_) + "/echo";

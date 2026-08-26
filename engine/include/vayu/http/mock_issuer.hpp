@@ -118,6 +118,8 @@ class MockIssuerManager {
 
     MockIssuerManager (const MockIssuerManager&)            = delete;
     MockIssuerManager& operator= (const MockIssuerManager&) = delete;
+    MockIssuerManager (MockIssuerManager&&)                 = delete;
+    MockIssuerManager& operator= (MockIssuerManager&&)      = delete;
 
     MockIssuerStart start (const nlohmann::json& body);
 

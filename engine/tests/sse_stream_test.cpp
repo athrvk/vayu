@@ -141,6 +141,10 @@ class StreamServer {
             thread_.join ();
         }
     }
+    StreamServer (const StreamServer&)            = delete;
+    StreamServer& operator= (const StreamServer&) = delete;
+    StreamServer (StreamServer&&)                 = delete;
+    StreamServer& operator= (StreamServer&&)      = delete;
 
     std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port_) + path;

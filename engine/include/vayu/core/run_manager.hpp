@@ -513,6 +513,10 @@ struct RunContext {
     size_t max_errors = constants::metrics_collector::DEFAULT_MAX_ERRORS,
     EngineDefaults engine_defaults = {});
     ~RunContext ();
+    RunContext (const RunContext&)            = delete;
+    RunContext& operator= (const RunContext&) = delete;
+    RunContext (RunContext&&)                 = delete;
+    RunContext& operator= (RunContext&&)      = delete;
 
     /**
      * @brief Join the run's auxiliary threads (metrics tick, auth refresh).
@@ -840,7 +844,12 @@ class RunManager {
     const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn);
 
     public:
+    RunManager () = default;
     ~RunManager ();
+    RunManager (const RunManager&)            = delete;
+    RunManager& operator= (const RunManager&) = delete;
+    RunManager (RunManager&&)                 = delete;
+    RunManager& operator= (RunManager&&)      = delete;
 
     void register_run (const std::string& run_id, std::shared_ptr<RunContext> context);
     std::shared_ptr<RunContext> get_run (const std::string& run_id);

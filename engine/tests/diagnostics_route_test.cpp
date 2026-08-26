@@ -52,6 +52,10 @@ class MockTarget {
         if (thread_.joinable ())
             thread_.join ();
     }
+    MockTarget (const MockTarget&)            = delete;
+    MockTarget& operator= (const MockTarget&) = delete;
+    MockTarget (MockTarget&&)                 = delete;
+    MockTarget& operator= (MockTarget&&)      = delete;
     std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port_) + path;
     }

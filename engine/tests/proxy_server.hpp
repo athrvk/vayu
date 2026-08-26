@@ -33,12 +33,14 @@
 #include <thread>
 #include <vector>
 
+#include "task_queue.hpp"
+
 namespace vayu::tests {
 
 class MockProxy {
     public:
     MockProxy () {
-        svr.new_task_queue = [] { return new httplib::ThreadPool (16); };
+        svr.new_task_queue = vayu::tests::pooled_task_queue (16);
 
         // CONNECT never reaches the routing table - httplib dispatches only the
         // body-carrying methods - so the tunnel case is answered here, before
@@ -75,6 +77,10 @@ class MockProxy {
         if (thread.joinable ())
             thread.join ();
     }
+    MockProxy (const MockProxy&)            = delete;
+    MockProxy& operator= (const MockProxy&) = delete;
+    MockProxy (MockProxy&&)                 = delete;
+    MockProxy& operator= (MockProxy&&)      = delete;
 
     /// What to put in `TransportPolicy::proxy_url`.
     std::string url () const {

@@ -428,6 +428,10 @@ struct Client::Impl {
             curl_easy_cleanup (curl);
         }
     }
+    Impl (const Impl&)            = delete;
+    Impl& operator= (const Impl&) = delete;
+    Impl (Impl&&)                 = delete;
+    Impl& operator= (Impl&&)      = delete;
 
     void reset () {
         curl_easy_reset (curl);

@@ -47,6 +47,10 @@ class EventLoopImpl {
     public:
     explicit EventLoopImpl (EventLoopConfig cfg);
     ~EventLoopImpl ();
+    EventLoopImpl (const EventLoopImpl&)            = delete;
+    EventLoopImpl& operator= (const EventLoopImpl&) = delete;
+    EventLoopImpl (EventLoopImpl&&)                 = delete;
+    EventLoopImpl& operator= (EventLoopImpl&&)      = delete;
 
     void start ();
     void stop (bool wait_for_pending,

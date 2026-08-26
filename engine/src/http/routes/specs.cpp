@@ -72,8 +72,7 @@ size_t spec_size_cap (vayu::db::Database& db) {
  */
 std::string spec_content_hash (const std::string& content) {
     const auto digest = vayu::utils::sha256 (content);
-    return vayu::utils::hex_encode (std::string_view (
-    reinterpret_cast<const char*> (digest.data ()), digest.size ()));
+    return vayu::utils::hex_encode (vayu::utils::byte_view (digest));
 }
 
 /**

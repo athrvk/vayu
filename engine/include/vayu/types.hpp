@@ -923,6 +923,21 @@ inline std::optional<RunStatus> parse_run_status (const std::string& str) {
 // Database Types
 // ============================================================================
 
+/**
+ * Every scalar member of a row struct below carries a default (#1013,
+ * `cppcoreguidelines-pro-type-member-init`), and the argument is the one
+ * `Run::end_time` already made for itself: these are aggregates, an insert site
+ * builds one field by field, and a field it forgets is *indeterminate* rather
+ * than zero - which sqlite_orm then binds and stores. A default cannot make an
+ * insert correct, but it bounds what a wrong one can persist, and reading an
+ * indeterminate `bool` or enum is undefined behaviour before it ever reaches
+ * the database.
+ *
+ * The three enums (`Request::method`, `Run::type`, `Run::status`) default to
+ * what `database.cpp`'s `row_extractor` already falls back to for a stored
+ * value it cannot parse, so the struct and the reader agree about what an
+ * unset field means rather than each picking its own answer.
+ */
 namespace db {
 struct Collection {
     std::string id;
@@ -945,9 +960,9 @@ struct Collection {
     // only the edge, so two collections may bind the same spec and unbinding
     // one leaves the document alone.
     std::string openapi{ "{}" };
-    int order;
-    int64_t created_at;
-    int64_t updated_at;
+    int order          = 0;
+    int64_t created_at = 0;
+    int64_t updated_at = 0;
 };
 
 struct Request {
@@ -955,7 +970,7 @@ struct Request {
     std::string collection_id;
     std::string name;
     std::string description; // TEXT NOT NULL DEFAULT ''
-    HttpMethod method;
+    HttpMethod method = HttpMethod::GET;
     std::string url;
     std::string params; // JSON array of KeyValueEntry: [{key,value,enabled,description?}]
     std::string headers; // JSON array of KeyValueEntry
@@ -964,7 +979,7 @@ struct Request {
     std::string auth; // JSON - RequestAuth (mode + fields, may be 'inherit')
     std::string pre_request_script;  // JS Code
     std::string post_request_script; // JS Code (Tests)
-    int order; // INTEGER NOT NULL DEFAULT 0 - position within collection
+    int order = 0; // INTEGER NOT NULL DEFAULT 0 - position within collection
     // Execution options. Mirror the fields of the executable vayu::Request so a
     // saved request keeps the redirect policy the user chose. The in-struct
     // defaults match the column defaults, so a default-constructed row and a row
@@ -997,8 +1012,8 @@ struct Request {
     // it is the identity a re-fetched spec is diffed against (#627) and the key
     // coverage counts by (#629). Two requests may name the same operation.
     std::optional<std::string> spec_operation;
-    int64_t created_at;
-    int64_t updated_at;
+    int64_t created_at = 0;
+    int64_t updated_at = 0;
 };
 
 /**
@@ -1080,9 +1095,9 @@ struct RequestExample {
      * `false` for every row that predates the column, which is what they all
      * are - a row a delete had reached was gone.
      */
-    bool suppressed = false;
-    int64_t created_at;
-    int64_t updated_at;
+    bool suppressed    = false;
+    int64_t created_at = 0;
+    int64_t updated_at = 0;
 };
 
 /**
@@ -1173,19 +1188,19 @@ struct Environment {
     // environmentId - but the choice is stored here rather than in client-local
     // state, so it survives a reinstall and is shared by every client on the
     // same database. See docs/engine/db-schema.md.
-    bool is_active = false;
-    int64_t created_at;
-    int64_t updated_at;
+    bool is_active     = false;
+    int64_t created_at = 0;
+    int64_t updated_at = 0;
 };
 
 struct Run {
     std::string id;
     std::optional<std::string> request_id; // Linked request (if design mode)
     std::optional<std::string> environment_id; // Environment used
-    RunType type;                              // "design", "load" or "scenario"
-    RunStatus status;            // "pending", "running", "completed", "failed"
+    RunType type = RunType::Design;            // "design", "load" or "scenario"
+    RunStatus status = RunStatus::Pending; // "pending", "running", "completed", "failed"
     std::string config_snapshot; // JSON string (Full copy of request/env)
-    int64_t start_time;
+    int64_t start_time = 0;
     // 0 means "no end recorded"; readers guard on `> 0` (the report route
     // substitutes now_ms(), the app's dashboard falls back to its own clock).
     // Defaulted rather than left bare so an insert site that forgets to stamp
@@ -1224,10 +1239,10 @@ struct Run {
  * makes that endpoint's pagination tick-aligned.
  */
 struct MetricTick {
-    int id;
+    int id = 0;
     std::string run_id;
-    int64_t timestamp;   // Unix ms - the tick's single wall-clock sample
-    std::string payload; // JSON object (see build_metric_tick_payload)
+    int64_t timestamp = 0; // Unix ms - the tick's single wall-clock sample
+    std::string payload;   // JSON object (see build_metric_tick_payload)
 };
 
 /**
@@ -1278,7 +1293,7 @@ struct Result {
  * deleting a run deletes its blobs without any cross-run refcount to maintain.
  */
 struct BodyBlob {
-    int id;
+    int id = 0;
     std::string run_id;
     std::string hash; // lowercase hex SHA-256 of `content` (vayu::core::body_digest)
     std::string content; // the stored bytes, already truncated to the per-body cap
@@ -1292,15 +1307,15 @@ struct BodyBlob {
  * `trace_data` - never reads a body it does not use.
  */
 struct ResultBody {
-    int result_id; // PK, and the `results.id` this exchange belongs to
+    int result_id = 0; // PK, and the `results.id` this exchange belongs to
     std::string run_id;
     std::string headers; // JSON object of response headers
     // 0 when no body was stored: the response had none, it was binary, or the
     // run's capture budget was spent. `body_bytes` and the flags say which.
-    int blob_id;
-    int64_t body_bytes; // size of the body as received, before truncation
-    bool truncated;     // stored bytes are a prefix of `body_bytes`
-    bool is_binary;     // stored as a descriptor; `blob_id` is 0
+    int blob_id        = 0;
+    int64_t body_bytes = 0; // size of the body as received, before truncation
+    bool truncated     = false; // stored bytes are a prefix of `body_bytes`
+    bool is_binary     = false; // stored as a descriptor; `blob_id` is 0
     std::string content_type;
     /**
      * Events the transfer delivered, when it was a bounded stream
@@ -1379,7 +1394,7 @@ struct ConfigEntry {
     std::optional<std::string> min_value; // Optional minimum (for numbers)
     std::optional<std::string> max_value; // Optional maximum (for numbers)
     std::optional<std::string> options; // JSON array of {value,label}, enum types only
-    int64_t updated_at;                 // Last update timestamp
+    int64_t updated_at = 0;             // Last update timestamp
     // Whether the running engine keeps the old value until it is restarted.
     // Serialized as `requiresRestart`; the app and the MCP `update_config` tool
     // both read it. It used to be spelled as a "(Requires Restart)" suffix in
@@ -1424,7 +1439,7 @@ struct ConfigEntry {
 struct Globals {
     std::string id;        // Always "globals" - singleton
     std::string variables; // JSON - Global variables
-    int64_t updated_at;
+    int64_t updated_at = 0;
 };
 
 /**
@@ -1439,8 +1454,8 @@ struct OAuthToken {
     std::string token_type;    // "Bearer" when the provider omits it
     std::string refresh_token; // "" = none
     std::string scope;
-    int64_t expires_in; // seconds; 0 = non-expiring
-    int64_t created_at; // ms epoch
+    int64_t expires_in = 0; // seconds; 0 = non-expiring
+    int64_t created_at = 0; // ms epoch
     std::string raw_response; // provider JSON (truncated); debugging only, never logged
 };
 

@@ -56,6 +56,9 @@ namespace detail {
  */
 inline const unsigned char* sodium_bytes (std::string_view s) {
     static const unsigned char empty = 0;
+    // [basic.lval] permits reading any object through a character type, and
+    // this is the one place the engine spells that direction of the conversion.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     return s.empty () ? &empty : reinterpret_cast<const unsigned char*> (s.data ());
 }
 

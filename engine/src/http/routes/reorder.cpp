@@ -51,7 +51,10 @@ enum class Kind { Collection, Request };
  * a collection.
  */
 struct Scope {
-    Kind kind;
+    // Defaulted because `read_scope` below fills this out-parameter and can
+    // refuse the entry before it gets there: an enum left indeterminate is read
+    // as one on any path that forgets to check the refusal first.
+    Kind kind = Kind::Collection;
     std::optional<std::string> parent; // collection scope: nullopt = the roots
     std::string collection;            // request scope
 
@@ -68,7 +71,7 @@ struct Scope {
 
 /** One row's new position, and - when it changes owner - its new owner. */
 struct Move {
-    Kind kind;
+    Kind kind = Kind::Collection; // defaulted for the reason `Scope::kind` is
     std::string id;
     int order         = 0;
     bool states_owner = false; // parentId / collectionId present in the body

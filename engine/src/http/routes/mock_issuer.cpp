@@ -169,8 +169,7 @@ std::string mint_jwt (const std::string& key, const nlohmann::json& payload) {
     base64url_json (header) + "." + base64url_json (payload);
     const auto tag = vayu::utils::hmac_sha256 (key, signing_input);
     return signing_input + "." +
-    vayu::utils::base64url_encode (
-    std::string_view (reinterpret_cast<const char*> (tag.data ()), tag.size ()));
+    vayu::utils::base64url_encode (vayu::utils::byte_view (tag));
 }
 
 // ---------------------------------------------------------------------------

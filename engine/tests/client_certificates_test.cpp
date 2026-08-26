@@ -85,6 +85,8 @@ class ScratchFile {
     }
     ScratchFile (const ScratchFile&)            = delete;
     ScratchFile& operator= (const ScratchFile&) = delete;
+    ScratchFile (ScratchFile&&)                 = delete;
+    ScratchFile& operator= (ScratchFile&&)      = delete;
 
     const std::string& path () const {
         return path_;
@@ -115,6 +117,10 @@ class MockUpstream {
         if (thread.joinable ())
             thread.join ();
     }
+    MockUpstream (const MockUpstream&)            = delete;
+    MockUpstream& operator= (const MockUpstream&) = delete;
+    MockUpstream (MockUpstream&&)                 = delete;
+    MockUpstream& operator= (MockUpstream&&)      = delete;
 
     std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port) + path;

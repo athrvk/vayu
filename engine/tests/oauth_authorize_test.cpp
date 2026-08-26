@@ -39,6 +39,10 @@ class MockTokenServer {
         if (thread_.joinable ())
             thread_.join ();
     }
+    MockTokenServer (const MockTokenServer&)            = delete;
+    MockTokenServer& operator= (const MockTokenServer&) = delete;
+    MockTokenServer (MockTokenServer&&)                 = delete;
+    MockTokenServer& operator= (MockTokenServer&&)      = delete;
     std::string token_url () const {
         return "http://127.0.0.1:" + std::to_string (port_) + "/token";
     }

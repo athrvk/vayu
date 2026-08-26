@@ -161,6 +161,10 @@ class MockHttpBin {
         if (thread_.joinable ())
             thread_.join ();
     }
+    MockHttpBin (const MockHttpBin&)            = delete;
+    MockHttpBin& operator= (const MockHttpBin&) = delete;
+    MockHttpBin (MockHttpBin&&)                 = delete;
+    MockHttpBin& operator= (MockHttpBin&&)      = delete;
 
     std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port_) + path;

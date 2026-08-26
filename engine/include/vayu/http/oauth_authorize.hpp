@@ -60,6 +60,8 @@ class OAuth2AuthorizeManager {
 
     OAuth2AuthorizeManager (const OAuth2AuthorizeManager&)            = delete;
     OAuth2AuthorizeManager& operator= (const OAuth2AuthorizeManager&) = delete;
+    OAuth2AuthorizeManager (OAuth2AuthorizeManager&&)                 = delete;
+    OAuth2AuthorizeManager& operator= (OAuth2AuthorizeManager&&)      = delete;
 
     // mode: "loopback" (default) or "embedded".
     AuthorizeStart
