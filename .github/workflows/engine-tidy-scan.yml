@@ -1,0 +1,214 @@
+# The whole-tree clang-tidy measurement, on demand (issue #1023).
+#
+# The pull-request gate in `pr-tests.yml` lints the files a change touches. That
+# is the right unit for a gate and the wrong one for a *denominator*: it can
+# never say what an untouched tree holds, so "zero findings tree-wide" is a
+# claim only a whole-tree scan can make - and #928 made it on the Linux
+# toolchain alone, because that is the only one anybody could run. The first
+# whole-file lint on Windows (#1022's run, clang-tidy 20.1.8 over MSVC compile
+# commands) then reported ~85 findings in one pull request's touched files, none
+# on a line the diff wrote: a backlog of a leg that had never been measured.
+#
+# This workflow is how that leg gets measured, and re-measured. It is
+# `workflow_dispatch` only - a whole-tree scan parses every translation unit and
+# has no business on the pull-request path, where the gate already lints what
+# changed. Run it when the tidy config changes, when a runner image moves its
+# clang-tidy, or to re-establish the zero after a paydown.
+#
+# It fails when the scan is not zero, so a run is a proof and not just a report;
+# the deduplicated finding list is uploaded either way.
+name: Engine tidy scan
+
+on:
+  # TEMPORARY, removed before this branch merges: `workflow_dispatch` cannot be
+  # fired on a ref whose workflow file is not yet on the default branch, and
+  # #1023's whole-tree Windows measurement has to happen *before* the promotion
+  # it justifies is reviewed. This is how that run is produced.
+  push:
+    branches:
+      - 'claude/issue-1023-**'
+  workflow_dispatch:
+    inputs:
+      os:
+        description: 'Runner to scan on'
+        type: choice
+        default: windows-latest
+        options:
+          - windows-latest
+          - ubuntu-latest
+
+# One scan at a time per ref: this is the longest job in the repository and
+# re-running it against a newer commit makes the older answer worthless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Whole-tree clang-tidy on ${{ github.event.inputs.os || 'windows-latest' }}
+    runs-on: ${{ github.event.inputs.os || 'windows-latest' }}
+    # Longer than the engine job's 90: this parses every translation unit in the
+    # tree rather than the handful a pull request changed.
+    timeout-minutes: 120
+    env:
+      VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+      SCCACHE_GHA_ENABLED: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            build-essential \
+            pkg-config \
+            ca-certificates \
+            autoconf \
+            autoconf-archive \
+            automake \
+            libtool
+
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
+          vcpkgJsonGlob: 'engine/vcpkg.json'
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Configure sccache compiler launcher
+        shell: bash
+        run: |
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+
+      # Built, not merely configured: the tests link against generated sources,
+      # and a compilation database whose inputs do not exist yet lints as a wall
+      # of missing-include errors rather than as the tree.
+      - name: Build engine
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          configurePreset: ${{ runner.os == 'Windows' && 'windows-prod' || 'linux-prod' }}
+          buildPreset: ${{ runner.os == 'Windows' && 'windows-prod' || 'linux-prod' }}
+          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      - name: Scan the whole tree
+        id: scan
+        shell: bash
+        run: |
+          set -o pipefail
+
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get install -y --no-install-recommends clang-tidy-19
+              tidy=clang-tidy-19
+              ;;
+            Windows)
+              tidy="/c/Program Files/LLVM/bin/clang-tidy.exe"
+              ;;
+            *)
+              echo "::error::No clang-tidy recipe for $RUNNER_OS"
+              exit 1
+              ;;
+          esac
+          "$tidy" --version
+
+          # The same floor and the same reason as the gate: `engine/.clang-tidy`
+          # uses `ExcludeHeaderFilterRegex`, which an older binary rejects
+          # outright, and two of the legs take whatever their image ships.
+          major="$("$tidy" --version | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p' | head -1)"
+          if [[ -z "$major" ]] || [[ "$major" -lt 19 ]]; then
+            echo "::error::clang-tidy ${major:-(version unreadable)} is below the 19 that engine/.clang-tidy requires"
+            exit 1
+          fi
+
+          # clang-tidy replays the compile command, precompiled header and all,
+          # and that PCH was written by the build's compiler rather than by
+          # clang-tidy's clang. Regenerating the database without it is the fix
+          # that needs no per-compiler flag spelling; `VCPKG_MANIFEST_INSTALL=OFF`
+          # keeps the reconfigure at seconds rather than re-running the manifest
+          # install. Both are the gate's reasoning, one job over.
+          cmake -S engine -B engine/build-release \
+            -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
+            -DVCPKG_MANIFEST_INSTALL=OFF
+          if grep -q cmake_pch engine/build-release/compile_commands.json; then
+            echo "::error::compile_commands.json still references a precompiled header"
+            exit 1
+          fi
+
+          # Every non-vendor translation unit the database knows, which is the
+          # honest denominator - `engine/vendor/` is excluded here as it is
+          # everywhere else.
+          python - <<'PY' > tidy-units.txt
+          import json
+          seen = []
+          for entry in json.load(open("engine/build-release/compile_commands.json")):
+              if "/vendor/" in entry["file"].replace("\\", "/"):
+                  continue
+              if entry["file"] not in seen:
+                  seen.append(entry["file"])
+          print("\n".join(sorted(seen)))
+          PY
+          units="$(grep -c . tidy-units.txt)"
+          echo "units=$units" >> "$GITHUB_OUTPUT"
+          if [[ "$units" -lt 100 ]]; then
+            echo "::error::only $units translation units found - the database is not the tree"
+            exit 1
+          fi
+
+          # `-header-filter` on the command line, not from the config: a
+          # `run-clang-tidy`-shaped invocation that omits it reports nothing
+          # found in a header, which is how 50 findings went uncounted through
+          # four #928 measurement rounds (#1013).
+          #
+          # Findings are the output, so the exit status is deliberately not the
+          # verdict here - the report step below is.
+          tr '\n' '\0' < tidy-units.txt \
+            | xargs -0 -n 1 -P 4 \
+                "$tidy" -p engine/build-release --quiet --allow-no-checks \
+                  --header-filter='.*[/\\]engine[/\\](src|include|tests)[/\\].*' \
+            > tidy-scan.log 2>&1 || true
+          echo "wrote $(grep -c . tidy-scan.log) lines of clang-tidy output"
+
+      - name: Report the deduplicated findings
+        shell: bash
+        run: |
+          python .github/dedupe-tidy-findings.py tidy-scan.log \
+            --root "$GITHUB_WORKSPACE" \
+            --scanned "${{ steps.scan.outputs.units }}" \
+            --label "Whole-tree clang-tidy on ${{ github.event.inputs.os || 'windows-latest' }}" \
+            | tee tidy-scan-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the scan
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: engine-tidy-scan-${{ github.event.inputs.os || 'windows-latest' }}
+          path: |
+            tidy-scan.log
+            tidy-scan-report.md
+            tidy-units.txt
+          if-no-files-found: error
+          retention-days: 14
