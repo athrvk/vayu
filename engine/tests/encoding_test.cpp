@@ -5,6 +5,10 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
+#include <string>
+#include <string_view>
+
 #include "vayu/utils/encoding.hpp"
 
 using vayu::utils::base64_decode;
@@ -13,6 +17,20 @@ using vayu::utils::form_encode;
 using vayu::utils::hex_encode;
 using vayu::utils::url_decode;
 using vayu::utils::url_encode;
+
+namespace {
+
+/// The bytes @p encoded decodes to, or an empty string after a failure naming
+/// it. A vector table stays one line per vector this way, and an input that
+/// failed to decode is that line's failure rather than a read of an empty
+/// optional.
+std::string decoded (std::string_view encoded) {
+    const std::optional<std::string> bytes = base64_decode (encoded);
+    EXPECT_TRUE (bytes.has_value ()) << "expected \"" << encoded << "\" to decode";
+    return bytes.value_or (std::string{});
+}
+
+} // namespace
 
 // RFC 4648 §10 test vectors.
 TEST (Encoding, Base64Rfc4648Vectors) {
@@ -93,23 +111,23 @@ TEST (Encoding, FormEncodeOrdersAndEscapes) {
 // its author never encoded.
 
 TEST (Encoding, Base64DecodeRfc4648Vectors) {
-    EXPECT_EQ (base64_decode ("").value (), "");
-    EXPECT_EQ (base64_decode ("Zg==").value (), "f");
-    EXPECT_EQ (base64_decode ("Zm8=").value (), "fo");
-    EXPECT_EQ (base64_decode ("Zm9v").value (), "foo");
-    EXPECT_EQ (base64_decode ("Zm9vYg==").value (), "foob");
-    EXPECT_EQ (base64_decode ("Zm9vYmE=").value (), "fooba");
-    EXPECT_EQ (base64_decode ("Zm9vYmFy").value (), "foobar");
+    EXPECT_EQ (decoded (""), "");
+    EXPECT_EQ (decoded ("Zg=="), "f");
+    EXPECT_EQ (decoded ("Zm8="), "fo");
+    EXPECT_EQ (decoded ("Zm9v"), "foo");
+    EXPECT_EQ (decoded ("Zm9vYg=="), "foob");
+    EXPECT_EQ (decoded ("Zm9vYmE="), "fooba");
+    EXPECT_EQ (decoded ("Zm9vYmFy"), "foobar");
 }
 
 TEST (Encoding, Base64DecodeAcceptsUnpaddedAndWrappedInput) {
     // Padding is optional as long as the trailing bits are zero, and wrapped
     // base64 (a PEM-ish blob, a value pasted out of a config file) is common
     // enough that rejecting the newline would be its own bug.
-    EXPECT_EQ (base64_decode ("Zg").value (), "f");
-    EXPECT_EQ (base64_decode ("Zm8").value (), "fo");
-    EXPECT_EQ (base64_decode ("Zm9v\nYmFy").value (), "foobar");
-    EXPECT_EQ (base64_decode ("Zm9v YmFy").value (), "foobar");
+    EXPECT_EQ (decoded ("Zg"), "f");
+    EXPECT_EQ (decoded ("Zm8"), "fo");
+    EXPECT_EQ (decoded ("Zm9v\nYmFy"), "foobar");
+    EXPECT_EQ (decoded ("Zm9v YmFy"), "foobar");
 }
 
 TEST (Encoding, Base64DecodeRejectsMalformedInput) {
@@ -122,11 +140,11 @@ TEST (Encoding, Base64DecodeRejectsMalformedInput) {
 }
 
 TEST (Encoding, Base64DecodeCarriesHighBytesAndNul) {
-    const std::string decoded = base64_decode ("AP8Q").value ();
-    ASSERT_EQ (decoded.size (), 3U);
-    EXPECT_EQ (static_cast<unsigned char> (decoded[0]), 0x00);
-    EXPECT_EQ (static_cast<unsigned char> (decoded[1]), 0xFF);
-    EXPECT_EQ (static_cast<unsigned char> (decoded[2]), 0x10);
+    const std::string bytes = decoded ("AP8Q");
+    ASSERT_EQ (bytes.size (), 3U);
+    EXPECT_EQ (static_cast<unsigned char> (bytes[0]), 0x00);
+    EXPECT_EQ (static_cast<unsigned char> (bytes[1]), 0xFF);
+    EXPECT_EQ (static_cast<unsigned char> (bytes[2]), 0x10);
 }
 
 TEST (Encoding, Base64RoundTripsEveryByteValue) {
@@ -134,7 +152,7 @@ TEST (Encoding, Base64RoundTripsEveryByteValue) {
     for (int i = 0; i < 256; ++i) {
         all.push_back (static_cast<char> (i));
     }
-    EXPECT_EQ (base64_decode (base64_encode (all)).value (), all);
+    EXPECT_EQ (decoded (base64_encode (all)), all);
 }
 
 TEST (Encoding, HexEncodeIsLowercaseAndZeroPadded) {

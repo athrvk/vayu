@@ -39,6 +39,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -191,7 +192,10 @@ class SpecSyncRouteTest : public ::testing::Test {
     /** The `openapi` binding the collection holds right now. */
     json binding () {
         auto collection = db_->get_collection (root_);
-        EXPECT_TRUE (collection.has_value ());
+        if (!collection.has_value ()) {
+            ADD_FAILURE () << "the fixture's root collection is gone";
+            return json::object ();
+        }
         return json::parse (collection->openapi);
     }
 
@@ -256,11 +260,11 @@ TEST_F (SpecSyncRouteTest, AppliesCreateUpdateAndDeleteInOneCall) {
     EXPECT_TRUE (created_id.starts_with ("req_"));
 
     auto created = db_->get_request (created_id);
-    ASSERT_TRUE (created.has_value ());
+    ASSERT_HAS_VALUE (created);
     EXPECT_EQ (created->collection_id, folder_id);
 
     auto updated = db_->get_request (stayed);
-    ASSERT_TRUE (updated.has_value ());
+    ASSERT_HAS_VALUE (updated);
     EXPECT_EQ (updated->name, "list every pet");
     EXPECT_FALSE (db_->get_request (gone).has_value ());
 
@@ -269,7 +273,7 @@ TEST_F (SpecSyncRouteTest, AppliesCreateUpdateAndDeleteInOneCall) {
     const auto moved = binding ();
     EXPECT_NE (moved["specId"].get<std::string> (), bound_spec_);
     auto stored = db_->get_spec_document (moved["specId"].get<std::string> ());
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->content, FETCHED_DOC);
     EXPECT_EQ (moved["specHash"].get<std::string> (), stored->hash);
     EXPECT_EQ (response["specId"].get<std::string> (), stored->id);
@@ -296,7 +300,7 @@ TEST_F (SpecSyncRouteTest, SyncingReclaimsTheDocumentTheBindingLeftBehind) {
     // Age the seeded document past the sweep's grace window: it was stored a
     // moment ago, and a document that new is treated as a bind in flight.
     auto seeded = db_->get_spec_document (bound_spec_);
-    ASSERT_TRUE (seeded.has_value ());
+    ASSERT_HAS_VALUE (seeded);
     seeded->fetched_at -=
     vayu::core::constants::database::SPEC_DOCUMENT_SWEEP_GRACE_MS + 1000;
     db_->save_spec_document (*seeded);
@@ -318,7 +322,7 @@ TEST_F (SpecSyncRouteTest, SyncingReclaimsTheDocumentTheBindingLeftBehind) {
 // by exactly the run's own retention.
 TEST_F (SpecSyncRouteTest, SyncingKeepsASupersededDocumentARunStillNames) {
     auto seeded = db_->get_spec_document (bound_spec_);
-    ASSERT_TRUE (seeded.has_value ());
+    ASSERT_HAS_VALUE (seeded);
     seeded->fetched_at -=
     vayu::core::constants::database::SPEC_DOCUMENT_SWEEP_GRACE_MS + 1000;
     db_->save_spec_document (*seeded);
@@ -417,7 +421,7 @@ TEST_F (SpecSyncRouteTest, RefusesToUpdateARequestOutsideTheSyncedCollection) {
     EXPECT_EQ (response["error"]["item"].get<std::string> (), stranger);
 
     auto untouched = db_->get_request (stranger);
-    ASSERT_TRUE (untouched.has_value ());
+    ASSERT_HAS_VALUE (untouched);
     EXPECT_EQ (untouched->name, "not yours");
 }
 
@@ -441,7 +445,9 @@ TEST_F (SpecSyncRouteTest, ReachesARequestInANestedTagFolder) {
     body (json{ { "update",
     json::array ({ json{ { "id", nested }, { "name", "renamed" } } }) } }));
     ASSERT_EQ (status, 200) << response.dump ();
-    EXPECT_EQ (db_->get_request (nested)->name, "renamed");
+    const auto stored_request2 = db_->get_request (nested);
+    ASSERT_HAS_VALUE (stored_request2);
+    EXPECT_EQ (stored_request2->name, "renamed");
 }
 
 TEST_F (SpecSyncRouteTest, RefusesAFolderParentedOutsideTheSyncedCollection) {
@@ -698,7 +704,9 @@ TEST_F (SpecSyncRouteTest, RefusesToMoveARequestWhileUpdatingIt) {
     body (json{ { "update",
     json::array ({ json{ { "id", request }, { "collectionId", folder } } }) } }));
     ASSERT_EQ (status, 400) << response.dump ();
-    EXPECT_EQ (db_->get_request (request)->collection_id, root_);
+    const auto stored_request = db_->get_request (request);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->collection_id, root_);
 }
 
 TEST_F (SpecSyncRouteTest, RefusesTheSameRequestTwiceInOnePayload) {
@@ -878,8 +886,9 @@ TEST_F (SpecSyncRouteTest, PolicyCreatesWhatTheDocumentAddedAndDeletesNothing) {
     ASSERT_EQ (owners->parent_id.value_or (""), root_);
     const auto filed = db_->get_requests_in_collection (owners->id);
     ASSERT_EQ (filed.size (), 1u);
-    EXPECT_TRUE (filed[0].spec_operation.has_value ());
-    EXPECT_EQ (json::parse (*filed[0].spec_operation)["operationId"], "listOwners");
+    const auto& identity = filed[0].spec_operation;
+    ASSERT_HAS_VALUE (identity);
+    EXPECT_EQ (json::parse (*identity)["operationId"], "listOwners");
     // The untouched request is left where it was - nothing about it moved.
     EXPECT_TRUE (db_->get_request (stamped).has_value ());
 }
@@ -892,7 +901,9 @@ TEST_F (SpecSyncRouteTest, PolicyWritesAFieldOnlyTheDocumentMoved) {
     // by field rather than row by row.
     const std::string stamped = create_request (
     root_, json{ { "name", "listPets" }, { "specOperation", list_pets () } });
-    const std::string edited_url = db_->get_request (stamped)->url;
+    const auto stamped_row = db_->get_request (stamped);
+    ASSERT_HAS_VALUE (stamped_row);
+    const std::string edited_url = stamped_row->url;
 
     auto [status, response] = routes::spec_sync_response (*db_,
     json{ { "collectionId", root_ },
@@ -901,7 +912,7 @@ TEST_F (SpecSyncRouteTest, PolicyWritesAFieldOnlyTheDocumentMoved) {
 
     EXPECT_EQ (response["updated"].get<size_t> (), 1u);
     auto updated = db_->get_request (stamped);
-    ASSERT_TRUE (updated.has_value ());
+    ASSERT_HAS_VALUE (updated);
     EXPECT_EQ (updated->name, "List all the pets");
     // The url the fixture typed is neither document's, so it is somebody's edit
     // and this apply writes around it - counted, not dropped.
@@ -927,7 +938,7 @@ TEST_F (SpecSyncRouteTest, PolicyLeavesAFieldSomebodyEditedExactlyAsTheyLeftIt) 
     ASSERT_EQ (status, 200) << response.dump ();
 
     auto after = db_->get_request (edited);
-    ASSERT_TRUE (after.has_value ());
+    ASSERT_HAS_VALUE (after);
     EXPECT_EQ (after->name, "My pets call");
     EXPECT_EQ (response["updated"].get<size_t> (), 0u);
     // Counted rather than dropped: a caller that stated no ticks cannot see what

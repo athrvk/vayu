@@ -57,7 +57,14 @@ engine/
   (`ASSERT_HAS_VALUE (row) << "after the second write"`). It is a guard, not a
   silencer: an optional the code under test may legitimately leave empty is
   still tested over both outcomes, and `invariant_value` remains the answer for
-  a rule that lives in another function.
+  a rule that lives in another function. Two shapes the macro does not cover:
+  an optional read *through* a guarded row (`row->parent_id`, a reassigned
+  `verdict.reason`) needs its own guard, since the outer one says nothing about
+  it, and a non-void test helper cannot use the macro at all - `FAIL ()`
+  returns - so it states the absent case as an `if` that `ADD_FAILURE ()`s and
+  returns something harmless. `optional_assert_test.cpp` scans `tests/` for the
+  spelling this replaced and fails naming the file, because CI lints a pull
+  request's changed lines only and nothing else holds the family at zero.
 - **The reentrant spelling of a C call, always** (#945). `std::localtime` and
   `std::strerror` hand back a pointer into storage the whole process shares, so
   with a worker thread per connection what comes back is a timestamp or an

@@ -21,6 +21,7 @@
 #include <nlohmann/json.hpp>
 
 #include "mock_server.hpp"
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/monitor.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -62,7 +63,7 @@ TEST (MonitorConfigValidation, AMinimalBlockIsAcceptedAndDefaulted) {
     ASSERT_FALSE (validate_monitor_config (config).has_value ());
 
     auto parsed = monitor_config_from (config);
-    ASSERT_TRUE (parsed.has_value ());
+    ASSERT_HAS_VALUE (parsed);
     EXPECT_EQ (parsed->url, "http://localhost:9100/metrics");
     EXPECT_EQ (parsed->interval_ms, vayu::core::monitor_limits::DEFAULT_INTERVAL_MS);
     EXPECT_EQ (parsed->format, MonitorFormat::Prometheus);
@@ -135,7 +136,7 @@ class MonitorLimitsTest : public ::testing::Test {
 
     void set_config (const std::string& key, const std::string& value) {
         auto entry = db->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << "seed_default_config did not seed " << key;
+        ASSERT_HAS_VALUE (entry) << "seed_default_config did not seed " << key;
         entry->value = value;
         db->save_config_entry (*entry);
     }
@@ -162,7 +163,7 @@ TEST_F (MonitorLimitsTest, TheConfiguredScrapeTimeoutReachesTheBlockTheRunExecut
     auto config = monitor_config (json{ { "url", "http://localhost:9100/metrics" },
     { "series", json::array ({ "up" }) } });
     auto parsed = monitor_config_from (config, limits);
-    ASSERT_TRUE (parsed.has_value ());
+    ASSERT_HAS_VALUE (parsed);
     EXPECT_EQ (parsed->scrape_timeout_ms, 1800);
 }
 
@@ -221,12 +222,14 @@ TEST_F (MonitorLimitsTest, TheConfiguredIntervalIsWhatABlockWithoutOneScrapesAt)
     auto config = monitor_config (json{ { "url", "http://localhost:9100/metrics" },
     { "series", json::array ({ "up" }) } });
     auto parsed = monitor_config_from (config, limits);
-    ASSERT_TRUE (parsed.has_value ());
+    ASSERT_HAS_VALUE (parsed);
     EXPECT_EQ (parsed->interval_ms, 5000);
 
     // ...and a block that states its own still wins.
     config["monitor"]["intervalMs"] = 250;
-    EXPECT_EQ (monitor_config_from (config, limits)->interval_ms, 250);
+    const auto stated               = monitor_config_from (config, limits);
+    ASSERT_HAS_VALUE (stated);
+    EXPECT_EQ (stated->interval_ms, 250);
 }
 
 TEST_F (MonitorLimitsTest, TheConfiguredCapIsWhatTheSeriesListIsJudgedAgainst) {
@@ -413,7 +416,7 @@ class MonitorRunTest : public ::testing::Test {
 
     void set_config (const std::string& key, const std::string& value) {
         auto entry = db->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << "seed_default_config did not seed " << key;
+        ASSERT_HAS_VALUE (entry) << "seed_default_config did not seed " << key;
         entry->value = value;
         db->save_config_entry (*entry);
     }
@@ -475,7 +478,7 @@ TEST_F (MonitorRunTest, AConfiguredRunRecordsSamplesForItsWholeDuration) {
 
     // The report's section, from the same scrape.
     auto stored = db->get_run (run_id);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     auto summary = json::parse (stored->summary);
     ASSERT_TRUE (summary.contains ("monitor")) << stored->summary;
     EXPECT_GE (summary["monitor"]["samples"].get<size_t> (), 4u);
@@ -546,7 +549,7 @@ TEST_F (MonitorRunTest, AHangingEndpointStallsNeitherTheRunNorTheTicks) {
     // The gaps are counted, so the report says the scrape found nothing rather
     // than silently showing an empty chart.
     auto stored = db->get_run (run_id);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     auto summary = json::parse (stored->summary);
     ASSERT_TRUE (summary.contains ("monitor"));
     EXPECT_EQ (summary["monitor"]["samples"].get<size_t> (), 0u);
@@ -601,7 +604,7 @@ TEST_F (MonitorRunTest, ASlowExpositionScrapesOnceTheBudgetIsRaisedAtTheSameCade
     // The cadence is the one the run asked for either way: the setting buys a
     // longer scrape, not a slower one.
     auto stored = db->get_run (raised_run);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     auto summary = json::parse (stored->summary);
     ASSERT_TRUE (summary.contains ("monitor")) << stored->summary;
     EXPECT_GE (summary["monitor"]["samples"].get<size_t> (), 1u);
@@ -622,7 +625,7 @@ TEST_F (MonitorRunTest, ARunWithoutAMonitorScrapesNothingAndReportsNoSection) {
 
     EXPECT_EQ (db->count_monitor_samples (run_id), 0);
     auto stored = db->get_run (run_id);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     auto summary = json::parse (stored->summary);
     EXPECT_FALSE (summary.contains ("monitor"))
     << "a run that configured no monitor reported one";

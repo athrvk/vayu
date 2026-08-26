@@ -29,6 +29,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 
@@ -282,11 +283,11 @@ TEST_F (SpecExportRouteTest, LeavesTheCollectionExactlyAsItFoundIt) {
     export_collection ();
 
     const auto stored = db_->get_spec_document (spec);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->content, PETS_DOC);
     const auto request = db_->get_request (listed);
-    ASSERT_TRUE (request.has_value ());
-    ASSERT_TRUE (request->spec_operation.has_value ());
+    ASSERT_HAS_VALUE (request);
+    ASSERT_HAS_VALUE (request->spec_operation);
     EXPECT_NE (request->spec_operation->find ("listPets"), std::string::npos);
 }
 

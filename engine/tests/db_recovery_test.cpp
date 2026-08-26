@@ -144,7 +144,7 @@ TEST_F (DbRecoveryTest, ACorruptDatabaseWithNoBackupIsQuarantinedRatherThanDelet
 
     auto db = std::make_unique<vayu::db::Database> (DB_PATH);
 
-    ASSERT_TRUE (db->recovery ().has_value ());
+    ASSERT_HAS_VALUE (db->recovery ());
     EXPECT_TRUE (recorded_outcome (*db) == RecoveryOutcome::StartedFreshQuarantined);
     EXPECT_GT (recorded_at (*db), 0);
 
@@ -209,7 +209,7 @@ TEST_F (DbRecoveryTest, RestoringFromABackupIsADifferentOutcome) {
     const std::string corrupt_bytes = read_file (DB_PATH);
     auto db = std::make_unique<vayu::db::Database> (DB_PATH);
 
-    ASSERT_TRUE (db->recovery ().has_value ());
+    ASSERT_HAS_VALUE (db->recovery ());
     EXPECT_TRUE (recorded_outcome (*db) == RecoveryOutcome::RestoredFromBackup);
     EXPECT_EQ (
     vayu::http::routes::build_health_response (*db)["recovery"]["outcome"],
@@ -233,7 +233,7 @@ TEST_F (DbRecoveryTest, ACorruptBackupIsNeitherRestoredNorDestroyed) {
 
     auto db = std::make_unique<vayu::db::Database> (DB_PATH);
 
-    ASSERT_TRUE (db->recovery ().has_value ());
+    ASSERT_HAS_VALUE (db->recovery ());
     EXPECT_TRUE (recorded_outcome (*db) == RecoveryOutcome::BackupAlsoCorrupt);
     EXPECT_EQ (read_file (std::string (DB_PATH) + ".bak"), backup_bytes)
     << "the unusable backup was modified rather than left as evidence";
@@ -288,7 +288,7 @@ TEST_F (DbRecoveryTest, TheRecordOutlivesTheEngineRunThatWroteIt) {
     }
 
     vayu::db::Database second (DB_PATH);
-    ASSERT_TRUE (second.recovery ().has_value ());
+    ASSERT_HAS_VALUE (second.recovery ());
     EXPECT_TRUE (recorded_outcome (second) == RecoveryOutcome::StartedFreshQuarantined);
 }
 

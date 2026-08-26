@@ -35,6 +35,7 @@
 #include <thread>
 #include <vector>
 
+#include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/types.hpp"
@@ -173,7 +174,7 @@ TEST (SseLoadStreamTest, EventCapEndsAnEndlessStreamAsASuccess) {
     // reports a 200. A stream that ended exactly as asked is not a failure.
     EXPECT_FALSE (response.has_error ()) << response.error_message;
     EXPECT_EQ (response.status_code, 200);
-    ASSERT_TRUE (response.stream_events.has_value ());
+    ASSERT_HAS_VALUE (response.stream_events);
     EXPECT_GE (*response.stream_events, 5u);
     EXPECT_TRUE (response.stream_capped);
 
@@ -197,7 +198,7 @@ TEST (SseLoadStreamTest, DurationCapEndsASilentStreamAsASuccess) {
     EXPECT_FALSE (response.has_error ()) << response.error_message;
     EXPECT_EQ (response.status_code, 200);
     EXPECT_TRUE (response.stream_capped);
-    ASSERT_TRUE (response.stream_events.has_value ());
+    ASSERT_HAS_VALUE (response.stream_events);
     EXPECT_EQ (*response.stream_events, 0u)
     << "a silent stream delivered nothing, and says so";
     // Ended by the cap, well before the backstop timeout that sits
@@ -218,7 +219,7 @@ TEST (SseLoadStreamTest, AServerClosedStreamCompletesUncappedWithItsEvents) {
     const auto& response = result.value ();
     EXPECT_FALSE (response.has_error ()) << response.error_message;
     EXPECT_EQ (response.status_code, 200);
-    ASSERT_TRUE (response.stream_events.has_value ());
+    ASSERT_HAS_VALUE (response.stream_events);
     // Three `data` frames and one comment-only keep-alive: the keep-alive is
     // not an event, here as on the design path.
     EXPECT_EQ (*response.stream_events, 3u);

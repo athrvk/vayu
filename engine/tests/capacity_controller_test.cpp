@@ -28,6 +28,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "optional_assert.hpp"
 #include "vayu/core/capacity_controller.hpp"
 #include "vayu/core/constants.hpp"
 
@@ -166,12 +167,12 @@ TEST (CapacityControllerTest, KneeIsTheLevelThatGaveOutAndHeadlineIsTheLastThatH
         window (48, 23400, 41.2), window (64, 23000, 300.0), window (64, 22800, 312.0) };
     const auto summary = summarize_capacity (search (), history, stop::SLO_EXCEEDED);
 
-    ASSERT_TRUE (summary.max_healthy.has_value ());
+    ASSERT_HAS_VALUE (summary.max_healthy);
     EXPECT_EQ (summary.max_healthy->concurrency, 48u);
     EXPECT_DOUBLE_EQ (summary.max_healthy->rps, 23400.0);
     EXPECT_DOUBLE_EQ (summary.max_healthy->p99_ms, 41.2);
 
-    ASSERT_TRUE (summary.knee.has_value ());
+    ASSERT_HAS_VALUE (summary.knee);
     EXPECT_EQ (summary.knee->concurrency, 64u);
     EXPECT_DOUBLE_EQ (summary.knee->p99_ms, 312.0);
     EXPECT_GT (summary.knee->p99_ms, summary.slo_ms);
@@ -185,7 +186,7 @@ TEST (CapacityControllerTest, NoKneeWhenTheSearchNeverSawTheServiceGiveOut) {
         window (100, 9000, 40.0) };
     const auto summary = summarize_capacity (search (), history, stop::CAP_REACHED);
 
-    ASSERT_TRUE (summary.max_healthy.has_value ());
+    ASSERT_HAS_VALUE (summary.max_healthy);
     EXPECT_EQ (summary.max_healthy->concurrency, 100u);
     EXPECT_FALSE (summary.knee.has_value ());
 }
@@ -196,7 +197,7 @@ TEST (CapacityControllerTest, NoHeadlineWhenTheFirstLevelAlreadyBreached) {
     const auto summary = summarize_capacity (search (), history, stop::SLO_EXCEEDED);
 
     EXPECT_FALSE (summary.max_healthy.has_value ());
-    ASSERT_TRUE (summary.knee.has_value ());
+    ASSERT_HAS_VALUE (summary.knee);
     EXPECT_EQ (summary.knee->concurrency, 10u);
 }
 

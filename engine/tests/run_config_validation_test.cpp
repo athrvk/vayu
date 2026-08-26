@@ -27,6 +27,7 @@
 #include <optional>
 #include <string>
 
+#include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/monitor.hpp"
@@ -56,7 +57,7 @@ nlohmann::json valid_config () {
 // body does not say which field is wrong is barely better than a crash.
 void expect_rejected (const nlohmann::json& config, const std::string& key) {
     auto reason = validate_run_config (config);
-    ASSERT_TRUE (reason.has_value ())
+    ASSERT_HAS_VALUE (reason)
     << "expected rejection for " << key << " in " << config.dump ();
     EXPECT_NE (reason->find (key), std::string::npos)
     << "message should name '" << key << "', got: " << *reason;

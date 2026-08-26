@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "echo_server.hpp"
+#include "optional_assert.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/form_body.hpp"
@@ -590,7 +591,7 @@ TEST (FormBodyRules, UnsendableFilePartNamesTheFieldAndThePath) {
     body.fields = { file };
 
     const auto missing = unsendable_file_part (body);
-    ASSERT_TRUE (missing.has_value ());
+    ASSERT_HAS_VALUE (missing);
     EXPECT_NE (missing->find ("avatar"), std::string::npos) << *missing;
     EXPECT_NE (missing->find ("/nonexistent/vayu/avatar.png"), std::string::npos)
     << *missing;
@@ -599,7 +600,7 @@ TEST (FormBodyRules, UnsendableFilePartNamesTheFieldAndThePath) {
     // the user at a path that does not exist because they never named one.
     body.fields[0].src = "";
     const auto unset   = unsendable_file_part (body);
-    ASSERT_TRUE (unset.has_value ());
+    ASSERT_HAS_VALUE (unset);
     EXPECT_NE (unset->find ("avatar"), std::string::npos) << *unset;
     EXPECT_NE (unset->find ("no file selected"), std::string::npos) << *unset;
 }

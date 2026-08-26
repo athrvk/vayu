@@ -24,6 +24,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/auth_refresh.hpp"
@@ -241,7 +242,7 @@ TEST_F (AuthRefreshTuningTest, EveryKnobIsSeededAsAUserSetting) {
     for (const char* key : { "oauth2RefreshLeadMs", "oauth2RefreshMinIntervalMs",
          "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs", "oauth2RefreshPollIntervalMs" }) {
         const auto entry = db->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key << " is not offered in Settings";
+        ASSERT_HAS_VALUE (entry) << key << " is not offered in Settings";
         EXPECT_EQ (entry->type, "integer") << key;
         EXPECT_FALSE (entry->label.empty ()) << key;
         EXPECT_FALSE (entry->description.empty ()) << key;
@@ -271,7 +272,7 @@ TEST_F (AuthRefreshTuningTest, TheStoredValuesAreWhatARunReads) {
     { "oauth2RefreshRetryMaxMs", 99'000 }, { "oauth2RefreshPollIntervalMs", 42 } });
     for (const auto& [key, value] : edits) {
         auto entry = db->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key;
+        ASSERT_HAS_VALUE (entry) << key;
         entry->value = std::to_string (value);
         db->save_config_entry (*entry);
     }
@@ -291,7 +292,7 @@ TEST_F (AuthRefreshTuningTest, ANonPositiveStoredValueFallsBackToTheDefault) {
     for (const char* key : { "oauth2RefreshLeadMs", "oauth2RefreshMinIntervalMs",
          "oauth2RefreshRetryMs", "oauth2RefreshRetryMaxMs", "oauth2RefreshPollIntervalMs" }) {
         auto entry = db->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key;
+        ASSERT_HAS_VALUE (entry) << key;
         entry->value = "0";
         db->save_config_entry (*entry);
     }
@@ -359,7 +360,7 @@ TEST_F (PlanAuthRefreshTest, PlansForAHeaderPlacedExpiringToken) {
     const auto plan =
     vayu::http::plan_auth_refresh (request_with ("Bearer AT1"), auth, db.get ());
 
-    ASSERT_TRUE (plan.has_value ());
+    ASSERT_HAS_VALUE (plan);
     EXPECT_EQ (plan->header_name, "Authorization");
     EXPECT_EQ (plan->header_value, "Bearer AT1");
     EXPECT_GT (plan->expires_at_ms, now_ms ());
@@ -375,7 +376,7 @@ TEST_F (PlanAuthRefreshTest, HonoursACustomHeaderPrefix) {
     const auto plan =
     vayu::http::plan_auth_refresh (request_with ("Token AT1"), auth, db.get ());
 
-    ASSERT_TRUE (plan.has_value ());
+    ASSERT_HAS_VALUE (plan);
     EXPECT_EQ (plan->header_value, "Token AT1");
 }
 
@@ -486,7 +487,7 @@ class MidRunRefreshTest : public ::testing::Test {
     /// UI offers rather than inventing a row beside it.
     void set_config (const std::string& key, const std::string& value) {
         auto entry = db->get_config_entry (key);
-        ASSERT_TRUE (entry.has_value ()) << key << " is not seeded";
+        ASSERT_HAS_VALUE (entry) << key << " is not seeded";
         entry->value = value;
         db->save_config_entry (*entry);
     }
@@ -610,7 +611,7 @@ TEST_F (MidRunRefreshTest, AFailedRefreshIsRecordedAndTheRunStillCompletes) {
     manager.shutdown (std::chrono::milliseconds (15000));
 
     const auto stored = db->get_run ("run-auth-refresh-fails");
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->status, vayu::RunStatus::Completed)
     << "a refusal to refresh must not fail the run";
 

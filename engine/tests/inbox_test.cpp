@@ -47,7 +47,7 @@ namespace inbox_constants = vayu::core::constants::inbox;
 
 TEST (InboxParseStart, EmptyBodyStartsALoopbackInboxAnswering200) {
     const auto parsed = vayu::http::parse_inbox_start (json (nullptr));
-    ASSERT_TRUE (parsed.has_value ());
+    ASSERT_HAS_VALUE (parsed);
     EXPECT_EQ (parsed->bind, "127.0.0.1");
     EXPECT_EQ (parsed->port, 0);
     EXPECT_EQ (parsed->response.status, 200);
@@ -61,7 +61,7 @@ TEST (InboxParseStart, ReadsEveryResponseField) {
           { { "status", 503 }, { "body", "retry later" }, { "delayMs", 25 },
           { "headers", { { "Retry-After", "1" } } } } } };
     const auto parsed = vayu::http::parse_inbox_start (body);
-    ASSERT_TRUE (parsed.has_value ());
+    ASSERT_HAS_VALUE (parsed);
     EXPECT_EQ (parsed->response.status, 503);
     EXPECT_EQ (parsed->response.body, "retry later");
     EXPECT_EQ (parsed->response.delay_ms, 25);
@@ -99,7 +99,7 @@ TEST (InboxParseStart, NonLoopbackBindNeedsExplicitConfirmation) {
 
     const auto accepted = vayu::http::parse_inbox_start (
     json{ { "bind", "0.0.0.0" }, { "confirmNonLoopback", true } });
-    ASSERT_TRUE (accepted.has_value ());
+    ASSERT_HAS_VALUE (accepted);
     EXPECT_EQ (accepted->bind, "0.0.0.0");
 
     // Loopback in any of its spellings needs no confirmation.
@@ -132,7 +132,7 @@ TEST (InboxParseStart, ALoopbackLookingHostnameIsNotLoopback) {
 
     const auto accepted = vayu::http::parse_inbox_start (
     json{ { "bind", "127.example.com" }, { "confirmNonLoopback", true } });
-    ASSERT_TRUE (accepted.has_value ());
+    ASSERT_HAS_VALUE (accepted);
     EXPECT_EQ (accepted->bind, "127.example.com");
 
     // The whole of 127.0.0.0/8 still needs no confirmation.
@@ -149,7 +149,7 @@ TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValue) {
 
     const auto status_only =
     vayu::http::parse_inbox_response_update (json{ { "status", 200 } }, current);
-    ASSERT_TRUE (status_only.has_value ());
+    ASSERT_HAS_VALUE (status_only);
     EXPECT_EQ (status_only->status, 200);
     // The point of the merge: changing the status must not drop the rest.
     EXPECT_EQ (status_only->body, "boom");
@@ -160,7 +160,7 @@ TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValue) {
     // what it was handed.
     const auto wrapped = vayu::http::parse_inbox_response_update (
     json{ { "response", { { "body", "ok" } } } }, current);
-    ASSERT_TRUE (wrapped.has_value ());
+    ASSERT_HAS_VALUE (wrapped);
     EXPECT_EQ (wrapped->body, "ok");
     EXPECT_EQ (wrapped->status, 500);
 
@@ -174,18 +174,18 @@ TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValue) {
 
 TEST (InboxLiveResumePoint, AbsentMeansFromTheStartAndTheHeaderWinsOverTheParam) {
     const auto absent = vayu::http::parse_live_resume_point ("", "");
-    ASSERT_TRUE (absent.has_value ());
+    ASSERT_HAS_VALUE (absent);
     EXPECT_EQ (*absent, 0);
 
     // The query parameter is the app's own reconnect - EventSource cannot set a
     // header on a fresh connection - and is read exactly like the header.
     const auto from_param = vayu::http::parse_live_resume_point ("", "42");
-    ASSERT_TRUE (from_param.has_value ());
+    ASSERT_HAS_VALUE (from_param);
     EXPECT_EQ (*from_param, 42);
 
     // The browser's reconnect header is the more recent of the two.
     const auto from_header = vayu::http::parse_live_resume_point ("77", "42");
-    ASSERT_TRUE (from_header.has_value ());
+    ASSERT_HAS_VALUE (from_header);
     EXPECT_EQ (*from_header, 77);
 }
 
@@ -195,7 +195,7 @@ TEST (InboxLiveResumePoint, RejectsAValueThatIsNotACaptureId) {
         // Empty is absence, not a bad value - it is in this list to pin that.
         const auto resume_point = vayu::http::parse_live_resume_point ("", value);
         if (value.empty ()) {
-            ASSERT_TRUE (resume_point.has_value ());
+            ASSERT_HAS_VALUE (resume_point);
             EXPECT_EQ (*resume_point, 0);
             continue;
         }
@@ -319,7 +319,7 @@ TEST_F (InboxListenerTest, UpdatingTheCannedResponseTakesEffectOnTheNextCall) {
     InboxCannedResponse updated;
     updated.status = 202;
     updated.body   = "queued";
-    ASSERT_TRUE (manager_->update_response (started.info.inbox_id, updated).has_value ());
+    ASSERT_HAS_VALUE (manager_->update_response (started.info.inbox_id, updated));
 
     auto response = client.Post ("/hook", "", "text/plain");
     ASSERT_TRUE (response);
@@ -426,7 +426,7 @@ TEST_F (InboxListenerTest, DeleteLeavesAnAttachedLiveStreamNothingToStrand) {
     const auto claim = manager_->try_claim_live (started.info.inbox_id);
     ASSERT_HAS_VALUE (claim);
 
-    ASSERT_TRUE (manager_->remove (*db_, started.info.inbox_id).has_value ());
+    ASSERT_HAS_VALUE (manager_->remove (*db_, started.info.inbox_id));
 
     // What the stream's own loop checks: the inbox is gone, so it breaks out.
     EXPECT_FALSE (manager_->get (started.info.inbox_id).has_value ());

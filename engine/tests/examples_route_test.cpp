@@ -23,6 +23,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
@@ -210,13 +211,17 @@ TEST_F (ExamplesRouteTest, CreateDefaultsOriginToImportAndKeepsAClaimedUser) {
     *db_, "req_1", json{ { "name", "Bare" } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["origin"], "import");
-    EXPECT_EQ (db_->get_request_example (body["id"])->origin, "import");
+    const auto stored_example7 = db_->get_request_example (body["id"]);
+    ASSERT_HAS_VALUE (stored_example7);
+    EXPECT_EQ (stored_example7->origin, "import");
 
     auto [saved_status, saved] = routes::create_request_example_response (*db_,
     "req_1", json{ { "name", "Saved from a response" }, { "origin", "user" } });
     ASSERT_EQ (saved_status, 200) << saved.dump ();
     EXPECT_EQ (saved["origin"], "user");
-    EXPECT_EQ (db_->get_request_example (saved["id"])->origin, "user");
+    const auto stored_example6 = db_->get_request_example (saved["id"]);
+    ASSERT_HAS_VALUE (stored_example6);
+    EXPECT_EQ (stored_example6->origin, "user");
 }
 
 // A 400, not a silent fall back to `import`: an absorbed typo would hand a
@@ -255,7 +260,9 @@ TEST_F (ExamplesRouteTest, UpdateOriginFollowsTheNullVsAbsentRule) {
     auto [bad_status, bad_body] = routes::update_request_example_response (
     *db_, "req_1", id, json{ { "origin", "elsewhere" } });
     EXPECT_EQ (bad_status, 400);
-    EXPECT_EQ (db_->get_request_example (id)->origin, "import");
+    const auto stored_example5 = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored_example5);
+    EXPECT_EQ (stored_example5->origin, "import");
 }
 
 // ---------------------------------------------------------------------------
@@ -271,14 +278,18 @@ TEST_F (ExamplesRouteTest, CreateDefaultsBodyTruncatedToFalseAndKeepsAClaimedTru
     *db_, "req_1", json{ { "name", "Whole" } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["bodyTruncated"], false);
-    EXPECT_FALSE (db_->get_request_example (body["id"])->body_truncated);
+    const auto stored_example4 = db_->get_request_example (body["id"]);
+    ASSERT_HAS_VALUE (stored_example4);
+    EXPECT_FALSE (stored_example4->body_truncated);
 
     auto [cut_status, cut] = routes::create_request_example_response (*db_, "req_1",
     json{ { "name", "First slice only" }, { "body", "{\"items\":[" },
     { "bodyTruncated", true } });
     ASSERT_EQ (cut_status, 200) << cut.dump ();
     EXPECT_EQ (cut["bodyTruncated"], true);
-    EXPECT_TRUE (db_->get_request_example (cut["id"])->body_truncated);
+    const auto stored_example3 = db_->get_request_example (cut["id"]);
+    ASSERT_HAS_VALUE (stored_example3);
+    EXPECT_TRUE (stored_example3->body_truncated);
 }
 
 // The list read is what the Examples panel paints its chip from, so the flag
@@ -312,7 +323,9 @@ TEST_F (ExamplesRouteTest, UpdateBodyTruncatedFollowsTheNullVsAbsentRule) {
     *db_, "req_1", id, json{ { "bodyTruncated", nullptr } });
     ASSERT_EQ (reset_status, 200) << reset_body.dump ();
     EXPECT_EQ (reset_body["bodyTruncated"], false);
-    EXPECT_FALSE (db_->get_request_example (id)->body_truncated);
+    const auto stored_example2 = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored_example2);
+    EXPECT_FALSE (stored_example2->body_truncated);
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +419,7 @@ TEST_F (ExamplesRouteTest, ExampleOfAnotherRequestIsInvisible) {
 
     // Still stored, still named what its owner called it.
     auto stored = db_->get_request_example (id);
-    ASSERT_TRUE (stored.has_value ());
+    ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->name, "theirs");
 }
 
@@ -415,7 +428,9 @@ TEST_F (ExamplesRouteTest, UpdateRejectsMismatchedBodyId) {
     auto [status, body]  = routes::update_request_example_response (
     *db_, "req_1", id, json{ { "id", "exa_other" }, { "name", "y" } });
     EXPECT_EQ (status, 400);
-    EXPECT_EQ (db_->get_request_example (id)->name, "x");
+    const auto stored_example = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored_example);
+    EXPECT_EQ (stored_example->name, "x");
 }
 
 // ---------------------------------------------------------------------------

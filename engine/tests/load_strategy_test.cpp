@@ -11,6 +11,7 @@
  * a pending_count()-based cap never fires.
  */
 
+#include "optional_assert.hpp"
 #include "vayu/core/load_strategy.hpp"
 
 #include <gtest/gtest.h>
@@ -829,8 +830,7 @@ TEST_F (LoadStrategyTest, OutliersAndExemplarsCaptureBodiesButPlainSamplesDoNot)
     const auto& slow = context->metrics_collector->slow_results ();
     ASSERT_EQ (slow.size (), 1u)
     << "the outlier was rerouted out of the slow store by the exemplar bucket";
-    ASSERT_TRUE (slow[0].capture.has_value ())
-    << "an outlier must carry its body";
+    ASSERT_HAS_VALUE (slow[0].capture) << "an outlier must carry its body";
 
     // Every sampled fast completion is stored; the first `quota` of them
     // claimed an exemplar and kept a body, the one past the quota did not.
@@ -952,7 +952,7 @@ TEST_F (LoadStrategyTest, CapacityStopsOnTheSloAgainstASlowEndpoint) {
     run_capacity_search (config, mock_server->slow_url (), "test-capacity-slo", db);
 
     EXPECT_EQ (summary.stop_reason, "slo_exceeded");
-    ASSERT_TRUE (summary.knee.has_value ());
+    ASSERT_HAS_VALUE (summary.knee);
     EXPECT_GT (summary.knee->p99_ms, summary.slo_ms);
     EXPECT_EQ (summary.knee->concurrency, 4u)
     << "the search should not have climbed";
@@ -978,7 +978,7 @@ TEST_F (LoadStrategyTest, CapacityStopsAtTheCapAgainstAFastEndpoint) {
     run_capacity_search (config, mock_server->fast_url (), "test-capacity-cap", db);
 
     EXPECT_EQ (summary.stop_reason, "cap_reached");
-    ASSERT_TRUE (summary.max_healthy.has_value ());
+    ASSERT_HAS_VALUE (summary.max_healthy);
     EXPECT_EQ (summary.max_healthy->concurrency, 3u);
     EXPECT_GT (summary.max_healthy->rps, 0.0);
     EXPECT_FALSE (summary.knee.has_value ());
@@ -1005,7 +1005,7 @@ TEST_F (LoadStrategyTest, CapacityStopsOnItsDeadline) {
     // One window closed before the clock ran out; the partial second one is not
     // in the audit trail, because it was never judged.
     EXPECT_EQ (summary.levels.size (), 1u);
-    ASSERT_TRUE (summary.max_healthy.has_value ());
+    ASSERT_HAS_VALUE (summary.max_healthy);
     EXPECT_EQ (summary.max_healthy->concurrency, 2u);
 }
 
@@ -1053,7 +1053,7 @@ TEST_F (LoadStrategyTest, PhaseHistogramsEscapeTheRetentionSample) {
     EXPECT_EQ (context->metrics_collector->success_results ().size (), 50u);
 
     auto phases = context->metrics_collector->phase_percentiles ();
-    ASSERT_TRUE (phases.has_value ());
+    ASSERT_HAS_VALUE (phases);
     const auto& ttfb =
     (*phases)[static_cast<size_t> (vayu::core::TimingPhase::FirstByte)];
     EXPECT_EQ (ttfb.count, 500u);

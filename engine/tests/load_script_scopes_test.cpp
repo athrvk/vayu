@@ -27,6 +27,7 @@
 #include <optional>
 #include <string>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
@@ -195,7 +196,7 @@ TEST_F (LoadScriptScopesTest, ATestPassingOnSendPassesUnderLoad) {
 
     const auto validation = vayu::core::validate_scripts (context, *db_, false);
 
-    ASSERT_TRUE (validation.run.has_value ());
+    ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->sampled, 1u);
     EXPECT_EQ (validation.run->passed, 1u);
     EXPECT_EQ (validation.run->failed, 0u)
@@ -223,7 +224,7 @@ TEST_F (LoadScriptScopesTest, GlobalsAndTheWholeCollectionChainAreBoundToo) {
 
     const auto validation = vayu::core::validate_scripts (context, *db_, false);
 
-    ASSERT_TRUE (validation.run.has_value ());
+    ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->passed, 3u);
     EXPECT_EQ (validation.run->failed, 0u);
 }
@@ -247,9 +248,10 @@ TEST_F (LoadScriptScopesTest, AScenarioStepReplayReadsTheRunningCollectionsScope
     const auto validation = vayu::core::validate_scripts (context, *db_, false);
 
     ASSERT_EQ (validation.steps.size (), 1u);
-    ASSERT_TRUE (validation.steps[0].has_value ());
-    EXPECT_EQ (validation.steps[0]->passed, 1u);
-    EXPECT_EQ (validation.steps[0]->failed, 0u);
+    const auto& first_step = validation.steps[0];
+    ASSERT_HAS_VALUE (first_step);
+    EXPECT_EQ (first_step->passed, 1u);
+    EXPECT_EQ (first_step->failed, 0u);
 }
 
 // The write rule, half one: a replay's `set()` is never persisted. A reservoir
@@ -269,7 +271,7 @@ TEST_F (LoadScriptScopesTest, AReplayWriteIsNeverPersisted) {
     context->metrics_collector->record_response_sample (response_with ("{}"));
 
     const auto validation = vayu::core::validate_scripts (context, *db_, false);
-    ASSERT_TRUE (validation.run.has_value ());
+    ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->passed, 1u)
     << "the write was not even visible in-memory";
 
@@ -277,10 +279,10 @@ TEST_F (LoadScriptScopesTest, AReplayWriteIsNeverPersisted) {
     << "a deferred replay persisted a variable; only design mode may write "
        "back";
     auto globals = db_->get_globals ();
-    ASSERT_TRUE (globals.has_value ());
+    ASSERT_HAS_VALUE (globals);
     EXPECT_EQ (globals->variables, GLOBALS_BLOB);
     auto leaf = db_->get_collection ("col_leaf");
-    ASSERT_TRUE (leaf.has_value ());
+    ASSERT_HAS_VALUE (leaf);
     EXPECT_EQ (leaf->variables, LEAF_BLOB);
 }
 
@@ -302,7 +304,7 @@ TEST_F (LoadScriptScopesTest, AWriteIsVisibleToTheSamplesReplayedAfterIt) {
 
     const auto validation = vayu::core::validate_scripts (context, *db_, false);
 
-    ASSERT_TRUE (validation.run.has_value ());
+    ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->sampled, 2u);
     EXPECT_EQ (validation.run->passed, 1u);
     EXPECT_EQ (validation.run->failed, 1u);
@@ -325,7 +327,7 @@ TEST_F (LoadScriptScopesTest, ARunWithNoEnvironmentStillBindsTheOtherScopes) {
 
     const auto validation = vayu::core::validate_scripts (context, *db_, false);
 
-    ASSERT_TRUE (validation.run.has_value ());
+    ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->passed, 2u);
     EXPECT_EQ (validation.run->failed, 0u);
 }

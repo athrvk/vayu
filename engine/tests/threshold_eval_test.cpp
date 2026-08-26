@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/threshold_eval.hpp"
 
@@ -52,9 +53,14 @@ nlohmann::json config_with (const nlohmann::json& thresholds) {
     return nlohmann::json{ { "url", "http://localhost/" }, { "thresholds", thresholds } };
 }
 
-/// The one check in an outcome that declared exactly one budget.
-const vayu::core::ThresholdCheck& only_check (const std::optional<ThresholdOutcome>& outcome) {
-    EXPECT_TRUE (outcome.has_value ());
+/// The one check in an outcome that declared exactly one budget. By value
+/// rather than by reference, so an outcome that never arrived is a named
+/// failure and a default check rather than a read of an empty optional.
+vayu::core::ThresholdCheck only_check (const std::optional<ThresholdOutcome>& outcome) {
+    if (!outcome.has_value ()) {
+        ADD_FAILURE () << "the evaluation reported no outcome at all";
+        return {};
+    }
     EXPECT_EQ (outcome->checks.size (), 1u);
     return outcome->checks.at (0);
 }
@@ -63,7 +69,7 @@ const vayu::core::ThresholdCheck& only_check (const std::optional<ThresholdOutco
 /// body does not say which budget is wrong is barely better than silence.
 void expect_rejected (const nlohmann::json& thresholds, const std::string& key) {
     auto reason = validate_thresholds (config_with (thresholds));
-    ASSERT_TRUE (reason.has_value ())
+    ASSERT_HAS_VALUE (reason)
     << "expected rejection for " << key << " in " << thresholds.dump ();
     EXPECT_NE (reason->find (key), std::string::npos)
     << "message should name '" << key << "', got: " << *reason;
@@ -83,7 +89,7 @@ TEST (ThresholdEval, AnEmptyThresholdsObjectIsRejectedRatherThanStored) {
     // Accepting it would complete the run with no verdict, which is precisely
     // what the caller believed it was asking for.
     auto reason = validate_thresholds (config_with (nlohmann::json::object ()));
-    ASSERT_TRUE (reason.has_value ());
+    ASSERT_HAS_VALUE (reason);
     EXPECT_NE (reason->find ("no budget"), std::string::npos) << *reason;
 }
 
@@ -150,7 +156,7 @@ TEST (ThresholdEval, EveryKnownBudgetIsAcceptedTogether) {
         { "latencyP99Ms", 50 }, { "maxErrorRatePct", 0.1 }, { "minThroughputRps", 10000 } };
     EXPECT_FALSE (validate_thresholds (config_with (thresholds)).has_value ());
     auto outcome = evaluate_thresholds (config_with (thresholds), measured_run ());
-    ASSERT_TRUE (outcome.has_value ());
+    ASSERT_HAS_VALUE (outcome);
     EXPECT_EQ (outcome->checks.size (), 5u);
 }
 
@@ -176,7 +182,7 @@ TEST (ThresholdEval, EachPercentileReadsItsOwnMeasurement) {
     auto config = config_with (
     { { "latencyP50Ms", 20 }, { "latencyP95Ms", 40 }, { "latencyP99Ms", 50 } });
     auto outcome = evaluate_thresholds (config, measured_run ());
-    ASSERT_TRUE (outcome.has_value ());
+    ASSERT_HAS_VALUE (outcome);
     ASSERT_EQ (outcome->checks.size (), 3u);
     EXPECT_EQ (outcome->checks[0].metric, "latencyP50Ms");
     EXPECT_DOUBLE_EQ (outcome->checks[0].actual, 10.0);
@@ -216,7 +222,7 @@ TEST (ThresholdEval, TalliesSplitPassedFromFailed) {
     config_with ({ { "latencyP50Ms", 20 }, { "latencyP95Ms", 40 },
     { "latencyP99Ms", 46 }, { "maxErrorRatePct", 0.5 }, { "minThroughputRps", 100 } }),
     measured_run ());
-    ASSERT_TRUE (outcome.has_value ());
+    ASSERT_HAS_VALUE (outcome);
     EXPECT_EQ (outcome->passed, 3u); // p50, p95, throughput
     EXPECT_EQ (outcome->failed, 2u); // p99 (47 > 46), error rate (1% > 0.5%)
     EXPECT_EQ (outcome->checks.size (), 5u);
@@ -239,7 +245,7 @@ TEST (ThresholdEval, AStoredBudgetOfTheWrongTypeIsSkippedRatherThanGuessed) {
     auto outcome = evaluate_thresholds (
     config_with ({ { "latencyP99Ms", "fast" }, { "minThroughputRps", 100 } }),
     measured_run ());
-    ASSERT_TRUE (outcome.has_value ());
+    ASSERT_HAS_VALUE (outcome);
     ASSERT_EQ (outcome->checks.size (), 1u);
     EXPECT_EQ (outcome->checks[0].metric, "minThroughputRps");
 }
