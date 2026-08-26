@@ -622,107 +622,144 @@ struct ClaimedIds {
     std::unordered_set<std::string> collections; ///< Which of them are folders.
 };
 
-} // namespace
-
 /**
- * Testable core of `POST /specs/sync`, returning {http_status, json_body}.
+ * The payload a sync applies, after every check that needs no database.
  *
- * Read-decide-write under one lock, on `delete_spec_document`'s rule (#386):
- * the subtree this payload is allowed to touch, the rows it says exist and the
- * write itself have to be one scope, or a concurrent delete lands between the
- * check and the commit and the batch writes against a tree that has moved.
+ * The four section pointers are borrowed - into the request body, or into the
+ * `policy_rows` the applier below builds - so this outlives neither.
  */
-std::pair<int, nlohmann::json>
-spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
-    if (!body.is_object ()) {
-        return as_response (body_error ("Body must be a JSON object"));
-    }
-
+struct SyncRequest {
     std::string collection_id;
-    if (auto outcome = apply_required_string_field (
-        body, "collectionId", collection_id, /*is_create=*/true);
-    !outcome) {
-        return as_response (outcome.error ());
-    }
-    if (collection_id.empty ()) {
-        return as_response (
-        body_error ("Invalid 'collectionId': must be a non-empty string"));
-    }
-
-    if (!body.contains ("spec") || !body["spec"].is_object ()) {
-        return as_response (body_error (
-        "Invalid 'spec': must be an object with the re-fetched document"));
-    }
-    const auto& spec_item = body["spec"];
-    for (const char* engine_owned : { "id", "hash", "fetchedAt" }) {
-        if (spec_item.contains (engine_owned)) {
-            return as_response (body_error (std::string ("Invalid 'spec.") +
-            engine_owned + "': computed by the engine; omit it"));
-        }
-    }
+    const nlohmann::json* spec_item = nullptr;
     std::string content;
-    if (auto outcome = apply_required_string_field (
-        spec_item, "content", content, /*is_create=*/true);
-    !outcome) {
-        return as_response (outcome.error ());
-    }
-    if (content.empty ()) {
-        return as_response (
-        body_error ("Invalid 'spec.content': an empty document is not a spec"));
-    }
-
-    /*
-     * `policy` is the alternative to stating rows (issue #871): the caller says
-     * *apply the safe ticks* and the engine works out which they are, from the
-     * same `core::safe_spec_apply` whose answer `POST /specs/diff` reports per
-     * entry. It exists because those rules - never overwrite a field somebody
-     * edited, never delete, leave a request nothing can be told apart about
-     * alone - used to live in the renderer alone, which put every apply out of
-     * reach of anything that is not the Spec tab and made any second caller a
-     * second opinion about which of a user's fields a sync may destroy.
-     *
-     * Mutually exclusive with the row sections rather than merged with them: a
-     * payload that stated both would be two answers to one question, and there
-     * is no reading of "the safe ticks, plus these" that is not a guess.
-     */
-    std::string policy;
-    if (const auto stated_policy = body.find ("policy");
-    stated_policy != body.end () && !stated_policy->is_null ()) {
-        if (!stated_policy->is_string ()) {
-            return as_response (
-            body_error ("Invalid 'policy': must be a string"));
-        }
-        policy = stated_policy->get<std::string> ();
-        if (policy != "safe") {
-            return as_response (body_error ("Invalid 'policy': '" + policy +
-            "' is not a policy this engine has; the only one is \"safe\" - "
-            "everything the "
-            "document adds, every field it moved that nobody here had edited, "
-            "and no deletions"));
-        }
-        for (const char* section : { "collections", "create", "update", "delete" }) {
-            if (body.contains (section) && !body[section].is_null ()) {
-                return as_response (body_error (std::string ("Invalid '") +
-                section + "': a policy sync decides its own rows; send 'policy' or the rows, not both"));
-            }
-        }
-    }
-
+    std::string policy; ///< Empty unless the caller asked for a policy sync.
     const nlohmann::json* new_collections = nullptr;
     const nlohmann::json* creates         = nullptr;
     const nlohmann::json* updates         = nullptr;
     const nlohmann::json* deletes         = nullptr;
-    if (auto outcome = read_items (body, "collections", new_collections); !outcome) {
-        return as_response (outcome.error ());
+    size_t stated                         = 0; ///< Rows the payload asks for.
+};
+
+/** What the payload is being applied to, read once under the lock. */
+struct SyncScope {
+    std::vector<vayu::db::Collection> stored_collections;
+    vayu::db::Collection root;
+    std::string bound_id;
+    std::unordered_set<std::string> subtree;
+    size_t cap  = 0; ///< The document size limit this installation sets.
+    int64_t now = 0;
+};
+
+/** The rows the sections below accumulate, and the ids they hand out. */
+struct SyncPlan {
+    vayu::db::SpecSyncBatch batch;
+    ClaimedIds claimed;
+    /**
+     * Parent id -> the next `order` to hand out, seeded from the stored
+     * siblings by the applier and advanced here: the applier computes its
+     * default from rows that exist, so two folders created in one payload
+     * would otherwise land on the same number (the same reason
+     * `/import/apply` hands out its own slots).
+     */
+    std::unordered_map<std::string, int> next_folder_order;
+    std::unordered_map<std::string, int> next_request_order;
+    /// Request ids this payload has already updated or deleted.
+    std::unordered_set<std::string> touched;
+};
+
+/**
+ * The `policy` field, and the rule that it excludes the row sections.
+ *
+ * `policy` is the alternative to stating rows (issue #871): the caller says
+ * *apply the safe ticks* and the engine works out which they are, from the
+ * same `core::safe_spec_apply` whose answer `POST /specs/diff` reports per
+ * entry. It exists because those rules - never overwrite a field somebody
+ * edited, never delete, leave a request nothing can be told apart about
+ * alone - used to live in the renderer alone, which put every apply out of
+ * reach of anything that is not the Spec tab and made any second caller a
+ * second opinion about which of a user's fields a sync may destroy.
+ *
+ * Mutually exclusive with the row sections rather than merged with them: a
+ * payload that stated both would be two answers to one question, and there
+ * is no reading of "the safe ticks, plus these" that is not a guess.
+ */
+RouteResult read_sync_policy (const nlohmann::json& body, std::string& policy) {
+    const auto stated_policy = body.find ("policy");
+    if (stated_policy == body.end () || stated_policy->is_null ()) {
+        return {};
     }
-    if (auto outcome = read_items (body, "create", creates); !outcome) {
-        return as_response (outcome.error ());
+    if (!stated_policy->is_string ()) {
+        return std::unexpected (body_error ("Invalid 'policy': must be a string"));
     }
-    if (auto outcome = read_items (body, "update", updates); !outcome) {
-        return as_response (outcome.error ());
+    policy = stated_policy->get<std::string> ();
+    if (policy != "safe") {
+        return std::unexpected (body_error ("Invalid 'policy': '" + policy +
+        "' is not a policy this engine has; the only one is \"safe\" - "
+        "everything the "
+        "document adds, every field it moved that nobody here had edited, "
+        "and no deletions"));
     }
-    if (auto outcome = read_items (body, "delete", deletes); !outcome) {
-        return as_response (outcome.error ());
+    for (const char* section : { "collections", "create", "update", "delete" }) {
+        if (body.contains (section) && !body[section].is_null ()) {
+            return std::unexpected (body_error (std::string ("Invalid '") + section +
+            "': a policy sync decides its own rows; send 'policy' or the rows, not both"));
+        }
+    }
+    return {};
+}
+
+/** Everything a sync can refuse before it takes the lock. */
+RouteResult read_sync_request (const nlohmann::json& body, SyncRequest& out) {
+    if (!body.is_object ()) {
+        return std::unexpected (body_error ("Body must be a JSON object"));
+    }
+
+    if (auto outcome = apply_required_string_field (
+        body, "collectionId", out.collection_id, /*is_create=*/true);
+    !outcome) {
+        return outcome;
+    }
+    if (out.collection_id.empty ()) {
+        return std::unexpected (
+        body_error ("Invalid 'collectionId': must be a non-empty string"));
+    }
+
+    if (!body.contains ("spec") || !body["spec"].is_object ()) {
+        return std::unexpected (body_error (
+        "Invalid 'spec': must be an object with the re-fetched document"));
+    }
+    out.spec_item = &body["spec"];
+    for (const char* engine_owned : { "id", "hash", "fetchedAt" }) {
+        if (out.spec_item->contains (engine_owned)) {
+            return std::unexpected (body_error (std::string ("Invalid 'spec.") +
+            engine_owned + "': computed by the engine; omit it"));
+        }
+    }
+    if (auto outcome = apply_required_string_field (
+        *out.spec_item, "content", out.content, /*is_create=*/true);
+    !outcome) {
+        return outcome;
+    }
+    if (out.content.empty ()) {
+        return std::unexpected (
+        body_error ("Invalid 'spec.content': an empty document is not a spec"));
+    }
+
+    if (auto outcome = read_sync_policy (body, out.policy); !outcome) {
+        return outcome;
+    }
+
+    if (auto outcome = read_items (body, "collections", out.new_collections); !outcome) {
+        return outcome;
+    }
+    if (auto outcome = read_items (body, "create", out.creates); !outcome) {
+        return outcome;
+    }
+    if (auto outcome = read_items (body, "update", out.updates); !outcome) {
+        return outcome;
+    }
+    if (auto outcome = read_items (body, "delete", out.deletes); !outcome) {
+        return outcome;
     }
 
     // The rows the payload asks for. The example rows a refresh writes are the
@@ -732,451 +769,587 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
     // Recomputed inside the lock for a policy sync, whose rows are not known
     // until the comparison is made - this early check is the one that keeps a
     // caller's own oversized payload from being parsed row by row first.
-    size_t stated = new_collections->size () + creates->size () +
-    updates->size () + deletes->size ();
-    if (stated > MAX_SYNC_ITEMS) {
-        return as_response (body_error ("Sync too large: " + std::to_string (stated) +
+    out.stated = out.new_collections->size () + out.creates->size () +
+    out.updates->size () + out.deletes->size ();
+    if (out.stated > MAX_SYNC_ITEMS) {
+        return std::unexpected (
+        body_error ("Sync too large: " + std::to_string (out.stated) +
+        " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call"));
+    }
+    return {};
+}
+
+/**
+ * The subtree, the binding and the size limit this payload is applied against.
+ *
+ * Read here rather than by the caller because all of it comes out of the
+ * database and so has to be inside the lock: a subtree gathered outside it
+ * could have moved before the batch is written.
+ */
+RouteResult
+resolve_sync_scope (vayu::db::Database& db, const SyncRequest& request, SyncScope& out) {
+    out.stored_collections = db.get_collections ();
+    auto root = std::find_if (out.stored_collections.begin (),
+    out.stored_collections.end (), [&] (const vayu::db::Collection& c) {
+        return c.id == request.collection_id;
+    });
+    if (root == out.stored_collections.end ()) {
+        return std::unexpected (
+        RouteError{ 404, error_body (404, "Collection not found") });
+    }
+    out.root     = *root;
+    out.bound_id = bound_spec_id (out.root.openapi);
+    if (out.bound_id.empty ()) {
+        return std::unexpected (body_error ("Collection '" + request.collection_id +
+        "' is not bound to a spec; bind it before syncing"));
+    }
+    out.subtree =
+    collection_subtree_ids (out.stored_collections, request.collection_id);
+
+    out.cap = spec_size_cap (db);
+    if (request.content.size () > out.cap) {
+        return std::unexpected (body_error ("Spec document is " +
+        std::to_string (request.content.size ()) + " bytes, over the limit of " +
+        std::to_string (out.cap) +
+        " (raise the 'maxSpecDocumentBytes' setting to allow more)"));
+    }
+    out.now = now_ms ();
+    return {};
+}
+
+/**
+ * The document row this sync stores, and the parsed document behind it.
+ *
+ * The document itself comes back with the indexes, because a refresh writes the
+ * responses *these* bytes document (issue #869) and reading them a second time
+ * would be a second answer about them.
+ */
+RouteResult read_sync_document (const SyncRequest& request,
+const SyncScope& scope,
+vayu::db::SpecDocument& spec,
+nlohmann::ordered_json& document) {
+    spec.id         = vayu::utils::generate_id ("spec_");
+    spec.content    = request.content;
+    spec.hash       = spec_content_hash (request.content);
+    spec.fetched_at = scope.now;
+    if (auto reason = read_spec_indexes (*request.spec_item, spec, scope.cap, &document)) {
+        return std::unexpected (body_error (*reason));
+    }
+    const auto& spec_item = *request.spec_item;
+    if (spec_item.contains ("sourceUrl") && !spec_item["sourceUrl"].is_null ()) {
+        if (!spec_item["sourceUrl"].is_string ()) {
+            return std::unexpected (
+            body_error ("Invalid 'spec.sourceUrl': must be a string or null"));
+        }
+        const auto url = spec_item["sourceUrl"].get<std::string> ();
+        if (!url.empty ()) {
+            spec.source_url = url;
+        }
+    }
+    return {};
+}
+
+/**
+ * What a policy sync writes, for the caller that stated no rows.
+ *
+ * Inside the lock because the answer is read out of the database: the bound
+ * document, the subtree's requests and this collection's folders are all part
+ * of it, and a comparison made outside the lock could be applied against a tree
+ * that has since moved. @p policy_rows owns the arrays @p request then points
+ * into, so it has to outlive the sections below.
+ */
+RouteResult plan_policy_rows (vayu::db::Database& db,
+const SyncScope& scope,
+const nlohmann::ordered_json& document,
+SyncRequest& request,
+nlohmann::json& policy_rows) {
+    if (request.policy.empty ()) {
+        return {};
+    }
+    SpecComparison comparison;
+    if (auto outcome = compare_bound_spec (db, scope.stored_collections,
+        scope.subtree, scope.bound_id, document, comparison);
+    !outcome) {
+        return outcome;
+    }
+    policy_rows =
+    safe_sync_payload (request.collection_id, scope.stored_collections, comparison);
+    request.new_collections = &policy_rows["collections"];
+    request.creates         = &policy_rows["create"];
+    request.updates         = &policy_rows["update"];
+    request.deletes         = &policy_rows["delete"];
+    request.stated = request.new_collections->size () + request.creates->size () +
+    request.updates->size () + request.deletes->size ();
+    if (request.stated > MAX_SYNC_ITEMS) {
+        return std::unexpected (
+        body_error ("Sync too large: " + std::to_string (request.stated) +
+        " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call"));
+    }
+    return {};
+}
+
+/** One new tag folder, claimed and built. */
+RouteResult plan_folder (vayu::db::Database& db,
+const nlohmann::json& item,
+size_t index,
+const SyncRequest& request,
+const SyncScope& scope,
+SyncPlan& plan) {
+    std::string temp;
+    if (auto outcome =
+        claim_temp_id (item, "collection", "col_", index, plan.claimed.real, temp);
+    !outcome) {
+        return outcome;
+    }
+    plan.claimed.collections.insert (temp);
+
+    if (item.contains ("openapi")) {
+        return std::unexpected (item_error (400,
+        "Invalid 'openapi': a folder a sync creates is part of the "
+        "document being "
+        "synced, not a document of its own",
+        temp));
+    }
+
+    nlohmann::json fields = item;
+    std::string parent    = request.collection_id;
+    if (item.contains ("parentId") && !item["parentId"].is_null ()) {
+        if (!item["parentId"].is_string ()) {
+            return std::unexpected (
+            item_error (400, "Invalid 'parentId': must be a string", temp));
+        }
+        parent = item["parentId"].get<std::string> ();
+        if (!scope.subtree.contains (parent)) {
+            return std::unexpected (item_error (400,
+            "Invalid 'parentId': '" + parent + "' is not the collection being synced or one beneath it",
+            temp));
+        }
+    }
+    fields["parentId"] = parent;
+
+    vayu::db::Collection folder;
+    folder.id         = plan.claimed.real.at (temp);
+    folder.created_at = scope.now;
+    folder.updated_at = scope.now;
+    if (auto outcome = apply_item_fields (
+        [&] { return apply_collection_fields (db, folder, fields, /*is_create=*/true); },
+        "collection", temp);
+    !outcome) {
+        return outcome;
+    }
+    if (!item.contains ("order") || item["order"].is_null ()) {
+        auto slot = plan.next_folder_order.try_emplace (parent, folder.order).first;
+        folder.order = slot->second++;
+    }
+    plan.batch.new_collections.push_back (std::move (folder));
+    return {};
+}
+
+/** Which collection a created request lands in, stored or claimed here. */
+RouteResult resolve_create_owner (vayu::db::Database& db,
+const nlohmann::json& item,
+const std::string& temp,
+const SyncScope& scope,
+SyncPlan& plan,
+std::string& owner) {
+    if (item.contains ("collectionTempId") && !item["collectionTempId"].is_null ()) {
+        if (!item["collectionTempId"].is_string ()) {
+            return std::unexpected (item_error (
+            400, "Invalid 'collectionTempId': must be a string", temp));
+        }
+        const auto named = item["collectionTempId"].get<std::string> ();
+        if (!plan.claimed.collections.contains (named)) {
+            return std::unexpected (
+            item_error (400, "Unknown collectionTempId '" + named + "'", temp));
+        }
+        if (item.contains ("collectionId")) {
+            return std::unexpected (item_error (400,
+            "Invalid request: send either 'collectionTempId' (a folder "
+            "in this "
+            "payload) or 'collectionId' (one already stored), not both",
+            temp));
+        }
+        owner = plan.claimed.real.at (named);
+        // A folder this payload creates has no stored siblings to scan.
+        plan.next_request_order.try_emplace (owner, 0);
+        return {};
+    }
+    if (!item.contains ("collectionId") || !item["collectionId"].is_string ()) {
+        return std::unexpected (item_error (400,
+        "Invalid 'collectionId': must name a collection beneath "
+        "the one being "
+        "synced, or use 'collectionTempId'",
+        temp));
+    }
+    owner = item["collectionId"].get<std::string> ();
+    if (!scope.subtree.contains (owner)) {
+        return std::unexpected (item_error (400,
+        "Invalid 'collectionId': '" + owner + "' is not the collection being synced or one beneath it",
+        temp));
+    }
+    if (!plan.next_request_order.contains (owner)) {
+        int highest = -1;
+        for (const auto& existing : db.get_requests_in_collection (owner)) {
+            highest = std::max (highest, existing.order);
+        }
+        plan.next_request_order.emplace (owner, highest + 1);
+    }
+    return {};
+}
+
+/**
+ * A created request's example rows.
+ *
+ * A created request is the request an import of this document would build,
+ * examples included, so its rows are read off the document rather than sent
+ * (issue #869) - and there is no decision to make, the way there is on an
+ * update: nothing exists behind it to leave alone. A request the payload creates
+ * with no identity is not an operation of anything and documents nothing.
+ */
+RouteResult plan_created_examples (const vayu::db::Request& row,
+const std::string& temp,
+int64_t now,
+DocumentedExamples& documented,
+SyncPlan& plan) {
+    if (!row.spec_operation) {
+        return {};
+    }
+    const auto rows = documented.rows_for (*row.spec_operation);
+    if (!rows) {
+        return std::unexpected (item_error (400,
+        "Invalid 'specOperation': the document being synced "
+        "declares no such "
+        "operation, so there is nothing to create for it",
+        temp));
+    }
+    return build_example_rows (*rows, row.id, temp,
+    /*base_order=*/0, now, plan.batch.examples, /*surviving=*/0);
+}
+
+/** One created request, claimed and built. */
+RouteResult plan_created_request (vayu::db::Database& db,
+const nlohmann::json& item,
+size_t index,
+const SyncScope& scope,
+DocumentedExamples& documented,
+SyncPlan& plan) {
+    std::string temp;
+    if (auto outcome =
+        claim_temp_id (item, "request", "req_", index, plan.claimed.real, temp);
+    !outcome) {
+        return outcome;
+    }
+    if (item.contains ("examples")) {
+        return std::unexpected (item_error (400,
+        "Invalid 'examples': a sync writes the responses the document "
+        "it stores "
+        "documents; omit it",
+        temp));
+    }
+
+    std::string owner;
+    if (auto outcome = resolve_create_owner (db, item, temp, scope, plan, owner); !outcome) {
+        return outcome;
+    }
+
+    nlohmann::json fields  = item;
+    fields["collectionId"] = owner;
+    fields.erase ("collectionTempId");
+
+    vayu::db::Request row;
+    row.id         = plan.claimed.real.at (temp);
+    row.created_at = scope.now;
+    row.updated_at = scope.now;
+    if (auto outcome = apply_item_fields (
+        [&] { return apply_request_fields (db, row, fields, /*is_create=*/true); },
+        "request", temp);
+    !outcome) {
+        return outcome;
+    }
+    if (!item.contains ("order") || item["order"].is_null ()) {
+        row.order = plan.next_request_order[owner]++;
+    }
+    if (auto outcome = plan_created_examples (row, temp, scope.now, documented, plan); !outcome) {
+        return outcome;
+    }
+    plan.batch.created.push_back (std::move (row));
+    return {};
+}
+
+/**
+ * Whether an updated request's imported examples are refreshed from the
+ * document being stored.
+ *
+ * `examples` is a decision, not a list (issue #869): true refreshes this
+ * request's imported examples from the document being stored, and absent - or
+ * false - leaves every one of them alone. Absence is the default because it is
+ * the state that touches nothing: a caller that forgets the key leaves a user's
+ * rows where they are, where a forgotten list used to mean "the document
+ * documents nothing".
+ */
+RouteResult
+read_examples_decision (const nlohmann::json& item, const std::string& id, bool& refresh) {
+    refresh = false;
+    const auto decision = item.find ("examples");
+    if (decision == item.end () || decision->is_null ()) {
+        return {};
+    }
+    if (!decision->is_boolean ()) {
+        return std::unexpected (item_error (400,
+        "Invalid 'examples': must be true to refresh this "
+        "request's imported "
+        "examples from the document being synced, or absent to "
+        "leave them - a "
+        "sync writes the responses the document documents, not "
+        "rows you state",
+        id));
+    }
+    refresh = decision->get<bool> ();
+    return {};
+}
+
+/** The example rows a refreshed request's replace, and the ones they retire. */
+RouteResult plan_refreshed_examples (vayu::db::Database& db,
+const vayu::db::Request& row,
+const std::string& id,
+int64_t now,
+DocumentedExamples& documented,
+SyncPlan& plan) {
+    if (!row.spec_operation) {
+        return std::unexpected (item_error (400,
+        "Invalid 'examples': this request records no operation, so "
+        "the document "
+        "documents no responses for it",
+        id));
+    }
+    const auto rows = documented.rows_for (*row.spec_operation);
+    if (!rows) {
+        return std::unexpected (item_error (400,
+        "Invalid 'examples': the document being synced declares no "
+        "operation "
+        "this request records, so it documents no responses for it",
+        id));
+    }
+    const auto plan_for_examples = refresh_examples (
+    db.get_request_examples (id), db.get_suppressed_request_examples (id));
+    plan.batch.deleted_examples.insert (plan.batch.deleted_examples.end (),
+    plan_for_examples.replaced.begin (), plan_for_examples.replaced.end ());
+    return build_example_rows (*rows, id, id, plan_for_examples.base_order, now,
+    plan.batch.examples, plan_for_examples.surviving,
+    plan_for_examples.suppressed_statuses);
+}
+
+/** One updated request: the row it names, merge-patched. */
+RouteResult plan_updated_request (vayu::db::Database& db,
+const nlohmann::json& item,
+size_t index,
+const SyncScope& scope,
+DocumentedExamples& documented,
+SyncPlan& plan) {
+    if (!item.is_object ()) {
+        return std::unexpected (body_error (
+        "Invalid update at index " + std::to_string (index) + ": must be an object"));
+    }
+    if (!item.contains ("id") || !item["id"].is_string () ||
+    item["id"].get<std::string> ().empty ()) {
+        return std::unexpected (body_error ("Invalid update at index " +
+        std::to_string (index) + ": 'id' must be the id of a stored request"));
+    }
+    const std::string id = item["id"].get<std::string> ();
+    if (!plan.touched.insert (id).second) {
+        return std::unexpected (item_error (
+        400, "Request '" + id + "' appears twice in this sync", id));
+    }
+    auto stored = db.get_request (id);
+    if (!stored) {
+        // The diff was computed against a row that has since gone. A
+        // conflict, not a bad request: nothing about the payload is
+        // malformed, the ground moved under it.
+        return std::unexpected (
+        item_error (409, "Request '" + id + "' no longer exists", id));
+    }
+    if (!scope.subtree.contains (stored->collection_id)) {
+        return std::unexpected (item_error (400,
+        "Request '" + id + "' is not beneath the collection being synced", id));
+    }
+    if (item.contains ("collectionId")) {
+        return std::unexpected (item_error (400,
+        "Invalid 'collectionId': a sync updates a request where it is; "
+        "move it with "
+        "PUT /requests/:id",
+        id));
+    }
+
+    vayu::db::Request row = *stored;
+    row.updated_at        = scope.now;
+    if (auto outcome = apply_item_fields (
+        [&] { return apply_request_fields (db, row, item, /*is_create=*/false); },
+        "request", id);
+    !outcome) {
+        return outcome;
+    }
+
+    bool refresh = false;
+    if (auto outcome = read_examples_decision (item, id, refresh); !outcome) {
+        return outcome;
+    }
+    if (refresh) {
+        if (auto outcome = plan_refreshed_examples (db, row, id, scope.now, documented, plan);
+        !outcome) {
+            return outcome;
+        }
+    }
+    plan.batch.updated.push_back (std::move (row));
+    return {};
+}
+
+/** One deleted request id, checked against the subtree it must live in. */
+RouteResult plan_deleted_request (vayu::db::Database& db,
+const nlohmann::json& item,
+size_t index,
+const SyncScope& scope,
+SyncPlan& plan) {
+    if (!item.is_string () || item.get<std::string> ().empty ()) {
+        return std::unexpected (body_error ("Invalid delete at index " +
+        std::to_string (index) + ": must be the id of a stored request"));
+    }
+    const std::string id = item.get<std::string> ();
+    if (!plan.touched.insert (id).second) {
+        return std::unexpected (item_error (
+        400, "Request '" + id + "' appears twice in this sync", id));
+    }
+    auto stored = db.get_request (id);
+    if (!stored) {
+        // Already gone is the state the caller asked for. Skipped rather
+        // than refused: a delete is the one item whose goal a concurrent
+        // write can only have achieved.
+        return {};
+    }
+    if (!scope.subtree.contains (stored->collection_id)) {
+        return std::unexpected (item_error (400,
+        "Request '" + id + "' is not beneath the collection being synced", id));
+    }
+    plan.batch.deleted.push_back (id);
+    return {};
+}
+
+/** Every section of the payload, in the order the batch is built. */
+RouteResult plan_sync_rows (vayu::db::Database& db,
+const SyncRequest& request,
+const SyncScope& scope,
+DocumentedExamples& documented,
+SyncPlan& plan) {
+    for (size_t i = 0; i < request.new_collections->size (); ++i) {
+        if (auto outcome = plan_folder (
+            db, (*request.new_collections)[i], i, request, scope, plan);
+        !outcome) {
+            return outcome;
+        }
+    }
+    for (size_t i = 0; i < request.creates->size (); ++i) {
+        if (auto outcome = plan_created_request (
+            db, (*request.creates)[i], i, scope, documented, plan);
+        !outcome) {
+            return outcome;
+        }
+    }
+    for (size_t i = 0; i < request.updates->size (); ++i) {
+        if (auto outcome = plan_updated_request (
+            db, (*request.updates)[i], i, scope, documented, plan);
+        !outcome) {
+            return outcome;
+        }
+    }
+    for (size_t i = 0; i < request.deletes->size (); ++i) {
+        if (auto outcome =
+            plan_deleted_request (db, (*request.deletes)[i], i, scope, plan);
+        !outcome) {
+            return outcome;
+        }
+    }
+    return {};
+}
+
+/**
+ * The whole write, under the lock its caller holds.
+ *
+ * Read-decide-write in one scope, on `delete_spec_document`'s rule (#386): the
+ * subtree this payload is allowed to touch, the rows it says exist and the write
+ * itself have to be one scope, or a concurrent delete lands between the check
+ * and the commit and the batch writes against a tree that has moved.
+ */
+std::pair<int, nlohmann::json>
+apply_sync_locked (vayu::db::Database& db, SyncRequest& request) {
+    SyncScope scope;
+    if (auto outcome = resolve_sync_scope (db, request, scope); !outcome) {
+        return as_response (outcome.error ());
+    }
+
+    SyncPlan plan;
+    nlohmann::ordered_json document;
+    if (auto outcome = read_sync_document (request, scope, plan.batch.spec, document);
+    !outcome) {
+        return as_response (outcome.error ());
+    }
+    DocumentedExamples documented (document);
+
+    nlohmann::json policy_rows;
+    if (auto outcome = plan_policy_rows (db, scope, document, request, policy_rows);
+    !outcome) {
+        return as_response (outcome.error ());
+    }
+
+    if (auto outcome = plan_sync_rows (db, request, scope, documented, plan); !outcome) {
+        return as_response (outcome.error ());
+    }
+
+    // The same limit as the payload check before the lock, applied to what will
+    // actually be written: the example rows are derived rather than sent (issue
+    // #869), so this is where their number is finally known, and a cap that
+    // stopped counting them would bound a smaller transaction than the one it
+    // was written for.
+    if (const size_t writing = request.stated + plan.batch.examples.size ();
+    writing > MAX_SYNC_ITEMS) {
+        return as_response (body_error ("Sync too large: " + std::to_string (writing) +
         " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call"));
     }
 
+    // The binding moves with the rows.
+    plan.batch.binding         = scope.root;
+    plan.batch.binding.openapi = nlohmann::json{ { "specId", plan.batch.spec.id },
+        { "specHash", plan.batch.spec.hash }, { "syncedAt", scope.now } }
+                                 .dump ();
+    plan.batch.binding.updated_at = scope.now;
+
+    db.spec_sync_apply (plan.batch);
+    nlohmann::json response{ { "idMap", plan.claimed.real },
+        { "specId", plan.batch.spec.id }, { "specHash", plan.batch.spec.hash },
+        { "syncedAt", scope.now }, { "created", plan.batch.created.size () },
+        { "updated", plan.batch.updated.size () },
+        { "deleted", plan.batch.deleted.size () } };
+    if (!request.policy.empty ()) {
+        // What the policy declined, for a caller that stated no ticks and so
+        // cannot see what it did not tick. Absent for an explicit payload,
+        // where nothing was declined - the caller chose the rows itself.
+        response["skipped"] = policy_rows["skipped"];
+    }
+    return { 200, std::move (response) };
+}
+
+} // namespace
+
+/**
+ * Testable core of `POST /specs/sync`, returning {http_status, json_body}.
+ */
+std::pair<int, nlohmann::json>
+spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
+    SyncRequest request;
+    if (auto outcome = read_sync_request (body, request); !outcome) {
+        return as_response (outcome.error ());
+    }
+
     std::pair<int, nlohmann::json> result;
-    db.with_lock ([&] {
-        const auto stored_collections = db.get_collections ();
-        auto root =
-        std::find_if (stored_collections.begin (), stored_collections.end (),
-        [&] (const vayu::db::Collection& c) { return c.id == collection_id; });
-        if (root == stored_collections.end ()) {
-            result = { 404, error_body (404, "Collection not found") };
-            return;
-        }
-        const std::string bound_id = bound_spec_id (root->openapi);
-        if (bound_id.empty ()) {
-            result = as_response (body_error ("Collection '" + collection_id +
-            "' is not bound to a spec; bind it before syncing"));
-            return;
-        }
-        const auto subtree = collection_subtree_ids (stored_collections, collection_id);
-
-        const size_t cap = spec_size_cap (db);
-        if (content.size () > cap) {
-            result = as_response (
-            body_error ("Spec document is " + std::to_string (content.size ()) +
-            " bytes, over the limit of " + std::to_string (cap) +
-            " (raise the 'maxSpecDocumentBytes' setting to allow more)"));
-            return;
-        }
-
-        const int64_t now = now_ms ();
-        vayu::db::SpecSyncBatch batch;
-        batch.spec.id         = vayu::utils::generate_id ("spec_");
-        batch.spec.content    = content;
-        batch.spec.hash       = spec_content_hash (content);
-        batch.spec.fetched_at = now;
-        // The document itself comes back with the indexes, because a refresh
-        // writes the responses *these* bytes document (issue #869) and reading
-        // them a second time would be a second answer about them.
-        nlohmann::ordered_json document;
-        if (auto reason = read_spec_indexes (spec_item, batch.spec, cap, &document)) {
-            result = as_response (body_error (*reason));
-            return;
-        }
-        DocumentedExamples documented (document);
-        if (spec_item.contains ("sourceUrl") && !spec_item["sourceUrl"].is_null ()) {
-            if (!spec_item["sourceUrl"].is_string ()) {
-                result = as_response (body_error (
-                "Invalid 'spec.sourceUrl': must be a string or null"));
-                return;
-            }
-            const auto url = spec_item["sourceUrl"].get<std::string> ();
-            if (!url.empty ()) {
-                batch.spec.source_url = url;
-            }
-        }
-
-        // ---- what a policy sync writes ----------------------------------------
-        // Here rather than before the lock because the answer is read out of the
-        // database: the bound document, the subtree's requests and this
-        // collection's folders are all part of it, and a comparison made outside
-        // the lock could be applied against a tree that has since moved.
-        nlohmann::json policy_rows;
-        if (!policy.empty ()) {
-            SpecComparison comparison;
-            if (auto outcome = compare_bound_spec (
-                db, stored_collections, subtree, bound_id, document, comparison);
-            !outcome) {
-                result = as_response (outcome.error ());
-                return;
-            }
-            policy_rows = safe_sync_payload (collection_id, stored_collections, comparison);
-            new_collections = &policy_rows["collections"];
-            creates         = &policy_rows["create"];
-            updates         = &policy_rows["update"];
-            deletes         = &policy_rows["delete"];
-            stated          = new_collections->size () + creates->size () +
-            updates->size () + deletes->size ();
-            if (stated > MAX_SYNC_ITEMS) {
-                result = as_response (body_error (
-                "Sync too large: " + std::to_string (stated) + " items exceeds the limit of " +
-                std::to_string (MAX_SYNC_ITEMS) + " per call"));
-                return;
-            }
-        }
-
-        // ---- new tag folders -------------------------------------------------
-        ClaimedIds claimed;
-        // Parent id -> the next `order` to hand out, seeded from the stored
-        // siblings by the applier and advanced here: the applier computes its
-        // default from rows that exist, so two folders created in one payload
-        // would otherwise land on the same number (the same reason
-        // `/import/apply` hands out its own slots).
-        std::unordered_map<std::string, int> next_folder_order;
-        for (size_t i = 0; i < new_collections->size (); ++i) {
-            const auto& item = (*new_collections)[i];
-            std::string temp;
-            if (auto outcome =
-                claim_temp_id (item, "collection", "col_", i, claimed.real, temp);
-            !outcome) {
-                result = as_response (outcome.error ());
-                return;
-            }
-            claimed.collections.insert (temp);
-
-            if (item.contains ("openapi")) {
-                result = as_response (item_error (400,
-                "Invalid 'openapi': a folder a sync creates is part of the "
-                "document being "
-                "synced, not a document of its own",
-                temp));
-                return;
-            }
-
-            nlohmann::json fields = item;
-            std::string parent    = collection_id;
-            if (item.contains ("parentId") && !item["parentId"].is_null ()) {
-                if (!item["parentId"].is_string ()) {
-                    result = as_response (
-                    item_error (400, "Invalid 'parentId': must be a string", temp));
-                    return;
-                }
-                parent = item["parentId"].get<std::string> ();
-                if (!subtree.contains (parent)) {
-                    result = as_response (item_error (400,
-                    "Invalid 'parentId': '" + parent + "' is not the collection being synced or one beneath it",
-                    temp));
-                    return;
-                }
-            }
-            fields["parentId"] = parent;
-
-            vayu::db::Collection folder;
-            folder.id         = claimed.real.at (temp);
-            folder.created_at = now;
-            folder.updated_at = now;
-            if (auto outcome = apply_item_fields (
-                [&] {
-                    return apply_collection_fields (db, folder, fields, /*is_create=*/true);
-                },
-                "collection", temp);
-            !outcome) {
-                result = as_response (outcome.error ());
-                return;
-            }
-            if (!item.contains ("order") || item["order"].is_null ()) {
-                auto slot = next_folder_order.try_emplace (parent, folder.order).first;
-                folder.order = slot->second++;
-            }
-            batch.new_collections.push_back (std::move (folder));
-        }
-
-        // ---- created requests -------------------------------------------------
-        std::unordered_map<std::string, int> next_request_order;
-        for (size_t i = 0; i < creates->size (); ++i) {
-            const auto& item = (*creates)[i];
-            std::string temp;
-            if (auto outcome =
-                claim_temp_id (item, "request", "req_", i, claimed.real, temp);
-            !outcome) {
-                result = as_response (outcome.error ());
-                return;
-            }
-            if (item.contains ("examples")) {
-                result = as_response (item_error (400,
-                "Invalid 'examples': a sync writes the responses the document "
-                "it stores "
-                "documents; omit it",
-                temp));
-                return;
-            }
-
-            nlohmann::json fields = item;
-            std::string owner;
-            if (item.contains ("collectionTempId") && !item["collectionTempId"].is_null ()) {
-                if (!item["collectionTempId"].is_string ()) {
-                    result = as_response (item_error (
-                    400, "Invalid 'collectionTempId': must be a string", temp));
-                    return;
-                }
-                const auto named = item["collectionTempId"].get<std::string> ();
-                if (!claimed.collections.contains (named)) {
-                    result = as_response (item_error (
-                    400, "Unknown collectionTempId '" + named + "'", temp));
-                    return;
-                }
-                if (item.contains ("collectionId")) {
-                    result = as_response (item_error (400,
-                    "Invalid request: send either 'collectionTempId' (a folder "
-                    "in this "
-                    "payload) or 'collectionId' (one already stored), not both",
-                    temp));
-                    return;
-                }
-                owner = claimed.real.at (named);
-                // A folder this payload creates has no stored siblings to scan.
-                next_request_order.try_emplace (owner, 0);
-            } else {
-                if (!item.contains ("collectionId") || !item["collectionId"].is_string ()) {
-                    result = as_response (item_error (400,
-                    "Invalid 'collectionId': must name a collection beneath "
-                    "the one being "
-                    "synced, or use 'collectionTempId'",
-                    temp));
-                    return;
-                }
-                owner = item["collectionId"].get<std::string> ();
-                if (!subtree.contains (owner)) {
-                    result = as_response (item_error (400,
-                    "Invalid 'collectionId': '" + owner + "' is not the collection being synced or one beneath it",
-                    temp));
-                    return;
-                }
-                if (!next_request_order.contains (owner)) {
-                    int highest = -1;
-                    for (const auto& existing : db.get_requests_in_collection (owner)) {
-                        highest = std::max (highest, existing.order);
-                    }
-                    next_request_order.emplace (owner, highest + 1);
-                }
-            }
-            fields["collectionId"] = owner;
-            fields.erase ("collectionTempId");
-
-            vayu::db::Request row;
-            row.id         = claimed.real.at (temp);
-            row.created_at = now;
-            row.updated_at = now;
-            if (auto outcome = apply_item_fields (
-                [&] {
-                    return apply_request_fields (db, row, fields, /*is_create=*/true);
-                },
-                "request", temp);
-            !outcome) {
-                result = as_response (outcome.error ());
-                return;
-            }
-            if (!item.contains ("order") || item["order"].is_null ()) {
-                row.order = next_request_order[owner]++;
-            }
-            /*
-             * A created request is the request an import of this document would
-             * build, examples included, so its rows are read off the document
-             * rather than sent (issue #869) - and there is no decision to make,
-             * the way there is on an update: nothing exists behind it to leave
-             * alone. A request the payload creates with no identity is not an
-             * operation of anything and documents nothing.
-             */
-            if (row.spec_operation) {
-                if (auto rows = documented.rows_for (*row.spec_operation)) {
-                    if (auto outcome = build_example_rows (*rows, row.id, temp,
-                        /*base_order=*/0, now, batch.examples, /*surviving=*/0);
-                    !outcome) {
-                        result = as_response (outcome.error ());
-                        return;
-                    }
-                } else {
-                    result = as_response (item_error (400,
-                    "Invalid 'specOperation': the document being synced "
-                    "declares no such "
-                    "operation, so there is nothing to create for it",
-                    temp));
-                    return;
-                }
-            }
-            batch.created.push_back (std::move (row));
-        }
-
-        // ---- updated requests -------------------------------------------------
-        std::unordered_set<std::string> touched;
-        for (size_t i = 0; i < updates->size (); ++i) {
-            const auto& item = (*updates)[i];
-            if (!item.is_object ()) {
-                result = as_response (body_error ("Invalid update at index " +
-                std::to_string (i) + ": must be an object"));
-                return;
-            }
-            if (!item.contains ("id") || !item["id"].is_string () ||
-            item["id"].get<std::string> ().empty ()) {
-                result = as_response (body_error ("Invalid update at index " +
-                std::to_string (i) + ": 'id' must be the id of a stored request"));
-                return;
-            }
-            const std::string id = item["id"].get<std::string> ();
-            if (!touched.insert (id).second) {
-                result = as_response (item_error (
-                400, "Request '" + id + "' appears twice in this sync", id));
-                return;
-            }
-            auto stored = db.get_request (id);
-            if (!stored) {
-                // The diff was computed against a row that has since gone. A
-                // conflict, not a bad request: nothing about the payload is
-                // malformed, the ground moved under it.
-                result = as_response (
-                item_error (409, "Request '" + id + "' no longer exists", id));
-                return;
-            }
-            if (!subtree.contains (stored->collection_id)) {
-                result = as_response (item_error (400,
-                "Request '" + id + "' is not beneath the collection being synced", id));
-                return;
-            }
-            if (item.contains ("collectionId")) {
-                result = as_response (item_error (400,
-                "Invalid 'collectionId': a sync updates a request where it is; "
-                "move it with "
-                "PUT /requests/:id",
-                id));
-                return;
-            }
-
-            vayu::db::Request row = *stored;
-            row.updated_at        = now;
-            if (auto outcome = apply_item_fields (
-                [&] {
-                    return apply_request_fields (db, row, item, /*is_create=*/false);
-                },
-                "request", id);
-            !outcome) {
-                result = as_response (outcome.error ());
-                return;
-            }
-
-            /*
-             * `examples` is a decision, not a list (issue #869): true refreshes
-             * this request's imported examples from the document being stored,
-             * and absent - or false - leaves every one of them alone. Absence is
-             * the default because it is the state that touches nothing: a caller
-             * that forgets the key leaves a user's rows where they are, where a
-             * forgotten list used to mean "the document documents nothing".
-             */
-            bool refresh = false;
-            if (const auto decision = item.find ("examples");
-            decision != item.end () && !decision->is_null ()) {
-                if (!decision->is_boolean ()) {
-                    result = as_response (item_error (400,
-                    "Invalid 'examples': must be true to refresh this "
-                    "request's imported "
-                    "examples from the document being synced, or absent to "
-                    "leave them - a "
-                    "sync writes the responses the document documents, not "
-                    "rows you state",
-                    id));
-                    return;
-                }
-                refresh = decision->get<bool> ();
-            }
-            if (refresh) {
-                if (!row.spec_operation) {
-                    result = as_response (item_error (400,
-                    "Invalid 'examples': this request records no operation, so "
-                    "the document "
-                    "documents no responses for it",
-                    id));
-                    return;
-                }
-                const auto rows = documented.rows_for (*row.spec_operation);
-                if (!rows) {
-                    result = as_response (item_error (400,
-                    "Invalid 'examples': the document being synced declares no "
-                    "operation "
-                    "this request records, so it documents no responses for it",
-                    id));
-                    return;
-                }
-                const auto plan = refresh_examples (db.get_request_examples (id),
-                db.get_suppressed_request_examples (id));
-                batch.deleted_examples.insert (batch.deleted_examples.end (),
-                plan.replaced.begin (), plan.replaced.end ());
-                if (auto outcome = build_example_rows (*rows, id, id, plan.base_order,
-                    now, batch.examples, plan.surviving, plan.suppressed_statuses);
-                !outcome) {
-                    result = as_response (outcome.error ());
-                    return;
-                }
-            }
-            batch.updated.push_back (std::move (row));
-        }
-
-        // ---- deleted requests -------------------------------------------------
-        for (size_t i = 0; i < deletes->size (); ++i) {
-            const auto& item = (*deletes)[i];
-            if (!item.is_string () || item.get<std::string> ().empty ()) {
-                result = as_response (body_error ("Invalid delete at index " +
-                std::to_string (i) + ": must be the id of a stored request"));
-                return;
-            }
-            const std::string id = item.get<std::string> ();
-            if (!touched.insert (id).second) {
-                result = as_response (item_error (
-                400, "Request '" + id + "' appears twice in this sync", id));
-                return;
-            }
-            auto stored = db.get_request (id);
-            if (!stored) {
-                // Already gone is the state the caller asked for. Skipped rather
-                // than refused: a delete is the one item whose goal a concurrent
-                // write can only have achieved.
-                continue;
-            }
-            if (!subtree.contains (stored->collection_id)) {
-                result = as_response (item_error (400,
-                "Request '" + id + "' is not beneath the collection being synced", id));
-                return;
-            }
-            batch.deleted.push_back (id);
-        }
-
-        // ---- what the whole transaction turned out to be -----------------------
-        // The same limit as the payload check above, applied to what will
-        // actually be written: the example rows are derived rather than sent
-        // (issue #869), so this is where their number is finally known, and a cap
-        // that stopped counting them would bound a smaller transaction than the
-        // one it was written for.
-        if (const size_t writing = stated + batch.examples.size (); writing > MAX_SYNC_ITEMS) {
-            result = as_response (body_error ("Sync too large: " + std::to_string (writing) +
-            " items exceeds the limit of " + std::to_string (MAX_SYNC_ITEMS) + " per call"));
-            return;
-        }
-
-        // ---- the binding moves with the rows ----------------------------------
-        batch.binding         = *root;
-        batch.binding.openapi = nlohmann::json{
-            { "specId", batch.spec.id }, { "specHash", batch.spec.hash }, { "syncedAt", now }
-        }.dump ();
-        batch.binding.updated_at = now;
-
-        db.spec_sync_apply (batch);
-        nlohmann::json response{ { "idMap", claimed.real },
-            { "specId", batch.spec.id }, { "specHash", batch.spec.hash },
-            { "syncedAt", now }, { "created", batch.created.size () },
-            { "updated", batch.updated.size () }, { "deleted", batch.deleted.size () } };
-        if (!policy.empty ()) {
-            // What the policy declined, for a caller that stated no ticks and so
-            // cannot see what it did not tick. Absent for an explicit payload,
-            // where nothing was declined - the caller chose the rows itself.
-            response["skipped"] = policy_rows["skipped"];
-        }
-        result = { 200, std::move (response) };
-    });
+    db.with_lock ([&] { result = apply_sync_locked (db, request); });
     return result;
 }
 
