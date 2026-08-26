@@ -886,6 +886,59 @@ std::vector<vayu::db::Environment>& out) {
 } // namespace
 
 /**
+ * The existence check the shared applier cannot make, then the write.
+ *
+ * A binding may name a spec this payload is about to write, or one already
+ * stored, and nothing else - and the check is the last thing before the write,
+ * under the same lock as the write. A binding validated outside the lock could
+ * be committed just after a concurrent `DELETE /specs/:id` removed the document
+ * it named, which is the dangling state the check exists to prevent. Bounded:
+ * one JSON parse per collection row, then the transaction `import_apply` was
+ * going to take the lock for anyway.
+ */
+RouteResult bind_and_apply_import (vayu::db::Database& db,
+const TempIds& temps,
+const std::unordered_map<std::string, std::string>& pending_hashes,
+int64_t now,
+std::vector<vayu::db::Collection>& collection_rows,
+const std::vector<vayu::db::Request>& request_rows,
+const std::vector<vayu::db::Environment>& environment_rows,
+const std::vector<vayu::db::RequestExample>& example_rows,
+const std::vector<vayu::db::SpecDocument>& spec_rows) {
+    for (size_t i = 0; i < collection_rows.size (); ++i) {
+        if (auto outcome = apply_item_fields (
+            [&] {
+                return reject_unbindable_spec (
+                db, collection_rows[i].openapi, temps.pending_spec_ids);
+            },
+            "collection", temps.collections[i]);
+        !outcome) {
+            return outcome;
+        }
+        // Stamped here rather than in `resolve_spec_binding`, so that the
+        // version a binding records is read under the same lock that proves
+        // the document exists - and so import shares the rule with the two
+        // collection write cores instead of keeping a second copy of it.
+        if (auto stamped = vayu::core::stamp_spec_binding (collection_rows[i].openapi,
+            [&] (const std::string& spec_id) -> std::optional<vayu::core::SpecStamp> {
+                auto pending = pending_hashes.find (spec_id);
+                if (pending != pending_hashes.end ()) {
+                    return vayu::core::SpecStamp{ pending->second, now };
+                }
+                auto document = db.get_spec_document (spec_id);
+                if (!document) {
+                    return std::nullopt;
+                }
+                return vayu::core::SpecStamp{ document->hash, now };
+            })) {
+            collection_rows[i].openapi = std::move (*stamped);
+        }
+    }
+    db.import_apply (collection_rows, request_rows, environment_rows, example_rows, spec_rows);
+    return {};
+}
+
+/**
  * Testable core of POST /import/apply - persist a whole parsed import in one
  * atomic call, returning {http_status, json_body} (issue #96).
  *
@@ -1004,43 +1057,73 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
     // was going to take the lock for anyway.
     std::pair<int, nlohmann::json> result{ 200, nlohmann::json{ { "idMap", temps.real } } };
     db.with_lock ([&] {
-        for (size_t i = 0; i < collection_rows.size (); ++i) {
-            if (auto outcome = apply_item_fields (
-                [&] {
-                    return reject_unbindable_spec (
-                    db, collection_rows[i].openapi, temps.pending_spec_ids);
-                },
-                "collection", temps.collections[i]);
-            !outcome) {
-                result = as_response (outcome.error ());
-                return;
-            }
-            // Stamped here rather than in `resolve_spec_binding`, so that the
-            // version a binding records is read under the same lock that proves
-            // the document exists - and so import shares the rule with the two
-            // collection write cores instead of keeping a second copy of it.
-            if (auto stamped =
-                vayu::core::stamp_spec_binding (collection_rows[i].openapi,
-                [&] (const std::string& spec_id) -> std::optional<vayu::core::SpecStamp> {
-                    auto pending = pending_hashes.find (spec_id);
-                    if (pending != pending_hashes.end ()) {
-                        return vayu::core::SpecStamp{ pending->second, now };
-                    }
-                    auto document = db.get_spec_document (spec_id);
-                    if (!document) {
-                        return std::nullopt;
-                    }
-                    return vayu::core::SpecStamp{ document->hash, now };
-                })) {
-                collection_rows[i].openapi = std::move (*stamped);
-            }
+        if (auto outcome = bind_and_apply_import (db, temps, pending_hashes, now,
+            collection_rows, request_rows, environment_rows, example_rows, spec_rows);
+        !outcome) {
+            result = as_response (outcome.error ());
         }
-        db.import_apply (collection_rows, request_rows, environment_rows,
-        example_rows, spec_rows);
     });
     return result;
 }
 
+
+/** Reads one optional boolean switch; present-and-not-boolean is a 400. */
+RouteResult read_bool_option (const nlohmann::json& body, const char* key, bool& out) {
+    const auto found = body.find (key);
+    if (found == body.end () || found->is_null ()) {
+        return {};
+    }
+    if (!found->is_boolean ()) {
+        return std::unexpected (
+        body_error (std::string ("Invalid '") + key + "': must be a boolean"));
+    }
+    out = found->get<bool> ();
+    return {};
+}
+
+/** Reads one optional string field; present-and-not-a-string is a 400. */
+RouteResult read_string_option (const nlohmann::json& body, const char* key, std::string& out) {
+    const auto found = body.find (key);
+    if (found == body.end () || found->is_null ()) {
+        return {};
+    }
+    if (!found->is_string ()) {
+        return std::unexpected (
+        body_error (std::string ("Invalid '") + key + "': must be a string"));
+    }
+    out = found->get<std::string> ();
+    return {};
+}
+
+/** Which halves of a document `POST /import/parse` is asked to read. */
+RouteResult read_import_options (const nlohmann::json& body, vayu::core::ImportOptions& options) {
+    if (auto outcome =
+        read_bool_option (body, "importEnvironments", options.import_environments);
+    !outcome) {
+        return outcome;
+    }
+    return read_bool_option (body, "importScripts", options.import_scripts);
+}
+
+/** Where the document came from, as the caller describes it. */
+RouteResult read_import_source (const nlohmann::json& body, vayu::core::ImportSource& source) {
+    if (auto outcome = read_string_option (body, "fileName", source.file_name); !outcome) {
+        return outcome;
+    }
+    if (auto outcome = read_string_option (body, "sourceUrl", source.source_url); !outcome) {
+        return outcome;
+    }
+    const auto found = body.find ("unresolvedRefs");
+    if (found == body.end () || found->is_null ()) {
+        return {};
+    }
+    if (!found->is_number_integer () || found->get<long long> () < 0) {
+        return std::unexpected (
+        body_error ("Invalid 'unresolvedRefs': must be a non-negative integer"));
+    }
+    source.unresolved_refs = found->get<int> ();
+    return {};
+}
 
 /**
  * Testable core of POST /import/parse - the parse, answered, nothing written.
@@ -1080,45 +1163,12 @@ import_parse_response (vayu::db::Database& db, const nlohmann::json& body) {
     }
 
     vayu::core::ImportOptions options;
-    if (auto found = body.find ("importEnvironments");
-    found != body.end () && !found->is_null ()) {
-        if (!found->is_boolean ()) {
-            return as_response (
-            body_error ("Invalid 'importEnvironments': must be a boolean"));
-        }
-        options.import_environments = found->get<bool> ();
+    if (auto outcome = read_import_options (body, options); !outcome) {
+        return as_response (outcome.error ());
     }
-    if (auto found = body.find ("importScripts");
-    found != body.end () && !found->is_null ()) {
-        if (!found->is_boolean ()) {
-            return as_response (
-            body_error ("Invalid 'importScripts': must be a boolean"));
-        }
-        options.import_scripts = found->get<bool> ();
-    }
-
     vayu::core::ImportSource source;
-    if (auto found = body.find ("fileName"); found != body.end () && !found->is_null ()) {
-        if (!found->is_string ()) {
-            return as_response (
-            body_error ("Invalid 'fileName': must be a string"));
-        }
-        source.file_name = found->get<std::string> ();
-    }
-    if (auto found = body.find ("sourceUrl"); found != body.end () && !found->is_null ()) {
-        if (!found->is_string ()) {
-            return as_response (
-            body_error ("Invalid 'sourceUrl': must be a string"));
-        }
-        source.source_url = found->get<std::string> ();
-    }
-    if (auto found = body.find ("unresolvedRefs");
-    found != body.end () && !found->is_null ()) {
-        if (!found->is_number_integer () || found->get<long long> () < 0) {
-            return as_response (body_error (
-            "Invalid 'unresolvedRefs': must be a non-negative integer"));
-        }
-        source.unresolved_refs = found->get<int> ();
+    if (auto outcome = read_import_source (body, source); !outcome) {
+        return as_response (outcome.error ());
     }
 
     vayu::core::ImportParse parsed = vayu::core::parse_import (content, options, source);
