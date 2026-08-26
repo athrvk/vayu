@@ -50,7 +50,7 @@ bool plateaued (const CapacityConfig& config, const std::vector<CapacityWindow>&
     const auto& base = levels[levels.size () - 3];
     const auto& mid  = levels[levels.size () - 2];
     const auto& top  = levels[levels.size () - 1];
-    if (!(base.concurrency < mid.concurrency && mid.concurrency < top.concurrency)) {
+    if (base.concurrency >= mid.concurrency || mid.concurrency >= top.concurrency) {
         return false;
     }
     if (!(base.rps > 0.0)) {

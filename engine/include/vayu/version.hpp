@@ -12,9 +12,15 @@
  * @brief Vayu Engine version information
  */
 
+// Macros, not an enum: build.py's version bump rewrites these exact
+// `#define` lines by regex, and VAYU_VERSION_STRING must stay a macro for
+// the string literal pasting in user_agent.cpp - the parts stay in the same
+// spelling beside it.
+// NOLINTBEGIN(modernize-macro-to-enum)
 #define VAYU_VERSION_MAJOR 0
 #define VAYU_VERSION_MINOR 23
 #define VAYU_VERSION_PATCH 0
+// NOLINTEND(modernize-macro-to-enum)
 
 #define VAYU_VERSION_STRING "0.23.0"
 

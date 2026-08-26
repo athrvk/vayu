@@ -786,9 +786,15 @@ ImportTally* tally) {
         const json* response = sampler.deref (&entry.value ());
         auto example         = response_example (entry.key (), response, tally,
                 [&] (const json& node) -> std::optional<ExamplePayload> {
-            const std::string content_type = json_produced ?
-                    *json_produced :
-                    (produces.empty () ? std::string ("application/json") : produces.front ());
+            const std::string content_type = [&] {
+                if (json_produced) {
+                    return *json_produced;
+                }
+                if (produces.empty ()) {
+                    return std::string ("application/json");
+                }
+                return produces.front ();
+            }();
             if (const json* documented = as_record (prop (&node, "examples"))) {
                 // `declared[contentType] ?? declared["application/json"]`, then
                 // `!== undefined` - so an explicitly documented `null` is a body

@@ -564,7 +564,7 @@ std::string escape_xml_cdata (const std::string& text) {
         out += SPLIT;
         cursor = found + CLOSER.size ();
     }
-    out.append (text, cursor, std::string::npos);
+    out.append (text, cursor);
     return out;
 }
 

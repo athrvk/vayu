@@ -177,7 +177,7 @@ const AuthRefreshTuning& tuning) {
         0.0;
         state->publish (
         vayu::http::oauth2_header_value (state->config (), token.access_token), at_seconds,
-        token.expires_in > 0 ? token.created_at + token.expires_in * 1000 : 0);
+        token.expires_in > 0 ? token.created_at + (token.expires_in * 1000) : 0);
         vayu::utils::log_info ("OAuth2: refreshed the token for run " + context->run_id);
     }
 }

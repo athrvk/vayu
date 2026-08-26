@@ -98,8 +98,11 @@ const std::string& owner_label) {
 
         // bind_to_any_port answers -1 on failure, bind_to_port a bool; both
         // become 0 here so every caller has one "nothing is listening" check.
-        bound = port > 0 ? (server_->bind_to_port (bind_address, port) ? port : 0) :
-                           server_->bind_to_any_port (bind_address);
+        if (port > 0) {
+            bound = server_->bind_to_port (bind_address, port) ? port : 0;
+        } else {
+            bound = server_->bind_to_any_port (bind_address);
+        }
         if (bound <= 0) {
             return out;
         }

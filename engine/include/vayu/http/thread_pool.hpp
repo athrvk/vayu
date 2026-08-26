@@ -40,7 +40,8 @@ class ThreadPool {
         using return_type = decltype (f (args...));
 
         auto task = std::make_shared<std::packaged_task<return_type ()>> (
-        std::bind (std::forward<F> (f), std::forward<Args> (args)...));
+        [f = std::forward<F> (f),
+        ... args = std::forward<Args> (args)] () mutable { return f (args...); });
 
         std::future<return_type> result = task->get_future ();
         submit_impl ([task] () { (*task) (); });

@@ -55,7 +55,6 @@ std::pair<int, nlohmann::json>
 get_spec_document_meta_response (vayu::db::Database& db, const std::string& id);
 std::pair<int, nlohmann::json>
 delete_spec_document_response (vayu::db::Database& db, const std::string& id);
-std::string spec_content_hash (const std::string& content);
 // Defined in collections.cpp / requests.cpp / import.cpp.
 std::pair<int, nlohmann::json>
 create_collection_response (vayu::db::Database& db, const nlohmann::json& json);

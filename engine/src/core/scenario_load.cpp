@@ -440,7 +440,7 @@ const ScenarioExecution& execution) {
 
         context->event_loop->submit (request,
         [context, &db, state, vu, step_index, iteration, row, finish_step] (
-        size_t, vayu::Result<vayu::Response> result) {
+        size_t, const vayu::Result<vayu::Response>& result) {
             const bool errored = result.is_error () || result.value ().has_error ();
             if (!errored) {
                 state->steps.record (step_index, result.value ().timing.total_ms);

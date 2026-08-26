@@ -508,8 +508,7 @@ const std::vector<std::optional<ScriptValidationTotals>>& per_step) {
 
 RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_errors, EngineDefaults engine_defaults)
 : run_id (id),
-  config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()),
-  start_time_ms (0) {
+  config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()) {
     // Initialize MetricsCollector with configuration from test config
     MetricsCollectorConfig mc_config;
     mc_config.max_errors = max_errors;
@@ -561,11 +560,11 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     // between the caller's number and the engine setting's.
     if (config.value ("stream", false)) {
         vayu::StreamBounds bounds;
-        bounds.max_duration_ms = config.value ("maxStreamDurationMs",
-        static_cast<int64_t> (engine_defaults.stream_max_duration_ms));
-        bounds.max_events      = config.value ("maxStreamEvents",
-             static_cast<int64_t> (engine_defaults.stream_max_events));
-        stream_bounds          = bounds;
+        bounds.max_duration_ms =
+        config.value ("maxStreamDurationMs", engine_defaults.stream_max_duration_ms);
+        bounds.max_events =
+        config.value ("maxStreamEvents", engine_defaults.stream_max_events);
+        stream_bounds = bounds;
     }
     mc_config.max_exemplar_results =
     static_cast<size_t> (config.value ("max_exemplar_results",

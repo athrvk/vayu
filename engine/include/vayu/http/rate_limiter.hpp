@@ -121,7 +121,7 @@ class RateLimiter {
     RateLimiterConfig config_;
     mutable std::mutex mutex_;
 
-    double tokens_;
+    double tokens_ = 0.0;
     std::chrono::steady_clock::time_point last_refill_;
 };
 

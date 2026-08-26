@@ -771,7 +771,7 @@ class RelayTest : public ::testing::Test {
         return context;
     }
 
-    httplib::Client client () {
+    httplib::Client client () const {
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
         return client;

@@ -303,11 +303,11 @@ constexpr int MIN_DERIVED_SCRAPE_TIMEOUT_MS = 100;
  */
 namespace script_engine {
 /// Memory limit for the script engine in bytes (64MB)
-constexpr size_t MEMORY_LIMIT = 64 * 1024 * 1024;
+constexpr size_t MEMORY_LIMIT = size_t{ 64 } * 1024 * 1024;
 /// Script execution timeout in milliseconds
 constexpr uint64_t TIMEOUT_MS = 5000;
 /// Stack size for the script engine in bytes (256KB)
-constexpr size_t STACK_SIZE = 256 * 1024;
+constexpr size_t STACK_SIZE = size_t{ 256 } * 1024;
 /// Whether to enable console output from scripts
 constexpr bool ENABLE_CONSOLE = true;
 /**
@@ -331,10 +331,10 @@ namespace json {
 /// Default indentation level for JSON serialization
 constexpr int DEFAULT_INDENT = 2;
 /// Maximum size for JSON field parsing to prevent OOM (10MB)
-constexpr size_t MAX_FIELD_SIZE = 10 * 1024 * 1024;
+constexpr size_t MAX_FIELD_SIZE = size_t{ 10 } * 1024 * 1024;
 /// Maximum request/response body bytes stored per design-run trace (5MB).
 /// Larger bodies are truncated in results.trace_data with bodyTruncated set.
-constexpr size_t MAX_TRACE_BODY_BYTES = 5 * 1024 * 1024;
+constexpr size_t MAX_TRACE_BODY_BYTES = size_t{ 5 } * 1024 * 1024;
 } // namespace json
 
 /**
@@ -357,7 +357,7 @@ constexpr size_t MAX_DATA_ROWS = 1000;
 /// ceiling is cpp-httplib's 100MB body cap, which would surface as a reset
 /// connection rather than as a message naming what was wrong. This is the
 /// engine-authored bound that answers first.
-constexpr size_t MAX_DATA_BYTES = 16 * 1024 * 1024;
+constexpr size_t MAX_DATA_BYTES = size_t{ 16 } * 1024 * 1024;
 /// Largest number of per-step `results` rows one scenario run stores (config
 /// key `maxScenarioStoredSteps`; 0 = unlimited). `Database::get_results` loads
 /// every row of a run with no limit and the report parses each `trace_data`,
@@ -446,7 +446,7 @@ constexpr size_t DEFAULT_MAX_SAMPLE_BODY_BYTES = 32768;
 /// only the bodies are dropped - counted by
 /// MetricsCollector::sample_bodies_dropped so the UI can say the set is
 /// incomplete rather than showing a silently biased subset.
-constexpr size_t DEFAULT_MAX_SAMPLE_BYTES = 2 * 1024 * 1024;
+constexpr size_t DEFAULT_MAX_SAMPLE_BYTES = size_t{ 2 } * 1024 * 1024;
 /// How many exemplars of each distinct status code a run guarantees to retain.
 /// Small on purpose: exemplars answer "what does a 503 from this target look
 /// like", which the first few answer as well as the first few hundred.
@@ -503,7 +503,7 @@ constexpr std::size_t RETAINED_EVENTS_CEILING = 200000;
 
 /// Bytes of one event's `data` kept, seeding `sseMaxEventBytes`. Also the cap
 /// on any single unterminated line, which is what bounds the parser itself.
-constexpr std::size_t MAX_EVENT_BYTES     = 64 * 1024;
+constexpr std::size_t MAX_EVENT_BYTES     = std::size_t{ 64 } * 1024;
 constexpr std::size_t MIN_EVENT_BYTES     = 256;
 constexpr std::size_t EVENT_BYTES_CEILING = 8UL * 1024 * 1024;
 
@@ -560,7 +560,7 @@ constexpr int RELAY_CLAIM_STALE_INTERVALS = 2;
 namespace inbox {
 /// Stored bytes per capture, seeding the `inboxMaxBodyBytes` setting. A larger
 /// body is truncated with the flag set.
-constexpr int64_t MAX_BODY_BYTES = 64 * 1024;
+constexpr int64_t MAX_BODY_BYTES = int64_t{ 64 } * 1024;
 /// Bounds on that setting. The floor keeps a capture from being all flag and no
 /// payload; the ceiling is the transport limit below, past which nothing is
 /// read at all.
@@ -648,7 +648,7 @@ constexpr size_t MAX_REFRESH_TOKENS = 256;
 /// How long an authorization code stays exchangeable. RFC 6749 §4.1.2 asks for
 /// a short lifetime; this matches the interactive attempt TTL in
 /// oauth_authorize.cpp so the two halves of one flow expire together.
-constexpr int64_t CODE_TTL_MS = 5 * 60 * 1000;
+constexpr int64_t CODE_TTL_MS = int64_t{ 5 } * 60 * 1000;
 /// Ceiling on the `slow` failure mode's delay. Past a minute the caller is
 /// testing its own timeout, and the sleep holds a cpp-httplib pool thread.
 constexpr int64_t MAX_SLOW_MS = 60000;
@@ -669,7 +669,7 @@ namespace request_example {
 /// Body bytes per stored example. A larger body is a 400, never a silent
 /// truncation: an example whose body is not what the caller sent would be
 /// served as if it were (phase 2), and a half-body is worse than a refusal.
-constexpr size_t MAX_BODY_BYTES = 1024 * 1024;
+constexpr size_t MAX_BODY_BYTES = size_t{ 1024 } * 1024;
 /// Examples one request may hold. Bounds the list read and the per-request
 /// slice of a bulk import.
 constexpr size_t MAX_PER_REQUEST = 100;
@@ -701,7 +701,7 @@ namespace spec_document {
 /// parse path already carries. Engine-authored so an oversized document is
 /// refused with a message naming the count and the cap, the way `MAX_DATA_BYTES`
 /// is - cpp-httplib's own body cap would drop the connection instead.
-constexpr size_t MAX_BYTES = 10 * 1024 * 1024;
+constexpr size_t MAX_BYTES = size_t{ 10 } * 1024 * 1024;
 
 /// Operation rows one stored `spec_documents.operations` index may declare, and
 /// the same number of rows a coverage block reports (issue #629).
@@ -735,7 +735,7 @@ constexpr size_t READ_NODES_FLOOR = 4096;
 /// The absolute ceiling on that budget, whatever `maxSpecDocumentBytes` is
 /// raised to. The DOM is held whole while the index is extracted, so this is
 /// the memory bound of a single write.
-constexpr size_t MAX_READ_NODES = 4 * 1000 * 1000;
+constexpr size_t MAX_READ_NODES = size_t{ 4 } * 1000 * 1000;
 
 /// Status codes one coverage row may list under `statusesSeen`/`undeclaredSeen`.
 /// A misconfigured target can answer one operation with hundreds of distinct

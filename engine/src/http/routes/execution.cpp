@@ -671,9 +671,12 @@ const nlohmann::json& scripts) {
 
         // A stream names its own terminal status: one the user stopped is
         // `Stopped`, which neither the response nor the error flag can say.
-        auto status = stream ?
-        stream->status :
-        (has_error ? vayu::RunStatus::Failed : vayu::RunStatus::Completed);
+        vayu::RunStatus status = vayu::RunStatus::Completed;
+        if (stream) {
+            status = stream->status;
+        } else if (has_error) {
+            status = vayu::RunStatus::Failed;
+        }
         db.update_run_status_with_retry (*run_id, status);
 
         // A design run reached a terminal status - trim the run history so
@@ -1143,9 +1146,13 @@ void register_execution_routes (RouteContext& ctx) {
                 StreamRecord record;
                 nlohmann::json scripts = nlohmann::json::object ();
                 record.events = vayu::http::stream_trace_node (context);
-                record.status = context.end_reason () == vayu::http::SseEndReason::Stopped ?
-                vayu::RunStatus::Stopped :
-                (response.has_error () ? vayu::RunStatus::Failed : vayu::RunStatus::Completed);
+                if (context.end_reason () == vayu::http::SseEndReason::Stopped) {
+                    record.status = vayu::RunStatus::Stopped;
+                } else if (response.has_error ()) {
+                    record.status = vayu::RunStatus::Failed;
+                } else {
+                    record.status = vayu::RunStatus::Completed;
+                }
 
                 const bool has_script_output = !post_request_script.empty () ||
                 !pre_script_result.tests.empty () ||
@@ -1549,11 +1556,15 @@ void register_execution_routes (RouteContext& ctx) {
         }
 
         nlohmann::json response;
-        response["runId"]   = run_id;
-        response["status"]  = to_string (vayu::RunStatus::Pending);
-        response["message"] = is_scenario_load ?
-        "Scenario load test started" :
-        (is_scenario ? "Collection run started" : "Load test started");
+        response["runId"]  = run_id;
+        response["status"] = to_string (vayu::RunStatus::Pending);
+        if (is_scenario_load) {
+            response["message"] = "Scenario load test started";
+        } else if (is_scenario) {
+            response["message"] = "Collection run started";
+        } else {
+            response["message"] = "Load test started";
+        }
 
         res.status = 202;
         res.set_content (response.dump (), "application/json");

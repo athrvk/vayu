@@ -36,7 +36,7 @@ namespace detail {
  */
 struct TransferData {
     size_t request_id = 0;
-    std::chrono::steady_clock::time_point submitted_at{};
+    std::chrono::steady_clock::time_point submitted_at;
     Request request;
     Response response;
     std::string response_body;
@@ -61,7 +61,7 @@ struct TransferData {
     /// When the duration cap expires. Computed at configure time from
     /// `stream_bounds->max_duration_ms`, so the clock is read once per transfer
     /// rather than once per callback.
-    std::chrono::steady_clock::time_point stream_deadline{};
+    std::chrono::steady_clock::time_point stream_deadline;
     /// Set by whichever cap ended the transfer, so the completion can report a
     /// **success** where curl reports an aborted write. Distinct from
     /// `body_limit_exceeded`, which stays an error: the byte cap is a refusal

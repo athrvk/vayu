@@ -33,9 +33,14 @@ struct TokenError {
     // `{}` rather than bare declarations: every construction here is a
     // three-field aggregate init for a failure that carries no provider body,
     // and without the default member initializer each of those eight sites is
-    // a -Wmissing-field-initializers warning. Empty is the intended value.
+    // a -Wmissing-field-initializers warning. Empty is the intended value -
+    // which is why the redundant-member-init finding on each is suppressed:
+    // the initializer is redundant to the default constructor but not to the
+    // aggregate-init warning.
+    // NOLINTBEGIN(readability-redundant-member-init)
     std::string provider_error{};             // RFC 6749 "error"
     std::string provider_error_description{}; // RFC 6749 "error_description"
+    // NOLINTEND(readability-redundant-member-init)
 };
 
 /**

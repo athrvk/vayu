@@ -208,7 +208,7 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
 TEST_F (StatsRouteTest, TickPaginationNeverSplitsATick) {
     const std::string id = seed_run ();
     for (int i = 0; i < 3; ++i) {
-        auto sample = sample_at (1000 + i * 1000, static_cast<double> (i));
+        auto sample = sample_at (1000 + (i * 1000), static_cast<double> (i));
         add_tick (id, sample.timestamp, vayu::core::build_metric_tick_payload (sample));
     }
 

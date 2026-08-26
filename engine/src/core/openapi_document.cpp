@@ -161,7 +161,11 @@ nlohmann::ordered_json plain_scalar (const std::string& text) {
         base = 10;
     } else if (digits.size () > 2 && digits[0] == '0' &&
     (digits[1] == 'x' || digits[1] == 'o' || digits[1] == 'b')) {
-        base = digits[1] == 'x' ? 16 : (digits[1] == 'o' ? 8 : 2);
+        switch (digits[1]) {
+        case 'x': base = 16; break;
+        case 'o': base = 8; break;
+        default: base = 2; break;
+        }
     }
     if (base != 0) {
         const std::string body{ base == 10 ? digits : digits.substr (2) };
@@ -456,6 +460,18 @@ std::string scalar_text (const nlohmann::ordered_json& value) {
     return is_plain_safe (text) ? text : dump (value);
 }
 
+/// The one-line spelling of a leaf: an empty container as its brackets, a
+/// scalar as `scalar_text`.
+std::string leaf_text (const nlohmann::ordered_json& value) {
+    if (value.is_object ()) {
+        return "{}";
+    }
+    if (value.is_array ()) {
+        return "[]";
+    }
+    return scalar_text (value);
+}
+
 void emit_map (const nlohmann::ordered_json& node, size_t indent, std::string& out);
 void emit_seq (const nlohmann::ordered_json& node, size_t indent, std::string& out);
 
@@ -474,7 +490,7 @@ void emit_after_marker (const nlohmann::ordered_json& value, size_t indent, std:
         return;
     }
     out += ' ';
-    out += value.is_object () ? "{}" : (value.is_array () ? "[]" : scalar_text (value));
+    out += leaf_text (value);
     out += '\n';
 }
 
@@ -509,7 +525,7 @@ void emit_seq (const nlohmann::ordered_json& node, size_t indent, std::string& o
         }
         out.append (indent, ' ');
         out += "- ";
-        out += item.is_object () ? "{}" : (item.is_array () ? "[]" : scalar_text (item));
+        out += leaf_text (item);
         out += '\n';
     }
 }
@@ -841,9 +857,7 @@ std::string emit_yaml (const nlohmann::ordered_json& document) {
         emit_seq (document, 0, out);
         return out;
     }
-    out += document.is_object () ?
-    "{}" :
-    (document.is_array () ? "[]" : scalar_text (document));
+    out += leaf_text (document);
     out += '\n';
     return out;
 }

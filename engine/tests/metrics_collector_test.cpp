@@ -398,7 +398,7 @@ TEST_F (MetricsCollectorTest, ThreadSafeRecording) {
     EXPECT_EQ (collector->total_requests (), num_threads * requests_per_thread);
     EXPECT_EQ (collector->total_errors (), num_threads * (requests_per_thread / 10));
     EXPECT_EQ (collector->success_count (),
-    num_threads * requests_per_thread - num_threads * (requests_per_thread / 10));
+    (num_threads * requests_per_thread) - (num_threads * (requests_per_thread / 10)));
 }
 
 // The std::atomic counters above are not the interesting part - the histogram

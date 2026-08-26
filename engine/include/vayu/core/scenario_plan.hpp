@@ -82,12 +82,12 @@ struct ScenarioStep {
     /// The step's parsed auth, kept **only** when its credentials carry a
     /// `{{data.column}}`. `NoAuth` for every other step, whose auth is already
     /// resolved into `request` above.
-    vayu::http::Auth auth{};
+    vayu::http::Auth auth;
     /// The stored `requests.spec_operation` text, "" for a step whose request
     /// names no operation. Carried on the step so contract coverage (#629) can
     /// resolve each step's identity **once**, when the tally is built, rather
     /// than parsing it per completion on the load path.
-    std::string spec_operation{};
+    std::string spec_operation;
     /// `auth`'s tokens, split once here like `data_template`.
     ///
     /// **Non-empty means this step's auth was deferred**: `request` carries no

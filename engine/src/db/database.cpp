@@ -1897,8 +1897,9 @@ void Database::prune_runs (int max_runs, int max_age_days) {
         std::chrono::system_clock::now ().time_since_epoch ())
                             .count ();
         // 0 disables the age cap; guard the multiply against overflow.
-        const int64_t age_cutoff =
-        max_age_days > 0 ? now - static_cast<int64_t> (max_age_days) * 86'400'000LL : 0;
+        const int64_t age_cutoff = max_age_days > 0 ?
+        now - (static_cast<int64_t> (max_age_days) * 86'400'000LL) :
+        0;
 
         int kept = 0;
         for (const auto& run : runs) {
@@ -2056,7 +2057,7 @@ int Database::add_inbox_request (const InboxRequest& capture, int64_t max_captur
     int assigned_id = 0;
     retry_on_busy ("append inbox capture", 5, std::chrono::milliseconds (100), [&] {
         impl_->storage.transaction ([&] {
-            assigned_id = static_cast<int> (impl_->storage.insert (capture));
+            assigned_id = impl_->storage.insert (capture);
 
             if (max_captures > 0) {
                 const int64_t stored = impl_->storage.count<InboxRequest> (
@@ -2142,7 +2143,7 @@ const std::vector<PendingResultBody>& bodies) {
             std::vector<int> result_ids;
             result_ids.reserve (results.size ());
             for (const auto& result : results) {
-                result_ids.push_back (static_cast<int> (impl_->storage.insert (result)));
+                result_ids.push_back (impl_->storage.insert (result));
             }
 
             // Dedup within the run: identical bodies (the norm for a load test)
@@ -2164,7 +2165,7 @@ const std::vector<PendingResultBody>& bodies) {
                         blob.run_id  = results[pending.result_index].run_id;
                         blob.hash    = pending.body_hash;
                         blob.content = pending.body;
-                        blob_id = static_cast<int> (impl_->storage.insert (blob));
+                        blob_id      = impl_->storage.insert (blob);
                         blob_ids.emplace (pending.body_hash, blob_id);
                     }
                 }

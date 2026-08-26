@@ -31,6 +31,7 @@
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
@@ -39,16 +40,6 @@
 using nlohmann::json;
 using vayu::json::parse_variables;
 using vayu::json::serialize_variables;
-
-namespace vayu::http::routes {
-// Defined in execution.cpp. The tail of POST /execute: writes back whatever the
-// pre/post-request scripts left in the three variable scopes.
-void persist_script_variables (vayu::db::Database& db,
-const vayu::db::Run& run,
-const vayu::Environment& env,
-const vayu::Environment& globals,
-const vayu::Environment& collectionVariables);
-} // namespace vayu::http::routes
 
 namespace {
 

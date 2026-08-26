@@ -102,8 +102,15 @@ void register_cookie_routes (RouteContext& ctx) {
         std::optional<std::string> (req.get_param_value ("environmentId")) :
         std::nullopt;
         auto response = clear_cookies_response (ctx.cookie_jar, scope);
-        vayu::utils::log_info ("DELETE /cookies - scope=" +
-        (scope ? (scope->empty () ? std::string ("none") : *scope) : std::string ("all")) +
+        std::string scope_label;
+        if (!scope) {
+            scope_label = "all";
+        } else if (scope->empty ()) {
+            scope_label = "none";
+        } else {
+            scope_label = *scope;
+        }
+        vayu::utils::log_info ("DELETE /cookies - scope=" + scope_label +
         ", cleared=" + std::to_string (response["cleared"].get<size_t> ()));
         res.set_content (response.dump (), "application/json");
     });

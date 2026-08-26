@@ -134,13 +134,11 @@ struct ResultRecord {
 
     ResultRecord () = default;
     ResultRecord (int64_t ts, int status, double latency)
-    : timestamp (ts), status_code (status), latency_ms (latency),
-      error_code (ErrorCode::None) {
+    : timestamp (ts), status_code (status), latency_ms (latency) {
     }
 
     ResultRecord (int64_t ts, ErrorCode code, std::string msg)
-    : timestamp (ts), status_code (0), latency_ms (0.0), error_code (code),
-      error_message (std::move (msg)) {
+    : timestamp (ts), error_code (code), error_message (std::move (msg)) {
     }
 
     [[nodiscard]] bool is_error () const {
@@ -269,8 +267,7 @@ enum class SuccessTraceReason : std::uint8_t {
  */
 class MetricsCollector {
     public:
-    explicit MetricsCollector (const std::string& run_id,
-    MetricsCollectorConfig config = {});
+    explicit MetricsCollector (std::string run_id, MetricsCollectorConfig config = {});
     ~MetricsCollector ();
 
     // Non-copyable, non-movable (due to atomics and mutex)

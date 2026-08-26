@@ -1246,8 +1246,7 @@ void register_run_routes (RouteContext& ctx) {
             } catch (...) {
                 offset = 0;
             }
-            if (offset < 0)
-                offset = 0;
+            offset = std::max<int64_t> (offset, 0);
         }
 
         vayu::db::RunFilter filter;
@@ -1549,8 +1548,7 @@ void register_run_routes (RouteContext& ctx) {
             } catch (...) {
                 offset = 0;
             }
-            if (offset < 0)
-                offset = 0;
+            offset = std::max<int64_t> (offset, 0);
         }
 
         try {

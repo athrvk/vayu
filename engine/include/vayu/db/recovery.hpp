@@ -92,8 +92,8 @@ std::optional<RecoveryOutcome> recovery_outcome_from_string (const std::string& 
  * (`created_at` on every row), so a reader formats it the way it formats those.
  */
 struct RecoveryRecord {
-    RecoveryOutcome outcome;
-    int64_t at;
+    RecoveryOutcome outcome{};
+    int64_t at = 0;
     /**
      * Where the corrupt database was moved to, when it was moved rather than
      * deleted (issue #984).

@@ -90,7 +90,7 @@ namespace vayu::http {
  * empty, so the empty key cannot collide with one, and naming it keeps the
  * "no environment" jar findable by grep.
  */
-inline constexpr std::string_view NO_ENVIRONMENT_SCOPE = "";
+inline constexpr std::string_view NO_ENVIRONMENT_SCOPE{};
 
 /**
  * @brief One cookie, as read back out of the jar for a *view*.

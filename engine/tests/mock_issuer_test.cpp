@@ -66,7 +66,11 @@ json decode_jwt_payload (const std::string& jwt) {
     }
     std::string standard = parts[1];
     for (char& c : standard) {
-        c = c == '-' ? '+' : (c == '_' ? '/' : c);
+        if (c == '-') {
+            c = '+';
+        } else if (c == '_') {
+            c = '/';
+        }
     }
     const auto decoded = vayu::utils::base64_decode (standard);
     if (!decoded) {
