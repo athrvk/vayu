@@ -22,10 +22,28 @@ import sys
 # `path:line:col: warning: text [check-name]`. clang-tidy also emits `error:`
 # for a `clang-diagnostic-*` under WarningsAsErrors and for a genuine parse
 # failure; both are findings a scan must count, not skip.
+#
+# The `(?:[A-Za-z]:)?` is the Windows drive letter, and leaving it out is how
+# this scan reported `0 findings over 206 translation units` for a log holding
+# 679 of them: every path on that leg is `D:\a\vayu\...`, the colon after the
+# drive is indistinguishable from the colon before the line number, and a file
+# group that forbids colons matches none of them. Linux paths have no drive
+# prefix, so the same regex read that leg correctly - which is exactly why the
+# defect could sit here unseen.
 LOCATED = re.compile(
-    r"^(?P<file>[^:]*[^:\s][^:]*):(?P<line>\d+):(?P<col>\d+): "
+    r"^(?P<file>(?:[A-Za-z]:)?[^:]*[^:\s][^:]*):(?P<line>\d+):(?P<col>\d+): "
     r"(?:warning|error): (?P<text>.*?) \[(?P<check>[\w.-]+(?:,[\w.-]+)*)\]\s*$"
 )
+
+# Deliberately loose: any line that *looks* like a diagnostic, whether or not
+# the structured patterns above can read it. This is not used to count
+# findings - it is used to catch the parser having failed, which is the one
+# failure mode a report cannot describe about itself. Twice now this script has
+# answered "zero" for a log full of diagnostics, both times because a real
+# diagnostic took a shape a regex did not anticipate; a shape nobody
+# anticipated is precisely what the next one will be too, so the guard asks
+# the question structurally instead of enumerating forms.
+DIAGNOSTIC_SHAPED = re.compile(r"(?:^|[:\s])(?:warning|error): ")
 
 # The same diagnostic with **no location at all** - `error: no such file or
 # directory: '...' [clang-diagnostic-error]`. A driver failure is reported this
@@ -87,11 +105,15 @@ def main() -> int:
     root = pathlib.PurePath(args.root)
     findings = {}
     unfinished = 0
+    diagnostic_shaped = 0
+    unreadable = []
     for line in text.splitlines():
         line = line.rstrip("\r")
         if NOT_PROCESSED.match(line):
             unfinished += 1
             continue
+        if DIAGNOSTIC_SHAPED.search(line):
+            diagnostic_shaped += 1
         match = LOCATED.match(line)
         if match:
             # An alias reports under both names on one line; the first is
@@ -110,6 +132,9 @@ def main() -> int:
             check = match.group("check").split(",")[0]
             key = ("(no location)", 0, 0, check + ": " + match.group("text"))
             findings.setdefault(key, match.group("text"))
+            continue
+        if DIAGNOSTIC_SHAPED.search(line):
+            unreadable.append(line)
 
     print(f"## {args.label}")
     print()
@@ -126,6 +151,20 @@ def main() -> int:
             f"linted clean, so this scan measured nothing it can be trusted on."
         )
         print()
+
+    if not findings and diagnostic_shaped:
+        print(
+            f"::error::{args.label}: the log holds {diagnostic_shaped} diagnostic-shaped "
+            f"line(s) and this script parsed none of them into a finding. That is a "
+            f"defect in this script, not a clean tree - a zero it produced here would "
+            f"be the false green it exists to prevent. Fix the pattern before trusting "
+            f"any number from this scan."
+        )
+        print()
+        print("First few lines it could not read:")
+        for line in unreadable[:5]:
+            print(f"    {line}")
+        return 1
 
     if not findings and not unfinished:
         print("Zero findings.")
