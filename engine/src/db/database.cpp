@@ -614,67 +614,196 @@ struct Database::Impl {
     }
 };
 
+namespace {
+
+namespace fs = std::filesystem;
+
+/** Copies a database file and its `-wal`/`-shm` sidecars over the destination. */
+bool copy_db_files (const fs::path& src, const fs::path& dst) {
+    std::error_code ec;
+    if (!fs::exists (src, ec))
+        return false;
+
+    // Copy main file
+    fs::copy_file (src, dst, fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        vayu::utils::log_warning ("Backup copy failed: " + ec.message ());
+        return false;
+    }
+
+    // Copy WAL/SHM if they exist
+    fs::path src_wal = src.string () + "-wal";
+    fs::path dst_wal = dst.string () + "-wal";
+    if (fs::exists (src_wal, ec)) {
+        fs::copy_file (src_wal, dst_wal, fs::copy_options::overwrite_existing, ec);
+    }
+
+    fs::path src_shm = src.string () + "-shm";
+    fs::path dst_shm = dst.string () + "-shm";
+    if (fs::exists (src_shm, ec)) {
+        fs::copy_file (src_shm, dst_shm, fs::copy_options::overwrite_existing, ec);
+    }
+    return true;
+}
+
+/**
+ * Whether `file` could be a SQLite database at all, answered without
+ * opening it.
+ *
+ * Asking SQLite instead *destroys evidence*: an open that fails with "file
+ * is not a database" deletes the `-wal` and `-shm` beside the file first
+ * (measured, not assumed), and a `-wal` holds committed transactions the
+ * main file does not - so by the time the recovery branch below moved the
+ * set aside there was nothing left to move but the main file. Sixteen bytes
+ * answer the question, so a file SQLite would refuse outright never reaches
+ * it. A file it *recognises* and then fails on is still its to recover, WAL
+ * included; this covers the case where it would not even try.
+ */
+bool has_sqlite_header (const fs::path& file) {
+    std::error_code ec;
+    const auto size = fs::file_size (file, ec);
+    // A zero-length file is a valid empty database to SQLite, and an
+    // unreadable one is the probe's question rather than this one's.
+    if (ec || size == 0) {
+        return true;
+    }
+    constexpr std::string_view SQLITE_HEADER =
+    std::string_view ("SQLite format 3\0", 16);
+    std::array<char, 16> header{};
+    std::ifstream in (file, std::ios::binary);
+    in.read (header.data (), static_cast<std::streamsize> (header.size ()));
+    return in.gcount () == static_cast<std::streamsize> (header.size ()) &&
+    std::string_view (header.data (), header.size ()) == SQLITE_HEADER;
+}
+
+/**
+ * Move a corrupt file set aside instead of deleting it, returning where it
+ * went, or `nullopt` when it could not be moved (issue #984).
+ *
+ * SQLite's own `.recover` can usually pull most rows out of a damaged
+ * file - but only while the file exists, and the previous behaviour deleted
+ * it at the exact moment it was the last copy of anything. The sidecars go
+ * with it because a `-wal` holds committed transactions the main file does
+ * not.
+ */
+std::optional<fs::path> quarantine_db_files (const fs::path& original) {
+    std::error_code ec;
+    if (!fs::exists (original, ec)) {
+        return std::nullopt;
+    }
+
+    // A stamped name rather than a fixed one, so a second corruption does
+    // not overwrite the evidence from the first. The loop is for the
+    // pathological case of two runs landing in the same millisecond: a
+    // taken name is stepped over, never written through.
+    int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                    .count ();
+    fs::path quarantined;
+    for (int attempt = 0; attempt < 1000; ++attempt, ++stamp) {
+        fs::path candidate = original;
+        candidate += std::string (QUARANTINE_INFIX) + std::to_string (stamp);
+        if (!fs::exists (candidate, ec)) {
+            quarantined = std::move (candidate);
+            break;
+        }
+    }
+    if (quarantined.empty ()) {
+        return std::nullopt;
+    }
+
+    fs::rename (original, quarantined, ec);
+    if (ec) {
+        vayu::utils::log_error (
+        "Could not move the corrupt database aside (" + ec.message () +
+        "); it will be deleted so the engine can start.");
+        return std::nullopt;
+    }
+    for (const char* suffix : { "-wal", "-shm" }) {
+        std::error_code sidecar_ec;
+        const fs::path from = original.string () + suffix;
+        if (fs::exists (from, sidecar_ec)) {
+            fs::rename (from, quarantined.string () + suffix, sidecar_ec);
+        }
+    }
+    vayu::utils::log_warning ("Corrupt database moved to " + quarantined.string () +
+    " - recover rows from it with: sqlite3 " + quarantined.string () + " .recover");
+    return quarantined;
+}
+
+/**
+ * What a start does when the database it found will not open.
+ *
+ * The backup is validated *before* the corrupt original is touched, so a start
+ * that finds both files broken still has both of them afterwards.
+ *
+ * @param probe whether a database at a path opens and carries this build's
+ *        schema - the constructor's own, because only it can name `Impl`.
+ */
+void recover_database (const fs::path& db_file,
+const fs::path& backup_file,
+const std::string& db_path,
+const std::function<bool (const std::string&)>& probe) {
+// The backup is validated *before* the corrupt original is touched, so
+// a start that finds both files broken still has both of them
+// afterwards.
+const bool backup_exists = fs::exists (backup_file);
+const bool backup_valid  = backup_exists &&
+has_sqlite_header (backup_file) && probe (backup_file.string ());
+if (backup_exists && !backup_valid) {
+    vayu::utils::log_error ("The backup at " +
+    backup_file.string () + " does not open either; it is left in place and will not be restored.");
+}
+
+// Nothing to recover from when the file is simply absent - that is a
+// first run, and the fresh database below is the right answer to it.
+if (fs::exists (db_file)) {
+    const std::optional<fs::path> quarantined = quarantine_db_files (db_file);
+    std::optional<std::string> quarantined_path;
+    if (quarantined) {
+        quarantined_path = quarantined->string ();
+        prune_quarantined_databases (db_path, QUARANTINE_SETS_KEPT);
+    } else {
+        // Quarantining is what this branch exists to do, but a rename
+        // that fails must not become a daemon that will not start: the
+        // corrupt files are removed as before, and the marker says so
+        // rather than claiming a copy the user could go and look for.
+        std::error_code ec;
+        fs::remove (db_file, ec);
+        fs::remove (db_file.string () + "-wal", ec);
+        fs::remove (db_file.string () + "-shm", ec);
+    }
+
+    RecoveryOutcome outcome = quarantined ?
+    RecoveryOutcome::StartedFreshQuarantined :
+    RecoveryOutcome::DeletedCorrupt;
+    if (backup_valid && copy_db_files (backup_file, db_file)) {
+        vayu::utils::log_info (
+        "Database restored from backup. Retrying...");
+        outcome = RecoveryOutcome::RestoredFromBackup;
+    } else if (backup_valid) {
+        vayu::utils::log_error ("The backup validated but could not be "
+                                "copied back; starting fresh.");
+    } else if (backup_exists && quarantined) {
+        outcome = RecoveryOutcome::BackupAlsoCorrupt;
+    }
+
+    // The marker is what tells the user what happened to their data
+    // (issue #922). It has to be written by this branch rather than
+    // inferred later from an empty database, which is exactly what a
+    // genuine first run also looks like. It is written *after* the
+    // files have been moved so a marker never claims an outcome that
+    // did not happen.
+    write_recovery_marker (db_path, outcome, quarantined_path);
+}
+}
+
+} // namespace
+
 Database::Database (const std::string& db_path) {
-    namespace fs = std::filesystem;
     fs::path db_file (db_path);
     fs::path backup_file = db_file;
     backup_file += ".bak";
-
-    // Helper to perform safe file copy
-    auto copy_db_files = [] (const fs::path& src, const fs::path& dst) {
-        std::error_code ec;
-        if (!fs::exists (src, ec))
-            return false;
-
-        // Copy main file
-        fs::copy_file (src, dst, fs::copy_options::overwrite_existing, ec);
-        if (ec) {
-            vayu::utils::log_warning ("Backup copy failed: " + ec.message ());
-            return false;
-        }
-
-        // Copy WAL/SHM if they exist
-        fs::path src_wal = src.string () + "-wal";
-        fs::path dst_wal = dst.string () + "-wal";
-        if (fs::exists (src_wal, ec)) {
-            fs::copy_file (src_wal, dst_wal, fs::copy_options::overwrite_existing, ec);
-        }
-
-        fs::path src_shm = src.string () + "-shm";
-        fs::path dst_shm = dst.string () + "-shm";
-        if (fs::exists (src_shm, ec)) {
-            fs::copy_file (src_shm, dst_shm, fs::copy_options::overwrite_existing, ec);
-        }
-        return true;
-    };
-
-    // Whether `file` could be a SQLite database at all, answered without
-    // opening it.
-    //
-    // Asking SQLite instead *destroys evidence*: an open that fails with "file
-    // is not a database" deletes the `-wal` and `-shm` beside the file first
-    // (measured, not assumed), and a `-wal` holds committed transactions the
-    // main file does not - so by the time the recovery branch below moved the
-    // set aside there was nothing left to move but the main file. Sixteen bytes
-    // answer the question, so a file SQLite would refuse outright never reaches
-    // it. A file it *recognises* and then fails on is still its to recover, WAL
-    // included; this covers the case where it would not even try.
-    auto has_sqlite_header = [] (const fs::path& file) {
-        std::error_code ec;
-        const auto size = fs::file_size (file, ec);
-        // A zero-length file is a valid empty database to SQLite, and an
-        // unreadable one is the probe's question rather than this one's.
-        if (ec || size == 0) {
-            return true;
-        }
-        constexpr std::string_view SQLITE_HEADER =
-        std::string_view ("SQLite format 3\0", 16);
-        std::array<char, 16> header{};
-        std::ifstream in (file, std::ios::binary);
-        in.read (header.data (), static_cast<std::streamsize> (header.size ()));
-        return in.gcount () == static_cast<std::streamsize> (header.size ()) &&
-        std::string_view (header.data (), header.size ()) == SQLITE_HEADER;
-    };
 
     // Whether the database at `path` opens and carries this build's schema.
     //
@@ -694,136 +823,29 @@ Database::Database (const std::string& db_path) {
             return true;
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "DB validation failed for " + path + ": " + std::string (e.what ()));
+            "Database validation failed for " + path + ": " + e.what ());
             return false;
         }
     };
 
-    // Move a corrupt file set aside instead of deleting it, returning where it
-    // went, or `nullopt` when it could not be moved (issue #984).
-    //
-    // SQLite's own `.recover` can usually pull most rows out of a damaged
-    // file - but only while the file exists, and the previous behaviour deleted
-    // it at the exact moment it was the last copy of anything. The sidecars go
-    // with it because a `-wal` holds committed transactions the main file does
-    // not.
-    auto quarantine_db_files = [] (const fs::path& original) -> std::optional<fs::path> {
-        std::error_code ec;
-        if (!fs::exists (original, ec)) {
-            return std::nullopt;
-        }
-
-        // A stamped name rather than a fixed one, so a second corruption does
-        // not overwrite the evidence from the first. The loop is for the
-        // pathological case of two runs landing in the same millisecond: a
-        // taken name is stepped over, never written through.
-        int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
-        std::chrono::system_clock::now ().time_since_epoch ())
-                        .count ();
-        fs::path quarantined;
-        for (int attempt = 0; attempt < 1000; ++attempt, ++stamp) {
-            fs::path candidate = original;
-            candidate += std::string (QUARANTINE_INFIX) + std::to_string (stamp);
-            if (!fs::exists (candidate, ec)) {
-                quarantined = std::move (candidate);
-                break;
-            }
-        }
-        if (quarantined.empty ()) {
-            return std::nullopt;
-        }
-
-        fs::rename (original, quarantined, ec);
-        if (ec) {
-            vayu::utils::log_error (
-            "Could not move the corrupt database aside (" + ec.message () +
-            "); it will be deleted so the engine can start.");
-            return std::nullopt;
-        }
-        for (const char* suffix : { "-wal", "-shm" }) {
-            std::error_code sidecar_ec;
-            const fs::path from = original.string () + suffix;
-            if (fs::exists (from, sidecar_ec)) {
-                fs::rename (from, quarantined.string () + suffix, sidecar_ec);
-            }
-        }
-        vayu::utils::log_warning ("Corrupt database moved to " + quarantined.string () +
-        " - recover rows from it with: sqlite3 " + quarantined.string () + " .recover");
-        return quarantined;
-    };
-
     // 1. Validate current database
-    const bool current_db_valid = has_sqlite_header (db_file) && probe_database (db_path);
-
-    // 2. Recovery Logic
-    if (!current_db_valid) {
-        // The backup is validated *before* the corrupt original is touched, so
-        // a start that finds both files broken still has both of them
-        // afterwards.
-        const bool backup_exists = fs::exists (backup_file);
-        const bool backup_valid  = backup_exists &&
-        has_sqlite_header (backup_file) && probe_database (backup_file.string ());
-        if (backup_exists && !backup_valid) {
-            vayu::utils::log_error ("The backup at " +
-            backup_file.string () + " does not open either; it is left in place and will not be restored.");
-        }
-
-        // Nothing to recover from when the file is simply absent - that is a
-        // first run, and the fresh database below is the right answer to it.
-        if (fs::exists (db_file)) {
-            const std::optional<fs::path> quarantined = quarantine_db_files (db_file);
-            std::optional<std::string> quarantined_path;
-            if (quarantined) {
-                quarantined_path = quarantined->string ();
-                prune_quarantined_databases (db_path, QUARANTINE_SETS_KEPT);
-            } else {
-                // Quarantining is what this branch exists to do, but a rename
-                // that fails must not become a daemon that will not start: the
-                // corrupt files are removed as before, and the marker says so
-                // rather than claiming a copy the user could go and look for.
-                std::error_code ec;
-                fs::remove (db_file, ec);
-                fs::remove (db_file.string () + "-wal", ec);
-                fs::remove (db_file.string () + "-shm", ec);
-            }
-
-            RecoveryOutcome outcome = quarantined ?
-            RecoveryOutcome::StartedFreshQuarantined :
-            RecoveryOutcome::DeletedCorrupt;
-            if (backup_valid && copy_db_files (backup_file, db_file)) {
-                vayu::utils::log_info (
-                "Database restored from backup. Retrying...");
-                outcome = RecoveryOutcome::RestoredFromBackup;
-            } else if (backup_valid) {
-                vayu::utils::log_error ("The backup validated but could not be "
-                                        "copied back; starting fresh.");
-            } else if (backup_exists && quarantined) {
-                outcome = RecoveryOutcome::BackupAlsoCorrupt;
-            }
-
-            // The marker is what tells the user what happened to their data
-            // (issue #922). It has to be written by this branch rather than
-            // inferred later from an empty database, which is exactly what a
-            // genuine first run also looks like. It is written *after* the
-            // files have been moved so a marker never claims an outcome that
-            // did not happen.
-            write_recovery_marker (db_path, outcome, quarantined_path);
-        }
-    } else {
-        // 3. Current DB is VALID. Update the backup for *next* time.
-        // We only backup if validation succeeded. This prevents overwriting good backup with bad DB.
-        vayu::utils::log_debug (
-        "Database validation successful. Updating backup...");
+    if (has_sqlite_header (db_file) && probe_database (db_path)) {
+        // 2. The database is valid. Update the backup for *next* time - only
+        // ever from a database that validated, so a bad one cannot overwrite a
+        // good backup.
+        vayu::utils::log_debug ("Database validation successful. Updating backup...");
         copy_db_files (db_file, backup_file);
+    } else {
+        recover_database (db_file, backup_file, db_path, probe_database);
     }
 
-    // 4. Final Initialization
+    // 3. Final Initialization
     // At this point, we either have a valid original, a restored backup, or a fresh/corrupted file we must attempt to use.
     impl_ = std::make_unique<Impl> (db_path);
     // sync_schema might throw if restore failed or backup was also bad
     impl_->storage.sync_schema ();
 
-    // 5. The recovery record this process reports. Read from the file rather
+    // 4. The recovery record this process reports. Read from the file rather
     // than kept from the branch above, so a marker written by an *earlier*
     // engine run that nothing polled still reaches a client - that survival is
     // the whole reason the fact is on disk instead of in a member.
@@ -1501,6 +1523,44 @@ const std::vector<Request>& requests) {
 // caller listed them in, and an example refresh is expressed as "drop these
 // imported rows, write these" - two halves of one replacement, where writing
 // first would briefly double the list and, on a re-used id, lose the new row.
+void Database::verify_spec_sync_rows_locked (const SpecSyncBatch& batch) {
+    if (impl_->storage.count<Collection> (
+        where (c (&Collection::id) == batch.binding.id)) == 0) {
+        throw MissingRowError ("Collection", batch.binding.id);
+    }
+    for (const auto& row : batch.updated) {
+        if (impl_->storage.count<Request> (where (c (&Request::id) == row.id)) == 0) {
+            throw MissingRowError ("Request", row.id);
+        }
+    }
+}
+
+void Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
+    for (const auto& id : batch.deleted) {
+        impl_->storage.remove_all<RequestExample> (
+        where (c (&RequestExample::request_id) == id));
+        impl_->storage.remove_all<Request> (where (c (&Request::id) == id));
+    }
+    for (const auto& id : batch.deleted_examples) {
+        impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
+    }
+
+    impl_->storage.replace (batch.spec);
+    for (const auto& row : batch.new_collections) {
+        impl_->storage.replace (row);
+    }
+    impl_->storage.update (batch.binding);
+    for (const auto& row : batch.created) {
+        impl_->storage.replace (row);
+    }
+    for (const auto& row : batch.updated) {
+        impl_->storage.update (row);
+    }
+    for (const auto& row : batch.examples) {
+        impl_->storage.replace (row);
+    }
+}
+
 void Database::spec_sync_apply (const SpecSyncBatch& batch) {
     // "spec write" rather than "sync": `POST /specs/bind` commits through this
     // same batch (issue #862), with its create and delete halves empty.
@@ -1512,41 +1572,8 @@ void Database::spec_sync_apply (const SpecSyncBatch& batch) {
 
     retry_on_busy ("apply spec sync", 5, std::chrono::milliseconds (100), [&] {
         impl_->storage.transaction ([&] {
-            if (impl_->storage.count<Collection> (
-                where (c (&Collection::id) == batch.binding.id)) == 0) {
-                throw MissingRowError ("Collection", batch.binding.id);
-            }
-            for (const auto& row : batch.updated) {
-                if (impl_->storage.count<Request> (
-                    where (c (&Request::id) == row.id)) == 0) {
-                    throw MissingRowError ("Request", row.id);
-                }
-            }
-
-            for (const auto& id : batch.deleted) {
-                impl_->storage.remove_all<RequestExample> (
-                where (c (&RequestExample::request_id) == id));
-                impl_->storage.remove_all<Request> (where (c (&Request::id) == id));
-            }
-            for (const auto& id : batch.deleted_examples) {
-                impl_->storage.remove_all<RequestExample> (
-                where (c (&RequestExample::id) == id));
-            }
-
-            impl_->storage.replace (batch.spec);
-            for (const auto& row : batch.new_collections) {
-                impl_->storage.replace (row);
-            }
-            impl_->storage.update (batch.binding);
-            for (const auto& row : batch.created) {
-                impl_->storage.replace (row);
-            }
-            for (const auto& row : batch.updated) {
-                impl_->storage.update (row);
-            }
-            for (const auto& row : batch.examples) {
-                impl_->storage.replace (row);
-            }
+            verify_spec_sync_rows_locked (batch);
+            write_spec_sync_batch_locked (batch);
             return true; // Commit
         });
     });
