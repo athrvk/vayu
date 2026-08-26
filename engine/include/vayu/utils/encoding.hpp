@@ -114,10 +114,12 @@ inline std::optional<std::string> base64_decode (std::string_view in) {
         // callee never assumes a terminator - the suspicious-stringview-data
         // check cannot see that through the ternary, which only exists to keep
         // the pointer non-null for an empty input.
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,bugprone-suspicious-stringview-data-usage)
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         if (sodium_base642bin (reinterpret_cast<unsigned char*> (out.data ()),
-            out.size (), in.empty () ? "" : in.data (), in.size (),
-            ignore.data (), &decoded_len, nullptr, variant) != 0) {
+            out.size (),
+            // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
+            in.empty () ? "" : in.data (), in.size (), ignore.data (),
+            &decoded_len, nullptr, variant) != 0) {
             return std::nullopt;
         }
 
