@@ -298,7 +298,10 @@ TEST_F (ConfigRouteTest, RestartRequiredIsClaimedOnlyByTheEntriesReadAtStartup) 
     << "catalogue empty or unseeded - nothing was scanned";
 
     const std::set<std::string> read_once_at_startup{ "dbBusyTimeout",
-        "dbCacheSize", "dbSynchronous" };
+        "dbCacheSize", "dbSynchronous",
+        // Applied to the logger by daemon.cpp once the database is open
+        // (#985); the file sink then keeps them for the life of the process.
+        "logLevel", "maxLogFileBytes" };
 
     std::set<std::string> flagged;
     for (const auto& entry : entries) {
@@ -386,7 +389,10 @@ TEST_F (ConfigRouteTest, AdvancedFlagsExactlyTheRecordedInternals) {
     const std::set<std::string> expected = { "dbBusyTimeout", "oauth2RefreshRetryMs",
         "oauth2RefreshRetryMaxMs", "oauth2RefreshPollIntervalMs", "inboxLivePollIntervalMs",
         "sseIdleTimeoutMs", "oauth2RefreshMinIntervalMs", "maxStepsPerIteration",
-        "monitorScrapeTimeoutMs", "liveMaxRetainedTicks", "scriptStackSize" };
+        "monitorScrapeTimeoutMs", "liveMaxRetainedTicks", "scriptStackSize",
+        // A per-start log file plus the retention count is the bound a user
+        // reaches for; this one is the backstop under it (#985).
+        "maxLogFileBytes" };
 
     auto entries = db_->get_all_config_entries ();
     ASSERT_FALSE (entries.empty ()) << "catalogue empty - nothing was scanned";

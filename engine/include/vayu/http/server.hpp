@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
 #include <thread>
 
 #include "vayu/core/run_manager.hpp"
@@ -33,9 +34,30 @@ class Server {
     Server (Server&&)                 = delete;
     Server& operator= (Server&&)      = delete;
 
-    void start ();
+    /**
+     * @brief Bind the listener, then serve on it from a background thread.
+     *
+     * The bind happens on the caller's thread so its failure is *returned*
+     * rather than logged from a thread nobody is reading (#983): a taken port
+     * used to leave `is_running_` false a moment after `start()` had already
+     * printed the listening banner, and the daemon read that as a shutdown
+     * request and exited 0.
+     *
+     * @return true once the accept loop owns the port; false when the bind
+     * failed, in which case `bind_error()` names the reason and nothing is
+     * listening.
+     */
+    [[nodiscard]] bool start ();
     void stop ();
     bool is_running () const;
+
+    /**
+     * @brief Why `start()` could not take the port, empty when it did.
+     *
+     * Names the host, the port and the likely cause, so the daemon can print
+     * one line that explains an exit rather than a bare code.
+     */
+    const std::string& bind_error () const;
 
     /**
      * @brief Set a callback to be invoked when /shutdown endpoint is called
@@ -51,6 +73,7 @@ class Server {
     vayu::core::RunManager& run_manager_;
     int port_;
     bool verbose_;
+    std::string bind_error_;
     // Everything from here down to server_ is declared *before* it so it is
     // destroyed *after* it (reverse member order): the httplib lambdas that
     // reference these members are gone with server_, and db_ - external, so

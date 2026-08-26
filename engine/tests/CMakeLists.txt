@@ -52,6 +52,7 @@ add_executable(vayu_tests
     sse_load_stream_test.cpp
     load_stream_events_test.cpp
     sse_stream_test.cpp
+    server_bind_test.cpp
     transport_policy_test.cpp
     tls_verification_test.cpp
     client_certificates_test.cpp
@@ -139,6 +140,7 @@ add_executable(vayu_tests
     schema_validation_test.cpp
     version_isolation_test.cpp
     reentrant_test.cpp
+    logger_test.cpp
     ../src/http/routes/import.cpp
     ../src/http/routes/diagnostics.cpp
     ../src/http/routes/compose.cpp
@@ -332,6 +334,7 @@ set(vayu_scratch_database_suites
     ScratchDatabaseCleanup
     ScriptRequestNameTest
     ScriptVariableScopesTest
+    ServerBindTest
     SpecBindRouteTest
     SpecExportRouteTest
     SpecMatchRouteTest

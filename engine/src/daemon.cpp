@@ -173,6 +173,23 @@ int main (int argc, char* argv[]) {
         return 1;
     }
 
+    // Apply the file sink's configuration, which needs the database the logger
+    // is initialised before: the log directory has to exist and be writable
+    // from the first line, and the first lines are written opening this file.
+    // Both entries are restart-required for that reason - the value in force is
+    // the one read here.
+    const std::string configured_level =
+    db.get_config_string ("logLevel", vayu::core::constants::logging::DEFAULT_LEVEL);
+    if (auto level = vayu::utils::parse_log_level (configured_level)) {
+        vayu::utils::Logger::instance ().set_file_level (*level);
+    } else {
+        vayu::utils::log_warning ("Ignoring unrecognised logLevel '" +
+        configured_level + "' - the log file keeps its default level (" +
+        vayu::core::constants::logging::DEFAULT_LEVEL + ")");
+    }
+    vayu::utils::Logger::instance ().set_max_file_bytes (db.get_config_int (
+    "maxLogFileBytes", vayu::core::constants::logging::DEFAULT_MAX_FILE_BYTES));
+
     // Initialize curl
     vayu::http::global_init ();
 
@@ -199,7 +216,21 @@ int main (int argc, char* argv[]) {
         g_running.store (false);
     });
 
-    server.start ();
+    // A listener that never came up and one that was asked to stop both leave
+    // the wait loop below with `is_running()` false, and telling them apart is
+    // the whole of #983: a taken port used to print the listening banner, fall
+    // into the graceful path and exit 0, so the app saw an engine that had
+    // simply died. The teardown is shared - the lock file and curl's global
+    // state must be released either way - and only the exit code differs.
+    int exit_code = 0;
+    if (!server.start ()) {
+        // `start()` has already logged the reason, which puts it on stderr and
+        // in the log file; what it cannot say is what to do about it.
+        std::cerr << "vayu-engine: exiting 1 - stop the process holding that "
+                     "port, or pass --port, then start the engine again.\n";
+        std::cerr.flush ();
+        exit_code = 1;
+    }
 
     // Wait for shutdown signal (either from OS signal or /shutdown endpoint)
     while (g_running && server.is_running ()) {
@@ -243,5 +274,7 @@ int main (int argc, char* argv[]) {
     // Force flush logs
     vayu::utils::Logger::instance ().flush ();
 
-    return 0;
+    // 1 = the listener never took its port (see the start() check above); 0 =
+    // an ordinary shutdown. Documented in docs/engine/cli.md.
+    return exit_code;
 }

@@ -1343,7 +1343,7 @@ TEST (SseServerShutdownTest, StoppingTheServerDrainsALiveStream) {
     const int port = free_port ();
     {
         vayu::http::Server server (*db, run_manager, port, false);
-        server.start ();
+        ASSERT_TRUE (server.start ());
 
         httplib::Client client ("127.0.0.1", port);
         client.set_read_timeout (20, 0);
