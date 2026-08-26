@@ -63,8 +63,9 @@ engine/
   it, and a non-void test helper cannot use the macro at all - `FAIL ()`
   returns - so it states the absent case as an `if` that `ADD_FAILURE ()`s and
   returns something harmless. `optional_assert_test.cpp` scans `tests/` for the
-  spelling this replaced and fails naming the file, because CI lints a pull
-  request's changed lines only and nothing else holds the family at zero.
+  spelling this replaced and fails naming the file, because the gates lint only
+  the files a change touches (#946) and nothing else holds an *untouched* file
+  at zero.
 - **The reentrant spelling of a C call, always** (#945). `std::localtime` and
   `std::strerror` hand back a pointer into storage the whole process shares, so
   with a worker thread per connection what comes back is a timestamp or an
@@ -112,8 +113,8 @@ engine/
   different answers, and defaulting one to the other erases the distinction its
   callers read. `tests/character_cast_test.cpp` scans `engine/{src,include,tests}`
   and names any file spelling one itself, with a per-file exemption list, because
-  the CI gate scopes to a pull request's changed lines and so holds nothing at
-  zero once these lines stop being new. The casts that are *not* this rule - a
+  the gates lint only the files a change touches (#946) and so hold an
+  *untouched* file at nothing. The casts that are *not* this rule - a
   `sockaddr_in*` off an `addrinfo`, a Windows function pointer off
   `GetProcAddress` - have no primitive to route through and the scan does not
   look at them.
@@ -157,10 +158,11 @@ engine/
   on failure so a reused handle must be cleared between transfers) a bare
   `char[CURL_ERROR_SIZE]` states none of. `tests/bounds_primitives_test.cpp`
   scans `engine/{src,include,tests}` for both spellings with a per-(file, token)
-  exemption list, on batch 1's reasoning: the CI gate scopes to a pull request's
-  changed lines and so holds nothing at zero once these lines stop being new.
+  exemption list, on batch 1's reasoning: the gates lint only the files a
+  change touches (#946) and so hold an *untouched* file at nothing.
   The rest of the family is a subscript, which is not a token - there the gate
-  is the whole of the guard, decided rather than omitted.
+  is the whole of the guard, decided rather than omitted, and since #946 the
+  gate re-checks the whole of every file an edit opens.
 - **A row struct's scalars all carry a default** (#1013,
   `cppcoreguidelines-pro-type-member-init`). The `vayu::db` structs in
   `types.hpp` are aggregates an insert site fills field by field, so one it
@@ -220,23 +222,27 @@ engine/
   four `#define`s, so what is lost is `clang-analyzer-*` over shared code under
   libc++, and it comes back only if a Homebrew LLVM survives that SDK. A pull
   request that is nothing but a bulk reformat carries the **`reformat-pr`**
-  label, which is the whole of the CI gate's escape hatch - line scoping cannot
-  help a change that rewrites a line in every file. **CI lints translation
-  units, never a header** (#940): a header has no `compile_commands.json` entry,
-  so clang-tidy guesses a command for it, and a guess that parses the wrong STL
-  emits `clang-diagnostic-error`s - which are *not* line-filtered, taking the
-  whole gate out of changed-lines scope. The hook is what lints headers, because
-  it names every staged file in one filter and CI's per-file driver does not.
-  **Both gate the changed
-  *lines***: the tree had never been linted and most files carry findings older
-  than any diff, so whole-file gating would fail a pull request for code it did
-  not write. The mechanisms differ on purpose (#902) - CI runs LLVM's
-  `clang-tidy-diff.py`, the hook parses `git diff --cached -U0` hunk headers and
-  passes `--line-filter` itself, because the driver needs Python and a
-  version-matched copy that is packaged differently on each platform, and a
-  fallback to whole-file linting would restore the asymmetry it removes.
-  `VAYU_TIDY_FULL=1` opts one commit back into whole staged files, for paying
-  the backlog down on purpose. Nothing lints at *build*
+  label, which is the whole of the CI gate's escape hatch - the gate's unit of
+  cost is the translation-unit parse, and a reformat asks for one per file it
+  rewrites. **CI lints translation units, never a header as an input** (#940):
+  a header has no `compile_commands.json` entry, so clang-tidy guesses a
+  command for it, and a guess that parses the wrong STL emits
+  `clang-diagnostic-error`s from files nobody touched. A header's findings
+  surface through every changed translation unit that includes it (#946); a
+  header-only change relies on the hook, which lints a staged header directly
+  against the local build tree.
+  **The hook and CI's Linux leg gate whole files** (#946, the promotion that
+  closed the #928 backlog paydown). Changed-lines scoping existed only to
+  quarantine a backlog older than any diff, and went with the backlog *where
+  the zero was measured* - the Linux toolchain: a finding anywhere in a file a
+  commit stages or a Linux-visible pull request change is that change's to
+  fix, or to NOLINT with the reason at the site; the `VAYU_TIDY_FULL` opt-in
+  and the hook's line-filter machinery are gone. **CI's Windows leg stays at
+  changed lines** (#1023): its clang-tidy 20 over MSVC sees a backlog no
+  Linux scan could (`pro-type-vararg` on every `curl_easy_setopt`, 20-only
+  checks, Windows-only code), measured at ~85 findings by the promotion's own
+  PR - it promotes when #1023 zeroes that. Nothing
+  lints at *build*
   time: the commented-out `CMAKE_CXX_CLANG_TIDY` block went with #885, because a
   lint that runs when someone uncomments it never runs. See
   `docs/engine/building.md`.

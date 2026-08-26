@@ -433,8 +433,8 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     return summary;
 }
 
-void execute_scenario_run (std::shared_ptr<RunContext> context,
-std::shared_ptr<const ScenarioExecution> execution,
+void execute_scenario_run (const std::shared_ptr<RunContext>& context,
+const std::shared_ptr<const ScenarioExecution>& execution,
 vayu::db::Database* db_ptr,
 vayu::http::CookieJar* cookie_jar,
 bool verbose,

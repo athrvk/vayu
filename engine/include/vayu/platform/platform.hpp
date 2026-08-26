@@ -22,6 +22,9 @@
 #include <string>
 
 // Platform detection macros
+// Macros, not an enum: every consumer is a preprocessor conditional
+// (`#if VAYU_PLATFORM_WINDOWS`), which an enum cannot serve.
+// NOLINTBEGIN(modernize-macro-to-enum)
 #ifdef _WIN32
 #define VAYU_PLATFORM_WINDOWS 1
 #define VAYU_PLATFORM_UNIX 0
@@ -43,6 +46,7 @@
 #define VAYU_PLATFORM_MACOS 0
 #define VAYU_PLATFORM_LINUX 0
 #endif
+// NOLINTEND(modernize-macro-to-enum)
 
 namespace vayu::platform {
 

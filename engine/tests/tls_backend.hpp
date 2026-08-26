@@ -12,6 +12,7 @@
  * when a build's backend changes. It lives here so there is one.
  */
 
+#include <cstdint>
 #include <curl/curl.h>
 
 #include <string>
@@ -31,7 +32,7 @@ inline std::string tls_backend_name () {
 }
 
 /// The shape a client identity is stored in.
-enum class ClientIdentityFormat {
+enum class ClientIdentityFormat : std::uint8_t {
     /// A PEM certificate and a PEM key, the pair libcurl reads by default.
     PemPair,
     /// A PKCS#12 file, which libcurl reads only when told the type is `P12`.

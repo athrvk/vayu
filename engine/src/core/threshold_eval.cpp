@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <string_view>
 
 #include "vayu/core/run_manager.hpp"
@@ -19,7 +20,7 @@ namespace vayu::core {
 namespace {
 
 /// Which way a budget is breached.
-enum class Direction {
+enum class Direction : std::uint8_t {
     AtMost,  ///< passes while `actual <= limit` (a ceiling)
     AtLeast, ///< passes while `actual >= limit` (a floor)
 };

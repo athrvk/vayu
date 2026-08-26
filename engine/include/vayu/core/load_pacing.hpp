@@ -141,7 +141,7 @@ ramp_target_concurrency (size_t start, size_t target, int64_t ramp_ms, int64_t e
     const double progress =
     static_cast<double> (elapsed_ms) / static_cast<double> (ramp_ms);
     const double value = static_cast<double> (start) +
-    (static_cast<double> (target) - static_cast<double> (start)) * progress;
+    ((static_cast<double> (target) - static_cast<double> (start)) * progress);
     if (value <= 0.0)
         return 0;
     return static_cast<size_t> (value);

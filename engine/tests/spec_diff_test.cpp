@@ -104,6 +104,7 @@ ComparableRequest request_from (const std::string& id, const SpecRequestDraft& e
 /** The compared field names of one changed request, sorted for comparison. */
 std::vector<std::string> field_names (const vayu::core::ChangedRequest& changed) {
     std::vector<std::string> names;
+    names.reserve (changed.fields.size ());
     for (const auto& field : changed.fields) {
         names.emplace_back (vayu::core::spec_field_name (field.field));
     }
@@ -152,6 +153,7 @@ class SpecDiffTest : public ::testing::Test {
     /** The whole collection as an import of `bound_document ()` left it. */
     [[nodiscard]] std::vector<ComparableRequest> bound_collection () const {
         std::vector<ComparableRequest> requests;
+        requests.reserve (bound_.size ());
         for (size_t i = 0; i < bound_.size (); ++i) {
             requests.push_back (request_from ("req_" + std::to_string (i), bound_[i]));
         }
@@ -733,6 +735,7 @@ TEST_F (SpecDiffTest, LeavesARequestAloneWhenTheDocumentAgreesWithTheVerbItHolds
 /** The ticked field names of one changed entry, sorted. */
 std::vector<std::string> safe_field_names (const vayu::core::SafeChangedApply& entry) {
     std::vector<std::string> names;
+    names.reserve (entry.fields.size ());
     for (const SpecField field : entry.fields) {
         names.emplace_back (vayu::core::spec_field_name (field));
     }

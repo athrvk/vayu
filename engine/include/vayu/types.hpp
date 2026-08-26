@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
@@ -50,7 +51,15 @@ using Duration  = std::chrono::milliseconds;
 #endif
 #endif
 
-enum class HttpMethod { GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS };
+enum class HttpMethod : std::uint8_t {
+    GET,
+    POST,
+    PUT,
+    DELETE,
+    PATCH,
+    HEAD,
+    OPTIONS
+};
 
 /**
  * @brief Convert HttpMethod enum to string
@@ -125,7 +134,7 @@ using Headers = std::map<std::string, std::string, CaseInsensitiveLess>;
  * Both carry their content as `Body::fields`, never as `Body::content` - see
  * `vayu/http/form_body.hpp` for the wire encoding of each.
  */
-enum class BodyMode {
+enum class BodyMode : std::uint8_t {
     None,
     Json,
     Text,
@@ -144,7 +153,7 @@ enum class BodyMode {
  * pairs - so a `File` part is only ever valid under `BodyMode::FormData`, and
  * `parse_form_fields` refuses it anywhere else.
  */
-enum class FormFieldType { Text, File };
+enum class FormFieldType : std::uint8_t { Text, File };
 
 /**
  * @brief One entry of a form body.
@@ -199,7 +208,7 @@ struct Body {
  * validation and the seeded config `options` list both derive their allowed
  * values from it rather than writing a literal list, so the two cannot drift.
  */
-enum class HttpVersion { Auto, Http1_1, Http2 };
+enum class HttpVersion : std::uint8_t { Auto, Http1_1, Http2 };
 
 inline std::string to_string (HttpVersion version) {
     switch (version) {
@@ -331,7 +340,7 @@ struct Timing {
 // Error Types (defined early so Response can use ErrorCode)
 // ============================================================================
 
-enum class ErrorCode {
+enum class ErrorCode : std::uint8_t {
     None,
     Timeout,
     ConnectionFailed,
@@ -712,7 +721,7 @@ struct TestResult {
  * dropped entirely until now, which is why every line reached the app's Console
  * tab looking the same whether the script called `log` or `error`.
  */
-enum class ConsoleLevel { Log, Info, Warn, Error };
+enum class ConsoleLevel : std::uint8_t { Log, Info, Warn, Error };
 
 /** Wire spelling of a level. The app matches on these exact strings. */
 [[nodiscard]] constexpr const char* to_string (ConsoleLevel level) noexcept {
@@ -754,7 +763,7 @@ struct ConsoleEntry {
  * caller an instruction it would silently drop.
  */
 struct ScriptControl {
-    enum class Kind {
+    enum class Kind : std::uint8_t {
         None,        ///< The script asked for nothing; run the next step.
         Next,        ///< `setNextRequest(name)` - jump to `target`.
         Skip,        ///< `skipRequest()` - do not send this step.
@@ -808,6 +817,10 @@ struct Variable {
     // `{}` rather than a bare declaration so the ~43 aggregate initializations
     // that stop short of this trailing field are not each a
     // -Wmissing-field-initializers warning; absent still means "unknown age".
+    // Redundant to the default constructor, not to that warning - hence the
+    // suppression rather than the removal (#946 measured the removal: clang
+    // fails the macOS and Windows legs on every one of those sites).
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     std::optional<int64_t> created_at{};
 
     bool operator== (const Variable&) const = default;
@@ -830,7 +843,7 @@ using Environment = std::map<std::string, Variable>;
  * (`attach_design_result`, `utils/json.cpp`), while a scenario run writes one
  * row per step execution. Overloading `design` would break that reader.
  */
-enum class RunType { Design, Load, Scenario };
+enum class RunType : std::uint8_t { Design, Load, Scenario };
 
 inline const char* to_string (RunType type) {
     switch (type) {
@@ -859,7 +872,7 @@ inline std::optional<RunType> parse_run_type (const std::string& str) {
  * published metric tick and stops itself. Every other member's target is a
  * pure function of elapsed time.
  */
-enum class LoadTestType {
+enum class LoadTestType : std::uint8_t {
     ConstantRps,
     ConstantConcurrency,
     RampUp,
@@ -892,7 +905,13 @@ inline std::optional<LoadTestType> parse_load_test_type (const std::string& str)
     return std::nullopt;
 }
 
-enum class RunStatus { Pending, Running, Completed, Failed, Stopped };
+enum class RunStatus : std::uint8_t {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Stopped
+};
 
 inline const char* to_string (RunStatus status) {
     switch (status) {
@@ -1430,6 +1449,9 @@ struct ConfigEntry {
     // load-bearing for the same reason: without a default member initializer,
     // every one of those 53 positional seeds is a `-Wmissing-field-initializers`
     // warning, and the cure belongs on the field rather than at each site.
+    // Redundant to the default constructor, not to that warning - hence the
+    // suppression rather than the removal (#946 measured the removal).
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     std::optional<std::string> unit{};
 };
 

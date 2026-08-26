@@ -103,7 +103,7 @@ class LiveClaimSlot {
     /// at least a keep-alive every interval, so a long gap here is the only
     /// evidence available that its socket is gone: cpp-httplib reports that
     /// only through the next failing write.
-    std::chrono::steady_clock::time_point last_write_{};
+    std::chrono::steady_clock::time_point last_write_;
 };
 
 } // namespace vayu::http

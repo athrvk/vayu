@@ -62,7 +62,7 @@ namespace vayu::http {
  * Why a stream ended. Always one of these - a stream that simply stopped
  * producing is `Idle`, not an unexplained silence.
  */
-enum class SseEndReason {
+enum class SseEndReason : std::uint8_t {
     /// The server closed the stream. The ordinary end of a finite stream.
     Completed,
     /// `POST /runs/:id/stop`.
@@ -204,7 +204,7 @@ class SseStreamContext {
     /// The initial response's status line and headers, recorded as soon as they
     /// arrive so the relay can report what the stream is even before its first
     /// event. Zero status means nothing has been received yet.
-    void note_response_open (int status_code, std::string status_text, Headers headers);
+    void note_response_open (int status_code, std::string status_text, const Headers& headers);
 
     /// The single-watcher slot. Guarded by `claim_mutex_` rather than the ring
     /// lock: a relay claiming or releasing must not contend with the producer.

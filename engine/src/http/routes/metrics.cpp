@@ -10,6 +10,7 @@
  * @brief Metrics streaming routes (SSE endpoints for real-time stats)
  */
 
+#include <algorithm>
 #include <thread>
 
 #include "vayu/http/routes.hpp"
@@ -192,17 +193,15 @@ std::pair<int64_t, int64_t> parse_time_series_pagination (const httplib::Request
             limit = std::stoll (req.get_param_value ("limit"));
             if (limit <= 0)
                 limit = 5000;
-            if (limit > 50000)
-                limit = 50000; // Cap at 50k for safety
+            limit = std::min<int64_t> (limit, 50000); // Cap at 50k for safety
         } catch (...) {
             limit = 5000;
         }
     }
     if (req.has_param ("offset")) {
         try {
-            offset = std::stoll (req.get_param_value ("offset"));
-            if (offset < 0)
-                offset = 0;
+            offset =
+            std::max<int64_t> (std::stoll (req.get_param_value ("offset")), 0);
         } catch (...) {
             offset = 0;
         }

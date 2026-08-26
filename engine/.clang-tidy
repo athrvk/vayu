@@ -116,11 +116,11 @@ Checks: '
 #     the first to hit this and turned the check off rather than scatter a
 #     NOLINT per function, which would have fixed the gate for exactly the
 #     functions one pull request happened to touch. **Decided in #940: it stays
-#     off, and gets no report-only job.** A whole-tree report job would restate
-#     a list #928 already holds - and #928's completion *is* the re-enable
-#     condition, because the check becomes honourable the moment nothing
-#     pre-existing is left for it to anchor on. Turn it back on there, not in a
-#     second job here. #928 owns the debt and the splits.
+#     off, and gets no report-only job.** #928's completion (#946) met the
+#     re-enable condition that decision attached - the gates are whole-file now
+#     and nothing pre-existing is left for the check to anchor on except the
+#     over-threshold functions themselves - so whether to refactor those,
+#     NOLINT them, or decline the check permanently is #1021's decision.
 #   readability-convert-member-functions-to-static
 #     Proposes making a member static whenever its body happens not to touch
 #     `this`. On a public class that is an API change decided by an
@@ -234,7 +234,12 @@ CheckOptions:
 # which could stop anything. Set here rather than as a `--warnings-as-errors`
 # flag at each call site so the two cannot disagree about what counts.
 WarningsAsErrors: '*'
-HeaderFilterRegex: '.*/(?:src|include|tests)/.*'
+# Anchored to `engine/` deliberately (#946): the unanchored spelling
+# `.*/(src|include|tests)/.*` matched every toolchain's own `include`
+# directory, and the first whole-file lint on Windows reported a finding
+# inside MSVC's `xfilesystem_abi.h`. Both separators, because MSVC paths
+# arrive with backslashes.
+HeaderFilterRegex: '.*[/\\]engine[/\\](?:src|include|tests)[/\\].*'
 ExcludeHeaderFilterRegex: '.*/vendor/.*'
 FormatStyle: file
 ...

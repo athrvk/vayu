@@ -25,9 +25,9 @@
  * hand-rolled copy *works* - it is simply a copy, and a copy of a primitive
  * does not receive the primitive's fixes. Eight of them had accumulated by the
  * time #945's batch 3 counted: six spelling a digest as a `string_view`, and
- * three more spelling a sqlite TEXT column as `const char*`. The CI tidy gate
- * scopes to a pull request's changed lines, so nothing holds the count at zero
- * once these lines stop being new; the scan is what does. Reverting any one of
+ * three more spelling a sqlite TEXT column as `const char*`. The tidy gates
+ * lint only the files a change touches (#946), so nothing holds the count at
+ * zero in a file nobody edits; the scan is what does. Reverting any one of
  * the rewrites fails it.
  */
 

@@ -212,7 +212,7 @@ class Client {
 /// that includes this one. `NOMINMAX` is deliberately PRIVATE to `vayu_core`
 /// (`CMakeLists.txt`), so `vayu-engine` does not get it and `daemon.cpp` is
 /// where that lands - which is exactly how this was found.
-enum class TlsBackendSelection {
+enum class TlsBackendSelection : std::uint8_t {
     /// OpenSSL is the backend every transfer will use, because we said so.
     Selected,
     /// This build has no OpenSSL to select - so whatever it does verify with,

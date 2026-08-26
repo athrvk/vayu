@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <unordered_set>
@@ -67,7 +68,7 @@ inline std::string lower (std::string value) {
 /// Which of the two formats Vayu imports a document claims to be. `None` is
 /// not an error - the document may be a perfectly good file that simply is not
 /// a contract, which is `NotASpecError` on the renderer side.
-enum class Dialect { None, V2, V3 };
+enum class Dialect : std::uint8_t { None, V2, V3 };
 
 /**
  * @brief The dialect @p document declares, by the renderer's detection order.

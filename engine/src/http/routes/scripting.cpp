@@ -11,6 +11,7 @@
  */
 
 #include <array>
+#include <format>
 #include <string>
 
 #include "vayu/http/routes.hpp"
@@ -692,9 +693,10 @@ nlohmann::json get_script_completions () {
         { "insertTextRules", INSERT_AS_SNIPPET },
         { "detail", accessor + ".has(name: string): boolean" },
         { "documentation",
-        "True when the " + noun + " exists and is enabled - the same rows " +
-        accessor + ".get() can read.\n\nExample:\nif (" + accessor + ".has('" +
-        scope.example + "')) { /* ... */ }" },
+        std::format ("True when the {} exists and is enabled - the same rows "
+                     "{}.get() can read.\n\nExample:\nif ({}.has('{}')) {{ /* "
+                     "... */ }}",
+        noun, accessor, accessor, scope.example) },
         { "sortText", sort + "has" } });
 
         completions.push_back ({ { "label", accessor + ".unset" },
@@ -702,11 +704,11 @@ nlohmann::json get_script_completions () {
         { "insertTextRules", INSERT_AS_SNIPPET },
         { "detail", accessor + ".unset(name: string): void" },
         { "documentation",
-        "Remove the " + noun +
-        " entirely. Not the same as setting it to \"\", which leaves an "
-        "enabled empty variable behind for {{template}} resolution to "
-        "find.\n\nExample:\n" +
-        accessor + ".unset('" + scope.example + "');" },
+        std::format (
+        "Remove the {} entirely. Not the same as setting it to \"\", "
+        "which leaves an enabled empty variable behind for "
+        "{{{{template}}}} resolution to find.\n\nExample:\n{}.unset('{}');",
+        noun, accessor, scope.example) },
         { "sortText", sort + "unset" } });
 
         completions.push_back ({ { "label", accessor + ".clear" },
@@ -719,8 +721,10 @@ nlohmann::json get_script_completions () {
         { "kind", KIND_FUNCTION }, { "insertText", accessor + ".toObject()" },
         { "detail", accessor + ".toObject(): Record<string, any>" },
         { "documentation",
-        "A plain object of every enabled " + noun + ", each value cast by its declared type.\n\nExample:\nconsole.log(" +
-        accessor + ".toObject());" },
+        std::format ("A plain object of every enabled {}, each value cast "
+                     "by its declared "
+                     "type.\n\nExample:\nconsole.log({}.toObject());",
+        noun, accessor) },
         { "sortText", sort + "toObject" } });
     }
 

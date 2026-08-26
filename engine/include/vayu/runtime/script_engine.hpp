@@ -15,6 +15,7 @@
  * and access to request/response data.
  */
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -64,7 +65,7 @@ struct ScriptConfig {
 /**
  * @brief Which hook a script is running as, reported to it as `pm.info.eventName`.
  */
-enum class ScriptEvent {
+enum class ScriptEvent : std::uint8_t {
     PreRequest,
     Test,
 };

@@ -509,35 +509,35 @@ Json serialize (const vayu::db::Request& r) {
     return json;
 }
 
-Json serialize (const vayu::db::RequestExample& x) {
+Json serialize (const vayu::db::RequestExample& example) {
     Json json;
-    json["id"]        = x.id;
-    json["requestId"] = x.request_id;
-    json["name"]      = x.name;
-    json["status"]    = x.status;
+    json["id"]        = example.id;
+    json["requestId"] = example.request_id;
+    json["name"]      = example.name;
+    json["status"]    = example.status;
 
     // Headers - stored as JSON array of KeyValueEntry, same as a request's.
     // An unparseable blob degrades to `[]` exactly as the request serializer
     // does: one bad row must not fail the list read it sits in.
-    if (x.headers.empty ()) {
+    if (example.headers.empty ()) {
         json["headers"] = Json::array ();
     } else {
         try {
-            json["headers"] = Json::parse (x.headers);
+            json["headers"] = Json::parse (example.headers);
         } catch (const std::exception&) {
             json["headers"] = Json::array ();
         }
     }
 
-    json["body"]        = x.body;
-    json["contentType"] = x.content_type;
-    json["order"]       = x.order;
-    json["origin"]      = x.origin;
+    json["body"]        = example.body;
+    json["contentType"] = example.content_type;
+    json["order"]       = example.order;
+    json["origin"]      = example.origin;
     // Always present, never inferred from the body's length: only the writer
     // knew the response was cut (issue #659).
-    json["bodyTruncated"] = x.body_truncated;
-    json["createdAt"]     = x.created_at;
-    json["updatedAt"]     = x.updated_at;
+    json["bodyTruncated"] = example.body_truncated;
+    json["createdAt"]     = example.created_at;
+    json["updatedAt"]     = example.updated_at;
     return json;
 }
 

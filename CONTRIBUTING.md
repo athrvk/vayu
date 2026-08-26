@@ -138,10 +138,12 @@ vayu/
   apart again.
 
   A finding fails in both places - the hook refuses the commit, CI fails the
-  engine job - and both gate the **lines** you changed, not the whole file, so
-  a finding older than your diff stops neither (#902). A hook refusal is
-  therefore a merge blocker you are seeing early. To lint whole staged files
-  instead, backlog and all, commit once with `VAYU_TIDY_FULL=1`. See
+  engine job - and the hook and CI's Linux leg gate the **whole of every
+  file** you touch (#946; the tree is clean on that toolchain, so every
+  finding in a file you edit is yours to fix or to NOLINT with a reason).
+  CI's Windows leg still gates changed lines until #1023 zeroes what only
+  its toolchain sees. A hook refusal is therefore a merge blocker you are
+  seeing early. See
   [Static Analysis](docs/engine/building.md#static-analysis).
 
 #### Naming Conventions

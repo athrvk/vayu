@@ -22,6 +22,7 @@
  */
 
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -36,7 +37,7 @@ namespace vayu::http {
 /**
  * @brief Where a transfer's proxy comes from.
  */
-enum class ProxyMode {
+enum class ProxyMode : std::uint8_t {
     /**
      * libcurl's own `http_proxy` / `https_proxy` / `no_proxy` environment
      * pickup - the default, because it is the behaviour every shell and CI
@@ -111,7 +112,7 @@ std::optional<std::string> proxy_url_rejection (std::string_view url);
  * same answer thousands of times - and an answer nothing stored is one the
  * Settings card cannot print. It is written once, when the entry is registered.
  */
-enum class ClientCertFormat {
+enum class ClientCertFormat : std::uint8_t {
     /// A PEM certificate with its key in a second file - libcurl's default.
     Pem,
     /// A PKCS#12 file carrying certificate *and* key, which libcurl reads only

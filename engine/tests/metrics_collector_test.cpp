@@ -341,6 +341,7 @@ TEST_F (MetricsCollectorTest, ThreadSafePerCodeCounts) {
     // Codes spanning every class plus one out-of-range overflow code.
     const std::vector<int> codes = { 200, 201, 301, 404, 500, 503, 999 };
     std::vector<std::thread> threads;
+    threads.reserve (num_threads);
 
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back ([this, &codes] () {
@@ -376,6 +377,7 @@ TEST_F (MetricsCollectorTest, ThreadSafeRecording) {
     const int num_threads         = 8;
     const int requests_per_thread = 1000;
     std::vector<std::thread> threads;
+    threads.reserve (num_threads);
 
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back ([this] () {
@@ -396,7 +398,7 @@ TEST_F (MetricsCollectorTest, ThreadSafeRecording) {
     EXPECT_EQ (collector->total_requests (), num_threads * requests_per_thread);
     EXPECT_EQ (collector->total_errors (), num_threads * (requests_per_thread / 10));
     EXPECT_EQ (collector->success_count (),
-    num_threads * requests_per_thread - num_threads * (requests_per_thread / 10));
+    (num_threads * requests_per_thread) - (num_threads * (requests_per_thread / 10)));
 }
 
 // The std::atomic counters above are not the interesting part - the histogram

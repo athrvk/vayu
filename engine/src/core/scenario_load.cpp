@@ -440,7 +440,7 @@ const ScenarioExecution& execution) {
 
         context->event_loop->submit (request,
         [context, &db, state, vu, step_index, iteration, row, finish_step] (
-        size_t, vayu::Result<vayu::Response> result) {
+        size_t, const vayu::Result<vayu::Response>& result) {
             const bool errored = result.is_error () || result.value ().has_error ();
             if (!errored) {
                 state->steps.record (step_index, result.value ().timing.total_ms);
@@ -455,7 +455,7 @@ const ScenarioExecution& execution) {
             step_index, result.is_error () ? 0 : result.value ().status_code);
             finish_step (vu, step_index, errored,
             errored ? nullptr : &result.value ().cookie_lines);
-            handle_result (context, db, std::move (result),
+            handle_result (context, db, result,
             ResultAnnotations{ row, step_index, iteration });
         });
         context->requests_sent++;

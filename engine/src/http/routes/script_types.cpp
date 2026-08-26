@@ -35,6 +35,7 @@
 // file is built on all three.
 #include <cctype>
 #include <cstddef>
+#include <format>
 #include <map>
 #include <string>
 #include <string_view>
@@ -75,7 +76,7 @@ constexpr const char* ANY_OBJECT = "{ [key: string]: any }";
  * table, so removing or renaming one fails loudly instead of silently degrading
  * that member to `void` and breaking every `.to.not.` completion downstream.
  */
-constexpr const char* CHAIN_CONTINUATIONS[] = { "not", "and" };
+constexpr auto CHAIN_CONTINUATIONS = std::to_array<const char*> ({ "not", "and" });
 
 /**
  * @brief Host globals a browser or Node would have and this sandbox does not.
@@ -361,7 +362,7 @@ Signature parse_signature (const std::string& detail, const std::string& name) {
     sig.params = params_ok ? trim (raw_params) : "...args: any[]";
 
     const auto rest = trim (detail.substr (close + 1));
-    if (rest.rfind (":", 0) == 0) {
+    if (rest.rfind (':', 0) == 0) {
         sig.return_type = trim (rest.substr (1));
     }
     return sig;
@@ -470,7 +471,10 @@ void append_doc (std::string& out, const TypeNode& node, const std::string& inde
     std::string line;
     for (char c : body) {
         if (c == '\n') {
-            out += indent + " * " + line + "\n";
+            out += indent;
+            out += " * ";
+            out += line;
+            out += '\n';
             line.clear ();
         } else {
             line += c;
@@ -652,7 +656,7 @@ std::string generate_script_typedefs () {
             const Signature sig = parse_signature (child.detail, name);
             const std::string params = sig.parsed ? sig.params : "...args: any[]";
             const std::string ret = sig.return_type.empty () ? "void" : sig.return_type;
-            out += "declare function " + name + "(" + params + "): " + ret + ";\n";
+            out += std::format ("declare function {}({}): {};\n", name, params, ret);
         } else {
             out += "declare const " + name + ": " + field_type (child.detail) + ";\n";
         }

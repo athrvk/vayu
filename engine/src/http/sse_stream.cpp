@@ -168,11 +168,13 @@ std::vector<nlohmann::json> SseStreamContext::stored_events () const {
     return stored_;
 }
 
-void SseStreamContext::note_response_open (int status_code, std::string status_text, Headers headers) {
+void SseStreamContext::note_response_open (int status_code,
+std::string status_text,
+const Headers& headers) {
     nlohmann::json open;
     open["statusCode"] = status_code;
     open["statusText"] = std::move (status_text);
-    open["headers"]    = std::move (headers);
+    open["headers"]    = headers;
     append ("open", open);
 }
 

@@ -20,6 +20,7 @@
  * extracted core is exercised directly, no in-process HTTP server.
  */
 
+#include <array>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -176,18 +177,17 @@ TEST_F (SpecMatchRouteTest, RefusesAPayloadTheStoreWouldRefuse) {
         json body;
         const char* what;
     };
-    const Case cases[] = {
-        { json::object (), "no collectionId" },
-        { json{ { "collectionId", "" }, { "operations", json::array () } }, "empty collectionId" },
-        { json{ { "collectionId", "col_x" } }, "no operations" },
-        { json{ { "collectionId", "col_x" }, { "operations", "nope" } }, "operations not an array" },
-        { json{ { "collectionId", "col_x" },
-          { "operations", json::array ({ json::object () }) } },
-        "an operation with no method or path" },
-        { json{ { "collectionId", "col_x" },
-          { "operations", json::array ({ json{ { "method", "GET" }, { "path", "" } } }) } },
-        "an operation with an empty path" },
-    };
+    const auto cases = std::to_array<Case> ({
+    { json::object (), "no collectionId" },
+    { json{ { "collectionId", "" }, { "operations", json::array () } }, "empty collectionId" },
+    { json{ { "collectionId", "col_x" } }, "no operations" },
+    { json{ { "collectionId", "col_x" }, { "operations", "nope" } }, "operations not an array" },
+    { json{ { "collectionId", "col_x" }, { "operations", json::array ({ json::object () }) } },
+    "an operation with no method or path" },
+    { json{ { "collectionId", "col_x" },
+      { "operations", json::array ({ json{ { "method", "GET" }, { "path", "" } } }) } },
+    "an operation with an empty path" },
+    });
     for (const auto& one : cases) {
         auto [status, body] = routes::match_spec_operations_response (*db_, one.body);
         EXPECT_EQ (status, 400) << one.what << ": " << body.dump ();

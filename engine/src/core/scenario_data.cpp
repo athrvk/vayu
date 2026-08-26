@@ -8,6 +8,7 @@
 #include "vayu/core/scenario_data.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -305,11 +306,11 @@ struct XmlOpener {
 /// The three things a `<` in character data can open. Anything else it opens is
 /// a tag, and every tag is @ref XmlPosition::Markup - a `<!DOCTYPE` included,
 /// which ends at its `>` like a tag and carries nothing a row would bind into.
-constexpr XmlOpener XML_OPENERS[] = {
-    { "<!--", XmlPosition::Comment },
-    { "<![CDATA[", XmlPosition::Cdata },
-    { "<?", XmlPosition::ProcessingInstruction },
-};
+constexpr auto XML_OPENERS = std::to_array<XmlOpener> ({
+{ "<!--", XmlPosition::Comment },
+{ "<![CDATA[", XmlPosition::Cdata },
+{ "<?", XmlPosition::ProcessingInstruction },
+});
 
 /// Where @p c leaves a scan that is inside a tag but not inside an attribute
 /// value. Asked twice - once per ordinary character, once for the character
@@ -563,7 +564,7 @@ std::string escape_xml_cdata (const std::string& text) {
         out += SPLIT;
         cursor = found + CLOSER.size ();
     }
-    out.append (text, cursor, std::string::npos);
+    out.append (text, cursor);
     return out;
 }
 

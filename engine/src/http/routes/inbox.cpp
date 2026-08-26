@@ -748,17 +748,15 @@ parse_capture_pagination (const httplib::Request& req, int64_t retained) {
             limit = std::stoll (req.get_param_value ("limit"));
             if (limit <= 0)
                 limit = constants::inbox::DEFAULT_PAGE_LIMIT;
-            if (limit > retained)
-                limit = retained;
+            limit = std::min (limit, retained);
         } catch (...) {
             limit = constants::inbox::DEFAULT_PAGE_LIMIT;
         }
     }
     if (req.has_param ("offset")) {
         try {
-            offset = std::stoll (req.get_param_value ("offset"));
-            if (offset < 0)
-                offset = 0;
+            offset =
+            std::max<int64_t> (std::stoll (req.get_param_value ("offset")), 0);
         } catch (...) {
             offset = 0;
         }

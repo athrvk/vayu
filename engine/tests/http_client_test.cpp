@@ -75,7 +75,11 @@ class MockHttpBin {
             for (const auto& [k, v] : req.headers) {
                 if (!first)
                     body += ",";
-                body += "\"" + k + "\":\"" + v + "\"";
+                body += '"';
+                body += k;
+                body += "\":\"";
+                body += v;
+                body += '"';
                 first = false;
             }
             body += "}";

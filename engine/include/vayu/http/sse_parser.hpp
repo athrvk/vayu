@@ -119,10 +119,10 @@ class SseParser {
 
     std::string event_type_;
     std::string data_;
-    std::size_t data_bytes_    = 0;
-    bool data_truncated_       = false;
-    bool has_data_             = false;
-    std::string last_event_id_ = {};
+    std::size_t data_bytes_ = 0;
+    bool data_truncated_    = false;
+    bool has_data_          = false;
+    std::string last_event_id_;
 };
 
 /**

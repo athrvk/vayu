@@ -81,12 +81,18 @@ struct ScenarioStep {
     StepDataTemplate data_template{};
     /// The step's parsed auth, kept **only** when its credentials carry a
     /// `{{data.column}}`. `NoAuth` for every other step, whose auth is already
-    /// resolved into `request` above.
+    /// resolved into `request` above. The `{}` here and below is load-bearing:
+    /// aggregate initializations of a step that stop short of these trailing
+    /// fields are each a -Wmissing-field-initializers error under clang
+    /// otherwise (#946 measured the removal) - redundant to the default
+    /// constructor, not to that warning.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     vayu::http::Auth auth{};
     /// The stored `requests.spec_operation` text, "" for a step whose request
     /// names no operation. Carried on the step so contract coverage (#629) can
     /// resolve each step's identity **once**, when the tally is built, rather
     /// than parsing it per completion on the load path.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     std::string spec_operation{};
     /// `auth`'s tokens, split once here like `data_template`.
     ///

@@ -50,9 +50,9 @@ void annotate (nlohmann::json& record, const ResultAnnotations& annotations) {
 
 } // namespace
 
-void handle_result (std::shared_ptr<RunContext> context,
+void handle_result (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& /* db - unused, kept for API compat */,
-vayu::Result<vayu::Response> result,
+const vayu::Result<vayu::Response>& result,
 const ResultAnnotations& annotations) {
     // A transfer usually completes as a Response carrying error_code, but two
     // paths still produce a real Error: curl-handle creation failure, and the
@@ -173,9 +173,13 @@ const ResultAnnotations& annotations) {
             // whichever budget claims it, the record is stored, and the
             // exemplar's real job (capturing a body for it) is decided
             // separately below.
-            trace_reason = is_slow ?
-            SuccessTraceReason::Slow :
-            (sampled ? SuccessTraceReason::Sampled : SuccessTraceReason::Exemplar);
+            if (is_slow) {
+                trace_reason = SuccessTraceReason::Slow;
+            } else if (sampled) {
+                trace_reason = SuccessTraceReason::Sampled;
+            } else {
+                trace_reason = SuccessTraceReason::Exemplar;
+            }
 
             nlohmann::json timing_json = { { "totalMs", response.timing.total_ms },
                 { "wireMs", response.timing.wire_ms },
@@ -281,8 +285,8 @@ inline void update_peak (const std::shared_ptr<RunContext>& context) {
 // a null state.
 class SubmissionRequest {
     public:
-    SubmissionRequest (const std::shared_ptr<RunContext>& context, const vayu::Request& request)
-    : state_ (context->auth_refresh), request_ (request) {
+    SubmissionRequest (const std::shared_ptr<RunContext>& context, vayu::Request request)
+    : state_ (context->auth_refresh), request_ (std::move (request)) {
     }
 
     const vayu::Request& current () {
@@ -434,8 +438,8 @@ class ConstantLoadStrategy : public LoadStrategy {
 
                     for (size_t i = 0; i < to_submit && !context->should_stop; ++i) {
                         context->event_loop->submit (live.current (),
-                        [context, &db] (size_t, vayu::Result<vayu::Response> result) {
-                            handle_result (context, db, std::move (result));
+                        [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
+                            handle_result (context, db, result);
                         });
                         submitted++;
                         context->requests_sent++;
@@ -484,8 +488,8 @@ class ConstantLoadStrategy : public LoadStrategy {
 
             auto submit_one = [&context, &db, &live] () {
                 context->event_loop->submit (live.current (),
-                [context, &db] (size_t, vayu::Result<vayu::Response> result) {
-                    handle_result (context, db, std::move (result));
+                [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
+                    handle_result (context, db, result);
                 });
                 context->requests_sent++;
             };
@@ -520,8 +524,8 @@ class IterationsLoadStrategy : public LoadStrategy {
 
         auto submit_one = [&context, &db, &live] () {
             context->event_loop->submit (live.current (),
-            [context, &db] (size_t, vayu::Result<vayu::Response> result) {
-                handle_result (context, db, std::move (result));
+            [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
+                handle_result (context, db, result);
             });
             context->requests_sent++;
         };
@@ -570,8 +574,8 @@ class RampUpLoadStrategy : public LoadStrategy {
 
         auto submit_one = [&context, &db, &live] () {
             context->event_loop->submit (live.current (),
-            [context, &db] (size_t, vayu::Result<vayu::Response> result) {
-                handle_result (context, db, std::move (result));
+            [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
+                handle_result (context, db, result);
             });
             context->requests_sent++;
         };
@@ -769,8 +773,8 @@ class CapacityLoadStrategy : public LoadStrategy {
 
         auto submit_one = [&context, &db, &request] () {
             context->event_loop->submit (request,
-            [context, &db] (size_t, vayu::Result<vayu::Response> result) {
-                handle_result (context, db, std::move (result));
+            [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
+                handle_result (context, db, result);
             });
             context->requests_sent++;
         };

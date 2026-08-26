@@ -72,7 +72,7 @@ struct MockRoute {
 };
 
 /** Why a request did not match, so the 404 body can say which near-miss it was. */
-enum class MockMissKind {
+enum class MockMissKind : std::uint8_t {
     /// Nothing in the table has this path shape at all.
     NoPath,
     /// The path matches a route, but none of them is registered for this method.

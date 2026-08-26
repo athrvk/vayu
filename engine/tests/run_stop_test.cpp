@@ -106,7 +106,8 @@ TEST_F (EventLoopStopTest, StopCancelsInFlightAgainstAHungUpstream) {
     std::atomic<size_t> completed{ 0 };
     std::atomic<size_t> errored{ 0 };
     for (size_t i = 0; i < TOTAL; ++i) {
-        loop.submit (hang_request (), [&] (size_t, vayu::Result<vayu::Response> result) {
+        loop.submit (hang_request (),
+        [&] (size_t, const vayu::Result<vayu::Response>& result) {
             if (result.is_error ())
                 errored++;
             completed++;
@@ -147,7 +148,7 @@ TEST_F (EventLoopStopTest, StopDiscardsTheQueuedBacklog) {
     std::atomic<size_t> completed{ 0 };
     for (size_t i = 0; i < TOTAL; ++i) {
         loop.submit (hang_request (),
-        [&] (size_t, vayu::Result<vayu::Response>) { completed++; });
+        [&] (size_t, const vayu::Result<vayu::Response>&) { completed++; });
     }
 
     auto stop_start = Clock::now ();
@@ -172,7 +173,7 @@ TEST_F (EventLoopStopTest, DrainingStopHonoursItsDeadline) {
     std::atomic<size_t> completed{ 0 };
     for (size_t i = 0; i < TOTAL; ++i) {
         loop.submit (hang_request (),
-        [&] (size_t, vayu::Result<vayu::Response>) { completed++; });
+        [&] (size_t, const vayu::Result<vayu::Response>&) { completed++; });
     }
 
     auto wait_start = Clock::now ();

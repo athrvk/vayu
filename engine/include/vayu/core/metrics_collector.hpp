@@ -24,6 +24,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -133,13 +134,11 @@ struct ResultRecord {
 
     ResultRecord () = default;
     ResultRecord (int64_t ts, int status, double latency)
-    : timestamp (ts), status_code (status), latency_ms (latency),
-      error_code (ErrorCode::None) {
+    : timestamp (ts), status_code (status), latency_ms (latency) {
     }
 
     ResultRecord (int64_t ts, ErrorCode code, std::string msg)
-    : timestamp (ts), status_code (0), latency_ms (0.0), error_code (code),
-      error_message (std::move (msg)) {
+    : timestamp (ts), error_code (code), error_message (std::move (msg)) {
     }
 
     [[nodiscard]] bool is_error () const {
@@ -220,7 +219,7 @@ struct MetricsCollectorConfig {
  * returns; `TIMING_PHASE_KEYS` gives the wire name of each, so the enum and
  * the JSON cannot drift apart.
  */
-enum class TimingPhase : size_t {
+enum class TimingPhase : std::uint8_t {
     Dns       = 0,
     Connect   = 1,
     Tls       = 2,
@@ -253,7 +252,7 @@ inline constexpr std::array<const char*, TIMING_PHASE_COUNT> TIMING_PHASE_KEYS =
  * passed to record_success - a record can sit in the sampled budget and still
  * deserve a body, which no ordering of these three could express.
  */
-enum class SuccessTraceReason {
+enum class SuccessTraceReason : std::uint8_t {
     None,    ///< no trace was built for this completion
     Sampled, ///< the 1-in-N sampler selected it
     Slow,    ///< it crossed slow_threshold_ms
@@ -268,8 +267,7 @@ enum class SuccessTraceReason {
  */
 class MetricsCollector {
     public:
-    explicit MetricsCollector (const std::string& run_id,
-    MetricsCollectorConfig config = {});
+    explicit MetricsCollector (std::string run_id, MetricsCollectorConfig config = {});
     ~MetricsCollector ();
 
     // Non-copyable, non-movable (due to atomics and mutex)

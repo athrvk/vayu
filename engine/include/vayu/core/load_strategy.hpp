@@ -100,9 +100,9 @@ struct ResultAnnotations {
  * @param annotations Reaches the stored record only where one is stored: an
  *           unsampled success keeps no trace, so there is nothing to annotate.
  */
-void handle_result (std::shared_ptr<RunContext> context,
+void handle_result (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
-vayu::Result<vayu::Response> result,
+const vayu::Result<vayu::Response>& result,
 const ResultAnnotations& annotations = {});
 
 /**

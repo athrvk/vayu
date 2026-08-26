@@ -26,9 +26,9 @@
  * libcurl only ever writes on failure - so a buffer that is not cleared answers
  * a later success with an earlier failure's message.
  *
- * The scanning half is for what no behavioural test can reach. The CI tidy gate
- * scopes to a pull request's changed lines, so nothing holds either count at
- * zero once these lines stop being new; the scan is what does. Unlike a
+ * The scanning half is for what no behavioural test can reach. The tidy gates
+ * lint only the files a change touches (#946), so nothing holds either count
+ * at zero in a file nobody edits; the scan is what does. Unlike a
  * subscript, both spellings are tokens - `from_chars` and `CURLOPT_ERRORBUFFER`
  * - so this family is scannable after all, for the two shapes that had copies.
  */

@@ -42,6 +42,7 @@
 
 #include "vayu/core/openapi_document.hpp"
 
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -50,7 +51,7 @@
 namespace vayu::core {
 
 /** The serialization the caller asked for. */
-enum class ExportFormat { Json, Yaml };
+enum class ExportFormat : std::uint8_t { Json, Yaml };
 
 /** One Params or Headers row, as the exporter reads it. */
 struct ExportKeyValue {

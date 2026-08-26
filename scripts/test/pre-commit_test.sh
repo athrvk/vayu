@@ -16,11 +16,11 @@
 # the `|| STATUS=1` on the two invocations, or the `exit 1` at the end - reddens
 # the cases below.
 #
-# The third is what it looks at. The hook gated whole staged files while CI gated
-# the changed lines, so it refused commits over findings CI would let through and
-# `--no-verify` was the way past it. It now passes clang-tidy a `--line-filter`
-# built from the staged hunk headers; dropping that argument, or widening it past
-# the staged range, reddens the line-scope cases.
+# The third is what it looks at: whole staged files (issue #946, the gate
+# promotion that closed the #928 backlog paydown). The hook briefly gated the
+# changed lines instead (#902), while a backlog older than any diff had to be
+# quarantined; with that backlog at zero the scope is the whole of every staged
+# file, and reintroducing a `--line-filter` reddens the scope cases below.
 #
 # The fourth is the formatting check (issue #908). The hook linted but never
 # format-checked, so the whole-tree `Engine formatting` gate - two seconds of
@@ -256,7 +256,7 @@ EOF
 # files matching $2, at line $3 (default 1), in a repo built by $4 (default
 # make_repo). Sets HOOK_OUTPUT and HOOK_STATUS - a global rather than a printed
 # value, because the status has to survive the call and a command substitution
-# would run this in a subshell. TIDY_FULL is the `VAYU_TIDY_FULL` the hook sees.
+# would run this in a subshell.
 #
 # FORMAT_STUB_VERSION, when set, puts a clang-format stub of that version on
 # PATH under FORMAT_STUB_NAME, reporting files matching FORMAT_STUB_DIRTY as
@@ -264,7 +264,6 @@ EOF
 # above, so no real clang-format can answer.
 HOOK_OUTPUT=""
 HOOK_STATUS=0
-TIDY_FULL=""
 FORMAT_STUB_NAME="clang-format"
 FORMAT_STUB_VERSION=""
 FORMAT_STUB_DIRTY=""
@@ -285,7 +284,7 @@ run_hook() {
         tail="$fstub:$tail"
     fi
     set +e
-    HOOK_OUTPUT="$(cd "$repo" && PATH="$stub:$tail" VAYU_TIDY_FULL="$TIDY_FULL" bash "$HOOK" 2>&1)"
+    HOOK_OUTPUT="$(cd "$repo" && PATH="$stub:$tail" bash "$HOOK" 2>&1)"
     HOOK_STATUS=$?
     set -e
     rm -rf "$repo" "$stub" ${fstub:+"$fstub"} ${sandbox:+"$sandbox"}
@@ -464,57 +463,46 @@ else
     fail "clang-tidy 18 still skips" "exit $HOOK_STATUS: $HOOK_OUTPUT"
 fi
 
-# --- What the hook looks at (issue #902) -------------------------------------
+# --- What the hook looks at (issue #946) -------------------------------------
 echo
-echo "pre-commit line scope"
+echo "pre-commit whole-file scope"
 
-# The defect: the hook gated whole staged files while CI gated the changed
-# lines, so a one-line edit to a legacy file was refused a commit over findings
-# CI would let through - and `--no-verify` became the way out. `legacy.cpp` has
-# a finding on line 1, which this commit does not touch.
+# The promotion: with the #928 backlog at zero tree-wide, the hook gates whole
+# staged files - a finding anywhere in a file this commit stages refuses the
+# commit, whether or not the diff touched its line. `legacy.cpp` has a finding
+# on line 1, which this commit does not touch.
 #
-# Mutation-check: drop `LINE_FILTER_ARG` from the clang-tidy invocations in
-# scripts/pre-commit and the stub, seeing no filter, reports every line - this
-# case reddens.
+# Mutation-check: reintroduce a `--line-filter` built from the staged hunks in
+# scripts/pre-commit and the stub, honouring it, reports nothing on line 1 -
+# this case reddens.
 run_hook 19.1.0 legacy.cpp 1 make_repo_with_history
-if [[ "$HOOK_STATUS" -eq 0 ]]; then
-    pass "a finding on a line this commit did not touch lets the commit through"
+if [[ "$HOOK_STATUS" -ne 0 ]]; then
+    pass "a finding on a line this commit did not touch still refuses the commit"
 else
-    fail "a pre-existing finding lets the commit through" "exit $HOOK_STATUS: $HOOK_OUTPUT"
+    fail "a whole-file finding refuses the commit" "the hook exited 0: $HOOK_OUTPUT"
 fi
 
-# The other half. Without it, "filter everything out" would pass the case above
-# - and the hook would be a gate over nothing.
+# No filter is passed at all - asserted on the invocation rather than inferred
+# from the verdict, so a filter that happened to cover line 1 could not pass
+# the case above while narrowing the scope.
+if [[ "$HOOK_OUTPUT" != *"--line-filter"* ]]; then
+    pass "the invocation carries no line filter"
+else
+    fail "the invocation carries no line filter" "got: $HOOK_OUTPUT"
+fi
+
+# A finding on a changed line, for completeness of the promotion: whole-file
+# scope is a superset of the old changed-lines scope.
 run_hook 19.1.0 legacy.cpp 3 make_repo_with_history
 if [[ "$HOOK_STATUS" -ne 0 ]]; then
-    pass "a finding on a line this commit changes still refuses the commit"
+    pass "a finding on a line this commit changes refuses the commit"
 else
     fail "a finding on a changed line refuses the commit" "the hook exited 0: $HOOK_OUTPUT"
 fi
 
-# The ranges themselves, named rather than inferred from the verdict: line 3 is
-# the only line staged, so the filter must say exactly that. A filter naming the
-# whole file would satisfy both cases above and gate nothing.
-if [[ "$HOOK_OUTPUT" == *'--line-filter=[{"name":"legacy.cpp","lines":[[3,3]]}]'* ]]; then
-    pass "the filter carries the staged hunk's range and nothing wider"
-else
-    fail "the filter is the staged hunk's range" "got: $HOOK_OUTPUT"
-fi
-
-# The opt-in for someone paying the backlog down on purpose, which is the one
-# case where a pre-existing finding is the point.
-TIDY_FULL=1
-run_hook 19.1.0 legacy.cpp 1 make_repo_with_history
-TIDY_FULL=""
-if [[ "$HOOK_STATUS" -ne 0 && "$HOOK_OUTPUT" != *"--line-filter"* ]]; then
-    pass "VAYU_TIDY_FULL=1 lints whole staged files again, with no line filter"
-else
-    fail "VAYU_TIDY_FULL=1 lints whole files" "exit $HOOK_STATUS: $HOOK_OUTPUT"
-fi
-
-# A deletion-only staged change has no new line to hold to the config, so there
-# is nothing to lint - and the hook must say so rather than parsing the
-# translation unit to have every finding filtered back out.
+# A deletion-only staged change still lints the whole file: removing a line can
+# create a finding on the lines that remain, and whole-file scope has no
+# nothing-new-to-lint case.
 repo="$(make_repo_with_history)"
 printf 'int a() { return 0; }\nint b() { return 0; }\n' > "$repo/legacy.cpp"
 git -C "$repo" add legacy.cpp
@@ -524,10 +512,10 @@ out="$(cd "$repo" && PATH="$stub:$PATH" bash "$HOOK" 2>&1)"
 status=$?
 set -e
 rm -rf "$repo" "$stub"
-if [[ "$status" -eq 0 && "$out" != *"STUB_LINTED"* && "$out" == *"deletions only"* ]]; then
-    pass "a deletion-only staged change lints nothing and says so"
+if [[ "$status" -ne 0 && "$out" == *"STUB_LINTED"*"legacy.cpp"* ]]; then
+    pass "a deletion-only staged change still lints the whole file"
 else
-    fail "a deletion-only change lints nothing" "exit $status: $out"
+    fail "a deletion-only change lints the whole file" "exit $status: $out"
 fi
 
 # --- Where the PCH flag lives (issue #912) -----------------------------------

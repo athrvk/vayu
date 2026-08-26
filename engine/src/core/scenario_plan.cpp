@@ -8,6 +8,7 @@
 #include "vayu/core/scenario_plan.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <unordered_map>
@@ -120,7 +121,7 @@ collect_requests (vayu::db::Database& db, const std::string& root_id, bool recur
     // renders `childCollections` above `requests` at every depth
     // (`CollectionItem.tsx`), and a recursive run has to execute in the order
     // the user is looking at (issue #431, the #360 rule one level up).
-    enum class Step { Descend, Emit };
+    enum class Step : std::uint8_t { Descend, Emit };
     struct Entry {
         Step step;
         std::string id;

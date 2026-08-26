@@ -332,7 +332,7 @@ TEST_F (ResourceWriteRouteTest, CollectionWrongShapeObjectFieldIsRejected) {
     200);
     const auto before_row = db_->get_collection (id);
     ASSERT_HAS_VALUE (before_row);
-    const auto before = *before_row;
+    const auto& before = *before_row;
 
     for (const char* field : { "variables", "auth", "dataSchema" }) {
         for (const json& bad : wrong_shapes ()) {
@@ -349,7 +349,7 @@ TEST_F (ResourceWriteRouteTest, CollectionWrongShapeObjectFieldIsRejected) {
     // the junk, so asserting only the response would pass either way.
     const auto after_row = db_->get_collection (id);
     ASSERT_HAS_VALUE (after_row);
-    const auto after = *after_row;
+    const auto& after = *after_row;
     EXPECT_EQ (after.variables, before.variables);
     EXPECT_EQ (after.auth, before.auth);
     EXPECT_EQ (after.data_schema, before.data_schema);
@@ -652,7 +652,7 @@ TEST_F (ResourceWriteRouteTest, RequestWrongShapeObjectFieldIsRejected) {
     200);
     const auto before_row = db_->get_request (id);
     ASSERT_HAS_VALUE (before_row);
-    const auto before = *before_row;
+    const auto& before = *before_row;
 
     for (const char* field : { "body", "auth" }) {
         for (const json& bad : wrong_shapes ()) {
@@ -666,7 +666,7 @@ TEST_F (ResourceWriteRouteTest, RequestWrongShapeObjectFieldIsRejected) {
 
     const auto after_row = db_->get_request (id);
     ASSERT_HAS_VALUE (after_row);
-    const auto after = *after_row;
+    const auto& after = *after_row;
     EXPECT_EQ (after.body, before.body);
     EXPECT_EQ (after.auth, before.auth)
     << "a stored non-object auth reads back as no auth, and the request goes "

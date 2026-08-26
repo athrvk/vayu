@@ -315,7 +315,7 @@ nlohmann::json serialize_token (const vayu::db::OAuthToken& t) {
     out["expiresIn"]       = t.expires_in;
     out["createdAt"]       = t.created_at;
     out["expiresAt"]       = t.expires_in > 0 ?
-          nlohmann::json (t.created_at + t.expires_in * 1000) :
+          nlohmann::json (t.created_at + (t.expires_in * 1000)) :
           nlohmann::json (nullptr);
     out["hasRefreshToken"] = !t.refresh_token.empty ();
     return out;

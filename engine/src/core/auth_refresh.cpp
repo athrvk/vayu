@@ -131,7 +131,7 @@ int64_t auth_refresh_delay_ms (int64_t expires_at_ms, int64_t now_ms, const Auth
     return std::max (tuning.min_interval_ms, expires_at_ms - tuning.lead_ms - now_ms);
 }
 
-void run_auth_refresh (std::shared_ptr<RunContext> context,
+void run_auth_refresh (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
 const AuthRefreshTuning& tuning) {
     const auto state = context->auth_refresh;
@@ -177,7 +177,7 @@ const AuthRefreshTuning& tuning) {
         0.0;
         state->publish (
         vayu::http::oauth2_header_value (state->config (), token.access_token), at_seconds,
-        token.expires_in > 0 ? token.created_at + token.expires_in * 1000 : 0);
+        token.expires_in > 0 ? token.created_at + (token.expires_in * 1000) : 0);
         vayu::utils::log_info ("OAuth2: refreshed the token for run " + context->run_id);
     }
 }

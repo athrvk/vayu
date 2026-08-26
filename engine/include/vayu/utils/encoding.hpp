@@ -110,10 +110,16 @@ inline std::optional<std::string> base64_decode (std::string_view in) {
         // short decode. The cast is the writing direction of the [basic.lval]
         // rule `byte_view` above documents - libsodium fills a byte buffer, and
         // this string is one.
+        // The data () below travels with in.size () one argument over, so the
+        // callee never assumes a terminator - the suspicious-stringview-data
+        // check cannot see that through the ternary, which only exists to keep
+        // the pointer non-null for an empty input.
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         if (sodium_base642bin (reinterpret_cast<unsigned char*> (out.data ()),
-            out.size (), in.empty () ? "" : in.data (), in.size (),
-            ignore.data (), &decoded_len, nullptr, variant) != 0) {
+            out.size (),
+            // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
+            in.empty () ? "" : in.data (), in.size (), ignore.data (),
+            &decoded_len, nullptr, variant) != 0) {
             return std::nullopt;
         }
 
@@ -141,7 +147,7 @@ inline std::string hex_encode (std::string_view in) {
     ensure_sodium_initialized ();
 
     // sodium_bin2hex needs room for the terminating NUL and aborts without it.
-    std::string out (in.size () * 2 + 1, '\0');
+    std::string out ((in.size () * 2) + 1, '\0');
     sodium_bin2hex (out.data (), out.size (), detail::sodium_bytes (in), in.size ());
     out.resize (in.size () * 2);
     return out;
@@ -208,16 +214,20 @@ inline std::string url_decode (std::string_view in) {
     out.reserve (in.size ());
     for (size_t i = 0; i < in.size (); ++i) {
         const char ch = in[i];
-        int hi = -1, lo = -1;
         if (ch == '+') {
             out.push_back (' ');
-        } else if (ch == '%' && i + 2 < in.size () &&
-        (hi = unhex (in[i + 1])) >= 0 && (lo = unhex (in[i + 2])) >= 0) {
-            out.push_back (static_cast<char> ((hi << 4) | lo));
-            i += 2;
-        } else {
-            out.push_back (ch);
+            continue;
         }
+        if (ch == '%' && i + 2 < in.size ()) {
+            const int hi = unhex (in[i + 1]);
+            const int lo = unhex (in[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                out.push_back (static_cast<char> ((hi << 4) | lo));
+                i += 2;
+                continue;
+            }
+        }
+        out.push_back (ch);
     }
     return out;
 }

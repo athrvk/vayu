@@ -111,8 +111,8 @@ json map_key_values (const json* rows) {
         entry["key"]   = as_string (prop (record, "key"));
         entry["value"] = normalize_vars (as_string (prop (record, "value")));
         const json* disabled = prop (record, "disabled");
-        entry["enabled"] =
-        !(disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ());
+        entry["enabled"] = disabled == nullptr || !disabled->is_boolean () ||
+        !disabled->get<bool> ();
         if (const json* description = prop (record, "description"); truthy (description)) {
             entry["description"] = as_string (description);
         }
@@ -597,8 +597,7 @@ json map_postman_auth (const json* auth) {
         // A `type` that is not a string names no scheme, so nothing can be sent.
         return json{ { "mode", "none" } };
     }
-    const std::map<std::string, std::string> detail =
-    auth_detail (prop (node, type->c_str ()));
+    const std::map<std::string, std::string> detail = auth_detail (prop (node, *type));
 
     if (*type == "bearer") {
         return json{ { "mode", "bearer" }, { "token", detail_text (detail, "token") } };
@@ -710,7 +709,7 @@ json formdata_fields (const json* rows, PostmanCounts& counts) {
         const json single = json::array ({ row });
         const json mapped = map_key_values (&single);
         const json* type  = prop (&row, "type");
-        if (!(type != nullptr && *type == "file")) {
+        if (type == nullptr || *type != "file") {
             for (const json& entry : mapped) {
                 out.push_back (entry);
             }
@@ -992,6 +991,18 @@ json pm_examples (const json* item, PostmanCounts& counts) {
     return out;
 }
 
+/// Postman's `description` is either a string or `{ content: "..." }` - the
+/// declared text, "" when neither shape carries one.
+std::string pm_description_text (const std::string* text, const std::string* nested) {
+    if (text != nullptr) {
+        return *text;
+    }
+    if (nested != nullptr) {
+        return *nested;
+    }
+    return {};
+}
+
 json pm_request (const json* item, PostmanCounts& counts) {
     const json* declared   = as_record (prop (item, "request"));
     const json empty       = json::object ();
@@ -1013,11 +1024,10 @@ json pm_request (const json* item, PostmanCounts& counts) {
 
     json request;
     request["name"] = name == nullptr || name->is_null () ? "Untitled" : as_string (name);
-    request["description"] =
-    description != nullptr ? *description : (nested != nullptr ? *nested : "");
-    request["method"] = to_method (prop (rq, "method"));
-    request["url"]    = url;
-    request["params"] = params;
+    request["description"] = pm_description_text (description, nested);
+    request["method"]      = to_method (prop (rq, "method"));
+    request["url"]         = url;
+    request["params"]      = params;
     request["headers"] =
     with_required_content_type (map_key_values (prop (rq, "header")), body);
     request["body"] = std::move (body);
@@ -1087,10 +1097,9 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     json collection;
     collection["name"] =
     name == nullptr || name->is_null () ? "Imported Collection" : as_string (name);
-    collection["description"] =
-    text != nullptr ? *text : (nested != nullptr ? *nested : "");
-    collection["variables"] = to_var_record (prop (node, "variable"));
-    collection["auth"]      = collection_auth (prop (node, "auth"));
+    collection["description"] = pm_description_text (text, nested);
+    collection["variables"]   = to_var_record (prop (node, "variable"));
+    collection["auth"]        = collection_auth (prop (node, "auth"));
     collection["preRequestScript"] =
     counts.options.import_scripts ? join_exec (pm_event (events, "prerequest")) : "";
     collection["postRequestScript"] =
@@ -1335,7 +1344,7 @@ json multipart_fields (const json* rows, InsomniaCounts& counts) {
         const json single = json::array ({ kv_row (row) });
         const json mapped = map_key_values (&single);
         const json* type  = prop (&row, "type");
-        if (!(type != nullptr && *type == "file")) {
+        if (type == nullptr || *type != "file") {
             for (const json& entry : mapped) {
                 out.push_back (entry);
             }
@@ -1366,7 +1375,7 @@ std::string to_graphql_envelope (const std::string& body) {
     if (begin == std::string::npos) {
         return js_json_compact (json{ { "query", "" } });
     }
-    const std::string trimmed =
+    std::string trimmed =
     body.substr (begin, body.find_last_not_of (" \t\n\r\f\v") - begin + 1);
     const json parsed = json::parse (trimmed, nullptr, false);
     if (!parsed.is_discarded () && parsed.is_object () &&
@@ -2068,7 +2077,8 @@ class OperationFolders {
             folder["children"]          = json::array ();
             folder["requests"]          = json::array ();
             folders_.emplace (name, std::move (folder));
-        } else if (from_tag && folders_.at (name).at ("description") == "") {
+        } else if (from_tag &&
+        folders_.at (name).at ("description").get_ref<const std::string&> ().empty ()) {
             // A path segment can be spelled exactly like a tag, in which case
             // the folder already exists with no description. The tag's
             // description still describes what is in it.

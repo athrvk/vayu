@@ -15,6 +15,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "optional_assert.hpp"
@@ -116,7 +117,7 @@ class CurlTransferTest : public ::testing::Test {
     /// Run one request through the event loop with the given config.
     vayu::Result<vayu::Response> run_once (const vayu::Request& request,
     vayu::http::EventLoopConfig config = {}) {
-        vayu::http::EventLoop loop (config);
+        vayu::http::EventLoop loop (std::move (config));
         loop.start ();
         auto handle = loop.submit_async (request);
         auto result = handle.future.get ();

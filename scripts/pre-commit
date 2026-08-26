@@ -2,8 +2,8 @@
 
 # Two checks over the staged C++ changes, each mirroring a CI gate that can fail
 # a pull request: clang-format over whole staged engine sources (issue #908),
-# then clang-tidy over the lines this commit changes - or whole files under
-# VAYU_TIDY_FULL, announced below once the staged set is known.
+# then clang-tidy over whole staged files (#946 - the gate promotion that closed
+# the #928 backlog paydown).
 #
 # Neither is stricter than the gate it mirrors, which is the property that keeps
 # `--no-verify` from becoming a reflex: a refusal here is a merge blocker seen
@@ -94,10 +94,11 @@ fi
 # of work that used to be reachable only after a push and a CI round trip; this
 # runs the same check, on the same major, over the sources this commit stages.
 #
-# **Whole files, not changed lines** - the opposite of the clang-tidy pass below
-# and for the opposite reason. The bulk-format commit in `.git-blame-ignore-revs`
-# left the tree clean at the pinned version, so formatting has no backlog to
-# grandfather and file scope already agrees with CI's tree scope.
+# **Whole files, not changed lines** - as the clang-tidy pass below is too,
+# since #946. Formatting got there first: the bulk-format commit in
+# `.git-blame-ignore-revs` left the tree clean at the pinned version, so it
+# never had a backlog to grandfather, where the tidy pass had to pay one down
+# (#928) before its scope could match.
 #
 # `git clang-format --staged` ships beside clang-format and was the primitive to
 # reuse here; it is the wrong one, because it formats the *changed lines*. A
@@ -156,9 +157,9 @@ fi
 
 # The one way out of this hook, so that a verdict is reported where it will be
 # read - last, under whatever else ran - and so that no exit can lose one. The
-# clang-tidy pass below has three legitimate early exits (no clang-tidy, one too
-# old to read the config, a deletions-only change); none of them is a reason to
-# forget that clang-format already refused this commit.
+# clang-tidy pass below has two legitimate early exits (no clang-tidy, one too
+# old to read the config); neither is a reason to forget that clang-format
+# already refused this commit.
 STATUS=0
 end_hook() {
     if [ "$FORMAT_STATUS" -ne 0 ]; then
@@ -183,9 +184,9 @@ end_hook() {
 # (issue #918).
 #
 # The `Lint changed engine sources` step in .github/workflows/pr-tests.yml lints
-# the same lines on clang-tidy 19 before a pull request can merge, so this stays
-# a skip rather than a refusal to commit - a missing or old local toolchain costs
-# a contributor nothing but the early warning.
+# the same files whole on clang-tidy 19 before a pull request can merge, so this
+# stays a skip rather than a refusal to commit - a missing or old local toolchain
+# costs a contributor nothing but the early warning.
 find_llvm_tool clang-tidy "$MIN_CLANG_TIDY_MAJOR" minimum
 CLANG_TIDY="$LLVM_TOOL"
 if [ -z "$CLANG_TIDY" ]; then
@@ -194,44 +195,15 @@ if [ -z "$CLANG_TIDY" ]; then
     echo "         >= ${MIN_CLANG_TIDY_MAJOR}; an older binary rejects the whole config and lints nothing."
     echo "         NOTHING WAS LINTED. Install it ('apt install clang-tidy-${MIN_CLANG_TIDY_MAJOR}',"
     echo "         'brew install llvm@${MIN_CLANG_TIDY_MAJOR}') or rely on CI, which lints the same"
-    echo "         lines on clang-tidy ${MIN_CLANG_TIDY_MAJOR}."
+    echo "         files on clang-tidy ${MIN_CLANG_TIDY_MAJOR}."
     end_hook
 fi
 
-# What it looks at - the lines this commit changes, or whole files under
-# VAYU_TIDY_FULL - is announced below, once the staged set is known. The binary
-# is named because it need not be the plain one.
+# The binary is named because it need not be the plain one.
 echo "Running ${CLANG_TIDY} on staged C++ changes..."
 
-# Turns one file's staged hunk headers into clang-tidy `--line-filter` ranges.
-#
-# `-U0` is what makes this exact: with no context lines, a hunk's new-side range
-# `@@ -a,b +c,d @@` *is* the set of lines this commit adds or rewrites, so the
-# header alone answers the question and the body never has to be read. A hunk
-# with `d` of 0 is a pure deletion and contributes no range - there is no new
-# line there to hold to the config.
-#
-# `h[1] + 0` drops the leading `+` by arithmetic conversion, and a header with
-# no comma (`@@ -3 +3 @@`) means a count of one, which is git's own shorthand.
-staged_line_ranges() {
-    git diff --cached -U0 -- "$1" | awk '
-        /^@@ / {
-            split($3, h, ",")
-            start = h[1] + 0
-            count = (2 in h) ? h[2] + 0 : 1
-            if (count > 0) {
-                printf "%s[%d,%d]", (n++ ? "," : ""), start, start + count - 1
-            }
-        }
-    '
-}
-
-# The files to lint, in the order they were staged, minus the two the loop below
-# used to skip inline (vendored code, and a path that no longer exists on disk).
-# Computed before the line filter because that filter has to name every file in
-# one argument, and clang-tidy drops a diagnostic in any file the filter does not
-# list - so a header's findings would vanish from the translation unit that
-# includes it if the filter were built per invocation.
+# The files to lint, in the order they were staged, minus vendored code and
+# paths that no longer exist on disk (a staged deletion has no file to lint).
 LINT_FILES=
 for FILE in $FILES; do
     if [[ "$FILE" == *"vendor/"* ]]; then
@@ -243,57 +215,21 @@ for FILE in $FILES; do
     LINT_FILES="$LINT_FILES $FILE"
 done
 
-# What this hook looks at, and why it is not the whole file (issue #902).
+# Whole staged files, not changed lines (#946 - the promotion that closed the
+# #928 backlog paydown; CI's Linux leg gates whole changed files too, its
+# Windows leg still changed lines until #1023 zeroes what only that
+# toolchain sees).
 #
-# The engine had never been linted when the gates went in, so most files carry
-# findings older than any current diff. CI gates the *changed lines* for that
-# reason, and this hook used to gate whole staged files - so a contributor who
-# edited one line of a legacy file was refused a commit over findings CI would
-# let through. The predictable end of that is `--no-verify` as a reflex, which
-# costs the hook its whole value: advisory in practice, arrived at from the
-# stricter direction.
-#
-# So the two gates now look at the same lines. The mechanism differs and that is
-# deliberate: CI runs LLVM's `clang-tidy-diff.py`, which needs a Python
-# interpreter and a copy of the driver whose version matches the binary (an
-# 18-era driver rejects the `-allow-no-checks` that `engine/src/runtime/`
-# requires) - dependencies a CI image can pin and a contributor's machine
-# cannot. Falling back to whole-file linting whenever one of them is missing
-# would put the asymmetry back for exactly the people it hurts, so the ranges
-# are computed here instead, from the one thing that is always present: git.
-# `-U0` makes that a header parse rather than a diff implementation.
-#
-# `VAYU_TIDY_FULL=1` restores whole-file linting, for someone paying the backlog
-# down on purpose - that is the one case where the findings CI ignores are the
-# point.
-LINE_FILTER_ARG=()
-if [ -n "${VAYU_TIDY_FULL:-}" ]; then
-    echo "VAYU_TIDY_FULL is set: linting whole staged files, pre-existing findings included."
-else
-    SCOPED_FILES=
-    LINE_FILTER=
-    for FILE in $LINT_FILES; do
-        RANGES=$(staged_line_ranges "$FILE")
-        # Only deletions staged for this file. Parsing the translation unit
-        # would report the backlog alone, and the filter would then drop all of
-        # it - the same answer, minus the parse.
-        if [ -z "$RANGES" ]; then
-            continue
-        fi
-        SCOPED_FILES="$SCOPED_FILES $FILE"
-        [ -n "$LINE_FILTER" ] && LINE_FILTER="$LINE_FILTER,"
-        LINE_FILTER="$LINE_FILTER{\"name\":\"$FILE\",\"lines\":[$RANGES]}"
-    done
-
-    if [ -z "$SCOPED_FILES" ]; then
-        echo "Staged C++ changes add no lines (deletions only); nothing to lint."
-        end_hook
-    fi
-
-    LINT_FILES="$SCOPED_FILES"
-    LINE_FILTER_ARG=("--line-filter=[$LINE_FILTER]")
-    echo "Scoped to the lines this commit changes, as CI is. Whole files: VAYU_TIDY_FULL=1"
-fi
+# Line scoping existed to quarantine a backlog: the engine had never been
+# linted, so most files carried findings older than any diff, and a whole-file
+# hook refused commits over code the committer did not write - `--no-verify` as
+# a reflex, the hook advisory in practice. #928 paid that backlog to zero
+# tree-wide, which removed the only argument for scoping - and the waves
+# measured what scoping cost while it lasted: a retyped constant created a
+# finding on a line its diff never touched (#979), and one branch's whole-file
+# lint of its own 30 changed files found 98 findings where the changed-lines
+# gate, correctly, reported 0 (#946). A finding anywhere in a staged file is
+# yours to fix now, or to NOLINT with the reason at the site.
 
 # What makes this hook a gate rather than a report. clang-tidy is invoked once
 # per file and each invocation's status is kept, so one bad file does not stop
@@ -350,11 +286,11 @@ for FILE in $LINT_FILES; do
     # nothing and say it had linted.
     if [ -f "engine/build/compile_commands.json" ]; then
         "$CLANG_TIDY" --allow-no-checks --extra-arg=-Wno-ignored-gch \
-            "${LINE_FILTER_ARG[@]}" -p engine/build "$FILE" || STATUS=1
+            -p engine/build "$FILE" || STATUS=1
     else
         echo "Warning: compile_commands.json not found in engine/build. clang-tidy might report false positives."
         # Fallback: try to include common directories
-        "$CLANG_TIDY" --allow-no-checks "${LINE_FILTER_ARG[@]}" "$FILE" \
+        "$CLANG_TIDY" --allow-no-checks "$FILE" \
             -- -Iengine/include -Iengine/vendor/quickjs-ng || STATUS=1
     fi
 done
@@ -364,16 +300,8 @@ if [ "$STATUS" -ne 0 ]; then
     echo "clang-tidy reported findings in the staged files above; the commit was refused."
     echo "Fix them, or mark a deliberate exception with a NOLINT comment naming the check."
     echo
-    if [ -n "${VAYU_TIDY_FULL:-}" ]; then
-        echo "VAYU_TIDY_FULL was set, so this run linted whole staged files and the"
-        echo "findings above may include ones that predate your change. Unset it and the"
-        echo "hook reports only the lines you touched, which is what CI gates."
-    else
-        echo "Every finding above is on a line this commit changes - the same lines CI"
-        echo "gates, so this is a merge blocker you are seeing early. To lint whole"
-        echo "staged files instead, backlog included: VAYU_TIDY_FULL=1 git commit"
-    fi
-    echo "To commit anyway: git commit --no-verify"
+    echo "CI lints the same files whole (#946), so this is a merge blocker you are"
+    echo "seeing early. To commit anyway: git commit --no-verify"
 fi
 
 end_hook

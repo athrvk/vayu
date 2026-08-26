@@ -157,6 +157,12 @@ class CurlHandlePool {
  * - Active transfers map for in-flight requests
  * - Rate limiter for controlling throughput
  */
+// The analyzer would reorder the fields to save 84 padding bytes. Declaration
+// order here follows the lifecycle (queue, loop state, transfers, limiter,
+// flags) and is what the constructor's initialization order hangs off; one
+// worker exists per thread, so the bytes saved would be a few hundred per
+// process for a reordering that costs the reader the grouping.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 class EventLoopWorker {
     public:
     explicit EventLoopWorker (const EventLoopConfig& cfg);

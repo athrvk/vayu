@@ -1003,8 +1003,8 @@ TEST_F (DatabaseTest, PruneRunsByAgeDeletesOldOnly) {
                         .count ();
     const int64_t day = 86'400'000LL;
 
-    seed_run_with_children (db, "fresh", now - 1 * day);
-    seed_run_with_children (db, "stale", now - 40 * day);
+    seed_run_with_children (db, "fresh", now - (1 * day));
+    seed_run_with_children (db, "stale", now - (40 * day));
 
     // Count cap disabled; drop anything older than 30 days.
     db.prune_runs (0, 30);
@@ -1073,7 +1073,7 @@ TEST_F (DatabaseTest, PruneRunsByAgeSparesABaselineRun) {
     std::chrono::system_clock::now ().time_since_epoch ())
                         .count ();
     const int64_t day             = 86'400'000LL;
-    const int64_t ninety_days_ago = now - 90 * day;
+    const int64_t ninety_days_ago = now - (90 * day);
     seed_run_with_children (db, "pinned_stale", ninety_days_ago);
     seed_run_with_children (db, "stale", ninety_days_ago);
     ASSERT_HAS_VALUE (db.set_run_baseline ("pinned_stale", true));

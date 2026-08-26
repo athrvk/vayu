@@ -72,8 +72,8 @@ bool insert_at_slot (std::vector<T>& store, size_t capacity, const ReservoirSlot
 }
 } // namespace
 
-MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorConfig config)
-: run_id_ (run_id), config_ (config) {
+MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig config)
+: run_id_ (std::move (run_id)), config_ (config) {
     // Both sample rates are sampling *periods* - "keep 1 in N" - used as the
     // right-hand side of a `%` in the hot record path and as a divisor in the
     // reserve below. A 0 there is integer division by zero: a SIGFPE that takes
@@ -301,9 +301,8 @@ const Timing* phases) {
     // non-atomic `counts[i] += 1; total_count += 1`, which loses increments and
     // tears min/max under concurrent writers.
     // Convert milliseconds to microseconds for histogram precision
-    int64_t latency_us = static_cast<int64_t> (latency_ms * 1000.0);
-    if (latency_us < 1)
-        latency_us = 1; // Minimum 1 microsecond
+    const int64_t latency_us =
+    std::max<int64_t> (static_cast<int64_t> (latency_ms * 1000.0), 1);
     hdr_record_value_atomic (latency_histogram_, latency_us);
     // Also feed the rolling-window recorder for the live per-tick percentiles.
     hdr_interval_recorder_record_value_atomic (&interval_recorder_, latency_us);
