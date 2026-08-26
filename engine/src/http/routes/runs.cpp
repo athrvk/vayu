@@ -326,36 +326,10 @@ void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) 
     extras.capacity     = std::move (capacity);
 }
 
-/**
- * Apply the run's stored `summary` (the whole-run results, written once at
- * terminal status) over the report calculated from the sampled `results`.
- *
- * An absent or unreadable summary leaves the report exactly as the sampled
- * results computed it - there is no second source to fall back to. Keys here
- * are the ones `vayu::core::build_run_summary_payload` writes;
- * runs_route_test.cpp round-trips the pair so the two sides cannot drift apart
- * silently.
- */
-void apply_run_summary (const std::string& summary_json,
+/** The whole-run totals and the latency distribution. */
+void apply_summary_totals (const nlohmann::json& summary,
 vayu::DetailedReport& report,
 ReportExtras& extras) {
-    if (summary_json.empty ()) {
-        return;
-    }
-    nlohmann::json summary;
-    try {
-        summary = nlohmann::json::parse (summary_json);
-    } catch (...) {
-        vayu::utils::log_warning ("Run summary is not valid JSON; reporting "
-                                  "from the sampled results alone");
-        return;
-    }
-    if (!summary.is_object ()) {
-        vayu::utils::log_warning ("Run summary is not an object; reporting "
-                                  "from the sampled results alone");
-        return;
-    }
-
     read_number (summary, "total_requests", report.total_requests);
     read_number (summary, "send_rate", report.send_rate);
     read_number (summary, "throughput", report.throughput);
@@ -385,7 +359,12 @@ ReportExtras& extras) {
         read_number (latency, "p99", report.latency_p99);
         read_number (latency, "p999", report.latency_p999);
     }
+}
 
+/** The status-code map, which replaces the sampled one wholesale when stored. */
+void apply_summary_status_codes (const nlohmann::json& summary,
+vayu::DetailedReport& report,
+ReportExtras& extras) {
     if (summary.contains ("status_codes") &&
     summary["status_codes"].is_object () && !summary["status_codes"].empty ()) {
         report.status_codes.clear ();
@@ -399,7 +378,10 @@ ReportExtras& extras) {
             }
         }
     }
+}
 
+/** What sampling dropped, so the report can say what it is a sample of. */
+void apply_summary_sampling (const nlohmann::json& summary, ReportExtras& extras) {
     if (summary.contains ("sampling") && summary["sampling"].is_object ()) {
         extras.has_sampling  = true;
         const auto& sampling = summary["sampling"];
@@ -411,7 +393,10 @@ ReportExtras& extras) {
         read_number (sampling, "sample_bodies_dropped", extras.sample_bodies_dropped);
         read_number (sampling, "response_bodies_captured", extras.response_bodies_captured);
     }
+}
 
+/** The scenario breakdown - for a load-mode scenario, the only per-step record there is. */
+void apply_summary_scenario (const nlohmann::json& summary, ReportExtras& extras) {
     if (summary.contains ("scenario") && summary["scenario"].is_object ()) {
         extras.has_scenario  = true;
         const auto& scenario = summary["scenario"];
@@ -433,7 +418,10 @@ ReportExtras& extras) {
             extras.step_breakdown = scenario["steps"];
         }
     }
+}
 
+/** What the run observed beside its own timings: vitals, tests, auth, capacity. */
+void apply_summary_observations (const nlohmann::json& summary, ReportExtras& extras) {
     if (summary.contains ("monitor") && summary["monitor"].is_object ()) {
         extras.has_monitor = true;
         extras.monitor     = summary["monitor"];
@@ -461,7 +449,15 @@ ReportExtras& extras) {
     if (summary.contains ("capacity") && summary["capacity"].is_object ()) {
         read_capacity_section (summary["capacity"], extras);
     }
+}
 
+/**
+ * The sections stored in the report's own wire shape and passed through rather
+ * than re-keyed: the producer writes the report's names, so a translation table
+ * here would be a second place to keep them. An empty section is treated as
+ * absent - it names nothing a reader can act on.
+ */
+void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras) {
     // Per-phase distributions, passed through rather than re-keyed: the
     // producer writes the report's own wire names (TIMING_PHASE_KEYS), so a
     // translation table here would be a second place to keep them. An empty
@@ -510,6 +506,44 @@ ReportExtras& extras) {
             read_number (thresholds, "failed", extras.thresholds_failed);
         }
     }
+}
+
+/**
+ * Apply the run's stored `summary` (the whole-run results, written once at
+ * terminal status) over the report calculated from the sampled `results`.
+ *
+ * An absent or unreadable summary leaves the report exactly as the sampled
+ * results computed it - there is no second source to fall back to. Keys here
+ * are the ones `vayu::core::build_run_summary_payload` writes;
+ * runs_route_test.cpp round-trips the pair so the two sides cannot drift apart
+ * silently.
+ */
+void apply_run_summary (const std::string& summary_json,
+vayu::DetailedReport& report,
+ReportExtras& extras) {
+    if (summary_json.empty ()) {
+        return;
+    }
+    nlohmann::json summary;
+    try {
+        summary = nlohmann::json::parse (summary_json);
+    } catch (...) {
+        vayu::utils::log_warning ("Run summary is not valid JSON; reporting "
+                                  "from the sampled results alone");
+        return;
+    }
+    if (!summary.is_object ()) {
+        vayu::utils::log_warning ("Run summary is not an object; reporting "
+                                  "from the sampled results alone");
+        return;
+    }
+
+    apply_summary_totals (summary, report, extras);
+    apply_summary_status_codes (summary, report, extras);
+    apply_summary_sampling (summary, extras);
+    apply_summary_scenario (summary, extras);
+    apply_summary_observations (summary, extras);
+    apply_summary_sections (summary, extras);
 }
 
 // Serialize one run into a list row: identity + status + the compact summary,
@@ -815,44 +849,16 @@ int64_t stop_wait_ms) {
 }
 
 /**
- * Testable core of GET /runs/:id/report, returning {http_status, json_body}. A
- * missing run is a definitive 404 in the shared `{"error": {"code", "message"}}`
- * shape.
+ * The figures the stored summary and the sampled results have to be reconciled
+ * into: the success/failure split from whichever status distribution won, the
+ * error rate that split implies, and the run's rate against its declared target.
  *
- * The whole-run aggregates come from `runs.summary` - the values the run itself
- * computed at completion - laid over a report calculated from the run's sampled
- * `results`. A run with no summary never reached a terminal status (the engine
- * died mid-run), and reports from those sampled results alone rather than
- * erroring. Either way a report is one run row plus its sampled results.
- *
- * Extracted so the wiring is covered without an in-process HTTP server - see
- * runs_route_test.cpp. Exceptions propagate to the route's try/catch (500).
+ * @return the target RPS the run declared, 0 when it declared none.
  */
-std::pair<int, nlohmann::json>
-run_report_response (vayu::db::Database& db, const std::string& run_id) {
-    auto run = db.get_run (run_id);
-    if (!run) {
-        return { 404, error_body (404, "Run not found") };
-    }
-
-    auto results = db.get_results (run_id);
-
-    double duration_s = 0;
-    if (run->start_time > 0) {
-        int64_t end = run->end_time > 0 ? run->end_time : now_ms ();
-        duration_s  = static_cast<double> (end - run->start_time) / 1000.0;
-    }
-
-    auto report =
-    vayu::utils::MetricsHelper::calculate_detailed_report (results, duration_s);
-
-    // No usable summary now means one thing only: the engine died before this
-    // run reached a terminal status, so it never wrote one. The report then
-    // stands on the sampled `results` alone - `calculate_detailed_report`
-    // above - rather than erroring.
-    ReportExtras extras;
-    apply_run_summary (run->summary, report, extras);
-
+double reconcile_report_rates (const std::string& config_snapshot,
+double duration_s,
+const ReportExtras& extras,
+vayu::DetailedReport& report) {
     // Recount the success/failure split from whichever distribution won, so
     // transport errors (status code 0) are counted. Runs with no stored
     // distribution keep the figures derived from the sampled results.
@@ -883,7 +889,7 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
     // Extract target RPS from config
     double target_rps = 0.0;
     try {
-        auto config = nlohmann::json::parse (run->config_snapshot);
+        auto config = nlohmann::json::parse (config_snapshot);
         if (config.contains ("rps")) {
             target_rps = config["rps"].get<double> ();
         } else if (config.contains ("targetRps")) {
@@ -909,17 +915,21 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
         report.total_duration_s =
         static_cast<double> (report.total_requests) / report.actual_rps;
     }
+    return target_rps;
+}
 
+/** What the report says the run *was* - identity, status, and what was asked for. */
+nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db::Run& run) {
     // Build response
     nlohmann::json metadata;
     metadata["runId"]     = run_id;
-    metadata["runType"]   = vayu::to_string (run->type);
-    metadata["status"]    = vayu::to_string (run->status);
-    metadata["startTime"] = run->start_time;
-    metadata["endTime"]   = run->end_time;
+    metadata["runType"]   = vayu::to_string (run.type);
+    metadata["status"]    = vayu::to_string (run.status);
+    metadata["startTime"] = run.start_time;
+    metadata["endTime"]   = run.end_time;
 
     try {
-        auto config = nlohmann::json::parse (run->config_snapshot);
+        auto config = nlohmann::json::parse (run.config_snapshot);
         // HTTP request fields are at root level (unified structure)
         if (config.contains ("url")) {
             metadata["requestUrl"] = config["url"];
@@ -960,9 +970,106 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
         // an unreadable snapshot costs the `configuration` block and nothing
         // else - the measured half of the report is built above this.
     }
+    return metadata;
+}
 
+/**
+ * The sections a run only has if it did the thing they describe: a sequence, a
+ * monitored target, tests, a capacity search, a bound contract, thresholds, a
+ * credential that was renewed under it.
+ */
+void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& json_report) {
+    // What the sequence did, step by step. `stepsStored` vs `stepsExecuted` is
+    // the honest reading of `results[]` below: a run whose store filled reports
+    // fewer rows than steps, with every non-passing step among them.
+    if (extras.has_scenario) {
+        json_report["scenario"] = { { "iterations", extras.iterations },
+            { "iterationsCompleted", extras.iterations_completed },
+            { "stepsExecuted", extras.steps_executed }, { "passed", extras.steps_passed },
+            { "failed", extras.steps_failed }, { "skipped", extras.steps_skipped },
+            { "errored", extras.steps_errored }, { "stepsStored", extras.steps_stored },
+            { "stepsDropped", extras.steps_dropped } };
+        // Added only when the run actually has them, so a design-mode run's
+        // section keeps the exact shape the app already renders.
+        if (extras.virtual_users > 0) {
+            json_report["scenario"]["virtualUsers"] = extras.virtual_users;
+            json_report["scenario"]["iterationsAbandoned"] = extras.iterations_abandoned;
+        }
+        if (!extras.step_breakdown.empty ()) {
+            json_report["scenario"]["steps"] = extras.step_breakdown;
+        }
+    }
+
+    // Server vitals beside the run's own numbers. Passed through as stored:
+    // the totals are written in the report's own shape, so there is one
+    // description of the section rather than a writer and a translator.
+    if (extras.has_monitor) {
+        json_report["monitor"] = extras.monitor;
+    }
+
+    if (extras.has_tests) {
+        json_report["testValidation"] = { { "samplesTested", extras.tests_sampled },
+            { "testsPassed", extras.tests_passed }, { "testsFailed", extras.tests_failed },
+            { "successRate",
+            extras.tests_sampled > 0 ?
+            (static_cast<double> (extras.tests_passed) * 100.0 /
+            static_cast<double> (extras.tests_passed + extras.tests_failed)) :
+            0.0 } };
+    }
+
+    // What the capacity search found. Present only for a capacity run, so every
+    // other report renders exactly as it did before the mode existed.
+    if (extras.has_capacity) {
+        json_report["capacity"] = extras.capacity;
+    }
+
+    // Which operations of the bound contract this run exercised, and which of
+    // their declared responses it saw (issue #629). Computed against the
+    // document `metadata.openapi` names - the one the run was *planned* with -
+    // and stored at run end, so a binding that has since synced to a newer spec
+    // cannot rewrite what an old report says was covered. Absent for every run
+    // that was not measured against a contract; see ReportExtras::coverage.
+    if (!extras.coverage.empty ()) {
+        json_report["coverage"] = extras.coverage;
+    }
+
+    // Whether the responses this run kept matched the schemas that same
+    // document declares (issue #682). Beside `coverage` because they answer
+    // halves of one question - which of the contract was exercised, and whether
+    // what came back honoured it - but on different evidence: coverage counts
+    // every send, this checks the bounded reservoir the run stored. The
+    // `sampled` count rides along so a reader cannot mistake one for the other.
+    // Absent for every run that checked nothing; see ReportExtras.
+    if (!extras.schema_validation.empty ()) {
+        json_report["schemaValidation"] = extras.schema_validation;
+    }
+
+    // The aggregate verdict, beside the per-response one. `verdict` is derived
+    // rather than stored so it cannot contradict the counts printed next to it.
+    if (extras.has_thresholds) {
+        json_report["thresholdValidation"] = { { "checks", extras.threshold_checks },
+            { "passed", extras.thresholds_passed }, { "failed", extras.thresholds_failed },
+            { "verdict", extras.thresholds_failed == 0 ? "passed" : "failed" } };
+    }
+
+    // When the run's credential was renewed under it, and what stopped a
+    // renewal that did not happen. A run whose token expired mid-flight shows
+    // up as 401s in the status distribution; this is the section that says why.
+    if (extras.has_auth) {
+        nlohmann::json auth = { { "refreshes", extras.auth_refreshes },
+            { "refreshFailures", extras.auth_refresh_failures } };
+        if (!extras.auth_last_error.empty ()) {
+            auth["lastError"] = extras.auth_last_error;
+        }
+        json_report["auth"] = auth;
+    }
+}
+
+/** The measured half of the report, section by section. */
+nlohmann::json build_report_body (const vayu::DetailedReport& report,
+const ReportExtras& extras,
+double target_rps) {
     nlohmann::json json_report;
-    json_report["metadata"] = metadata;
     json_report["summary"]  = { { "totalRequests", report.total_requests },
          { "successfulRequests", report.successful_requests },
          { "failedRequests", report.failed_requests }, { "errorRate", report.error_rate },
@@ -1055,91 +1162,16 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
             { "responseBodiesCaptured", extras.response_bodies_captured } };
     }
 
-    // What the sequence did, step by step. `stepsStored` vs `stepsExecuted` is
-    // the honest reading of `results[]` below: a run whose store filled reports
-    // fewer rows than steps, with every non-passing step among them.
-    if (extras.has_scenario) {
-        json_report["scenario"] = { { "iterations", extras.iterations },
-            { "iterationsCompleted", extras.iterations_completed },
-            { "stepsExecuted", extras.steps_executed }, { "passed", extras.steps_passed },
-            { "failed", extras.steps_failed }, { "skipped", extras.steps_skipped },
-            { "errored", extras.steps_errored }, { "stepsStored", extras.steps_stored },
-            { "stepsDropped", extras.steps_dropped } };
-        // Added only when the run actually has them, so a design-mode run's
-        // section keeps the exact shape the app already renders.
-        if (extras.virtual_users > 0) {
-            json_report["scenario"]["virtualUsers"] = extras.virtual_users;
-            json_report["scenario"]["iterationsAbandoned"] = extras.iterations_abandoned;
-        }
-        if (!extras.step_breakdown.empty ()) {
-            json_report["scenario"]["steps"] = extras.step_breakdown;
-        }
-    }
+    add_optional_report_sections (extras, json_report);
+    return json_report;
+}
 
-    // Server vitals beside the run's own numbers. Passed through as stored:
-    // the totals are written in the report's own shape, so there is one
-    // description of the section rather than a writer and a translator.
-    if (extras.has_monitor) {
-        json_report["monitor"] = extras.monitor;
-    }
-
-    if (extras.has_tests) {
-        json_report["testValidation"] = { { "samplesTested", extras.tests_sampled },
-            { "testsPassed", extras.tests_passed }, { "testsFailed", extras.tests_failed },
-            { "successRate",
-            extras.tests_sampled > 0 ?
-            (static_cast<double> (extras.tests_passed) * 100.0 /
-            static_cast<double> (extras.tests_passed + extras.tests_failed)) :
-            0.0 } };
-    }
-
-    // What the capacity search found. Present only for a capacity run, so every
-    // other report renders exactly as it did before the mode existed.
-    if (extras.has_capacity) {
-        json_report["capacity"] = extras.capacity;
-    }
-
-    // Which operations of the bound contract this run exercised, and which of
-    // their declared responses it saw (issue #629). Computed against the
-    // document `metadata.openapi` names - the one the run was *planned* with -
-    // and stored at run end, so a binding that has since synced to a newer spec
-    // cannot rewrite what an old report says was covered. Absent for every run
-    // that was not measured against a contract; see ReportExtras::coverage.
-    if (!extras.coverage.empty ()) {
-        json_report["coverage"] = extras.coverage;
-    }
-
-    // Whether the responses this run kept matched the schemas that same
-    // document declares (issue #682). Beside `coverage` because they answer
-    // halves of one question - which of the contract was exercised, and whether
-    // what came back honoured it - but on different evidence: coverage counts
-    // every send, this checks the bounded reservoir the run stored. The
-    // `sampled` count rides along so a reader cannot mistake one for the other.
-    // Absent for every run that checked nothing; see ReportExtras.
-    if (!extras.schema_validation.empty ()) {
-        json_report["schemaValidation"] = extras.schema_validation;
-    }
-
-    // The aggregate verdict, beside the per-response one. `verdict` is derived
-    // rather than stored so it cannot contradict the counts printed next to it.
-    if (extras.has_thresholds) {
-        json_report["thresholdValidation"] = { { "checks", extras.threshold_checks },
-            { "passed", extras.thresholds_passed }, { "failed", extras.thresholds_failed },
-            { "verdict", extras.thresholds_failed == 0 ? "passed" : "failed" } };
-    }
-
-    // When the run's credential was renewed under it, and what stopped a
-    // renewal that did not happen. A run whose token expired mid-flight shows
-    // up as 401s in the status distribution; this is the section that says why.
-    if (extras.has_auth) {
-        nlohmann::json auth = { { "refreshes", extras.auth_refreshes },
-            { "refreshFailures", extras.auth_refresh_failures } };
-        if (!extras.auth_last_error.empty ()) {
-            auth["lastError"] = extras.auth_last_error;
-        }
-        json_report["auth"] = auth;
-    }
-
+/**
+ * A sample of the run's own exchanges. The row id travels so a client can ask
+ * `GET /runs/:id/samples` for the captured bodies, which deliberately do not
+ * ride this payload (see run_samples_response).
+ */
+nlohmann::json build_report_results (const std::vector<vayu::db::Result>& results) {
     // Include sample of request/response results
     nlohmann::json results_array = nlohmann::json::array ();
     size_t max_results           = 100;
@@ -1168,10 +1200,374 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
         results_array.push_back (result_obj);
         count++;
     }
-    json_report["results"] = results_array;
+    return results_array;
+}
+
+/**
+ * Testable core of GET /runs/:id/report, returning {http_status, json_body}. A
+ * missing run is a definitive 404 in the shared `{"error": {"code", "message"}}`
+ * shape.
+ *
+ * The whole-run aggregates come from `runs.summary` - the values the run itself
+ * computed at completion - laid over a report calculated from the run's sampled
+ * `results`. A run with no summary never reached a terminal status (the engine
+ * died mid-run), and reports from those sampled results alone rather than
+ * erroring. Either way a report is one run row plus its sampled results.
+ *
+ * Extracted so the wiring is covered without an in-process HTTP server - see
+ * runs_route_test.cpp. Exceptions propagate to the route's try/catch (500).
+ */
+std::pair<int, nlohmann::json>
+run_report_response (vayu::db::Database& db, const std::string& run_id) {
+    auto run = db.get_run (run_id);
+    if (!run) {
+        return { 404, error_body (404, "Run not found") };
+    }
+
+    auto results = db.get_results (run_id);
+
+    double duration_s = 0;
+    if (run->start_time > 0) {
+        int64_t end = run->end_time > 0 ? run->end_time : now_ms ();
+        duration_s  = static_cast<double> (end - run->start_time) / 1000.0;
+    }
+
+    auto report =
+    vayu::utils::MetricsHelper::calculate_detailed_report (results, duration_s);
+
+    // No usable summary now means one thing only: the engine died before this
+    // run reached a terminal status, so it never wrote one. The report then
+    // stands on the sampled `results` alone - `calculate_detailed_report`
+    // above - rather than erroring.
+    ReportExtras extras;
+    apply_run_summary (run->summary, report, extras);
+
+    const double target_rps =
+    reconcile_report_rates (run->config_snapshot, duration_s, extras, report);
+
+    nlohmann::json json_report = build_report_body (report, extras, target_rps);
+    json_report["metadata"]    = build_report_metadata (run_id, *run);
+    json_report["results"]     = build_report_results (results);
 
     return { 200, json_report };
 }
+
+namespace {
+
+void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const bool wants_envelope = req.has_param ("limit") ||
+    req.has_param ("offset") || req.has_param ("type") || req.has_param ("status") ||
+    req.has_param ("requestId") || req.has_param ("collectionId") ||
+    req.has_param ("q") || req.has_param ("baseline");
+
+    if (!wants_envelope) {
+        // Legacy no-param path: today's bare array, byte-shape-identical.
+        vayu::utils::log_info ("GET /runs - Fetching all runs (legacy)");
+        try {
+            auto runs                = ctx.db.get_all_runs ();
+            nlohmann::json json_runs = nlohmann::json::array ();
+            for (const auto& run : runs) {
+                json_runs.push_back (vayu::json::serialize (run));
+            }
+            vayu::utils::log_debug (
+            "GET /runs - Returning " + std::to_string (runs.size ()) + " runs");
+            res.set_content (json_runs.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error ("GET /runs - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
+        }
+        return;
+    }
+
+    // Parse + clamp pagination; validate filters (invalid enum -> ignored).
+    int64_t limit = 50;
+    if (req.has_param ("limit")) {
+        try {
+            limit = std::stoll (req.get_param_value ("limit"));
+        } catch (...) {
+            limit = 50;
+        }
+        if (limit <= 0)
+            limit = 50;
+        limit = std::min<int64_t> (limit, 500); // Cap page size.
+    }
+    int64_t offset = 0;
+    if (req.has_param ("offset")) {
+        try {
+            offset = std::stoll (req.get_param_value ("offset"));
+        } catch (...) {
+            offset = 0;
+        }
+        offset = std::max<int64_t> (offset, 0);
+    }
+
+    vayu::db::RunFilter filter;
+    if (req.has_param ("type"))
+        filter.type = vayu::parse_run_type (req.get_param_value ("type"));
+    if (req.has_param ("status"))
+        filter.status =
+        vayu::parse_run_status (req.get_param_value ("status"));
+    if (req.has_param ("requestId"))
+        filter.request_id = req.get_param_value ("requestId");
+    if (req.has_param ("collectionId"))
+        filter.collection_id = req.get_param_value ("collectionId");
+    if (req.has_param ("q"))
+        filter.q = req.get_param_value ("q");
+    // Only the two spellings that mean something are honoured; anything
+    // else leaves the filter unset, matching how an invalid `type` or
+    // `status` is ignored rather than answered with a 400.
+    if (req.has_param ("baseline")) {
+        const std::string value = req.get_param_value ("baseline");
+        if (value == "true")
+            filter.baseline = true;
+        else if (value == "false")
+            filter.baseline = false;
+    }
+
+    vayu::utils::log_info ("GET /runs - Listing runs (limit=" + std::to_string (limit) +
+    ", offset=" + std::to_string (offset) + ")");
+    try {
+        auto [status, body] = get_runs_response (ctx.db, filter, limit, offset);
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("GET /runs - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_get_run (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    std::string run_id = req.matches[1];
+    vayu::utils::log_info ("GET /runs/:id - Fetching run: " + run_id);
+    try {
+        auto run = ctx.db.get_run (run_id);
+        if (run) {
+            vayu::utils::log_debug ("GET /runs/:id - Found run: " + run_id +
+            ", type=" + to_string (run->type) + ", status=" + to_string (run->status));
+            auto payload = vayu::json::serialize (*run);
+            // A design run is one exchange, so it travels with the run.
+            // Load runs keep theirs in the report, where `results` means
+            // the sampled subset. Guard here, before fetching - a load
+            // run's results are not bounded (one row per error, uncapped)
+            // and must never be pulled just to be discarded.
+            if (run->type == vayu::RunType::Design)
+                vayu::json::attach_design_result (
+                payload, *run, ctx.db.get_results (run_id));
+            res.set_content (payload.dump (), "application/json");
+        } else {
+            vayu::utils::log_warning ("GET /runs/:id - Run not found: " + run_id);
+            send_error (res, 404, "Run not found");
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "GET /runs/:id - Error fetching run " + run_id + ": " + e.what ());
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_delete_run (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    std::string run_id = req.matches[1];
+    vayu::utils::log_info ("DELETE /runs/:id - Deleting run: " + run_id);
+    try {
+        auto [status, body] =
+        delete_run_response (ctx.db, ctx.run_manager, run_id, DELETE_STOP_WAIT_MS);
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
+        if (status == 200) {
+            vayu::utils::log_info (
+            "DELETE /runs/:id - Successfully deleted run: " + run_id);
+        } else if (status == 404) {
+            vayu::utils::log_warning ("DELETE /runs/:id - Run not found: " + run_id);
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "DELETE /runs/:id - Error deleting run " + run_id + ": " + e.what ());
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_set_baseline (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    std::string run_id = req.matches[1];
+    vayu::utils::log_info ("PUT /runs/:id/baseline - Run: " + run_id);
+    try {
+        auto [status, body] = set_run_baseline_response (ctx.db, run_id, req.body);
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
+        if (status == 404) {
+            vayu::utils::log_warning (
+            "PUT /runs/:id/baseline - Run not found: " + run_id);
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "PUT /runs/:id/baseline - Error for run " + run_id + ": " + e.what ());
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    std::string run_id = req.matches[1];
+    vayu::utils::log_info ("POST /runs/:id/stop - Stopping run: " + run_id);
+    try {
+        auto run = ctx.db.get_run (run_id);
+        if (!run) {
+            vayu::utils::log_warning (
+            "POST /runs/:id/stop - Run not found: " + run_id);
+            send_error (res, 404, "Run not found");
+            return;
+        }
+
+        // Check if run is already completed or stopped
+        if (run->status == vayu::RunStatus::Completed ||
+        run->status == vayu::RunStatus::Stopped ||
+        run->status == vayu::RunStatus::Failed) {
+            vayu::utils::log_info (
+            "POST /runs/:id/stop - Run already finished: " + run_id +
+            ", status=" + to_string (run->status));
+            auto response = vayu::utils::MetricsHelper::create_already_stopped_response (
+            run_id, to_string (run->status));
+            res.set_content (response.dump (), "application/json");
+            return;
+        }
+
+        // A streaming design run is stopped by asking its consumer worker
+        // to end the transfer (issue #573). Checked before the load-run
+        // path because a design run has no `RunContext` at all: without
+        // this it fell through to the not-active branch, which flips the
+        // row to Stopped while the worker keeps consuming - a run reported
+        // finished that is still holding a socket.
+        //
+        // The worker owns the terminal write, so the row is left alone
+        // here: `record_design_result` sets `Stopped` when it settles,
+        // which is also when the trace and the true event count land.
+        if (ctx.sse_manager.request_stop (run_id)) {
+            vayu::utils::log_info (
+            "POST /runs/:id/stop - Signaling stop for stream: " + run_id);
+            // Waited on rather than answered immediately, so the caller is
+            // told what actually happened - the same budget the load path
+            // gives a graceful stop. A transfer notices within one progress
+            // callback, so this all but always settles at once.
+            auto stream = ctx.sse_manager.get (run_id);
+            const auto deadline =
+            std::chrono::steady_clock::now () + std::chrono::seconds (5);
+            while (stream && !stream->closed () &&
+            std::chrono::steady_clock::now () < deadline) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
+            }
+            const bool settled = !stream || stream->closed ();
+
+            nlohmann::json response;
+            response["runId"]  = run_id;
+            response["status"] = to_string (
+            settled ? vayu::RunStatus::Stopped : vayu::RunStatus::Running);
+            response["message"] = settled ?
+            "Stream stopped" :
+            "Stop signalled; the stream has not settled yet";
+            if (stream) {
+                response["totalEvents"] = stream->total_events ();
+            }
+            res.set_content (response.dump (), "application/json");
+            return;
+        }
+
+        // Try to find active run context
+        auto context = ctx.run_manager.get_run (run_id);
+        if (context) {
+            vayu::utils::log_info (
+            "POST /runs/:id/stop - Signaling stop for active run: " + run_id);
+            // Signal the running thread to stop
+            context->should_stop = true;
+            // Wake the closed-loop controller for immediate cancellation
+            // (otherwise it waits up to its 50ms safety-net timeout).
+            context->notify_refill ();
+
+            // Wait for graceful shutdown
+            vayu::utils::MetricsHelper::wait_for_graceful_stop (*context, 5);
+
+            // Calculate summary metrics
+            auto summary = vayu::utils::MetricsHelper::calculate_summary (*context);
+            vayu::utils::log_info ("POST /runs/:id/stop - Run stopped: " + run_id +
+            ", total_requests=" + std::to_string (summary.total_requests) +
+            ", errors=" + std::to_string (summary.errors));
+            auto response =
+            vayu::utils::MetricsHelper::create_stop_response (run_id, summary);
+
+            res.set_content (response.dump (), "application/json");
+        } else {
+            // Run not active, just update DB
+            vayu::utils::log_info (
+            "POST /runs/:id/stop - Run not active, updating DB: " + run_id);
+            ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Stopped);
+
+            auto response =
+            vayu::utils::MetricsHelper::create_inactive_response (run_id);
+            res.set_content (response.dump (), "application/json");
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "POST /runs/:id/stop - Error stopping run " + run_id + ": " + e.what ());
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_get_run_report (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    std::string run_id = req.matches[1];
+    vayu::utils::log_info (
+    "GET /runs/:id/report - Generating report for run: " + run_id);
+    try {
+        auto [status, body] = run_report_response (ctx.db, run_id);
+        if (status == 404) {
+            vayu::utils::log_warning (
+            "GET /runs/:id/report - Run not found: " + run_id);
+        }
+        res.status = status;
+        res.set_content (body.dump (2), "application/json");
+    } catch (const std::exception& e) {
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_get_run_samples (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    std::string run_id = req.matches[1];
+    vayu::utils::log_info (
+    "GET /runs/:id/samples - Fetching captured samples for run: " + run_id);
+
+    int64_t limit = 50;
+    if (req.has_param ("limit")) {
+        try {
+            limit = std::stoll (req.get_param_value ("limit"));
+        } catch (...) {
+            limit = 50;
+        }
+        if (limit <= 0)
+            limit = 50;
+        limit = std::min<int64_t> (limit, 500); // Cap page size, as GET /runs does.
+    }
+    int64_t offset = 0;
+    if (req.has_param ("offset")) {
+        try {
+            offset = std::stoll (req.get_param_value ("offset"));
+        } catch (...) {
+            offset = 0;
+        }
+        offset = std::max<int64_t> (offset, 0);
+    }
+
+    try {
+        auto [status, body] = run_samples_response (ctx.db, run_id, limit, offset);
+        if (status == 404) {
+            vayu::utils::log_warning (
+            "GET /runs/:id/samples - Run not found: " + run_id);
+        }
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "GET /runs/:id/samples - Error for run " + run_id + ": " + e.what ());
+        send_error (res, 500, e.what ());
+    }
+}
+
+} // namespace
 
 void register_run_routes (RouteContext& ctx) {
     /**
@@ -1203,119 +1599,15 @@ void register_run_routes (RouteContext& ctx) {
      * external scripts keep working. Any recognised param opts into the envelope.
      */
     ctx.server.Get ("/runs", [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const bool wants_envelope = req.has_param ("limit") ||
-        req.has_param ("offset") || req.has_param ("type") || req.has_param ("status") ||
-        req.has_param ("requestId") || req.has_param ("collectionId") ||
-        req.has_param ("q") || req.has_param ("baseline");
-
-        if (!wants_envelope) {
-            // Legacy no-param path: today's bare array, byte-shape-identical.
-            vayu::utils::log_info ("GET /runs - Fetching all runs (legacy)");
-            try {
-                auto runs                = ctx.db.get_all_runs ();
-                nlohmann::json json_runs = nlohmann::json::array ();
-                for (const auto& run : runs) {
-                    json_runs.push_back (vayu::json::serialize (run));
-                }
-                vayu::utils::log_debug (
-                "GET /runs - Returning " + std::to_string (runs.size ()) + " runs");
-                res.set_content (json_runs.dump (), "application/json");
-            } catch (const std::exception& e) {
-                vayu::utils::log_error ("GET /runs - Error: " + std::string (e.what ()));
-                send_error (res, 500, e.what ());
-            }
-            return;
-        }
-
-        // Parse + clamp pagination; validate filters (invalid enum -> ignored).
-        int64_t limit = 50;
-        if (req.has_param ("limit")) {
-            try {
-                limit = std::stoll (req.get_param_value ("limit"));
-            } catch (...) {
-                limit = 50;
-            }
-            if (limit <= 0)
-                limit = 50;
-            limit = std::min<int64_t> (limit, 500); // Cap page size.
-        }
-        int64_t offset = 0;
-        if (req.has_param ("offset")) {
-            try {
-                offset = std::stoll (req.get_param_value ("offset"));
-            } catch (...) {
-                offset = 0;
-            }
-            offset = std::max<int64_t> (offset, 0);
-        }
-
-        vayu::db::RunFilter filter;
-        if (req.has_param ("type"))
-            filter.type = vayu::parse_run_type (req.get_param_value ("type"));
-        if (req.has_param ("status"))
-            filter.status =
-            vayu::parse_run_status (req.get_param_value ("status"));
-        if (req.has_param ("requestId"))
-            filter.request_id = req.get_param_value ("requestId");
-        if (req.has_param ("collectionId"))
-            filter.collection_id = req.get_param_value ("collectionId");
-        if (req.has_param ("q"))
-            filter.q = req.get_param_value ("q");
-        // Only the two spellings that mean something are honoured; anything
-        // else leaves the filter unset, matching how an invalid `type` or
-        // `status` is ignored rather than answered with a 400.
-        if (req.has_param ("baseline")) {
-            const std::string value = req.get_param_value ("baseline");
-            if (value == "true")
-                filter.baseline = true;
-            else if (value == "false")
-                filter.baseline = false;
-        }
-
-        vayu::utils::log_info ("GET /runs - Listing runs (limit=" + std::to_string (limit) +
-        ", offset=" + std::to_string (offset) + ")");
-        try {
-            auto [status, body] = get_runs_response (ctx.db, filter, limit, offset);
-            res.status = status;
-            res.set_content (body.dump (), "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error ("GET /runs - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_list_runs (ctx, req, res);
     });
 
     /**
      * GET /runs/:runId  (alias: GET /run/:runId, deprecated)
      * Retrieves details for a specific test run by its ID.
      */
-    httplib::Server::Handler get_run = [&ctx] (const httplib::Request& req,
-                                       httplib::Response& res) {
-        std::string run_id = req.matches[1];
-        vayu::utils::log_info ("GET /runs/:id - Fetching run: " + run_id);
-        try {
-            auto run = ctx.db.get_run (run_id);
-            if (run) {
-                vayu::utils::log_debug ("GET /runs/:id - Found run: " + run_id +
-                ", type=" + to_string (run->type) + ", status=" + to_string (run->status));
-                auto payload = vayu::json::serialize (*run);
-                // A design run is one exchange, so it travels with the run.
-                // Load runs keep theirs in the report, where `results` means
-                // the sampled subset. Guard here, before fetching - a load
-                // run's results are not bounded (one row per error, uncapped)
-                // and must never be pulled just to be discarded.
-                if (run->type == vayu::RunType::Design)
-                    vayu::json::attach_design_result (
-                    payload, *run, ctx.db.get_results (run_id));
-                res.set_content (payload.dump (), "application/json");
-            } else {
-                vayu::utils::log_warning ("GET /runs/:id - Run not found: " + run_id);
-                send_error (res, 404, "Run not found");
-            }
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "GET /runs/:id - Error fetching run " + run_id + ": " + e.what ());
-            send_error (res, 500, e.what ());
-        }
+    httplib::Server::Handler get_run = [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        handle_get_run (ctx, req, res);
     };
     ctx.server.Get (R"(/runs/([^/]+))", get_run);
     ctx.server.Get (R"(/run/([^/]+))", deprecated_alias (get_run));
@@ -1326,26 +1618,8 @@ void register_run_routes (RouteContext& ctx) {
      * run is stopped first and only deleted once its worker has settled; see
      * delete_run_response.
      */
-    httplib::Server::Handler delete_run = [&ctx] (const httplib::Request& req,
-                                          httplib::Response& res) {
-        std::string run_id = req.matches[1];
-        vayu::utils::log_info ("DELETE /runs/:id - Deleting run: " + run_id);
-        try {
-            auto [status, body] =
-            delete_run_response (ctx.db, ctx.run_manager, run_id, DELETE_STOP_WAIT_MS);
-            res.status = status;
-            res.set_content (body.dump (), "application/json");
-            if (status == 200) {
-                vayu::utils::log_info (
-                "DELETE /runs/:id - Successfully deleted run: " + run_id);
-            } else if (status == 404) {
-                vayu::utils::log_warning ("DELETE /runs/:id - Run not found: " + run_id);
-            }
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "DELETE /runs/:id - Error deleting run " + run_id + ": " + e.what ());
-            send_error (res, 500, e.what ());
-        }
+    httplib::Server::Handler delete_run = [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        handle_delete_run (ctx, req, res);
     };
     ctx.server.Delete (R"(/runs/([^/]+))", delete_run);
     ctx.server.Delete (R"(/run/([^/]+))", deprecated_alias (delete_run));
@@ -1359,131 +1633,15 @@ void register_run_routes (RouteContext& ctx) {
      */
     ctx.server.Put (R"(/runs/([^/]+)/baseline)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        std::string run_id = req.matches[1];
-        vayu::utils::log_info ("PUT /runs/:id/baseline - Run: " + run_id);
-        try {
-            auto [status, body] = set_run_baseline_response (ctx.db, run_id, req.body);
-            res.status = status;
-            res.set_content (body.dump (), "application/json");
-            if (status == 404) {
-                vayu::utils::log_warning (
-                "PUT /runs/:id/baseline - Run not found: " + run_id);
-            }
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "PUT /runs/:id/baseline - Error for run " + run_id + ": " + e.what ());
-            send_error (res, 500, e.what ());
-        }
+        handle_set_baseline (ctx, req, res);
     });
 
     /**
      * POST /runs/:runId/stop  (alias: POST /run/:runId/stop, deprecated)
      * Stops a running load test.
      */
-    httplib::Server::Handler stop_run = [&ctx] (const httplib::Request& req,
-                                        httplib::Response& res) {
-        std::string run_id = req.matches[1];
-        vayu::utils::log_info ("POST /runs/:id/stop - Stopping run: " + run_id);
-        try {
-            auto run = ctx.db.get_run (run_id);
-            if (!run) {
-                vayu::utils::log_warning (
-                "POST /runs/:id/stop - Run not found: " + run_id);
-                send_error (res, 404, "Run not found");
-                return;
-            }
-
-            // Check if run is already completed or stopped
-            if (run->status == vayu::RunStatus::Completed ||
-            run->status == vayu::RunStatus::Stopped ||
-            run->status == vayu::RunStatus::Failed) {
-                vayu::utils::log_info (
-                "POST /runs/:id/stop - Run already finished: " + run_id +
-                ", status=" + to_string (run->status));
-                auto response = vayu::utils::MetricsHelper::create_already_stopped_response (
-                run_id, to_string (run->status));
-                res.set_content (response.dump (), "application/json");
-                return;
-            }
-
-            // A streaming design run is stopped by asking its consumer worker
-            // to end the transfer (issue #573). Checked before the load-run
-            // path because a design run has no `RunContext` at all: without
-            // this it fell through to the not-active branch, which flips the
-            // row to Stopped while the worker keeps consuming - a run reported
-            // finished that is still holding a socket.
-            //
-            // The worker owns the terminal write, so the row is left alone
-            // here: `record_design_result` sets `Stopped` when it settles,
-            // which is also when the trace and the true event count land.
-            if (ctx.sse_manager.request_stop (run_id)) {
-                vayu::utils::log_info (
-                "POST /runs/:id/stop - Signaling stop for stream: " + run_id);
-                // Waited on rather than answered immediately, so the caller is
-                // told what actually happened - the same budget the load path
-                // gives a graceful stop. A transfer notices within one progress
-                // callback, so this all but always settles at once.
-                auto stream = ctx.sse_manager.get (run_id);
-                const auto deadline =
-                std::chrono::steady_clock::now () + std::chrono::seconds (5);
-                while (stream && !stream->closed () &&
-                std::chrono::steady_clock::now () < deadline) {
-                    std::this_thread::sleep_for (std::chrono::milliseconds (10));
-                }
-                const bool settled = !stream || stream->closed ();
-
-                nlohmann::json response;
-                response["runId"]  = run_id;
-                response["status"] = to_string (
-                settled ? vayu::RunStatus::Stopped : vayu::RunStatus::Running);
-                response["message"] = settled ?
-                "Stream stopped" :
-                "Stop signalled; the stream has not settled yet";
-                if (stream) {
-                    response["totalEvents"] = stream->total_events ();
-                }
-                res.set_content (response.dump (), "application/json");
-                return;
-            }
-
-            // Try to find active run context
-            auto context = ctx.run_manager.get_run (run_id);
-            if (context) {
-                vayu::utils::log_info (
-                "POST /runs/:id/stop - Signaling stop for active run: " + run_id);
-                // Signal the running thread to stop
-                context->should_stop = true;
-                // Wake the closed-loop controller for immediate cancellation
-                // (otherwise it waits up to its 50ms safety-net timeout).
-                context->notify_refill ();
-
-                // Wait for graceful shutdown
-                vayu::utils::MetricsHelper::wait_for_graceful_stop (*context, 5);
-
-                // Calculate summary metrics
-                auto summary = vayu::utils::MetricsHelper::calculate_summary (*context);
-                vayu::utils::log_info ("POST /runs/:id/stop - Run stopped: " + run_id +
-                ", total_requests=" + std::to_string (summary.total_requests) +
-                ", errors=" + std::to_string (summary.errors));
-                auto response =
-                vayu::utils::MetricsHelper::create_stop_response (run_id, summary);
-
-                res.set_content (response.dump (), "application/json");
-            } else {
-                // Run not active, just update DB
-                vayu::utils::log_info (
-                "POST /runs/:id/stop - Run not active, updating DB: " + run_id);
-                ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Stopped);
-
-                auto response =
-                vayu::utils::MetricsHelper::create_inactive_response (run_id);
-                res.set_content (response.dump (), "application/json");
-            }
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "POST /runs/:id/stop - Error stopping run " + run_id + ": " + e.what ());
-            send_error (res, 500, e.what ());
-        }
+    httplib::Server::Handler stop_run = [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        handle_stop_run (ctx, req, res);
     };
     ctx.server.Post (R"(/runs/([^/]+)/stop)", stop_run);
     ctx.server.Post (R"(/run/([^/]+)/stop)", deprecated_alias (stop_run));
@@ -1492,22 +1650,8 @@ void register_run_routes (RouteContext& ctx) {
      * GET /runs/:runId/report  (alias: GET /run/:runId/report, deprecated)
      * Retrieves a detailed statistical report for a specific test run.
      */
-    httplib::Server::Handler get_run_report = [&ctx] (const httplib::Request& req,
-                                              httplib::Response& res) {
-        std::string run_id = req.matches[1];
-        vayu::utils::log_info (
-        "GET /runs/:id/report - Generating report for run: " + run_id);
-        try {
-            auto [status, body] = run_report_response (ctx.db, run_id);
-            if (status == 404) {
-                vayu::utils::log_warning (
-                "GET /runs/:id/report - Run not found: " + run_id);
-            }
-            res.status = status;
-            res.set_content (body.dump (2), "application/json");
-        } catch (const std::exception& e) {
-            send_error (res, 500, e.what ());
-        }
+    httplib::Server::Handler get_run_report = [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        handle_get_run_report (ctx, req, res);
     };
     ctx.server.Get (R"(/runs/([^/]+)/report)", get_run_report);
     ctx.server.Get (R"(/run/([^/]+)/report)", deprecated_alias (get_run_report));
@@ -1526,44 +1670,7 @@ void register_run_routes (RouteContext& ctx) {
      */
     ctx.server.Get (R"(/runs/([^/]+)/samples)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        std::string run_id = req.matches[1];
-        vayu::utils::log_info (
-        "GET /runs/:id/samples - Fetching captured samples for run: " + run_id);
-
-        int64_t limit = 50;
-        if (req.has_param ("limit")) {
-            try {
-                limit = std::stoll (req.get_param_value ("limit"));
-            } catch (...) {
-                limit = 50;
-            }
-            if (limit <= 0)
-                limit = 50;
-            limit = std::min<int64_t> (limit, 500); // Cap page size, as GET /runs does.
-        }
-        int64_t offset = 0;
-        if (req.has_param ("offset")) {
-            try {
-                offset = std::stoll (req.get_param_value ("offset"));
-            } catch (...) {
-                offset = 0;
-            }
-            offset = std::max<int64_t> (offset, 0);
-        }
-
-        try {
-            auto [status, body] = run_samples_response (ctx.db, run_id, limit, offset);
-            if (status == 404) {
-                vayu::utils::log_warning (
-                "GET /runs/:id/samples - Run not found: " + run_id);
-            }
-            res.status = status;
-            res.set_content (body.dump (), "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "GET /runs/:id/samples - Error for run " + run_id + ": " + e.what ());
-            send_error (res, 500, e.what ());
-        }
+        handle_get_run_samples (ctx, req, res);
     });
 }
 
