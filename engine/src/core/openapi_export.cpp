@@ -257,6 +257,66 @@ const std::vector<Json>& values) {
  * never does, because the document's own schema is the contract and a shape
  * read off one sample must not overwrite it.
  */
+/**
+ * The examples of one status that can honestly be written, and the counts for
+ * the ones that cannot.
+ *
+ * A capped body is the first slice of a response, not the response (#659).
+ * Written as an `example` it would be indistinguishable from a complete one -
+ * and a body whose parse fails falls back to the raw string, so half a document
+ * would enter the contract as a quoted fragment. The response still lands, and
+ * the count says the body did not. Checked before the media type so a truncated
+ * body with no recorded type is counted once, as the loss that actually stopped
+ * it. A body whose media type nobody stated has no honest `content` key either -
+ * the response still lands (a 204 documents itself) and the count says a body
+ * was left out.
+ */
+std::vector<const ExportExample*> writable_examples (
+const std::vector<const ExportExample*>& group, ExportNotes& notes) {
+    std::vector<const ExportExample*> writable;
+    for (const ExportExample* example : group) {
+        if (example->body_truncated) {
+            notes.examples_truncated += 1;
+            continue;
+        }
+        if (example->content_type.empty ()) {
+            notes.examples_without_media_type += 1;
+            continue;
+        }
+        writable.push_back (example);
+    }
+    return writable;
+}
+
+/**
+ * One media type's examples under a response.
+ *
+ * One of `example` / `examples`, never both: OpenAPI states they are mutually
+ * exclusive, and a stale one left beside the one just written is a second answer
+ * to the same question.
+ */
+void write_media_examples (Json& media,
+const std::vector<const ExportExample*>& media_group,
+ExportNotes& notes,
+bool derive_schema) {
+    std::vector<Json> values;
+    values.reserve (media_group.size ());
+    for (const ExportExample* example : media_group) {
+        values.push_back (example_value (example->body));
+    }
+    if (derive_schema && media.find ("schema") == media.end ()) {
+        media["schema"] = schema_from_example (values.front ());
+    }
+    if (media_group.size () == 1) {
+        media["example"] = values.front ();
+        media.erase ("examples");
+    } else {
+        media["examples"] = named_examples (media_group, values);
+        media.erase ("example");
+    }
+    notes.examples_written += static_cast<int> (media_group.size ());
+}
+
 void write_response_examples (Json& responses,
 const std::vector<ExportExample>& examples,
 ExportNotes& notes,
@@ -277,34 +337,11 @@ bool derive_schema) {
             // which beats a generated line - and an existing description is
             // never replaced.
             responses[status] = Json{ { "description",
-            group.front ()->name.empty () ? status + " response" :
-                                            group.front ()->name } };
+            group.front ()->name.empty () ? status + " response" : group.front ()->name } };
         }
         Json& response = responses[status];
 
-        std::vector<const ExportExample*> writable;
-        for (const ExportExample* example : group) {
-            // A capped body is the first slice of a response, not the response
-            // (#659). Written as an `example` it would be indistinguishable
-            // from a complete one - and a body whose parse fails falls back to
-            // the raw string, so half a document would enter the contract as a
-            // quoted fragment. The response still lands, and the count says the
-            // body did not. Checked before the media type so a truncated body
-            // with no recorded type is counted once, as the loss that actually
-            // stopped it.
-            if (example->body_truncated) {
-                notes.examples_truncated += 1;
-                continue;
-            }
-            if (example->content_type.empty ()) {
-                // No honest `content` key exists for a body whose media type
-                // nobody stated. The response still lands - a 204 documents
-                // itself - and the count says a body was left out.
-                notes.examples_without_media_type += 1;
-                continue;
-            }
-            writable.push_back (example);
-        }
+        const std::vector<const ExportExample*> writable = writable_examples (group, notes);
         if (writable.empty ()) {
             continue;
         }
@@ -312,26 +349,8 @@ bool derive_schema) {
         Json& content = child_record (response, "content");
         for (const auto& [content_type, media_group] : group_by (
              writable, [] (const ExportExample& e) { return e.content_type; })) {
-            Json& media = child_record (content, content_type);
-            std::vector<Json> values;
-            values.reserve (media_group.size ());
-            for (const ExportExample* example : media_group) {
-                values.push_back (example_value (example->body));
-            }
-            if (derive_schema && media.find ("schema") == media.end ()) {
-                media["schema"] = schema_from_example (values.front ());
-            }
-            // One of `example` / `examples`, never both: OpenAPI states they
-            // are mutually exclusive, and a stale one left beside the one just
-            // written is a second answer to the same question.
-            if (media_group.size () == 1) {
-                media["example"] = values.front ();
-                media.erase ("examples");
-            } else {
-                media["examples"] = named_examples (media_group, values);
-                media.erase ("example");
-            }
-            notes.examples_written += static_cast<int> (media_group.size ());
+            write_media_examples (
+            child_record (content, content_type), media_group, notes, derive_schema);
         }
     }
 }
@@ -444,6 +463,144 @@ void patch_operation (Json& operation, const ExportRequest& entry, ExportNotes& 
 }
 
 /**
+ * The dialect the stored document declares.
+ *
+ * The dialect is never changed: a 3.0 document exports as 3.0, a 2.0 document as
+ * 2.0. For 2.0 the presence pass still runs, but nothing is written into an
+ * operation - parameters and examples are a different vocabulary there, and half
+ * a translation is a file that is neither.
+ *
+ * @return why there is nothing to patch, or nothing.
+ */
+std::optional<std::string> read_dialect (const Json& document, Dialect& dialect) {
+    if (const std::string version = string_member (document, "openapi");
+    !version.empty ()) {
+        dialect = { "OpenAPI " + version, true };
+    } else if (const std::string legacy = string_member (document, "swagger");
+    !legacy.empty ()) {
+        // The dialect is never changed: a 3.0 document exports as 3.0, a 2.0
+        // document as 2.0. For 2.0 the presence pass still runs, but nothing is
+        // written into an operation - parameters and examples are a different
+        // vocabulary there, and half a translation is a file that is neither.
+        dialect = { "Swagger " + legacy, false };
+    } else {
+        return "The stored document declares neither `openapi` nor `swagger`, "
+               "so it is not one Vayu can update.";
+    }
+    return std::nullopt;
+}
+
+/** Where each request's identity sits in @p requests, by both of its keys. */
+void index_requests (const std::vector<ExportRequest>& requests,
+std::unordered_map<std::string, size_t>& by_operation_id,
+std::unordered_map<std::string, size_t>& by_method_path) {
+    for (size_t index = 0; index < requests.size (); ++index) {
+        const auto& identity = requests[index].spec_operation;
+        if (!identity) {
+            continue;
+        }
+        if (!identity->operation_id.empty ()) {
+            by_operation_id.emplace (identity->operation_id, index);
+        }
+        by_method_path.emplace (method_path_key (identity->method, identity->path), index);
+    }
+}
+
+/** Every operation on one path item, patched or removed. */
+void patch_path_item (Assembly& assembly,
+const std::vector<ExportRequest>& requests,
+const Dialect& dialect,
+const std::string& path,
+const std::unordered_map<std::string, size_t>& by_operation_id,
+const std::unordered_map<std::string, size_t>& by_method_path,
+std::unordered_set<size_t>& claimed,
+Json& path_item) {
+    for (const std::string_view method : PATH_ITEM_METHODS) {
+        const std::string key (method);
+        const auto operation = path_item.find (key);
+        if (operation == path_item.end () || !operation->is_object ()) {
+            continue;
+        }
+        const size_t* found =
+        find_request (*operation, method, path, by_operation_id, by_method_path);
+        if (found == nullptr) {
+            path_item.erase (key);
+            assembly.notes.operations_removed += 1;
+            continue;
+        }
+        claimed.insert (*found);
+        assembly.notes.requests_exported += 1;
+        if (dialect.writable) {
+            patch_operation (*operation, requests[*found], assembly.notes);
+        }
+    }
+}
+
+/**
+ * Every operation the document declares, patched or removed.
+ *
+ * A path left with no operations goes with them. This is what makes a re-import
+ * of the exported document produce the collection it came from.
+ */
+void patch_document_paths (Assembly& assembly,
+const std::vector<ExportRequest>& requests,
+const Dialect& dialect,
+const std::unordered_map<std::string, size_t>& by_operation_id,
+const std::unordered_map<std::string, size_t>& by_method_path,
+std::unordered_set<size_t>& claimed,
+std::unordered_set<std::string>& referenced_paths) {
+    const auto paths = assembly.document.find ("paths");
+    if (paths != assembly.document.end () && paths->is_object ()) {
+        std::vector<std::string> emptied;
+        for (auto entry = paths->begin (); entry != paths->end (); ++entry) {
+            Json& path_item = entry.value ();
+            if (!path_item.is_object ()) {
+                continue;
+            }
+            if (!string_member (path_item, "$ref").empty ()) {
+                referenced_paths.insert (entry.key ());
+                continue;
+            }
+            patch_path_item (assembly, requests, dialect, entry.key (),
+            by_operation_id, by_method_path, claimed, path_item);
+            const bool has_operation = std::any_of (PATH_ITEM_METHODS.begin (),
+            PATH_ITEM_METHODS.end (), [&] (std::string_view method) {
+                return path_item.contains (std::string (method));
+            });
+            if (!has_operation) {
+                // A path left with no operations goes with them. This is what
+                // makes a re-import of the exported document produce the
+                // collection it came from.
+                emptied.push_back (entry.key ());
+            }
+        }
+        for (const std::string& key : emptied) {
+            paths->erase (key);
+        }
+    }
+}
+
+/** What became of the requests no operation in the document claimed. */
+void count_unclaimed_requests (const std::vector<ExportRequest>& requests,
+const std::unordered_set<size_t>& claimed,
+const std::unordered_set<std::string>& referenced_paths,
+ExportNotes& notes) {
+    for (size_t index = 0; index < requests.size (); ++index) {
+        if (claimed.contains (index)) {
+            continue;
+        }
+        const auto& identity = requests[index].spec_operation;
+        if (!identity) {
+            notes.requests_without_operation += 1;
+        } else if (referenced_paths.contains (identity->path)) {
+            notes.requests_exported += 1;
+        } else {
+            notes.operations_not_in_document += 1;
+        }
+    }
+}
+
+/**
  * The stored bytes, patched.
  *
  * Everything Vayu does not model - `info`, `tags`, vendor extensions,
@@ -468,20 +625,8 @@ const std::vector<ExportRequest>& requests) {
     assembly.document = std::move (read.root);
 
     Dialect dialect;
-    if (const std::string version = string_member (assembly.document, "openapi");
-    !version.empty ()) {
-        dialect = { "OpenAPI " + version, true };
-    } else if (const std::string legacy = string_member (assembly.document, "swagger");
-    !legacy.empty ()) {
-        // The dialect is never changed: a 3.0 document exports as 3.0, a 2.0
-        // document as 2.0. For 2.0 the presence pass still runs, but nothing is
-        // written into an operation - parameters and examples are a different
-        // vocabulary there, and half a translation is a file that is neither.
-        dialect = { "Swagger " + legacy, false };
-    } else {
-        assembly.error =
-        "The stored document declares neither `openapi` nor `swagger`, "
-        "so it is not one Vayu can update.";
+    if (auto refusal = read_dialect (assembly.document, dialect)) {
+        assembly.error = *refusal;
         return assembly;
     }
     assembly.notes = empty_notes ("document", dialect.label);
@@ -489,16 +634,7 @@ const std::vector<ExportRequest>& requests) {
 
     std::unordered_map<std::string, size_t> by_operation_id;
     std::unordered_map<std::string, size_t> by_method_path;
-    for (size_t index = 0; index < requests.size (); ++index) {
-        const auto& identity = requests[index].spec_operation;
-        if (!identity) {
-            continue;
-        }
-        if (!identity->operation_id.empty ()) {
-            by_operation_id.emplace (identity->operation_id, index);
-        }
-        by_method_path.emplace (method_path_key (identity->method, identity->path), index);
-    }
+    index_requests (requests, by_operation_id, by_method_path);
 
     std::unordered_set<size_t> claimed;
     /*
@@ -511,66 +647,9 @@ const std::vector<ExportRequest>& requests) {
      */
     std::unordered_set<std::string> referenced_paths;
 
-    const auto paths = assembly.document.find ("paths");
-    if (paths != assembly.document.end () && paths->is_object ()) {
-        std::vector<std::string> emptied;
-        for (auto entry = paths->begin (); entry != paths->end (); ++entry) {
-            Json& path_item = entry.value ();
-            if (!path_item.is_object ()) {
-                continue;
-            }
-            if (!string_member (path_item, "$ref").empty ()) {
-                referenced_paths.insert (entry.key ());
-                continue;
-            }
-            for (const std::string_view method : PATH_ITEM_METHODS) {
-                const std::string key (method);
-                const auto operation = path_item.find (key);
-                if (operation == path_item.end () || !operation->is_object ()) {
-                    continue;
-                }
-                const size_t* found = find_request (*operation, method,
-                entry.key (), by_operation_id, by_method_path);
-                if (found == nullptr) {
-                    path_item.erase (key);
-                    assembly.notes.operations_removed += 1;
-                    continue;
-                }
-                claimed.insert (*found);
-                assembly.notes.requests_exported += 1;
-                if (dialect.writable) {
-                    patch_operation (*operation, requests[*found], assembly.notes);
-                }
-            }
-            const bool has_operation = std::any_of (PATH_ITEM_METHODS.begin (),
-            PATH_ITEM_METHODS.end (), [&] (std::string_view method) {
-                return path_item.contains (std::string (method));
-            });
-            if (!has_operation) {
-                // A path left with no operations goes with them. This is what
-                // makes a re-import of the exported document produce the
-                // collection it came from.
-                emptied.push_back (entry.key ());
-            }
-        }
-        for (const std::string& key : emptied) {
-            paths->erase (key);
-        }
-    }
-
-    for (size_t index = 0; index < requests.size (); ++index) {
-        if (claimed.contains (index)) {
-            continue;
-        }
-        const auto& identity = requests[index].spec_operation;
-        if (!identity) {
-            assembly.notes.requests_without_operation += 1;
-        } else if (referenced_paths.contains (identity->path)) {
-            assembly.notes.requests_exported += 1;
-        } else {
-            assembly.notes.operations_not_in_document += 1;
-        }
-    }
+    patch_document_paths (assembly, requests, dialect, by_operation_id,
+    by_method_path, claimed, referenced_paths);
+    count_unclaimed_requests (requests, claimed, referenced_paths, assembly.notes);
 
     return assembly;
 }
