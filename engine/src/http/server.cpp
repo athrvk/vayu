@@ -15,9 +15,11 @@
 #include <chrono>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <string>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
 
@@ -32,27 +34,67 @@ Server::~Server () {
     stop ();
 }
 
-void Server::start () {
+bool Server::start () {
     if (is_running_)
-        return;
+        return true;
+
+    bind_error_.clear ();
+
+    vayu::utils::log_info ("Vayu Engine " + std::string (vayu::Version::string));
+
+    // Load and display config
+    auto entries = db_.get_all_config_entries ();
+    nlohmann::json config;
+    for (const auto& entry : entries) {
+        config[entry.key] = entry.value;
+    }
+    config["verbose"] = verbose_;
+    vayu::utils::log_info ("Configuration: " + config.dump ());
+
+    // The engine's port is fixed by contract (docs/architecture.md), so this
+    // listener must never *share* it - a second binder is a collision to
+    // report, not a peer to split traffic with. cpp-httplib's default socket
+    // options say the opposite: they set SO_REUSEPORT where it exists, and the
+    // kernel then hands each accept loop a random half of the connections
+    // (the #512 defect, one layer down). SO_REUSEADDR alone still lets a
+    // restart step over its own sockets left in TIME_WAIT, which is the only
+    // sharing wanted here; on Windows, where SO_REUSEADDR is what lets one
+    // process take a port another is actively serving, SO_EXCLUSIVEADDRUSE is
+    // the same statement spelled for that platform.
+    server_.set_socket_options ([] (socket_t sock) {
+#if VAYU_PLATFORM_WINDOWS
+        httplib::set_socket_opt (sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, 1);
+#else
+        httplib::set_socket_opt (sock, SOL_SOCKET, SO_REUSEADDR, 1);
+#endif
+    });
+
+    // Bind here rather than inside the listener thread: `listen()` folds the
+    // bind into the serve loop and reports its failure only as a `false` no
+    // caller was reading, so a taken port printed a listening banner and exited
+    // 0 (#983). Binding first makes the outcome this call's return value.
+    const std::string where = "127.0.0.1:" + std::to_string (port_);
+    if (!server_.bind_to_port ("127.0.0.1", port_)) {
+        bind_error_ = "Could not bind " +
+        where + " - another process, possibly another Vayu engine, is already listening there";
+        vayu::utils::log_error (bind_error_);
+        return false;
+    }
 
     is_running_    = true;
     server_thread_ = std::thread ([this] () {
-        vayu::utils::log_info ("Vayu Engine " + std::string (vayu::Version::string));
-
-        // Load and display config
-        auto entries = db_.get_all_config_entries ();
-        nlohmann::json config;
-        for (const auto& entry : entries) {
-            config[entry.key] = entry.value;
-        }
-        config["verbose"] = verbose_;
-        vayu::utils::log_info ("Configuration: " + config.dump ());
-
-        vayu::utils::log_info ("Listening on http://127.0.0.1:" + std::to_string (port_));
-        server_.listen ("127.0.0.1", port_);
+        server_.listen_after_bind ();
         is_running_ = false;
     });
+
+    // `stop()` racing ahead of the accept loop is missed by cpp-httplib and the
+    // join that follows then waits out its 3s detach fallback, so `start()`
+    // returns only once the loop is live - the rule managed_listener.hpp spells
+    // out for every other listener in the engine.
+    server_.wait_until_ready ();
+
+    vayu::utils::log_info ("Listening on http://" + where);
+    return true;
 }
 
 void Server::stop () {
@@ -98,6 +140,10 @@ void Server::stop () {
 
 bool Server::is_running () const {
     return is_running_;
+}
+
+const std::string& Server::bind_error () const {
+    return bind_error_;
 }
 
 void Server::set_shutdown_callback (routes::ShutdownCallback callback) {

@@ -166,6 +166,15 @@ connections across both accept loops - two inboxes on one port, each capturing a
 webhooks and neither list showing the rest. An ephemeral request needs no check, since the kernel
 does not hand out a port it is already using.
 
+The management API answers that same `SO_REUSEPORT` problem the other way round, because it is the
+one listener whose port is a *contract* rather than a detail: it clears the option (Windows, which
+has no `SO_REUSEPORT` and lets `SO_REUSEADDR` step over a live listener, gets `SO_EXCLUSIVEADDRUSE`
+instead), so a port anything else holds fails the bind rather than splitting the engine's own
+traffic. `Server::start()` binds before it serves and returns that outcome, and the daemon prints
+the reason to stderr and exits **1** (#983). It was `listen()` before, which folds the bind into the
+serve loop and reports failure only through a `return false` on a detached thread - so a taken port
+printed the listening banner, unwound through the graceful-shutdown path and exited 0.
+
 ### Event Loop (`curl_multi`)
 
 The event loop manages concurrent HTTP request execution using libcurl's multi interface.
