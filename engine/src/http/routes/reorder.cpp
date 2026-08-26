@@ -369,6 +369,64 @@ void stage_move (vayu::db::Database& db, const Move& move, int64_t now, WriteSet
 }
 
 /**
+ * The batch a reorder is about to stage: the scopes to renumber and the moves to
+ * apply, each read through the same validation a single write uses.
+ */
+RouteResult read_reorder_batch (vayu::db::Database& db,
+const nlohmann::json& body,
+std::vector<Scope>& scopes,
+std::vector<Move>& moves) {
+    const nlohmann::json empty     = nlohmann::json::array ();
+    const nlohmann::json* moves_in = &empty;
+    const nlohmann::json* norm_in  = &empty;
+    if (body.contains ("moves") && !body["moves"].is_null ()) {
+        if (!body["moves"].is_array ()) {
+            return std::unexpected (body_error ("Invalid 'moves': must be an array"));
+        }
+        moves_in = &body["moves"];
+    }
+    if (body.contains ("normalize") && !body["normalize"].is_null ()) {
+        if (!body["normalize"].is_array ()) {
+            return std::unexpected (body_error ("Invalid 'normalize': must be an array"));
+        }
+        norm_in = &body["normalize"];
+    }
+
+    const size_t total = moves_in->size () + norm_in->size ();
+    if (total > MAX_REORDER_ENTRIES) {
+        return std::unexpected (
+        body_error ("Reorder too large: " + std::to_string (total) + " entries exceeds the limit of " +
+        std::to_string (MAX_REORDER_ENTRIES) + " per call"));
+    }
+
+    scopes.reserve (norm_in->size ());
+    for (size_t i = 0; i < norm_in->size (); ++i) {
+        Scope scope;
+        if (auto outcome = read_scope (db, (*norm_in)[i], i, scope); !outcome) {
+            return outcome;
+        }
+        scopes.push_back (std::move (scope));
+    }
+
+    moves.reserve (moves_in->size ());
+    std::unordered_set<std::string> claimed;
+    for (size_t i = 0; i < moves_in->size (); ++i) {
+        Move move;
+        if (auto outcome = read_move (db, (*moves_in)[i], i, move); !outcome) {
+            return outcome;
+        }
+        // Two positions for one row is not a resolvable batch - whichever won
+        // would be an accident of iteration order, and the client that sent it
+        // has a bug the 400 names.
+        if (!claimed.insert (move.id).second) {
+            return std::unexpected (body_error ("Duplicate move for '" + move.id + "'"));
+        }
+        moves.push_back (std::move (move));
+    }
+    return {};
+}
+
+/**
  * The batch, from validation to commit. Runs with the DB mutex already held by
  * `reorder_response` - see there for why the whole of it has to.
  *
@@ -405,55 +463,10 @@ const std::function<void ()>& before_write) {
         return as_response (body_error ("Body must be a JSON object"));
     }
 
-    const nlohmann::json empty     = nlohmann::json::array ();
-    const nlohmann::json* moves_in = &empty;
-    const nlohmann::json* norm_in  = &empty;
-    if (body.contains ("moves") && !body["moves"].is_null ()) {
-        if (!body["moves"].is_array ()) {
-            return as_response (
-            body_error ("Invalid 'moves': must be an array"));
-        }
-        moves_in = &body["moves"];
-    }
-    if (body.contains ("normalize") && !body["normalize"].is_null ()) {
-        if (!body["normalize"].is_array ()) {
-            return as_response (
-            body_error ("Invalid 'normalize': must be an array"));
-        }
-        norm_in = &body["normalize"];
-    }
-
-    const size_t total = moves_in->size () + norm_in->size ();
-    if (total > MAX_REORDER_ENTRIES) {
-        return as_response (body_error ("Reorder too large: " + std::to_string (total) +
-        " entries exceeds the limit of " + std::to_string (MAX_REORDER_ENTRIES) + " per call"));
-    }
-
     std::vector<Scope> scopes;
-    scopes.reserve (norm_in->size ());
-    for (size_t i = 0; i < norm_in->size (); ++i) {
-        Scope scope;
-        if (auto outcome = read_scope (db, (*norm_in)[i], i, scope); !outcome) {
-            return as_response (outcome.error ());
-        }
-        scopes.push_back (std::move (scope));
-    }
-
     std::vector<Move> moves;
-    moves.reserve (moves_in->size ());
-    std::unordered_set<std::string> claimed;
-    for (size_t i = 0; i < moves_in->size (); ++i) {
-        Move move;
-        if (auto outcome = read_move (db, (*moves_in)[i], i, move); !outcome) {
-            return as_response (outcome.error ());
-        }
-        // Two positions for one row is not a resolvable batch - whichever won
-        // would be an accident of iteration order, and the client that sent it
-        // has a bug the 400 names.
-        if (!claimed.insert (move.id).second) {
-            return as_response (body_error ("Duplicate move for '" + move.id + "'"));
-        }
-        moves.push_back (std::move (move));
+    if (auto outcome = read_reorder_batch (db, body, scopes, moves); !outcome) {
+        return as_response (outcome.error ());
     }
 
     if (auto outcome = reject_post_move_cycles (db, moves); !outcome) {
