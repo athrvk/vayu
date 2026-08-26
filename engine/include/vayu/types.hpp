@@ -817,7 +817,11 @@ struct Variable {
     // `{}` rather than a bare declaration so the ~43 aggregate initializations
     // that stop short of this trailing field are not each a
     // -Wmissing-field-initializers warning; absent still means "unknown age".
-    std::optional<int64_t> created_at;
+    // Redundant to the default constructor, not to that warning - hence the
+    // suppression rather than the removal (#946 measured the removal: clang
+    // fails the macOS and Windows legs on every one of those sites).
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<int64_t> created_at{};
 
     bool operator== (const Variable&) const = default;
 };
@@ -1445,7 +1449,10 @@ struct ConfigEntry {
     // load-bearing for the same reason: without a default member initializer,
     // every one of those 53 positional seeds is a `-Wmissing-field-initializers`
     // warning, and the cure belongs on the field rather than at each site.
-    std::optional<std::string> unit;
+    // Redundant to the default constructor, not to that warning - hence the
+    // suppression rather than the removal (#946 measured the removal).
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<std::string> unit{};
 };
 
 /**
