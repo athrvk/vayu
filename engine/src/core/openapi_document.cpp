@@ -136,21 +136,26 @@ bool is_decimal_digits (std::string_view text) {
  *
  * JSON has no infinity or NaN, and `JSON.stringify` writes both as null - so
  * does the renderer when it hands one of these to the engine.
+ *
+ * `make_optional` rather than a bare return, for `rows_for`'s reason: copy-
+ * initializing an `optional<json>` from a `json` puts nlohmann's
+ * `operator ValueType()` up against `optional`'s converting constructor, which
+ * GCC reports as an ambiguity under `-Werror`.
  */
 std::optional<nlohmann::ordered_json> plain_constant (const std::string& text) {
     if (text.empty () || text == "~" || text == "null" || text == "Null" || text == "NULL") {
-        return nlohmann::ordered_json (nullptr);
+        return std::make_optional (nlohmann::ordered_json (nullptr));
     }
     if (text == "true" || text == "True" || text == "TRUE") {
-        return nlohmann::ordered_json (true);
+        return std::make_optional (nlohmann::ordered_json (true));
     }
     if (text == "false" || text == "False" || text == "FALSE") {
-        return nlohmann::ordered_json (false);
+        return std::make_optional (nlohmann::ordered_json (false));
     }
     if (text == ".inf" || text == ".Inf" || text == ".INF" || text == "+.inf" ||
     text == "-.inf" || text == "-.Inf" || text == "-.INF" || text == ".nan" ||
     text == ".NaN" || text == ".NAN") {
-        return nlohmann::ordered_json (nullptr);
+        return std::make_optional (nlohmann::ordered_json (nullptr));
     }
     return std::nullopt;
 }

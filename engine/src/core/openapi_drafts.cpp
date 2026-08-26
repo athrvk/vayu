@@ -256,7 +256,15 @@ class Sampler {
         return "null";
     }
 
-    /** The stub a scalar type is sampled as, or nothing for a structured one. */
+    /**
+     * The stub a scalar type is sampled as, or nothing for a structured one.
+     *
+     * `make_optional` rather than a bare return, for the reason `rows_for` in
+     * `spec_sync.cpp` carries: copy-initializing an `optional<json>` from a
+     * `json` puts nlohmann's `operator ValueType()` up against `optional`'s
+     * converting constructor, which GCC reports as an ambiguity under
+     * `-Werror`.
+     */
     [[nodiscard]] static std::optional<json>
     scalar_stub (const json* node, const std::string& type) {
         if (type == "string") {
@@ -264,16 +272,16 @@ class Sampler {
             if (values != nullptr && values->is_array () && !values->empty ()) {
                 return std::make_optional ((*values)[0]);
             }
-            return json ("");
+            return std::make_optional (json (""));
         }
         if (type == "integer" || type == "number") {
-            return json (0);
+            return std::make_optional (json (0));
         }
         if (type == "boolean") {
-            return json (false);
+            return std::make_optional (json (false));
         }
         if (type == "null") {
-            return json (nullptr);
+            return std::make_optional (json (nullptr));
         }
         return std::nullopt;
     }
