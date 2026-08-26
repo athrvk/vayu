@@ -700,6 +700,26 @@ std::string graphql_content (const json* graphql) {
  * row with no usable `src` has nothing to point at, so it is counted as skipped
  * rather than imported as a part that could never be sent.
  */
+/** The file paths a `file` row points at, in either shape Postman writes them. */
+std::vector<std::string> file_part_paths (const json* src) {
+    std::vector<std::string> paths;
+    if (src == nullptr) {
+        return paths;
+    }
+    if (src->is_array ()) {
+        for (const json& entry : *src) {
+            if (entry.is_string () && !entry.get_ref<const std::string&> ().empty ()) {
+                paths.push_back (entry.get<std::string> ());
+            }
+        }
+        return paths;
+    }
+    if (src->is_string () && !src->get_ref<const std::string&> ().empty ()) {
+        paths.push_back (src->get<std::string> ());
+    }
+    return paths;
+}
+
 json formdata_fields (const json* rows, PostmanCounts& counts) {
     json out = json::array ();
     if (rows == nullptr || !rows->is_array ()) {
@@ -715,18 +735,7 @@ json formdata_fields (const json* rows, PostmanCounts& counts) {
             }
             continue;
         }
-        const json* src = prop (&row, "src");
-        std::vector<std::string> paths;
-        if (src != nullptr && src->is_array ()) {
-            for (const json& entry : *src) {
-                if (entry.is_string () && !entry.get_ref<const std::string&> ().empty ()) {
-                    paths.push_back (entry.get<std::string> ());
-                }
-            }
-        } else if (src != nullptr && src->is_string () &&
-        !src->get_ref<const std::string&> ().empty ()) {
-            paths.push_back (src->get<std::string> ());
-        }
+        const std::vector<std::string> paths = file_part_paths (prop (&row, "src"));
         if (mapped.empty () || paths.empty ()) {
             counts.skipped_file_body += 1;
             continue;
@@ -1509,40 +1518,84 @@ json resource_name (const json* resource, const char* fallback) {
     return name == nullptr || name->is_null () ? json (fallback) : *name;
 }
 
-json parse_insomnia (const json& parsed, const ImportOptions& options) {
-    const json* declared = prop (&parsed, "resources");
-    if (declared != nullptr && !declared->is_null () && !declared->is_array ()) {
-        throw MalformedImport ("`resources` must be an array");
-    }
-    const json empty = json::array ();
-    const json& resources = declared == nullptr || declared->is_null () ? empty : *declared;
-    std::map<std::string, std::vector<const json*>> by_parent;
-    for (size_t at = 0; at < resources.size (); ++at) {
-        if (!resources[at].is_object ()) {
-            throw MalformedImport ("`resources[" + std::to_string (at) + "]` must be an object");
+/**
+ * One Insomnia v4 export's resource tree, indexed by parent.
+ *
+ * The walk is a member function rather than a recursive lambda so each step of
+ * it - a request, a folder, the environments - reads as its own thing; the
+ * counts and the skipped-feature tally are the state every step writes into.
+ */
+class InsomniaTree {
+    public:
+    InsomniaTree (const json& resources, const ImportOptions& options) {
+        counts_.options = options;
+        for (size_t at = 0; at < resources.size (); ++at) {
+            if (!resources[at].is_object ()) {
+                throw MalformedImport (
+                "`resources[" + std::to_string (at) + "]` must be an object");
+            }
+            by_parent_[resource_key (prop (&resources[at], "parentId"))].push_back (
+            &resources[at]);
         }
-        by_parent[resource_key (prop (&resources[at], "parentId"))].push_back (
-        &resources[at]);
+        for (const json& resource : resources) {
+            if (type_is (&resource, "workspace")) {
+                workspaces_.push_back (&resource);
+            }
+        }
     }
 
-    InsomniaCounts counts;
-    counts.options = options;
-    ImportTally tally;
+    /// Every workspace, as a collection tree.
+    json collections () {
+        json out = json::array ();
+        for (const json* workspace : workspaces_) {
+            out.push_back (build_collection (workspace, /*workspace=*/true));
+        }
+        return out;
+    }
 
-    const auto children_of = [&by_parent] (
-                             const json* node) -> const std::vector<const json*>& {
-        static const std::vector<const json*> NONE;
-        const auto found = by_parent.find (resource_key (prop (node, "_id")));
-        return found == by_parent.end () ? NONE : found->second;
-    };
-    const auto type_is = [] (const json* node, const char* type) {
+    /**
+     * Environments: a base env (parentId = workspace) plus its sub-envs
+     * (parentId = base env), flattened - a sub-env is the base with its own
+     * values written over it.
+     */
+    json environments () {
+        json out = json::array ();
+        if (!counts_.options.import_environments) {
+            return out;
+        }
+        for (const json* workspace : workspaces_) {
+            for (const json* base : children_of (workspace)) {
+                if (type_is (base, "environment")) {
+                    add_environment (workspace, base, out);
+                }
+            }
+        }
+        return out;
+    }
+
+    InsomniaCounts& counts () {
+        return counts_;
+    }
+
+    ImportTally& tally () {
+        return tally_;
+    }
+
+    private:
+    static bool type_is (const json* node, const char* type) {
         const json* declared_type = prop (node, "_type");
         return declared_type != nullptr && *declared_type == type;
-    };
+    }
 
-    const auto build_request = [&counts] (const json* resource) {
-        counts.requests += 1;
-        json body = insomnia_body (prop (resource, "body"), counts);
+    const std::vector<const json*>& children_of (const json* node) const {
+        static const std::vector<const json*> NONE;
+        const auto found = by_parent_.find (resource_key (prop (node, "_id")));
+        return found == by_parent_.end () ? NONE : found->second;
+    }
+
+    json build_request (const json* resource) {
+        counts_.requests += 1;
+        json body = insomnia_body (prop (resource, "body"), counts_);
         const json params =
         kv_rows (rows_or_throw (prop (resource, "parameters"), "`parameters`"));
         const json headers =
@@ -1558,44 +1611,49 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
         request["params"] = map_key_values (&params);
         request["headers"] = with_required_content_type (map_key_values (&headers), body);
         request["body"] = std::move (body);
-        request["auth"] = insomnia_auth (prop (resource, "authentication"), counts);
-        request["preRequestScript"]  = counts.options.import_scripts ?
-         as_string (prop (resource, "preRequestScript")) :
-         "";
-        request["postRequestScript"] = counts.options.import_scripts ?
+        request["auth"] = insomnia_auth (prop (resource, "authentication"), counts_);
+        request["preRequestScript"] = counts_.options.import_scripts ?
+        as_string (prop (resource, "preRequestScript")) :
+        "";
+        request["postRequestScript"] = counts_.options.import_scripts ?
         as_string (prop (resource, "afterResponseScript")) :
         "";
         insomnia_redirects (resource, request);
         return request;
-    };
+    }
 
-    // Insomnia cannot emit a cycle (`parentId` is a single edge), but a mangled
-    // file can - and an unguarded walk answers that with a stack overflow.
-    std::set<std::string> visited;
-    const auto build_collection = [&] (const json* node, bool workspace, auto&& self) -> json {
+    /** One child of a folder, by the resource type it declares. */
+    void add_child (const json* child, json& children, json& requests) {
+        if (type_is (child, "request_group")) {
+            counts_.folders += 1;
+            children.push_back (build_collection (child, /*workspace=*/false));
+        } else if (type_is (child, "request")) {
+            requests.push_back (build_request (child));
+        } else if (type_is (child, "grpc_request")) {
+            tally_.add ("grpc");
+        } else if (type_is (child, "websocket_request")) {
+            tally_.add ("websocket");
+        } else if (type_is (child, "api_spec")) {
+            tally_.add ("api_spec");
+        } else if (type_is (child, "unit_test") || type_is (child, "unit_test_suite")) {
+            tally_.add ("unit_test");
+        }
+    }
+
+    json build_collection (const json* node, bool workspace) {
+        // Insomnia cannot emit a cycle (`parentId` is a single edge), but a
+        // mangled file can - and an unguarded walk answers that with a stack
+        // overflow.
         const std::string id = resource_key (prop (node, "_id"));
-        if (!visited.insert (id).second) {
+        if (!visited_.insert (id).second) {
             throw MalformedImport ("resource \"" + id + "\" appears twice in the folder tree");
         }
         json children = json::array ();
         json requests = json::array ();
         for (const json* child : children_of (node)) {
-            if (type_is (child, "request_group")) {
-                counts.folders += 1;
-                children.push_back (self (child, false, self));
-            } else if (type_is (child, "request")) {
-                requests.push_back (build_request (child));
-            } else if (type_is (child, "grpc_request")) {
-                tally.add ("grpc");
-            } else if (type_is (child, "websocket_request")) {
-                tally.add ("websocket");
-            } else if (type_is (child, "api_spec")) {
-                tally.add ("api_spec");
-            } else if (type_is (child, "unit_test") || type_is (child, "unit_test_suite")) {
-                tally.add ("unit_test");
-            }
+            add_child (child, children, requests);
         }
-        json auth = insomnia_auth (prop (node, "authentication"), counts);
+        json auth = insomnia_auth (prop (node, "authentication"), counts_);
         const json* description = prop (node, "description");
 
         json collection;
@@ -1606,88 +1664,87 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
         to_env_vars (as_record (prop (node, "environment"))) :
         json::object ();
         // Collections never inherit.
-        collection["auth"] =
-        auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
+        collection["auth"] = auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
         // Insomnia 9.3+ lets a folder carry scripts, and its v4 export writes
         // model fields verbatim - so these are the request-level key names. An
         // export that spells them differently reads as absent.
-        collection["preRequestScript"] =
-        options.import_scripts ? as_string (prop (node, "preRequestScript")) : "";
-        collection["postRequestScript"] =
-        options.import_scripts ? as_string (prop (node, "afterResponseScript")) : "";
+        collection["preRequestScript"] = counts_.options.import_scripts ?
+        as_string (prop (node, "preRequestScript")) :
+        "";
+        collection["postRequestScript"] = counts_.options.import_scripts ?
+        as_string (prop (node, "afterResponseScript")) :
+        "";
         collection["children"] = std::move (children);
         collection["requests"] = std::move (requests);
         return collection;
-    };
-
-    std::vector<const json*> workspaces;
-    for (const json& resource : resources) {
-        if (type_is (&resource, "workspace")) {
-            workspaces.push_back (&resource);
-        }
-    }
-    json collections = json::array ();
-    for (const json* workspace : workspaces) {
-        collections.push_back (build_collection (workspace, true, build_collection));
     }
 
-    // Environments: a base env (parentId = workspace) plus its sub-envs
-    // (parentId = base env), flattened - a sub-env is the base with its own
-    // values written over it.
-    json environments = json::array ();
-    if (options.import_environments) {
-        for (const json* workspace : workspaces) {
-            for (const json* base : children_of (workspace)) {
-                if (!type_is (base, "environment")) {
-                    continue;
-                }
-                const json base_vars = to_env_vars (as_record (prop (base, "data")));
-                std::vector<const json*> subs;
-                for (const json* sub : children_of (base)) {
-                    if (type_is (sub, "environment")) {
-                        subs.push_back (sub);
-                    }
-                }
-                if (subs.empty ()) {
-                    // `base.name ?? workspace.name ?? "Environment"` - absence,
-                    // not emptiness: an environment deliberately named "" keeps
-                    // that name on both sides.
-                    const json* named = prop (base, "name");
-                    const json name   = named == nullptr || named->is_null () ?
-                      resource_name (workspace, "Environment") :
-                      *named;
-                    environments.push_back ({ { "name", name },
-                    { "description", "" }, { "variables", base_vars } });
-                    continue;
-                }
-                for (const json* sub : subs) {
-                    // `{...baseVars, ...subVars}`: a key the sub-env restates
-                    // keeps the base's position and takes the sub's value.
-                    json merged = base_vars;
-                    const json sub_vars = to_env_vars (as_record (prop (sub, "data")));
-                    for (auto entry = sub_vars.begin (); entry != sub_vars.end (); ++entry) {
-                        merged[entry.key ()] = entry.value ();
-                    }
-                    environments.push_back ({ { "name", resource_name (sub, "Environment") },
-                    { "description", "" }, { "variables", std::move (merged) } });
-                }
+    /** One base environment, flattened with its sub-environments. */
+    void add_environment (const json* workspace, const json* base, json& out) {
+        const json base_vars = to_env_vars (as_record (prop (base, "data")));
+        std::vector<const json*> subs;
+        for (const json* sub : children_of (base)) {
+            if (type_is (sub, "environment")) {
+                subs.push_back (sub);
             }
         }
+        if (subs.empty ()) {
+            // `base.name ?? workspace.name ?? "Environment"` - absence, not
+            // emptiness: an environment deliberately named "" keeps that name
+            // on both sides.
+            const json* named = prop (base, "name");
+            const json name   = named == nullptr || named->is_null () ?
+              resource_name (workspace, "Environment") :
+              *named;
+            out.push_back (
+            { { "name", name }, { "description", "" }, { "variables", base_vars } });
+            return;
+        }
+        for (const json* sub : subs) {
+            // `{...baseVars, ...subVars}`: a key the sub-env restates keeps the
+            // base's position and takes the sub's value.
+            json merged         = base_vars;
+            const json sub_vars = to_env_vars (as_record (prop (sub, "data")));
+            for (auto entry = sub_vars.begin (); entry != sub_vars.end (); ++entry) {
+                merged[entry.key ()] = entry.value ();
+            }
+            out.push_back ({ { "name", resource_name (sub, "Environment") },
+            { "description", "" }, { "variables", std::move (merged) } });
+        }
     }
 
-    tally.add ("file_body", counts.file_body);
+    std::map<std::string, std::vector<const json*>> by_parent_;
+    std::vector<const json*> workspaces_;
+    InsomniaCounts counts_;
+    ImportTally tally_;
+    std::set<std::string> visited_;
+};
+
+json parse_insomnia (const json& parsed, const ImportOptions& options) {
+    const json* declared = prop (&parsed, "resources");
+    if (declared != nullptr && !declared->is_null () && !declared->is_array ()) {
+        throw MalformedImport ("`resources` must be an array");
+    }
+    const json empty = json::array ();
+    const json& resources = declared == nullptr || declared->is_null () ? empty : *declared;
+
+    InsomniaTree tree (resources, options);
+    json collections  = tree.collections ();
+    json environments = tree.environments ();
+
+    tree.tally ().add ("file_body", tree.counts ().file_body);
 
     json meta;
     meta["format"]           = "Insomnia Export v4";
-    meta["requestCount"]     = counts.requests;
-    meta["folderCount"]      = counts.folders;
+    meta["requestCount"]     = tree.counts ().requests;
+    meta["folderCount"]      = tree.counts ().folders;
     meta["environmentCount"] = static_cast<int> (environments.size ());
     meta["globalCount"]      = 0;
     // Insomnia v4 exports carry no saved responses - the format has no concept
     // of one, so this is 0 by absence rather than by drop.
     meta["exampleCount"]        = 0;
-    meta["skipped"]             = tally.items ();
-    meta["nonExecutableAuth"]   = counts.non_executable;
+    meta["skipped"]             = tree.tally ().items ();
+    meta["nonExecutableAuth"]   = tree.counts ().non_executable;
     meta["unattachedFileParts"] = unattached_file_parts (collections);
 
     return json{ { "collections", std::move (collections) },
