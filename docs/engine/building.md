@@ -1191,15 +1191,29 @@ lint one by hand, point clang-tidy at a consumer:
 clang-tidy-19 --allow-no-checks -p engine/build engine/src/http/routes.cpp
 ```
 
-**`readability-function-cognitive-complexity` stays off, with no report-only
-job** (#940, closing #929; declined while it could not be honoured by a
-line-scoped gate, since it anchors on the function declaration). #928's
-completion met the re-enable condition that decision attached - nothing
-pre-existing is left for the check to anchor on except the over-threshold
-functions themselves - so whether to pay that refactor, NOLINT it, or decline
-the check permanently is now
-[#1021](https://github.com/athrvk/vayu/issues/1021)'s decision. The reason
-sits beside the disable in `engine/.clang-tidy`.
+**`readability-function-cognitive-complexity` is on** (#1021). It was declined
+in #940 (closing #929) while it could not be honoured: the check anchors on the
+*function declaration*, never on the line that made the function complex, so the
+changed-lines gate could not report it against the diff that caused it. #928's
+completion (#946) promoted both gates to whole-file scope, which met the
+re-enable condition that decision attached, and #1021 paid what the enable then
+cost before flipping it - **68 functions in `engine/src` were over the default
+threshold of 25**, and each was split into named steps first, so the check went
+on against a tree already at zero rather than handing an unrelated pull request
+somebody else's refactor.
+
+The issue's own count - "ten functions in the routes layer" - was a stale
+snapshot; measured over the whole compile database at the enable it was 25 in
+the routes layer and 43 in `core/`, `db/`, `utils/`, `http/`, `cli.cpp` and
+`daemon.cpp`. `engine/tests` is not in scope and never was: its own
+`.clang-tidy` has disabled this check since #928, because a gtest body is a long
+straight-line arrange/act/assert with no extracted helpers on purpose, and the
+check has no remedy for that shape which leaves the test readable.
+
+What it means for a change from here: a function you edit is re-checked whole,
+so one that grows past the threshold is that pull request's to split - which is
+the same rule every other check in this config already carries under the
+whole-file gate. The reason sits beside the check in `engine/.clang-tidy`.
 
 ### The precompiled header
 
