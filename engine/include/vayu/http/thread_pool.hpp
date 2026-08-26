@@ -27,6 +27,10 @@ class ThreadPool {
     public:
     explicit ThreadPool (size_t num_threads = 0);
     ~ThreadPool ();
+    ThreadPool (const ThreadPool&)            = delete;
+    ThreadPool& operator= (const ThreadPool&) = delete;
+    ThreadPool (ThreadPool&&)                 = delete;
+    ThreadPool& operator= (ThreadPool&&)      = delete;
 
     /**
      * @brief Submit a task that returns a value

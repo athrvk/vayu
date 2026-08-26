@@ -46,12 +46,12 @@ namespace vayu::core {
  * Stores minimal data needed to run test scripts after load test completes
  */
 struct ResponseSample {
-    int status_code;
+    int status_code = 0;
     std::string status_text;
     std::string body;
     Headers headers;
-    double latency_ms;
-    int64_t timestamp;
+    double latency_ms = 0.0;
+    int64_t timestamp = 0;
     /**
      * Scenario load runs only: the virtual user's iteration this response was
      * sent in, and the data row that iteration was bound to.
@@ -120,10 +120,10 @@ struct CapturedExchange {
  * @brief Record for a single request result (lighter than db::Result)
  */
 struct ResultRecord {
-    int64_t timestamp;
-    int status_code;
-    double latency_ms;
-    ErrorCode error_code;
+    int64_t timestamp    = 0;
+    int status_code      = 0;
+    double latency_ms    = 0.0;
+    ErrorCode error_code = ErrorCode::None;
     std::string error_message;
     std::string trace_data;
     /// Present only for the three captured buckets (errors, slow outliers,

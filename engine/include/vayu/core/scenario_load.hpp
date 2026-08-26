@@ -166,6 +166,8 @@ class StepHistograms {
 
     StepHistograms (const StepHistograms&)            = delete;
     StepHistograms& operator= (const StepHistograms&) = delete;
+    StepHistograms (StepHistograms&&)                 = delete;
+    StepHistograms& operator= (StepHistograms&&)      = delete;
 
     /// A completed step: its latency, and whether it counted as an error.
     void record (size_t step, double latency_ms);

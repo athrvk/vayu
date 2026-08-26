@@ -188,6 +188,8 @@ class InboxManager {
 
     InboxManager (const InboxManager&)            = delete;
     InboxManager& operator= (const InboxManager&) = delete;
+    InboxManager (InboxManager&&)                 = delete;
+    InboxManager& operator= (InboxManager&&)      = delete;
 
     struct StartResult {
         bool ok         = true;

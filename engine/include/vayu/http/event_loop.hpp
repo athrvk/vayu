@@ -93,7 +93,7 @@ struct EventLoopConfig {
  * @brief Request handle for tracking/cancellation
  */
 struct RequestHandle {
-    size_t id;
+    size_t id = 0;
     std::future<Result<Response>> future;
 };
 

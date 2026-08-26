@@ -118,6 +118,8 @@ class CurlHandlePool {
     // Prevent copying
     CurlHandlePool (const CurlHandlePool&)            = delete;
     CurlHandlePool& operator= (const CurlHandlePool&) = delete;
+    CurlHandlePool (CurlHandlePool&&)                 = delete;
+    CurlHandlePool& operator= (CurlHandlePool&&)      = delete;
 
     /// Acquire a handle from the pool (or create new if empty)
     /// The handle is reset and ready for configuration
@@ -163,6 +165,8 @@ class EventLoopWorker {
     // Prevent copying
     EventLoopWorker (const EventLoopWorker&)            = delete;
     EventLoopWorker& operator= (const EventLoopWorker&) = delete;
+    EventLoopWorker (EventLoopWorker&&)                 = delete;
+    EventLoopWorker& operator= (EventLoopWorker&&)      = delete;
 
     void start ();
     /// See EventLoop::stop. `drain_timeout` bounds the drain when
