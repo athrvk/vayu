@@ -254,11 +254,13 @@ engine/
   the zero was measured* - the Linux toolchain: a finding anywhere in a file a
   commit stages or a Linux-visible pull request change is that change's to
   fix, or to NOLINT with the reason at the site; the `VAYU_TIDY_FULL` opt-in
-  and the hook's line-filter machinery are gone. **CI's Windows leg stays at
-  changed lines** (#1023): its clang-tidy 20 over MSVC sees a backlog no
-  Linux scan could (`pro-type-vararg` on every `curl_easy_setopt`, 20-only
-  checks, Windows-only code), measured at ~85 findings by the promotion's own
-  PR - it promotes when #1023 zeroes that. Nothing
+  and the hook's line-filter machinery are gone. **CI's Windows leg followed**
+  (#1023): its clang-tidy 20 over MSVC saw a backlog no Linux scan could
+  (`pro-type-vararg` on every libcurl option call, 20-only checks, Windows-only
+  code), measured at ~85 findings by #946's own PR, and it gates whole files
+  now that its own whole-tree scan reads zero - `clang-tidy-diff.py` went with
+  the promotion. `.github/workflows/engine-tidy-scan.yml` is how either leg is
+  re-measured. Nothing
   lints at *build*
   time: the commented-out `CMAKE_CXX_CLANG_TIDY` block went with #885, because a
   lint that runs when someone uncomments it never runs. See

@@ -978,7 +978,8 @@ clang-tidy runs in two places, and both of them can stop a change:
 | Where | What it lints | What a finding does |
 |-------|---------------|---------------------|
 | `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **whole** of every staged `.c/.cpp/.h/.hpp` file | Refuses the commit |
-| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | On Linux, the **whole** of every changed `engine/{src,include,tests}` **translation unit**; on Windows, the **changed lines** of those units until #1023 zeroes that leg's own backlog. Headers are never direct inputs | Fails CI |
+| `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **whole** of every changed `engine/{src,include,tests}` **translation unit**, on Linux and Windows alike. Headers are never direct inputs | Fails CI |
+| `Engine tidy scan` (`.github/workflows/engine-tidy-scan.yml`), `workflow_dispatch` only | The **whole tree**, on the runner you pick. Not a pull-request gate - the denominator no per-change gate can give | Fails the run |
 
 A finding is a failure because `engine/.clang-tidy` sets
 `WarningsAsErrors: '*'`; with that empty, clang-tidy prints every diagnostic it
@@ -1010,18 +1011,49 @@ scan-guard tests (`reentrant_test.cpp`, `character_cast_test.cpp`,
 `bounds_primitives_test.cpp`, `optional_assert_test.cpp`) keep their job of
 holding *unedited* files to the spellings they pin.
 
-**One leg is deliberately not promoted yet.** The zero above was measured on
-the Linux toolchain - clang-tidy 19 over GCC compile commands, the only
-toolchain any #928 wave scanned with - and the promotion's own PR proved the
-zero does not transfer: the first whole-file lint ever run on the Windows leg
-reported ~85 findings in the touched files alone, none on a line the diff
-wrote (`pro-type-vararg` on every `curl_easy_setopt`, which curl's GCC
-typecheck macro hides from Linux; checks that exist only in that leg's
-clang-tidy 20; findings in Windows-only code a Linux lint never compiles).
-Promoting a leg ahead of its measured zero is the original failure back
-again, so the Windows leg keeps changed-lines scope - the `clang-tidy-diff.py`
-mechanism, unchanged - until #1023 measures its real backlog, zeroes it, and
-collapses the branch.
+**Both legs are promoted, and each waited for its own measurement** (#946
+Linux, #1023 Windows). The zero above was measured on the Linux toolchain -
+clang-tidy 19 over GCC compile commands, the only toolchain any #928 wave
+scanned with - and #946's own pull request proved that a zero does not
+transfer between legs: the first whole-file lint ever run on Windows reported
+~85 findings in the touched files alone, none on a line the diff wrote.
+Promoting a leg ahead of its measured zero is the original failure back again,
+so the Windows leg kept changed-lines scope until #1023 measured what only it
+could see, paid it down, and collapsed the branch. What that leg was carrying,
+and what each class cost:
+
+| Class | What it was | What #1023 did |
+|-------|-------------|----------------|
+| `cppcoreguidelines-pro-type-vararg` on every libcurl option call | The bulk of it - `curl_easy_setopt`, `curl_multi_setopt` and `curl_easy_getinfo` are variadic, and 121 sites called them directly | One typed primitive, `vayu/http/curl_options.hpp`, holding the single `NOLINT`. See `engine/CLAUDE.md` |
+| `modernize-use-integer-sign-comparison` | A check that exists only in clang-tidy 20, which is what the Windows image ships against a floor of 19 | Fixed - the two cast-to-compare sites in `sse_stream.cpp` became `std::cmp_greater` |
+| `bugprone-exception-escape`, `cppcoreguidelines-owning-memory` | Platform-divergent: MSVC's STL marks different surfaces `noexcept`, and Windows-only code is code a Linux lint never compiles | Fixed at the site, each with the reason it needed |
+
+**Why only Windows ever saw the vararg class**, since it reads like a
+toolchain mystery and is not one: libcurl's type-checking macros are guarded
+`#if !defined(__cplusplus)` ("the typechecker does not work in C++ (yet)"), so
+they have never applied to this codebase. What C++ gets instead is
+`curl_exactly_three_arguments`, an arity check, and that one is defined only
+`#if defined(__STDC__) && (__STDC__ >= 1)`. GCC and Clang define `__STDC__`;
+MSVC does not, absent `/Za`. So the identical source is a call inside a
+system-header macro on Linux - which clang-tidy attributes to the header and
+drops - and a plain call on Windows. Any toolchain reproduces the Windows
+reading with `clang-tidy --extra-arg=-U__STDC__
+--extra-arg=-Wno-builtin-macro-redefined`, which is the cheapest way to check
+a libcurl change before it reaches CI.
+
+**The whole-tree scan is a workflow, not a local ritual** (#1023). The Windows
+measurement needs clang-tidy 20 over MSVC compile commands and so cannot run
+on the Linux machine most of this work happens on. `Engine tidy scan`
+(`.github/workflows/engine-tidy-scan.yml`) is that run: pick a runner, it
+builds the tree, regenerates the compile database without the precompiled
+header, lints every non-vendor translation unit whole-file with
+`-header-filter` on the command line, and reports through
+`.github/dedupe-tidy-findings.py` - deduplicated by (file, line, column,
+check), with the translation-unit count beside it so the denominator is on the
+record. It fails when the count is not zero, so a green run *is* the claim,
+and it uploads the log, the report and the unit list either way. Run it when
+`engine/.clang-tidy` changes, when a runner image moves its clang-tidy, or to
+re-establish the zero after a paydown.
 
 **"Clean" means the whole tree, headers included - and a scan has to be asked
 for that** (#1013). `run-clang-tidy` reports nothing found in a header unless
@@ -1087,13 +1119,11 @@ legacy file was refused a commit over findings CI would let through, and
 changed-lines scope, because a hook that has to be bypassed to commit is
 advisory in practice. #946 brought the hook and CI's Linux leg up to whole
 files, because the backlog whose existence was the whole argument for line
-scoping was gone there. The `VAYU_TIDY_FULL=1` escape hatch went with it -
-whole-file linting is simply what the hook does now - and those two invoke
-clang-tidy directly on each file, with no line filter to compute; only CI's
-Windows leg still carries `clang-tidy-diff.py`, for the reason above, until
-#1023 retires it. A Windows contributor's hook may therefore surface
-findings CI's Windows leg does not yet gate - `git commit --no-verify` is
-the escape while #1023 is open, and CI remains the gate of record.
+scoping was gone there, and #1023 brought CI's Windows leg up behind it once
+that leg's own backlog was measured and paid. The `VAYU_TIDY_FULL=1` escape
+hatch went with the first promotion and `clang-tidy-diff.py` with the second -
+whole-file linting is simply what all three do now, invoking clang-tidy
+directly on each file with no line filter to compute.
 
 **A bulk reformat is the one change this gate cannot price fairly**, and the
 escape is a label. The gate's unit of cost is the translation-unit parse, and a
@@ -1176,8 +1206,8 @@ passing MSVC's include paths through (`--extra-arg=-imsvc...`): it buys one
 more leg of header-as-input coverage, in exchange for toolchain plumbing that
 breaks when a runner image moves.
 
-**What this costs shrank with the #946 promotion.** Under the changed-lines
-gate, `clang-tidy-diff.py` built one invocation per changed file with a
+**What this costs shrank with the promotions** (#946, #1023). Under the
+changed-lines gate, `clang-tidy-diff.py` built one invocation per changed file with a
 `-line-filter` naming only that file, and clang-tidy drops a diagnostic in any
 file its filter does not list - so a changed header never reached the CI gate
 through its consumers at all. With no line filter on the invocation, the
