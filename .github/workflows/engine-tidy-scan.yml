@@ -65,9 +65,15 @@ jobs:
   scan:
     name: Whole-tree clang-tidy on ${{ github.event.inputs.os || 'windows-latest' }}
     runs-on: ${{ github.event.inputs.os || 'windows-latest' }}
-    # Longer than the engine job's 90: this parses every translation unit in the
-    # tree rather than the handful a pull request changed.
-    timeout-minutes: 120
+    # Measured, not guessed, and the first value was wrong. 120 was chosen by
+    # analogy with the engine job's 90; the first Windows run that actually
+    # linted spent **101 minutes still going** on the scan step alone and died
+    # on the deadline with nothing uploaded - a whole run's cost for no answer.
+    # 206 translation units of MSVC headers at four workers is simply slower
+    # than a per-change gate, which is the whole reason this is a separate
+    # workflow. 240 leaves room for a cold vcpkg cache on top of that; the
+    # ceiling for a hosted runner is 360.
+    timeout-minutes: 240
     env:
       VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
