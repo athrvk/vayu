@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -188,32 +189,33 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
             try {
                 int int_val = std::stoi (value);
                 if (existing->min_value && int_val < std::stoi (*existing->min_value)) {
-                    reason = "'" + key + "' must be at least " +
-                    *existing->min_value + " (got " + value + ")";
+                    reason = std::format ("'{}' must be at least {} (got {})",
+                    key, *existing->min_value, value);
                 } else if (existing->max_value && int_val > std::stoi (*existing->max_value)) {
-                    reason = "'" + key + "' must be at most " +
-                    *existing->max_value + " (got " + value + ")";
+                    reason = std::format ("'{}' must be at most {} (got {})",
+                    key, *existing->max_value, value);
                 }
             } catch (...) {
-                reason = "'" + key + "' must be an integer (got '" + value + "')";
+                reason = std::format ("'{}' must be an integer (got '{}')", key, value);
             }
         } else if (existing->type == "number") {
             try {
                 double double_val = std::stod (value);
                 if (existing->min_value && double_val < std::stod (*existing->min_value)) {
-                    reason = "'" + key + "' must be at least " +
-                    *existing->min_value + " (got " + value + ")";
+                    reason = std::format ("'{}' must be at least {} (got {})",
+                    key, *existing->min_value, value);
                 } else if (existing->max_value &&
                 double_val > std::stod (*existing->max_value)) {
-                    reason = "'" + key + "' must be at most " +
-                    *existing->max_value + " (got " + value + ")";
+                    reason = std::format ("'{}' must be at most {} (got {})",
+                    key, *existing->max_value, value);
                 }
             } catch (...) {
-                reason = "'" + key + "' must be a number (got '" + value + "')";
+                reason = std::format ("'{}' must be a number (got '{}')", key, value);
             }
         } else if (existing->type == "boolean") {
             if (value != "true" && value != "false") {
-                reason = "'" + key + "' must be 'true' or 'false' (got '" + value + "')";
+                reason =
+                std::format ("'{}' must be 'true' or 'false' (got '{}')", key, value);
             }
         } else if (existing->type == "enum") {
             std::vector<std::string> allowed;
@@ -232,8 +234,8 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
                 }
             }
             if (std::find (allowed.begin (), allowed.end (), value) == allowed.end ()) {
-                reason = "'" + key + "' must be one of [" + allowed_list +
-                "] (got '" + value + "')";
+                reason = std::format (
+                "'{}' must be one of [{}] (got '{}')", key, allowed_list, value);
             }
         }
 

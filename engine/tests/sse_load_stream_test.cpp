@@ -276,7 +276,7 @@ TEST (SseLoadStreamTest, BalancedAccountingUnderConcurrency) {
 
     for (size_t i = 0; i < STREAMS; ++i) {
         loop.submit (stream_request (server.url ("/endless"), 3, 20000),
-        [&] (size_t, vayu::Result<vayu::Response> result) {
+        [&] (size_t, const vayu::Result<vayu::Response>& result) {
             completed.fetch_add (1);
             if (result.is_ok ()) {
                 if (!result.value ().has_error ()) {

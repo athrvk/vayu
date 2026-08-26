@@ -7,6 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -28,7 +29,12 @@
 namespace vayu::utils {
 class Logger {
     public:
-    enum class Level { DEBUG = 0, INFO = 1, WARNING = 2, ERROR = 3 };
+    enum class Level : std::uint8_t {
+        DEBUG   = 0,
+        INFO    = 1,
+        WARNING = 2,
+        ERROR   = 3
+    };
 
     static Logger& instance ();
 

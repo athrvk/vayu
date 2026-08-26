@@ -63,6 +63,7 @@
 #include "vayu/core/spec_coverage.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -78,7 +79,15 @@ namespace vayu::core {
  * `inherit` and both scripts to empty for every operation, so a difference
  * there is always the user's and never the document's.
  */
-enum class SpecField { Name, Description, Method, Url, Params, Headers, Body };
+enum class SpecField : std::uint8_t {
+    Name,
+    Description,
+    Method,
+    Url,
+    Params,
+    Headers,
+    Body
+};
 
 /// The wire spelling of @p field - what a tick names and what an apply reads.
 [[nodiscard]] std::string_view spec_field_name (SpecField field);
@@ -100,7 +109,7 @@ struct SpecFieldDiff {
 };
 
 /** How a request was followed from its recorded identity into the new document. */
-enum class IdentityMatch { OperationId, Path };
+enum class IdentityMatch : std::uint8_t { OperationId, Path };
 
 /**
  * A stored request, as the comparison reads it.

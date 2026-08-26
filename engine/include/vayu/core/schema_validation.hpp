@@ -81,6 +81,7 @@
  */
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -101,7 +102,7 @@ namespace vayu::core {
  * did not fail one. Every reason below describes a run that *is* bound and
  * still could not be judged.
  */
-enum class UncheckedReason {
+enum class UncheckedReason : std::uint8_t {
     /// The request carries no `spec_operation` - it is not an operation.
     NoOperation,
     /// The bound document carries no response-schema index (stored before the

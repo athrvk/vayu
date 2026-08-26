@@ -756,6 +756,7 @@ class RelayTest : public ::testing::Test {
     /// so the relay replays what a transfer actually produced.
     std::shared_ptr<SseStreamContext> streamed (int count) {
         std::vector<std::string> chunks;
+        chunks.reserve (static_cast<size_t> (count));
         for (int i = 0; i < count; ++i) {
             chunks.push_back ("data: " + std::to_string (i) + "\n\n");
         }
@@ -941,6 +942,7 @@ class StreamExecuteTest : public ::testing::Test {
     /// consumer really does assemble them over time.
     void serve (int count) {
         std::vector<std::string> chunks;
+        chunks.reserve (static_cast<size_t> (count));
         for (int i = 0; i < count; ++i) {
             chunks.push_back ("id: e" + std::to_string (i) +
             "\nevent: tick\ndata: {\"n\": " + std::to_string (i) + "}\n\n");

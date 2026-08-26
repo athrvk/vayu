@@ -26,6 +26,7 @@
  */
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -54,7 +55,7 @@ namespace vayu::core {
  * the iteration continues. `Errored` is the step not completing at all (a
  * transport failure, a timeout, a script that threw), and ends its iteration.
  */
-enum class StepOutcome { Passed, Failed, Skipped, Errored };
+enum class StepOutcome : std::uint8_t { Passed, Failed, Skipped, Errored };
 
 [[nodiscard]] const char* to_string (StepOutcome outcome);
 
@@ -320,8 +321,8 @@ const ScenarioSummaryInputs& inputs);
  * persisted once at the end: per-step persistence would be N x M diff-and-write
  * cycles against the DB mutex for a value only this run's later steps read.
  */
-void execute_scenario_run (std::shared_ptr<RunContext> context,
-std::shared_ptr<const ScenarioExecution> execution,
+void execute_scenario_run (const std::shared_ptr<RunContext>& context,
+const std::shared_ptr<const ScenarioExecution>& execution,
 vayu::db::Database* db_ptr,
 vayu::http::CookieJar* cookie_jar,
 bool verbose,

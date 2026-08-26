@@ -947,7 +947,7 @@ class RunManager {
 };
 
 // Worker functions
-void execute_load_test (std::shared_ptr<RunContext> context,
+void execute_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
 bool verbose,
 RunManager& manager);
@@ -971,9 +971,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
  * Declared here so a test can drive the loop against a mock endpoint without an
  * HTTP server in front of it; the production caller is `RunManager::start_run`.
  */
-void collect_monitor (std::shared_ptr<RunContext> context,
+void collect_monitor (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
-MonitorConfig config);
+const MonitorConfig& config);
 
 /**
  * @brief Keep a run's OAuth 2.0 credential valid for as long as the run lasts.
@@ -991,7 +991,7 @@ MonitorConfig config);
  * Returns as soon as the run stops, or once the published token no longer
  * expires. Inert (returns immediately) when the run has no `auth_refresh`.
  */
-void run_auth_refresh (std::shared_ptr<RunContext> context,
+void run_auth_refresh (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
 const AuthRefreshTuning& tuning);
 

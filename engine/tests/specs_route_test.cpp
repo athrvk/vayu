@@ -21,6 +21,7 @@
  * route tests (no in-process HTTP server).
  */
 
+#include <array>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -598,16 +599,16 @@ TEST_F (SpecsRouteTest, OperationIdentityIsUnsetByAnExplicitNullOnUpdate) {
 
 TEST_F (SpecsRouteTest, RejectsAnOperationIdentityThatIsNotOne) {
     const std::string col_id = create_collection (json{ { "name", "Pets" } });
-    const json bad[]         = {
-        json ("GET /pets"),                            // not an object
-        json{ { "operationId", "listPets" } },         // no method/path
-        json{ { "method", "GET" } },                   // no path
-        json{ { "path", "/pets" } },                   // no method
-        json{ { "method", "" }, { "path", "/pets" } }, // empty method
-        json{ { "method", "GET" }, { "path", "pets" } }, // not a template path
-        json{ { "method", "GET" }, { "path", "https://x/p" } }, // a concrete URL
-        json{ { "method", "GET" }, { "path", "/pets" }, { "operationId", 7 } },
-    };
+    const auto bad           = std::to_array<json> ({
+    json ("GET /pets"),                            // not an object
+    json{ { "operationId", "listPets" } },         // no method/path
+    json{ { "method", "GET" } },                   // no path
+    json{ { "path", "/pets" } },                   // no method
+    json{ { "method", "" }, { "path", "/pets" } }, // empty method
+    json{ { "method", "GET" }, { "path", "pets" } }, // not a template path
+    json{ { "method", "GET" }, { "path", "https://x/p" } }, // a concrete URL
+    json{ { "method", "GET" }, { "path", "/pets" }, { "operationId", 7 } },
+    });
     for (const auto& operation : bad) {
         json body = { { "collectionId", col_id }, { "name", "r" }, { "method", "GET" },
             { "url", "https://example.test/pets" }, { "specOperation", operation } };

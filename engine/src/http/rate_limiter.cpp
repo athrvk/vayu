@@ -14,8 +14,7 @@
 
 namespace vayu::http {
 RateLimiter::RateLimiter (RateLimiterConfig config)
-: config_ (std::move (config)), tokens_ (0.0),
-  last_refill_ (std::chrono::steady_clock::now ()) {
+: config_ (config), tokens_ (0.0), last_refill_ (std::chrono::steady_clock::now ()) {
     // Set default burst size if not specified
     if (config_.burst_size == 0.0 && config_.target_rps > 0.0) {
         config_.burst_size = config_.target_rps * vayu::core::constants::http::BURST_MULTIPLIER;

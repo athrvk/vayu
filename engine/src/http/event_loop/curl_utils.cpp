@@ -308,7 +308,7 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
 }
 
 std::string body_content_type_value (const Request& request) {
-    const std::string implied = vayu::http::implied_content_type (request.body);
+    std::string implied = vayu::http::implied_content_type (request.body);
     if (implied.empty ()) {
         return {};
     }

@@ -131,7 +131,7 @@ int64_t auth_refresh_delay_ms (int64_t expires_at_ms, int64_t now_ms, const Auth
     return std::max (tuning.min_interval_ms, expires_at_ms - tuning.lead_ms - now_ms);
 }
 
-void run_auth_refresh (std::shared_ptr<RunContext> context,
+void run_auth_refresh (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
 const AuthRefreshTuning& tuning) {
     const auto state = context->auth_refresh;

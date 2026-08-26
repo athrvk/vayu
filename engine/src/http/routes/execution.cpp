@@ -16,6 +16,7 @@
  * - Server's HTTP status code is always in the response body, never translated to engine status
  */
 
+#include <array>
 #include <cmath>
 #include <optional>
 #include <regex>
@@ -752,50 +753,48 @@ const vayu::core::MonitorLimits& monitor_limits) {
         }
     }
 
-    namespace limits               = vayu::core::constants::run_config;
-    const NumericRunField fields[] = {
-        { "success_sample_rate", 1, 100000,
-        "It is a sampling period (keep 1 in N), and 0 is a division by zero." },
-        { "response_sample_rate", 1, 100000,
-        "It is a sampling period (keep 1 in N), and 0 is a division by zero." },
-        { "max_response_samples", 0, limits::MAX_RESPONSE_SAMPLES,
-        "Each retained sample holds a full response body." },
-        { "max_success_results", 0, limits::MAX_RETAINED_RESULTS,
-        "Each retained record holds a serialised timing breakdown, and the "
-        "store is reserved up front." },
-        { "max_slow_results", 0, limits::MAX_RETAINED_RESULTS,
-        "Each retained record holds a serialised timing breakdown, and the "
-        "store is reserved up front." },
-        { "slow_threshold_ms", 0, limits::MAX_SLOW_THRESHOLD_MS,
-        "0 disables outlier capture; a negative threshold would mark every "
-        "completion an outlier." },
-        { "max_sample_body_bytes", 0, limits::MAX_SAMPLE_BODY_BYTES,
-        "A captured body is copied on the completion callback, so the cap "
-        "bounds hot-path work; 0 keeps headers and metadata and no body." },
-        { "max_sample_bytes", 0, limits::MAX_SAMPLE_BYTES,
-        "It is the whole-run capture budget, and every byte under it is held "
-        "in memory until the run flushes." },
-        { "max_exemplar_results", 0, limits::MAX_EXEMPLAR_RESULTS,
-        "Each retained exemplar holds a captured exchange." },
-        { "concurrency", 1, limits::MAX_CONCURRENCY,
-        "Connections are pre-allocated per worker before any traffic flows." },
-        { "startConcurrency", 1, limits::MAX_CONCURRENCY,
-        "A ramp is seeded with this many in-flight requests before the first "
-        "duration check, and it is read as a size_t, so a negative start is "
-        "~1.8e19 of them." },
-        { "maxInFlight", 1, limits::MAX_IN_FLIGHT,
-        "It is a pending-request ceiling read as a size_t, so a negative value "
-        "is ~1.8e19 - it removes the backpressure the field exists to provide "
-        "rather than tightening it." },
-        { "sloMs", 1, limits::MAX_SLO_MS,
-        "It is the latency budget a capacity search looks for the edge of; a "
-        "non-positive budget has no edge, and one past a minute is longer than "
-        "the transfers any realistic run measures." },
-        { "timeout", 1, 86400000,
-        "A transfer with no timeout never completes, so the run can never "
-        "reach "
-        "a terminal status." },
-    };
+    namespace limits  = vayu::core::constants::run_config;
+    const auto fields = std::to_array<NumericRunField> ({
+    { "success_sample_rate", 1, 100000, "It is a sampling period (keep 1 in N), and 0 is a division by zero." },
+    { "response_sample_rate", 1, 100000, "It is a sampling period (keep 1 in N), and 0 is a division by zero." },
+    { "max_response_samples", 0, limits::MAX_RESPONSE_SAMPLES,
+    "Each retained sample holds a full response body." },
+    { "max_success_results", 0, limits::MAX_RETAINED_RESULTS,
+    "Each retained record holds a serialised timing breakdown, and the "
+    "store is reserved up front." },
+    { "max_slow_results", 0, limits::MAX_RETAINED_RESULTS,
+    "Each retained record holds a serialised timing breakdown, and the "
+    "store is reserved up front." },
+    { "slow_threshold_ms", 0, limits::MAX_SLOW_THRESHOLD_MS,
+    "0 disables outlier capture; a negative threshold would mark every "
+    "completion an outlier." },
+    { "max_sample_body_bytes", 0, limits::MAX_SAMPLE_BODY_BYTES,
+    "A captured body is copied on the completion callback, so the cap "
+    "bounds hot-path work; 0 keeps headers and metadata and no body." },
+    { "max_sample_bytes", 0, limits::MAX_SAMPLE_BYTES,
+    "It is the whole-run capture budget, and every byte under it is held "
+    "in memory until the run flushes." },
+    { "max_exemplar_results", 0, limits::MAX_EXEMPLAR_RESULTS,
+    "Each retained exemplar holds a captured exchange." },
+    { "concurrency", 1, limits::MAX_CONCURRENCY,
+    "Connections are pre-allocated per worker before any traffic flows." },
+    { "startConcurrency", 1, limits::MAX_CONCURRENCY,
+    "A ramp is seeded with this many in-flight requests before the first "
+    "duration check, and it is read as a size_t, so a negative start is "
+    "~1.8e19 of them." },
+    { "maxInFlight", 1, limits::MAX_IN_FLIGHT,
+    "It is a pending-request ceiling read as a size_t, so a negative value "
+    "is ~1.8e19 - it removes the backpressure the field exists to provide "
+    "rather than tightening it." },
+    { "sloMs", 1, limits::MAX_SLO_MS,
+    "It is the latency budget a capacity search looks for the edge of; a "
+    "non-positive budget has no edge, and one past a minute is longer than "
+    "the transfers any realistic run measures." },
+    { "timeout", 1, 86400000,
+    "A transfer with no timeout never completes, so the run can never "
+    "reach "
+    "a terminal status." },
+    });
     for (const auto& field : fields) {
         if (auto reason = check_numeric_field (config, field)) {
             return reason;

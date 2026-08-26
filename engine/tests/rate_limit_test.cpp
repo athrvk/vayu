@@ -59,6 +59,7 @@ TEST_F (RateLimiterTest, EnforcesTargetRPS) {
 
     // Submit all requests quickly - rate limiter will pace them
     std::vector<RequestHandle> handles;
+    handles.reserve (200);
     for (int i = 0; i < 200; ++i) {
         handles.push_back (loop.submit_async (req));
     }
@@ -166,6 +167,7 @@ TEST_F (RateLimiterTest, EnforcesTargetRPSAcrossMultipleWorkers) {
     auto submission_start = std::chrono::steady_clock::now ();
 
     std::vector<RequestHandle> handles;
+    handles.reserve (200);
     for (int i = 0; i < 200; ++i) {
         handles.push_back (loop.submit_async (req));
     }

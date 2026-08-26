@@ -455,7 +455,7 @@ const ScenarioExecution& execution) {
             step_index, result.is_error () ? 0 : result.value ().status_code);
             finish_step (vu, step_index, errored,
             errored ? nullptr : &result.value ().cookie_lines);
-            handle_result (context, db, std::move (result),
+            handle_result (context, db, result,
             ResultAnnotations{ row, step_index, iteration });
         });
         context->requests_sent++;

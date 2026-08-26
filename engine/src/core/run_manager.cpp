@@ -618,7 +618,7 @@ void RunContext::join_aux_threads () {
 
 void RunManager::register_run (const std::string& run_id, std::shared_ptr<RunContext> context) {
     std::lock_guard<std::mutex> lock (mutex_);
-    active_runs_[run_id] = context;
+    active_runs_[run_id] = std::move (context);
 }
 
 std::shared_ptr<RunContext> RunManager::get_run (const std::string& run_id) {
@@ -831,6 +831,7 @@ void RunManager::shutdown (std::chrono::milliseconds grace) {
 std::vector<std::shared_ptr<RunContext>> RunManager::get_all_active_runs () const {
     std::lock_guard<std::mutex> lock (mutex_);
     std::vector<std::shared_ptr<RunContext>> runs;
+    runs.reserve (active_runs_.size ());
     for (const auto& [id, context] : active_runs_) {
         runs.push_back (context);
     }
@@ -935,7 +936,7 @@ std::shared_ptr<const ScenarioExecution> scenario) {
             context->monitor_totals = std::make_unique<MonitorTotals> ();
             context->monitor_thread =
             std::thread ([context, &db, cfg = std::move (*monitor)] () mutable {
-                collect_monitor (context, &db, std::move (cfg));
+                collect_monitor (context, &db, cfg);
             });
         }
         return std::thread ([context, &db, verbose, this] () {
@@ -958,7 +959,7 @@ bool verbose) {
     });
 }
 
-void execute_load_test (std::shared_ptr<RunContext> context,
+void execute_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
 bool verbose,
 RunManager& manager) {
@@ -1815,9 +1816,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     context->closed.store (true, std::memory_order_release);
 }
 
-void collect_monitor (std::shared_ptr<RunContext> context,
+void collect_monitor (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
-MonitorConfig config) {
+const MonitorConfig& config) {
     auto& db = *db_ptr;
 
     // A scrape must not outlive its own cadence: the sample a late answer

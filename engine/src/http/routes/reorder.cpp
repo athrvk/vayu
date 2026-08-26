@@ -16,6 +16,7 @@
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -43,7 +44,7 @@ RouteError body_error (const std::string& message) {
 }
 
 /** The two entity kinds this endpoint moves. */
-enum class Kind { Collection, Request };
+enum class Kind : std::uint8_t { Collection, Request };
 
 /**
  * One scope whose children are renumbered dense before the moves apply: the

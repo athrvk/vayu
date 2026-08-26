@@ -12,6 +12,7 @@
 // its `${1:...}` placeholders as literal text, which looks like a typo rather
 // than a feature.
 
+#include <format>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
@@ -308,7 +309,8 @@ TEST (ScriptCompletions, TheOfferedVariableScopeMethodsAreExactlyWhatTheRuntimeH
                 continue;
             }
             offered++;
-            probe += "if (typeof " + label + " !== 'function') missing.push('" + label + "');\n";
+            probe += std::format (
+            "if (typeof {} !== 'function') missing.push('{}');\n", label, label);
         }
     }
     ASSERT_GT (offered, 0)
@@ -397,10 +399,12 @@ TEST (ScriptCompletions, EveryOfferedExpectMatcherExistsInTheRuntime) {
         // A function must be callable; a chainer or terminal getter only has to
         // be a declared own property of the object it hangs off.
         const std::string check = item.value ("kind", 0) == KIND_FUNCTION ?
-        "if (typeof " + target + "[\"" + member +
-        "\"] !== \"function\") { throw new Error(\"missing\"); }" :
-        "if (!Object.getOwnPropertyDescriptor(" + target + ", \"" + member +
-        "\")) { throw new Error(\"missing\"); }";
+        std::format ("if (typeof {}[\"{}\"] !== \"function\") "
+                     "{{ throw new Error(\"missing\"); }}",
+        target, member) :
+        std::format ("if (!Object.getOwnPropertyDescriptor({}, \"{}\")) "
+                     "{{ throw new Error(\"missing\"); }}",
+        target, member);
 
         const std::string script = "pm.test(\"t\", function() { " + check + " });";
         auto result = engine.execute_test (script, request, response, env);

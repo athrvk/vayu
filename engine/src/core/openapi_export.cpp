@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <format>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -791,7 +792,7 @@ const std::vector<ExportRequest>& requests) {
         }
         const std::string templated = path_template (*parts.path);
         const std::string method    = lower (entry.method);
-        if (!claimed.insert (method + " " + templated).second) {
+        if (!claimed.insert (std::format ("{} {}", method, templated)).second) {
             // Two requests on the same method and path are one operation in a
             // document, and the second would silently replace the first.
             assembly.notes.duplicate_operations += 1;

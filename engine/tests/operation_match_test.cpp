@@ -75,6 +75,7 @@ const std::string& operation_id = "") {
 std::vector<std::string> matched_ids (const vayu::core::MatchResult& result,
 const std::vector<MatchableRequest>& requests) {
     std::vector<std::string> ids;
+    ids.reserve (result.matched.size ());
     for (const auto& pair : result.matched) {
         ids.push_back (requests[pair.request].id);
     }
@@ -85,6 +86,7 @@ const std::vector<MatchableRequest>& requests) {
 std::vector<std::string> matched_operations (const vayu::core::MatchResult& result,
 const std::vector<MatchableOperation>& operations) {
     std::vector<std::string> ids;
+    ids.reserve (result.matched.size ());
     for (const auto& pair : result.matched) {
         ids.push_back (operations[pair.operation].operation_id);
     }
@@ -94,6 +96,7 @@ const std::vector<MatchableOperation>& operations) {
 std::vector<std::string> unmatched_request_ids (const vayu::core::MatchResult& result,
 const std::vector<MatchableRequest>& requests) {
     std::vector<std::string> ids;
+    ids.reserve (result.unmatched_requests.size ());
     for (const size_t index : result.unmatched_requests) {
         ids.push_back (requests[index].id);
     }
@@ -103,6 +106,7 @@ const std::vector<MatchableRequest>& requests) {
 std::vector<std::string> unmatched_operation_ids (const vayu::core::MatchResult& result,
 const std::vector<MatchableOperation>& operations) {
     std::vector<std::string> ids;
+    ids.reserve (result.unmatched_operations.size ());
     for (const size_t index : result.unmatched_operations) {
         ids.push_back (operations[index].operation_id);
     }

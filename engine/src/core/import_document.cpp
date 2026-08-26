@@ -1366,7 +1366,7 @@ std::string to_graphql_envelope (const std::string& body) {
     if (begin == std::string::npos) {
         return js_json_compact (json{ { "query", "" } });
     }
-    const std::string trimmed =
+    std::string trimmed =
     body.substr (begin, body.find_last_not_of (" \t\n\r\f\v") - begin + 1);
     const json parsed = json::parse (trimmed, nullptr, false);
     if (!parsed.is_discarded () && parsed.is_object () &&

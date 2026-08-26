@@ -481,7 +481,7 @@ nlohmann::json parse_auth_blob (const std::string& blob) {
 
 nlohmann::json resolve_inherited_auth (const std::vector<vayu::db::Collection>& chain) {
     for (auto it = chain.rbegin (); it != chain.rend (); ++it) {
-        const nlohmann::json auth = parse_auth_blob (it->auth);
+        nlohmann::json auth = parse_auth_blob (it->auth);
         if (auth_mode (auth) == "noauth") {
             return nlohmann::json (); // explicit "send nothing" ends the walk
         }

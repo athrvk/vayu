@@ -176,7 +176,7 @@ cookie_for_url (const std::string& url, JarCookie cookie);
  * land in the live map beside a transfer.
  */
 struct CookieWrite {
-    enum class Kind {
+    enum class Kind : std::uint8_t {
         /// Merge `line` in, replacing a cookie of the same name/domain/path.
         Set,
         /// Drop the cookies named `name` that would be sent to `url`.

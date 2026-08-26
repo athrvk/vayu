@@ -231,7 +231,7 @@ class InboxListenerTest : public ::testing::Test {
         vayu::tests::remove_database_files (DB_PATH);
     }
 
-    InboxManager::StartResult start (InboxStartRequest request = {}) {
+    InboxManager::StartResult start (const InboxStartRequest& request = {}) {
         auto result = manager_->start (*db_, request);
         EXPECT_TRUE (result.ok) << result.error_message;
         return result;

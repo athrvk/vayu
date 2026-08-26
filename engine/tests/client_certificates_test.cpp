@@ -1087,6 +1087,7 @@ TEST (ClientCertificatePaths, ALoadRunCarriesTheRegistryAndStillTransfers) {
     EventLoop loop (config);
     loop.start ();
     std::vector<Request> requests;
+    requests.reserve (3);
     for (int i = 0; i < 3; ++i) {
         requests.push_back (get_request (upstream.url ("/hello")));
     }

@@ -70,7 +70,7 @@ struct CapacityConfig {
     size_t slo_breach_windows = 2;
 };
 
-enum class CapacityAction { Hold, StepUp, Stop };
+enum class CapacityAction : std::uint8_t { Hold, StepUp, Stop };
 
 /// Stop reasons, as they appear in the report's `capacity.stopReason`. Named
 /// constants rather than string literals at each `return`, so the report, the

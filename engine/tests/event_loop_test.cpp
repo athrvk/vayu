@@ -216,7 +216,7 @@ TEST_F (EventLoopTest, ConcurrentRequests) {
         request.method = vayu::HttpMethod::GET;
         request.url    = test_url;
 
-        loop.submit (request, [&] (size_t, vayu::Result<vayu::Response> result) {
+        loop.submit (request, [&] (size_t, const vayu::Result<vayu::Response>& result) {
             if (result.is_ok ()) {
                 completed_count++;
             }
@@ -295,7 +295,7 @@ TEST_F (EventLoopTest, CancelPendingRequest) {
     std::atomic<bool> was_error{ false };
 
     size_t request_id =
-    loop.submit (request, [&] (size_t, vayu::Result<vayu::Response> result) {
+    loop.submit (request, [&] (size_t, const vayu::Result<vayu::Response>& result) {
         callback_called = true;
         was_error       = result.is_error ();
     });
@@ -365,6 +365,7 @@ TEST_F (ThreadPoolTest, SubmitMultipleTasks) {
 
     std::atomic<int> counter{ 0 };
     std::vector<std::future<int>> futures;
+    futures.reserve (10);
 
     for (int i = 0; i < 10; ++i) {
         futures.push_back (pool.submit ([&counter, i] () {
@@ -510,7 +511,8 @@ TEST_F (EventLoopTest, ProgressCallback) {
     std::atomic<bool> completed{ false };
 
     loop.submit (
-    request, [&] (size_t, vayu::Result<vayu::Response>) { completed = true; },
+    request,
+    [&] (size_t, const vayu::Result<vayu::Response>&) { completed = true; },
     [&] (size_t, size_t downloaded, size_t total) {
         progress_calls++;
         // Progress callback should report download progress

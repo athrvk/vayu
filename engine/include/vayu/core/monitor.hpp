@@ -26,6 +26,7 @@
  * engine or hand-edited.
  */
 
+#include <cstdint>
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -44,7 +45,7 @@ class Database;
 namespace vayu::core {
 
 /** Which exposition format the scraped endpoint speaks. */
-enum class MonitorFormat {
+enum class MonitorFormat : std::uint8_t {
     /// Prometheus text exposition: `name{labels} value [timestamp]` lines.
     Prometheus,
     /// A flat JSON object of numbers, keyed by the requested series names.

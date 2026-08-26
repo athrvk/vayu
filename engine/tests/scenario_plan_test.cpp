@@ -162,6 +162,7 @@ class ScenarioPlanTest : public ::testing::Test {
 
     std::vector<std::string> step_ids (const vayu::core::ScenarioPlan& plan) {
         std::vector<std::string> ids;
+        ids.reserve (plan.steps.size ());
         for (const auto& step : plan.steps) {
             ids.push_back (step.request_id);
         }
@@ -561,7 +562,7 @@ TEST_F (ScenarioPlanTest, PlanOverMaxStepsIsRejectedWithCountAndCap) {
     vayu::core::resolve_scenario (*db_, block ("col"), options (/*max_steps=*/2));
     EXPECT_FALSE (resolved.ok);
     EXPECT_NE (resolved.error.find ("3 steps"), std::string::npos) << resolved.error;
-    EXPECT_NE (resolved.error.find ("2"), std::string::npos) << resolved.error;
+    EXPECT_NE (resolved.error.find ('2'), std::string::npos) << resolved.error;
     EXPECT_NE (resolved.error.find ("maxScenarioSteps"), std::string::npos)
     << resolved.error;
 }
@@ -1025,7 +1026,7 @@ TEST_F (ScenarioPlanTest, MalformedBlockFieldsAreRejected) {
     seed_collection ("col", "");
     seed_request ("req", "col");
 
-    const auto rejected = [&] (json scenario) {
+    const auto rejected = [&] (const json& scenario) {
         const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
         EXPECT_FALSE (resolved.ok) << scenario.dump ();
         EXPECT_FALSE (resolved.error.empty ());
