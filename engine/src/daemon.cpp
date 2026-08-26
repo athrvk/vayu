@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+
 /**
  * @file daemon.cpp
  * @brief Vayu Engine daemon entry point
@@ -56,18 +57,14 @@ bool acquire_lock (const std::string& lock_path) {
 
     return true;
 }
-} // namespace
-
-int main (int argc, char* argv[]) {
-    // Parse arguments first (need data_dir for logging)
-    int port             = vayu::core::constants::defaults::PORT;
-    int verbosity        = 0; // 0=warn/error, 1=info+, 2=debug+
-    std::string data_dir = get_default_data_dir ();
-
-    // The argument vector as the bounded range it is: `argv[i]` is arithmetic
-    // on a pointer that carries no length, and the count is right there.
-    const std::span<char* const> args (argv, static_cast<size_t> (argc));
-
+/**
+ * The daemon's own arguments.
+ *
+ * @return the exit code to stop on - `--help` answers here - or nothing to
+ *         carry on with what the pass read.
+ */
+std::optional<int>
+read_daemon_args (std::span<char* const> args, int& port, int& verbosity, std::string& data_dir) {
     for (size_t i = 1; i < args.size (); ++i) {
         std::string arg = args[i];
 
@@ -107,6 +104,25 @@ int main (int argc, char* argv[]) {
             return 0;
         }
     }
+    return std::nullopt;
+}
+
+} // namespace
+
+int main (int argc, char* argv[]) {
+    // Parse arguments first (need data_dir for logging)
+    int port             = vayu::core::constants::defaults::PORT;
+    int verbosity        = 0; // 0=warn/error, 1=info+, 2=debug+
+    std::string data_dir = get_default_data_dir ();
+
+    // The argument vector as the bounded range it is: `argv[i]` is arithmetic
+    // on a pointer that carries no length, and the count is right there.
+    const std::span<char* const> args (argv, static_cast<size_t> (argc));
+
+    if (auto stop = read_daemon_args (args, port, verbosity, data_dir)) {
+        return *stop;
+    }
+
 
     // Ensure data directory exists
     try {

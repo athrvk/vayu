@@ -273,6 +273,92 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
     }
 }
 
+/** What the argument vector says to do, once it has been read. */
+struct CliOptions {
+    std::string command;
+    int verbosity = 0; ///< 0=warn/error, 1=info+, 2=debug+
+    bool color    = true;
+    std::string filepath;
+    std::string daemon_url{ DEFAULT_DAEMON_URL };
+};
+
+/**
+ * One argument.
+ *
+ * @param next the argument a flag would consume; @p has_next is kept apart from
+ *        its emptiness on purpose - `--daemon ""` is a value, badly chosen, and
+ *        it stays the caller's to be told about downstream rather than silently
+ *        reinterpreted as a missing one.
+ * @param consumed_next set when the flag took @p next as its value.
+ * @return the exit code to stop on - `--help` and `--version` answer here - or
+ *         nothing to carry on.
+ */
+std::optional<int> read_cli_flag (const std::string& arg,
+std::string_view next,
+bool has_next,
+CliOptions& options,
+bool& consumed_next) {
+    if (arg == "-h" || arg == "--help") {
+        print_help ();
+        return 0;
+    }
+    if (arg == "-v" || arg == "--version") {
+        print_version ();
+        return 0;
+    }
+    if (arg == "--verbose") {
+        // The level is optional: `--verbose` on its own means info. Clamped to
+        // the range the logger has.
+        if (!next.empty () && std::isdigit (static_cast<unsigned char> (next.front ())) != 0) {
+            options.verbosity = std::max (0, std::min (2, std::stoi (std::string (next))));
+            consumed_next     = true;
+        } else {
+            options.verbosity = 1;
+        }
+        return std::nullopt;
+    }
+    if (arg == "--no-color") {
+        options.color = false;
+        return std::nullopt;
+    }
+    if (arg == "--daemon" && has_next) {
+        options.daemon_url = next;
+        consumed_next      = true;
+        return std::nullopt;
+    }
+    if (arg == "run" && has_next) {
+        options.filepath = next;
+        consumed_next    = true;
+        return std::nullopt;
+    }
+    // First non-flag argument after 'run' is the filepath
+    if (options.command == "run" && options.filepath.empty () && arg[0] != '-') {
+        options.filepath = arg;
+    }
+    return std::nullopt;
+}
+
+/**
+ * The flags and the command's own argument, in one pass.
+ *
+ * @return the exit code to stop on, or nothing to carry on with what it read.
+ */
+std::optional<int> read_cli_flags (std::span<char* const> args, CliOptions& options) {
+    for (size_t i = 1; i < args.size (); ++i) {
+        const bool has_next = i + 1 < args.size ();
+        const std::string_view next =
+        has_next ? std::string_view (args[i + 1]) : std::string_view ();
+        bool consumed_next = false;
+        if (auto stop = read_cli_flag (args[i], next, has_next, options, consumed_next)) {
+            return *stop;
+        }
+        if (consumed_next) {
+            ++i;
+        }
+    }
+    return std::nullopt;
+}
+
 /**
  * The whole of the CLI, so that `main` is a catch and nothing else.
  *
@@ -295,69 +381,10 @@ int run_cli (std::span<char* const> args) {
         return 1;
     }
 
-    std::string command = args[1];
-    int verbosity       = 0; // 0=warn/error, 1=info+, 2=debug+
-    bool color          = true;
-    std::string filepath;
-    std::string daemon_url{ DEFAULT_DAEMON_URL };
-
-    // Parse flags
-    for (size_t i = 1; i < args.size (); ++i) {
-        const std::string arg = args[i];
-        // The argument a flag would consume, read once. `has_next` is kept
-        // apart from emptiness on purpose: `--daemon ""` is a value, badly
-        // chosen, and it stays the caller's to be told about downstream rather
-        // than silently reinterpreted as a missing one.
-        const bool has_next = i + 1 < args.size ();
-        const std::string_view next =
-        has_next ? std::string_view (args[i + 1]) : std::string_view ();
-
-        if (arg == "-h" || arg == "--help") {
-            print_help ();
-            return 0;
-        }
-
-        if (arg == "-v" || arg == "--version") {
-            print_version ();
-            return 0;
-        }
-
-        if (arg == "--verbose") {
-            // Check if next arg is a number (verbosity level)
-            if (!next.empty () &&
-            std::isdigit (static_cast<unsigned char> (next.front ())) != 0) {
-                verbosity = std::stoi (std::string (next));
-                ++i;
-                // Clamp to valid range [0, 2]
-                verbosity = std::max (0, std::min (2, verbosity));
-            } else {
-                // No level specified, default to 1 (info level)
-                verbosity = 1;
-            }
-            continue;
-        }
-
-        if (arg == "--no-color") {
-            color = false;
-            continue;
-        }
-
-        if (arg == "--daemon" && has_next) {
-            daemon_url = next;
-            ++i;
-            continue;
-        }
-
-        if (arg == "run" && has_next) {
-            filepath = next;
-            ++i;
-            continue;
-        }
-
-        // First non-flag argument after 'run' is the filepath
-        if (command == "run" && filepath.empty () && arg[0] != '-') {
-            filepath = arg;
-        }
+    CliOptions options;
+    options.command = args[1];
+    if (auto stop = read_cli_flags (args, options)) {
+        return *stop;
     }
 
     // Initialize curl (still needed for httplib?)
@@ -366,25 +393,26 @@ int run_cli (std::span<char* const> args) {
     // using vayu::http::Client anymore. vayu::http::global_init();
 
     // Set logger verbosity
-    vayu::utils::Logger::instance ().set_verbosity (verbosity);
+    vayu::utils::Logger::instance ().set_verbosity (options.verbosity);
 
     int result = 0;
 
-    if (command == "run") {
-        if (filepath.empty ()) {
+    if (options.command == "run") {
+        if (options.filepath.empty ()) {
             std::string msg = "Error: Missing request file";
             std::cerr << msg << "\n";
             std::cerr << "Usage: vayu-cli run <request.json>\n";
             vayu::utils::log_error (msg);
             result = 1;
         } else {
-            result = run_via_daemon (daemon_url, filepath, verbosity, color);
+            result = run_via_daemon (
+            options.daemon_url, options.filepath, options.verbosity, options.color);
         }
-    } else if (command[0] == '-') {
+    } else if (options.command[0] == '-') {
         // Already handled flags above
         result = 0;
     } else {
-        std::string msg = "Error: Unknown command '" + command + "'";
+        std::string msg = "Error: Unknown command '" + options.command + "'";
         std::cerr << msg << "\n";
         std::cerr << "Run 'vayu-cli --help' for usage information.\n";
         vayu::utils::log_error (msg);
