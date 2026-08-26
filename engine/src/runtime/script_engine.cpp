@@ -2034,8 +2034,7 @@ bool read_crypto_bytes (JSContext* ctx, JSValueConst value, const char* what, st
 JSValue encode_digest (JSContext* ctx,
 const std::array<uint8_t, 32>& digest,
 const std::string& encoding) {
-    const std::string_view raw (
-    reinterpret_cast<const char*> (digest.data ()), digest.size ());
+    const std::string_view raw = vayu::utils::byte_view (digest);
 
     if (encoding == "bytes") {
         // Constructed through the global Uint8Array rather than a helper, for

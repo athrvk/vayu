@@ -92,6 +92,10 @@ class MockSpecServer {
         if (thread_.joinable ())
             thread_.join ();
     }
+    MockSpecServer (const MockSpecServer&)            = delete;
+    MockSpecServer& operator= (const MockSpecServer&) = delete;
+    MockSpecServer (MockSpecServer&&)                 = delete;
+    MockSpecServer& operator= (MockSpecServer&&)      = delete;
     int port () const {
         return port_;
     }

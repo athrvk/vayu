@@ -56,9 +56,7 @@ bool signature_verifies (const std::string& jwt, const std::string& key) {
         return false;
     }
     const auto tag = vayu::utils::hmac_sha256 (key, parts[0] + "." + parts[1]);
-    return parts[2] ==
-    vayu::utils::base64url_encode (
-    std::string_view (reinterpret_cast<const char*> (tag.data ()), tag.size ()));
+    return parts[2] == vayu::utils::base64url_encode (vayu::utils::byte_view (tag));
 }
 
 json decode_jwt_payload (const std::string& jwt) {

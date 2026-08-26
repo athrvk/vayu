@@ -24,8 +24,7 @@ namespace vayu::http::pkce {
  */
 inline std::string code_challenge (const std::string& verifier) {
     const auto hash = vayu::utils::sha256 (verifier);
-    return vayu::utils::base64url_encode (
-    std::string_view (reinterpret_cast<const char*> (hash.data ()), hash.size ()));
+    return vayu::utils::base64url_encode (vayu::utils::byte_view (hash));
 }
 
 /**
