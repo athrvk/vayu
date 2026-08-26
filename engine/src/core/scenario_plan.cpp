@@ -163,6 +163,92 @@ collect_requests (vayu::db::Database& db, const std::string& root_id, bool recur
     return ordered;
 }
 
+/**
+ * The `data` rows a run binds.
+ *
+ * They reach the run's worker (as `pm.iterationData`) but never the plan or the
+ * snapshot - the app owns parsing the file they came from, and only their count
+ * is persisted. A rejected set leaves no rows behind, never the ones before the
+ * bad one, which would be a partial data set.
+ */
+std::optional<std::string> read_scenario_data (const nlohmann::json& data,
+const ScenarioLimits& limits,
+ScenarioRequest& out,
+std::vector<nlohmann::json>& rows_out) {
+
+    if (!data.is_array ()) {
+        return "'scenario.data' must be an array of objects (got " +
+        std::string (data.type_name ()) + ")";
+    }
+    if (data.empty ()) {
+        return "'scenario.data' is present but empty. A data set that "
+               "binds "
+               "nothing is a mistake, not an empty run - omit the field to "
+               "run without one.";
+    }
+    if (data.size () > limits.max_data_rows) {
+        return "'scenario.data' has " + std::to_string (data.size ()) +
+        " rows, over the limit of " + std::to_string (limits.max_data_rows) +
+        " (raise the 'maxScenarioDataRows' setting to allow more)";
+    }
+    rows_out.reserve (data.size ());
+    // Accumulated row by row rather than dumping the whole array: an
+    // oversized set is refused as soon as it crosses the bound, so the
+    // check never materializes a second copy of a payload that is already
+    // too big to want one.
+    size_t data_bytes = 0;
+    for (size_t i = 0; i < data.size (); ++i) {
+        if (!data[i].is_object ()) {
+            // A rejected set leaves no rows behind - never the ones before
+            // the bad one, which would be a partial data set.
+            rows_out.clear ();
+            return "'scenario.data' row " + std::to_string (i) +
+            " must be an object of name/value pairs (got " +
+            std::string (data[i].type_name ()) + ")";
+        }
+        data_bytes += data[i].dump ().size ();
+        if (data_bytes > limits.max_data_bytes) {
+            rows_out.clear ();
+            return "'scenario.data' is larger than the limit of " +
+            std::to_string (limits.max_data_bytes) +
+            " bytes (raise the 'maxScenarioDataBytes' setting to allow "
+            "more). The row count is within its own limit - a data set can "
+            "exceed this one with few but large rows.";
+        }
+        rows_out.push_back (data[i]);
+    }
+    out.data_row_count = data.size ();
+    return std::nullopt;
+}
+
+/**
+ * The iteration count: an explicit one wins and the row index wraps; absent, a
+ * data set sets it to its row count (Postman's default) and everything else
+ * runs once.
+ */
+std::optional<std::string> read_scenario_iterations (const nlohmann::json& scenario,
+bool has_data,
+ScenarioRequest& out) {
+    if (auto iterations = scenario.find ("iterations");
+    iterations != scenario.end () && !iterations->is_null ()) {
+        constexpr double max_iterations =
+        static_cast<double> (std::numeric_limits<int>::max ());
+        const bool usable = iterations->is_number () &&
+        std::isfinite (iterations->get<double> ()) && iterations->get<double> () >= 1.0 &&
+        iterations->get<double> () <= max_iterations &&
+        iterations->get<double> () == std::floor (iterations->get<double> ());
+        if (!usable) {
+            return "'scenario.iterations' must be a whole number between 1 and "
+                   "2147483647 (got " +
+            iterations->dump () + ")";
+        }
+        out.iterations = static_cast<size_t> (iterations->get<double> ());
+    } else if (has_data) {
+        out.iterations = out.data_row_count;
+    }
+    return std::nullopt;
+}
+
 /// Validate the block's own fields. The plan is not touched here; a malformed
 /// payload must not cost a collection walk.
 std::optional<std::string> parse_scenario_request (const nlohmann::json& scenario,
@@ -208,69 +294,14 @@ std::vector<nlohmann::json>& rows_out) {
     // only their count is persisted.
     bool has_data = false;
     if (auto data = scenario.find ("data"); data != scenario.end () && !data->is_null ()) {
-        if (!data->is_array ()) {
-            return "'scenario.data' must be an array of objects (got " +
-            std::string (data->type_name ()) + ")";
+        if (auto reason = read_scenario_data (*data, limits, out, rows_out)) {
+            return reason;
         }
-        if (data->empty ()) {
-            return "'scenario.data' is present but empty. A data set that "
-                   "binds "
-                   "nothing is a mistake, not an empty run - omit the field to "
-                   "run without one.";
-        }
-        if (data->size () > limits.max_data_rows) {
-            return "'scenario.data' has " + std::to_string (data->size ()) +
-            " rows, over the limit of " + std::to_string (limits.max_data_rows) +
-            " (raise the 'maxScenarioDataRows' setting to allow more)";
-        }
-        rows_out.reserve (data->size ());
-        // Accumulated row by row rather than dumping the whole array: an
-        // oversized set is refused as soon as it crosses the bound, so the
-        // check never materializes a second copy of a payload that is already
-        // too big to want one.
-        size_t data_bytes = 0;
-        for (size_t i = 0; i < data->size (); ++i) {
-            if (!(*data)[i].is_object ()) {
-                // A rejected set leaves no rows behind - never the ones before
-                // the bad one, which would be a partial data set.
-                rows_out.clear ();
-                return "'scenario.data' row " + std::to_string (i) +
-                " must be an object of name/value pairs (got " +
-                std::string ((*data)[i].type_name ()) + ")";
-            }
-            data_bytes += (*data)[i].dump ().size ();
-            if (data_bytes > limits.max_data_bytes) {
-                rows_out.clear ();
-                return "'scenario.data' is larger than the limit of " +
-                std::to_string (limits.max_data_bytes) +
-                " bytes (raise the 'maxScenarioDataBytes' setting to allow "
-                "more). The row count is within its own limit - a data set can "
-                "exceed this one with few but large rows.";
-            }
-            rows_out.push_back ((*data)[i]);
-        }
-        has_data           = true;
-        out.data_row_count = data->size ();
+        has_data = true;
     }
 
-    // An explicit count wins and the row index wraps; absent, a data set sets
-    // it to its row count (Postman's default) and everything else runs once.
-    if (auto iterations = scenario.find ("iterations");
-    iterations != scenario.end () && !iterations->is_null ()) {
-        constexpr double max_iterations =
-        static_cast<double> (std::numeric_limits<int>::max ());
-        const bool usable = iterations->is_number () &&
-        std::isfinite (iterations->get<double> ()) && iterations->get<double> () >= 1.0 &&
-        iterations->get<double> () <= max_iterations &&
-        iterations->get<double> () == std::floor (iterations->get<double> ());
-        if (!usable) {
-            return "'scenario.iterations' must be a whole number between 1 and "
-                   "2147483647 (got " +
-            iterations->dump () + ")";
-        }
-        out.iterations = static_cast<size_t> (iterations->get<double> ());
-    } else if (has_data) {
-        out.iterations = out.data_row_count;
+    if (auto reason = read_scenario_iterations (scenario, has_data, out)) {
+        return reason;
     }
 
     return std::nullopt;
@@ -278,24 +309,20 @@ std::vector<nlohmann::json>& rows_out) {
 
 } // namespace
 
-ScenarioResolution resolve_scenario (vayu::db::Database& db,
-const nlohmann::json& scenario,
-const ScenarioResolveOptions& options) {
-    ScenarioResolution resolution;
-    if (auto reason = parse_scenario_request (
-        scenario, options.limits, resolution.request, resolution.data_rows)) {
-        return invalid (*reason);
-    }
-    const ScenarioRequest& request = resolution.request;
+namespace {
 
-    // Captured, not just probed: the collection carries the declared data
-    // contract, and the no-data refusal below is the reader that makes storing
-    // one worth anything.
-    const auto collection = db.get_collection (request.collection_id);
-    if (!collection) {
-        return invalid ("No collection with id '" + request.collection_id + "'");
-    }
-
+/**
+ * The contract this run is measured against, and the schemas that go with it.
+ *
+ * Read once here and stamped into the snapshot by `build_scenario_manifest`
+ * (issue #637). Any disagreement - no such document, no index on it, a hash
+ * that does not match - leaves the operations empty, which is the engine's one
+ * spelling of "not measured against a contract"; which disagreement it was is
+ * recorded too (issue #681), and only the collection runner reads it.
+ */
+void resolve_bound_spec (vayu::db::Database& db,
+const std::string& collection_id,
+ScenarioResolution& resolution) {
     // The spec this run is measured against, read once here and stamped into the
     // snapshot by `build_scenario_manifest` (issue #637). Read from the
     // collection chain rather than looked up in `spec_documents`: the hash *on
@@ -307,10 +334,10 @@ const ScenarioResolveOptions& options) {
     // under tag sub-collections: reading only the named collection's own column
     // left the natural "run this tag folder" measuring nothing at all, silently
     // (issue #716).
-    if (const auto bound = nearest_spec_binding (db, request.collection_id)) {
+    if (const auto bound = nearest_spec_binding (db, collection_id)) {
         resolution.spec.spec_id   = bound->spec_id;
         resolution.spec.spec_hash = bound->spec_hash;
-        resolution.spec.inherited = bound->collection_id != request.collection_id;
+        resolution.spec.inherited = bound->collection_id != collection_id;
     }
 
     // The document's declared operations, read once here so contract coverage
@@ -353,6 +380,150 @@ const ScenarioResolveOptions& options) {
             resolution.spec.response_schemas = document->response_schemas;
         }
     }
+}
+
+/**
+ * One step of the plan: composed, built, and refused if it carries a token
+ * nothing in this run could bind.
+ *
+ * @return the reason this scenario cannot run, or nothing.
+ */
+std::optional<std::string> resolve_step (vayu::db::Database& db,
+const ScenarioResolveOptions& options,
+const vayu::db::Collection& collection,
+bool has_data,
+size_t index,
+const vayu::db::Request& row,
+ScenarioPlan& plan) {
+    // The by-id compose path: the same resolution a Send of this request
+    // performs, so a step's request and scripts cannot drift from it.
+    nlohmann::json compose_body{ { "requestId", row.id } };
+    if (!options.environment_id.empty ()) {
+        compose_body["environmentId"] = options.environment_id;
+    }
+    auto [status, payload] = vayu::http::compose_request_core (db, compose_body);
+    if (status != 200) {
+        return ("Cannot compose " + describe_step (index, row) +
+        ": " + compose_error_message (payload));
+    }
+
+    // Auth is resolved into headers/url here, which is what makes the plan
+    // credential-grade and the snapshot manifest necessary - unless the
+    // credentials themselves come from the data file. `apply_auth`
+    // collapses basic auth into one base64 `Authorization` value, so a
+    // `{{data.user}}` resolved into the plan is unreadable by the time
+    // anything scans the built request: it used to go out as base64 of the
+    // literal token text, silently, and the refusal below could not see it
+    // either (issue #591). Such a step keeps its credentials typed and
+    // unbound and applies its auth per iteration instead - one base64 per
+    // iteration, and only for the steps that need it.
+    const vayu::http::Auth parsed_auth =
+    vayu::http::parse_auth (payload.value ("auth", nlohmann::json ()));
+    StepDataTemplate auth_template = tokenize_auth_fields (parsed_auth);
+
+    // OAuth 2.0 is the one mode deferral cannot serve: its token is
+    // acquired right here, once, against the token endpoint, so there is no
+    // per-iteration acquisition for a row to reach - and adding one would
+    // mean a network round trip per virtual user per iteration. Refused by
+    // name in both directions, with or without a data set, rather than sent
+    // to the token endpoint as the literal token text.
+    if (auto token = first_oauth2_data_token (parsed_auth)) {
+        return (describe_step (index, row) + " carries " + *token +
+        " in its OAuth 2.0 configuration. That token is acquired once, "
+        "when the run is planned, so a data column can never reach it - "
+        "use a static credential there, or move the data token into the "
+        "request itself.");
+    }
+
+    // Deferred through the builder's own option rather than by hiding the
+    // `auth` key from it: one mechanism, named at the call site, shared
+    // with the single send that defers for the same reason (issue #642).
+    const auto auth_resolution = auth_template.empty () ?
+    vayu::http::AuthResolution::Apply :
+    vayu::http::AuthResolution::Defer;
+    auto built =
+    vayu::http::build_request (payload, &db, options.timeout_ms, auth_resolution);
+    if (!built.ok || built.parse_failed) {
+        return ("Cannot compose " + describe_step (index, row) +
+        ": " + built.error_message);
+    }
+
+    // Split once, here, so no executor re-scans this step per iteration -
+    // the load-mode one binds a row per iteration per virtual user, which
+    // is a scan of every field of every step at the run's full rate.
+    auto data_template = tokenize_data_fields (built.request);
+
+    // A `{{data.*}}` token with no data set behind it can never bind. The
+    // namespace is reserved, so composition deliberately left the token
+    // written as it stands, and a run without rows has nothing to
+    // substitute it from - it would reach the wire as the literal text
+    // `{{data.id}}`, which is not a request anyone meant to send. Refused
+    // here, beside every other unrunnable scenario and before a run row
+    // exists, rather than rediscovered per step per iteration once it has
+    // started (issue #415).
+    if (!has_data) {
+        auto token = data_template.first_token ();
+        if (!token) {
+            // The credentials are scanned too, and for the same reason: a
+            // data token in a basic-auth field is exactly as unbindable as
+            // one in the URL, and until it was kept out of the base64 above
+            // this refusal could not see it at all.
+            token = auth_template.first_token ();
+        }
+        if (token) {
+            return (describe_step (index, row) + " carries " + *token +
+            ", but this run has no 'scenario.data' set. A data token has "
+            "no row to bind to and would reach the wire written as it "
+            "stands - run the collection with a data file, or remove the "
+            "token from the request (or from the variable value it was "
+            "written into)." +
+            declared_columns_hint (collection));
+        }
+    }
+
+    ScenarioStep step;
+    step.index          = index;
+    step.request_id     = row.id;
+    step.name           = row.name;
+    step.request        = std::move (built.request);
+    step.pre_script     = vayu::http::read_pre_request_script (payload);
+    step.post_script    = vayu::http::read_post_request_script (payload);
+    step.stored_url     = row.url;
+    step.spec_operation = row.spec_operation.value_or (std::string ());
+    step.data_template  = std::move (data_template);
+    // Only ever reached with rows behind it: the refusal above returns for
+    // a credential token in a run that has no data set, so a deferred step
+    // cannot arrive at an executor with no row to bind.
+    if (!auth_template.empty ()) {
+        step.auth          = parsed_auth;
+        step.auth_template = std::move (auth_template);
+    }
+    plan.steps.push_back (std::move (step));
+    return std::nullopt;
+}
+
+} // namespace
+
+ScenarioResolution resolve_scenario (vayu::db::Database& db,
+const nlohmann::json& scenario,
+const ScenarioResolveOptions& options) {
+    ScenarioResolution resolution;
+    if (auto reason = parse_scenario_request (
+        scenario, options.limits, resolution.request, resolution.data_rows)) {
+        return invalid (*reason);
+    }
+    const ScenarioRequest& request = resolution.request;
+
+    // Captured, not just probed: the collection carries the declared data
+    // contract, and the no-data refusal below is the reader that makes storing
+    // one worth anything.
+    const auto collection = db.get_collection (request.collection_id);
+    if (!collection) {
+        return invalid ("No collection with id '" + request.collection_id + "'");
+    }
+
+    resolve_bound_spec (db, request.collection_id, resolution);
+
 
     const auto rows = collect_requests (db, request.collection_id, request.recursive);
     if (rows.empty ()) {
@@ -372,112 +543,10 @@ const ScenarioResolveOptions& options) {
 
     resolution.plan.steps.reserve (rows.size ());
     for (size_t index = 0; index < rows.size (); ++index) {
-        const auto& row = rows[index];
-
-        // The by-id compose path: the same resolution a Send of this request
-        // performs, so a step's request and scripts cannot drift from it.
-        nlohmann::json compose_body{ { "requestId", row.id } };
-        if (!options.environment_id.empty ()) {
-            compose_body["environmentId"] = options.environment_id;
+        if (auto reason = resolve_step (db, options, *collection, has_data, index,
+            rows[index], resolution.plan)) {
+            return invalid (*reason);
         }
-        auto [status, payload] = vayu::http::compose_request_core (db, compose_body);
-        if (status != 200) {
-            return invalid ("Cannot compose " + describe_step (index, row) +
-            ": " + compose_error_message (payload));
-        }
-
-        // Auth is resolved into headers/url here, which is what makes the plan
-        // credential-grade and the snapshot manifest necessary - unless the
-        // credentials themselves come from the data file. `apply_auth`
-        // collapses basic auth into one base64 `Authorization` value, so a
-        // `{{data.user}}` resolved into the plan is unreadable by the time
-        // anything scans the built request: it used to go out as base64 of the
-        // literal token text, silently, and the refusal below could not see it
-        // either (issue #591). Such a step keeps its credentials typed and
-        // unbound and applies its auth per iteration instead - one base64 per
-        // iteration, and only for the steps that need it.
-        const vayu::http::Auth parsed_auth =
-        vayu::http::parse_auth (payload.value ("auth", nlohmann::json ()));
-        StepDataTemplate auth_template = tokenize_auth_fields (parsed_auth);
-
-        // OAuth 2.0 is the one mode deferral cannot serve: its token is
-        // acquired right here, once, against the token endpoint, so there is no
-        // per-iteration acquisition for a row to reach - and adding one would
-        // mean a network round trip per virtual user per iteration. Refused by
-        // name in both directions, with or without a data set, rather than sent
-        // to the token endpoint as the literal token text.
-        if (auto token = first_oauth2_data_token (parsed_auth)) {
-            return invalid (describe_step (index, row) + " carries " + *token +
-            " in its OAuth 2.0 configuration. That token is acquired once, "
-            "when the run is planned, so a data column can never reach it - "
-            "use a static credential there, or move the data token into the "
-            "request itself.");
-        }
-
-        // Deferred through the builder's own option rather than by hiding the
-        // `auth` key from it: one mechanism, named at the call site, shared
-        // with the single send that defers for the same reason (issue #642).
-        const auto auth_resolution = auth_template.empty () ?
-        vayu::http::AuthResolution::Apply :
-        vayu::http::AuthResolution::Defer;
-        auto built =
-        vayu::http::build_request (payload, &db, options.timeout_ms, auth_resolution);
-        if (!built.ok || built.parse_failed) {
-            return invalid ("Cannot compose " + describe_step (index, row) +
-            ": " + built.error_message);
-        }
-
-        // Split once, here, so no executor re-scans this step per iteration -
-        // the load-mode one binds a row per iteration per virtual user, which
-        // is a scan of every field of every step at the run's full rate.
-        auto data_template = tokenize_data_fields (built.request);
-
-        // A `{{data.*}}` token with no data set behind it can never bind. The
-        // namespace is reserved, so composition deliberately left the token
-        // written as it stands, and a run without rows has nothing to
-        // substitute it from - it would reach the wire as the literal text
-        // `{{data.id}}`, which is not a request anyone meant to send. Refused
-        // here, beside every other unrunnable scenario and before a run row
-        // exists, rather than rediscovered per step per iteration once it has
-        // started (issue #415).
-        if (!has_data) {
-            auto token = data_template.first_token ();
-            if (!token) {
-                // The credentials are scanned too, and for the same reason: a
-                // data token in a basic-auth field is exactly as unbindable as
-                // one in the URL, and until it was kept out of the base64 above
-                // this refusal could not see it at all.
-                token = auth_template.first_token ();
-            }
-            if (token) {
-                return invalid (describe_step (index, row) + " carries " + *token +
-                ", but this run has no 'scenario.data' set. A data token has "
-                "no row to bind to and would reach the wire written as it "
-                "stands - run the collection with a data file, or remove the "
-                "token from the request (or from the variable value it was "
-                "written into)." +
-                declared_columns_hint (*collection));
-            }
-        }
-
-        ScenarioStep step;
-        step.index          = index;
-        step.request_id     = row.id;
-        step.name           = row.name;
-        step.request        = std::move (built.request);
-        step.pre_script     = vayu::http::read_pre_request_script (payload);
-        step.post_script    = vayu::http::read_post_request_script (payload);
-        step.stored_url     = row.url;
-        step.spec_operation = row.spec_operation.value_or (std::string ());
-        step.data_template  = std::move (data_template);
-        // Only ever reached with rows behind it: the refusal above returns for
-        // a credential token in a run that has no data set, so a deferred step
-        // cannot arrive at an executor with no row to bind.
-        if (!auth_template.empty ()) {
-            step.auth          = parsed_auth;
-            step.auth_template = std::move (auth_template);
-        }
-        resolution.plan.steps.push_back (std::move (step));
     }
 
     resolution.ok = true;

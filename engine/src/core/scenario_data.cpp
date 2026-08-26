@@ -348,17 +348,58 @@ XmlPosition xml_position_after_markup_char (char c) {
  * delimiter. That trust is the author's to keep; a name is not content, and a
  * data file is not where one comes from.
  */
+/**
+ * One character of character data.
+ *
+ * A `<` is held until enough of what follows it has arrived to say which
+ * construct it opened - which may be after the token that sits in the middle of
+ * it, hence `pending`.
+ */
+void advance_xml_text (char c, XmlScanState& state) {
+    if (state.pending.empty ()) {
+        if (c == '<') {
+            state.pending = "<";
+        }
+        return;
+    }
+    state.pending += c;
+    bool opened  = false;
+    bool partial = false;
+    for (const XmlOpener& opener : XML_OPENERS) {
+        if (state.pending == opener.text) {
+            state.position = opener.opens;
+            state.pending.clear ();
+            opened = true;
+            break;
+        }
+        partial = partial || opener.text.substr (0, state.pending.size ()) == state.pending;
+    }
+    if (opened || partial) {
+        return;
+    }
+    // It opened a tag after all. The character that settled that is part of the
+    // tag, so it is re-read in the position it actually sits in - `<>` would
+    // otherwise leave the scan inside markup that already closed.
+    state.pending.clear ();
+    state.position = xml_position_after_markup_char (c);
+}
+
+/** One character inside a construct that ends at a fixed closing delimiter. */
+void advance_xml_closer (char c, std::string_view closer, XmlScanState& state) {
+    const std::string candidate = state.pending + c;
+    if (candidate == closer) {
+        state.position = XmlPosition::Text;
+        state.pending.clear ();
+        return;
+    }
+    state.pending = longest_partial_match (candidate, closer);
+}
+
 void advance_xml_state (std::string_view literal, XmlScanState& state) {
     for (const char c : literal) {
-        const std::string_view closer = xml_closing_delimiter (state.position);
-        if (!closer.empty ()) {
-            const std::string candidate = state.pending + c;
-            if (candidate == closer) {
-                state.position = XmlPosition::Text;
-                state.pending.clear ();
-            } else {
-                state.pending = longest_partial_match (candidate, closer);
-            }
+        if (const std::string_view closer = xml_closing_delimiter (state.position);
+        !closer.empty ()) {
+            advance_xml_closer (c, closer, state);
             continue;
         }
 
@@ -379,36 +420,7 @@ void advance_xml_state (std::string_view literal, XmlScanState& state) {
         default: break;
         }
 
-        // Character data. A `<` is held until enough of what follows it has
-        // arrived to say which construct it opened - which may be after the
-        // token that sits in the middle of it, hence `pending`.
-        if (state.pending.empty ()) {
-            if (c == '<') {
-                state.pending = "<";
-            }
-            continue;
-        }
-        state.pending += c;
-        bool opened  = false;
-        bool partial = false;
-        for (const XmlOpener& opener : XML_OPENERS) {
-            if (state.pending == opener.text) {
-                state.position = opener.opens;
-                state.pending.clear ();
-                opened = true;
-                break;
-            }
-            partial = partial ||
-            opener.text.substr (0, state.pending.size ()) == state.pending;
-        }
-        if (opened || partial) {
-            continue;
-        }
-        // It opened a tag after all. The character that settled that is part of
-        // the tag, so it is re-read in the position it actually sits in - `<>`
-        // would otherwise leave the scan inside markup that already closed.
-        state.pending.clear ();
-        state.position = xml_position_after_markup_char (c);
+        advance_xml_text (c, state);
     }
 }
 
