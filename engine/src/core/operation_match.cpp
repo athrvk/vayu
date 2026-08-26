@@ -236,22 +236,23 @@ std::string operation_shape_key (std::string_view method, std::string_view path_
     return upper (method) + " " + std::string (path_shape);
 }
 
-MatchResult match_operations (const std::vector<MatchableRequest>& requests,
-const std::vector<MatchableOperation>& operations) {
-    // Both sides' shapes once, not once per comparison: the second pass is a
-    // cross product over what the first left open, and a document declaring
-    // hundreds of operations would otherwise re-flatten every path per request.
-    std::vector<std::optional<std::string>> request_shapes;
-    request_shapes.reserve (requests.size ());
-    for (const auto& request : requests) {
-        request_shapes.push_back (request_path_shape (request.url));
-    }
-    std::vector<std::string> operation_shapes;
-    operation_shapes.reserve (operations.size ());
-    for (const auto& operation : operations) {
-        operation_shapes.push_back (spec_path_shape (operation.path));
-    }
+namespace {
 
+/**
+ * Pass one: a request and an operation whose method and path *shape* are equal,
+ * and which are the only ones with that shape on their side.
+ *
+ * The buckets are insertion-ordered, so `matched` comes back in the order the
+ * caller offered its requests rather than in a hash order that could change
+ * under it. A request that states no path is in no bucket and stays unmatched.
+ */
+void match_exact_shapes (const std::vector<MatchableRequest>& requests,
+const std::vector<MatchableOperation>& operations,
+const std::vector<std::optional<std::string>>& request_shapes,
+const std::vector<std::string>& operation_shapes,
+MatchResult& result,
+std::vector<bool>& request_claimed,
+std::vector<bool>& operation_claimed) {
     // Insertion-ordered buckets, so `matched` comes back in the order the caller
     // offered its requests rather than in a hash order that could change under
     // it. A request that states no path is in no bucket and stays unmatched.
@@ -275,10 +276,6 @@ const std::vector<MatchableOperation>& operations) {
         .push_back (j);
     }
 
-    MatchResult result;
-    std::vector<bool> request_claimed (requests.size (), false);
-    std::vector<bool> operation_claimed (operations.size (), false);
-
     for (const auto& key : request_keys) {
         const auto& candidates          = requests_by_key[key];
         const auto operation_candidates = operations_by_key.find (key);
@@ -292,21 +289,28 @@ const std::vector<MatchableOperation>& operations) {
         request_claimed[candidates[0]]                     = true;
         operation_claimed[operation_candidates->second[0]] = true;
     }
+}
 
-    /*
-     * Second pass, for the requests a hand-built collection is full of: a URL
-     * with the id filled in (`/pets/42`) is the same operation as
-     * `/pets/{petId}`, and refusing to see that would leave bind-from-here
-     * matching almost nothing outside a collection that was itself imported
-     * from a document.
-     *
-     * It runs only over what pass one did not claim, so a literal path in the
-     * document always wins over a placeholder it could also have filled - which
-     * is the precedence OpenAPI itself gives (`/pets/mine` before
-     * `/pets/{petId}`). The uniqueness rule is unchanged and applies in both
-     * directions: a request with two candidate operations, or an operation two
-     * requests could fill, is left alone.
-     */
+/**
+ * Pass two, for the requests a hand-built collection is full of: a URL with the
+ * id filled in (`/pets/42`) is the same operation as `/pets/{petId}`, and
+ * refusing to see that would leave bind-from-here matching almost nothing
+ * outside a collection that was itself imported from a document.
+ *
+ * It runs only over what pass one did not claim, so a literal path in the
+ * document always wins over a placeholder it could also have filled - which is
+ * the precedence OpenAPI itself gives (`/pets/mine` before `/pets/{petId}`).
+ * The uniqueness rule is unchanged and applies in both directions: a request
+ * with two candidate operations, or an operation two requests could fill, is
+ * left alone.
+ */
+void match_filled_templates (const std::vector<MatchableRequest>& requests,
+const std::vector<MatchableOperation>& operations,
+const std::vector<std::optional<std::string>>& request_shapes,
+const std::vector<std::string>& operation_shapes,
+MatchResult& result,
+std::vector<bool>& request_claimed,
+std::vector<bool>& operation_claimed) {
     std::vector<size_t> open_requests;
     std::unordered_map<size_t, std::vector<size_t>> candidates_for;
     std::unordered_map<size_t, std::vector<size_t>> claimants_of;
@@ -344,6 +348,33 @@ const std::vector<MatchableOperation>& operations) {
         request_claimed[i]           = true;
         operation_claimed[operation] = true;
     }
+}
+
+} // namespace
+
+MatchResult match_operations (const std::vector<MatchableRequest>& requests,
+const std::vector<MatchableOperation>& operations) {
+    // Both sides' shapes once, not once per comparison: the second pass is a
+    // cross product over what the first left open, and a document declaring
+    // hundreds of operations would otherwise re-flatten every path per request.
+    std::vector<std::optional<std::string>> request_shapes;
+    request_shapes.reserve (requests.size ());
+    for (const auto& request : requests) {
+        request_shapes.push_back (request_path_shape (request.url));
+    }
+    std::vector<std::string> operation_shapes;
+    operation_shapes.reserve (operations.size ());
+    for (const auto& operation : operations) {
+        operation_shapes.push_back (spec_path_shape (operation.path));
+    }
+
+    MatchResult result;
+    std::vector<bool> request_claimed (requests.size (), false);
+    std::vector<bool> operation_claimed (operations.size (), false);
+    match_exact_shapes (requests, operations, request_shapes, operation_shapes,
+    result, request_claimed, operation_claimed);
+    match_filled_templates (requests, operations, request_shapes, operation_shapes,
+    result, request_claimed, operation_claimed);
 
     for (size_t i = 0; i < requests.size (); ++i) {
         if (!request_claimed[i]) {
