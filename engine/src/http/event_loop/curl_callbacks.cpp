@@ -11,6 +11,7 @@
 #include <chrono>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
@@ -60,8 +61,8 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     bool stream_cap_hit = false;
     if (data->stream_bounds) {
         data->stream_counter.feed (std::string_view (ptr, total_size));
-        stream_cap_hit = static_cast<int64_t> (data->stream_counter.events ()) >=
-        data->stream_bounds->max_events;
+        stream_cap_hit = std::cmp_greater_equal (
+        data->stream_counter.events (), data->stream_bounds->max_events);
     }
 
     // Bounded buffering. Without this a large or streaming response grows the
