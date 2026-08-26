@@ -322,6 +322,85 @@ nlohmann::json CoverageTally::build () const {
     return build_coverage_payload (declared_, observed, undeclared_operation_requests);
 }
 
+/** One operation's row, and whether the run reached it at all. */
+struct Row {
+    nlohmann::json body;
+    bool covered = false;
+};
+
+/** The run-wide counts the rows accumulate as they are built. */
+struct CoverageTotals {
+    size_t operations_covered     = 0;
+    size_t declared_total         = 0;
+    size_t declared_hit_total     = 0;
+    size_t undeclared_total       = 0;
+    size_t transport_errors_total = 0;
+};
+
+/** What the coverage block says about one declared operation. */
+Row coverage_row (const DeclaredOperation& operation,
+const OperationObservation& seen,
+CoverageTotals& totals) {
+
+    std::set<int> statuses_seen;
+    std::set<int> undeclared;
+    std::vector<bool> hit (operation.responses.size (), false);
+    for (const auto& [status, count] : seen.statuses) {
+        if (count == 0) {
+            continue;
+        }
+        statuses_seen.insert (status);
+        if (auto index = match_status_pattern (operation.responses, status)) {
+            hit[*index] = true;
+        } else {
+            undeclared.insert (status);
+        }
+    }
+
+    nlohmann::json declared_hit    = nlohmann::json::array ();
+    nlohmann::json declared_missed = nlohmann::json::array ();
+    for (size_t p = 0; p < operation.responses.size (); ++p) {
+        (hit[p] ? declared_hit : declared_missed).push_back (operation.responses[p]);
+    }
+
+    // Braced initialization evaluates left to right, so both lists have
+    // filled this by the time the row is read below.
+    std::set<int> statuses_shown;
+    nlohmann::json row{ { "method", operation.method },
+        { "path", operation.path }, { "sent", seen.sent },
+        { "statusesSeen", capped_statuses (statuses_seen, statuses_shown) },
+        { "declaredHit", declared_hit }, { "declaredMissed", declared_missed },
+        { "undeclaredSeen", capped_statuses (undeclared, statuses_shown) } };
+    // Absent rather than "" for an operation the document gives no id - the
+    // same absent-not-empty rule the binding itself follows.
+    if (!operation.operation_id.empty ()) {
+        row["operationId"] = operation.operation_id;
+    }
+    // Findings that are zero on most rows, carried only where they happened
+    // rather than padding every row with counters nobody reads.
+    if (seen.transport_errors > 0) {
+        row["transportErrors"] = seen.transport_errors;
+    }
+    if (seen.other_status_responses > 0) {
+        row["otherStatusResponses"] = seen.other_status_responses;
+    }
+    // Every emitted code is drawn from `statuses_seen` - the undeclared set
+    // is a subset of it - so what neither list carries is one subtraction.
+    const size_t statuses_hidden = statuses_seen.size () - statuses_shown.size ();
+    if (statuses_hidden > 0) {
+        row["statusesTruncated"] = statuses_hidden;
+    }
+
+    const bool covered = seen.sent > 0;
+    totals.operations_covered += covered ? 1 : 0;
+    totals.declared_total += operation.responses.size ();
+    totals.declared_hit_total +=
+    static_cast<size_t> (std::count (hit.begin (), hit.end (), true));
+    totals.undeclared_total += undeclared.size ();
+    totals.transport_errors_total += seen.transport_errors;
+    return { std::move (row), covered };
+}
+
 nlohmann::json build_coverage_payload (const std::vector<DeclaredOperation>& declared,
 const std::vector<OperationObservation>& observed,
 size_t undeclared_operation_requests) {
@@ -329,81 +408,14 @@ size_t undeclared_operation_requests) {
         return nlohmann::json::object ();
     }
 
-    struct Row {
-        nlohmann::json body;
-        bool covered = false;
-    };
     std::vector<Row> rows;
     rows.reserve (declared.size ());
-
-    size_t operations_covered     = 0;
-    size_t declared_total         = 0;
-    size_t declared_hit_total     = 0;
-    size_t undeclared_total       = 0;
-    size_t transport_errors_total = 0;
+    CoverageTotals totals;
 
     const OperationObservation nothing;
     for (size_t i = 0; i < declared.size (); ++i) {
-        const auto& operation = declared[i];
-        const OperationObservation& seen = i < observed.size () ? observed[i] : nothing;
-
-        std::set<int> statuses_seen;
-        std::set<int> undeclared;
-        std::vector<bool> hit (operation.responses.size (), false);
-        for (const auto& [status, count] : seen.statuses) {
-            if (count == 0) {
-                continue;
-            }
-            statuses_seen.insert (status);
-            if (auto index = match_status_pattern (operation.responses, status)) {
-                hit[*index] = true;
-            } else {
-                undeclared.insert (status);
-            }
-        }
-
-        nlohmann::json declared_hit    = nlohmann::json::array ();
-        nlohmann::json declared_missed = nlohmann::json::array ();
-        for (size_t p = 0; p < operation.responses.size (); ++p) {
-            (hit[p] ? declared_hit : declared_missed).push_back (operation.responses[p]);
-        }
-
-        // Braced initialization evaluates left to right, so both lists have
-        // filled this by the time the row is read below.
-        std::set<int> statuses_shown;
-        nlohmann::json row{ { "method", operation.method },
-            { "path", operation.path }, { "sent", seen.sent },
-            { "statusesSeen", capped_statuses (statuses_seen, statuses_shown) },
-            { "declaredHit", declared_hit }, { "declaredMissed", declared_missed },
-            { "undeclaredSeen", capped_statuses (undeclared, statuses_shown) } };
-        // Absent rather than "" for an operation the document gives no id - the
-        // same absent-not-empty rule the binding itself follows.
-        if (!operation.operation_id.empty ()) {
-            row["operationId"] = operation.operation_id;
-        }
-        // Findings that are zero on most rows, carried only where they happened
-        // rather than padding every row with counters nobody reads.
-        if (seen.transport_errors > 0) {
-            row["transportErrors"] = seen.transport_errors;
-        }
-        if (seen.other_status_responses > 0) {
-            row["otherStatusResponses"] = seen.other_status_responses;
-        }
-        // Every emitted code is drawn from `statuses_seen` - the undeclared set
-        // is a subset of it - so what neither list carries is one subtraction.
-        const size_t statuses_hidden = statuses_seen.size () - statuses_shown.size ();
-        if (statuses_hidden > 0) {
-            row["statusesTruncated"] = statuses_hidden;
-        }
-
-        const bool covered = seen.sent > 0;
-        operations_covered += covered ? 1 : 0;
-        declared_total += operation.responses.size ();
-        declared_hit_total +=
-        static_cast<size_t> (std::count (hit.begin (), hit.end (), true));
-        undeclared_total += undeclared.size ();
-        transport_errors_total += seen.transport_errors;
-        rows.push_back ({ std::move (row), covered });
+        rows.push_back (coverage_row (declared[i],
+        i < observed.size () ? observed[i] : nothing, totals));
     }
 
     // Uncovered first - they are what the block exists to surface - and document
@@ -420,17 +432,18 @@ size_t undeclared_operation_requests) {
     // level, shaped like `thresholdValidation`'s counts, so #473 can adopt them
     // without reshaping the block (documented, not implemented).
     nlohmann::json coverage{ { "operationsTotal", declared.size () },
-        { "operationsCovered", operations_covered },
-        { "declaredResponsesTotal", declared_total },
-        { "declaredResponsesHit", declared_hit_total },
+        { "operationsCovered", totals.operations_covered },
+        { "declaredResponsesTotal", totals.declared_total },
+        { "declaredResponsesHit", totals.declared_hit_total },
         { "declaredResponseCoveragePct",
-        declared_total > 0 ? static_cast<double> (declared_hit_total) * 100.0 /
-        static_cast<double> (declared_total) :
-                             0.0 },
-        { "undeclaredStatusesSeen", undeclared_total },
+        totals.declared_total > 0 ?
+        static_cast<double> (totals.declared_hit_total) * 100.0 /
+        static_cast<double> (totals.declared_total) :
+        0.0 },
+        { "undeclaredStatusesSeen", totals.undeclared_total },
         { "operations", std::move (operations) } };
-    if (transport_errors_total > 0) {
-        coverage["transportErrors"] = transport_errors_total;
+    if (totals.transport_errors_total > 0) {
+        coverage["transportErrors"] = totals.transport_errors_total;
     }
     if (undeclared_operation_requests > 0) {
         coverage["undeclaredOperationRequests"] = undeclared_operation_requests;
