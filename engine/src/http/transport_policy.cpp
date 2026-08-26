@@ -409,11 +409,16 @@ std::optional<ClientCertFormat> sniff_client_cert_format (std::string_view path)
     return std::nullopt;
 }
 
-std::optional<std::string> client_cert_rejection (std::string_view host,
-const std::optional<int>& port,
-ClientCertFormat format,
-std::string_view cert_path,
-std::string_view key_path) {
+namespace {
+
+/**
+ * Why @p host is not a host this registry can match on, or nothing.
+ *
+ * Each near miss is refused by name rather than stored and quietly never
+ * matched, because a registry entry that cannot match is indistinguishable from
+ * a feature that does not work (issue #803).
+ */
+std::optional<std::string> client_cert_host_rejection (std::string_view host) {
     if (host.empty () || is_blank (host)) {
         return std::string ("host is empty");
     }
@@ -460,21 +465,19 @@ std::string_view key_path) {
         return std::string (
         "an IPv6 host is registered without brackets, e.g. '::1'");
     }
+    return std::nullopt;
+}
 
-    if (port && (*port < 1 || *port > 65535)) {
-        return "port " + std::to_string (*port) + " is outside 1..65535";
-    }
-
-    // A PKCS#12 bundle carries its own key, so a key path on such a row is a
-    // field nothing would ever read - refused rather than stored and ignored,
-    // because a card that keeps asking for a key file the format does not have
-    // is a dead end (#833). Clearing it is `keyPath: null` on the update.
-    if (format == ClientCertFormat::Pkcs12 && !key_path.empty () && !is_blank (key_path)) {
-        return std::string (
-        "a PKCS#12 entry names no key file - the bundle carries the key, "
-        "so clear the key file or register the certificate as PEM");
-    }
-
+/**
+ * Whether the files a row names are there and readable.
+ *
+ * Checked *here*, at the moment the user can still fix the path, rather than at
+ * handshake time where curl reports `CURLE_SSL_CERTPROBLEM` against the endpoint
+ * and says nothing about which setting named a file that is not there. A PKCS#12
+ * row has one file to check, which is the whole difference the format makes.
+ */
+std::optional<std::string> client_cert_file_rejection (
+ClientCertFormat format, std::string_view cert_path, std::string_view key_path) {
     // Both files are checked *here*, at the moment the user can still fix the
     // path, rather than at handshake time where curl reports
     // `CURLE_SSL_CERTPROBLEM` against the endpoint and says nothing about which
@@ -505,6 +508,38 @@ std::string_view key_path) {
             return std::string (label) + " '" + std::string (path) + "' cannot be opened";
         }
     }
+    return std::nullopt;
+}
+
+} // namespace
+
+std::optional<std::string> client_cert_rejection (std::string_view host,
+const std::optional<int>& port,
+ClientCertFormat format,
+std::string_view cert_path,
+std::string_view key_path) {
+    if (auto rejection = client_cert_host_rejection (host)) {
+        return rejection;
+    }
+
+    if (port && (*port < 1 || *port > 65535)) {
+        return "port " + std::to_string (*port) + " is outside 1..65535";
+    }
+
+    // A PKCS#12 bundle carries its own key, so a key path on such a row is a
+    // field nothing would ever read - refused rather than stored and ignored,
+    // because a card that keeps asking for a key file the format does not have
+    // is a dead end (#833). Clearing it is `keyPath: null` on the update.
+    if (format == ClientCertFormat::Pkcs12 && !key_path.empty () && !is_blank (key_path)) {
+        return std::string (
+        "a PKCS#12 entry names no key file - the bundle carries the key, "
+        "so clear the key file or register the certificate as PEM");
+    }
+
+    if (auto rejection = client_cert_file_rejection (format, cert_path, key_path)) {
+        return rejection;
+    }
+
 
     // The declared format against the file's own bytes. Only a *contradiction*
     // is refused: a file this engine cannot classify (a DER certificate, an
