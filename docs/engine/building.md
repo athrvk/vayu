@@ -979,7 +979,7 @@ clang-tidy runs in two places, and both of them can stop a change:
 |-------|---------------|---------------------|
 | `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **whole** of every staged `.c/.cpp/.h/.hpp` file | Refuses the commit |
 | `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **whole** of every changed `engine/{src,include,tests}` **translation unit**, on Linux and Windows alike. Headers are never direct inputs | Fails CI |
-| `Engine tidy scan` (`.github/workflows/engine-tidy-scan.yml`), **weekly** plus `workflow_dispatch` | The **whole tree**, on the runner you pick. Not a pull-request gate - the denominator no per-change gate can give | Fails the run |
+| `Engine tidy scan` (`.github/workflows/engine-tidy-scan.yml`), **weekly** plus `workflow_dispatch` | The **whole tree**, on Linux and Windows both. Not a pull-request gate - the denominator no per-change gate can give | Fails the run |
 
 The two rows answer different questions, which is why both exist. The gate
 lints the files a change *touches*, and so can never say what an **untouched**
@@ -989,6 +989,19 @@ diff - it arrives when the ground moves: a runner image bumping its
 clang-tidy, or a `.clang-tidy` edit changing what the checks mean. That is
 what the weekly run is for, on `sanitizers.yml`'s model (Monday 11:00 UTC,
 clear of the 06:00 and 09:00 that other workflows already use).
+
+**Both legs, not just the one that had a backlog.** Windows is why the scan
+was written (#1023), but the hole it fills is not Windows-specific: the gate
+lints translation units and never a header (#940), so a **header-only pull
+request is linted by no CI job at all** - it relies on the contributor's
+pre-commit hook. A header that introduces findings across the sources
+including it can reach master unlinted on either platform, and only a
+whole-tree run finds it afterwards. Linux drifts too, more slowly: it pins
+clang-tidy 19 from apt where Windows takes whatever LLVM its image ships.
+`workflow_dispatch` still scans the single runner you pick, which keeps a
+targeted re-measure cheap; the schedule takes both. macOS is absent because
+the *gate* is (#940) - scanning a platform nothing gates would measure a
+standard nothing holds.
 
 **A weekly failure files an issue**, because a cron nobody watches reports
 nowhere useful otherwise: the job summary and the uploaded artifact are read

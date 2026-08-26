@@ -83,8 +83,35 @@ permissions:
 
 jobs:
   scan:
-    name: Whole-tree clang-tidy on ${{ github.event.inputs.os || 'windows-latest' }}
-    runs-on: ${{ github.event.inputs.os || 'windows-latest' }}
+    # **Both legs the gate lints, not just the one that had a backlog.** The
+    # Windows leg is why this workflow exists (#1023), but the coverage hole a
+    # whole-tree scan fills is not Windows-specific: the gate lints translation
+    # units, never a header (#940), so a **header-only pull request is linted
+    # by no CI job at all** - it relies on the contributor's pre-commit hook.
+    # A header that introduces findings across the sources including it can
+    # therefore reach master unlinted on either platform, and only a whole-tree
+    # run finds it afterwards. Linux drifts too, more slowly: it pins
+    # clang-tidy 19 from apt where Windows takes whatever its image ships.
+    #
+    # `workflow_dispatch` still scans the single runner you pick, which is what
+    # makes a targeted re-measure cheap. Schedule and pull request take both -
+    # the latter for `sanitizers.yml`'s stated reason, that a leg first
+    # exercised by the cron is a leg whose first evidence is a red master.
+    #
+    # macOS is absent because the *gate* is: clang-tidy 19 and 20 both trap on
+    # that runner's AppleClang SDK (#940). A scan of a platform nothing gates
+    # would measure a standard nothing holds.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: >-
+          ${{ fromJSON(
+            github.event_name == 'workflow_dispatch'
+              && format('["{0}"]', github.event.inputs.os)
+              || '["ubuntu-latest", "windows-latest"]'
+          ) }}
+    name: Whole-tree clang-tidy on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     # Measured, not guessed, and the first value was wrong. 120 was chosen by
     # analogy with the engine job's 90; the first Windows run that actually
     # linted spent **101 minutes still going** on the scan step alone and died
@@ -226,6 +253,12 @@ jobs:
           #
           # Findings are the output, so the exit status is deliberately not the
           # verdict here - the report step below is.
+          #
+          # `nproc` rather than a literal, now that this runs on two runner
+          # kinds: it is coreutils and ships with Git for Windows, so it
+          # answers on both, and a hosted image that changes its core count
+          # gets used rather than ignored. The gate one workflow over spells it
+          # the same way.
           # `tr -d '\r'` first, and it is not defensive noise: the unit list is
           # written by a Python whose stdout is a Windows text stream, so every
           # path arrives CRLF-terminated. Without this each path reaches
@@ -233,7 +266,7 @@ jobs:
           # translation units answers `no such file or directory` - a whole-tree
           # scan that lints nothing in five seconds.
           tr -d '\r' < tidy-units.txt | tr '\n' '\0' \
-            | xargs -0 -n 1 -P 4 \
+            | xargs -0 -n 1 -P "$(nproc)" \
                 "$tidy" -p engine/build-release --quiet --allow-no-checks \
                   --header-filter='.*[/\\]engine[/\\](src|include|tests)[/\\].*' \
             > tidy-scan.log 2>&1 || true
@@ -245,14 +278,14 @@ jobs:
           python .github/dedupe-tidy-findings.py tidy-scan.log \
             --root "$GITHUB_WORKSPACE" \
             --scanned "${{ steps.scan.outputs.units }}" \
-            --label "Whole-tree clang-tidy on ${{ github.event.inputs.os || 'windows-latest' }}" \
+            --label "Whole-tree clang-tidy on ${{ matrix.os }}" \
             | tee tidy-scan-report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the scan
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: engine-tidy-scan-${{ github.event.inputs.os || 'windows-latest' }}
+          name: engine-tidy-scan-${{ matrix.os }}
           path: |
             tidy-scan.log
             tidy-scan-report.md
@@ -287,7 +320,7 @@ jobs:
         if: ${{ failure() && github.event_name != 'pull_request' }}
         uses: actions/github-script@v8
         env:
-          RUNNER_PICKED: ${{ github.event.inputs.os || 'windows-latest' }}
+          RUNNER_PICKED: ${{ matrix.os }}
         with:
           script: |
             const fs = require('fs');
