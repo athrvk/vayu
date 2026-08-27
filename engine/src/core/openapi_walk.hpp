@@ -255,6 +255,82 @@ struct WalkedOperation {
     bool identified = true;
 };
 
+/// The skipped members one path item hides from the walk (issue #877), counted
+/// once per item, before its methods - the position the renderer's parsers
+/// count these from. A `parameters` member that is not an array is the missing
+/// `-` in hand-written YAML; `trace` is a Path Item Object member in 3.x only,
+/// and only a present *object* is an operation that was dropped.
+inline void note_skipped_members (Dialect dialect,
+const nlohmann::ordered_json& item,
+WalkNotes& notes) {
+    if (const auto parameters = item.find ("parameters"); parameters != item.end () &&
+    !parameters->is_null () && !parameters->is_array ()) {
+        notes.malformed_spec += 1;
+    }
+    if (dialect == Dialect::V3) {
+        const auto trace = item.find ("trace");
+        if (trace != item.end () && trace->is_structured ()) {
+            notes.unsupported_method += 1;
+        }
+    }
+}
+
+/// The `operationId` @p operation keeps: its declared id, or "" - the no-id
+/// spelling `DeclaredOperation` documents - when it declares none, declares it
+/// as something other than a non-empty string, or repeats one a previous
+/// operation already claimed (issue #715). Only the repeat is counted on
+/// @p notes: a sync follows the identity a request records, so which request
+/// kept the id is not a detail the user should have to discover from a diff.
+inline std::string claim_operation_id (const nlohmann::ordered_json& operation,
+std::unordered_set<std::string>& claimed_ids,
+WalkNotes* notes) {
+    const auto id = operation.find ("operationId");
+    if (id == operation.end () || !id->is_string ()) {
+        return "";
+    }
+    std::string operation_id = id->get<std::string> ();
+    if (operation_id.empty ()) {
+        return "";
+    }
+    if (claimed_ids.insert (operation_id).second) {
+        return operation_id;
+    }
+    if (notes != nullptr) {
+        notes->duplicate_operation_id += 1;
+    }
+    return "";
+}
+
+/// Every operation one resolved Path Item Object declares, appended to
+/// @p walked in `HTTP_METHODS` order. Takes `claimed_ids` because the claim is
+/// document-wide: which of two operations keeps a repeated `operationId` spans
+/// path items, so the set outlives each call.
+inline void walk_path_item (const std::string& path,
+const nlohmann::ordered_json& item,
+std::unordered_set<std::string>& claimed_ids,
+WalkNotes* notes,
+std::vector<WalkedOperation>& walked) {
+    // A `paths` key that is not a path declares no operation - see
+    // `WalkedOperation::identified`. The row is still walked, because
+    // the import builds a request for it; no `operationId` is claimed
+    // off it, since the identity it would sit on does not exist.
+    const bool identified = !path.empty () && path[0] == '/';
+    for (const char* method : HTTP_METHODS) {
+        const nlohmann::ordered_json* operation = find_object (item, method);
+        if (operation == nullptr) {
+            continue;
+        }
+        DeclaredOperation row;
+        row.method = upper (method);
+        row.path   = path;
+        if (identified) {
+            row.operation_id = claim_operation_id (*operation, claimed_ids, notes);
+        }
+        row.responses = declared_responses_of (*operation);
+        walked.push_back ({ std::move (row), operation, &item, identified });
+    }
+}
+
 inline std::vector<WalkedOperation>
 walk_operations (const nlohmann::ordered_json& document, WalkNotes* notes = nullptr) {
     std::vector<WalkedOperation> walked;
@@ -272,7 +348,6 @@ walk_operations (const nlohmann::ordered_json& document, WalkNotes* notes = null
     std::unordered_set<std::string> claimed_ids;
 
     for (auto entry = paths->begin (); entry != paths->end (); ++entry) {
-        const std::string& path = entry.key ();
         const nlohmann::ordered_json* item =
         resolve_single_hop (document, entry.value ());
         if (item == nullptr) {
@@ -284,48 +359,9 @@ walk_operations (const nlohmann::ordered_json& document, WalkNotes* notes = null
             continue;
         }
         if (notes != nullptr) {
-            // Once per path item, before its methods - the position the
-            // renderer's parsers count these from.
-            if (const auto parameters = item->find ("parameters");
-            parameters != item->end () && !parameters->is_null () &&
-            !parameters->is_array ()) {
-                notes->malformed_spec += 1;
-            }
-            // `trace` is a Path Item Object member in 3.x only, and only a
-            // present *object* is an operation that was dropped.
-            if (dialect == Dialect::V3) {
-                const auto trace = item->find ("trace");
-                if (trace != item->end () && trace->is_structured ()) {
-                    notes->unsupported_method += 1;
-                }
-            }
+            note_skipped_members (dialect, *item, *notes);
         }
-        for (const char* method : HTTP_METHODS) {
-            const nlohmann::ordered_json* operation = find_object (*item, method);
-            if (operation == nullptr) {
-                continue;
-            }
-            // A `paths` key that is not a path declares no operation - see
-            // `WalkedOperation::identified`. The row is still walked, because
-            // the import builds a request for it; no `operationId` is claimed
-            // off it, since the identity it would sit on does not exist.
-            const bool identified = !path.empty () && path[0] == '/';
-            DeclaredOperation row;
-            row.method = upper (method);
-            row.path   = path;
-            if (const auto id = operation->find ("operationId"); identified &&
-            id != operation->end () && id->is_string () &&
-            !id->get<std::string> ().empty ()) {
-                const std::string operation_id = id->get<std::string> ();
-                if (claimed_ids.insert (operation_id).second) {
-                    row.operation_id = operation_id;
-                } else if (notes != nullptr) {
-                    notes->duplicate_operation_id += 1;
-                }
-            }
-            row.responses = declared_responses_of (*operation);
-            walked.push_back ({ std::move (row), operation, item, identified });
-        }
+        walk_path_item (entry.key (), *item, claimed_ids, notes, walked);
     }
     return walked;
 }

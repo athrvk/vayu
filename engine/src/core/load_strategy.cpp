@@ -416,6 +416,62 @@ class ConstantLoadStrategy : public LoadStrategy {
 
     private:
     /**
+     * Pay out the requests one tick owes, up to the in-flight cap's headroom.
+     * Requests the cap refuses are dropped at the instant they came due, not
+     * deferred. Deferring is what let a saturated run submit its backlog past
+     * the deadline and still report itself on rate. Returns how many were
+     * actually submitted.
+     */
+    static size_t submit_due (const std::shared_ptr<RunContext>& context,
+    vayu::db::Database& db,
+    SubmissionRequest& live,
+    size_t due,
+    size_t max_pending) {
+        const size_t in_flight = context->in_flight ();
+        const size_t headroom = max_pending > in_flight ? max_pending - in_flight : 0;
+        const size_t to_submit = std::min (due, headroom);
+        if (due > to_submit) {
+            context->metrics_collector->record_drop_batch (due - to_submit);
+        }
+        size_t sent = 0;
+        for (size_t i = 0; i < to_submit && !context->should_stop; ++i) {
+            context->event_loop->submit (live.current (),
+            [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
+                handle_result (context, db, result);
+            });
+            sent++;
+            context->requests_sent++;
+        }
+        return sent;
+    }
+
+    /**
+     * Wait out the remainder of a tick. Oversleeping is self-correcting - the
+     * next tick accrues the extra elapsed time - so the sleep can be the full
+     * remainder; on Windows short waits still spin, since 15.6ms timer
+     * rounding would make sub-tick sleeps bursty. @p context is read only by
+     * that spin, so the leg without it leaves the parameter unused.
+     */
+    static void wait_for_next_tick ([[maybe_unused]] const std::shared_ptr<RunContext>& context,
+    std::chrono::steady_clock::time_point next_tick) {
+        const auto sleep_us = std::chrono::duration_cast<std::chrono::microseconds> (
+        next_tick - std::chrono::steady_clock::now ())
+                              .count ();
+        if (sleep_us <= 100) {
+            return;
+        }
+#ifdef _WIN32
+        if (sleep_us <= 2000) {
+            while (std::chrono::steady_clock::now () < next_tick && !context->should_stop) {
+                /* spin */
+            }
+            return;
+        }
+#endif
+        std::this_thread::sleep_for (std::chrono::microseconds (sleep_us));
+    }
+
+    /**
      * Rate-limited mode: submit what each tick owes, drop what the in-flight
      * cap refuses, and stop at the deadline.
      */
@@ -470,54 +526,15 @@ class ConstantLoadStrategy : public LoadStrategy {
 
             const size_t due = take_due_requests (debt, target_rps, elapsed_us);
             if (due > 0) {
-                const size_t in_flight = context->in_flight ();
-                const size_t headroom =
-                max_pending > in_flight ? max_pending - in_flight : 0;
-                const size_t to_submit = std::min (due, headroom);
-
-                // Requests the in-flight cap refuses are dropped at the
-                // instant they came due, not deferred. Deferring is what
-                // let a saturated run submit its backlog past the deadline
-                // and still report itself on rate.
-                if (due > to_submit) {
-                    context->metrics_collector->record_drop_batch (due - to_submit);
-                }
-
-                for (size_t i = 0; i < to_submit && !context->should_stop; ++i) {
-                    context->event_loop->submit (live.current (),
-                    [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
-                        handle_result (context, db, result);
-                    });
-                    submitted++;
-                    context->requests_sent++;
-                }
+                submitted += submit_due (context, db, live, due, max_pending);
             }
 
             if (now >= duration_end) {
                 break;
             }
 
-            // Wait for the next tick. Oversleeping is self-correcting - the
-            // next tick accrues the extra elapsed time - so the sleep can be
-            // the full remainder; on Windows short waits still spin, since
-            // 15.6ms timer rounding would make sub-tick sleeps bursty.
-            const auto next_tick = accrued_through + std::chrono::microseconds (tick_us);
-            const auto sleep_us = std::chrono::duration_cast<std::chrono::microseconds> (
-            next_tick - std::chrono::steady_clock::now ())
-                                  .count ();
-            if (sleep_us > 100) {
-#ifdef _WIN32
-                if (sleep_us <= 2000) {
-                    while (std::chrono::steady_clock::now () < next_tick &&
-                    !context->should_stop) {
-                        /* spin */
-                    }
-                } else
-#endif
-                {
-                    std::this_thread::sleep_for (std::chrono::microseconds (sleep_us));
-                }
-            }
+            wait_for_next_tick (
+            context, accrued_through + std::chrono::microseconds (tick_us));
         }
 
         vayu::utils::log_info ("Submitted " + std::to_string (submitted) + " requests");
