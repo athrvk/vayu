@@ -180,11 +180,35 @@ TEST_F (AssertionErrorTest, ResponseAssertionsFailWithTheAssertionErrorName) {
     "AssertionError: Expected header 'Content-Type' to be 'text/plain' but got "
     "'application/json'");
     EXPECT_EQ (failure_of (R"(pm.response.to.have.body("nope"))"),
-    "AssertionError: Expected response body to contain 'nope'");
+    "AssertionError: Expected response body to be 'nope' but got '{\"id\": "
+    "1}'");
     EXPECT_EQ (failure_of (R"(pm.response.to.have.jsonBody("missing"))"),
     "AssertionError: Expected response body to have property 'missing'");
     EXPECT_EQ (failure_of (R"(pm.response.to.be.notFound)"),
     "AssertionError: Expected response to have status 404 but got 200");
+}
+
+/**
+ * The verdicts #998 corrected report what they compared, because each of them
+ * used to report nothing at all: the assertion passed. A message naming only
+ * the matcher would leave the reader of a newly-red suite with no way to see
+ * which half of the comparison moved.
+ */
+TEST_F (AssertionErrorTest, TheCorrectedVerdictsNameBothSidesOfTheComparison) {
+    EXPECT_EQ (failure_of (R"(pm.response.to.have.jsonBody("id", 2))"),
+    "AssertionError: Expected response body property 'id' to deeply equal 2 "
+    "but got 1");
+    EXPECT_EQ (failure_of (R"(pm.response.to.have.status("Not Found"))"),
+    "AssertionError: Expected status reason 'Not Found' but got 'OK'");
+    EXPECT_EQ (failure_of (R"(pm.response.to.have.header("Content-Type", 5))"),
+    "AssertionError: Expected header 'Content-Type' to be 5 but got "
+    "'application/json'");
+    EXPECT_EQ (failure_of (R"(pm.response.to.have.body(/nope/))"),
+    "AssertionError: Expected response body to match the pattern but got "
+    "'{\"id\": 1}'");
+    EXPECT_EQ (failure_of (R"(pm.response.to.have.body({ id: 2 }))"),
+    "AssertionError: Expected response body to deeply equal {\"id\":2} but got "
+    "'{\"id\": 1}'");
 }
 
 /** The body-shape assertions read the body rather than the status. */
@@ -220,6 +244,7 @@ TEST_F (AssertionErrorTest, AMisusedMatcherIsStillATypeError) {
         R"(pm.expect(1).to.be.instanceOf("Array"))",
         R"(pm.expect(1).to.throw())",
         R"(pm.response.to.have.status())",
+        R"(pm.response.to.have.body(5))",
     };
 
     for (const auto& usage_error : usage_errors) {

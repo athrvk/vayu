@@ -952,6 +952,183 @@ TEST_F (ScriptEngineTest, ResponseJsonBodyNoArgFailsOnNonJson) {
 }
 
 // ============================================================================
+// Chai-postman verdicts (issue #998)
+// ============================================================================
+//
+// Six assertions returned a verdict Postman does not give, five of them in the
+// dangerous direction - Vayu passed where Postman fails, which in a testing
+// tool is a green suite over a broken API. Each test below asserts BOTH
+// directions, so it is its own mutation check: on the code these replaced, the
+// false-pass half goes red.
+
+TEST_F (ScriptEngineTest, ResponseJsonBodyComparesTheValueItWasGiven) {
+    response.body = R"({"id": 1, "user": {"name": "John"}})";
+
+    auto result = engine.execute_test (R"(
+        pm.test("right value", function() { pm.response.to.have.jsonBody("id", 1); });
+        pm.test("nested deep value", function() { pm.response.to.have.jsonBody("user", { name: "John" }); });
+        pm.test("wrong value", function() { pm.response.to.have.jsonBody("id", 2); });
+        pm.test("wrong nested value", function() { pm.response.to.have.jsonBody("user", { name: "Jane" }); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 4u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+    EXPECT_FALSE (result.tests[2].passed)
+    << "jsonBody must compare the expected value";
+    EXPECT_FALSE (result.tests[3].passed) << "jsonBody must compare deeply";
+    EXPECT_NE (result.tests[2].error_message.find ("'id'"), std::string::npos)
+    << "the failure must name the path: " << result.tests[2].error_message;
+}
+
+TEST_F (ScriptEngineTest, ResponseBodyStringIsExactNotSubstring) {
+    response.body = "pong";
+
+    auto result = engine.execute_test (R"(
+        pm.test("exact", function() { pm.response.to.have.body("pong"); });
+        pm.test("substring", function() { pm.response.to.have.body("pon"); });
+        pm.test("superstring", function() { pm.response.to.have.body("pongpong"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 3u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_FALSE (result.tests[1].passed)
+    << "a substring must not satisfy body()";
+    EXPECT_FALSE (result.tests[2].passed);
+}
+
+TEST_F (ScriptEngineTest, ResponseBodyRunsARegularExpressionAndDeepEqualsAnObject) {
+    response.body = R"({"ok": true, "count": 2})";
+
+    auto result = engine.execute_test (R"(
+        pm.test("pattern matches", function() { pm.response.to.have.body(/"count":\s*2/); });
+        pm.test("pattern misses", function() { pm.response.to.have.body(/"count":\s*3/); });
+        pm.test("object equal", function() { pm.response.to.have.body({ ok: true, count: 2 }); });
+        pm.test("object differs", function() { pm.response.to.have.body({ ok: true, count: 3 }); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 4u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_FALSE (result.tests[1].passed);
+    EXPECT_TRUE (result.tests[2].passed) << result.tests[2].error_message;
+    EXPECT_FALSE (result.tests[3].passed);
+}
+
+// A number is neither of the three forms chai-postman reads, and stringifying
+// it into a comparison is how the substring version passed on anything. It is
+// a mistake in the script text, so it is a TypeError rather than a verdict.
+TEST_F (ScriptEngineTest, ResponseBodyRefusesAnArgumentItCannotCompare) {
+    response.body = "5";
+
+    auto result = engine.execute_test (R"(
+        pm.test("number", function() { pm.response.to.have.body(5); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("TypeError"), std::string::npos)
+    << result.tests[0].error_message;
+}
+
+TEST_F (ScriptEngineTest, ResponseStatusTakesAReasonPhrase) {
+    auto result = engine.execute_test (R"(
+        pm.test("reason", function() { pm.response.to.have.status("OK"); });
+        pm.test("code", function() { pm.response.to.have.status(200); });
+        pm.test("wrong reason", function() { pm.response.to.have.status("Not Found"); });
+        pm.test("code as a string", function() { pm.response.to.have.status("200"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 4u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+    EXPECT_FALSE (result.tests[2].passed);
+    EXPECT_FALSE (result.tests[3].passed)
+    << "a string is a reason phrase, never a coerced code";
+}
+
+// HTTP/2 carries no reason phrase, so the assertion reads the same fallback
+// pm.response.reason() does rather than comparing against an empty string.
+TEST_F (ScriptEngineTest, ResponseStatusReasonFallsBackToTheRegisteredPhrase) {
+    response.status_code = 404;
+    response.status_text.clear ();
+
+    auto result = engine.execute_test (R"(
+        pm.test("registered phrase", function() { pm.response.to.have.status("Not Found"); });
+        pm.test("agrees with the reason accessor", function() { pm.expect(pm.response.reason()).to.equal("Not Found"); });
+        pm.test("other phrase", function() { pm.response.to.have.status("OK"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 3u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+    EXPECT_FALSE (result.tests[2].passed);
+}
+
+TEST_F (ScriptEngineTest, ResponseHeaderValueComparisonIsStrict) {
+    response.headers["X-Count"] = "5";
+
+    auto result = engine.execute_test (R"(
+        pm.test("string matches", function() { pm.response.to.have.header("Content-Type", "application/json"); });
+        pm.test("number does not", function() { pm.response.to.have.header("X-Count", 5); });
+        pm.test("wrong string", function() { pm.response.to.have.header("X-Count", "6"); });
+        pm.test("right string", function() { pm.response.to.have.header("X-Count", "5"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 4u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_FALSE (result.tests[1].passed)
+    << "a number must not be stringified into agreement with the wire";
+    EXPECT_FALSE (result.tests[2].passed);
+    EXPECT_TRUE (result.tests[3].passed) << result.tests[3].error_message;
+}
+
+TEST_F (ScriptEngineTest, HeadersHasChecksTheValueWhenItIsGivenOne) {
+    response.headers["X-Count"] = "5";
+
+    auto result = engine.execute_test (R"(
+        pm.test("present", function() { pm.expect(pm.response.headers.has("X-Request-Id")).to.equal(true); });
+        pm.test("value matches", function() { pm.expect(pm.response.headers.has("X-Request-Id", "abc123")).to.equal(true); });
+        pm.test("value differs", function() { pm.expect(pm.response.headers.has("X-Request-Id", "nope")).to.equal(false); });
+        pm.test("number never matches", function() { pm.expect(pm.response.headers.has("X-Count", 5)).to.equal(false); });
+        pm.test("absent with a value", function() { pm.expect(pm.response.headers.has("X-Absent", "x")).to.equal(false); });
+        pm.test("request side too", function() { pm.expect(pm.request.headers.has("Content-Type", "application/json")).to.equal(true); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_EQ (result.tests.size (), 6u);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+}
+
+// `ok` is a named code in chai-postman, not the 2xx class `success` is, so the
+// two stop being synonyms exactly here: a 204 satisfies one and not the other.
+TEST_F (ScriptEngineTest, ResponseToBeOkIsStatus200Only) {
+    response.status_code = 204;
+    response.status_text = "No Content";
+    response.body.clear ();
+
+    auto result = engine.execute_test (R"(
+        pm.test("success is the class", function() { pm.response.to.be.success; });
+        pm.test("ok is the code", function() { pm.response.to.be.ok; });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_FALSE (result.tests[1].passed)
+    << "ok must be status 200, not any 2xx";
+}
+
+// ============================================================================
 // pm.response.to.be Tests
 // ============================================================================
 //
@@ -1003,6 +1180,8 @@ TEST_F (ScriptEngineTest, ResponseToBeStatusClassMatchersAssertOnBothSides) {
     };
     const auto cases = std::to_array<Case> ({
     { 100, "info", "ok" },
+    { 200, "ok", "info" },
+    { 204, "success", "ok" },
     { 202, "accepted", "notFound" },
     { 301, "redirection", "success" },
     { 400, "badRequest", "serverError" },
