@@ -109,6 +109,106 @@ describe("generator shapes", () => {
 	});
 });
 
+/** Anchored shape per new name - the engine suite carries the identical table. */
+const NEW_SHAPES: readonly { name: string; pattern: RegExp }[] = [
+	{ name: "$randomPhoneNumber", pattern: /^\d{3}-\d{3}-\d{4}$/ },
+	{ name: "$randomCity", pattern: /^[A-Za-z]+( [A-Za-z]+)*$/ },
+	{ name: "$randomStreetAddress", pattern: /^\d{3,4} [A-Za-z]+ [A-Za-z]+$/ },
+	{ name: "$randomCountry", pattern: /^[A-Za-z][A-Za-z '-]*$/ },
+	{ name: "$randomCountryCode", pattern: /^[A-Z]{2}$/ },
+	{
+		name: "$randomDatePast",
+		pattern:
+			/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{4} \d{2}:\d{2}:\d{2} GMT\+0000 \(Coordinated Universal Time\)$/,
+	},
+	{
+		name: "$randomDateFuture",
+		pattern:
+			/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{4} \d{2}:\d{2}:\d{2} GMT\+0000 \(Coordinated Universal Time\)$/,
+	},
+	{
+		name: "$randomDateRecent",
+		pattern:
+			/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{4} \d{2}:\d{2}:\d{2} GMT\+0000 \(Coordinated Universal Time\)$/,
+	},
+	{ name: "$randomWord", pattern: /^[a-z]+$/ },
+	{ name: "$randomWords", pattern: /^[a-z]+( [a-z]+){2,4}$/ },
+	{ name: "$randomLoremWord", pattern: /^[a-z]+$/ },
+	{ name: "$randomLoremWords", pattern: /^[a-z]+( [a-z]+){2}$/ },
+	{ name: "$randomLoremSentence", pattern: /^[A-Z][a-z]*( [a-z]+){3,8}\.$/ },
+	{
+		name: "$randomLoremSentences",
+		pattern: /^[A-Z][a-z]*( [a-z]+){3,8}\.( [A-Z][a-z]*( [a-z]+){3,8}\.){1,5}$/,
+	},
+	{
+		name: "$randomLoremParagraph",
+		pattern: /^[A-Z][a-z]*( [a-z]+){3,8}\.( [A-Z][a-z]*( [a-z]+){3,8}\.){2,4}$/,
+	},
+	{ name: "$randomColor", pattern: /^[a-z]+$/ },
+	{ name: "$randomHexColor", pattern: /^#[0-9a-f]{6}$/ },
+	{ name: "$randomUserAgent", pattern: /^Mozilla\/5\.0 \(.+\).*$/ },
+	{ name: "$randomDomainName", pattern: /^[a-z]+\.(example\.(com|org|net)|test\.dev)$/ },
+	{ name: "$randomAbbreviation", pattern: /^[A-Z]{3,4}$/ },
+	{ name: "$randomPrice", pattern: /^\d{1,4}\.\d{2}$/ },
+	{ name: "$randomCurrencyCode", pattern: /^[A-Z]{3}$/ },
+	{ name: "$randomProductName", pattern: /^[A-Z][a-z]+ [A-Z][a-z]+ [A-Z][a-z]+$/ },
+	{ name: "$randomJobTitle", pattern: /^[A-Z][a-z]+ [A-Z][a-z]+ [A-Z][a-z]+$/ },
+];
+
+describe("new generator shapes (#1010)", () => {
+	test("the shape table is non-empty and every name in it is known", () => {
+		expect(NEW_SHAPES.length).toBeGreaterThan(0);
+		const known = new Set(DYNAMIC_VARIABLES.map((v) => v.name));
+		for (const { name } of NEW_SHAPES) {
+			expect(known.has(name)).toBe(true);
+		}
+	});
+
+	test.each(NEW_SHAPES)("$name matches its pattern over many draws", ({ name, pattern }) => {
+		for (let i = 0; i < 30; i++) {
+			expect(gen(name)).toMatch(pattern);
+		}
+	});
+
+	/*
+	 * The shape test above would pass a generator that answered one fixed,
+	 * pattern-conforming string forever - a `pick` hoisted out of its closure and
+	 * evaluated once at module load reads exactly like a working one. What
+	 * separates them is that the value moves. Two draws are not enough for that
+	 * (a small corpus repeats), so this asks 30 draws for two distinct answers:
+	 * the least-varied generator here draws from five, which makes an
+	 * all-identical run of 30 a 5^-29 event rather than a flake.
+	 */
+	test.each(NEW_SHAPES)("$name varies per occurrence", ({ name }) => {
+		const seen = new Set<string>();
+		for (let i = 0; i < 30; i++) seen.add(gen(name));
+		expect(seen.size).toBeGreaterThan(1);
+	});
+
+	test("$randomPrice parses to a number in [0, 1000]", () => {
+		for (let i = 0; i < 30; i++) {
+			const value = Number(gen("$randomPrice"));
+			expect(Number.isNaN(value)).toBe(false);
+			expect(value).toBeGreaterThanOrEqual(0);
+			expect(value).toBeLessThanOrEqual(1000);
+		}
+	});
+
+	test("the three dates fall on the side of now their names claim", () => {
+		const now = Date.now();
+		const oneWeekMs = 7 * 86400 * 1000;
+		for (let i = 0; i < 30; i++) {
+			expect(Date.parse(gen("$randomDatePast"))).toBeLessThan(now);
+			expect(Date.parse(gen("$randomDateFuture"))).toBeGreaterThan(now);
+			const recent = Date.parse(gen("$randomDateRecent"));
+			expect(recent).toBeLessThan(now);
+			// A second of slack: the rendered string carries no milliseconds, so
+			// parsing it back rounds the instant down by up to one second.
+			expect(recent).toBeGreaterThanOrEqual(now - oneWeekMs - 1000);
+		}
+	});
+});
+
 describe("per-occurrence generation", () => {
 	/*
 	 * The rule a naive implementation gets wrong: a table of values computed once

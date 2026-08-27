@@ -20,10 +20,15 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <regex>
+#include <set>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -188,6 +193,147 @@ TEST (DynamicVariables, RandomIntStaysInRange) {
         std::stoi (vayu::http::resolve_template ("{{$randomInt}}", no_vars));
         EXPECT_GE (value, 0);
         EXPECT_LE (value, 1000);
+    }
+}
+
+/// A `std::tm` already in UTC as a `time_t` - the inverse of `gmtime_r`, which
+/// the standard leaves out and each platform spells its own way.
+std::time_t utc_time_from (std::tm parts) {
+#if defined(_WIN32)
+    return _mkgmtime (&parts);
+#else
+    return timegm (&parts);
+#endif
+}
+
+// The shape of every generator #1010 added, read off Postman's own documented
+// example for that name. The values are random and the corpora behind them are
+// ours, so the shape is the whole of what the two tables promise each other -
+// the renderer's `dynamic-variables.test.ts` pins the same 24 patterns.
+struct GeneratorShape {
+    const char* name;
+    const char* pattern;
+};
+
+// `Sat Mar 02 2019 09:09:26 GMT+0000 (Coordinated Universal Time)` - what
+// JavaScript's `Date.prototype.toString` writes, which is how Postman documents
+// its three date generators.
+constexpr const char* JS_DATE_PATTERN =
+R"(^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) )"
+R"(\d{2} \d{4} \d{2}:\d{2}:\d{2} GMT\+0000 \(Coordinated Universal Time\)$)";
+
+const std::vector<GeneratorShape>& generator_shapes () {
+    static const std::vector<GeneratorShape> shapes = {
+        { "$randomPhoneNumber", R"(^\d{3}-\d{3}-\d{4}$)" },
+        { "$randomCity", R"(^[A-Za-z]+( [A-Za-z]+)*$)" },
+        { "$randomStreetAddress", R"(^\d{3,4} [A-Za-z]+ [A-Za-z]+$)" },
+        { "$randomCountry", R"(^[A-Za-z][A-Za-z '-]*$)" },
+        { "$randomCountryCode", R"(^[A-Z]{2}$)" },
+        { "$randomDatePast", JS_DATE_PATTERN },
+        { "$randomDateFuture", JS_DATE_PATTERN },
+        { "$randomDateRecent", JS_DATE_PATTERN },
+        { "$randomWord", R"(^[a-z]+$)" },
+        { "$randomWords", R"(^[a-z]+( [a-z]+){2,4}$)" },
+        { "$randomLoremWord", R"(^[a-z]+$)" },
+        { "$randomLoremWords", R"(^[a-z]+( [a-z]+){2}$)" },
+        { "$randomLoremSentence", R"(^[A-Z][a-z]*( [a-z]+){3,8}\.$)" },
+        { "$randomLoremSentences",
+        R"(^[A-Z][a-z]*( [a-z]+){3,8}\.( [A-Z][a-z]*( [a-z]+){3,8}\.){1,5}$)" },
+        { "$randomLoremParagraph",
+        R"(^[A-Z][a-z]*( [a-z]+){3,8}\.( [A-Z][a-z]*( [a-z]+){3,8}\.){2,4}$)" },
+        { "$randomColor", R"(^[a-z]+$)" },
+        { "$randomHexColor", R"(^#[0-9a-f]{6}$)" },
+        { "$randomUserAgent", R"(^Mozilla/5\.0 \(.+\).*$)" },
+        // The reserved example space, not Postman's live-looking `gracie.biz`.
+        { "$randomDomainName", R"(^[a-z]+\.(example\.(com|org|net)|test\.dev)$)" },
+        { "$randomAbbreviation", R"(^[A-Z]{3,4}$)" },
+        { "$randomPrice", R"(^\d{1,4}\.\d{2}$)" },
+        { "$randomCurrencyCode", R"(^[A-Z]{3}$)" },
+        { "$randomProductName", R"(^[A-Z][a-z]+ [A-Z][a-z]+ [A-Z][a-z]+$)" },
+        { "$randomJobTitle", R"(^[A-Z][a-z]+ [A-Z][a-z]+ [A-Z][a-z]+$)" },
+    };
+    return shapes;
+}
+
+TEST (DynamicVariables, EveryAddedGeneratorMatchesItsDocumentedShape) {
+    const vayu::http::VariableValues no_vars;
+    const auto& names = vayu::http::dynamic_variable_names ();
+    ASSERT_FALSE (generator_shapes ().empty ())
+    << "the shape table scanned nothing";
+
+    for (const auto& shape : generator_shapes ()) {
+        EXPECT_NE (std::find (names.begin (), names.end (), shape.name), names.end ())
+        << shape.name << " is pinned here but is not in the table";
+        const std::regex expected (shape.pattern);
+        // Sampled rather than called once: every one of these draws from a list
+        // or an alphabet, so a single call reads one element of it.
+        for (int i = 0; i < 30; ++i) {
+            const std::string value = vayu::http::resolve_template (
+            std::string ("{{") + shape.name + "}}", no_vars);
+            EXPECT_TRUE (std::regex_match (value, expected))
+            << shape.name << " produced " << value;
+        }
+    }
+}
+
+TEST (DynamicVariables, EveryAddedGeneratorVariesPerOccurrence) {
+    // The shape test above would pass a generator that answered one fixed,
+    // pattern-conforming string forever - a `pick` hoisted out of its lambda and
+    // evaluated once at table construction reads exactly like a working one.
+    // What separates them is that the value moves. Two draws are not enough for
+    // that (a small corpus repeats), so this asks 30 draws for two distinct
+    // answers: the least-varied generator here draws from five, which makes an
+    // all-identical run of 30 a 5^-29 event rather than a flake.
+    const vayu::http::VariableValues no_vars;
+    for (const auto& shape : generator_shapes ()) {
+        std::set<std::string> seen;
+        for (int i = 0; i < 30; ++i) {
+            seen.insert (vayu::http::resolve_template (
+            std::string ("{{") + shape.name + "}}", no_vars));
+        }
+        EXPECT_GT (seen.size (), 1u) << shape.name << " answered one value 30 times";
+    }
+}
+
+TEST (DynamicVariables, ThePriceStaysInsidePostmansDocumentedRange) {
+    const vayu::http::VariableValues no_vars;
+    for (int i = 0; i < 50; ++i) {
+        const double value =
+        std::stod (vayu::http::resolve_template ("{{$randomPrice}}", no_vars));
+        EXPECT_GE (value, 0.0);
+        EXPECT_LE (value, 1000.0);
+    }
+}
+
+TEST (DynamicVariables, TheThreeDatesFallOnTheSidesOfNowTheirNamesClaim) {
+    // The shape test above cannot tell the three apart - they write the same
+    // string - so what separates them is asserted here, by parsing the value
+    // back. A past date in the future is the failure this catches.
+    const vayu::http::VariableValues no_vars;
+    constexpr std::time_t kWeek = std::time_t{ 7 } * 24 * 60 * 60;
+    const auto now =
+    std::chrono::system_clock::to_time_t (std::chrono::system_clock::now ());
+    const auto parse = [] (const std::string& rendered) {
+        std::tm parts{};
+        std::istringstream in (rendered);
+        in >> std::get_time (&parts, "%a %b %d %Y %H:%M:%S");
+        EXPECT_FALSE (in.fail ()) << rendered;
+        return utc_time_from (parts);
+    };
+
+    for (int i = 0; i < 20; ++i) {
+        const auto past =
+        parse (vayu::http::resolve_template ("{{$randomDatePast}}", no_vars));
+        const auto future =
+        parse (vayu::http::resolve_template ("{{$randomDateFuture}}", no_vars));
+        const auto recent =
+        parse (vayu::http::resolve_template ("{{$randomDateRecent}}", no_vars));
+        EXPECT_LT (past, now);
+        EXPECT_GT (future, now);
+        EXPECT_LT (recent, now);
+        // Recent is the past year's last week, which is what makes it a
+        // different generator rather than a second `$randomDatePast`.
+        EXPECT_GE (recent, now - kWeek - 1);
     }
 }
 

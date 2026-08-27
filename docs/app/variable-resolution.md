@@ -315,10 +315,38 @@ in `app/src/lib/dynamic-variables.ts`, called where it is written:
 | `$randomUrl` | absolute `https://` URL |
 | `$randomIP` | IPv4 address |
 | `$randomPassword` | 15-character password |
+| `$randomPhoneNumber` | ten-digit phone number, `700-008-5275` |
+| `$randomCity` | city name |
+| `$randomStreetAddress` | street address, `5742 Harvey Streets` |
+| `$randomCountry` | country name |
+| `$randomCountryCode` | ISO 3166-1 alpha-2 country code |
+| `$randomDatePast`, `$randomDateFuture`, `$randomDateRecent` | datetime in the past year, the next year, the past week |
+| `$randomWord`, `$randomWords` | one word, three to five words |
+| `$randomLoremWord`, `$randomLoremWords` | one lorem ipsum word, three of them |
+| `$randomLoremSentence`, `$randomLoremSentences` | one lorem ipsum sentence, two to six |
+| `$randomLoremParagraph` | a lorem ipsum paragraph |
+| `$randomColor` | color name |
+| `$randomHexColor` | hex color, `#47594a` |
+| `$randomUserAgent` | browser user-agent string |
+| `$randomDomainName` | domain under a reserved example domain |
+| `$randomAbbreviation` | abbreviation, `SQL` |
+| `$randomPrice` | price 0.00 - 1000.00 |
+| `$randomCurrencyCode` | ISO 4217 currency code |
+| `$randomProductName` | product name |
+| `$randomJobTitle` | job title |
 
 They resolve anywhere `{{name}}` does - URL, headers, body, form fields - and the
 `{{` autocomplete offers them under a **Dynamic** heading in both the plain
 fields and the body editors.
+
+The three date generators write what JavaScript's `Date.prototype.toString`
+writes, which is the shape Postman documents them in, and always in UTC:
+`Sat Mar 02 2019 09:09:26 GMT+0000 (Coordinated Universal Time)`. The engine has
+no user's zone to read, and the two sides have to spell the same string.
+
+`$randomDomainName` draws from the reserved example space (RFC 2606) rather than
+Postman's live-looking `gracie.biz`, as `$randomUrl` and `$randomEmail` already
+do: a generated hostname reaches DNS the moment someone writes it into a URL.
 
 Three rules decide what happens at a token:
 
@@ -333,6 +361,24 @@ Three rules decide what happens at a token:
    is a declaration of intent, and a typo that silently emptied a field is the
    defect this feature was added to fix - so it is left where it can be seen, and
    the token stays marked unresolved in the UI.
+
+### The Postman generators Vayu deliberately does not carry
+
+Postman ships around 120 dynamic variables. The table above is the tier imported
+collections actually use; everything outside it keeps its braces by rule 3 rather
+than resolving to something invented. The categories deliberately left out,
+wholesale: finance (`$randomBankAccount`, `$randomCreditCardMask`, IBAN and BIC),
+images (`$randomImageUrl` and its per-category siblings), files and directories
+(`$randomFileName`, `$randomMimeType`, `$randomFileExt`), databases
+(`$randomDatabaseColumn`, `$randomDatabaseType`), catchphrases and business
+buzz-phrases, stores and products beyond `$randomProductName`, grammar
+(`$randomNoun`, `$randomVerb`, `$randomAdjective`), and the remaining
+name/profession/location detail (`$randomNamePrefix`, `$randomJobArea`,
+`$randomLatitude`, `$randomLongitude`). A collection using one of those sends the
+literal `{{$randomBankAccount}}`, visibly, rather than a plausible wrong value.
+
+`$randomRgbColor` is on neither list because Postman does not ship it - only
+`$randomColor` and `$randomHexColor` are documented.
 
 ### What this does not cover
 
