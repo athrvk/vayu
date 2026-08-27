@@ -40,6 +40,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "vayu/core/scenario_data.hpp"
@@ -304,6 +305,30 @@ struct ScenarioResolution {
 };
 
 /**
+ * Validate a run's `data` rows against @p limits and copy them into
+ * @p rows_out, or answer the caller-facing refusal that says why not.
+ *
+ * One reader for both shapes a run can carry rows in - a collection run's
+ * `scenario.data` and a single-request load run's top-level `data` (issue
+ * #993) - so the two cannot come to disagree about what a row is. @p field
+ * names the payload field in every refusal, because the caller has to be told
+ * which one of theirs was wrong.
+ *
+ * Every refusal is loud, for the reason the whole `{{data.column}}` namespace
+ * exists: a token says the value came from the file, so a set the engine could
+ * not read must never become a run that sends the token as it stands. A present
+ * but **empty** array is refused too - a data set that binds nothing is a
+ * mistake, not an empty run.
+ *
+ * A rejected set leaves @p rows_out empty, never holding the rows before the
+ * bad one, which would be a partial data set.
+ */
+[[nodiscard]] std::optional<std::string> read_data_rows (const nlohmann::json& data,
+const ScenarioLimits& limits,
+std::string_view field,
+std::vector<nlohmann::json>& rows_out);
+
+/**
  * Validate a `scenario` block and resolve it into a plan.
  *
  * Ordering is the order the sidebar displays, top to bottom. A collection's
@@ -343,19 +368,23 @@ const ScenarioResolveOptions& options);
 [[nodiscard]] CoverageTally make_coverage_tally (const ScenarioExecution& execution);
 
 /**
- * Bind @p row into @p step's deferred credentials and apply them to @p request.
+ * Bind @p row into @p step - its request's `{{data.column}}` fields first, then
+ * the credentials the plan deliberately left unresolved.
+ *
+ * The step-shaped spelling of `core::bind_iteration_row`, which is where the
+ * order lives and which the single-request load path drives with its own
+ * templates (issue #993). Both scenario executors call this rather than the two
+ * halves in sequence, so a step cannot bind differently depending on which one
+ * ran it, and neither can put the credentials before the fields.
  *
  * A no-op returning success for the ordinary step, whose auth was resolved into
- * the plan and whose `auth_template` is therefore empty - both executors call
- * it beside `apply_data_template` rather than testing first, because the two
- * halves of one iteration's bind belong together and one binder for both modes
- * is what keeps a step from binding differently depending on which one ran it.
+ * the plan and whose templates are therefore both empty - an executor may call
+ * it without testing first.
  *
- * Call it **after** the request's own data pass and before the send: the
- * credentials must be bound before `apply_auth` encodes them, which is the
- * ordering the deferral exists to fix.
+ * Call it before the send: the credentials must be bound before `apply_auth`
+ * encodes them, which is the ordering the deferral exists to fix.
  */
-[[nodiscard]] DataBindResult bind_step_auth (vayu::Request& request,
+[[nodiscard]] DataBindResult bind_step_row (vayu::Request& request,
 const ScenarioStep& step,
 const nlohmann::json& row,
 size_t row_index);

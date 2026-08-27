@@ -268,14 +268,13 @@ class ScenarioLoadDriver {
         // `{{data.*}}` token has empty templates and is not walked at all,
         // which is what makes a token-free plan free per iteration.
         if (row && !(step.data_template.empty () && step.auth_template.empty ())) {
-            auto bound = apply_data_template (
-            request, step.data_template, execution_.data_rows[*row], *row);
-            if (bound.ok) {
-                // Then the credentials, which is why the plan left them typed:
-                // they have to carry the row's values *before* `apply_auth`
-                // base64-encodes them onto the request (issue #591).
-                bound = bind_step_auth (request, step, execution_.data_rows[*row], *row);
-            }
+            // Both halves through the one binder the single-request load path
+            // also drives (issue #993), so a request carrying a row binds
+            // identically whether it is repeated on its own or walked as a step
+            // - including the credentials-after-fields order the encoding
+            // depends on.
+            const auto bound =
+            bind_step_row (request, step, execution_.data_rows[*row], *row);
             if (!bound.ok) {
                 // Nothing goes on the wire, so nothing will ever complete for
                 // this step: this path owns the whole accounting a completion

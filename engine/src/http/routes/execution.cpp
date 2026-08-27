@@ -413,7 +413,140 @@ SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row) {
     return out;
 }
 
+/**
+ * @brief Read `POST /runs`' top-level `data` rows (issue #993).
+ *
+ * Non-static: load_data_test.cpp drives it directly, the suite having no
+ * in-process HTTP route harness. See routes.hpp for what the field means.
+ */
+LoadDataRows read_load_data_set (const nlohmann::json& json,
+const vayu::core::ScenarioLimits& limits,
+bool is_scenario) {
+    LoadDataRows out;
+    const auto field = json.find ("data");
+    if (field == json.end () || field->is_null ()) {
+        return out;
+    }
+
+    // A collection run states its rows inside the block that names the
+    // collection, and the two are bound differently - one row per iteration
+    // shared by every step there, one per submission here. Refused rather than
+    // silently ignored: a caller that sent rows and had them dropped would read
+    // a run of literal `{{data.*}}` tokens as the feature working.
+    if (is_scenario) {
+        out.ok    = false;
+        out.error = "'data' is the single-request form of a data set. A "
+                    "collection run states its rows as 'scenario.data', where "
+                    "one row is bound per iteration and shared by every step - "
+                    "move them there, or drop the 'scenario' block.";
+        return out;
+    }
+
+    auto set = std::make_unique<vayu::core::LoadDataSet> ();
+    // The same reader the scenario block goes through, so the two shapes cannot
+    // come to disagree about what a row is or which limit refuses it.
+    if (auto reason = vayu::core::read_data_rows (*field, limits, "data", set->rows)) {
+        out.ok    = false;
+        out.error = *reason;
+        return out;
+    }
+
+    // How the credentials resolve, decided here because it is the *build* that
+    // would otherwise encode them out of reach - the same call, and the same
+    // reasoning, as a send that carries one row (issue #642). The refusal it
+    // can carry is an oauth2 config with a data token, which no deferral can
+    // serve.
+    auto row_auth = plan_send_row_auth (json, /*has_row=*/true);
+    if (!row_auth.ok) {
+        out.ok    = false;
+        out.error = std::move (row_auth.error);
+        return out;
+    }
+    set->auth        = std::move (row_auth.auth);
+    set->credentials = std::move (row_auth.credentials);
+    out.set          = std::move (set);
+    return out;
+}
+
+/**
+ * @brief Replace a single-request run's `data` rows with their count in the
+ *        stored snapshot (issue #993).
+ *
+ * `sanitize_config_snapshot` strips credentials out of `auth` and keeps
+ * everything else, which is not enough here for the reason `scenario_snapshot`
+ * exists: the rows are user data of unknown sensitivity and are deliberately
+ * never snapshotted. `dataRowCount` is what survives, exactly as it does on a
+ * scenario manifest, so a stored run still says it was data-driven and how
+ * large the set was.
+ *
+ * A snapshot that is not JSON (which `sanitize_config_snapshot` passes through
+ * verbatim) is left alone - there is nothing in it to rewrite.
+ *
+ * Non-static: run_row_seed_test.cpp declares and drives it, the way it does
+ * `scenario_snapshot`, because "the rows are never persisted" is a privacy
+ * property and deserves a test that does not need a run to exist.
+ */
+std::string load_data_snapshot (const std::string& sanitized, size_t row_count) {
+    nlohmann::json parsed;
+    try {
+        parsed = nlohmann::json::parse (sanitized);
+    } catch (const std::exception&) {
+        return sanitized;
+    }
+    if (!parsed.is_object ()) {
+        return sanitized;
+    }
+    parsed.erase ("data");
+    parsed["dataRowCount"] = row_count;
+    return parsed.dump ();
+}
+
 namespace {
+
+/**
+ * @brief The stored `config_snapshot` for a run, with whatever this run's shape
+ *        deliberately keeps out of it already out (issue #993).
+ *
+ * The two rewrites are exclusive by construction - a scenario run states its
+ * work as a collection and refuses a `data` block beside it - so which one
+ * applies is a property of the payload rather than a decision the caller makes.
+ * It lives here rather than inline in `handle_start_load_test` because both
+ * arms are the same rule (a shape whose payload carries user data of unknown
+ * sensitivity is stored described rather than verbatim), and the route reads
+ * better asking for the snapshot than spelling the choice out a third time.
+ */
+std::string run_config_snapshot (const std::string& body,
+bool is_scenario,
+const nlohmann::json& scenario_manifest,
+const vayu::core::LoadDataSet* data) {
+    std::string sanitized = vayu::json::sanitize_config_snapshot (body);
+    if (is_scenario) {
+        return scenario_snapshot (sanitized, scenario_manifest);
+    }
+    if (data != nullptr && !data->rows.empty ()) {
+        // The rows out, their count in - the same rule the scenario manifest
+        // keeps, and for the same reason (issue #993).
+        return load_data_snapshot (sanitized, data->rows.size ());
+    }
+    return sanitized;
+}
+
+/**
+ * @brief The row-set limits a single-request run's `data` block is held to.
+ *
+ * The same two config rows the scenario path reads, so one payload cannot be
+ * refused for a size the other would accept.
+ */
+vayu::core::ScenarioLimits load_data_limits (vayu::db::Database& db) {
+    vayu::core::ScenarioLimits limits;
+    limits.max_data_rows =
+    static_cast<size_t> (db.get_config_int ("maxScenarioDataRows",
+    static_cast<int> (vayu::core::constants::scenario::MAX_DATA_ROWS)));
+    limits.max_data_bytes =
+    static_cast<size_t> (db.get_config_int ("maxScenarioDataBytes",
+    static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES)));
+    return limits;
+}
 
 // Build the final response JSON with script results
 nlohmann::json build_response_json (const vayu::Response& response,
@@ -1616,6 +1749,16 @@ httplib::Response& res) {
         }
     }
 
+    // The rows a single-request run binds (issue #993), validated and credential-
+    // planned here for the reason the scenario block is resolved here: a set the
+    // engine cannot read must leave no run row behind.
+    auto load_data = read_load_data_set (json, load_data_limits (ctx.db), is_scenario);
+    if (!load_data.ok) {
+        vayu::utils::log_warning ("POST /runs - " + load_data.error);
+        send_error (res, 400, load_data.error, "invalid_run_config");
+        return;
+    }
+
     // Create run record
     std::string run_id = vayu::utils::generate_id ("run_");
     vayu::db::Run run;
@@ -1631,10 +1774,8 @@ httplib::Response& res) {
     run.type   = (is_scenario && !is_scenario_load) ? vayu::RunType::Scenario :
                                                       vayu::RunType::Load;
     run.status = vayu::RunStatus::Pending;
-    run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
-    if (is_scenario) {
-        run.config_snapshot = scenario_snapshot (run.config_snapshot, scenario_manifest);
-    }
+    run.config_snapshot = run_config_snapshot (
+    req.body, is_scenario, scenario_manifest, load_data.set.get ());
     seed_run_times (run, now_ms ());
 
     if (json.contains ("requestId") && !json["requestId"].is_null ()) {
@@ -1675,7 +1816,7 @@ httplib::Response& res) {
     ctx.run_manager.start_scenario_run (
     run_id, json, scenario_execution, ctx.db, ctx.cookie_jar, ctx.verbose) :
     ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose,
-    is_scenario_load ? scenario_execution : nullptr);
+    is_scenario_load ? scenario_execution : nullptr, std::move (load_data.set));
     if (!started) {
         send_error (res, 503, "Engine is shutting down");
         return;

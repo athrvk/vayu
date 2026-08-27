@@ -1027,10 +1027,12 @@ was none; the app's step list shows that rather than an empty `200`.
 
 ## Data rows (`pm.iterationData`)
 
-A collection run can be given a set of rows - a CSV, TSV, JSON or JSONL file the
-app parses and sends inline on the run payload as `scenario.data`
-([the file format](../app/data-driven-runs.md)). **Row `i % rows` binds to
-iteration `i`**, and that row is what `pm.iterationData` reads:
+A run can be given a set of rows - a CSV, TSV, JSON or JSONL file the app parses
+and sends inline on the run payload ([the file
+format](../app/data-driven-runs.md)). A collection run states them as
+`scenario.data` and a single-request load run as the top-level `data` (issue
+#993). **Row `i % rows` binds to iteration `i`** - for a single request an
+iteration is one submission - and that row is what `pm.iterationData` reads:
 
 ```javascript
 pm.iterationData.get('username');  // this iteration's value for that column
@@ -1070,11 +1072,14 @@ script that reads a row gets an edit loop that is not "start a run, find the
 step, read the result"; the row binds `{{data.column}}` in the request as well.
 See [api-reference.md](api-reference.md#post-execute).
 
-**`pm.iterationData` is `undefined` where there is no row** - an ordinary Send, a
-single-request load run's deferred `tests` script, and any run started without a
-data set. A scenario load run's deferred per-step script *does* read one: the
-sampled response carries the row its iteration was bound to, so the row is a
-fact about that response rather than a guess. That is deliberate, and it is the opposite treatment to `pm.execution`
+**`pm.iterationData` is `undefined` where there is no row** - an ordinary Send,
+and any run started without a data set. Where a run *was* given rows, its
+deferred script reads one whichever shape the run took: a sampled response
+carries the row the submission or iteration that produced it was bound to, so
+the row is a fact about that response rather than a guess. (`pm.info.iteration`
+is narrower and stays so: a scenario step carries the virtual user's real
+iteration index, while a single-request run has none to report - a reservoir
+position is not an iteration.) That is deliberate, and it is the opposite treatment to `pm.execution`
 above: flow control is a *capability*, and one that silently does nothing is a
 false success, so it is always bound and explains itself. A data row is *data*,
 and "this run is not data-driven" is a fact a script may legitimately branch on:
@@ -1545,9 +1550,10 @@ shape:
 
 - `pm.request` is the step's own request, and `pm.info.requestId` /
   `requestName` are that step's, not a run-level one.
-- `pm.info.iteration` and `pm.iterationData` are bound: the sample carries the
-  virtual user's iteration and the data row that iteration used, so a script
-  asserting on `{{data.*}}`-driven behaviour grades the right row.
+- `pm.info.iteration` is bound - the sample carries the virtual user's real
+  iteration index - beside the `pm.iterationData` a single-request run's rows
+  also provide, so a script asserting on `{{data.*}}`-driven behaviour grades the
+  right row either way.
 - The sample budget is split across the steps that carry a script rather than
   spent run-wide, so the last step of a long plan is validated instead of being
   crowded out by the first. A step with no script is never sampled.

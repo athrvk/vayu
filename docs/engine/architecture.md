@@ -910,6 +910,17 @@ row exists - and the executor is the only thing that differs.
   (`DATA_BINDING_FAILED`). Every retained result carries its `dataRowIndex`,
   which is what makes a failure attributable to a row when no per-step `results`
   rows exist.
+- **A single-request load run binds rows too** (issue #993). Its rows ride the
+  payload's top-level `data` rather than a scenario block, and one is claimed per
+  *submission* off the same kind of run-wide cursor, wrapping the same way - a
+  single request has no sequence for an iteration to span, so the unit of a claim
+  is the request. The templates are split once, when the run's one request is
+  built (`LoadDataSet::fields`), the credentials defer exactly as a step's do,
+  and every retained result carries its `dataRowIndex`. **A run without rows
+  carries no set at all**, which is the throughput guard stated structurally: the
+  strategies test one pointer and otherwise submit the shared request they always
+  did. The validation, the binder and the escaping are the scenario path's own
+  functions rather than copies - `read_data_rows` and `bind_iteration_row`.
 - **Scripts stay deferred, keyed per step.** Nothing runs inline; after the run
   drains, each step's own `post_script` is replayed against the responses *that
   step* produced, and the tallies land on that step's entry in the breakdown

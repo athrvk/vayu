@@ -3197,6 +3197,11 @@ describe("start_load_run scenario runs", () => {
 			["maxInFlight", 10],
 			["stream", true],
 			["sloMs", 500],
+			// The single-target row set (issue #993): a sequence states its rows
+			// as `scenario.data`, and they bind per iteration there rather than
+			// per request sent, so a payload carrying both would have one of the
+			// two silently dropped.
+			["data", [{ id: "1" }]],
 		] as Array<[string, unknown]>) {
 			const res = await dispatchTool(
 				"start_load_run",
@@ -6774,6 +6779,23 @@ describe("start_load_run recording knobs", () => {
 		]) {
 			expect(started(client)).not.toHaveProperty(camel);
 		}
+	});
+
+	// The rows go through untouched (issue #993): every rule about what a set may
+	// be lives engine-side, so a second copy of them here could only drift - and
+	// a set the schema quietly dropped would be a run of literal `{{data.*}}`
+	// tokens that reads as the feature working.
+	test("forwards a data set verbatim, under the engine's own key", async () => {
+		const rows = [{ id: "1" }, { id: "2" }];
+		const { res, client } = await start({ data: rows });
+
+		expect(res.isError).toBeFalsy();
+		expect(started(client)).toMatchObject({ data: rows });
+	});
+
+	test("sends no `data` key when the caller named no rows", async () => {
+		const { client } = await start({ comment: "just a note" });
+		expect(started(client)).not.toHaveProperty("data");
 	});
 
 	test("a knob the caller did not name is absent, not defaulted", async () => {

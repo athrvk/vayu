@@ -26,6 +26,7 @@
 #include "vayu/core/capacity_controller.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/load_pacing.hpp"
+#include "vayu/core/load_strategy.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/monitor.hpp"
 #include "vayu/core/scenario_plan.hpp"
@@ -300,6 +301,20 @@ struct RunContext {
      * choice of executor differs, and that is the one place this is read.
      */
     std::shared_ptr<const ScenarioExecution> scenario;
+
+    /**
+     * The rows a *single-request* load run binds, or null for a run sent
+     * without `data` (issue #993) - and for every scenario load run, whose rows
+     * live on @ref scenario beside the plan that binds them.
+     *
+     * Here for the reason the plan above is: the lifecycle around the executor
+     * is the same either way, and this is what the four strategies, the
+     * completion annotation and the deferred script replay each read. Written
+     * once - the rows by `start_run`, the request's own template by
+     * `build_load_request` before the first submission - and only read
+     * afterwards, all on the run's worker thread.
+     */
+    std::unique_ptr<LoadDataSet> load_data;
 
     // Real-time counters (also tracked by MetricsCollector, but kept for backward compat)
     std::atomic<size_t> requests_sent{ 0 }; // Number of requests submitted to event loop
@@ -889,12 +904,20 @@ class RunManager {
      *                 event loop, metrics thread, drain, flush and summary are
      *                 the same, and only the executor differs. The design-mode
      *                 sequential runner is `start_scenario_run` instead.
+     * @param data The validated `data` rows a single-request run binds, or null
+     *             for a run sent without them (issue #993). Passed rather than
+     *             read back out of @p config, because what makes a row set
+     *             usable is the route's validation and its credential plan -
+     *             a run started with the raw payload alone would be trusting a
+     *             check nobody ran. Null for a scenario run, whose rows travel
+     *             on @p scenario.
      */
     bool start_run (const std::string& run_id,
     const nlohmann::json& config,
     vayu::db::Database& db,
     bool verbose,
-    std::shared_ptr<const ScenarioExecution> scenario = nullptr);
+    std::shared_ptr<const ScenarioExecution> scenario = nullptr,
+    std::unique_ptr<LoadDataSet> data                 = nullptr);
 
     /**
      * @brief Start a scenario run: the same lifecycle, a different executor.

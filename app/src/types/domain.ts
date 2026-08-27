@@ -1435,6 +1435,17 @@ export interface LoadTestConfig {
 	 */
 	stream_duration_seconds?: number;
 	stream_max_events?: number;
+	/**
+	 * The rows this run binds, one object per row (issue #993) - the parsed
+	 * file the dialog's picker holds, never a re-parse of it.
+	 *
+	 * Absent when no file was picked, which is what leaves the run on the path
+	 * it took before data-driven single-request runs existed. Named `data`
+	 * rather than snake_cased like its neighbours because it is the engine's own
+	 * field name, the same reason {@link RunThresholds} and
+	 * {@link RunMonitorConfig} are camelCase here.
+	 */
+	data?: Record<string, unknown>[];
 }
 
 /**

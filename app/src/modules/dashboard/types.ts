@@ -41,6 +41,12 @@ export interface DashboardHeaderProps {
 		targetRps?: number;
 		concurrency?: number;
 		comment?: string;
+		/**
+		 * How many `data` rows the run bound (issue #993), off the stored
+		 * snapshot - which keeps the count in the rows' place, since the rows
+		 * themselves are never persisted. Absent for a run without a data file.
+		 */
+		dataRowCount?: number;
 	};
 }
 
@@ -58,6 +64,8 @@ export interface RunMetadataProps {
 		targetRps?: number;
 		concurrency?: number;
 		comment?: string;
+		/** See {@link DashboardHeaderProps}: the row count, never the rows. */
+		dataRowCount?: number;
 	};
 }
 

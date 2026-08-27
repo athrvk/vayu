@@ -11,7 +11,7 @@
  * Displays API endpoint, test mode, timing information
  */
 
-import { Activity, Clock, Globe, Calendar, Timer } from "lucide-react";
+import { Activity, Clock, Globe, Calendar, Table2, Timer } from "lucide-react";
 import type { RunMetadataProps } from "../types";
 import { formatDuration } from "../utils/format";
 import { loadTestTypeToLabel } from "@/utils";
@@ -75,6 +75,26 @@ export default function RunMetadata({
 						)}
 					</div>
 				)}
+
+				{/* What a data-driven run bound (issue #993). The rows themselves
+				    are never stored - the snapshot keeps their count in their
+				    place - so this is the whole record that the run was driven by
+				    a file, and the only place a reader learns how large the set
+				    was. Absent for every run without one, rather than "0 rows". */}
+				{typeof configuration?.dataRowCount === "number" &&
+					configuration.dataRowCount > 0 && (
+						<div className="flex items-center gap-2">
+							<Table2 className="w-4 h-4 text-muted-foreground" />
+							<span className="font-medium text-muted-foreground">Data:</span>
+							<span className="text-foreground">
+								{configuration.dataRowCount}{" "}
+								{configuration.dataRowCount === 1 ? "row" : "rows"}
+							</span>
+							<span className="text-muted-foreground text-xs">
+								(one per request, repeating)
+							</span>
+						</div>
+					)}
 			</div>
 
 			{/* Timing Info */}
