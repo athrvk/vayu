@@ -52,6 +52,14 @@ and `libtool` - vcpkg builds libsodium from source there and runs `autoreconf`
 first. `python build.py --setup` installs them; without them the *dependency*
 install fails, which does not look like a missing build tool.
 
+Engine rebuilds are cheaper than one cold build suggests: `build.py` skips the
+CMake configure on warm builds (ninja re-runs CMake itself when
+`CMakeLists.txt` or `vcpkg.json` change) and, at configure time, auto-detects
+ccache/sccache as the compiler launcher (Linux/macOS) and mold/lld as the
+linker (Linux). Installing ccache is the single biggest lever for clean
+rebuilds and branch switches - `sudo apt-get install -y ccache` in a fresh
+cloud container. Details: `docs/engine/building.md#faster-rebuilds`.
+
 **A `403` from vcpkg on a GitHub source archive is not a dependency you cannot
 have.** In the cloud dev environment the egress policy refuses those archives
 while allowing git-over-https, so a port fetched by `vcpkg_from_github` dies on

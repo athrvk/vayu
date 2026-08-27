@@ -527,8 +527,12 @@ See [Database Schema](db-schema.md) for the full column list.
 2. **Pruning**: run history is trimmed per `maxRunsRetained` / `runRetentionDays`.
    Reconciliation runs first so an orphan is terminal, and therefore prunable, in the
    same startup.
+3. **Trash retention**: collections and requests deleted more than
+   `trashRetentionDays` ago are destroyed for good (issue #988) - the subtree,
+   its requests and their examples. Until then a delete is only a stamp, and
+   `POST /trash/:id/restore` puts it back.
 
-Both passes are best-effort: a failure is logged and never blocks startup.
+All three passes are best-effort: a failure is logged and never blocks startup.
 
 ## Request Flow
 

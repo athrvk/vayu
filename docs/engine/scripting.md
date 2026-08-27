@@ -332,9 +332,14 @@ named in its error line by an assertion its own Tests list did not contain.
 
 ```javascript
 pm.response.headers.get('Content-Type');   // case-insensitive; undefined if absent
-pm.response.headers.has('X-Request-Id');   // boolean
+pm.response.headers.has('X-Request-Id');   // name present, boolean
+pm.response.headers.has('Content-Type', 'application/json');
+                                           // present and holding that exact value
 pm.response.headers['content-type'];       // indexing: exact key only
 ```
+
+`has()`'s optional second argument is compared strictly against the header's
+wire value - a number never matches, since the wire value is always a string.
 
 `headers` is a plain object, not Postman's `HeaderList`, but `get()` and `has()`
 are on it and behave the way HTTP header names do - case-insensitively. Indexing
@@ -394,16 +399,46 @@ cookie boundary, and the `=` padding on a base64 value stays in the value.
 ### Response Assertions
 
 ```javascript
-pm.response.to.have.status(200);
-pm.response.to.have.header('Content-Type');
-pm.response.to.have.jsonBody();
+pm.response.to.have.status(200);                          // status code
+pm.response.to.have.status('OK');                         // reason phrase, not a code
+pm.response.to.have.header('Content-Type');               // header exists
+pm.response.to.have.header('Content-Type', 'text/plain'); // exact value, strict
+pm.response.to.have.body('{"ok":true}');                  // body equals this exactly
+pm.response.to.have.body(/"ok":\s*true/);                 // regex run against the body
+pm.response.to.have.body({ ok: true });                   // parsed JSON deep-equals this
+pm.response.to.have.jsonBody();                           // body parses as JSON
+pm.response.to.have.jsonBody('data.id');                  // that property exists
+pm.response.to.have.jsonBody('data.id', 42);              // exists and deep-equals 42
 ```
+
+`have.status` means two different things depending on the argument's type: a
+number is the status code, a string is compared against the reason phrase
+`pm.response.reason()` answers. **`status('200')` fails** - a string is always
+a reason phrase to compare, never a code coerced to one.
+
+`have.header`'s second argument is compared strictly against the header as it
+arrived on the wire. `header('X-Count', 5)` fails rather than stringifying `5`
+into agreement; the expected value must already be the string form.
+
+`have.body` accepts exactly three forms. A string must equal the body
+**exactly** - this used to be a substring search. A regular expression is run
+against the body text. An object is deep-equalled against the parsed JSON
+body. Any other argument type - a number, a boolean - is a `TypeError` naming
+the three accepted forms rather than a verdict: Postman silently asserts
+nothing for those inputs, and Vayu refuses a silent non-assertion instead
+(#998).
+
+`have.jsonBody` takes an optional path and an optional value. No arguments
+checks only that the body parses as JSON. A path checks that the property
+exists. A path plus a value checks that the property exists **and** deeply
+equals it - before #998 the value argument was accepted but never compared,
+so a wrong expected value still passed.
 
 Status-class assertions hang off `pm.response.to.be`. They are **getters** - the
 paren-less form is the assertion:
 
 ```javascript
-pm.response.to.be.ok;            // 2xx
+pm.response.to.be.ok;            // status 200 only
 pm.response.to.be.success;       // 2xx
 pm.response.to.be.info;          // 1xx
 pm.response.to.be.redirection;   // 3xx
@@ -419,6 +454,11 @@ pm.response.to.be.rateLimited;   // 429
 pm.response.to.be.json;          // body parses as JSON
 pm.response.to.be.withBody;      // body is not empty
 ```
+
+**`ok` is status 200 only, not any 2xx** (#998) - `success` is the 2xx one. A
+script that meant "any 2xx" and asserted `.ok` needs `.success` instead.
+Postman's named statuses (`accepted`, `badRequest`, ...) also match by reason
+phrase; Vayu's stay code-only.
 
 **Anything else under `pm.response.to` throws.** A misspelled or unimplemented
 name - `pm.response.to.be.definitelyNotAMatcher`, or the negated
@@ -547,7 +587,8 @@ Rules worth knowing before you rely on them:
 
 ```javascript
 pm.request.headers.get('authorization');                  // case-insensitive
-pm.request.headers.has('Authorization');                  // boolean
+pm.request.headers.has('Authorization');                  // name present, boolean
+pm.request.headers.has('Authorization', 'Bearer abc');    // present with that value
 pm.request.headers.upsert({ key: 'X-Trace', value: id }); // add or replace
 pm.request.headers.upsert('X-Trace', id);                 // same, two-arg form
 pm.request.headers.add({ key: 'X-New', value: '1' });     // add; throws if present
@@ -570,6 +611,9 @@ Three behaviours worth knowing:
   carries a single value per name, so the difference is reported rather than
   silently collapsed into an `upsert`.
 - **`remove` on an absent header is a no-op**, not an error.
+- **`has`'s optional value argument is a strict string compare**, the same rule
+  `pm.response.headers.has` follows - a number never matches, since the
+  outgoing header is always a string.
 
 A bad argument fails loudly: a name must be a non-empty string and a value a
 string, number or boolean - the same set plain assignment accepts. Detaching a

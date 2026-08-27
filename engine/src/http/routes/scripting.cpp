@@ -195,8 +195,11 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.response.headers.has" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.response.headers.has(\"${1:Content-Type}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.response.headers.has(name: string): boolean" },
-    { "documentation", "Whether the response carries a header of that name, case-insensitively." },
+    { "detail", "pm.response.headers.has(name: string, value?: string): boolean" },
+    { "documentation",
+    "Whether the response carries a header of that name, case-insensitively. "
+    "With a second argument, whether it also carries that exact value - the "
+    "comparison is strict, so a number never matches the wire's string." },
     { "sortText", "1_pm_response_headers_has" } });
 
     completions.push_back ({ { "label", "pm.response.cookies" }, { "kind", KIND_FIELD },
@@ -269,26 +272,45 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.response.to.have.status" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.status(${1:200})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.response.to.have.status(code: number)" },
+    { "detail", "pm.response.to.have.status(code: number | string)" },
     { "documentation",
-    "Assert that the response has a specific HTTP status "
-    "code.\n\nExample:\npm.response.to.have.status(200);\npm.response.to.have."
-    "status(201);" },
+    "Assert that the response has a specific HTTP status code, or - given a "
+    "string - the reason phrase pm.response.reason() "
+    "answers.\n\nExample:\npm.response.to.have.status(200);\npm.response.to."
+    "have.status('OK');" },
     { "sortText", "1_pm_response_to_have_status" } });
 
     completions.push_back ({ { "label", "pm.response.to.have.header" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.response.to.have.header(\"${1:Content-Type}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.response.to.have.header(name: string)" },
+    { "detail", "pm.response.to.have.header(name: string, value?: string)" },
     { "documentation",
-    "Assert that a specific header exists in the "
-    "response.\n\nExample:\npm.response.to.have.header('Content-Type');" },
+    "Assert that a specific header exists in the response, and - with a second "
+    "argument - that it holds that exact value. The value comparison is "
+    "strict, so a number never matches the wire's "
+    "string.\n\nExample:\npm.response.to.have.header('Content-Type');\npm."
+    "response.to.have.header('Content-Type', 'application/json');" },
     { "sortText", "1_pm_response_to_have_header" } });
+
+    completions.push_back ({ { "label", "pm.response.to.have.body" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.body(\"${1:body}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.body(expected: string | RegExp | object)" },
+    { "documentation",
+    "Assert what the response body is. A string must equal the body exactly, a "
+    "regular expression must match it, and an object must deeply equal the "
+    "parsed JSON.\n\nExample:\npm.response.to.have.body('pong');\npm.response."
+    "to.have.body(/^\\{\"ok\"/);\npm.response.to.have.body({ ok: true });" },
+    { "sortText", "1_pm_response_to_have_body" } });
 
     completions.push_back ({ { "label", "pm.response.to.have.jsonBody" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.jsonBody()" },
-    { "detail", "pm.response.to.have.jsonBody()" },
-    { "documentation", "Assert that the response has a valid JSON body." },
+    { "detail", "pm.response.to.have.jsonBody(path?: string, value?: unknown)" },
+    { "documentation",
+    "Assert that the response has a valid JSON body; with a path, that the "
+    "body holds that property; with a value, that the property deeply equals "
+    "it.\n\nExample:\npm.response.to.have.jsonBody();\npm.response.to.have."
+    "jsonBody('data.id');\npm.response.to.have.jsonBody('data.id', 42);" },
     { "sortText", "1_pm_response_to_have_jsonBody" } });
 
     // ========================================
@@ -303,7 +325,7 @@ nlohmann::json get_script_completions () {
         const char* condition;
     };
     constexpr auto status_classes = std::to_array<StatusClassCompletion> ({
-    { "ok", "a 2xx status code" },
+    { "ok", "status 200" },
     { "success", "a 2xx status code" },
     { "info", "a 1xx status code" },
     { "redirection", "a 3xx status code" },
@@ -587,8 +609,11 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.request.headers.has" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.request.headers.has(\"${1:Authorization}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.request.headers.has(name: string): boolean" },
-    { "documentation", "Whether the outgoing request carries that header, case-insensitively." },
+    { "detail", "pm.request.headers.has(name: string, value?: string): boolean" },
+    { "documentation",
+    "Whether the outgoing request carries that header, case-insensitively. "
+    "With a second argument, whether it also carries that exact value - the "
+    "comparison is strict, so a number never matches the header's string." },
     { "sortText", "1_pm_request_headers_has" } });
 
     completions.push_back ({ { "label", "pm.request.headers.upsert" }, { "kind", KIND_FUNCTION },

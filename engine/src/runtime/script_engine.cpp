@@ -2485,6 +2485,34 @@ void install_response_body_readers (JSContext* ctx, JSValue response, const std:
 // takes a status code, not a message), so they call the helper directly rather
 // than through `throw_expect_failure`, which exists to apply that prefix.
 
+// The reason phrase as `pm.response.reason()` answers it: what the status line
+// carried when it carried one, and the registered phrase for the code when it
+// did not - HTTP/2 has no reason phrase on the wire at all. One definition,
+// because `to.have.status("OK")` and `reason()` are two readings of the same
+// response and a script that compares them must not get two answers.
+std::string response_reason_phrase (const Response& response) {
+    if (!response.status_text.empty ()) {
+        return response.status_text;
+    }
+    return vayu::http::status_text (response.status_code);
+}
+
+// A body can be megabytes, so a failure message quotes a bounded prefix rather
+// than the whole of it - and cuts on a UTF-8 boundary, because a message split
+// mid-sequence reaches the report as replacement characters.
+constexpr std::string::size_type kBodyExcerptBytes = 120;
+
+std::string describe_body (const std::string& body) {
+    if (body.size () <= kBodyExcerptBytes) {
+        return "'" + body + "'";
+    }
+    std::string::size_type cut = kBodyExcerptBytes;
+    while (cut > 0 && (static_cast<unsigned char> (body[cut]) & 0xC0) == 0x80) {
+        --cut;
+    }
+    return "'" + body.substr (0, cut) + "...' (" + std::to_string (body.size ()) + " bytes)";
+}
+
 JSValue js_response_have_status (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 1) {
         return JS_ThrowTypeError (ctx, "status() requires an expected status code");
@@ -2493,6 +2521,21 @@ JSValue js_response_have_status (JSContext* ctx, JSValueConst this_val, int argc
     auto* data = get_context_data (ctx);
     if (!data->response) {
         return JS_ThrowInternalError (ctx, "No response available");
+    }
+
+    // Postman takes either form and decides by type, never by coercion:
+    // chai-postman compares a string against `reason()` and a number against
+    // the code. Coercing both through `JS_ToInt32` read "OK" as 0 - failing an
+    // assertion Postman passes - and "200" as 200 - passing one Postman fails.
+    if (JS_IsString (argv[0])) {
+        const std::string expected_reason = js_to_string (ctx, argv[0]);
+        const std::string actual_reason = response_reason_phrase (*data->response);
+        if (actual_reason != expected_reason) {
+            std::string msg = "Expected status reason '" + expected_reason +
+            "' but got '" + actual_reason + "'";
+            return throw_assertion_failure (ctx, msg);
+        }
+        return JS_UNDEFINED;
     }
 
     int32_t expected_status;
@@ -2542,12 +2585,17 @@ JSValue js_response_have_header (JSContext* ctx, JSValueConst this_val, int argc
         return throw_assertion_failure (ctx, msg);
     }
 
-    // If a second argument is provided, check the value
+    // A header value is a string on the wire, and chai-postman compares the
+    // expected value against it strictly. Coercing the expectation instead let
+    // `header("X-Count", 5)` pass against the string "5" - a verdict Postman
+    // does not give - so a non-string expectation fails the assertion here
+    // rather than being stringified into agreement with the wire.
     if (argc >= 2) {
-        std::string expected_value = js_to_string (ctx, argv[1]);
-        if (found_value != expected_value) {
-            std::string msg = "Expected header '" + header_name + "' to be '" +
-            expected_value + "' but got '" + found_value + "'";
+        const bool matches =
+        JS_IsString (argv[1]) && js_to_string (ctx, argv[1]) == found_value;
+        if (!matches) {
+            std::string msg = "Expected header '" + header_name + "' to be " +
+            js_describe (ctx, argv[1]) + " but got '" + found_value + "'";
             return throw_assertion_failure (ctx, msg);
         }
     }
@@ -2565,10 +2613,79 @@ JSValue js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, 
         return JS_ThrowInternalError (ctx, "No response available");
     }
 
-    std::string expected = js_to_string (ctx, argv[0]);
+    const std::string& body = data->response->body;
 
-    if (data->response->body.find (expected) == std::string::npos) {
-        std::string msg = "Expected response body to contain '" + expected + "'";
+    // chai-postman decides by the argument's type, and each form is a
+    // different comparison: a string is exact, a regular expression is
+    // executed against the body, an object is deep-equalled against the parsed
+    // JSON. Vayu stringified all three and substring-searched the result, so a
+    // partial string passed where Postman fails, and a regex or an object was
+    // searched for as the literal text "/re/" or "[object Object]" - failing
+    // where Postman passes.
+    if (JS_IsString (argv[0])) {
+        const std::string expected = js_to_string (ctx, argv[0]);
+        if (body != expected) {
+            std::string msg = "Expected response body to be '" + expected +
+            "' but got " + describe_body (body);
+            return throw_assertion_failure (ctx, msg);
+        }
+        return JS_UNDEFINED;
+    }
+
+    if (!JS_IsObject (argv[0])) {
+        return JS_ThrowTypeError (ctx,
+        "body() expects a string, a regular expression or an object, got %s",
+        js_type_name (ctx, argv[0]));
+    }
+
+    // A pattern is whatever carries a callable `test`, which is how
+    // `expect(...).to.match` reads one: a regular expression literal is a real
+    // RegExp here and satisfies it, and a matcher object a script built itself
+    // is run rather than silently deep-equalled against the body.
+    JSValue test_fn = JS_GetPropertyStr (ctx, argv[0], "test");
+    // Reading `test` runs a getter if the script defined one, and a getter that
+    // throws leaves the exception pending. Falling through to the deep-equal
+    // branch there would report a mismatch and drop the script's own error -
+    // the shape of silent wrongness this assertion was fixed for.
+    if (JS_IsException (test_fn)) {
+        return JS_EXCEPTION;
+    }
+    if (JS_IsFunction (ctx, test_fn)) {
+        JSValue subject = JS_NewString (ctx, body.c_str ());
+        JSValue result  = JS_Call (ctx, test_fn, argv[0], 1, &subject);
+        JS_FreeValue (ctx, subject);
+        JS_FreeValue (ctx, test_fn);
+        if (JS_IsException (result)) {
+            JS_FreeValue (ctx, result);
+            return JS_EXCEPTION;
+        }
+        const bool matched = JS_ToBool (ctx, result) == 1;
+        JS_FreeValue (ctx, result);
+        if (!matched) {
+            std::string msg =
+            "Expected response body to match the pattern but got " + describe_body (body);
+            return throw_assertion_failure (ctx, msg);
+        }
+        return JS_UNDEFINED;
+    }
+    JS_FreeValue (ctx, test_fn);
+
+    JSValue json = JS_ParseJSON (ctx, body.c_str (), body.size (), "<response>");
+    if (JS_IsException (json)) {
+        // Swallow the parse exception so we report a clean assertion failure.
+        JS_FreeValue (ctx, JS_GetException (ctx));
+        return throw_assertion_failure (ctx, "Response body is not valid JSON");
+    }
+
+    DeepEqualPath path;
+    const int same = js_deep_equal (ctx, json, argv[0], 0, path);
+    JS_FreeValue (ctx, json);
+    if (same < 0) {
+        return JS_EXCEPTION;
+    }
+    if (same == 0) {
+        std::string msg = "Expected response body to deeply equal " +
+        js_describe (ctx, argv[0]) + " but got " + describe_body (body);
         return throw_assertion_failure (ctx, msg);
     }
 
@@ -2627,6 +2744,29 @@ JSValue js_response_have_jsonBody (JSContext* ctx, JSValueConst this_val, int ar
         start = end + 1;
     }
 
+    // chai-postman's two-argument form is `_.has(json, path)` and then
+    // `_.isEqual(_.get(json, path), value)`. Vayu walked the path and stopped,
+    // never reading the expected value at all, so every value-checking
+    // assertion in an imported suite passed on any value the path held - the
+    // silent false pass #998 was filed for.
+    if (argc >= 2) {
+        DeepEqualPath path;
+        const int same = js_deep_equal (ctx, current, argv[1], 0, path);
+        if (same < 0) {
+            JS_FreeValue (ctx, current);
+            JS_FreeValue (ctx, json);
+            return JS_EXCEPTION;
+        }
+        if (same == 0) {
+            std::string msg = "Expected response body property '" + prop_path +
+            "' to deeply equal " + js_describe (ctx, argv[1]) + " but got " +
+            js_describe (ctx, current);
+            JS_FreeValue (ctx, current);
+            JS_FreeValue (ctx, json);
+            return throw_assertion_failure (ctx, msg);
+        }
+    }
+
     JS_FreeValue (ctx, current);
     JS_FreeValue (ctx, json);
     return JS_UNDEFINED;
@@ -2649,7 +2789,11 @@ struct StatusClassMatcher {
 // ranges, so they get their own getters below.
 constexpr StatusClassMatcher status_class_matchers[] = {
     { "info", 100, 199, "a 1xx status code" },
-    { "ok", 200, 299, "a 2xx status code" },
+    // `ok` is a named code in chai-postman, not a class: it asserts 200, so a
+    // 204 passes here and fails in Postman while the two ranges agree. Vayu
+    // scripts that meant the class have `success`, which is the 2xx one in
+    // both - the migration note is in docs/app/pm-api-compatibility.md.
+    { "ok", 200, 200, "status 200" },
     { "success", 200, 299, "a 2xx status code" },
     { "accepted", 202, 202, "status 202" },
     { "redirection", 300, 399, "a 3xx status code" },
@@ -3035,6 +3179,11 @@ JSValue js_headers_get (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     return JS_GetPropertyStr (ctx, this_val, key->c_str ());
 }
 
+// Postman's PropertyList spells this `has(key, value?)` and checks the value
+// when one is given. Vayu read only the name, so `has(name, value)` answered
+// true for any value the header held - a check that looked like one and was
+// not. The comparison is strict against the wire string, as `to.have.header`'s
+// is: a non-string expectation matches nothing rather than being coerced.
 JSValue js_headers_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (!header_this_is_usable (ctx, this_val, "has")) {
         return JS_EXCEPTION;
@@ -3043,7 +3192,20 @@ JSValue js_headers_has (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     if (!name) {
         return JS_EXCEPTION;
     }
-    return JS_NewBool (ctx, find_header_key (ctx, this_val, *name).has_value ());
+    auto key = find_header_key (ctx, this_val, *name);
+    if (!key) {
+        return JS_NewBool (ctx, 0);
+    }
+    if (argc < 2) {
+        return JS_NewBool (ctx, 1);
+    }
+    if (!JS_IsString (argv[1])) {
+        return JS_NewBool (ctx, 0);
+    }
+    JSValue stored           = JS_GetPropertyStr (ctx, this_val, key->c_str ());
+    const std::string actual = js_to_string (ctx, stored);
+    JS_FreeValue (ctx, stored);
+    return JS_NewBool (ctx, actual == js_to_string (ctx, argv[1]) ? 1 : 0);
 }
 
 // Postman spells this `add({ key, value })`; Bruno spells it `(name, value)`.
@@ -3180,11 +3342,7 @@ JSValue js_response_reason (JSContext* ctx, JSValueConst this_val, int argc, JSV
     if (!data || !data->response) {
         return JS_ThrowInternalError (ctx, "No response available");
     }
-    if (!data->response->status_text.empty ()) {
-        return JS_NewString (ctx, data->response->status_text.c_str ());
-    }
-    return JS_NewString (
-    ctx, vayu::http::status_text (data->response->status_code).c_str ());
+    return JS_NewString (ctx, response_reason_phrase (*data->response).c_str ());
 }
 
 // pm.response.size() -> { body, header, total }, in bytes.

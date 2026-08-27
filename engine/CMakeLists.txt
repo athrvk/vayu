@@ -576,6 +576,12 @@ endif()
 # https://github.com/athrvk/vayu/issues/805. Whatever value this PCH has is
 # in regimes CI's steady state does not exercise - a cold cache, or a local
 # build without sccache - not the PR pipeline itself.
+#
+# The same exclusivity holds for local ccache, one step worse: GCC's .gch is
+# not byte-reproducible, and ccache hashes it into every consuming TU's key,
+# so any rebuild of the PCH invalidates the entire local cache. build.py
+# therefore configures with CMAKE_DISABLE_PRECOMPILE_HEADERS=ON whenever it
+# detects a compiler launcher - this PCH is for builds with no cache at all.
 if(NOT MSVC)
     target_precompile_headers(vayu_core PRIVATE <nlohmann/json.hpp>)
 endif()
@@ -626,6 +632,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/collections.cpp
         src/http/routes/requests.cpp
         src/http/routes/examples.cpp
+        src/http/routes/trash.cpp
         src/http/routes/specs.cpp
         src/http/routes/spec_sync.cpp
         src/http/routes/spec_match.cpp

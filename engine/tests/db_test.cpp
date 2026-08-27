@@ -1242,11 +1242,20 @@ TEST_F (DatabaseTest, DeletingTheLastBinderReclaimsTheDocument) {
     seed_bound_collection (db, "col_1", "spec_1");
     seed_bound_collection (db, "col_2", "spec_1");
 
+    // A *delete* is soft since issue #988, and a collection in the trash still
+    // binds its document - reclaiming it there would leave a restore pointing
+    // at nothing. So it is the purge, not the delete, that releases the
+    // reference; both are asserted so neither half can regress silently.
     db.delete_collection ("col_1");
+    db.delete_collection ("col_2");
+    EXPECT_TRUE (db.get_spec_document ("spec_1").has_value ())
+    << "a document two collections in the trash still bind was swept";
+
+    db.purge_deleted ("col_1");
     EXPECT_TRUE (db.get_spec_document ("spec_1").has_value ())
     << "a document a second collection still binds was swept";
 
-    db.delete_collection ("col_2");
+    db.purge_deleted ("col_2");
     EXPECT_FALSE (db.get_spec_document ("spec_1").has_value ());
 }
 

@@ -23,13 +23,13 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | ------------------- | -------------------------------------------------------------------------------- |
 | Core                | `pm`, `pm.test(name, fn)` - in either script, each result naming the one that made it (see below), `pm.expect(value[, message])` - the message prefixes the failure, as in chai |
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
-| Response headers    | `pm.response.headers.get(name)`, `.has(name)` - case-insensitive              |
+| Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Streamed events     | `pm.response.events` (array of `{ event, id, data }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`set`/`unset`/`clear(url?)`, see below |
-| Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`, and the `pm.response.to.be.*` status classes below |
+| Response assertions | `pm.response.to.have.status(code \| reason)`, `.header(name[, value])`, `.body(expected)`, `.jsonBody(path?[, value])`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`), `.method`, `.headers`, `.body` |
-| Request headers     | `pm.request.headers.get/has(name)`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
+| Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
 | Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
@@ -351,7 +351,7 @@ raises a `RangeError` after 64 levels rather than hanging.
 Getters, so the paren-less form is the assertion:
 
 ```
-.to.be.ok          .to.be.success       (2xx)
+.to.be.ok          (200 only)           .to.be.success       (2xx)
 .to.be.info        (1xx)                .to.be.redirection   (3xx)
 .to.be.clientError (4xx)                .to.be.serverError   (5xx)
 .to.be.error       (4xx or 5xx)
@@ -361,6 +361,19 @@ Getters, so the paren-less form is the assertion:
 .to.be.json        (body parses as JSON)
 .to.be.withBody    (body is not empty)
 ```
+
+**`ok` narrowed to status 200 only (#998)** - it used to match any 2xx, the same
+class `success` still matches. A script that asserted `.ok` meaning "any 2xx"
+should assert `.success` instead; a script that meant "200 exactly" needed no
+change. Postman's own named statuses (`accepted`, `badRequest`, `notFound`, ...)
+match by reason phrase as well as by code; Vayu's stay code-only.
+
+**`have.body`'s substring form is gone (#998).** A string argument now has to
+equal the body exactly, not merely appear in it - `.to.have.body(sub)` written
+for "the body contains `sub`" should become `.to.have.body(new RegExp(sub))`.
+`.have.jsonBody(path, value)` also started comparing `value`, which it used to
+accept and ignore - a script relying on the old no-op should not pass an
+argument it does not want checked.
 
 **Every other name under `pm.response.to` throws a `TypeError`** naming the
 chain - a misspelling, or an idiom Vayu does not implement such as the negated

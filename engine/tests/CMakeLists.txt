@@ -143,6 +143,7 @@ add_executable(vayu_tests
     openapi_export_test.cpp
     spec_export_route_test.cpp
     workspace_backup_test.cpp
+    trash_test.cpp
     spec_coverage_test.cpp
     schema_validation_test.cpp
     version_isolation_test.cpp
@@ -155,6 +156,7 @@ add_executable(vayu_tests
     ../src/http/routes/workspace.cpp
     ../src/http/routes/requests.cpp
     ../src/http/routes/examples.cpp
+    ../src/http/routes/trash.cpp
     ../src/http/routes/specs.cpp
     ../src/http/routes/spec_sync.cpp
     ../src/http/routes/spec_match.cpp
@@ -357,6 +359,7 @@ set(vayu_scratch_database_suites
     StreamExecuteTest
     StreamedSampleRouteTest
     TransportPolicyDbTest
+    TrashTest
     TreeOrderTest
     WorkspaceBackupTest
 )
