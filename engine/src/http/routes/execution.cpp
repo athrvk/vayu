@@ -1279,6 +1279,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         if (send.data_row) {
             pre_ctx.iteration_data  = &*send.data_row;
             pre_ctx.iteration       = 0;
+            pre_ctx.vu              = vayu::core::SOLE_VIRTUAL_USER;
             pre_ctx.iteration_count = 1;
         }
         pre_script_result =
@@ -1349,8 +1350,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                     post_ctx.request_name = request_name;
                     post_ctx.transport    = transport;
                     if (iteration_data) {
-                        post_ctx.iteration_data  = &*iteration_data;
-                        post_ctx.iteration       = 0;
+                        post_ctx.iteration_data = &*iteration_data;
+                        post_ctx.iteration      = 0;
+                        post_ctx.vu             = vayu::core::SOLE_VIRTUAL_USER;
                         post_ctx.iteration_count = 1;
                     }
                     // The node the trace is about to store, not a copy
@@ -1439,6 +1441,7 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
         // has no row and an invented index would be the binding that cannot
         // fail (issue #300).
         inputs.iteration       = 0;
+        inputs.vu              = vayu::core::SOLE_VIRTUAL_USER;
         inputs.iteration_count = 1;
     }
     auto exchange = execute_exchange (script_engine, ctx.cookie_jar,

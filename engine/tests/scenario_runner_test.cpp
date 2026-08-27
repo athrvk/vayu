@@ -557,6 +557,27 @@ TEST_F (ScenarioRunnerTest, TheIterationIndexAndCountReachTheStepsScripts) {
     EXPECT_EQ (seen[2].marker, "2/3");
 }
 
+// A collection run in design mode is one user walking the sequence, and its
+// scripts must be able to say so: `pm.info.vu` reads `1` here rather than
+// `undefined` (issue #994), which is what makes the number a script reads agree
+// with the one `{{$vu}}` binds into the request beside it.
+TEST_F (ScenarioRunnerTest, TheVirtualUserReachesTheStepsScriptsBesideTheIteration) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok",
+    R"(pm.request.headers.add({key: "X-Marker",
+       value: (typeof pm.info.vu) + ":" + pm.info.vu + "/" + pm.info.iteration});)");
+
+    const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    // The `typeof` half is the mutation check: drop the plumbing and the
+    // marker reads `undefined:undefined/0` rather than failing to compare.
+    EXPECT_EQ (seen[0].marker, "number:1/0");
+    EXPECT_EQ (seen[1].marker, "number:1/1");
+}
+
 // ============================================================================
 // Failure paths
 // ============================================================================

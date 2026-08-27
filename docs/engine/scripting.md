@@ -883,6 +883,17 @@ all the token keeps its braces. It stops at `replaceIn`: `pm.variables.get` and
 `.has` read the variable *scopes*, and `data.` is disjoint from them by design
 (`core/scenario_data.hpp`), with `pm.iterationData` as its accessor.
 
+**The identity namespace is not readable from `replaceIn`, and that is
+deliberate** (issue #994). `{{$vu}}` and `{{$iteration}}` keep their braces
+here, unlike `{{data.column}}` above: the identity belongs to the *send*, which
+binds it into the request before the pre-request script runs and long before a
+deferred test script grades the response - so a script asking `replaceIn` to
+resolve it would be asking the resolver for a fact the resolver does not hold.
+What a script reads instead is `pm.info.vu` and `pm.info.iteration`, which carry
+exactly the numbers the request beside them was bound with. #1057 is the record
+of the alternative - teaching `replaceIn` the identity so the two agree by
+construction rather than by a script reaching for the right one of two APIs.
+
 **Dynamic variables are otherwise not readable from a script.** `{{$guid}}`,
 `{{$timestamp}}` and the rest of the set in
 [variable resolution](../app/variable-resolution.md#dynamic-variables) are

@@ -513,12 +513,15 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     // A copy, not a move: the pre-request script writes back into
     // this request, and the next iteration must start from the
     // composed one rather than from whatever the last pass left.
-    inputs.request         = step.request;
-    inputs.pre_script      = step.pre_script;
-    inputs.post_script     = step.post_script;
-    inputs.request_id      = step.request_id;
-    inputs.request_name    = step.name;
-    inputs.iteration       = ctx.iteration;
+    inputs.request      = step.request;
+    inputs.pre_script   = step.pre_script;
+    inputs.post_script  = step.post_script;
+    inputs.request_id   = step.request_id;
+    inputs.request_name = step.name;
+    inputs.iteration    = ctx.iteration;
+    // One user walking the sequence, which is what a collection run in design
+    // mode is - the same number `{{$vu}}` binds into its requests (issue #994).
+    inputs.vu              = SOLE_VIRTUAL_USER;
     inputs.iteration_count = ctx.iteration_count;
     inputs.transport       = ctx.transport;
     // The one caller that sets it: `pm.execution` throws

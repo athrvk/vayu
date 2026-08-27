@@ -157,6 +157,16 @@ export function useScriptVariableCompletionProvider() {
 				 * Generators only exist during interpolation, so they belong to
 				 * `replaceIn` and nowhere else here: `pm.variables.get("$guid")` is
 				 * not a lookup that resolves, it returns `undefined`.
+				 *
+				 * `{{$vu}}` / `{{$iteration}}` are deliberately absent from this
+				 * list, unlike the `{{`-completion in the URL and body editors
+				 * (issue #994). They are bound into the *request* by the send, and
+				 * `replaceIn` runs inside the script: the engine's resolver leaves
+				 * them written as they stand there, so offering them here would
+				 * offer a token that cannot resolve where it was offered. A script
+				 * reads `pm.info.vu` / `pm.info.iteration` instead. #1057 is the
+				 * record of teaching `replaceIn` the identity, which is what would
+				 * make this list right to extend.
 				 */
 				if (template) {
 					for (const dynamic of DYNAMIC_VARIABLES) {

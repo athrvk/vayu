@@ -571,20 +571,6 @@ CoverageTally make_coverage_tally (const ScenarioExecution& execution) {
     return CoverageTally (execution.spec.declared_operations, step_operations);
 }
 
-DataBindResult bind_step_row (vayu::Request& request,
-const ScenarioStep& step,
-const nlohmann::json& row,
-size_t row_index) {
-    // The fields-then-credentials order lives in one place, shared with the
-    // single-request load path that binds its own templates the same way
-    // (issue #993); this is the step-shaped caller of it. The step's auth is
-    // copied by the callee, which is what a plan shared by every virtual user
-    // of the run requires.
-    const IterationBinding binding{ &row, row_index, IterationIdentity{} };
-    return bind_iteration (
-    request, step.data_template, step.auth, step.auth_template, binding);
-}
-
 DataBindResult bind_step_iteration (vayu::Request& request,
 const ScenarioStep& step,
 const std::vector<nlohmann::json>& rows,
@@ -595,6 +581,11 @@ IterationIdentity identity) {
     // throw names it instead of reading past the end.
     const IterationBinding binding{ row_index ? &rows.at (*row_index) : nullptr,
         row_index.value_or (0), identity };
+    // The fields-then-credentials order lives in one place, shared with the
+    // single-request load path that binds its own templates the same way
+    // (issue #993); this is the step-shaped caller of it. The step's auth is
+    // copied by the callee, which is what a plan shared by every virtual user
+    // of the run requires.
     return bind_iteration (
     request, step.data_template, step.auth, step.auth_template, binding);
 }

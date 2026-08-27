@@ -369,34 +369,13 @@ const ScenarioResolveOptions& options);
 [[nodiscard]] CoverageTally make_coverage_tally (const ScenarioExecution& execution);
 
 /**
- * Bind @p row into @p step - its request's `{{data.column}}` fields first, then
- * the credentials the plan deliberately left unresolved.
- *
- * The step-shaped spelling of `core::bind_iteration`, which is where the
- * order lives and which the single-request load path drives with its own
- * templates (issue #993). Both scenario executors call this rather than the two
- * halves in sequence, so a step cannot bind differently depending on which one
- * ran it, and neither can put the credentials before the fields.
- *
- * A no-op returning success for the ordinary step, whose auth was resolved into
- * the plan and whose templates are therefore both empty - an executor may call
- * it without testing first.
- *
- * Call it before the send: the credentials must be bound before `apply_auth`
- * encodes them, which is the ordering the deferral exists to fix.
- */
-[[nodiscard]] DataBindResult bind_step_row (vayu::Request& request,
-const ScenarioStep& step,
-const nlohmann::json& row,
-size_t row_index);
-
-/**
  * Bind one iteration's whole per-iteration state into @p step's @p request:
  * @p row where the step has one, then @p identity.
  *
- * Both executors call this rather than the two binds in sequence, for the
- * reason `bind_step_row` exists: a step must not bind differently depending on
- * which executor ran it. The row goes first because the identity cannot fail on
+ * Both executors call this rather than the two binds in sequence, so a step
+ * cannot bind differently depending on which one ran it - fields first, then
+ * the credentials the plan deliberately left unresolved, which is the order
+ * `apply_auth` makes load-bearing (issue #591), and the identity last. The row goes first because the identity cannot fail on
  * its own account and a row can, so the more specific refusal is the one a
  * caller reports.
  *
