@@ -503,6 +503,51 @@ std::string load_data_snapshot (const std::string& sanitized, size_t row_count) 
 
 namespace {
 
+/**
+ * @brief The stored `config_snapshot` for a run, with whatever this run's shape
+ *        deliberately keeps out of it already out (issue #993).
+ *
+ * The two rewrites are exclusive by construction - a scenario run states its
+ * work as a collection and refuses a `data` block beside it - so which one
+ * applies is a property of the payload rather than a decision the caller makes.
+ * It lives here rather than inline in `handle_start_load_test` because both
+ * arms are the same rule (a shape whose payload carries user data of unknown
+ * sensitivity is stored described rather than verbatim), and the route reads
+ * better asking for the snapshot than spelling the choice out a third time.
+ */
+std::string run_config_snapshot (const std::string& body,
+bool is_scenario,
+const nlohmann::json& scenario_manifest,
+const vayu::core::LoadDataSet* data) {
+    std::string sanitized = vayu::json::sanitize_config_snapshot (body);
+    if (is_scenario) {
+        return scenario_snapshot (sanitized, scenario_manifest);
+    }
+    if (data != nullptr && !data->rows.empty ()) {
+        // The rows out, their count in - the same rule the scenario manifest
+        // keeps, and for the same reason (issue #993).
+        return load_data_snapshot (sanitized, data->rows.size ());
+    }
+    return sanitized;
+}
+
+/**
+ * @brief The row-set limits a single-request run's `data` block is held to.
+ *
+ * The same two config rows the scenario path reads, so one payload cannot be
+ * refused for a size the other would accept.
+ */
+vayu::core::ScenarioLimits load_data_limits (vayu::db::Database& db) {
+    vayu::core::ScenarioLimits limits;
+    limits.max_data_rows =
+    static_cast<size_t> (db.get_config_int ("maxScenarioDataRows",
+    static_cast<int> (vayu::core::constants::scenario::MAX_DATA_ROWS)));
+    limits.max_data_bytes =
+    static_cast<size_t> (db.get_config_int ("maxScenarioDataBytes",
+    static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES)));
+    return limits;
+}
+
 // Build the final response JSON with script results
 nlohmann::json build_response_json (const vayu::Response& response,
 const nlohmann::json& scripts,
@@ -1707,20 +1752,12 @@ httplib::Response& res) {
     // The rows a single-request run binds (issue #993), validated and credential-
     // planned here for the reason the scenario block is resolved here: a set the
     // engine cannot read must leave no run row behind.
-    vayu::core::ScenarioLimits data_limits;
-    data_limits.max_data_rows =
-    static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataRows",
-    static_cast<int> (vayu::core::constants::scenario::MAX_DATA_ROWS)));
-    data_limits.max_data_bytes =
-    static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataBytes",
-    static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES)));
-    auto load_data = read_load_data_set (json, data_limits, is_scenario);
+    auto load_data = read_load_data_set (json, load_data_limits (ctx.db), is_scenario);
     if (!load_data.ok) {
         vayu::utils::log_warning ("POST /runs - " + load_data.error);
         send_error (res, 400, load_data.error, "invalid_run_config");
         return;
     }
-    const size_t data_row_count = load_data.set ? load_data.set->rows.size () : 0;
 
     // Create run record
     std::string run_id = vayu::utils::generate_id ("run_");
@@ -1737,14 +1774,8 @@ httplib::Response& res) {
     run.type   = (is_scenario && !is_scenario_load) ? vayu::RunType::Scenario :
                                                       vayu::RunType::Load;
     run.status = vayu::RunStatus::Pending;
-    run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
-    if (is_scenario) {
-        run.config_snapshot = scenario_snapshot (run.config_snapshot, scenario_manifest);
-    } else if (data_row_count > 0) {
-        // The rows out, their count in - the same rule the scenario manifest
-        // keeps, and for the same reason (issue #993).
-        run.config_snapshot = load_data_snapshot (run.config_snapshot, data_row_count);
-    }
+    run.config_snapshot = run_config_snapshot (
+    req.body, is_scenario, scenario_manifest, load_data.set.get ());
     seed_run_times (run, now_ms ());
 
     if (json.contains ("requestId") && !json["requestId"].is_null ()) {

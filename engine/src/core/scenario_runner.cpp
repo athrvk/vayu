@@ -499,7 +499,7 @@ vayu::http::routes::ExchangeOutcome& exchange) {
         // depending on which one ran it - fields first, then the
         // credentials the plan deliberately left unresolved, which
         // is the order `apply_auth` makes load-bearing (issue #591).
-        const auto bound = bind_step_row (inputs.request, step,
+        auto bound = bind_step_row (inputs.request, step,
         ctx.data_rows[*ctx.data_row_index], *ctx.data_row_index);
         if (!bound.ok) {
             data_bind_error = std::move (bound.error);
