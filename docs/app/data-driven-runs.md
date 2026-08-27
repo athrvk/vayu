@@ -14,7 +14,9 @@ Two runs take one:
   Iterations and Load test - or declare it once on the collection's **Data** tab
   and have the dialog pre-fill it.
 - **A single request's load test** (issue #993). Pick the file in the **Run a
-  load test** dialog, under the profile fields. The request needs no collection
+  load test** dialog, under the profile fields - or, again, declare it on the
+  collection's **Data** tab and have the dialog pre-fill it (issue #1039). The
+  request needs no collection
   wrapper: `N` users each sending the same request with different data is the
   canonical load shape, and until this it was expressible only by wrapping the
   request in a one-step collection.
@@ -121,7 +123,7 @@ The caps apply to a file **re-read from a remembered path** exactly as they do
 to one picked by hand, and both refusals name the setting. That matters because
 neither side of the comparison holds still: a declared file grows rows after it
 was declared, and the setting itself can be lowered under a file that has not
-changed at all. So the Run dialog's pre-fill, Send-with-row and the Data tab
+changed at all. So both run dialogs' pre-fill, Send-with-row and the Data tab
 each refuse a file over the cap instead of previewing it - the byte cap when the
 file is opened (the app's main process stats it before reading), the row cap
 once it is parsed, since counting rows means parsing and the engine never opens
@@ -250,13 +252,24 @@ Declaring changes no binding rule - a token still binds from the row the run
 carries. What it buys is everything that needs to know the columns _before_ a
 run:
 
-- **The Run dialog pre-fills.** If the declared file is still where you left it,
-  opening **Run collection** re-reads it and previews it, ready to start. Move
-  or rename the file and the dialog says so and offers the picker - it is a
-  note, not a refusal. Which file that is follows the chain rule like everything
-  else here: running a sub-collection that declares nothing offers the file its
-  nearest declaring ancestor was given, because that is the contract the run
-  binds against.
+- **Both run dialogs pre-fill.** If the declared file is still where you left
+  it, opening **Run collection** - or the **Load test** dialog for a request in
+  that collection - re-reads it and previews it, ready to start. Move or rename
+  the file and the dialog says so and offers the picker - it is a note, not a
+  refusal. Which file that is follows the chain rule like everything else here:
+  running a sub-collection that declares nothing offers the file its nearest
+  declaring ancestor was given, because that is the contract the run binds
+  against - and a request's load run resolves it from the request's own
+  collection, up the same chain.
+
+    The two dialogs differ in one thing only, and it is not about the file: a
+    collection run with rows and no explicit count runs one pass per row, so
+    picking a file there clears an untouched `iterations` of `1`. A load run's
+    length is its profile's - a duration, a request count, a search - so nothing
+    about picking or pre-filling a file changes a single field of it. Picking a
+    file in the load dialog also does not re-declare it: the Data tab is where a
+    collection says which file its contract came from, and one load run started
+    against a different file is not a change to that.
 - **The Data tab re-opens it too.** Coming back to the tab reads the declared
   file again and lines it up against the contract with no re-pick: comparing
   them is what the tab is for, so it does not wait to be handed the same file a

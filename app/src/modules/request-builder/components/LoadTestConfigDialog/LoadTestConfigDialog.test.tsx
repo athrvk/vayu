@@ -16,11 +16,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, within, cleanup, act } from "@testing-library/react";
 import LoadTestConfigDialog from "./index";
 import type { LoadTestConfig } from "@/types";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
-import { useClientSettingsStore } from "@/stores";
+import { useClientSettingsStore, useDataFileStore } from "@/stores";
 import {
 	DEFAULT_LOAD_TEST_CEILINGS,
 	LOAD_TEST_CEILING_BOUNDS,
@@ -50,7 +50,46 @@ vi.mock("@/queries", () => ({
 }));
 
 /** Collections the contract walk sees. Mutable, like `configEntries` above. */
-let collectionRows: { id: string; name: string; dataSchema?: { columns: string[] } }[] = [];
+let collectionRows: {
+	id: string;
+	name: string;
+	parentId?: string;
+	dataSchema?: { columns: string[] };
+}[] = [];
+
+/*
+ * Re-reading the remembered path (issue #1039). Mocked at the service rather
+ * than at the hook, so what these cases drive is the real `useDeclaredDataFile`
+ * - the one-attempt ref and the declaring-ancestor lookup included - with only
+ * the filesystem stubbed out.
+ */
+const readDeclared = vi.fn();
+let bridgePresent = true;
+vi.mock("@/services/data-files/read-declared", () => ({
+	canReadDeclaredDataFile: () => bridgePresent,
+	readDeclaredDataFile: (path: string, options: { maxRows: number }) =>
+		readDeclared(path, options),
+}));
+
+/**
+ * A file as `readDeclaredDataFile` resolves it.
+ *
+ * Built through one helper rather than spelled out per case so the stub carries
+ * every member the picker renders - `format` is the one a hand-written literal
+ * forgets, and the picker reads it unguarded.
+ */
+function declared(fileName: string, rows: Record<string, string>[]) {
+	return {
+		fileName,
+		path: `/data/${fileName}`,
+		parsed: {
+			format: "csv" as const,
+			columns: Object.keys(rows[0] ?? {}),
+			rows,
+			warnings: [],
+		},
+	};
+}
 
 function open(props: Partial<React.ComponentProps<typeof LoadTestConfigDialog>> = {}) {
 	const onStart = vi.fn();
@@ -248,6 +287,132 @@ describe("data rows (issue #993)", () => {
 		// A missing column is a warning here and a loud engine-side failure at
 		// bind time - hearing about it before the run is the whole point.
 		expect(await screen.findByText(/plan/)).toBeInTheDocument();
+	});
+});
+
+describe("the declared file pre-fills (issue #1039)", () => {
+	const pick = (file: File) => {
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [file] } });
+	};
+
+	beforeEach(() => {
+		useDataFileStore.setState({ locations: {} });
+		readDeclared.mockReset();
+		bridgePresent = true;
+	});
+
+	it("reads the path remembered for the declaring ancestor, not the request's collection", async () => {
+		/*
+		 * The #729 rule, and the one a copy of this pre-fill gets wrong: the
+		 * request sits in `col_child`, which declares nothing, so the contract -
+		 * and therefore the remembered location - belongs to `col_parent`.
+		 * Reading the store at the id the caller passed in finds nothing for
+		 * exactly the users the chain walk exists to serve.
+		 */
+		collectionRows = [
+			{ id: "col_parent", name: "Orders", dataSchema: { columns: ["id"] } },
+			{ id: "col_child", name: "Checkout", parentId: "col_parent" },
+		];
+		useDataFileStore.setState({
+			locations: { col_parent: { path: "/data/users.csv", fileName: "users.csv" } },
+		});
+		readDeclared.mockResolvedValue(declared("users.csv", [{ id: "a" }]));
+
+		const { onStart } = open({ collectionId: "col_child" });
+
+		expect(await screen.findByText(/users\.csv/)).toBeInTheDocument();
+		expect(readDeclared).toHaveBeenCalledWith("/data/users.csv", expect.anything());
+		// And it is a real selection, not just a label: the rows reach the run.
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+		expect(onStart.mock.calls[0][0].data).toEqual([{ id: "a" }]);
+	});
+
+	it("shows a note and leaves Start working when the file has moved", async () => {
+		collectionRows = [{ id: "col_1", name: "Orders", dataSchema: { columns: ["id"] } }];
+		useDataFileStore.setState({
+			locations: { col_1: { path: "/gone/users.csv", fileName: "users.csv" } },
+		});
+		readDeclared.mockRejectedValue(new Error("The declared file is no longer at users.csv."));
+
+		const { onStart } = open({ collectionId: "col_1" });
+
+		expect(await screen.findByText(/no longer at users\.csv/)).toBeInTheDocument();
+		// A warning, never a blocker: a load run without rows is an ordinary
+		// load run, and picking the file again is the whole remedy.
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+		expect(onStart).toHaveBeenCalled();
+		expect(onStart.mock.calls[0][0]).not.toHaveProperty("data");
+	});
+
+	it("does not yank a hand-picked file back when the store is written while open", async () => {
+		collectionRows = [{ id: "col_1", name: "Orders", dataSchema: { columns: ["id"] } }];
+		useDataFileStore.setState({
+			locations: { col_1: { path: "/data/first.csv", fileName: "first.csv" } },
+		});
+		readDeclared.mockResolvedValue(declared("first.csv", [{ id: "a" }]));
+
+		const { onStart } = open({ collectionId: "col_1" });
+		await screen.findByText(/first\.csv/);
+
+		pick(new File(["id\nz"], "mine.csv"));
+		await screen.findByText(/mine\.csv/);
+
+		// The pre-fill has had its one turn. A store write now - the Data tab
+		// in another pane, another dialog - must not replace what the user
+		// chose in front of them.
+		act(() => {
+			useDataFileStore
+				.getState()
+				.setDataFile("col_1", { path: "/data/second.csv", fileName: "second.csv" });
+		});
+
+		expect(screen.getByText(/mine\.csv/)).toBeInTheDocument();
+		expect(screen.queryByText(/second\.csv/)).not.toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+		expect(onStart.mock.calls[0][0].data).toEqual([{ id: "z" }]);
+	});
+
+	it("leaves the profile fields alone", async () => {
+		/*
+		 * The Run collection dialog turns a pristine `iterations` of 1 into "one
+		 * pass per row" when a file arrives. That is a fact about the engine's
+		 * default for a *collection* run; a load run's length is its profile's,
+		 * so the pre-fill may not touch a single field here.
+		 */
+		collectionRows = [{ id: "col_1", name: "Orders", dataSchema: { columns: ["id"] } }];
+		useDataFileStore.setState({
+			locations: { col_1: { path: "/data/users.csv", fileName: "users.csv" } },
+		});
+		readDeclared.mockResolvedValue(
+			declared("users.csv", [{ id: "a" }, { id: "b" }, { id: "c" }])
+		);
+
+		const { onStart } = open({ collectionId: "col_1" });
+		await screen.findByText(/users\.csv/);
+
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+		const config = onStart.mock.calls[0][0] as LoadTestConfig;
+		expect(config.duration_seconds).toBe(LOAD_TEST_DEFAULTS.DURATION_S);
+		expect(config.rps).toBe(LOAD_TEST_DEFAULTS.RPS);
+		// Three rows, and not one iteration per row: the default profile is
+		// `constant_rps`, whose length is its duration.
+		expect(config.iterations).toBeUndefined();
+	});
+
+	it("attempts nothing when there is no filesystem to re-read from", async () => {
+		// A browser build has no path to re-read and never will, so this is not
+		// a failure worth a note - it is a state that will never resolve.
+		bridgePresent = false;
+		collectionRows = [{ id: "col_1", name: "Orders", dataSchema: { columns: ["id"] } }];
+		useDataFileStore.setState({
+			locations: { col_1: { path: "/data/users.csv", fileName: "users.csv" } },
+		});
+
+		open({ collectionId: "col_1" });
+
+		expect(readDeclared).not.toHaveBeenCalled();
+		expect(screen.queryByText(/The remembered data file/i)).not.toBeInTheDocument();
 	});
 });
 
