@@ -211,7 +211,8 @@ class ScenarioRunnerTest : public ::testing::Test {
 
     /// A request in `col_1`, ordered by @p order, pointing at the mock server.
     /// @p name defaults to one derived from @p id; flow-control tests pass it
-    /// explicitly, because `setNextRequest` targets a *name*.
+    /// explicitly, because a `setNextRequest` target is resolved as a *name*
+    /// before it is tried as an id (issue #1006).
     void seed_request (const std::string& id,
     int order,
     const std::string& path,
@@ -894,6 +895,75 @@ TEST_F (ScenarioRunnerTest, SkipRequestInATestScriptFailsTheStepRatherThanPreten
     EXPECT_EQ (scenario["errored"].get<size_t> (), 1u);
 }
 
+// Postman documents jumping by the id a script reads off `pm.info.requestId`
+// (issue #1006), and a script that does it end to end is what says the plan
+// carries the ids resolution needs.
+TEST_F (ScenarioRunnerTest, SetNextRequestJumpsByRequestIdToo) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(pm.execution.setNextRequest("req_c");)");
+    seed_request ("req_b", 1, "/login");
+    seed_request ("req_c", 2, "/observe", "", "", "", "Checkout");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/observe");
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    EXPECT_EQ (json::parse (rows[1].trace_data)["requestId"].get<std::string> (), "req_c");
+    EXPECT_TRUE (rows[1].error.empty ()) << rows[1].error;
+}
+
+// The quoted stop form: Postman's runner reads `setNextRequest("null")` as the
+// real `null` above, and collections written against it carry the spelling.
+TEST_F (ScenarioRunnerTest, SetNextRequestWithTheStringNullEndsTheIteration) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(pm.execution.setNextRequest("null");)");
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u) << "step 2 ran despite the iteration ending";
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/ok");
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    // Ending an iteration is not erroring the step that ended it - the shape
+    // this used to take, when the string reached the name index and matched
+    // nothing.
+    EXPECT_EQ (json::parse (rows[0].trace_data)["outcome"].get<std::string> (), "passed");
+    EXPECT_TRUE (rows[0].error.empty ()) << rows[0].error;
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["errored"].get<size_t> (), 0u);
+    EXPECT_EQ (scenario["iterations_completed"].get<size_t> (), 2u);
+}
+
+// The precedence the docs state, on the wire: a collection that really does
+// carry a request named `null` can still jump to it.
+TEST_F (ScenarioRunnerTest, AStepNamedNullIsStillReachableByName) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(pm.execution.setNextRequest("null");)");
+    seed_request ("req_b", 1, "/login");
+    seed_request ("req_c", 2, "/observe", "", "", "", "null");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/observe")
+    << "the stop form won over a step the run carries";
+}
+
 TEST_F (ScenarioRunnerTest, AnUnknownTargetFailsTheStepByNameAndEndsTheIteration) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/ok", "", R"(pm.execution.setNextRequest("Nowhere");)");
@@ -966,26 +1036,33 @@ TEST_F (ScenarioRunnerTest, ACycleTripsTheStepBudgetAndTheRunStillFinishes) {
 // Flow-control resolution (pure)
 // ============================================================================
 
+using NextStep = vayu::core::NextStepResolution::Kind;
+
 TEST (ScenarioNextStep, ResolvesAUniqueNameToItsPosition) {
     vayu::core::ScenarioPlan plan;
     plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
     plan.steps.push_back ({ 1, "req_b", "Second", {}, "", "", "" });
 
-    const auto index = vayu::core::build_step_name_index (plan);
+    const auto index = vayu::core::build_step_index (plan);
     auto resolved    = vayu::core::resolve_next_step (index, "Second");
-    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.kind, NextStep::Step) << resolved.error;
     EXPECT_EQ (resolved.index, 1u);
     EXPECT_TRUE (resolved.error.empty ());
 }
 
-TEST (ScenarioNextStep, RefusesANameNoStepCarries) {
+TEST (ScenarioNextStep, RefusesATargetNoStepAnswersTo) {
     vayu::core::ScenarioPlan plan;
     plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
 
-    auto resolved = vayu::core::resolve_next_step (
-    vayu::core::build_step_name_index (plan), "Missing");
-    EXPECT_FALSE (resolved.ok);
+    auto resolved =
+    vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "Missing");
+    EXPECT_EQ (resolved.kind, NextStep::Unresolved);
     EXPECT_NE (resolved.error.find ("Missing"), std::string::npos) << resolved.error;
+    // The message has to say what was searched: since #1006 a target may be an
+    // id, so "names no request" would send the reader looking for a typo in a
+    // name they never wrote.
+    EXPECT_NE (resolved.error.find ("name or id"), std::string::npos)
+    << resolved.error;
 }
 
 TEST (ScenarioNextStep, RefusesADuplicatedNameAndNamesEveryPosition) {
@@ -995,10 +1072,63 @@ TEST (ScenarioNextStep, RefusesADuplicatedNameAndNamesEveryPosition) {
     plan.steps.push_back ({ 2, "req_c", "Twin", {}, "", "", "" });
 
     auto resolved =
-    vayu::core::resolve_next_step (vayu::core::build_step_name_index (plan), "Twin");
-    EXPECT_FALSE (resolved.ok);
+    vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "Twin");
+    EXPECT_EQ (resolved.kind, NextStep::Unresolved);
     EXPECT_NE (resolved.error.find ("ambiguous"), std::string::npos) << resolved.error;
     EXPECT_NE (resolved.error.find ("0 and 2"), std::string::npos) << resolved.error;
+}
+
+// Postman documents passing the id a script reads off `pm.info.requestId`
+// (issue #1006). Resolution falls through to the ids only after the names, so a
+// collection whose steps carry neither surprise keeps behaving as it did.
+TEST (ScenarioNextStep, ResolvesARequestIdWhenNoNameAnswers) {
+    vayu::core::ScenarioPlan plan;
+    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
+    plan.steps.push_back ({ 1, "req_b", "Second", {}, "", "", "" });
+
+    auto resolved =
+    vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "req_b");
+    ASSERT_EQ (resolved.kind, NextStep::Step) << resolved.error;
+    EXPECT_EQ (resolved.index, 1u);
+}
+
+TEST (ScenarioNextStep, PrefersTheNameWhenOneStepsNameIsAnothersId) {
+    vayu::core::ScenarioPlan plan;
+    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
+    // Step 1 is *named* what step 2 is *identified* by. The name is what a
+    // script author can see in the sidebar, so it wins.
+    plan.steps.push_back ({ 1, "req_b", "req_c", {}, "", "", "" });
+    plan.steps.push_back ({ 2, "req_c", "Third", {}, "", "", "" });
+
+    auto resolved =
+    vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "req_c");
+    ASSERT_EQ (resolved.kind, NextStep::Step) << resolved.error;
+    EXPECT_EQ (resolved.index, 1u);
+}
+
+// The quoted spelling is endemic in collections written against Postman's
+// runner, which reads it as the stop form real `null` already means here.
+TEST (ScenarioNextStep, TheStringNullEndsTheIteration) {
+    vayu::core::ScenarioPlan plan;
+    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
+
+    auto resolved =
+    vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "null");
+    EXPECT_EQ (resolved.kind, NextStep::EndIteration);
+    EXPECT_TRUE (resolved.error.empty ());
+}
+
+// Honest precedence: a step a run actually carries is the more specific answer,
+// and reading the stop form first would make that step unreachable.
+TEST (ScenarioNextStep, AStepNamedNullWinsOverTheStopForm) {
+    vayu::core::ScenarioPlan plan;
+    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
+    plan.steps.push_back ({ 1, "req_b", "null", {}, "", "", "" });
+
+    auto resolved =
+    vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "null");
+    ASSERT_EQ (resolved.kind, NextStep::Step) << resolved.error;
+    EXPECT_EQ (resolved.index, 1u);
 }
 
 TEST (ScenarioStepBudget, DerivesTheBoundFromThePlanWhenUnconfigured) {

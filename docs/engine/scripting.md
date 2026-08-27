@@ -1080,7 +1080,9 @@ where the sequence goes next:
 
 ```javascript
 pm.execution.setNextRequest('Checkout');  // run that request next, after this one finishes
+pm.execution.setNextRequest(pm.info.requestId); // the same jump, by id
 pm.execution.setNextRequest(null);        // end this iteration; the next one still runs
+pm.execution.setNextRequest('null');      // the quoted form Postman reads the same way
 pm.execution.skipRequest();               // pre-request only: do not send this request
 ```
 
@@ -1091,8 +1093,17 @@ thing that knows what a sequence is, reads it once the step has finished. So
 and the jump happens afterwards. The last call in a script wins, across the
 pre-request and test scripts alike.
 
-`setNextRequest` takes a request's **name**, not its id or URL, and jumping
-backwards is allowed - that is how a retry loop is written.
+`setNextRequest` takes a request's **name** or its **id** - the one a script
+reads off `pm.info.requestId` - never its URL, and jumping backwards is allowed:
+that is how a retry loop is written. A target is resolved against the names
+first and the ids second, so a request whose *name* happens to be another
+request's id sends the jump to the request you can see in the sidebar.
+
+The string `'null'` is the stop form, exactly as the real `null` above is -
+Postman's runner reads it that way, and the quoted spelling is common in
+collections written against it. The one exception is a run that carries a
+request actually **named** `null`: a name the run carries is the more specific
+answer and wins, so that request stays reachable.
 
 ### Where it throws
 
@@ -1114,7 +1125,8 @@ reports success for something that never happened.
 Two cases are the runner's to refuse, because only it can see the plan. Both end
 the iteration with the step marked `errored` and the reason in its row:
 
-- **A name no request in the run carries.** The message names the target.
+- **A target no request in the run answers to**, by name or by id. The message
+  names the target and says both were searched.
 - **A name two or more requests share.** The message names every step that
   answers to it, so the fix - rename one - is obvious. Resolving to the first
   match would run a sequence nobody asked for.

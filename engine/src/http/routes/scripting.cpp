@@ -1130,11 +1130,13 @@ nlohmann::json get_script_completions () {
     { "detail", "pm.execution.setNextRequest(name: string | null): void" },
     { "documentation",
     "Run the named request next instead of the one that follows in the "
-    "collection - the request's name, not its URL. Pass null to end this "
-    "iteration and start the next one.\n\nThe current request still "
+    "collection - the request's name, or the id pm.info.requestId reads, never "
+    "its URL. Pass null - or the string \"null\" - to end this iteration and "
+    "start the next one.\n\nThe current request still "
     "completes; the jump happens after it. Calling it more than once in a "
-    "script keeps the last call. A name no request in the run carries, or one "
-    "two requests share, fails the step by name rather than guessing.\n\n"
+    "script keeps the last call. A target no request in the run answers to, or "
+    "a name two requests share, fails the step by name rather than "
+    "guessing.\n\n"
     "Jumping backwards is allowed and is how a retry loop is written; an "
     "iteration that never stops is cut off by the maxStepsPerIteration "
     "setting.\n\nExample:\nif (pm.response.code === 401) { "
