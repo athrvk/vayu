@@ -856,9 +856,14 @@ The **engine owns** request composition (shipped in issue #226):
 `{{variables}}` and `inherit` auth (collection-chain walk, `noauth`
 terminates, `none` steps over) and returns the execute-ready payload that
 `POST /execute` / `POST /runs` accept unchanged. Compose is **pure** (sends
-nothing, no run row) and the execution endpoints **never interpolate**, so a
-payload is resolved exactly once - that split is load-bearing, do not "merge"
-compose into execute. Two entry shapes: `requestId` (stored request; MCP uses
+nothing, no run row) and is still the one place a payload is *composed* - that
+split is load-bearing, do not "merge" compose into execute. Since #1008,
+execute is not silent past that point either: a name compose could not answer
+(it kept its braces, #1009) is resolved once more, after the pre-request
+script and before the send (`resolve_residual_tokens`,
+`engine/src/http/request_exchange.cpp`) - a value compose already substituted
+is finished text and this pass does not revisit it, so nothing is resolved
+twice. Two entry shapes: `requestId` (stored request; MCP uses
 this, and gates its allowlist on the *composed* URL) and an inline `request`
 (+ `collectionId` scope; the renderer uses this because Send/replay execute
 *editor state*, which may be unsaved or detached). Inline over stored = the
@@ -878,9 +883,10 @@ the fixture fails whichever side forgot. The dynamic-variable name set
 in `request_composer.cpp`, renderer table in `lib/dynamic-variables.ts`).
 The D17 malformed-data rules (absent/non-boolean `enabled` = enabled;
 non-string `value` = "") live engine-side in `parse_variables` and
-renderer-side in `lib/variable-resolution.ts`. Interpolation happens strictly
-**before** the pre-request script (D1 - deliberate Postman divergence), and
-script text is never interpolated (D16). **MCP has no composition copy
+renderer-side in `lib/variable-resolution.ts`. Compose still resolves strictly
+**before** the pre-request script runs (D1 - deliberate Postman divergence,
+not reversed by #1008 - see the residual pass above), and script text is never
+interpolated (D16). **MCP has no composition copy
 anymore** (`resolve.ts` deleted) - a new engine client should call
 `POST /compose`, never re-implement resolution client-side.
 

@@ -3729,9 +3729,15 @@ Compose a request without sending it: resolve `{{variables}}` and `inherit`
 auth engine-side and return the execute-ready payload that `POST /execute` and
 `POST /runs` accept unchanged (issue #226). Pure - no traffic, no run row -
 which is what lets a client (e.g. MCP's allowlist gate) inspect the *resolved*
-request before anything is sent. The execution endpoints never interpolate, so
-composing here and executing the result resolves everything exactly once; a
-payload that skips composition is sent byte-for-byte as supplied.
+request before anything is sent. Composition is still the only place a payload
+is composed; a payload that skips it is sent byte-for-byte as supplied. Since
+issue #1008 the execution endpoints are not silent past that point either: a
+name composition could not answer keeps its braces (issue #1009) instead of
+resolving to `""`, and both `POST /execute` and a scenario step resolve it once
+more, after the pre-request script and before the send, against whatever the
+script just wrote. A value composition already substituted is finished text
+and is never re-resolved - see [POST /execute](#post-execute) and
+[Scenario runs](#scenario-runs) for what that changes.
 
 **Request** - at least one of `requestId` / `request` is required:
 
@@ -3822,6 +3828,29 @@ the pre-request script runs, so `pm.request` reflects the real outgoing headers.
 If a non-interactive OAuth 2.0 token cannot be obtained, the engine still returns
 `200` but the body carries `statusCode: 0`, an `errorCode` of `AUTH_REQUIRED`
 (interactive sign-in needed) or `AUTH_FAILED`, and an `authErrorCode` hint.
+
+**A name compose could not answer is resolved once more, after the
+pre-request script and before the send** (issue #1008). Composition still runs
+first and is still the only place a payload is *composed* - what changed is
+that an unknown ordinary `{{name}}` keeps its braces at compose time instead of
+becoming `""` (issue #1009), so it survives to be resolved here against the
+variable scopes as the pre-request script left them. This is what makes the
+canonical imported auth pattern work: a pre-request script does
+`pm.environment.set("token", …)` and the same send's `Authorization: Bearer
+{{token}}` carries the fresh value, rather than the previous run's token or
+`""` on the first run. It resolves the same fields composition does - the URL,
+header names and values, body content, and the five strings a form field
+carries - by the same resolver and the same rules (scope precedence, nested
+resolution, cycles, the 8-level bound); a value composition already
+substituted is finished text and is not touched again. `{{data.column}}` is
+left alone here too - the data namespace is bound per iteration by whoever owns
+the row. A request skipped by `pm.execution.skipRequest()` resolves nothing,
+having nothing left to send. **`POST /compose`'s own output is unchanged** -
+a preview, a tab title, the unresolved-token painting and "Copy as cURL" still
+show compose-time resolution, so a preview can show `{{token}}` where the wire
+will actually carry the resolved value. **The LOAD path does not do this
+pass** - a load run never runs a pre-request script, so there is nothing for it
+to resolve against; see [Scenario load runs](#scenario-load-runs).
 
 **Request:**
 ```json
@@ -4690,15 +4719,28 @@ the same request does, and the two cannot drift apart.
 - **Cookies.** The environment's jar, unchanged - so a step that logs in leaves
   a session the next step sends.
 
-> **`{{variables}}` are resolved before the first send, not per step.** The plan
-> is composed once, so a value a script sets mid-run does **not** appear in a
-> later step's URL, headers or body. It reaches later steps through the script
-> API - `pm.environment.get(...)` in a pre-request script, which may then edit
-> `pm.request`. This is the price of resolving once, and resolving once is what
-> keeps a collection edited mid-run from changing the sequence underneath it.
+> **`{{variables}}` composition could answer are resolved once, before the
+> first send, not per step.** The plan is composed once, so a name that already
+> had a value when the run started is fixed for the whole run: a value a script
+> sets mid-run does **not** change what a *composed* `{{name}}` becomes in a
+> later step's URL, headers or body. This is the price of resolving once, and
+> resolving once is what keeps a collection edited mid-run from changing the
+> sequence underneath it.
 >
-> The one exception is the reserved `{{data.*}}` namespace below, which
-> composition deliberately leaves alone so the runner can bind it per iteration.
+> **A name composition could not answer is a different story** (issue #1008).
+> Since #1009 that name keeps its braces instead of resolving to `""`, so each
+> step resolves it again, immediately before that step's own send, against the
+> scopes as every script up to and including that step's own pre-request script
+> left them - not just through `pm.environment.get(...)` and a `pm.request`
+> edit, though a script can still reach it that way too. That is what lets a
+> step early in the plan fetch a token and a later step's `Bearer {{token}}`
+> carry it with no script of its own. A step's own request holds one search per
+> field, and a plan where every name was already defined at run start pays that
+> and nothing else.
+>
+> The one exception is the reserved `{{data.*}}` namespace below, which neither
+> pass touches - composition leaves it alone so the runner can bind it per
+> iteration, and it is not a name any script scope answers either.
 
 **Scripts** additionally read `pm.info.iteration` (0-based) and
 `pm.info.iterationCount`. No other caller sets them - see

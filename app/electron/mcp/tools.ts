@@ -1249,7 +1249,11 @@ function readRequestOverrides(args: Record<string, unknown>): Record<string, unk
  * walk (issue #226 deleted the MCP-side copy). Composition is pure - nothing
  * is sent - which is what lets the caller run the allowlist gate on the
  * *resolved* URL before any traffic flows, and the composed payload is passed
- * to `/execute` or `/runs` unchanged, so it is never interpolated twice.
+ * to `/execute` or `/runs` unchanged: a value composition substituted is never
+ * substituted again. What the engine does resolve past this point is the
+ * leftovers - a name composition could not answer keeps its braces (#1009) and
+ * is resolved after the pre-request script, before the send (#1008) - which is
+ * why the gate refuses an unresolved *authority* rather than checking one.
  *
  * A 404 for a named `requestId` surfaces as a {@link ToolArgError} so the
  * agent reads "no such saved request", not a transport failure.
@@ -3859,7 +3863,11 @@ export const TOOLS: McpTool[] = [
 			if (authArg) request.auth = authArg;
 
 			// Compose engine-side (pure), gate on the *resolved* URL, then execute
-			// the composed payload unchanged - resolved exactly once.
+			// the composed payload. The gate is a host rule: a pre-request script
+			// this call forwards can still edit `pm.request`, and since #1008 a
+			// name compose could not answer is resolved before the send - neither
+			// of which can reach a host the allowlist did not see, because an
+			// unresolved authority is refused rather than checked (safety.ts).
 			let payload: Record<string, unknown>;
 			try {
 				payload = await composeViaEngine(

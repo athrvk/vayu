@@ -18,6 +18,7 @@
 
 #include "vayu/http/request_exchange.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <utility>
 
@@ -309,6 +310,88 @@ std::vector<vayu::http::CookieWrite>* writes) {
     ctx.cookie_writes = writes;
 }
 
+namespace {
+
+/// A field can only carry a token if it spells the opening brace, and a field
+/// that does not is the whole of the common case - composition resolved it.
+bool holds_a_token (const std::string& text) {
+    return text.find ("{{") != std::string::npos;
+}
+
+/**
+ * Every string of @p request whose `{{tokens}}` composition resolves, except
+ * the header *names*: a resolved name is a different key, so the map is rebuilt
+ * for those rather than edited through this list.
+ */
+std::vector<std::string*> resolvable_strings (vayu::Request& request) {
+    std::vector<std::string*> targets;
+    targets.push_back (&request.url);
+    for (auto& [name, value] : request.headers) {
+        (void)name;
+        targets.push_back (&value);
+    }
+    targets.push_back (&request.body.content);
+    for (auto& field : request.body.fields) {
+        // The same five strings composition resolves, a file part's path
+        // included: a fixture directory is exactly the kind of thing an
+        // environment variable holds, and a literal `{{...}}` reaching the
+        // transfer would be opened as a filename.
+        for (std::string* part : { &field.key, &field.value, &field.src,
+             &field.file_name, &field.content_type }) {
+            targets.push_back (part);
+        }
+    }
+    return targets;
+}
+
+bool a_header_name_holds_a_token (const vayu::Headers& headers) {
+    return std::any_of (headers.begin (), headers.end (),
+    [] (const auto& entry) { return holds_a_token (entry.first); });
+}
+
+/// Rebuilt rather than edited in place, because a resolved name is a different
+/// key. Values are moved: this runs after they have been resolved.
+void resolve_header_names (vayu::Headers& headers, const vayu::http::VariableValues& vars) {
+    if (!a_header_name_holds_a_token (headers)) {
+        return;
+    }
+    vayu::Headers resolved;
+    for (auto& [name, value] : headers) {
+        resolved[vayu::http::resolve_template (name, vars)] = std::move (value);
+    }
+    headers = std::move (resolved);
+}
+
+/// The scopes as one map, with composition's precedence - environment over the
+/// collection chain over globals - so a name resolves in the request exactly as
+/// `pm.variables.get` answers it in the script that just ran.
+vayu::http::VariableValues values_from_scopes (const ScriptVariableScopes& scopes) {
+    std::vector<vayu::Environment> chain = scopes.collection_ancestors; // root first
+    chain.push_back (scopes.collection); // leaf last
+    return vayu::http::build_variable_values (scopes.globals, chain, scopes.environment);
+}
+
+} // namespace
+
+void resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& scopes) {
+    auto targets             = resolvable_strings (request);
+    const bool anything_left = a_header_name_holds_a_token (request.headers) ||
+    std::any_of (targets.begin (), targets.end (),
+    [] (const std::string* text) { return holds_a_token (*text); });
+    if (!anything_left) {
+        return; // composition answered everything - the ordinary case
+    }
+
+    const auto vars = values_from_scopes (scopes);
+    for (std::string* text : targets) {
+        if (holds_a_token (*text)) {
+            *text = vayu::http::resolve_template (*text, vars);
+        }
+    }
+    // Last: it moves the values `targets` points at into a new map.
+    resolve_header_names (request.headers, vars);
+}
+
 ExchangeOutcome execute_exchange (vayu::runtime::ScriptEngine& engine,
 vayu::http::CookieJar& jar,
 const std::string& cookie_scope,
@@ -362,6 +445,13 @@ bool verbose) {
         jar.apply (cookie_scope, pre_cookie_writes);
         return outcome;
     }
+
+    // The tokens composition could not answer, answered now against what the
+    // script just wrote (issue #1008). After the skip check, so a step that
+    // sends nothing resolves nothing; before the send, because the point is the
+    // wire. A step of a scenario run reaches this with the *previous* steps'
+    // writes in `scopes` too, which is the same rule one step further on.
+    resolve_residual_tokens (outcome.request, scopes);
 
     vayu::http::ClientConfig config;
     config.verbose       = verbose;
