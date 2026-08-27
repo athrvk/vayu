@@ -85,8 +85,8 @@
  *
  * ## Split once, joined per row
  *
- * A step is tokenised when the plan is resolved (`tokenize_data_fields`) and
- * only *joined* afterwards (`apply_data_template`). Design mode could afford to
+ * A step is tokenised when the plan is resolved (`tokenize_bindable_fields`)
+ * and only *joined* afterwards (`apply_iteration_template`). Design mode could afford to
  * re-scan every field per iteration; the load-mode executor cannot, because it
  * binds a row per iteration per virtual user (issue #449). Both modes drive the
  * same template rather than one keeping a scanner of its own, so a step binds
@@ -161,51 +161,39 @@ enum class DataValueEncoding : std::uint8_t {
 };
 
 /**
- * Which reserved namespace a template's tokens were split from.
+ * One bindable field, split once around the reserved tokens it carries.
  *
- * The two are the same machinery over different names, which is why they are a
- * flag rather than two field lists: both survive composition, both are bound by
- * the executor immediately before a send, and both write their value through
- * the encodings the split decided. What differs is only how a token is spelled
- * back into an error and what the value is bound *from* - a row of the data
- * set, or the iteration that is sending.
+ * **One list, both namespaces.** `{{data.id}}` and `{{$vu}}` are bound at the
+ * same moment by the same walk, and a field may hold one of each - so they are
+ * split together and joined together. Two templates over one field could not
+ * be: each join rebuilds the whole field from its own literals, so the second
+ * would write back the text the first started from, silently undoing it.
  */
-enum class TokenNamespace : std::uint8_t {
-    /// `{{data.column}}` - a column of the run's data set (issue #402).
-    Data,
-    /// `{{$vu}}` / `{{$iteration}}` - the identity of the iteration that is
-    /// about to send (issue #994).
-    Identity,
-};
-
-/** One bindable field, split once around the `{{data.column}}` it carries. */
 struct DataFieldTemplate {
     /// Which string this is, counted in `walk_bindable_fields` order. Both the
     /// split and the join drive that one walk, so neither can address a field
     /// the other does not - the same reason the scan and the bind shared it.
     size_t field = 0;
-    /// `literals.size() == columns.size() + 1`; see `http::TokenSplit`.
+    /// `literals.size() == tokens.size() + 1`; see `http::TokenSplit`.
     std::vector<std::string> literals;
-    /// The column names, with the `data.` prefix already stripped.
-    std::vector<std::string> columns;
-    /// One per entry of `columns`, in the same order.
+    /// The token names **as they were written**, braces stripped and the
+    /// namespace kept: `data.id`, `$vu`. Kept whole because the name is what
+    /// says where the value comes from, and what an error has to quote back.
+    std::vector<std::string> tokens;
+    /// One per entry of @ref tokens, in the same order.
     std::vector<DataValueEncoding> encodings;
 };
 
 /**
  * A step's bindable fields, tokenised once.
  *
- * **Empty for a step carrying no `{{data.*}}` token at all**, and that
- * emptiness is what a token-free plan is charged per iteration: the executor
- * skips the join outright rather than walking fields that cannot change.
+ * **Empty for a step carrying no reserved token at all**, and that emptiness is
+ * what a token-free plan is charged per iteration: the executor skips the join
+ * outright rather than walking fields that cannot change.
  */
 struct StepDataTemplate {
     /// Only the fields that carry at least one token, in walk order.
     std::vector<DataFieldTemplate> fields;
-    /// Which namespace @ref fields were split from, so an error can spell a
-    /// token back the way it was written. Data by default, because that is what
-    /// every caller predating the identity namespace splits.
-    TokenNamespace ns = TokenNamespace::Data;
 
     [[nodiscard]] bool empty () const noexcept {
         return fields.empty ();
@@ -218,48 +206,13 @@ struct StepDataTemplate {
      * This is what lets plan resolution refuse a run whose steps carry data
      * tokens and whose payload has no `data` set (issue #415): nothing would
      * bind them, so they would reach the wire written as they stand.
+     *
+     * Deliberately blind to `{{$vu}}` / `{{$iteration}}`, which share this
+     * template: the identity needs no data set behind it, so a plan carrying
+     * only those is perfectly runnable and must not be refused by this check.
      */
-    [[nodiscard]] std::optional<std::string> first_token () const;
+    [[nodiscard]] std::optional<std::string> first_data_token () const;
 };
-
-/**
- * Split every bindable field of @p request around its `{{data.column}}` tokens.
- *
- * Run once per step, when the plan is resolved. The request is copied for it -
- * the shared walk rewrites in place and nothing is actually rewritten here -
- * which is affordable exactly because resolution happens once per run, over a
- * plan already bounded by `maxScenarioSteps`.
- *
- * The body's **mode** is read here as well as its text: it is what decides
- * whether the body is a JSON or an XML document, and so how each of its tokens
- * binds. A template is therefore only valid for a request whose body mode is
- * the one it was split from.
- */
-[[nodiscard]] StepDataTemplate tokenize_data_fields (const vayu::Request& request);
-
-/**
- * Join @p tmpl's fields against @p row, in place on @p request.
- *
- * @p tmpl must have been built from a request of the same shape (in practice:
- * from the plan step @p request was copied from), because a field is addressed
- * by its position in the walk.
- *
- * Fails for a column @p row does not carry, a column whose cell is `null`, a
- * cell whose value would end the header line it is bound into, two
- * header names that bound to one name, and a token placed where an `xml` body
- * has no encoding that would keep the document meaning what it says - inside a
- * comment or a processing instruction. That last one fails for every row alike,
- * because it is the template's fault rather than the row's, and is reported
- * before the row is even consulted.
- *
- * On failure @p request is left partially bound and must not be sent - the
- * caller ends the step. Repairing it would mean a second copy of the composed
- * request per step per iteration for a path that never reaches the wire.
- */
-[[nodiscard]] DataBindResult apply_data_template (vayu::Request& request,
-const StepDataTemplate& tmpl,
-const nlohmann::json& row,
-size_t row_index);
 
 /**
  * Which iteration of which virtual user is about to send (issue #994).
@@ -269,7 +222,14 @@ size_t row_index);
  * design-mode send is a run of one - so this carries them to the bind rather
  * than inventing a second source of truth for either.
  */
-struct IterationIdentity;
+struct IterationIdentity {
+    /// The virtual user, **1-based**: the first user of a run is `1`, so
+    /// `user-{{$vu}}@example.com` reads as a person would number them.
+    size_t vu = 1;
+    /// That virtual user's iteration, **0-based**, so it indexes the data set
+    /// the same way `{{data.*}}`'s row cursor does.
+    size_t iteration = 0;
+};
 
 /**
  * The virtual user every send outside a scenario *load* run belongs to.
@@ -283,50 +243,83 @@ struct IterationIdentity;
  */
 inline constexpr size_t SOLE_VIRTUAL_USER = 1;
 
-struct IterationIdentity {
-    /// The virtual user, **1-based**: the first user of a run is `1`, so
-    /// `user-{{$vu}}@example.com` reads as a person would number them.
-    size_t vu = 1;
-    /// That virtual user's iteration, **0-based**, so it indexes the data set
-    /// the same way `{{data.*}}`'s row cursor does.
-    size_t iteration = 0;
+/**
+ * Everything one iteration substitutes into the request it is about to send:
+ * its row, where the run has a data set, and its identity, which every run has.
+ *
+ * One argument rather than two, because a caller must not be able to bind half
+ * of it - a field holding `{{data.id}}` beside `{{$vu}}` is joined once, from
+ * both sources at once.
+ */
+struct IterationBinding {
+    /// This iteration's row, or **null for a run sent without `data`**. Points
+    /// into the run's own rows, which outlive the bind.
+    const nlohmann::json* row = nullptr;
+    /// Which row that is, for an error to name. Meaningless when @ref row is
+    /// null, and read by nothing in that case.
+    size_t row_index = 0;
+    /// Who is sending, which is known even when there is no row at all.
+    IterationIdentity identity;
 };
 
 /**
- * Split every bindable field of @p request around its `{{$vu}}` and
- * `{{$iteration}}` tokens - `tokenize_data_fields` over the identity namespace.
+ * Split every bindable field of @p request around its reserved tokens -
+ * `{{data.column}}` (issue #402) and `{{$vu}}` / `{{$iteration}}` (issue #994).
  *
- * **Empty for the overwhelming majority of requests**, which carry neither
- * token, and that emptiness is what the identity costs a run that does not use
- * it: one `empty()` test per iteration and no walk at all.
+ * Run once per step, when the plan is resolved, or once per run for a single
+ * request. The request is copied for it - the shared walk rewrites in place and
+ * nothing is actually rewritten here - which is affordable exactly because
+ * resolution happens once per run, over a plan already bounded by
+ * `maxScenarioSteps`.
  *
- * Run once per run (a single request) or per step (a plan), never per
- * iteration - the same bargain the data namespace makes, and for the same
- * reason: a load run binds at its full rate.
+ * **Both namespaces in one template**, for the reason `DataFieldTemplate`
+ * records: a field carrying one of each is one string, and two templates over
+ * it would each rebuild it from their own literals, so the second join would
+ * undo the first.
+ *
+ * The body's **mode** is read here as well as its text: it is what decides
+ * whether the body is a JSON or an XML document, and so how each of its tokens
+ * binds. A template is therefore only valid for a request whose body mode is
+ * the one it was split from.
  */
-[[nodiscard]] StepDataTemplate tokenize_identity_fields (const vayu::Request& request);
+[[nodiscard]] StepDataTemplate tokenize_bindable_fields (const vayu::Request& request);
 
 /**
- * Join @p tmpl's fields against @p identity, in place on @p request.
+ * Join @p tmpl's fields against @p binding, in place on @p request.
  *
- * The identity is a row of two reserved columns rather than a second joiner:
- * the values are written into the field, escaped for the document they land in
- * and refused where no encoding fits, by exactly the code a data row goes
- * through - so a `{{$vu}}` inside a JSON string cannot be escaped differently
- * from a `{{data.id}}` beside it.
+ * @p tmpl must have been built from a request of the same shape (in practice:
+ * from the plan step @p request was copied from), because a field is addressed
+ * by its position in the walk.
  *
- * Cannot fail on the identity's own account - both names always have a value -
- * so the failures left are the template's: a token placed inside an XML comment
- * or processing instruction, and two header names that bound to one name. On
- * failure @p request is left partially bound and must not be sent, which is
- * `apply_data_template`'s rule inherited whole.
+ * The identity half cannot fail - both names always have a value - so every
+ * failure names a data token or the template: a column the row does not carry,
+ * a column whose cell is `null`, a `{{data.*}}` token in a run with no row at
+ * all, a value that would end the header line it is bound into, two header
+ * names that bound to one name, and a token placed where an `xml` body has no
+ * encoding that would keep the document meaning what it says - inside a comment
+ * or a processing instruction. That last one fails for every row alike, because
+ * it is the template's fault rather than the row's, and is reported before the
+ * row is even consulted.
+ *
+ * On failure @p request is left partially bound and must not be sent - the
+ * caller ends the step. Repairing it would mean a second copy of the composed
+ * request per step per iteration for a path that never reaches the wire.
  */
-[[nodiscard]] DataBindResult apply_identity_template (vayu::Request& request,
+[[nodiscard]] DataBindResult apply_iteration_template (vayu::Request& request,
 const StepDataTemplate& tmpl,
-IterationIdentity identity);
+const IterationBinding& binding);
 
 /**
  * Split @p auth's credential strings around their `{{data.column}}` tokens.
+ *
+ * **The data namespace only**: a credential carrying `{{$vu}}` is deliberately
+ * not split here (issue #994). Deferring a build is what lets a row reach a
+ * credential before `apply_auth` encodes it, and a build is deferred only for a
+ * run that *has* rows - so an identity token in a credential would bind in a
+ * data-driven run and go out base64-encoded as written in every other, which is
+ * a rule nobody could hold in their head. It goes out written as it stands in
+ * both, loudly, and the identity binds the request rather than its credentials
+ * (issue #1050 carries the deferral change that would lift this).
  *
  * The same splitter the request walk drives, over `walk_auth_credentials`
  * instead of `walk_bindable_fields` - one field list per walk, and the join
@@ -354,7 +347,7 @@ IterationIdentity identity);
  * Join @p tmpl's credentials against @p row, in place on @p auth.
  *
  * @p auth must be the parsed auth @p tmpl was split from, for the same reason
- * `apply_data_template` needs the request it was split from: a credential is
+ * `apply_iteration_template` needs the request it was split from: a credential is
  * addressed by its position in the walk.
  */
 [[nodiscard]] DataBindResult apply_auth_data_template (vayu::http::Auth& auth,
@@ -394,7 +387,8 @@ size_t row_index);
 
 /**
  * One iteration's whole bind, in the order that makes it correct: @p fields
- * into @p request, then @p credentials into the auth applied on top of it.
+ * into @p request - its row and its identity together - then @p credentials
+ * into the auth applied on top of it.
  *
  * The order is the point, and it is why this is one function rather than two
  * calls each executor makes in sequence: a credential has to carry the row's
@@ -407,17 +401,18 @@ size_t row_index);
  * A no-op returning success when both templates are empty, so a caller may call
  * it unconditionally. @p auth is only read when @p credentials is non-empty,
  * which is exactly when the request's build was deferred; a caller whose auth
- * was applied at build time passes its `NoAuth` and pays nothing.
+ * was applied at build time passes its `NoAuth` and pays nothing. The
+ * credentials are joined against @p binding's row alone - see
+ * `tokenize_auth_fields` for why the identity stops at the request.
  *
  * On failure @p request is left partially bound and must not be sent - see
- * `apply_data_template`, whose rule this inherits.
+ * `apply_iteration_template`, whose rule this inherits.
  */
-[[nodiscard]] DataBindResult bind_iteration_row (vayu::Request& request,
+[[nodiscard]] DataBindResult bind_iteration (vayu::Request& request,
 const StepDataTemplate& fields,
 const vayu::http::Auth& auth,
 const StepDataTemplate& credentials,
-const nlohmann::json& row,
-size_t row_index);
+const IterationBinding& binding);
 
 /**
  * The first `{{data.column}}` in any string of @p value, recursively, written
@@ -470,7 +465,7 @@ const vayu::http::Auth& auth);
  *
  * A caller binding the *same* request repeatedly - every load-mode iteration of
  * every virtual user - must hold the template instead and call
- * `apply_data_template`, which is the whole point of splitting once.
+ * `apply_iteration_template`, which is the whole point of splitting once.
  */
 [[nodiscard]] DataBindResult
 bind_data_row (vayu::Request& request, const nlohmann::json& row, size_t row_index);

@@ -317,18 +317,20 @@ struct RunContext {
     std::unique_ptr<LoadDataSet> load_data;
 
     /**
-     * A *single-request* load run's `{{$vu}}` / `{{$iteration}}` fields, split
-     * once (issue #994) - and **empty for every run whose request carries
-     * neither token**, which is the throughput guard made structural: the
-     * strategies test `empty()` and otherwise submit the shared request they
-     * always did.
+     * A *single-request* load run's reserved tokens - `{{data.column}}` and the
+     * `{{$vu}}` / `{{$iteration}}` identity - split once off the built request,
+     * so no submission re-scans its fields.
      *
-     * Separate from @ref load_data rather than a member of it, because the
-     * identity does not need a data set: a run with no rows at all still knows
-     * which iteration it is on. Written once by `build_load_request` before the
-     * first submission, read on the run's worker thread afterwards.
+     * **Empty for every run whose request carries none of them**, which is the
+     * throughput guard made structural: the strategies test `empty()` and
+     * otherwise submit the shared request they always did.
+     *
+     * Beside @ref load_data rather than inside it, because the identity needs no
+     * data set: a run sent without rows still knows which iteration it is on.
+     * Written once by `build_load_request` before the first submission, read on
+     * the run's worker thread afterwards.
      */
-    StepDataTemplate load_identity;
+    StepDataTemplate load_template;
 
     // Real-time counters (also tracked by MetricsCollector, but kept for backward compat)
     std::atomic<size_t> requests_sent{ 0 }; // Number of requests submitted to event loop

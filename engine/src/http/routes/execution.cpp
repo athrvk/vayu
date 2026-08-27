@@ -1090,33 +1090,26 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // partially bound request is discarded rather than sent
     // (scenario_data.hpp). Nothing runs, so nothing is recorded: the
     // refusal precedes the run row exactly as the flag checks above do.
-    if (data_row.value) {
-        auto bound = vayu::core::bind_data_row (built.request, *data_row.value, 0);
-        if (bound.ok) {
-            // Then the credentials the build deferred, in the order the
-            // scenario executors bind theirs: the row reaches them before
-            // `apply_auth` encodes them onto the request. A no-op for the
-            // ordinary send, whose auth the build already applied.
-            bound = vayu::core::bind_auth_row (built.request, row_auth.auth,
-            row_auth.credentials, *data_row.value, 0);
-        }
-        if (!bound.ok) {
-            vayu::utils::log_warning ("POST /execute - " + bound.error);
-            return bound.error;
-        }
+    // The identity binds here too, and for every send rather than only for one
+    // carrying a row (issue #994): a single send is a run of one, so `{{$vu}}`
+    // and `{{$iteration}}` answer `1` and `0` - the numbers this same request
+    // would carry as the first iteration of a load run - instead of reaching
+    // the wire written as they stand. The scan costs a request that spells
+    // neither one walk of its fields, at the design path's rate rather than a
+    // load run's.
+    const vayu::core::IterationBinding binding{ data_row.value ? &*data_row.value : nullptr,
+        /*row_index=*/0, vayu::core::IterationIdentity{} };
+    auto bound = vayu::core::apply_iteration_template (built.request,
+    vayu::core::tokenize_bindable_fields (built.request), binding);
+    if (bound.ok && data_row.value) {
+        // Then the credentials the build deferred, in the order the
+        // scenario executors bind theirs: the row reaches them before
+        // `apply_auth` encodes them onto the request. A no-op for the
+        // ordinary send, whose auth the build already applied.
+        bound = vayu::core::bind_auth_row (
+        built.request, row_auth.auth, row_auth.credentials, *data_row.value, 0);
     }
-
-    // The iteration identity, bound here for the same reason and with the same
-    // refusal (issue #994). A single send is a run of one - user 1, iteration 0
-    // - so `{{$vu}}` and `{{$iteration}}` answer with the numbers the same
-    // request would carry as the first iteration of a load run, rather than
-    // reaching the wire written as they stand. The scan is the send's own and
-    // costs a request carrying neither token one walk of its fields, which is
-    // the design path's rate rather than a load run's.
-    if (auto bound = vayu::core::apply_identity_template (built.request,
-        vayu::core::tokenize_identity_fields (built.request),
-        vayu::core::IterationIdentity{});
-    !bound.ok) {
+    if (!bound.ok) {
         vayu::utils::log_warning ("POST /execute - " + bound.error);
         return bound.error;
     }

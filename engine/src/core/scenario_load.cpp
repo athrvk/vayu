@@ -269,8 +269,7 @@ class ScenarioLoadDriver {
         // send. A step carrying neither kind of token has empty templates and
         // is not walked at all, which is what makes a token-free plan free per
         // iteration.
-        if (!(step.data_template.empty () && step.auth_template.empty () &&
-            step.identity_template.empty ())) {
+        if (!(step.data_template.empty () && step.auth_template.empty ())) {
             // Every half through the one binder the single-request load path
             // also drives (issues #993, #994), so a request binds identically
             // whether it is repeated on its own or walked as a step - including

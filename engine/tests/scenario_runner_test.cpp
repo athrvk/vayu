@@ -413,6 +413,26 @@ class ScenarioRunnerTest : public ::testing::Test {
 // Sequence semantics
 // ============================================================================
 
+// A collection run in design mode is one user walking the sequence, so
+// `{{$vu}}` is 1 there and `{{$iteration}}` counts the passes (issue #994).
+// Through the real resolver, so the split this depends on is the one plan
+// resolution performs rather than one the test arranged.
+TEST_F (ScenarioRunnerTest, TheIterationIdentityBindsOnEveryPassOfADesignRun) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok?u={{$vu}}&i={{$iteration}}");
+
+    const auto run_id = start (/*iterations=*/3);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    EXPECT_EQ (seen[0].target, "/ok?u=1&i=0");
+    EXPECT_EQ (seen[1].target, "/ok?u=1&i=1");
+    EXPECT_EQ (seen[2].target, "/ok?u=1&i=2")
+    << "the identity must advance with the pass rather than freezing at "
+       "composition";
+}
+
 TEST_F (ScenarioRunnerTest, RunsEveryStepOfEveryIterationInPlanOrder) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/ok");

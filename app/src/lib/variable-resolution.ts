@@ -26,6 +26,9 @@
  *  - a name nothing defines keeps its braces, plain or `$name` (issue #1009)
  *  - a `data.*` name keeps its braces too: it addresses the reserved data
  *    namespace (issue #402), which only a scenario run's iteration can bind
+ *  - `$vu` and `$iteration` keep their braces too: they address the reserved
+ *    identity namespace (issue #994), which only the iteration that sends can
+ *    bind - a variable defined with either name never answers for it
  *  - a user-defined variable named `$guid` beats the generator; generators run
  *    once per occurrence
  *  - a value that itself holds `{{tokens}}` resolves through them, to a depth
@@ -39,6 +42,7 @@
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { isDynamicVariableName, resolveDynamicVariable } from "./dynamic-variables";
+import { isIterationVariableName } from "./iteration-variables";
 
 /** A stored variable definition as it may actually arrive off disk - loose. */
 export interface StoredVariableLike {
@@ -130,8 +134,9 @@ export function dataColumnName(name: string): string | null {
 const MAX_NESTED_RESOLUTIONS = 8;
 
 /**
- * Substitute `{{name}}` occurrences: the reserved `data.*` namespace first
- * (kept verbatim), then scopes, then the dynamic-variable table. A defined
+ * Substitute `{{name}}` occurrences: the reserved `data.*` namespace and the
+ * reserved `$vu` / `$iteration` identity namespace first (both kept verbatim),
+ * then scopes, then the dynamic-variable table. A defined
  * name (even one spelled `$guid`) wins over a generator; a name nothing
  * answers keeps its braces, `$name` (issue #186) and ordinary alike (issue
  * #1009) - the token reaching the wire is what makes the miss visible, where
@@ -159,6 +164,12 @@ export function resolveTemplate(
 			// Only a scenario run's iteration can bind one, and the engine's
 			// composer leaves it written as it stands for exactly that reason.
 			if (isDataVariableName(name)) return match;
+			// Same reasoning, same placement: `$vu` / `$iteration` name the
+			// reserved identity namespace (issue #994), not a variable, so a
+			// scope definition of either must not answer here either. Only the
+			// iteration that sends binds them - the engine's composer leaves the
+			// token written as it stands for exactly that reason.
+			if (isIterationVariableName(name)) return match;
 			if (expanding.includes(name)) return match;
 			const defined = lookup(name);
 			// The generator answers `null` for a name its table does not have,

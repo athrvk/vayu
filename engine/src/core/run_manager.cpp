@@ -1121,7 +1121,7 @@ vayu::Request& request) {
     // Credentials carrying a `{{data.column}}` are the one case the build
     // leaves alone: the row has to reach them before `apply_auth` base64s them
     // out of reach (issue #591), so a run with rows tells the build to defer
-    // and `bind_iteration_row` applies them per submission. Every other run
+    // and `bind_iteration` applies them per submission. Every other run
     // resolves its auth here exactly as it always did.
     const auto auth_resolution = context->load_data ?
     context->load_data->auth_resolution () :
@@ -1139,15 +1139,13 @@ vayu::Request& request) {
     // run binds at its full rate, which is the same reason a plan step is split
     // when the plan resolves (issue #993). The `{}` a row-free run keeps is
     // what makes the join free for it - it has no set at all.
-    if (context->load_data) {
-        context->load_data->fields = tokenize_data_fields (request);
-    }
-    // The identity is split here too, and unconditionally: it binds off the
-    // iteration rather than off a row, so a run with no `data` at all still
-    // carries `{{$vu}}` / `{{$iteration}}` if its request spells them. A request
-    // carrying neither leaves this empty, and an empty template is what makes
-    // the per-submission join a single `empty()` test (issue #994).
-    context->load_identity = tokenize_identity_fields (request);
+    // Unconditionally, and not only for a run that has rows: the identity binds
+    // off the iteration rather than off a row, so a run sent without `data` at
+    // all still carries `{{$vu}}` / `{{$iteration}}` if its request spells them
+    // (issue #994). A request carrying no reserved token leaves this empty, and
+    // an empty template is what makes the per-submission join a single
+    // `empty()` test.
+    context->load_template = tokenize_bindable_fields (request);
 
     // A streaming run's caps ride on the request itself, because the
     // event loop is what enforces them and the request is all it sees.

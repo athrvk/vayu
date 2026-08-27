@@ -350,30 +350,32 @@ const ResultAnnotations& annotations) {
 }
 
 /**
- * Bind this submission's row and identity into @p request, in that order.
+ * Bind this submission's row - where the run has one - and its identity into
+ * @p request, through the one binder both load paths drive.
  *
- * Reached only for a run that has one or the other - the caller keeps the
- * neither-of-them path clear of all of this - and each half still tests its own
- * template, because a run may carry rows without identity tokens or the other
- * way round.
+ * Reached only for a run whose request carries a reserved token: the caller
+ * keeps the token-free path clear of all of this.
  */
 DataBindResult bind_submission (vayu::Request& request,
 const RunContext& context,
 const LoadDataSet* data,
 const ResultAnnotations& annotations) {
-    if (data != nullptr) {
-        const size_t row = vayu::utils::invariant_value (annotations.data_row_index,
-        "a run carrying rows claims one per submission");
-        if (auto bound = bind_iteration_row (request, data->fields, data->auth,
-            data->credentials, data->rows[row], row);
-        !bound.ok) {
-            return bound;
-        }
-    }
-    return apply_identity_template (request, context.load_identity,
-    IterationIdentity{ SOLE_VIRTUAL_USER,
-    vayu::utils::invariant_value (annotations.iteration,
-    "every submission claims its iteration before binding") });
+    const size_t iteration = vayu::utils::invariant_value (annotations.iteration,
+    "every submission claims its iteration before binding");
+    const IterationBinding binding{ data == nullptr ?
+        nullptr :
+        &data->rows.at (vayu::utils::invariant_value (annotations.data_row_index,
+        "a run carrying rows claims one per submission")),
+        annotations.data_row_index.value_or (0),
+        IterationIdentity{ SOLE_VIRTUAL_USER, iteration } };
+    // The auth halves are the data set's, and empty for a run without one: a
+    // credential deliberately does not carry the identity, which is the rule
+    // `tokenize_auth_fields` records.
+    static const vayu::http::Auth NO_AUTH{};
+    static const StepDataTemplate NO_CREDENTIALS{};
+    return bind_iteration (request, context.load_template,
+    data == nullptr ? NO_AUTH : data->auth,
+    data == nullptr ? NO_CREDENTIALS : data->credentials, binding);
 }
 
 /**
@@ -386,10 +388,10 @@ const ResultAnnotations& annotations) {
  * instead of the one whose lambda remembered them - and so does the
  * mid-run credential swap, which two of the four used to miss.
  *
- * **A run carrying neither takes the path it always did**: two tests of an
- * empty template, then the same submit of the same shared request. No copy and
- * no bind - the throughput guard #992 states, kept structurally rather than by
- * measurement alone. What it does pay is the cursor increment below, which is
+ * **A run carrying neither takes the path it always did**: one null test and
+ * one `empty()` test, then the same submit of the same shared request. No copy
+ * and no bind - the throughput guard #992 states, kept structurally rather than
+ * by measurement alone. What it does pay is the cursor increment below, which is
  * one unsynchronised `size_t` on the sole producer thread and is what lets
  * every load run - not only the ones spelling a token - tell a deferred script
  * which iteration a sampled response was sent in.
@@ -407,7 +409,7 @@ SubmissionRequest& live) {
         std::optional<size_t> (iteration % data->rows.size ()),
         std::nullopt, iteration, SOLE_VIRTUAL_USER };
 
-    if (data == nullptr && context->load_identity.empty ()) {
+    if (data == nullptr && context->load_template.empty ()) {
         submit_to_loop (context, db, live.current (), annotations);
         return;
     }

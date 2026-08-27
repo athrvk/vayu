@@ -181,13 +181,11 @@ class LoadDataTest : public ::testing::Test {
         auto built = vayu::http::build_request (payload, db_.get (), /*timeout_ms=*/5000,
         read.set ? read.set->auth_resolution () : vayu::http::AuthResolution::Apply);
         ASSERT_TRUE (built.ok) << built.error_message;
-        if (read.set) {
-            read.set->fields = vayu::core::tokenize_data_fields (built.request);
-        }
 
         auto context =
         std::make_shared<vayu::core::RunContext> ("test-load-data", payload);
         context->load_data = std::move (read.set);
+        context->load_template = vayu::core::tokenize_bindable_fields (built.request);
         vayu::http::EventLoopConfig loop_config;
         loop_config.max_concurrent = 100;
         loop_config.max_per_host   = 100;

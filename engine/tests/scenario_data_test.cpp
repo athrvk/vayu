@@ -791,7 +791,8 @@ TEST (ScenarioDataScanTest, ARequestWithNoDataTokenScansClean) {
     request.body.content      = R"({"n":1})";
     request.body.fields       = { { "k", "v", true } };
 
-    EXPECT_FALSE (vayu::core::tokenize_data_fields (request).first_token ().has_value ());
+    EXPECT_FALSE (
+    vayu::core::tokenize_bindable_fields (request).first_data_token ().has_value ());
 }
 
 TEST (ScenarioDataScanTest, EveryFieldTheBinderSubstitutesIsAFieldTheScanSees) {
@@ -799,7 +800,9 @@ TEST (ScenarioDataScanTest, EveryFieldTheBinderSubstitutesIsAFieldTheScanSees) {
     // would miss is a token that survives the refusal and reaches the wire.
     // Each case seeds exactly one field, so a hole names itself.
     const auto seen = [] (const vayu::Request& request) {
-        return vayu::core::tokenize_data_fields (request).first_token ().value_or ("<none>");
+        return vayu::core::tokenize_bindable_fields (request)
+        .first_data_token ()
+        .value_or ("<none>");
     };
 
     EXPECT_EQ (seen (request_with_url ("https://api.test/{{data.id}}")), "{{data.id}}");
@@ -838,7 +841,8 @@ TEST (ScenarioDataScanTest, TheScanLeavesTheRequestAlone) {
     request.body.content             = "{{data.body}}";
     const auto before                = request.url;
 
-    EXPECT_TRUE (vayu::core::tokenize_data_fields (request).first_token ().has_value ());
+    EXPECT_TRUE (
+    vayu::core::tokenize_bindable_fields (request).first_data_token ().has_value ());
     EXPECT_EQ (request.url, before);
     EXPECT_EQ (request.headers.at ("X-{{data.hn}}"), "{{data.token}}");
     EXPECT_EQ (request.body.content, "{{data.body}}");
@@ -858,7 +862,7 @@ TEST (ScenarioDataTemplateTest, AStepWithNoDataTokenHasAnEmptyTemplate) {
     request.body.content        = R"({"n":1})";
     request.body.fields         = { { "k", "v", true } };
 
-    EXPECT_TRUE (vayu::core::tokenize_data_fields (request).empty ());
+    EXPECT_TRUE (vayu::core::tokenize_bindable_fields (request).empty ());
 }
 
 TEST (ScenarioDataTemplateTest, ATemplateJoinsTheSameTextTheScannerWouldSubstitute) {
@@ -877,8 +881,10 @@ TEST (ScenarioDataTemplateTest, ATemplateJoinsTheSameTextTheScannerWouldSubstitu
     };
 
     auto templated  = make ();
-    const auto tmpl = vayu::core::tokenize_data_fields (templated);
-    ASSERT_TRUE (vayu::core::apply_data_template (templated, tmpl, row, 0).ok);
+    const auto tmpl = vayu::core::tokenize_bindable_fields (templated);
+    ASSERT_TRUE (vayu::core::apply_iteration_template (
+    templated, tmpl, vayu::core::IterationBinding{ &row, 0, {} })
+    .ok);
 
     auto scanned = make ();
     ASSERT_TRUE (bind_data_row (scanned, row, 0).ok);
@@ -898,22 +904,25 @@ TEST (ScenarioDataTemplateTest, ATemplateIsReusableAcrossRows) {
     // anything off the first row would bind every later iteration to it.
     auto request =
     request_with_url ("https://api.test/u/{{data.id}}/{{data.id}}");
-    const auto tmpl = vayu::core::tokenize_data_fields (request);
+    const auto tmpl = vayu::core::tokenize_bindable_fields (request);
 
     for (const char* id : { "1", "2", "3" }) {
-        auto bound = request;
-        ASSERT_TRUE (
-        vayu::core::apply_data_template (bound, tmpl, json{ { "id", id } }, 0).ok);
+        auto bound     = request;
+        const json row = { { "id", id } };
+        ASSERT_TRUE (vayu::core::apply_iteration_template (
+        bound, tmpl, vayu::core::IterationBinding{ &row, 0, {} })
+        .ok);
         EXPECT_EQ (bound.url, std::string ("https://api.test/u/") + id + "/" + id);
     }
 }
 
 TEST (ScenarioDataTemplateTest, AnAbsentColumnFailsTheJoinAndNamesTheRow) {
     auto request    = request_with_url ("https://api.test/{{data.missing}}");
-    const auto tmpl = vayu::core::tokenize_data_fields (request);
+    const auto tmpl = vayu::core::tokenize_bindable_fields (request);
 
-    const auto bound =
-    vayu::core::apply_data_template (request, tmpl, json{ { "id", "1" } }, 7);
+    const json row   = { { "id", "1" } };
+    const auto bound = vayu::core::apply_iteration_template (
+    request, tmpl, vayu::core::IterationBinding{ &row, 7, {} });
     EXPECT_FALSE (bound.ok);
     EXPECT_NE (bound.error.find ("{{data.missing}}"), std::string::npos)
     << bound.error;
@@ -1001,8 +1010,8 @@ TEST (ScenarioDataScanTest, ThePrefixAloneIsNotSomethingToRefuse) {
     // not a data token, whatever composition left in the field (since #1009,
     // the token itself). Refusing it would block a run over a token no row
     // could ever answer.
-    EXPECT_FALSE (vayu::core::tokenize_data_fields (
+    EXPECT_FALSE (vayu::core::tokenize_bindable_fields (
     request_with_url ("https://api.test/{{data.}}"))
-    .first_token ()
+    .first_data_token ()
     .has_value ());
 }

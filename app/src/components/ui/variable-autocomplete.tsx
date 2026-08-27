@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import type { DataContractScope, ResolvedVariable } from "@/types";
 import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
+import { ITERATION_VARIABLES } from "@/lib/iteration-variables";
 
 // Re-export ResolvedVariable as VariableInfo for backward compatibility
 export type { ResolvedVariable as VariableInfo };
@@ -73,6 +74,18 @@ export function VariableAutocomplete({
 	}, [variables, searchQuery]);
 
 	/*
+	 * The reserved identity namespace (issue #994), a group of its own for the
+	 * same reason `data.*` is: it is not a variable a scope could ever define
+	 * (`variable-resolution.ts` reserves the names ahead of the scope lookup),
+	 * so unlike the generators below there is no shadowing check here - both
+	 * names are always offered.
+	 */
+	const filteredIteration = useMemo(() => {
+		const lowerQuery = searchQuery.toLowerCase();
+		return ITERATION_VARIABLES.filter((v) => v.name.toLowerCase().includes(lowerQuery));
+	}, [searchQuery]);
+
+	/*
 	 * Columns are their own group for the same reason generators are: they are
 	 * not variables, and interleaving them would put a name no scope defines
 	 * among the ones the user created. They are offered from the contract rather
@@ -89,6 +102,7 @@ export function VariableAutocomplete({
 
 	if (
 		filteredVariables.length === 0 &&
+		filteredIteration.length === 0 &&
 		filteredDynamic.length === 0 &&
 		filteredColumns.length === 0
 	) {
@@ -111,6 +125,23 @@ export function VariableAutocomplete({
 								>
 									<span className="font-mono text-sm">{name}</span>
 									<VariableScopeBadge scope={varInfo.scope} variant="compact" />
+								</CommandItem>
+							))}
+						</CommandGroup>
+					)}
+					{filteredIteration.length > 0 && (
+						<CommandGroup heading="Iteration">
+							{filteredIteration.map((identity) => (
+								<CommandItem
+									key={identity.name}
+									value={identity.name}
+									onSelect={() => onSelect(identity.name)}
+									className="flex items-center justify-between cursor-pointer"
+								>
+									<span className="font-mono text-sm">{identity.name}</span>
+									<span className="ml-2 truncate text-[11px] text-muted-foreground">
+										{identity.description}
+									</span>
 								</CommandItem>
 							))}
 						</CommandGroup>

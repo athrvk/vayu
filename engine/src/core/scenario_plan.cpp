@@ -411,7 +411,7 @@ ScenarioPlan& plan) {
     // Split once, here, so no executor re-scans this step per iteration -
     // the load-mode one binds a row per iteration per virtual user, which
     // is a scan of every field of every step at the run's full rate.
-    auto data_template = tokenize_data_fields (built.request);
+    auto data_template = tokenize_bindable_fields (built.request);
 
     // A `{{data.*}}` token with no data set behind it can never bind. The
     // namespace is reserved, so composition deliberately left the token
@@ -422,13 +422,13 @@ ScenarioPlan& plan) {
     // exists, rather than rediscovered per step per iteration once it has
     // started (issue #415).
     if (!has_data) {
-        auto token = data_template.first_token ();
+        auto token = data_template.first_data_token ();
         if (!token) {
             // The credentials are scanned too, and for the same reason: a
             // data token in a basic-auth field is exactly as unbindable as
             // one in the URL, and until it was kept out of the base64 above
             // this refusal could not see it at all.
-            token = auth_template.first_token ();
+            token = auth_template.first_data_token ();
         }
         if (token) {
             return (describe_step (index, row) + " carries " + *token +
@@ -451,10 +451,6 @@ ScenarioPlan& plan) {
     step.stored_url     = row.url;
     step.spec_operation = row.spec_operation.value_or (std::string ());
     step.data_template  = std::move (data_template);
-    // Split beside the data one and unconditionally: the identity binds off the
-    // iteration rather than off a row, so it needs no data set behind it and
-    // has nothing to refuse here (issue #994).
-    step.identity_template = tokenize_identity_fields (step.request);
     // Only ever reached with rows behind it: the refusal above returns for
     // a credential token in a run that has no data set, so a deferred step
     // cannot arrive at an executor with no row to bind.
@@ -584,8 +580,9 @@ size_t row_index) {
     // (issue #993); this is the step-shaped caller of it. The step's auth is
     // copied by the callee, which is what a plan shared by every virtual user
     // of the run requires.
-    return bind_iteration_row (
-    request, step.data_template, step.auth, step.auth_template, row, row_index);
+    const IterationBinding binding{ &row, row_index, IterationIdentity{} };
+    return bind_iteration (
+    request, step.data_template, step.auth, step.auth_template, binding);
 }
 
 DataBindResult bind_step_iteration (vayu::Request& request,
@@ -593,16 +590,13 @@ const ScenarioStep& step,
 const std::vector<nlohmann::json>& rows,
 std::optional<size_t> row_index,
 IterationIdentity identity) {
-    if (row_index) {
-        // `.at()` rather than a subscript: the index was claimed off a cursor
-        // taken modulo this vector's own size, so a mismatch is a broken
-        // invariant and a throw names it instead of reading past the end.
-        if (auto bound = bind_step_row (request, step, rows.at (*row_index), *row_index);
-        !bound.ok) {
-            return bound;
-        }
-    }
-    return apply_identity_template (request, step.identity_template, identity);
+    // `.at()` rather than a subscript: the index was claimed off a cursor taken
+    // modulo this vector's own size, so a mismatch is a broken invariant and a
+    // throw names it instead of reading past the end.
+    const IterationBinding binding{ row_index ? &rows.at (*row_index) : nullptr,
+        row_index.value_or (0), identity };
+    return bind_iteration (
+    request, step.data_template, step.auth, step.auth_template, binding);
 }
 
 nlohmann::json build_scenario_manifest (const ScenarioRequest& request,

@@ -42,10 +42,10 @@ struct RunContext; // Forward declaration
  * otherwise submit the shared request they always did - no copy, no claim, no
  * annotation. Nothing here is per-iteration work a token-free run can pay.
  *
- * Filled in two stages, because the halves are known at different moments: the
- * route validates the rows and decides how the credentials resolve before any
- * run row exists, and `fields` can only be split once the request has been
- * composed and built on the run's own worker thread.
+ * The request's own bindable fields are **not** here: they are split off the
+ * built request onto `RunContext::load_template`, because a run with no rows at
+ * all still binds its `{{$vu}}` / `{{$iteration}}` identity (issue #994). This
+ * carries what only a data set has.
  */
 struct LoadDataSet {
     /// The validated rows, in payload order. Never empty - a present-but-empty
@@ -62,10 +62,6 @@ struct LoadDataSet {
     /// The credentials split around their `{{data.column}}` tokens; empty when
     /// none carries one.
     StepDataTemplate credentials;
-    /// The built request's own tokens, split once so the run does not re-scan
-    /// its fields per submission - the same bargain a plan step makes, at a
-    /// single request's full rate.
-    StepDataTemplate fields;
 
     /// What `build_request` must be told: the credentials are bound after the
     /// build, so an auth carrying a token must not be encoded during it.

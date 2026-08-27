@@ -427,7 +427,7 @@ std::optional<std::string>& missing_column) {
         }
         // Recorded rather than resolved to "": the token says the value came
         // from the file, so a name no column answers is a mistake about the
-        // column and the quiet answer hides it (the rule `apply_data_template`
+        // column and the quiet answer hides it (the rule `apply_iteration_template`
         // enforces at bind time). Only the first is kept - the caller reports
         // one and the rest are the same mistake.
         if (!missing_column) {

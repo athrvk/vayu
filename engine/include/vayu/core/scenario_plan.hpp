@@ -70,8 +70,9 @@ struct ScenarioStep {
     /// `request.url` has `{{vars}}` substituted and may carry an `apikey` auth
     /// with `in: "query"`, i.e. a live key.
     std::string stored_url;
-    /// `request`'s `{{data.column}}` tokens, split once here so no executor has
-    /// to re-scan the step per iteration. Empty for a step that carries none,
+    /// `request`'s reserved tokens - `{{data.column}}` and the `{{$vu}}` /
+    /// `{{$iteration}}` identity - split once here so no executor has to
+    /// re-scan the step per iteration. Empty for a step that carries none,
     /// which is what both executors test before doing any join work at all.
     ///
     /// Every field from here down carries a `{}`: the plan tests build steps by
@@ -103,11 +104,6 @@ struct ScenarioStep {
     /// happens in a run that has rows - a data token with no data set is
     /// refused when the plan resolves - so an executor always has a row for it.
     StepDataTemplate auth_template{};
-    /// `request`'s `{{$vu}}` / `{{$iteration}}` tokens, split once here for the
-    /// reason `data_template` is: the identity binds per iteration, and a plan
-    /// is composed once (issue #994). Empty for a step carrying neither, which
-    /// is what keeps an ordinary plan free of any identity work per iteration.
-    StepDataTemplate identity_template{};
 };
 
 /** An ordered, immutable sequence of composed steps. */
@@ -376,7 +372,7 @@ const ScenarioResolveOptions& options);
  * Bind @p row into @p step - its request's `{{data.column}}` fields first, then
  * the credentials the plan deliberately left unresolved.
  *
- * The step-shaped spelling of `core::bind_iteration_row`, which is where the
+ * The step-shaped spelling of `core::bind_iteration`, which is where the
  * order lives and which the single-request load path drives with its own
  * templates (issue #993). Both scenario executors call this rather than the two
  * halves in sequence, so a step cannot bind differently depending on which one
