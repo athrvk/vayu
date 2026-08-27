@@ -3767,7 +3767,7 @@ void install_response_events (JSContext* ctx, JSValue response, const nlohmann::
             JS_SetPropertyStr (ctx, entry, "data",
             JS_NewStringLen (ctx, data.data (), data.size ()));
             if (const auto source_id = item.find ("sourceId");
-                source_id != item.end () && source_id->is_string ()) {
+            source_id != item.end () && source_id->is_string ()) {
                 const auto id = source_id->get<std::string> ();
                 JS_SetPropertyStr (
                 ctx, entry, "id", JS_NewStringLen (ctx, id.data (), id.size ()));
@@ -5301,7 +5301,7 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
     // Weakest scope first, so a stronger one overwrites it and the snapshot
     // agrees with what get() would have answered for every key in it.
     for (auto it = std::rbegin (variables_precedence);
-         it != std::rend (variables_precedence); ++it) {
+    it != std::rend (variables_precedence); ++it) {
         merge_visible_variables (
         ctx, *it, [&] (const std::string& key, const Variable& variable) {
             JS_SetPropertyStr (ctx, snapshot, key.c_str (),
@@ -5365,7 +5365,7 @@ JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int a
     // Weakest scope first so a stronger one overwrites - the same walk
     // toObject() does, and the same answer get() would give per name.
     for (auto it = std::rbegin (variables_precedence);
-         it != std::rend (variables_precedence); ++it) {
+    it != std::rend (variables_precedence); ++it) {
         merge_visible_variables (
         ctx, *it, [&] (const std::string& key, const Variable& variable) {
             values[key] = variable.value;
