@@ -8,9 +8,11 @@
 #include "vayu/core/scenario_runner.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <deque>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 #include "vayu/core/constants.hpp"
@@ -228,41 +230,80 @@ std::string describe_recent_steps (const std::deque<std::string>& trail) {
 
 } // namespace
 
-ScenarioStepNameIndex build_step_name_index (const ScenarioPlan& plan) {
-    ScenarioStepNameIndex index;
+ScenarioStepIndex build_step_index (const ScenarioPlan& plan) {
+    ScenarioStepIndex index;
     for (size_t position = 0; position < plan.steps.size (); ++position) {
-        index[plan.steps[position].name].push_back (position);
+        index.by_name[plan.steps[position].name].push_back (position);
+        // A step whose request carries no id - the plan tests build such steps,
+        // and nothing in this type forbids one - is indexed by name alone
+        // rather than under an empty key that `setNextRequest("")` could never
+        // reach anyway (the binding refuses an empty target).
+        if (!plan.steps[position].request_id.empty ()) {
+            index.by_request_id[plan.steps[position].request_id].push_back (position);
+        }
     }
     return index;
 }
 
-NextStepResolution resolve_next_step (const ScenarioStepNameIndex& index,
-const std::string& target) {
+NextStepResolution
+resolve_next_step (const ScenarioStepIndex& index, const std::string& target) {
     NextStepResolution resolution;
 
-    auto found = index.find (target);
-    if (found == index.end ()) {
-        resolution.error =
-        "setNextRequest(\"" + target + "\") names no request in this collection run";
+    // Postman's runner reads the string "null" as the stop form real `null`
+    // already means here, and the quoted spelling is endemic in collections
+    // written against it. A step actually named `null` is the more specific
+    // answer and wins - which is why this asks the name index rather than
+    // answering on the string alone.
+    if (target == "null" && !index.by_name.contains (target)) {
+        resolution.kind = NextStepResolution::Kind::EndIteration;
         return resolution;
     }
 
-    if (found->second.size () > 1) {
-        std::string positions;
-        for (size_t i = 0; i < found->second.size (); ++i) {
-            if (i > 0) {
-                positions += i + 1 == found->second.size () ? " and " : ", ";
-            }
-            positions += std::to_string (found->second[i]);
+    // Names first, ids second: a name is what a script author writes, and the
+    // order is what keeps a collection whose request is *named* like some
+    // other request's id resolving to the request the author can see.
+    struct TargetKey {
+        const ScenarioStepPositions* positions;
+        std::string_view noun;
+        /// What the author can actually do about a collision, which differs by
+        /// key: two steps may be renamed, and two steps carrying one id is a
+        /// plan that listed a request twice - nothing a rename fixes.
+        std::string_view remedy;
+    };
+    const std::array<TargetKey, 2> keys{
+        { { &index.by_name, "name", "rename one of them so the target names a single request" },
+        { &index.by_request_id, "id", "jump by name instead - one request cannot be two steps of a run" } }
+    };
+    for (const auto& [positions, noun, remedy] : keys) {
+        auto found = positions->find (target);
+        if (found == positions->end ()) {
+            continue;
         }
-        resolution.error = "setNextRequest(\"" + target +
-        "\") is ambiguous - the name is carried by steps " + positions +
-        "; rename one of them so the target names a single request";
+
+        if (found->second.size () > 1) {
+            std::string steps;
+            for (size_t i = 0; i < found->second.size (); ++i) {
+                if (i > 0) {
+                    steps += i + 1 == found->second.size () ? " and " : ", ";
+                }
+                steps += std::to_string (found->second[i]);
+            }
+            resolution.error = "setNextRequest(\"" + target + "\") is ambiguous - the ";
+            resolution.error += noun;
+            resolution.error += " is carried by steps ";
+            resolution.error += steps;
+            resolution.error += "; ";
+            resolution.error += remedy;
+            return resolution;
+        }
+
+        resolution.kind  = NextStepResolution::Kind::Step;
+        resolution.index = found->second.front ();
         return resolution;
     }
 
-    resolution.ok    = true;
-    resolution.index = found->second.front ();
+    resolution.error = "setNextRequest(\"" + target +
+    "\") matches no request name or id in this collection run";
     return resolution;
 }
 
@@ -597,7 +638,7 @@ ScenarioSummaryInputs& summary) {
  *         it continues at all.
  */
 size_t decide_next_step (const vayu::http::routes::ExchangeOutcome& exchange,
-const ScenarioStepNameIndex& name_index,
+const ScenarioStepIndex& step_index,
 const std::deque<std::string>& recent_steps,
 size_t position,
 size_t steps_this_iteration,
@@ -636,13 +677,24 @@ bool& end_iteration) {
                 std::to_string (max_steps_per_iteration) +
                 ") - setNextRequest is cycling through: " + describe_recent_steps (recent_steps);
                 end_iteration = true;
-            } else if (auto next = resolve_next_step (name_index, control.target);
-            !next.ok) {
-                record.outcome = StepOutcome::Errored;
-                record.error   = next.error;
-                end_iteration  = true;
             } else {
-                next_position = next.index;
+                // Three answers, not two: a target may also *be* the stop
+                // form - `setNextRequest("null")`, which Postman's runner
+                // reads as the real `null` this switch's other arm handles.
+                switch (auto next = resolve_next_step (step_index, control.target);
+                next.kind) {
+                case NextStepResolution::Kind::Unresolved:
+                    record.outcome = StepOutcome::Errored;
+                    record.error   = next.error;
+                    end_iteration  = true;
+                    break;
+                case NextStepResolution::Kind::EndIteration:
+                    end_iteration = true;
+                    break;
+                case NextStepResolution::Kind::Step:
+                    next_position = next.index;
+                    break;
+                }
             }
             break;
         }
@@ -738,7 +790,7 @@ bool verbose,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const StepContext& base,
 const ScenarioPlan& plan,
-const ScenarioStepNameIndex& name_index,
+const ScenarioStepIndex& step_index,
 size_t max_steps_per_iteration,
 CoverageTally& coverage,
 ScenarioSummaryInputs& summary,
@@ -772,7 +824,7 @@ ScenarioStepStore& store) {
 
         bool end_iteration = record.outcome == StepOutcome::Errored;
         const size_t next_position =
-        decide_next_step (exchange, name_index, recent_steps, position,
+        decide_next_step (exchange, step_index, recent_steps, position,
         steps_this_iteration, max_steps_per_iteration, record, end_iteration);
 
         store_step_record (step_ctx, step, exchange, record, coverage, summary, store);
@@ -884,7 +936,7 @@ RunManager& manager) {
         // Flow control's two supports, both fixed for the run: where a
         // `setNextRequest` target resolves to, and how far one iteration may
         // travel before a cycle is called a cycle.
-        const auto name_index                = build_step_name_index (plan);
+        const auto step_index                = build_step_index (plan);
         const size_t max_steps_per_iteration = resolve_max_steps_per_iteration (
         db.get_config_int ("maxStepsPerIteration", 0), plan.steps.size ());
 
@@ -913,7 +965,7 @@ RunManager& manager) {
                 transport, cookie_scope, data_rows, data_row_index, iteration,
                 asked.iterations, fail_on_schema_error, max_trace_body_bytes };
             run_iteration (script_engine, cookie_jar, cookie_scope, verbose, scopes, step_ctx,
-            plan, name_index, max_steps_per_iteration, coverage, summary, store);
+            plan, step_index, max_steps_per_iteration, coverage, summary, store);
 
             if (!context->should_stop) {
                 ++summary.iterations_completed;

@@ -173,38 +173,63 @@ class ScenarioStepStore {
 };
 
 /**
- * @brief Every position a step name occupies in the plan.
+ * @brief Every position one key - a step name or a request id - occupies in the
+ *        plan.
  *
  * Names are not unique - two requests in the same collection may share one, and
  * nothing in the schema prevents it - so the value is a list rather than an
  * index. That list is what makes an ambiguous `setNextRequest` target a named
  * error instead of a silent jump to whichever one resolution happened to see
- * first.
+ * first. Ids are unique by the schema, and are held in the same shape so an
+ * impossible duplicate is refused the same way rather than resolved by
+ * whichever the walk saw first.
  */
-using ScenarioStepNameIndex = std::unordered_map<std::string, std::vector<size_t>>;
+using ScenarioStepPositions = std::unordered_map<std::string, std::vector<size_t>>;
+
+/**
+ * @brief The two keys a `setNextRequest` target may be, indexed once per run.
+ *
+ * Postman documents both spellings - a request's name, and the id a script
+ * reads off `pm.info.requestId` - so a target that is neither is what makes the
+ * step fail (issue #1006).
+ */
+struct ScenarioStepIndex {
+    ScenarioStepPositions by_name;
+    ScenarioStepPositions by_request_id;
+};
 
 /** Build that index once per run; positions are indices into `plan.steps`. */
-[[nodiscard]] ScenarioStepNameIndex build_step_name_index (const ScenarioPlan& plan);
+[[nodiscard]] ScenarioStepIndex build_step_index (const ScenarioPlan& plan);
 
 /** Where a `setNextRequest` target points, or why it points nowhere. */
 struct NextStepResolution {
-    bool ok      = false;
+    enum class Kind {
+        Unresolved,  ///< Nothing answers to the target; `error` says why.
+        Step,        ///< Continue the iteration at `index`.
+        EndIteration ///< The target was the stop form; this iteration is over.
+    };
+    Kind kind    = Kind::Unresolved;
     size_t index = 0;
-    /// Caller-facing sentence, on the failure path only. It reaches the step's
-    /// `results.error` and the app's step list, so it names the target and, for
-    /// an ambiguous one, every step that answers to it.
+    /// Caller-facing sentence, on the `Unresolved` path only. It reaches the
+    /// step's `results.error` and the app's step list, so it names the target
+    /// and, for an ambiguous one, every step that answers to it.
     std::string error;
 };
 
 /**
  * @brief Resolve a `setNextRequest` target against the plan.
  *
- * Both failures are loud by design (issue #355): a name no step carries is a
- * script pointing at a request that is not in the run, and a duplicated name is
- * ambiguous - continuing past either would run a sequence nobody asked for.
+ * Resolution order, and the order is the contract: the stop form `"null"`
+ * first, then names, then request ids. A step actually *named* `null` wins over
+ * the stop form - a name the run carries is the more specific answer, and the
+ * alternative is a step nothing can ever jump to.
+ *
+ * Both failures are loud by design (issue #355): a target no step answers to is
+ * a script pointing at a request that is not in the run, and a duplicated name
+ * is ambiguous - continuing past either would run a sequence nobody asked for.
  */
 [[nodiscard]] NextStepResolution
-resolve_next_step (const ScenarioStepNameIndex& index, const std::string& target);
+resolve_next_step (const ScenarioStepIndex& index, const std::string& target);
 
 /**
  * @brief How many step executions one iteration may perform.
