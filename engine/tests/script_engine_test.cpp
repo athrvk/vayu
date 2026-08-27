@@ -867,6 +867,9 @@ TEST_F (ScriptEngineTest, ExpectChainRejectsUnknownMembers) {
     R"(pm.test("t", function() { pm.expect({}).to.be.sealed; });)",
     // A typo in the middle of a chain names itself too.
     R"(pm.test("t", function() { pm.expect({a:1}).to.hve.property("a"); });)",
+    // The negated form is a property read like any other, so it throws rather
+    // than negating its way to a pass.
+    R"(pm.test("t", function() { pm.expect(1).to.not.be.finite; });)",
     });
 
     for (const char* script : scripts) {
@@ -963,6 +966,57 @@ TEST_F (ScriptEngineTest, ExpectIncludeMatchesObjectSubset) {
     }
 }
 
+// An expectation with no keys compares nothing. chai walks its keys, finds
+// none, and passes in *both* directions - so a computed subset that came out
+// empty is a green test that asserted nothing, and `.not.include` of one is a
+// green test too. A Date, a RegExp and a function each carry no own enumerable
+// key and read as an assertion, which is the same trap wearing a type.
+TEST_F (ScriptEngineTest, ExpectIncludeRefusesAnExpectationWithNoKeys) {
+    auto result = engine.execute_test (R"(
+        pm.test("empty object", function() { pm.expect({a:1}).to.include({}); });
+        pm.test("empty object negated", function() { pm.expect({a:1}).to.not.include({}); });
+        pm.test("a primitive target", function() { pm.expect(5).to.include({}); });
+        pm.test("a date", function() { pm.expect({a:1}).to.include(new Date()); });
+        pm.test("a regexp", function() { pm.expect({a:1}).to.include(/x/); });
+        pm.test("a function", function() { pm.expect({a:1}).to.include(function(){}); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 6u);
+    for (const auto& test : result.tests) {
+        EXPECT_FALSE (test.passed) << test.name << " passed but should not";
+        EXPECT_NE (test.error_message.find ("no properties to match"), std::string::npos)
+        << test.name << ": " << test.error_message;
+    }
+}
+
+// A getter that throws is a read that did not happen, not a mismatch. Answering
+// "these differ" would make the negated form a pass, which is how a broken
+// object under test reports green.
+TEST_F (ScriptEngineTest, ExpectIncludePropagatesAThrowingGetter) {
+    auto result = engine.execute_test (R"(
+        pm.test("on the target", function() {
+            var target = { get a() { throw new Error("nope"); } };
+            pm.expect(target).to.not.include({a: 1});
+        });
+        pm.test("on the expectation", function() {
+            var wanted = {};
+            Object.defineProperty(wanted, "a", {
+                enumerable: true, get: function() { throw new Error("nope"); }
+            });
+            pm.expect({a: 1}).to.not.include(wanted);
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2u);
+    for (const auto& test : result.tests) {
+        EXPECT_FALSE (test.passed) << test.name << " passed but should not";
+        EXPECT_NE (test.error_message.find ("nope"), std::string::npos)
+        << test.name << ": " << test.error_message;
+    }
+}
+
 // `ToNumber` on both sides made `expect("5").to.be.above(3)` a pass. chai
 // type-asserts, so it is an error there - and the coerced reading is how a
 // string body silently compares as a number.
@@ -978,10 +1032,12 @@ TEST_F (ScriptEngineTest, ExpectOrderingMatchersTypeAssert) {
         pm.test("a string argument", function() { pm.expect(5).to.be.above("3"); });
         pm.test("a boolean target", function() { pm.expect(true).to.be.at.least(0); });
         pm.test("a null argument", function() { pm.expect(5).to.be.at.most(null); });
+        pm.test("a number against a Date", function() { pm.expect(5).to.be.above(new Date(1)); });
+        pm.test("a Date against a number", function() { pm.expect(new Date(5)).to.be.above(1); });
     )",
     request, response, env);
 
-    ASSERT_EQ (result.tests.size (), 10u);
+    ASSERT_EQ (result.tests.size (), 12u);
     for (size_t i = 0; i < 6; i++) {
         EXPECT_TRUE (result.tests[i].passed)
         << result.tests[i].name << ": " << result.tests[i].error_message;
@@ -989,6 +1045,13 @@ TEST_F (ScriptEngineTest, ExpectOrderingMatchersTypeAssert) {
     for (size_t i = 6; i < 10; i++) {
         EXPECT_FALSE (result.tests[i].passed) << result.tests[i].name << " passed but should not";
         EXPECT_NE (result.tests[i].error_message.find ("number or a Date"), std::string::npos)
+        << result.tests[i].error_message;
+    }
+    // chai orders like with like: a Date read as milliseconds against a number
+    // is a comparison neither side wrote.
+    for (size_t i = 10; i < 12; i++) {
+        EXPECT_FALSE (result.tests[i].passed) << result.tests[i].name << " passed but should not";
+        EXPECT_NE (result.tests[i].error_message.find ("a Date with a Date"), std::string::npos)
         << result.tests[i].error_message;
     }
 }
@@ -1030,16 +1093,29 @@ TEST_F (ScriptEngineTest, ExpectThrowMatchesMessageAndConstructor) {
         pm.test("the message form can fail", function() {
             pm.expect(function() { throw new Error("boom"); }).to.throw("bang");
         });
+        pm.test("a thrown number has no message", function() {
+            pm.expect(function() { throw 42; }).to.not.throw("4");
+        });
     )",
     request, response, env);
 
-    ASSERT_EQ (result.tests.size (), 10u);
+    ASSERT_EQ (result.tests.size (), 11u);
     for (size_t i = 0; i < 8; i++) {
         EXPECT_TRUE (result.tests[i].passed)
         << result.tests[i].name << ": " << result.tests[i].error_message;
     }
     EXPECT_FALSE (result.tests[8].passed);
     EXPECT_FALSE (result.tests[9].passed);
+    EXPECT_TRUE (result.tests[10].passed) << result.tests[10].error_message;
+
+    // A failure has to say what was expected. "Expected the function to throw,
+    // but it threw RangeError: bad" reads as an engine fault when what failed
+    // was the constructor the script named.
+    EXPECT_NE (result.tests[8].error_message.find ("to throw TypeError"), std::string::npos)
+    << result.tests[8].error_message;
+    EXPECT_NE (
+    result.tests[9].error_message.find ("with a message matching 'bang'"), std::string::npos)
+    << result.tests[9].error_message;
 }
 
 // deep-eql separates the two zeros (`1/x`) and `===` does not, so `.eql` and

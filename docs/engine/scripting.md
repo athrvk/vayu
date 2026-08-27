@@ -201,16 +201,40 @@ Notes on the edges:
   unless the chain says `deep`. Any target other than a string or an array takes
   an *object* argument, so `expect({a:1}).to.include('a')` and
   `expect(5).to.include('x')` are both a `TypeError` - a combination chai
-  refuses rather than a verdict.
+  refuses rather than a verdict. Three edges are Vayu's own:
+    - **An expectation with no own enumerable keys is refused**, where chai
+      passes it in both directions. `expect(body).to.include({})` compares
+      nothing, so a computed subset that came out empty would report green
+      having asserted nothing; a `Date`, a `RegExp` and a function carry no key
+      either and read as assertions. Each names itself instead.
+    - **A getter that throws is reported, not compared.** The exception reaches
+      the test rather than being read as "these differ", which under `.not`
+      would have been a pass.
+    - **A `Map`, a `Set` or a boxed `String` target is refused** rather than
+      answered: chai has membership rules for the first two that deep equality
+      here deliberately does not (see the `eql` note above), and a quiet
+      `false` was the previous answer.
+- **The failure message names the argument.** `.to.throw(TypeError)` that caught
+  a `RangeError` says so, rather than reporting that a function which threw did
+  not throw.
 - **The ordering matchers type-assert both sides.** `above`, `below`,
   `at.least` and `at.most` take a number or a `Date` and refuse anything else,
   which is chai's rule: `expect('5').to.be.above(3)` used to pass here through
-  `ToNumber`, and now names what it was given.
+  `ToNumber`, and now names what it was given. They compare like with like too -
+  a `Date` read as milliseconds against a number is a comparison neither side
+  wrote, so the mixed pair is refused.
 - **`throw` reads the error's `message`.** A string or a regular expression is
   matched against `err.message` alone, never `String(err)` - so
   `.to.throw('Error')` no longer passes for every `Error` thrown. A constructor
   is accepted as the first argument (`instanceof`), with an optional message
-  matcher after it.
+  matcher after it. A thrown string is its own message and anything else has
+  none, which is chai's rule: `.to.throw('4')` does not pass on `throw 42`.
+- **A wrong-typed value is a `TypeError` here where chai raises an
+  `AssertionError`** - `expect('5').to.be.above(3)`, `expect(5).to.include('x')`.
+  Deliberate: this file's rule is that a mistake in the script text stays a
+  `TypeError` because nothing was asserted, and the response assertions refuse
+  a wrong-typed argument the same way (#998). Both throw, so a test fails
+  either way; what differs is `e.name`.
 - **`.and` carries the chain's flags**, `not` included, exactly as in chai.
 
 ## Response Object (`pm.response`)

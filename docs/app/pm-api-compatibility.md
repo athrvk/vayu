@@ -322,7 +322,20 @@ compare them equal, because chai-postman runs on lodash `_.isEqual`.
 the argument must be on the target with an equal value. Any target other than a
 string or an array takes an *object* argument, so `expect({a:1}).to.include('a')`
 and `expect(5).to.include('x')` are both a `TypeError` - the combination chai
-refuses rather than answers.
+refuses rather than answers. Vayu is stricter than chai in three places, each
+because chai's answer there is a silent non-assertion or a quiet wrong verdict:
+an expectation carrying no own enumerable keys is refused (`to.include({})`, a
+`Date`, a `RegExp`, a function - chai passes all of them, in both directions,
+having compared nothing); a getter that throws is reported rather than read as
+"these differ"; and a `Map`, `Set` or boxed `String` target is refused rather
+than answered, since deep equality here does not inspect the first two.
+
+**A wrong-typed value is a `TypeError` where chai raises an `AssertionError`** -
+`expect('5').to.be.above(3)`, `expect(5).to.include('x')`. Deliberate, and the
+same choice `pm.response.to.have.body` made for a wrong-typed argument (#998):
+the rule below is that a mistake in the script text stays a `TypeError` because
+nothing was asserted. Both throw, so a test fails either way; `e.name` is what
+differs.
 
 **The second argument is chai's failure message.** `pm.expect(value, 'context')`
 prefixes `context: ` to whatever the failing matcher reports, so an assertion
