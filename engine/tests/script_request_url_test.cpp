@@ -27,6 +27,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -388,6 +389,238 @@ TEST_F (ScriptRequestUrlTest, AReplacedRequestObjectMayStillCarryAPlainString) {
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (request.url, "https://api.example.com/v9/ping");
+}
+
+// ---------------------------------------------------------------------------
+// Member mutation (issue #1040) - the edits that must reach the wire, and the
+// untouched URL that must not be rebuilt.
+// ---------------------------------------------------------------------------
+
+TEST_F (ScriptRequestUrlTest, PushingAPathSegmentReachesTheWire) {
+    request.url       = "https://api.example.com/v2/users";
+    const auto result = engine.execute_prerequest (R"JS(
+        pm.request.url.path.push('active');
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/v2/users/active");
+}
+
+// The reason the segment lists are proxies rather than arrays: every spelling
+// of the mutation has to reach the URL, not just the one that was tested for.
+TEST_F (ScriptRequestUrlTest, EverySpellingOfASegmentEditReachesTheWire) {
+    struct Case {
+        const char* script;
+        const char* expected;
+    };
+    const std::array<Case, 5> CASES = { {
+    { "pm.request.url.path[1] = 'admins';", "https://api.example.com/v2/admins" },
+    { "pm.request.url.path.splice(0, 1);", "https://api.example.com/users" },
+    { "pm.request.url.path.pop();", "https://api.example.com/v2" },
+    { "pm.request.url.path.unshift('api');", "https://api.example.com/api/v2/users" },
+    { "pm.request.url.path.length = 1;", "https://api.example.com/v2" },
+    } };
+
+    for (const auto& [script, expected] : CASES) {
+        Request target    = request;
+        target.url        = "https://api.example.com/v2/users";
+        const auto result = engine.execute_prerequest (script, target, env);
+
+        ASSERT_TRUE (result.success) << script << ": " << result.error_message;
+        EXPECT_EQ (target.url, expected) << script;
+    }
+}
+
+TEST_F (ScriptRequestUrlTest, ReplacingTheHostReachesTheWire) {
+    request.url       = "https://api.example.com/v2/users";
+    const auto result = engine.execute_prerequest (R"JS(
+        pm.request.url.host = ['api', 'staging', 'example', 'com'];
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "https://api.staging.example.com/v2/users");
+}
+
+TEST_F (ScriptRequestUrlTest, TheSingleStringPartsAreWritable) {
+    request.url       = "https://api.example.com/v2/users";
+    const auto result = engine.execute_prerequest (R"JS(
+        pm.request.url.protocol = 'http';
+        pm.request.url.port = '8080';
+        pm.request.url.hash = 'top';
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "http://api.example.com:8080/v2/users#top");
+}
+
+TEST_F (ScriptRequestUrlTest, TheQueryWritersReachTheWire) {
+    request.url       = "https://api.example.com/s?page=2";
+    const auto result = engine.execute_prerequest (R"JS(
+        pm.request.url.query.add({ key: 'sort', value: 'name' });
+        pm.request.url.query.upsert({ key: 'page', value: '7' });
+        pm.request.url.query.add({ key: 'flag' });
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/s?page=7&sort=name&flag");
+}
+
+// upsert replaces in place, so a signature over the query does not silently
+// change shape because a parameter moved to the end.
+TEST_F (ScriptRequestUrlTest, UpsertKeepsWirePositionAndAddAppendsADuplicate) {
+    request.url = "https://api.example.com/s?a=1&b=2";
+    ASSERT_TRUE (engine
+    .execute_prerequest ("pm.request.url.query.upsert({key:'a', value:'9'});", request, env)
+    .success);
+    EXPECT_EQ (request.url, "https://api.example.com/s?a=9&b=2");
+
+    ASSERT_TRUE (engine
+    .execute_prerequest ("pm.request.url.query.add({key:'a', value:'8'});", request, env)
+    .success);
+    EXPECT_EQ (request.url, "https://api.example.com/s?a=9&b=2&a=8");
+}
+
+// Every match, not the first: removing `page` and getting one of two back has
+// removed nothing the caller can observe.
+TEST_F (ScriptRequestUrlTest, RemoveTakesEveryParameterOfThatName) {
+    request.url       = "https://api.example.com/s?page=1&sort=name&page=2";
+    const auto result = engine.execute_prerequest (R"JS(
+        pm.request.url.query.remove('page');
+        pm.request.url.query.remove('nothing-here');
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/s?sort=name");
+}
+
+TEST_F (ScriptRequestUrlTest, ClearEmptiesTheQueryAndTheQuestionMarkWithIt) {
+    request.url = "https://api.example.com/s?page=1&sort=name";
+    const auto result =
+    engine.execute_prerequest ("pm.request.url.query.clear();", request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/s");
+}
+
+// The reads have to follow the writes within the same script, or a script that
+// edits and then signs would sign the pre-edit URL.
+TEST_F (ScriptRequestUrlTest, TheReadsFollowAnEditWithinTheSameScript) {
+    request.url = "https://api.example.com/v2/users?page=1";
+    expect_script_passes (R"JS(
+        pm.request.url.query.upsert({ key: 'page', value: '4' });
+        pm.request.url.path.push('active');
+        pm.expect(pm.request.url.query.get('page')).to.equal('4');
+        pm.expect(pm.request.url.getPath()).to.equal('/v2/users/active');
+        pm.expect(pm.request.url.getQueryString()).to.equal('page=4');
+        pm.expect(pm.request.url.toString())
+          .to.equal('https://api.example.com/v2/users/active?page=4');
+        pm.expect(pm.request.url.length).to.equal(pm.request.url.toString().length);
+    )JS");
+}
+
+/**
+ * The regression the whole dirty-flag design exists to prevent.
+ *
+ * Composing on every read would put every URL through a split-and-join, and a
+ * URL that survives that is not guaranteed byte-identical - which would quietly
+ * break `getQueryString()` being byte-exact against the wire, the property the
+ * signing workflows depend on. A script that only *reads* must leave the
+ * request exactly as it found it.
+ */
+TEST_F (ScriptRequestUrlTest, AScriptThatOnlyReadsLeavesTheUrlByteIdentical) {
+    for (const char* url :
+    { "https://api.example.com/s?q=hello%20world&plus=a+b",
+    "https://api.example.com/v2/users%20list?page=2&sort=name&page=3#top",
+    "https://api.example.com/s?flag&empty=" }) {
+        Request target    = request;
+        target.url        = url;
+        const auto result = engine.execute_prerequest (R"JS(
+            var seen = pm.request.url.getQueryString() + pm.request.url.getPath() +
+                       pm.request.url.query.count() + pm.request.url.host.length;
+        )JS",
+        target, env);
+
+        ASSERT_TRUE (result.success) << url << ": " << result.error_message;
+        EXPECT_EQ (target.url, url) << "a read-only script rewrote the URL";
+    }
+}
+
+// A URL with no parts has no honest edit to make, and composing from empty
+// pieces would send "://" plus whatever was pushed.
+TEST_F (ScriptRequestUrlTest, EditingAnUnparseableUrlIsRefusedRatherThanComposed) {
+    const std::array<const char*, 4> EDITS = { {
+    "pm.request.url.path.push('x');",
+    "pm.request.url.query.add({key:'a', value:'1'});",
+    "pm.request.url.query.clear();",
+    "pm.request.url.protocol = 'https';",
+    } };
+
+    for (const char* edit : EDITS) {
+        Request target    = request;
+        target.url        = "not a url at all";
+        const auto result = engine.execute_prerequest (edit, target, env);
+
+        EXPECT_FALSE (result.success) << edit;
+        EXPECT_EQ (target.url, "not a url at all") << edit;
+    }
+}
+
+// A segment that cannot be a path segment fails at the mutation rather than
+// reaching the wire as "[object Object]".
+TEST_F (ScriptRequestUrlTest, ASegmentThatIsNotAStringIsRefused) {
+    const std::string original = request.url;
+    const auto result          = engine.execute_prerequest (R"JS(
+        pm.request.url.path.push({ a: 1 });
+    )JS",
+             request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("path"), std::string::npos) << result.error_message;
+    EXPECT_EQ (request.url, original);
+}
+
+// A number is the one non-string taken: pushing an id onto a path is the
+// obvious case, and there is no ambiguity about what it means.
+TEST_F (ScriptRequestUrlTest, ANumericSegmentIsTakenAsItsDigits) {
+    request.url = "https://api.example.com/v2/users";
+    const auto result =
+    engine.execute_prerequest ("pm.request.url.path.push(42);", request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/v2/users/42");
+}
+
+TEST_F (ScriptRequestUrlTest, AQueryWriterRefusesAnArgumentThatIsNotAKeyValueObject) {
+    const std::string original = request.url;
+    for (const char* edit : { "pm.request.url.query.add('sort=name');",
+         "pm.request.url.query.add({ value: 'name' });", "pm.request.url.query.add({ key: '' });",
+         "pm.request.url.query.add({ key: 'a', value: { b: 1 } });",
+         "pm.request.url.query.remove(42);" }) {
+        Request target    = request;
+        const auto result = engine.execute_prerequest (edit, target, env);
+
+        EXPECT_FALSE (result.success) << edit;
+        EXPECT_EQ (target.url, original) << edit;
+    }
+}
+
+// A test script's pm.request is a read-only record, so an edit there changes
+// what the script sees and reaches nothing that was sent - the same rule the
+// header mutators follow, now that the URL has mutators of its own.
+TEST_F (ScriptRequestUrlTest, MemberEditsInATestScriptAreNotWrittenBack) {
+    const std::string original = request.url;
+    const ScriptResult result  = run_test_script (R"JS(
+        pm.request.url.path.push('evil');
+        pm.request.url.query.add({ key: 'leak', value: '1' });
+    )JS");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, original);
 }
 
 // ---------------------------------------------------------------------------

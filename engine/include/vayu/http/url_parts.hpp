@@ -102,6 +102,34 @@ struct UrlParts {
 [[nodiscard]] std::vector<UrlQueryParam> parse_query_params (std::string_view query);
 
 /**
+ * @brief The params back as a wire query string, without the leading `?`.
+ *
+ * The inverse of @ref parse_query_params, and byte-for-byte its inverse for a
+ * list that came out of it: values are already the wire bytes, so nothing is
+ * encoded here. A `nullopt` value is a bare key.
+ */
+[[nodiscard]] std::string compose_query (const std::vector<UrlQueryParam>& params);
+
+/**
+ * @brief The parts back as a URL.
+ *
+ * The inverse of @ref parse_url_parts, for a caller that has *edited* the parts
+ * - `pm.request.url.path.push(...)` and the query writers (issue #1040). It is
+ * not a round-trip helper: a URL nobody edited must reach the wire as the bytes
+ * it arrived as, so the script surface composes only when a member was actually
+ * written to, and this is never called otherwise.
+ *
+ * Path segments are percent-encoded here because @ref parse_url_parts decoded
+ * them, each segment on its own so an edited segment containing `/` stays one
+ * segment. The query is passed through unencoded, for the same reason it was
+ * never decoded.
+ *
+ * Empty when `parts.parsed` is false: there is nothing to compose from, and a
+ * plausible-looking URL built out of empty pieces is worse than none.
+ */
+[[nodiscard]] std::string compose_url (const UrlParts& parts);
+
+/**
  * @brief `{"api", "example", "com"}` -> `"api.example.com"`.
  */
 [[nodiscard]] std::string join_host (const std::vector<std::string>& host);

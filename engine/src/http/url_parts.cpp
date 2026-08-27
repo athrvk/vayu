@@ -41,6 +41,22 @@ std::string percent_decode (const std::string& value) {
     return out;
 }
 
+/// libcurl's percent-encoder, the inverse of the decode above and the same
+/// pure-function call `form_body.cpp` makes. It encodes everything outside the
+/// unreserved set, which is wider than a path segment strictly needs - an
+/// encoded `:` or `@` is still the same path, and over-encoding cannot change
+/// what the URL means the way under-encoding can.
+std::string percent_encode (const std::string& value) {
+    char* escaped =
+    curl_easy_escape (nullptr, value.c_str (), static_cast<int> (value.size ()));
+    if (!escaped) {
+        return value;
+    }
+    std::string out (escaped);
+    curl_free (escaped);
+    return out;
+}
+
 /// Split a raw path on `/`, dropping the empty segment the leading slash makes
 /// and decoding each of the rest on its own. Segment-at-a-time decoding is the
 /// point: decoding the whole path first would turn an encoded `%2F` into a
@@ -88,6 +104,51 @@ std::vector<UrlQueryParam> parse_query_params (std::string_view query) {
         query.remove_prefix (amp + 1);
     }
     return params;
+}
+
+std::string compose_query (const std::vector<UrlQueryParam>& params) {
+    std::string out;
+    for (const auto& param : params) {
+        if (!out.empty ()) {
+            out += '&';
+        }
+        out += param.key;
+        if (param.value) {
+            out += '=';
+            out += *param.value;
+        }
+    }
+    return out;
+}
+
+std::string compose_url (const UrlParts& parts) {
+    if (!parts.parsed) {
+        return {};
+    }
+    std::string out = parts.protocol;
+    out += "://";
+    out += join_host (parts.host);
+    if (!parts.port.empty ()) {
+        out += ':';
+        out += parts.port;
+    }
+    // Encoded per segment, undoing `split_path`'s per-segment decode - so a
+    // segment an edit put a `/` into stays one segment rather than becoming
+    // two, which is the same rule read the other way round.
+    for (const auto& segment : parts.path) {
+        out += '/';
+        out += percent_encode (segment);
+    }
+    const std::string query = compose_query (parts.query_params);
+    if (!query.empty ()) {
+        out += '?';
+        out += query;
+    }
+    if (!parts.hash.empty ()) {
+        out += '#';
+        out += parts.hash;
+    }
+    return out;
 }
 
 std::string join_host (const std::vector<std::string>& host) {

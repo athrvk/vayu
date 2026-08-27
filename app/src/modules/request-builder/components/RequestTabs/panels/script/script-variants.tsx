@@ -83,6 +83,7 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			'pm.request.headers.upsert("X-Trace", traceId)',
 			'delete pm.request.headers["Authorization"]',
 			'pm.request.url.query.get("page")',
+			'pm.request.url.query.upsert({ key: "page", value: 2 })',
 			'pm.request.url = "https://api.example.com/v2/users"',
 			"pm.request.body = JSON.stringify({ n: 2 })",
 			"pm.sendRequest(url, (err, res) => { ... })",
@@ -107,7 +108,9 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 				<code className={CODE_CLASS}>query</code> and{" "}
 				<code className={CODE_CLASS}>getQueryString()</code> - and still reads as the full
 				URL string everywhere except <code className={CODE_CLASS}>===</code> and{" "}
-				<code className={CODE_CLASS}>typeof</code>. Assign a string to retarget.
+				<code className={CODE_CLASS}>typeof</code>. Edit a member -{" "}
+				<code className={CODE_CLASS}>path.push</code>,{" "}
+				<code className={CODE_CLASS}>query.add</code> - or assign a whole URL string.
 			</>,
 			<>
 				Indexing is case-sensitive in JS: use the exact name (

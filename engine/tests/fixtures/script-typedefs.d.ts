@@ -695,6 +695,8 @@ declare const pm: {
 			hash: string;
 			/**
 			 * The host split on dots, as Postman presents it: "api.example.com" is ["api", "example", "com"]. Use getHost() for the joined form.
+			 * 
+			 * Editable in a pre-request script, the same way path is.
 			 */
 			host: string[];
 			/**
@@ -703,6 +705,8 @@ declare const pm: {
 			length: number;
 			/**
 			 * The path as decoded segments: "/v2/users" is ["v2", "users"]. Each segment is decoded on its own, so an encoded slash stays inside the segment it belongs to. Use getPath() for the joined form.
+			 * 
+			 * Editable in a pre-request script - push, splice, index assignment and replacing the whole array all reach the URL that is sent.
 			 */
 			path: string[];
 			/**
@@ -714,13 +718,21 @@ declare const pm: {
 			 */
 			protocol: string;
 			/**
-			 * The query parameters, with Postman's PropertyList reads over them: get(name), has(name), all(), toObject() and count(). Values are the wire bytes, not decoded - a signature has to canonicalize what was sent.
+			 * The query parameters, with Postman's PropertyList reads over them - get(name), has(name), all(), toObject(), count() - and its writers: add, upsert, remove, clear. Values are the wire bytes, not decoded - a signature has to canonicalize what was sent.
 			 */
 			query: {
+				/**
+				 * Append a parameter, even when the name is already there - a query may repeat a name, which is why all() exists. Omit value for a bare "?flag". Use upsert to replace instead of appending.
+				 */
+				add(param: { key: string, value?: string | number | boolean | null }): void;
 				/**
 				 * Every parameter as { key, value }, in wire order, duplicates kept - the view a canonical query string is built from. A parameter with no value has value null.
 				 */
 				all(): { key: string, value: string | null }[];
+				/**
+				 * Drop every query parameter. The URL loses its "?" with them.
+				 */
+				clear(): void;
 				/**
 				 * How many parameters the query carries, counting duplicates separately.
 				 */
@@ -734,9 +746,17 @@ declare const pm: {
 				 */
 				has(name: string): boolean;
 				/**
+				 * Remove every parameter of that name, not just the first. A name that is not there is a no-op, the same rule pm.request.headers.remove follows.
+				 */
+				remove(name: string): void;
+				/**
 				 * The query as a plain { name: value } object, last wins on a repeated name. Use all() when duplicates matter.
 				 */
 				toObject(): { [key: string]: string | null };
+				/**
+				 * Replace the first parameter of that name, keeping its position in the query, or append it when there is none. Position is kept because a signature over the query changes shape if a parameter moves.
+				 */
+				upsert(param: { key: string, value?: string | number | boolean | null }): void;
 			};
 			/**
 			 * The whole URL as a string, which is why JSON.stringify embeds the URL rather than an object dump.

@@ -573,10 +573,6 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
 - `pm.cookies.set(...)` / `.unset(...)` / `.clear()` - the *flat* write half.
   Writing goes through `pm.cookies.jar()`, which ships whole - see
   [above](#the-cookie-jar-pmcookies)
-- **Mutating one member of `pm.request.url`** - pushing to `path`, editing a
-  `query` entry. The read surface ships whole (see
-  [Request mutation & URL variables](#request-mutation--url-variables) below);
-  a write is the whole URL, by assignment or `url.update(...)`.
 - `pm.visualizer`
 - The `tests["name"] = bool` legacy assertion style (use `pm.test`)
 - Chai matchers outside the list above: `.include.keys` (the subset form),
@@ -629,6 +625,12 @@ pm.request.body = JSON.stringify({ n: 2 });
   `String.prototype` methods, `JSON.stringify`, `.length` - and two things changed:
   `===` and `typeof`. The full surface and the migration note are in
   [scripting.md](../engine/scripting.md#url-parts-pmrequesturl).
+- **The URL is writable a member at a time, not only whole** (#1040). `path` and
+  `host` are arrays a script mutates in place (`push`, `splice`, index assignment,
+  a `length` truncation); `protocol` / `port` / `hash` take an assignment; and the
+  query carries Postman's `PropertyList` writers - `add`, `upsert`, `remove`,
+  `clear`. A URL nobody edited is sent as the exact bytes it arrived as, because
+  the parts are recomposed only when a member actually changed.
 - **`body` is a string for every mode, including the two that store fields.** A
   `x-www-form-urlencoded` or `form-data` body reads as its **enabled** fields encoded
   `key=value&…` rather than as `""` - the empty string a `content`-only read used to give,

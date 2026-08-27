@@ -187,6 +187,75 @@ TEST (UrlPartsTest, AnUnparseableUrlReportsNoPartsAtAll) {
     EXPECT_TRUE (parts.query_params.empty ());
 }
 
+// ---------------------------------------------------------------------------
+// Composition - the inverse, for a caller that edited the parts (issue #1040).
+// ---------------------------------------------------------------------------
+
+TEST (UrlPartsTest, ComposesTheEditedPartsBackIntoAUrl) {
+    UrlParts parts =
+    parse_url_parts ("https://api.example.com:8443/v2/users?page=2#top");
+    ASSERT_TRUE (parts.parsed);
+
+    parts.path.emplace_back ("active");
+    parts.query_params.push_back ({ "sort", "name" });
+
+    EXPECT_EQ (compose_url (parts),
+    "https://api.example.com:8443/v2/users/active?page=2&sort=name#top");
+}
+
+// The parts a URL was split into put it back together unchanged, for the
+// ordinary shapes. Where that is *not* guaranteed - an unusual escape - the
+// script surface never composes at all, which is what the dirty flag is for;
+// this pins the cases where it is.
+TEST (UrlPartsTest, ComposeRoundTripsAParsedUrl) {
+    for (const char* url :
+    { "https://api.example.com/v2/users?page=2&sort=name#top",
+    "http://127.0.0.1:9876/health", "https://example.com/",
+    "ws://example.com/socket?room=1", "https://example.com/s?flag&empty=" }) {
+        const UrlParts parts = parse_url_parts (url);
+        ASSERT_TRUE (parts.parsed) << url;
+        EXPECT_EQ (compose_url (parts), url);
+    }
+}
+
+// Encoded on the way out because it was decoded on the way in, per segment - so
+// a segment holding a slash stays one segment rather than becoming two.
+TEST (UrlPartsTest, ComposeEncodesEachPathSegmentOnItsOwn) {
+    UrlParts parts = parse_url_parts ("https://example.com/root");
+    ASSERT_TRUE (parts.parsed);
+    parts.path = { "a b", "c/d" };
+
+    EXPECT_EQ (compose_url (parts), "https://example.com/a%20b/c%2Fd");
+    // And it reads back as the two segments it was written from.
+    const UrlParts reparsed = parse_url_parts (compose_url (parts));
+    EXPECT_EQ (reparsed.path, (std::vector<std::string>{ "a b", "c/d" }));
+}
+
+// The query is the wire bytes in both directions: a value that arrived
+// percent-encoded is written back as it arrived, not doubly encoded.
+TEST (UrlPartsTest, ComposeDoesNotReEncodeTheQuery) {
+    const UrlParts parts =
+    parse_url_parts ("https://example.com/s?q=hello%20world");
+    ASSERT_TRUE (parts.parsed);
+
+    EXPECT_EQ (compose_url (parts), "https://example.com/s?q=hello%20world");
+}
+
+TEST (UrlPartsTest, ComposeQueryKeepsTheBareKeyDistinction) {
+    EXPECT_EQ (compose_query ({ { "flag", std::nullopt }, { "empty", std::string () } }),
+    "flag&empty=");
+    EXPECT_EQ (compose_query ({}), "");
+}
+
+// Nothing to compose from, and a URL built out of empty pieces ("://") would
+// look plausible enough to send.
+TEST (UrlPartsTest, ComposingAnUnparsedUrlAnswersNothing) {
+    const UrlParts parts = parse_url_parts ("{{base_url}}/users");
+
+    ASSERT_FALSE (parts.parsed);
+    EXPECT_EQ (compose_url (parts), "");
+}
+
 TEST (UrlPartsTest, JoinHostAndJoinPathAreEmptyForEmptyInput) {
     EXPECT_EQ (join_host ({}), "");
     EXPECT_EQ (join_path ({}), "");

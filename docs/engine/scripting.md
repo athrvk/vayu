@@ -612,16 +612,57 @@ Four rules behind those answers:
 - **A URL the parser cannot read has no parts.** `toString()` still answers the
   whole string, and every part is empty rather than a plausible half.
 
-**Writing** is the whole URL, not a member - assign a string, or call
-`update()`, which is Postman's spelling of the same write:
+#### Writing
+
+The whole URL - assign a string, or call `update()`, which is Postman's
+spelling of the same write:
 
 ```javascript
 pm.request.url = 'https://api.example.com/v3/orders';   // re-parses in place
 pm.request.url.update('https://api.example.com/v3/orders'); // the same write
 ```
 
-Editing a single member (pushing to `path`, changing a `query` entry) is not
-supported; build the URL and assign it.
+Or one member at a time. `path` and `host` are live arrays, and the query has
+Postman's `PropertyList` writers beside its reads:
+
+```javascript
+pm.request.url.path.push('active');          // .../v2/users/active
+pm.request.url.path[0] = 'v3';               // index assignment, splice, pop,
+pm.request.url.path.length = 1;              //   unshift and length all work
+pm.request.url.host = ['api', 'staging', 'example', 'com'];
+pm.request.url.protocol = 'http';            // and port / hash likewise
+
+pm.request.url.query.add({ key: 'trace', value: id });  // appends, duplicates ok
+pm.request.url.query.add({ key: 'flag' });              // a bare ?flag
+pm.request.url.query.upsert({ key: 'page', value: 4 }); // replaces in place
+pm.request.url.query.remove('page');                    // every match, not the first
+pm.request.url.query.clear();                           // and the '?' with them
+```
+
+Four rules behind those, each the reason for a decision you might otherwise
+undo:
+
+- **A URL nobody edited is sent exactly as it arrived.** The parts are
+  recomposed only when a member was actually written to, so a read-only script
+  cannot change a single byte - which is what keeps `getQueryString()`
+  byte-exact against the wire.
+- **`upsert` keeps wire position**, `add` appends. A parameter that quietly
+  moved to the end would change the shape of any signature computed over the
+  query.
+- **`remove(name)` takes every match.** Removing `page` from `?page=1&page=2`
+  and getting one back has removed nothing the caller can observe.
+- **An edit that cannot reach the wire is an error, never a no-op.** A URL the
+  parser could not read has no parts to edit, so a write is refused rather than
+  composing `://` out of empty pieces, and a path segment that is not a string
+  or a number is refused rather than becoming `[object Object]`. `path` and
+  `host` are ordinary arrays that are **read back** when the URL is needed - the
+  same rule `pm.request.headers` follows - so a bad segment surfaces as a
+  rejected write-back, with the member and the index named, rather than at the
+  `push`.
+
+In a **test** script these behave like every other `pm.request` write: they
+change what the script sees and reach nothing, because the request has already
+gone out.
 
 #### It was a string, and mostly still behaves as one
 

@@ -374,7 +374,8 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.request.url.host" }, { "detail", "string[]" },
     { "documentation",
     "The host split on dots, as Postman presents it: \"api.example.com\" is "
-    "[\"api\", \"example\", \"com\"]. Use getHost() for the joined form." },
+    "[\"api\", \"example\", \"com\"]. Use getHost() for the joined form.\n\n"
+    "Editable in a pre-request script, the same way path is." },
     { "sortText", "2_pm_request_url_host" } });
 
     completions.push_back ({ { "label", "pm.request.url.port" }, { "kind", KIND_FIELD },
@@ -389,7 +390,9 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "The path as decoded segments: \"/v2/users\" is [\"v2\", \"users\"]. Each "
     "segment is decoded on its own, so an encoded slash stays inside the "
-    "segment it belongs to. Use getPath() for the joined form." },
+    "segment it belongs to. Use getPath() for the joined form.\n\nEditable in "
+    "a pre-request script - push, splice, index assignment and replacing the "
+    "whole array all reach the URL that is sent." },
     { "sortText", "2_pm_request_url_path" } });
 
     completions.push_back ({ { "label", "pm.request.url.length" }, { "kind", KIND_FIELD },
@@ -408,10 +411,10 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.request.url.query" }, { "kind", KIND_FIELD },
     { "insertText", "pm.request.url.query" }, { "detail", "Url query object" },
     { "documentation",
-    "The query parameters, with Postman's PropertyList reads over them: "
-    "get(name), has(name), all(), toObject() and count(). Values are the "
-    "wire bytes, not decoded - a signature has to canonicalize what was "
-    "sent." },
+    "The query parameters, with Postman's PropertyList reads over them - "
+    "get(name), has(name), all(), toObject(), count() - and its writers: "
+    "add, upsert, remove, clear. Values are the wire bytes, not decoded - a "
+    "signature has to canonicalize what was sent." },
     { "sortText", "2_pm_request_url_query" } });
 
     completions.push_back ({ { "label", "pm.request.url.query.get" },
@@ -455,6 +458,42 @@ nlohmann::json get_script_completions () {
     { "detail", "pm.request.url.query.count(): number" },
     { "documentation", "How many parameters the query carries, counting duplicates separately." },
     { "sortText", "3_pm_request_url_query_count" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.add" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.url.query.add({ key: \"${1:trace}\", value: ${2:id} })" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.url.query.add(param: { key: string, value?: string | number | boolean | null }): void" },
+    { "documentation",
+    "Append a parameter, even when the name is already there - a query may "
+    "repeat a name, which is why all() exists. Omit value for a bare "
+    "\"?flag\". Use upsert to replace instead of appending." },
+    { "sortText", "3_pm_request_url_query_add" } });
+
+    completions.push_back (
+    { { "label", "pm.request.url.query.upsert" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.url.query.upsert({ key: \"${1:page}\", value: ${2:n} })" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.url.query.upsert(param: { key: string, value?: string | number | boolean | null }): void" },
+    { "documentation",
+    "Replace the first parameter of that name, keeping its position in the "
+    "query, or append it when there is none. Position is kept because a "
+    "signature over the query changes shape if a parameter moves." },
+    { "sortText", "3_pm_request_url_query_upsert" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.remove" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.remove(\"${1:page}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.url.query.remove(name: string): void" },
+    { "documentation",
+    "Remove every parameter of that name, not just the first. A name that is "
+    "not there is a no-op, the same rule pm.request.headers.remove follows." },
+    { "sortText", "3_pm_request_url_query_remove" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.clear" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.clear()" },
+    { "detail", "pm.request.url.query.clear(): void" },
+    { "documentation", "Drop every query parameter. The URL loses its \"?\" with them." },
+    { "sortText", "3_pm_request_url_query_clear" } });
 
     completions.push_back ({ { "label", "pm.request.url.getHost" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.getHost()" },
