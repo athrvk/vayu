@@ -181,6 +181,152 @@ std::vector<std::string>& failure_messages) {
 }
 } // namespace
 
+/**
+ * The run-level request and identity a single-request replay reads.
+ *
+ * A load run's `tests` script is the same script a Send runs, so it must not
+ * read `pm.info.requestId` as undefined here and as a value there. Both fields
+ * ride in on the composed payload for a run started from a saved request;
+ * resolved once, not per sample. The linked row is read once for the two
+ * readers below it: the `pm.info.requestName` fallback, and the collection scope
+ * its scripts read (issue #728) - a failure is left to propagate, because empty
+ * scopes are the silently wrong verdicts this pass exists to avoid.
+ */
+void read_run_script_identity (vayu::db::Database& db,
+const nlohmann::json& config,
+vayu::Request& dummy_request,
+std::optional<std::string>& script_request_id,
+std::optional<std::string>& script_request_name,
+std::optional<vayu::db::Request>& linked_request) {
+    // Build a dummy request for script context (HTTP request fields are at root level)
+    auto request_result = vayu::json::deserialize_request (config);
+    if (request_result.is_ok ()) {
+        dummy_request = request_result.value ();
+    }
+
+    // Identity for `pm.info`. A load run's `tests` script is the same script a
+    // Send runs, so it must not read `pm.info.requestId` as undefined here and
+    // as a value there. Both fields ride in on the composed payload for a run
+    // started from a saved request; resolved once, not per sample.
+    if (auto id = config.find ("requestId");
+    id != config.end () && id->is_string () && !id->get<std::string> ().empty ()) {
+        script_request_id = id->get<std::string> ();
+    }
+    // The linked request row, read once for the two readers below: the
+    // `pm.info.requestName` fallback, and the collection scope its scripts
+    // read (issue #728). The lookup used to be wrapped in a catch, on the
+    // grounds that it cost the script only a name - it now also decides
+    // which collection scope the replay binds, and empty scopes are the
+    // silently wrong verdicts this pass exists to avoid, so a failure is
+    // left to propagate (see the scopes note below).
+    if (script_request_id) {
+        linked_request = db.get_request (*script_request_id);
+    }
+
+    if (auto name = config.find ("requestName"); name != config.end () &&
+    name->is_string () && !name->get<std::string> ().empty ()) {
+        script_request_name = name->get<std::string> ();
+    } else if (linked_request && !linked_request->name.empty ()) {
+        script_request_name = linked_request->name;
+    }
+}
+
+/**
+ * The per-step replays of a scenario load run.
+ *
+ * A step with no script, or one whose script never got a sample to run against,
+ * reports nothing rather than a row of zeros - the same distinction the
+ * whole-run section has always kept.
+ */
+ScriptValidationTotals replay_scenario_steps (vayu::runtime::ScriptEngine& engine,
+vayu::http::routes::ScriptVariableScopes& scopes,
+const std::shared_ptr<RunContext>& context,
+const vayu::http::SseLimits& sse_limits,
+bool verbose,
+ScriptValidation& validation,
+std::vector<std::string>& failure_messages) {
+    ScriptValidationTotals run_totals;
+    const auto& plan      = context->scenario->plan;
+    const auto& data_rows = context->scenario->data_rows;
+    const size_t steps    = std::min (
+    plan.steps.size (), context->metrics_collector->step_sample_step_count ());
+    validation.steps.resize (steps);
+
+    for (size_t i = 0; i < steps; ++i) {
+        const auto& step = plan.steps[i];
+        const auto& samples = context->metrics_collector->step_response_samples (i);
+        // A step with no script, or one whose script never got a sample to
+        // run against, reports nothing rather than a row of zeros - the
+        // same distinction the whole-run section has always kept.
+        if (step.post_script.empty () || samples.empty ()) {
+            continue;
+        }
+
+        if (verbose) {
+            vayu::utils::log_info ("Validating " +
+            std::to_string (samples.size ()) + " response samples for step " +
+            std::to_string (i + 1) + " (" + step.name + ")...");
+        }
+
+        ScriptReplay replay;
+        replay.script = &step.post_script;
+        // The step's own request, so `pm.request` describes the step the
+        // script is asserting on rather than a run-level request a
+        // scenario payload does not have.
+        replay.request    = &step.request;
+        replay.samples    = &samples;
+        replay.data_rows  = data_rows.empty () ? nullptr : &data_rows;
+        replay.request_id = step.request_id.empty () ?
+        std::nullopt :
+        std::optional<std::string> (step.request_id);
+        replay.request_name =
+        step.name.empty () ? std::nullopt : std::optional<std::string> (step.name);
+        // Which step failed, in a message that may be read far from the
+        // per-step tallies below.
+        replay.failure_prefix =
+        step.name.empty () ? "step " + std::to_string (i + 1) + ": " : step.name + ": ";
+        replay.sse_limits = sse_limits;
+
+        const auto totals = run_replay (engine, scopes, replay, failure_messages);
+        validation.steps[i] = totals;
+        run_totals.sampled += totals.sampled;
+        run_totals.passed += totals.passed;
+        run_totals.failed += totals.failed;
+    }
+
+    // Every scripted step drew a blank, so the run validated nothing.
+    if (run_totals.sampled == 0) {
+        return run_totals;
+    }
+    return run_totals;
+}
+
+/** The failure summary this pass leaves behind as a result row. */
+void store_validation_failures (vayu::db::Database& db,
+const std::string& run_id,
+const std::vector<std::string>& failure_messages,
+size_t passed,
+size_t failed) {
+    // Store failure summary as a result record
+    auto timestamp = now_ms ();
+    if (!failure_messages.empty ()) {
+        nlohmann::json failure_json;
+        failure_json["failures"]    = failure_messages;
+        failure_json["totalFailed"] = failed;
+        failure_json["totalPassed"] = passed;
+
+        vayu::db::Result validation_result;
+        validation_result.run_id    = run_id;
+        validation_result.timestamp = timestamp;
+        validation_result.status_code = failed > 0 ? 0 : 200; // 0 indicates test failures
+        validation_result.latency_ms = 0;
+        validation_result.error = failed > 0 ? "Script validation failures" : "";
+        validation_result.trace_data = failure_json.dump ();
+
+        db.add_result (validation_result);
+    }
+}
+
 ScriptValidation validate_scripts (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 bool verbose) {
@@ -237,38 +383,8 @@ bool verbose) {
     std::optional<std::string> script_request_name;
     std::optional<vayu::db::Request> linked_request;
     if (!per_step) {
-        // Build a dummy request for script context (HTTP request fields are at root level)
-        auto request_result = vayu::json::deserialize_request (context->config);
-        if (request_result.is_ok ()) {
-            dummy_request = request_result.value ();
-        }
-
-        // Identity for `pm.info`. A load run's `tests` script is the same script a
-        // Send runs, so it must not read `pm.info.requestId` as undefined here and
-        // as a value there. Both fields ride in on the composed payload for a run
-        // started from a saved request; resolved once, not per sample.
-        if (auto id = context->config.find ("requestId"); id != context->config.end () &&
-        id->is_string () && !id->get<std::string> ().empty ()) {
-            script_request_id = id->get<std::string> ();
-        }
-        // The linked request row, read once for the two readers below: the
-        // `pm.info.requestName` fallback, and the collection scope its scripts
-        // read (issue #728). The lookup used to be wrapped in a catch, on the
-        // grounds that it cost the script only a name - it now also decides
-        // which collection scope the replay binds, and empty scopes are the
-        // silently wrong verdicts this pass exists to avoid, so a failure is
-        // left to propagate (see the scopes note below).
-        if (script_request_id) {
-            linked_request = db.get_request (*script_request_id);
-        }
-
-        if (auto name = context->config.find ("requestName");
-        name != context->config.end () && name->is_string () &&
-        !name->get<std::string> ().empty ()) {
-            script_request_name = name->get<std::string> ();
-        } else if (linked_request && !linked_request->name.empty ()) {
-            script_request_name = linked_request->name;
-        }
+        read_run_script_identity (db, context->config, dummy_request,
+        script_request_id, script_request_name, linked_request);
     }
 
     // The scopes the replayed scripts read (issue #728). A load run's `tests`
@@ -318,55 +434,11 @@ bool verbose) {
     std::vector<std::string> failure_messages;
 
     if (per_step) {
-        const auto& plan      = context->scenario->plan;
-        const auto& data_rows = context->scenario->data_rows;
-        const size_t steps    = std::min (plan.steps.size (),
-           context->metrics_collector->step_sample_step_count ());
-        validation.steps.resize (steps);
-
-        for (size_t i = 0; i < steps; ++i) {
-            const auto& step = plan.steps[i];
-            const auto& samples = context->metrics_collector->step_response_samples (i);
-            // A step with no script, or one whose script never got a sample to
-            // run against, reports nothing rather than a row of zeros - the
-            // same distinction the whole-run section has always kept.
-            if (step.post_script.empty () || samples.empty ()) {
-                continue;
-            }
-
-            if (verbose) {
-                vayu::utils::log_info ("Validating " +
-                std::to_string (samples.size ()) + " response samples for step " +
-                std::to_string (i + 1) + " (" + step.name + ")...");
-            }
-
-            ScriptReplay replay;
-            replay.script = &step.post_script;
-            // The step's own request, so `pm.request` describes the step the
-            // script is asserting on rather than a run-level request a
-            // scenario payload does not have.
-            replay.request    = &step.request;
-            replay.samples    = &samples;
-            replay.data_rows  = data_rows.empty () ? nullptr : &data_rows;
-            replay.request_id = step.request_id.empty () ?
-            std::nullopt :
-            std::optional<std::string> (step.request_id);
-            replay.request_name =
-            step.name.empty () ? std::nullopt : std::optional<std::string> (step.name);
-            // Which step failed, in a message that may be read far from the
-            // per-step tallies below.
-            replay.failure_prefix = step.name.empty () ?
-            "step " + std::to_string (i + 1) + ": " :
-            step.name + ": ";
-            replay.sse_limits     = sse_limits;
-
-            const auto totals = run_replay (engine, scopes, replay, failure_messages);
-            validation.steps[i] = totals;
-            sampled += totals.sampled;
-            passed += totals.passed;
-            failed += totals.failed;
-        }
-
+        const ScriptValidationTotals totals = replay_scenario_steps (engine,
+        scopes, context, sse_limits, verbose, validation, failure_messages);
+        sampled                             = totals.sampled;
+        passed                              = totals.passed;
+        failed                              = totals.failed;
         // Every scripted step drew a blank, so the run validated nothing.
         if (sampled == 0) {
             return validation;
@@ -392,24 +464,7 @@ bool verbose) {
         failed  = totals.failed;
     }
 
-    // Store failure summary as a result record
-    auto timestamp = now_ms ();
-    if (!failure_messages.empty ()) {
-        nlohmann::json failure_json;
-        failure_json["failures"]    = failure_messages;
-        failure_json["totalFailed"] = failed;
-        failure_json["totalPassed"] = passed;
-
-        vayu::db::Result validation_result;
-        validation_result.run_id    = context->run_id;
-        validation_result.timestamp = timestamp;
-        validation_result.status_code = failed > 0 ? 0 : 200; // 0 indicates test failures
-        validation_result.latency_ms = 0;
-        validation_result.error = failed > 0 ? "Script validation failures" : "";
-        validation_result.trace_data = failure_json.dump ();
-
-        db.add_result (validation_result);
-    }
+    store_validation_failures (db, context->run_id, failure_messages, passed, failed);
 
     if (verbose) {
         vayu::utils::log_info ("  Script validation: " + std::to_string (passed) +
@@ -958,6 +1013,319 @@ bool verbose) {
     });
 }
 
+/**
+ * The event loop this run drives, configured, started and published.
+ *
+ * Created, started, and only then published: the metrics thread has been ticking
+ * since before this thread first ran (both are spawned by `start_run`, metrics
+ * first) and reads the loop through `active_transfer_count()`, so the pointer
+ * must land under the same lock (#956) - and only once the loop is already
+ * started, so no reader can ever observe it half-built.
+ */
+void configure_event_loop (vayu::db::Database& db,
+const nlohmann::json& config,
+const std::shared_ptr<RunContext>& context,
+size_t concurrency,
+double target_rps,
+int timeout_ms,
+int configured_workers,
+int default_max_per_host) {
+    // Configure EventLoop
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.num_workers = static_cast<size_t> (configured_workers); // Use configured workers (0 = auto-detect)
+    loop_config.max_concurrent    = std::max (concurrency, size_t (100));
+    loop_config.max_per_host      = static_cast<size_t> (default_max_per_host);
+    loop_config.target_rps        = target_rps;
+    loop_config.burst_size        = target_rps > 0 ? target_rps * 2.0 : 0.0;
+    loop_config.dns_cache_timeout = db.get_config_int ("dnsCacheTimeout",
+    vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
+    // Read once for the run and held for it - see EventLoopConfig::transport
+    // for why a per-request policy would cost the connection pool. The
+    // client-certificate registry (#707) rides inside the policy and is
+    // therefore read once here too, which is the whole of "load runs
+    // resolve certificates at run start": libcurl reuses a pooled
+    // connection only when its TLS identity matches, so a certificate that
+    // could change mid-run would partition each worker's pool
+    // (`event_loop_worker.cpp`, `FORBID_REUSE=0`) and pay a fresh handshake
+    // per change. Matching per transfer stays cheap because it reads this
+    // snapshot, never the database.
+    loop_config.transport = vayu::http::resolve_transport_policy (db);
+    loop_config.max_response_body_bytes = static_cast<size_t> (std::max (0,
+    db.get_config_int ("maxResponseBodyBytes",
+    static_cast<int> (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES))));
+    // Only enable curl verbose if explicitly requested in config,
+    // independent of server verbose mode
+    loop_config.verbose = config.value ("verbose", false);
+
+    std::string workers_str =
+    configured_workers == 0 ? "auto" : std::to_string (configured_workers);
+    vayu::utils::log_debug ("EventLoop config: workers=" + workers_str +
+    ", max_concurrent=" + std::to_string (loop_config.max_concurrent) +
+    ", max_per_host=" + std::to_string (loop_config.max_per_host) +
+    ", target_rps=" + std::to_string (target_rps) +
+    ", timeout=" + std::to_string (timeout_ms) + "ms");
+
+    // Create, start, and only then publish the event loop. The metrics
+    // thread has been ticking since before this thread first ran (both are
+    // spawned by start_run, metrics first) and reads the loop through
+    // active_transfer_count(), so the pointer must land under the same
+    // lock (#956) - and only once the loop is already started, so no
+    // reader can ever observe it half-built.
+    auto event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    event_loop->start ();
+    context->publish_event_loop (std::move (event_loop));
+}
+
+/**
+ * The one request a single-request load run sends, built once - deserialize,
+ * timeout, auth - because the event loop attaches its headers to every transfer.
+ *
+ * A scenario load run has none: every step was composed and auth-resolved at
+ * plan time, before the run row existed, and a step that could not be authorized
+ * already failed resolution with a 400. Building one here would compose the
+ * payload's absent method and url.
+ *
+ * @return false when the payload cannot be built - the caller fails the run.
+ */
+bool build_load_request (vayu::db::Database& db,
+vayu::db::Database* db_ptr,
+const nlohmann::json& config,
+const std::shared_ptr<RunContext>& context,
+int timeout_ms,
+vayu::Request& request) {
+    // Build the request once: deserialize + timeout + auth. The event loop
+    // attaches request.headers to every transfer, so resolving auth here
+    // covers the whole run.
+    //
+    // A scenario load run has no single request to build: every step was
+    // composed and auth-resolved at plan time, before the run row existed,
+    // and a step that could not be authorized already failed resolution
+    // with a 400. Building one here would compose the payload's absent
+    // method and url.
+    if (context->scenario) {
+        return true;
+    }
+    auto built = vayu::http::build_request (config, db_ptr, timeout_ms);
+    if (!built.ok) {
+        vayu::utils::log_error (built.parse_failed ?
+        std::string ("Load test: invalid request format") :
+        "Load test auth resolution failed: " + built.error_message);
+        return false;
+    }
+    request = std::move (built.request);
+
+    // A streaming run's caps ride on the request itself, because the
+    // event loop is what enforces them and the request is all it sees.
+    // Attached after `build_request` rather than inside it: the caps
+    // are a property of *this* run's execution model, and the same
+    // builder serves `POST /execute`, whose stream is managed by
+    // `SseStreamManager` and must not acquire load bounds (issue #576).
+    request.stream_bounds = context->stream_bounds;
+
+    // A run that outlives its OAuth 2.0 token used to become a 401
+    // storm the report never explained. Armed here, while the token
+    // this run just resolved is still the one in the cache, and inert
+    // for every auth that cannot be refreshed mid-run - see
+    // plan_auth_refresh for that list.
+    //
+    // A scenario load run is deliberately not covered: each of its
+    // steps resolved its own auth at plan time, before this run row
+    // existed, so there is no single credential to keep current.
+    if (auto plan = vayu::http::plan_auth_refresh (
+        request, config.value ("auth", nlohmann::json ()), db_ptr)) {
+        context->auth_refresh = std::make_shared<AuthRefreshState> (std::move (*plan));
+        // The user's oauth2Refresh* settings, read once here: a run's
+        // schedule must not change under it half way through.
+        const AuthRefreshTuning tuning = read_auth_refresh_tuning (db);
+        context->auth_refresh_thread = std::thread ([context, db_ptr, tuning] () {
+            run_auth_refresh (context, db_ptr, tuning);
+        });
+    }
+    return true;
+}
+
+/** The measured figures a finished run's summary is built from. */
+struct RunTotals {
+    size_t completed        = 0;
+    double actual_rps       = 0.0;
+    double total_duration_s = 0.0;
+    double setup_overhead_s = 0.0;
+    double latency_avg_ms   = 0.0;
+    MetricsCollector::Percentiles latency;
+};
+
+/** Everything the stored whole-run summary is built from. */
+RunSummaryInputs collect_summary_inputs (const std::shared_ptr<RunContext>& context,
+const RunTotals& totals,
+const ScriptValidation& validation,
+const SampledValidationTotals& schema_totals,
+const std::shared_ptr<ScenarioLoadState>& scenario_state) {
+    RunSummaryInputs inputs;
+    inputs.total_requests   = totals.completed;
+    inputs.rps              = totals.actual_rps;
+    inputs.send_rate        = totals.total_duration_s > 0 ?
+           static_cast<double> (context->requests_sent.load ()) / totals.total_duration_s :
+           0.0;
+    inputs.throughput       = totals.actual_rps;
+    inputs.test_duration_s  = totals.total_duration_s;
+    inputs.setup_overhead_s = totals.setup_overhead_s;
+    inputs.peak_concurrency = context->peak_in_flight.load ();
+    inputs.dropped_requests = context->metrics_collector->dropped_requests ();
+    inputs.queue_wait_avg_ms = context->metrics_collector->average_queue_wait ();
+    inputs.bytes_sent     = context->metrics_collector->total_bytes_sent ();
+    inputs.bytes_received = context->metrics_collector->total_bytes_received ();
+    inputs.status_codes = context->metrics_collector->status_code_distribution ();
+    inputs.latency        = totals.latency;
+    inputs.latency_avg_ms = totals.latency_avg_ms;
+    inputs.phases         = context->metrics_collector->phase_percentiles ();
+    inputs.stream         = context->metrics_collector->stream_totals ();
+    inputs.http_version_downgraded =
+    context->metrics_collector->http_version_downgraded ();
+    inputs.tests = validation.run;
+    // Written by the capacity strategy before its execute() returned,
+    // so it is already final here; absent for every other mode.
+    inputs.capacity  = context->capacity;
+    inputs.retention = read_retention (*context->metrics_collector);
+    // Safe to read unlocked: the scrape thread is its only writer and
+    // was joined above, which is the happens-before edge.
+    if (context->monitor_totals) {
+        inputs.monitor = context->monitor_totals->to_summary ();
+    }
+    // Read only now, after the drain above: a completion callback can
+    // still be advancing a VU while the strategy's own frame has
+    // already returned, so the tallies are only final here.
+    if (scenario_state) {
+        inputs.scenario =
+        build_scenario_load_summary (*scenario_state, context->scenario->plan);
+        // Which step's assertions failed, beside what that step did.
+        // The whole-run `tests` section above says only that something
+        // failed, which over a sequence is not an answer.
+        attach_step_test_totals (*inputs.scenario, validation.steps);
+        // Read on the same edge and for the same reason: a completion
+        // still in flight is a request this contract was exercised with
+        // (issue #629). Empty for a run of an unbound collection, which
+        // the payload builder treats as absent.
+        inputs.coverage = build_scenario_load_coverage (*scenario_state);
+    }
+    // Beside coverage, and deliberately not inside the `scenario_state`
+    // block above: this pass reads the sample reservoirs, which are the
+    // collector's, so it is available whether or not the executor left
+    // a state behind. An empty object is treated as absent.
+    inputs.schema_validation = build_sampled_validation_payload (schema_totals);
+
+    // Judged last, off the filled inputs rather than off the collector:
+    // the verdict has to be computed from the same numbers the summary
+    // is about to store, or a report could print a p99 its own verdict
+    // disagrees with. A run stopped early is judged on what it measured.
+    inputs.thresholds = evaluate_thresholds (context->config, inputs);
+    // What the refresh watchdog did, for a run that had one. Read after
+    // the join above, so the tallies are final.
+    if (context->auth_refresh) {
+        inputs.auth = context->auth_refresh->summary ();
+    }
+    return inputs;
+}
+
+/**
+ * Everything a finished run leaves behind: the flush, the two deferred passes,
+ * the stored summary and the terminal status.
+ *
+ * Each step is guarded on its own, so one that fails costs only what it was
+ * about to write - a run that measured something must still be reported as
+ * finished.
+ */
+void finish_load_test (const std::shared_ptr<RunContext>& context,
+vayu::db::Database& db,
+bool verbose,
+double total_duration_s,
+double setup_overhead_s,
+double target_rps,
+const std::shared_ptr<ScenarioLoadState>& scenario_state) {
+    size_t completed   = context->total_requests ();
+    size_t errors      = context->total_errors ();
+    double avg_latency = context->average_latency_ms ();
+    double actual_rps =
+    total_duration_s > 0 ? static_cast<double> (completed) / total_duration_s : 0.0;
+    double error_rate = context->metrics_collector->error_rate ();
+
+    // Calculate percentiles using MetricsCollector (HdrHistogram)
+    auto percentiles = context->metrics_collector->calculate_percentiles ();
+
+    // Batch flush all results to database (errors and sampled successes)
+    try {
+        size_t flushed = context->metrics_collector->flush_to_database (db);
+        if (verbose && flushed > 0) {
+            vayu::utils::log_info (
+            "  Flushed " + std::to_string (flushed) + " results to database");
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "Failed to flush results to database: " + std::string (e.what ()));
+    }
+
+    // Run deferred script validation if test script is present. Its tallies
+    // go into the summary below, so it has to run before the summary write.
+    ScriptValidation validation;
+    try {
+        validation = validate_scripts (context, db, verbose);
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("Script validation failed: " + std::string (e.what ()));
+    }
+
+    // The other deferred pass over the same reservoirs (issue #682): what
+    // the bound contract says about the responses that survived sampling.
+    // Here, beside the script replay, for its reason - the completion path
+    // refills concurrency, and neither pass may be on it.
+    SampledValidationTotals schema_totals;
+    try {
+        schema_totals = validate_sampled_responses (context, verbose);
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("Schema validation failed: " + std::string (e.what ()));
+    }
+
+    // Store the whole-run summary: everything the report used to rebuild by
+    // scanning the run's metric rows, written once, here.
+    try {
+        const RunTotals totals{ completed, actual_rps, total_duration_s,
+            setup_overhead_s, avg_latency, percentiles };
+        const RunSummaryInputs inputs = collect_summary_inputs (
+        context, totals, validation, schema_totals, scenario_state);
+        db.update_run_summary (
+        context->run_id, build_run_summary_payload (inputs).dump ());
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("Failed to store run summary: " + std::string (e.what ()));
+    }
+
+    // Update run status with retry logic to handle any remaining contention
+    vayu::RunStatus final_status =
+    context->should_stop ? vayu::RunStatus::Stopped : vayu::RunStatus::Completed;
+    db.update_run_status_with_retry (context->run_id, final_status);
+
+    // Terminal status reached - trim old runs per the retention knobs.
+    // Best-effort: a prune failure must not fail the completed run.
+    try {
+        db.prune_runs_configured ();
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
+    }
+
+    if (verbose) {
+        vayu::utils::log_info (
+        "Load test " + context->run_id + " " + vayu::to_string (final_status));
+        vayu::utils::log_info ("  Total requests: " + std::to_string (completed));
+        vayu::utils::log_info ("  Errors: " + std::to_string (errors) + " (" +
+        std::to_string (error_rate) + "%)");
+        vayu::utils::log_info ("  Duration: " + std::to_string (total_duration_s) + " s");
+        vayu::utils::log_info ("  Target RPS: " +
+        (target_rps > 0 ? std::to_string (target_rps) : "unlimited"));
+        vayu::utils::log_info ("  Actual RPS: " + std::to_string (actual_rps));
+        vayu::utils::log_info ("  Avg latency: " + std::to_string (avg_latency) + " ms");
+        vayu::utils::log_info ("  P50/P95/P99: " + std::to_string (percentiles.p50) +
+        "/" + std::to_string (percentiles.p95) + "/" +
+        std::to_string (percentiles.p99) + " ms");
+    }
+}
+
 void execute_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
 bool verbose,
@@ -988,103 +1356,16 @@ RunManager& manager) {
         }
         int timeout_ms = config.value ("timeout", 30000);
 
-        // Configure EventLoop
-        vayu::http::EventLoopConfig loop_config;
-        loop_config.num_workers = static_cast<size_t> (configured_workers); // Use configured workers (0 = auto-detect)
-        loop_config.max_concurrent = std::max (concurrency, size_t (100));
-        loop_config.max_per_host   = static_cast<size_t> (default_max_per_host);
-        loop_config.target_rps     = target_rps;
-        loop_config.burst_size     = target_rps > 0 ? target_rps * 2.0 : 0.0;
-        loop_config.dns_cache_timeout = db.get_config_int ("dnsCacheTimeout",
-        vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
-        // Read once for the run and held for it - see EventLoopConfig::transport
-        // for why a per-request policy would cost the connection pool. The
-        // client-certificate registry (#707) rides inside the policy and is
-        // therefore read once here too, which is the whole of "load runs
-        // resolve certificates at run start": libcurl reuses a pooled
-        // connection only when its TLS identity matches, so a certificate that
-        // could change mid-run would partition each worker's pool
-        // (`event_loop_worker.cpp`, `FORBID_REUSE=0`) and pay a fresh handshake
-        // per change. Matching per transfer stays cheap because it reads this
-        // snapshot, never the database.
-        loop_config.transport = vayu::http::resolve_transport_policy (db);
-        loop_config.max_response_body_bytes = static_cast<size_t> (std::max (0,
-        db.get_config_int ("maxResponseBodyBytes",
-        static_cast<int> (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES))));
-        // Only enable curl verbose if explicitly requested in config,
-        // independent of server verbose mode
-        loop_config.verbose = config.value ("verbose", false);
+        configure_event_loop (db, config, context, concurrency, target_rps,
+        timeout_ms, configured_workers, default_max_per_host);
 
-        std::string workers_str =
-        configured_workers == 0 ? "auto" : std::to_string (configured_workers);
-        vayu::utils::log_debug ("EventLoop config: workers=" + workers_str +
-        ", max_concurrent=" + std::to_string (loop_config.max_concurrent) +
-        ", max_per_host=" + std::to_string (loop_config.max_per_host) +
-        ", target_rps=" + std::to_string (target_rps) +
-        ", timeout=" + std::to_string (timeout_ms) + "ms");
-
-        // Create, start, and only then publish the event loop. The metrics
-        // thread has been ticking since before this thread first ran (both are
-        // spawned by start_run, metrics first) and reads the loop through
-        // active_transfer_count(), so the pointer must land under the same
-        // lock (#956) - and only once the loop is already started, so no
-        // reader can ever observe it half-built.
-        auto event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
-        event_loop->start ();
-        context->publish_event_loop (std::move (event_loop));
-
-        // Build the request once: deserialize + timeout + auth. The event loop
-        // attaches request.headers to every transfer, so resolving auth here
-        // covers the whole run.
-        //
-        // A scenario load run has no single request to build: every step was
-        // composed and auth-resolved at plan time, before the run row existed,
-        // and a step that could not be authorized already failed resolution
-        // with a 400. Building one here would compose the payload's absent
-        // method and url.
         vayu::Request request;
-        if (!context->scenario) {
-            auto built = vayu::http::build_request (config, db_ptr, timeout_ms);
-            if (!built.ok) {
-                vayu::utils::log_error (built.parse_failed ?
-                std::string ("Load test: invalid request format") :
-                "Load test auth resolution failed: " + built.error_message);
-                db.update_run_status (context->run_id, vayu::RunStatus::Failed);
-                context->is_running = false;
-                context->join_aux_threads ();
-                manager.retain_run (context->run_id);
-                return;
-            }
-            request = std::move (built.request);
-
-            // A streaming run's caps ride on the request itself, because the
-            // event loop is what enforces them and the request is all it sees.
-            // Attached after `build_request` rather than inside it: the caps
-            // are a property of *this* run's execution model, and the same
-            // builder serves `POST /execute`, whose stream is managed by
-            // `SseStreamManager` and must not acquire load bounds (issue #576).
-            request.stream_bounds = context->stream_bounds;
-
-            // A run that outlives its OAuth 2.0 token used to become a 401
-            // storm the report never explained. Armed here, while the token
-            // this run just resolved is still the one in the cache, and inert
-            // for every auth that cannot be refreshed mid-run - see
-            // plan_auth_refresh for that list.
-            //
-            // A scenario load run is deliberately not covered: each of its
-            // steps resolved its own auth at plan time, before this run row
-            // existed, so there is no single credential to keep current.
-            if (auto plan = vayu::http::plan_auth_refresh (
-                request, config.value ("auth", nlohmann::json ()), db_ptr)) {
-                context->auth_refresh =
-                std::make_shared<AuthRefreshState> (std::move (*plan));
-                // The user's oauth2Refresh* settings, read once here: a run's
-                // schedule must not change under it half way through.
-                const AuthRefreshTuning tuning = read_auth_refresh_tuning (db);
-                context->auth_refresh_thread = std::thread ([context, db_ptr, tuning] () {
-                    run_auth_refresh (context, db_ptr, tuning);
-                });
-            }
+        if (!build_load_request (db, db_ptr, config, context, timeout_ms, request)) {
+            db.update_run_status (context->run_id, vayu::RunStatus::Failed);
+            context->is_running = false;
+            context->join_aux_threads ();
+            manager.retain_run (context->run_id);
+            return;
         }
 
         // Execute Load Strategy
@@ -1153,155 +1434,11 @@ RunManager& manager) {
 
         // Calculate cleanup overhead (time from test end to after cleanup)
         auto cleanup_end = std::chrono::steady_clock::now ();
-        double setup_overhead_s =
+        const double setup_overhead_s =
         std::chrono::duration<double> (cleanup_end - test_end).count ();
 
-        size_t completed   = context->total_requests ();
-        size_t errors      = context->total_errors ();
-        double avg_latency = context->average_latency_ms ();
-        double actual_rps =
-        total_duration_s > 0 ? static_cast<double> (completed) / total_duration_s : 0.0;
-        double error_rate = context->metrics_collector->error_rate ();
-
-        // Calculate percentiles using MetricsCollector (HdrHistogram)
-        auto percentiles = context->metrics_collector->calculate_percentiles ();
-
-        // Batch flush all results to database (errors and sampled successes)
-        try {
-            size_t flushed = context->metrics_collector->flush_to_database (db);
-            if (verbose && flushed > 0) {
-                vayu::utils::log_info (
-                "  Flushed " + std::to_string (flushed) + " results to database");
-            }
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "Failed to flush results to database: " + std::string (e.what ()));
-        }
-
-        // Run deferred script validation if test script is present. Its tallies
-        // go into the summary below, so it has to run before the summary write.
-        ScriptValidation validation;
-        try {
-            validation = validate_scripts (context, db, verbose);
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "Script validation failed: " + std::string (e.what ()));
-        }
-
-        // The other deferred pass over the same reservoirs (issue #682): what
-        // the bound contract says about the responses that survived sampling.
-        // Here, beside the script replay, for its reason - the completion path
-        // refills concurrency, and neither pass may be on it.
-        SampledValidationTotals schema_totals;
-        try {
-            schema_totals = validate_sampled_responses (context, verbose);
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "Schema validation failed: " + std::string (e.what ()));
-        }
-
-        // Store the whole-run summary: everything the report used to rebuild by
-        // scanning the run's metric rows, written once, here.
-        try {
-            RunSummaryInputs inputs;
-            inputs.total_requests   = completed;
-            inputs.rps              = actual_rps;
-            inputs.send_rate        = total_duration_s > 0 ?
-                   static_cast<double> (context->requests_sent.load ()) / total_duration_s :
-                   0.0;
-            inputs.throughput       = actual_rps;
-            inputs.test_duration_s  = total_duration_s;
-            inputs.setup_overhead_s = setup_overhead_s;
-            inputs.peak_concurrency = context->peak_in_flight.load ();
-            inputs.dropped_requests = context->metrics_collector->dropped_requests ();
-            inputs.queue_wait_avg_ms = context->metrics_collector->average_queue_wait ();
-            inputs.bytes_sent = context->metrics_collector->total_bytes_sent ();
-            inputs.bytes_received = context->metrics_collector->total_bytes_received ();
-            inputs.status_codes = context->metrics_collector->status_code_distribution ();
-            inputs.latency        = percentiles;
-            inputs.latency_avg_ms = avg_latency;
-            inputs.phases = context->metrics_collector->phase_percentiles ();
-            inputs.stream = context->metrics_collector->stream_totals ();
-            inputs.http_version_downgraded =
-            context->metrics_collector->http_version_downgraded ();
-            inputs.tests = validation.run;
-            // Written by the capacity strategy before its execute() returned,
-            // so it is already final here; absent for every other mode.
-            inputs.capacity  = context->capacity;
-            inputs.retention = read_retention (*context->metrics_collector);
-            // Safe to read unlocked: the scrape thread is its only writer and
-            // was joined above, which is the happens-before edge.
-            if (context->monitor_totals) {
-                inputs.monitor = context->monitor_totals->to_summary ();
-            }
-            // Read only now, after the drain above: a completion callback can
-            // still be advancing a VU while the strategy's own frame has
-            // already returned, so the tallies are only final here.
-            if (scenario_state) {
-                inputs.scenario = build_scenario_load_summary (
-                *scenario_state, context->scenario->plan);
-                // Which step's assertions failed, beside what that step did.
-                // The whole-run `tests` section above says only that something
-                // failed, which over a sequence is not an answer.
-                attach_step_test_totals (*inputs.scenario, validation.steps);
-                // Read on the same edge and for the same reason: a completion
-                // still in flight is a request this contract was exercised with
-                // (issue #629). Empty for a run of an unbound collection, which
-                // the payload builder treats as absent.
-                inputs.coverage = build_scenario_load_coverage (*scenario_state);
-            }
-            // Beside coverage, and deliberately not inside the `scenario_state`
-            // block above: this pass reads the sample reservoirs, which are the
-            // collector's, so it is available whether or not the executor left
-            // a state behind. An empty object is treated as absent.
-            inputs.schema_validation = build_sampled_validation_payload (schema_totals);
-
-            // Judged last, off the filled inputs rather than off the collector:
-            // the verdict has to be computed from the same numbers the summary
-            // is about to store, or a report could print a p99 its own verdict
-            // disagrees with. A run stopped early is judged on what it measured.
-            inputs.thresholds = evaluate_thresholds (context->config, inputs);
-            // What the refresh watchdog did, for a run that had one. Read after
-            // the join above, so the tallies are final.
-            if (context->auth_refresh) {
-                inputs.auth = context->auth_refresh->summary ();
-            }
-
-            db.update_run_summary (
-            context->run_id, build_run_summary_payload (inputs).dump ());
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "Failed to store run summary: " + std::string (e.what ()));
-        }
-
-        // Update run status with retry logic to handle any remaining contention
-        vayu::RunStatus final_status =
-        context->should_stop ? vayu::RunStatus::Stopped : vayu::RunStatus::Completed;
-        db.update_run_status_with_retry (context->run_id, final_status);
-
-        // Terminal status reached - trim old runs per the retention knobs.
-        // Best-effort: a prune failure must not fail the completed run.
-        try {
-            db.prune_runs_configured ();
-        } catch (const std::exception& e) {
-            vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
-        }
-
-        if (verbose) {
-            vayu::utils::log_info (
-            "Load test " + context->run_id + " " + vayu::to_string (final_status));
-            vayu::utils::log_info ("  Total requests: " + std::to_string (completed));
-            vayu::utils::log_info ("  Errors: " + std::to_string (errors) +
-            " (" + std::to_string (error_rate) + "%)");
-            vayu::utils::log_info ("  Duration: " + std::to_string (total_duration_s) + " s");
-            vayu::utils::log_info ("  Target RPS: " +
-            (target_rps > 0 ? std::to_string (target_rps) : "unlimited"));
-            vayu::utils::log_info ("  Actual RPS: " + std::to_string (actual_rps));
-            vayu::utils::log_info ("  Avg latency: " + std::to_string (avg_latency) + " ms");
-            vayu::utils::log_info ("  P50/P95/P99: " +
-            std::to_string (percentiles.p50) + "/" + std::to_string (percentiles.p95) +
-            "/" + std::to_string (percentiles.p99) + " ms");
-        }
+        finish_load_test (context, db, verbose, total_duration_s,
+        setup_overhead_s, target_rps, scenario_state);
     } catch (const std::exception& e) {
         // Stop background metrics collection and join it, like the two inner
         // failure paths do. Deferring the join to ~RunContext instead would run
@@ -1550,6 +1687,131 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     return summary;
 }
 
+/** The rolling window a live tick published, reused by the persisted row. */
+struct TickWindow {
+    double p50 = 0.0;
+    double p95 = 0.0;
+    double p99 = 0.0;
+};
+
+/**
+ * One persisted metric tick: the 1 Hz row every chart is drawn from.
+ *
+ * Built here as one wide row rather than reassembled from ~18 EAV rows by every
+ * reader. A dropped tick is a hole in the run's history series and nothing
+ * downstream can tell a hole from a quiet second, so the reason is logged rather
+ * than swallowed - it never fails the run, whose live stream and final report
+ * are built from the collector, not from these rows.
+ */
+void persist_metric_tick (const std::shared_ptr<RunContext>& context,
+vayu::db::Database& db,
+int64_t tick_wall_ms,
+double elapsed,
+const std::map<int, size_t>& status_snapshot,
+const TickWindow& window,
+size_t& last_total,
+int64_t& first_tick_wall_ms) {
+    size_t current_total  = context->total_requests ();
+    size_t current_errors = context->total_errors ();
+    size_t delta          = current_total - last_total;
+
+    double current_rps = elapsed > 0 ? static_cast<double> (delta) / elapsed : 0.0;
+    double error_rate = current_total > 0 ?
+    (static_cast<double> (current_errors) * 100.0 / static_cast<double> (current_total)) :
+    0.0;
+
+    // Calculate send rate (requests dispatched per second) and throughput (responses per second)
+    size_t requests_sent = context->requests_sent.load ();
+    double run_elapsed_s =
+    (static_cast<double> (tick_wall_ms - context->start_time_ms)) / 1000.0;
+    double send_rate =
+    run_elapsed_s > 0 ? static_cast<double> (requests_sent) / run_elapsed_s : 0.0;
+    double throughput =
+    run_elapsed_s > 0 ? static_cast<double> (current_total) / run_elapsed_s : 0.0;
+
+    // Calculate backpressure (true in-flight: requests sent but not yet responded)
+    size_t backpressure = context->in_flight ();
+
+    // One locked read shared by the debug line and the persisted
+    // row below, so both report the same instant. Unlike the
+    // direct dereference this replaces, a run whose loop is not
+    // published yet - the runner still in its config reads one
+    // second in - reports zero instead of dereferencing null.
+    const size_t active_now = context->active_transfer_count ();
+
+    // Sample the in-flight high-water mark. The closed-loop controller
+    // also updates this at submit granularity; open-loop modes
+    // (constant_rps) rely solely on this 1 Hz sample. CAS-max so the two
+    // writers don't clobber each other.
+    {
+        size_t pk = context->peak_in_flight.load (std::memory_order_relaxed);
+        while (backpressure > pk &&
+        !context->peak_in_flight.compare_exchange_weak (
+        pk, backpressure, std::memory_order_relaxed)) {
+            // pk reloaded on failure
+        }
+    }
+
+    vayu::utils::log_debug ("Metrics: rps=" + std::to_string (current_rps) +
+    ", send_rate=" + std::to_string (send_rate) + ", throughput=" +
+    std::to_string (throughput) + ", backpressure=" + std::to_string (backpressure) +
+    ", error_rate=" + std::to_string (error_rate) + "%" + ", active=" +
+    std::to_string (active_now) + ", sent=" + std::to_string (requests_sent));
+
+    // Persist the tick: one wide row, built here rather than
+    // reassembled from ~18 EAV rows by every reader.
+    try {
+        // elapsed_seconds is measured from the *first persisted*
+        // tick, not from the run's start: the 1 Hz gate means the
+        // first stored tick lands ~1s in, and a series that starts
+        // at 0 is what the charts have always drawn.
+        if (first_tick_wall_ms == 0) {
+            first_tick_wall_ms = tick_wall_ms;
+        }
+
+        auto& mc = *context->metrics_collector;
+        MetricTickSample sample;
+        sample.timestamp = tick_wall_ms;
+        sample.elapsed_seconds =
+        static_cast<double> (tick_wall_ms - first_tick_wall_ms) / 1000.0;
+        sample.requests_completed  = current_total;
+        sample.requests_failed     = current_errors;
+        sample.current_rps         = current_rps;
+        sample.current_concurrency = active_now;
+        sample.send_rate           = send_rate;
+        sample.throughput          = throughput;
+        sample.backpressure        = backpressure;
+        sample.error_rate          = error_rate;
+        sample.dropped_requests    = mc.dropped_requests ();
+        sample.bytes_sent          = mc.total_bytes_sent ();
+        sample.bytes_received      = mc.total_bytes_received ();
+        // Reuse the snapshot already taken for the live tick above.
+        sample.status_codes = status_snapshot;
+        // Windowed (rolling) percentiles from the interval recorder -
+        // these power the history percentile chart, the
+        // response-time-vs-concurrency scatter, and the capacity
+        // breakpoint / saturation derivations. Reuses the window
+        // sampled by emit_live_tick this tick (do not re-sample).
+        sample.latency_p50_ms = window.p50;
+        sample.latency_p95_ms = window.p95;
+        sample.latency_p99_ms = window.p99;
+
+        db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
+        build_metric_tick_payload (sample).dump () });
+    } catch (const std::exception& e) {
+        // A dropped tick is a hole in the run's history series and
+        // nothing downstream can tell a hole from a quiet second,
+        // so the reason is logged rather than swallowed. It never
+        // fails the run: the live stream and the final report are
+        // built from the collector, not from these rows. At most
+        // one line per tick, and the tick gate is 1 Hz.
+        vayu::utils::log_warning (
+        "Metric tick not persisted for run " + context->run_id + ": " + e.what ());
+    }
+
+    last_total = current_total;
+}
+
 void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* db_ptr) {
     auto& db          = *db_ptr;
     auto last_update  = std::chrono::steady_clock::now ();
@@ -1691,113 +1953,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
             if (elapsed >= 1.0) // Update every second
             {
-                size_t current_total  = context->total_requests ();
-                size_t current_errors = context->total_errors ();
-                size_t delta          = current_total - last_total;
-
-                double current_rps =
-                elapsed > 0 ? static_cast<double> (delta) / elapsed : 0.0;
-                double error_rate = current_total > 0 ?
-                (static_cast<double> (current_errors) * 100.0 /
-                static_cast<double> (current_total)) :
-                0.0;
-
-                // Calculate send rate (requests dispatched per second) and throughput (responses per second)
-                size_t requests_sent = context->requests_sent.load ();
-                double run_elapsed_s =
-                (static_cast<double> (tick_wall_ms - context->start_time_ms)) / 1000.0;
-                double send_rate  = run_elapsed_s > 0 ?
-                 static_cast<double> (requests_sent) / run_elapsed_s :
-                 0.0;
-                double throughput = run_elapsed_s > 0 ?
-                static_cast<double> (current_total) / run_elapsed_s :
-                0.0;
-
-                // Calculate backpressure (true in-flight: requests sent but not yet responded)
-                size_t backpressure = context->in_flight ();
-
-                // One locked read shared by the debug line and the persisted
-                // row below, so both report the same instant. Unlike the
-                // direct dereference this replaces, a run whose loop is not
-                // published yet - the runner still in its config reads one
-                // second in - reports zero instead of dereferencing null.
-                const size_t active_now = context->active_transfer_count ();
-
-                // Sample the in-flight high-water mark. The closed-loop controller
-                // also updates this at submit granularity; open-loop modes
-                // (constant_rps) rely solely on this 1 Hz sample. CAS-max so the two
-                // writers don't clobber each other.
-                {
-                    size_t pk = context->peak_in_flight.load (std::memory_order_relaxed);
-                    while (backpressure > pk &&
-                    !context->peak_in_flight.compare_exchange_weak (
-                    pk, backpressure, std::memory_order_relaxed)) {
-                        // pk reloaded on failure
-                    }
-                }
-
-                vayu::utils::log_debug ("Metrics: rps=" + std::to_string (current_rps) +
-                ", send_rate=" + std::to_string (send_rate) +
-                ", throughput=" + std::to_string (throughput) +
-                ", backpressure=" + std::to_string (backpressure) +
-                ", error_rate=" + std::to_string (error_rate) + "%" +
-                ", active=" + std::to_string (active_now) +
-                ", sent=" + std::to_string (requests_sent));
-
-                // Persist the tick: one wide row, built here rather than
-                // reassembled from ~18 EAV rows by every reader.
-                try {
-                    // elapsed_seconds is measured from the *first persisted*
-                    // tick, not from the run's start: the 1 Hz gate means the
-                    // first stored tick lands ~1s in, and a series that starts
-                    // at 0 is what the charts have always drawn.
-                    if (first_tick_wall_ms == 0) {
-                        first_tick_wall_ms = tick_wall_ms;
-                    }
-
-                    auto& mc = *context->metrics_collector;
-                    MetricTickSample sample;
-                    sample.timestamp = tick_wall_ms;
-                    sample.elapsed_seconds =
-                    static_cast<double> (tick_wall_ms - first_tick_wall_ms) / 1000.0;
-                    sample.requests_completed  = current_total;
-                    sample.requests_failed     = current_errors;
-                    sample.current_rps         = current_rps;
-                    sample.current_concurrency = active_now;
-                    sample.send_rate           = send_rate;
-                    sample.throughput          = throughput;
-                    sample.backpressure        = backpressure;
-                    sample.error_rate          = error_rate;
-                    sample.dropped_requests    = mc.dropped_requests ();
-                    sample.bytes_sent          = mc.total_bytes_sent ();
-                    sample.bytes_received      = mc.total_bytes_received ();
-                    // Reuse the snapshot already taken for the live tick above.
-                    sample.status_codes = status_snapshot;
-                    // Windowed (rolling) percentiles from the interval recorder -
-                    // these power the history percentile chart, the
-                    // response-time-vs-concurrency scatter, and the capacity
-                    // breakpoint / saturation derivations. Reuses the window
-                    // sampled by emit_live_tick this tick (do not re-sample).
-                    sample.latency_p50_ms = win_p50;
-                    sample.latency_p95_ms = win_p95;
-                    sample.latency_p99_ms = win_p99;
-
-                    db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
-                    build_metric_tick_payload (sample).dump () });
-                } catch (const std::exception& e) {
-                    // A dropped tick is a hole in the run's history series and
-                    // nothing downstream can tell a hole from a quiet second,
-                    // so the reason is logged rather than swallowed. It never
-                    // fails the run: the live stream and the final report are
-                    // built from the collector, not from these rows. At most
-                    // one line per tick, and the tick gate is 1 Hz.
-                    vayu::utils::log_warning (
-                    "Metric tick not persisted for run " + context->run_id +
-                    ": " + e.what ());
-                }
-
+                persist_metric_tick (context, db, tick_wall_ms, elapsed, status_snapshot,
+                TickWindow{ win_p50, win_p95, win_p99 }, last_total, first_tick_wall_ms);
                 last_update = now;
-                last_total  = current_total;
             }
         }
 
@@ -1813,6 +1971,66 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // Unconditional: always signal consumers so they terminate cleanly,
     // even if the producer threw.
     context->closed.store (true, std::memory_order_release);
+}
+
+/**
+ * A scrape that read nothing: the transport failed, or the body carried none of
+ * the requested names. Both mean this moment went unmeasured, and a stored
+ * sample with no readings would draw a line through a hole in the data.
+ *
+ * The interval is doubled once, not per failure: the point is to stop hammering
+ * an endpoint that is gone, not to drift so far out that a recovered one is
+ * noticed minutes later.
+ */
+void note_monitor_gap (const std::shared_ptr<RunContext>& context,
+const MonitorConfig& config,
+int& consecutive_failures,
+bool& backoff_logged,
+int& interval_ms) {
+    ++consecutive_failures;
+    if (context->monitor_totals) {
+        context->monitor_totals->record_failure ();
+    }
+    if (consecutive_failures == constants::monitor::FAILURES_BEFORE_BACKOFF) {
+        if (!backoff_logged) {
+            vayu::utils::log_warning ("Monitor scrape for run " + context->run_id +
+            " has failed " + std::to_string (consecutive_failures) + " times in a row (" +
+            config.url + "); backing off, the series will show gaps");
+            backoff_logged = true;
+        }
+        // Doubled once, not per failure: the point is to stop
+        // hammering an endpoint that is gone, not to drift so far
+        // out that a recovered one is noticed minutes later.
+        interval_ms = std::min (config.interval_ms * 2, constants::monitor::MAX_INTERVAL_MS);
+    }
+}
+
+/** A scrape that read values: stored, published, and the backoff reset. */
+void record_monitor_sample (const std::shared_ptr<RunContext>& context,
+vayu::db::Database& db,
+const MonitorConfig& config,
+const std::map<std::string, double>& values,
+int& consecutive_failures,
+bool& backoff_logged,
+int& interval_ms) {
+    consecutive_failures = 0;
+    backoff_logged       = false;
+    interval_ms          = config.interval_ms;
+
+    const int64_t sample_wall_ms = now_ms ();
+    auto payload = build_monitor_sample_payload (sample_wall_ms, values);
+    if (context->monitor_totals) {
+        context->monitor_totals->add (values);
+    }
+    try {
+        db.add_monitor_sample ({ 0, context->run_id, sample_wall_ms, payload.dump () });
+    } catch (const std::exception& e) {
+        // The live frame below still goes out: a row this run could
+        // not store is worth less than a series that stops drawing.
+        vayu::utils::log_warning ("Failed to store monitor sample for run " +
+        context->run_id + ": " + e.what ());
+    }
+    context->append_event ("monitor", payload.dump ());
 }
 
 void collect_monitor (const std::shared_ptr<RunContext>& context,
@@ -1878,45 +2096,11 @@ const MonitorConfig& config) {
             // moment went unmeasured, and a stored sample with no readings
             // would draw a line through a hole in the data.
             if (values.empty ()) {
-                ++consecutive_failures;
-                if (context->monitor_totals) {
-                    context->monitor_totals->record_failure ();
-                }
-                if (consecutive_failures == constants::monitor::FAILURES_BEFORE_BACKOFF) {
-                    if (!backoff_logged) {
-                        vayu::utils::log_warning ("Monitor scrape for run " +
-                        context->run_id + " has failed " +
-                        std::to_string (consecutive_failures) + " times in a row (" +
-                        config.url + "); backing off, the series will show gaps");
-                        backoff_logged = true;
-                    }
-                    // Doubled once, not per failure: the point is to stop
-                    // hammering an endpoint that is gone, not to drift so far
-                    // out that a recovered one is noticed minutes later.
-                    interval_ms = std::min (
-                    config.interval_ms * 2, constants::monitor::MAX_INTERVAL_MS);
-                }
+                note_monitor_gap (context, config, consecutive_failures,
+                backoff_logged, interval_ms);
             } else {
-                consecutive_failures = 0;
-                backoff_logged       = false;
-                interval_ms          = config.interval_ms;
-
-                const int64_t sample_wall_ms = now_ms ();
-                auto payload = build_monitor_sample_payload (sample_wall_ms, values);
-                if (context->monitor_totals) {
-                    context->monitor_totals->add (values);
-                }
-                try {
-                    db.add_monitor_sample (
-                    { 0, context->run_id, sample_wall_ms, payload.dump () });
-                } catch (const std::exception& e) {
-                    // The live frame below still goes out: a row this run could
-                    // not store is worth less than a series that stops drawing.
-                    vayu::utils::log_warning (
-                    "Failed to store monitor sample for run " +
-                    context->run_id + ": " + e.what ());
-                }
-                context->append_event ("monitor", payload.dump ());
+                record_monitor_sample (context, db, config, values,
+                consecutive_failures, backoff_logged, interval_ms);
             }
 
             // Sleep out the remainder of the interval in short slices. A run

@@ -130,22 +130,55 @@ bool is_decimal_digits (std::string_view text) {
  * this corpus, reports the quoted string `"2.0"` - the very key Swagger 2.0
  * detection turns on - as the number 2.0.
  */
-nlohmann::ordered_json plain_scalar (const std::string& text) {
+/**
+ * The constants YAML's core schema spells out, or nothing when @p text is not
+ * one of them.
+ *
+ * JSON has no infinity or NaN, and `JSON.stringify` writes both as null - so
+ * does the renderer when it hands one of these to the engine.
+ *
+ * `make_optional` rather than a bare return, for `rows_for`'s reason: copy-
+ * initializing an `optional<json>` from a `json` puts nlohmann's
+ * `operator ValueType()` up against `optional`'s converting constructor, which
+ * GCC reports as an ambiguity under `-Werror`.
+ */
+std::optional<nlohmann::ordered_json> plain_constant (const std::string& text) {
     if (text.empty () || text == "~" || text == "null" || text == "Null" || text == "NULL") {
-        return nullptr;
+        return std::make_optional (nlohmann::ordered_json (nullptr));
     }
     if (text == "true" || text == "True" || text == "TRUE") {
-        return true;
+        return std::make_optional (nlohmann::ordered_json (true));
     }
     if (text == "false" || text == "False" || text == "FALSE") {
-        return false;
+        return std::make_optional (nlohmann::ordered_json (false));
     }
-    // JSON has no infinity or NaN, and `JSON.stringify` writes both as null -
-    // so does the renderer when it hands one of these to the engine.
     if (text == ".inf" || text == ".Inf" || text == ".INF" || text == "+.inf" ||
     text == "-.inf" || text == "-.Inf" || text == "-.INF" || text == ".nan" ||
     text == ".NaN" || text == ".NAN") {
-        return nullptr;
+        return std::make_optional (nlohmann::ordered_json (nullptr));
+    }
+    return std::nullopt;
+}
+
+/** The base @p digits is written in - 10, 16, 8, 2 - or 0 for no integer. */
+int integer_base (std::string_view digits) {
+    if (is_decimal_digits (digits)) {
+        return 10;
+    }
+    if (digits.size () > 2 && digits[0] == '0') {
+        switch (digits[1]) {
+        case 'x': return 16;
+        case 'o': return 8;
+        case 'b': return 2;
+        default: return 0;
+        }
+    }
+    return 0;
+}
+
+nlohmann::ordered_json plain_scalar (const std::string& text) {
+    if (auto constant = plain_constant (text)) {
+        return *constant;
     }
 
     const bool negative     = text[0] == '-';
@@ -156,18 +189,7 @@ nlohmann::ordered_json plain_scalar (const std::string& text) {
         return text;
     }
 
-    int base = 0;
-    if (is_decimal_digits (digits)) {
-        base = 10;
-    } else if (digits.size () > 2 && digits[0] == '0' &&
-    (digits[1] == 'x' || digits[1] == 'o' || digits[1] == 'b')) {
-        switch (digits[1]) {
-        case 'x': base = 16; break;
-        case 'o': base = 8; break;
-        default: base = 2; break;
-        }
-    }
-    if (base != 0) {
+    if (const int base = integer_base (digits); base != 0) {
         const std::string body{ base == 10 ? digits : digits.substr (2) };
         errno                 = 0;
         char* end             = nullptr;
@@ -573,6 +595,87 @@ bool holds (const std::array<std::string_view, N>& keys, const std::string& key)
  * `MAX_READ_DEPTH`: a `$ref` is copied as-is rather than followed, so a
  * recursive schema terminates here for the same reason it terminates in storage.
  */
+nlohmann::ordered_json to_json_schema (const nlohmann::ordered_json& schema);
+
+/**
+ * `exclusiveMinimum` / `exclusiveMaximum`, which changed meaning between drafts.
+ *
+ * draft-04 (and so OpenAPI 3.0) spells these as booleans modifying
+ * `minimum`/`maximum`; draft-07 spells them as the bound itself. A boolean left
+ * as-is is not a stricter check, it is a different one. `exclusiveMinimum: true`
+ * with no bound leaves `minimum` doing the non-exclusive job the document did
+ * not ask for - but dropping `minimum` too would lose a constraint the document
+ * *did* state, so keeping it is the conservative half of the two.
+ */
+void translate_exclusive_bound (const nlohmann::ordered_json& schema,
+const std::string& key,
+const nlohmann::ordered_json& value,
+nlohmann::ordered_json& out) {
+    if (!value.is_boolean ()) {
+        out[key] = value;
+        return;
+    }
+    const auto bound = schema.find (key == "exclusiveMinimum" ? "minimum" : "maximum");
+    if (value.get<bool> () && bound != schema.end () && bound->is_number ()) {
+        out[key] = *bound;
+    }
+}
+
+/**
+ * OpenAPI 3.0's `nullable`, applied once against whatever `type` ended up being
+ * - doing it per key would depend on key order.
+ */
+void apply_nullable (const nlohmann::ordered_json& schema, nlohmann::ordered_json& out) {
+    const auto nullable = schema.find ("nullable");
+    if (nullable == schema.end () || !nullable->is_boolean () || !nullable->get<bool> ()) {
+        return;
+    }
+    const auto type = out.find ("type");
+    if (type == out.end ()) {
+        // With no `type` at all, `nullable` constrains nothing: every JSON value
+        // was already allowed, null included.
+        return;
+    }
+    if (type->is_string ()) {
+        *type = nlohmann::ordered_json::array ({ type->get<std::string> (), "null" });
+        return;
+    }
+    if (type->is_array () &&
+    std::none_of (type->begin (), type->end (), [] (const nlohmann::ordered_json& name) {
+        return name.is_string () && name.get<std::string> () == "null";
+    })) {
+        type->push_back ("null");
+    }
+}
+
+/** One key of a schema object, translated into @p out. */
+void translate_schema_key (const nlohmann::ordered_json& schema,
+const std::string& key,
+const nlohmann::ordered_json& value,
+nlohmann::ordered_json& out) {
+    if (key == "exclusiveMinimum" || key == "exclusiveMaximum") {
+        translate_exclusive_bound (schema, key, value, out);
+        return;
+    }
+    if (holds (SUBSCHEMA_KEYS, key)) {
+        out[key] = to_json_schema (value);
+        return;
+    }
+    if (holds (SUBSCHEMA_MAP_KEYS, key)) {
+        if (!value.is_object ()) {
+            out[key] = value;
+            return;
+        }
+        nlohmann::ordered_json translated = nlohmann::ordered_json::object ();
+        for (auto child = value.begin (); child != value.end (); ++child) {
+            translated[child.key ()] = to_json_schema (child.value ());
+        }
+        out[key] = std::move (translated);
+        return;
+    }
+    out[key] = value;
+}
+
 nlohmann::ordered_json to_json_schema (const nlohmann::ordered_json& schema) {
     if (schema.is_array ()) {
         nlohmann::ordered_json out = nlohmann::ordered_json::array ();
@@ -589,71 +692,16 @@ nlohmann::ordered_json to_json_schema (const nlohmann::ordered_json& schema) {
 
     nlohmann::ordered_json out = nlohmann::ordered_json::object ();
     for (auto entry = schema.begin (); entry != schema.end (); ++entry) {
-        const std::string& key              = entry.key ();
-        const nlohmann::ordered_json& value = entry.value ();
-        // `nullable` is handled below, once, against whatever `type` ends up
-        // being - doing it here would depend on key order.
+        const std::string& key = entry.key ();
+        // `nullable` is applied below, once, against whatever `type` ends up
+        // being.
         if (holds (OPENAPI_ONLY_KEYS, key) || key == "nullable") {
             continue;
         }
-        if (key == "exclusiveMinimum" || key == "exclusiveMaximum") {
-            // draft-04 (and so OpenAPI 3.0) spells these as booleans modifying
-            // `minimum`/`maximum`; draft-07 spells them as the bound itself. A
-            // boolean left as-is is not a stricter check, it is a different one.
-            if (value.is_boolean ()) {
-                const auto bound =
-                schema.find (key == "exclusiveMinimum" ? "minimum" : "maximum");
-                if (value.get<bool> () && bound != schema.end () && bound->is_number ()) {
-                    out[key] = *bound;
-                }
-                // `exclusiveMinimum: true` with no bound leaves `minimum` doing
-                // the non-exclusive job the document did not ask for - but
-                // dropping `minimum` too would lose a constraint the document
-                // *did* state. Keeping it is the conservative half of the two.
-                continue;
-            }
-            out[key] = value;
-            continue;
-        }
-        if (holds (SUBSCHEMA_KEYS, key)) {
-            out[key] = to_json_schema (value);
-            continue;
-        }
-        if (holds (SUBSCHEMA_MAP_KEYS, key)) {
-            if (!value.is_object ()) {
-                out[key] = value;
-                continue;
-            }
-            nlohmann::ordered_json translated = nlohmann::ordered_json::object ();
-            for (auto child = value.begin (); child != value.end (); ++child) {
-                translated[child.key ()] = to_json_schema (child.value ());
-            }
-            out[key] = std::move (translated);
-            continue;
-        }
-        out[key] = value;
+        translate_schema_key (schema, key, entry.value (), out);
     }
 
-    const auto nullable = schema.find ("nullable");
-    if (nullable == schema.end () || !nullable->is_boolean () || !nullable->get<bool> ()) {
-        return out;
-    }
-    const auto type = out.find ("type");
-    if (type == out.end ()) {
-        // With no `type` at all, `nullable` constrains nothing: every JSON value
-        // was already allowed, null included.
-        return out;
-    }
-    if (type->is_string ()) {
-        *type = nlohmann::ordered_json::array ({ type->get<std::string> (), "null" });
-        return out;
-    }
-    if (type->is_array () &&
-    std::none_of (type->begin (), type->end (), [] (const nlohmann::ordered_json& name) {
-        return name.is_string () && name.get<std::string> () == "null";
-    })) {
-        type->push_back ("null");
-    }
+    apply_nullable (schema, out);
     return out;
 }
 

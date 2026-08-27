@@ -193,6 +193,20 @@ class EventLoopWorker {
 
     void run_loop ();
 
+    /// Submit what the pending queue holds, up to `max_concurrent` and up to
+    /// what the rate limiter allows. Worker-thread only. @p local_active is the
+    /// loop's cached active count, advanced as transfers are added.
+    /// @return whether anything was taken off the queue.
+    bool submit_pending_transfers (size_t& local_active);
+
+    /// Deliver every transfer curl has finished. Worker-thread only.
+    /// @return whether any completion was read.
+    bool drain_completions ();
+
+    /// Park until there is IO or new work, spinning briefly first. Worker-thread
+    /// only; called only when a pass found nothing to do.
+    void wait_for_work (int still_running);
+
     /// Remove every in-flight easy handle from curl and complete it as
     /// cancelled. Worker-thread only - `active_transfers` and the handle pool
     /// are not synchronised.

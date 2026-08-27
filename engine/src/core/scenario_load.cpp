@@ -215,7 +215,217 @@ nlohmann::json build_scenario_load_coverage (const ScenarioLoadState& state) {
 // The virtual-user state machine
 // ============================================================================
 
-std::shared_ptr<ScenarioLoadState> execute_scenario_load (std::shared_ptr<RunContext> context,
+/**
+ * The producer side of a scenario load run: which virtual user is free, what a
+ * finished step does to it, and how the next step is submitted.
+ *
+ * One object rather than three lambdas over the same locals, because every one
+ * of them writes state the other two read - `cursor`, `live_vus`, and each VU's
+ * `busy` edge - and the ownership rules are only statable where they sit
+ * together.
+ */
+class ScenarioLoadDriver {
+    public:
+    ScenarioLoadDriver (const std::shared_ptr<RunContext>& context,
+    vayu::db::Database& db,
+    const ScenarioExecution& execution,
+    std::shared_ptr<ScenarioLoadState> state,
+    size_t max_iterations)
+    : context_ (context), db_ (db), execution_ (execution),
+      state_ (std::move (state)), max_iterations_ (max_iterations),
+      live_vus_ (state_->vus.size ()) {
+    }
+
+    /// How many VUs could still be given work. For a duration-bounded run that
+    /// is every live VU; for an `iterations` run it shrinks to zero as they
+    /// retire, which is what ends the loop.
+    [[nodiscard]] size_t live_vus () const {
+        return live_vus_;
+    }
+
+    /** The next step of the next ready virtual user, submitted. */
+    void submit_one () {
+        VirtualUser* vu = take_ready_vu ();
+        if (vu == nullptr) {
+            // Every VU is in flight or retired. The controller's own 50ms tick
+            // retries; not counting a submission here is what keeps
+            // `in_flight()` honest.
+            return;
+        }
+
+        const size_t step_index         = vu->step;
+        const ScenarioStep& step        = execution_.plan.steps[step_index];
+        const std::optional<size_t> row = vu->data_row;
+        // Read here rather than in the completion: `finish_step` advances it at
+        // an iteration boundary, so the callback would report the iteration the
+        // VU moved on to instead of the one this step ran in.
+        const size_t iteration = vu->iteration;
+        vayu::Request request  = step.request;
+        request.track_cookies  = true;
+        request.cookie_lines   = vu->cookies;
+
+        // The data pass, per iteration and before the send. A step carrying no
+        // `{{data.*}}` token has empty templates and is not walked at all,
+        // which is what makes a token-free plan free per iteration.
+        if (row && !(step.data_template.empty () && step.auth_template.empty ())) {
+            auto bound = apply_data_template (
+            request, step.data_template, execution_.data_rows[*row], *row);
+            if (bound.ok) {
+                // Then the credentials, which is why the plan left them typed:
+                // they have to carry the row's values *before* `apply_auth`
+                // base64-encodes them onto the request (issue #591).
+                bound = bind_step_auth (request, step, execution_.data_rows[*row], *row);
+            }
+            if (!bound.ok) {
+                // Nothing goes on the wire, so nothing will ever complete for
+                // this step: this path owns the whole accounting a completion
+                // would have done. `requests_sent` is incremented beside the
+                // error record so `in_flight()` - sent minus completed - stays
+                // honest, and the step's `errors` column in the report's
+                // breakdown is what attributes the failure to a step.
+                context_->requests_sent++;
+                finish_step (state_, execution_.plan.steps.size (), vu, step_index,
+                /*errored=*/true, nullptr);
+                handle_result (context_, db_,
+                vayu::Result<vayu::Response> (vayu::Error{
+                vayu::ErrorCode::DataBindingFailed, step.name + ": " + bound.error }),
+                ResultAnnotations{ row, step_index, iteration });
+                return;
+            }
+        }
+
+        context_->event_loop->submit (request,
+        [context = context_, &db = db_, state = state_,
+        step_count = execution_.plan.steps.size (), vu, step_index, iteration,
+        row] (size_t, const vayu::Result<vayu::Response>& result) {
+            const bool errored = result.is_error () || result.value ().has_error ();
+            if (!errored) {
+                state->steps.record (step_index, result.value ().timing.total_ms);
+            }
+            // Every completion, including the failed ones: a transport error is
+            // a request this operation was sent and did not answer, and coverage
+            // that counted only successes would report the send as if it never
+            // happened. `is_error()` is the no-response case, which records as
+            // status 0 and is reported as a transport error rather than a
+            // status the server never sent (issue #629).
+            state->coverage.record (
+            step_index, result.is_error () ? 0 : result.value ().status_code);
+            finish_step (state, step_count, vu, step_index, errored,
+            errored ? nullptr : &result.value ().cookie_lines);
+            handle_result (context, db, result,
+            ResultAnnotations{ row, step_index, iteration });
+        });
+        context_->requests_sent++;
+    }
+
+    private:
+    /**
+     * A virtual user that is neither busy nor retired, claimed for one step.
+     *
+     * Returns null when every VU is in flight or retired: the controller's own
+     * 50ms tick retries, and not counting a submission is what keeps
+     * `in_flight()` honest.
+     */
+    VirtualUser* take_ready_vu () {
+        for (size_t scanned = 0; scanned < state_->vus.size (); ++scanned) {
+            VirtualUser& vu = *state_->vus[cursor_];
+            cursor_         = (cursor_ + 1) % state_->vus.size ();
+            if (vu.retired) {
+                continue;
+            }
+            // Acquire pairs with the completion's release store, so the step,
+            // iteration and cookies this VU was left with are visible here.
+            if (vu.busy.load (std::memory_order_acquire)) {
+                continue;
+            }
+            if (vu.step == 0) {
+                if (max_iterations_ > 0 && state_->iterations_started >= max_iterations_) {
+                    vu.retired = true;
+                    --live_vus_;
+                    continue;
+                }
+                ++state_->iterations_started;
+                if (state_->data_row_count > 0) {
+                    // One claim per iteration off the run-wide cursor, wrapping
+                    // always. Claimed here rather than per step so every step
+                    // of the iteration binds the same row - a checkout that
+                    // used a different row than its login is not a user.
+                    vu.data_row = state_->data_cursor++ % state_->data_row_count;
+                }
+            }
+            // The producer is the only writer of this edge, so a plain store is
+            // enough - no compare-exchange, and nothing on the completion path
+            // has to loop.
+            vu.busy.store (true, std::memory_order_relaxed);
+            return &vu;
+        }
+        return nullptr;
+    }
+
+    /**
+     * One step's outcome applied to the run's tallies and the VU's state
+     * machine, and the only writer of `busy`'s `true -> false` edge. Shared by
+     * the completion callback and the data-binding failure, so a step that
+     * never reached the wire retires its VU exactly as a completed one does - a
+     * VU left busy permanently shrinks effective concurrency.
+     *
+     * @p next_cookies is null for an outcome that carries none - an error, or a
+     * step that was never sent.
+     */
+    static void finish_step (const std::shared_ptr<ScenarioLoadState>& state,
+    size_t step_count,
+    VirtualUser* vu,
+    size_t step_index,
+    bool errored,
+    const std::vector<std::string>* next_cookies) {
+        state->steps_executed.fetch_add (1, std::memory_order_relaxed);
+        if (errored) {
+            state->steps.record_error (step_index);
+            state->steps_errored.fetch_add (1, std::memory_order_relaxed);
+        }
+
+        const bool last_step = step_index + 1 >= step_count;
+        if (errored || last_step) {
+            // An errored step ends its iteration - and the VU starts the next
+            // one rather than being stranded, which would permanently shrink
+            // effective concurrency for the rest of the run.
+            if (last_step) {
+                state->iterations_completed.fetch_add (1, std::memory_order_relaxed);
+            } else {
+                state->iterations_abandoned.fetch_add (1, std::memory_order_relaxed);
+            }
+            vu->step = 0;
+            ++vu->iteration;
+            // Empty at the start of each iteration: a new iteration is a
+            // new user, not the same one logging in twice.
+            vu->cookies.clear ();
+        } else {
+            vu->step = step_index + 1;
+            // Replace, never merge - the captured list is the whole jar the
+            // handle held, so merging would resurrect a cookie the server
+            // deleted by expiring it.
+            vu->cookies =
+            next_cookies != nullptr ? *next_cookies : std::vector<std::string>{};
+        }
+
+        // Released *before* handle_result, which is what increments the
+        // completion count `in_flight()` is derived from: a VU that became
+        // ready after the count moved would leave the controller computing
+        // a deficit it cannot fill.
+        vu->busy.store (false, std::memory_order_release);
+    }
+
+    const std::shared_ptr<RunContext>& context_;
+    vayu::db::Database& db_;
+    const ScenarioExecution& execution_;
+    std::shared_ptr<ScenarioLoadState> state_;
+    size_t max_iterations_ = 0;
+    size_t cursor_         = 0;
+    size_t live_vus_       = 0;
+};
+
+std::shared_ptr<ScenarioLoadState> execute_scenario_load (
+const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 const ScenarioExecution& execution) {
     const ScenarioPlan& plan = execution.plan;
@@ -299,167 +509,7 @@ const ScenarioExecution& execution) {
         "bounded by the virtual-user count ('concurrency')");
     }
 
-    // Producer-thread-only cursor and tallies. `live_vus` shrinks as VUs retire
-    // at an iteration boundary, which is what lets an `iterations` run end
-    // without abandoning a VU in the middle of its sequence.
-    size_t cursor   = 0;
-    size_t live_vus = vu_count;
-    auto* state_ptr = state.get ();
-
-    auto take_ready_vu = [&] () -> VirtualUser* {
-        for (size_t scanned = 0; scanned < state_ptr->vus.size (); ++scanned) {
-            VirtualUser& vu = *state_ptr->vus[cursor];
-            cursor          = (cursor + 1) % state_ptr->vus.size ();
-            if (vu.retired) {
-                continue;
-            }
-            // Acquire pairs with the completion's release store, so the step,
-            // iteration and cookies this VU was left with are visible here.
-            if (vu.busy.load (std::memory_order_acquire)) {
-                continue;
-            }
-            if (vu.step == 0) {
-                if (max_iterations > 0 && state_ptr->iterations_started >= max_iterations) {
-                    vu.retired = true;
-                    --live_vus;
-                    continue;
-                }
-                ++state_ptr->iterations_started;
-                if (state_ptr->data_row_count > 0) {
-                    // One claim per iteration off the run-wide cursor, wrapping
-                    // always. Claimed here rather than per step so every step
-                    // of the iteration binds the same row - a checkout that
-                    // used a different row than its login is not a user.
-                    vu.data_row = state_ptr->data_cursor++ % state_ptr->data_row_count;
-                }
-            }
-            // The producer is the only writer of this edge, so a plain store is
-            // enough - no compare-exchange, and nothing on the completion path
-            // has to loop.
-            vu.busy.store (true, std::memory_order_relaxed);
-            return &vu;
-        }
-        return nullptr;
-    };
-
-    // One step's outcome applied to the run's tallies and the VU's state
-    // machine, and the only writer of `busy`'s `true -> false` edge. Shared by
-    // the completion callback and the data-binding failure below, so a step
-    // that never reached the wire retires its VU exactly as a completed one
-    // does - a VU left busy permanently shrinks effective concurrency.
-    //
-    // `next_cookies` is null for an outcome that carries none - an error, or a
-    // step that was never sent.
-    auto finish_step = [state, step_count] (VirtualUser* vu, size_t step_index,
-                       bool errored, const std::vector<std::string>* next_cookies) {
-        state->steps_executed.fetch_add (1, std::memory_order_relaxed);
-        if (errored) {
-            state->steps.record_error (step_index);
-            state->steps_errored.fetch_add (1, std::memory_order_relaxed);
-        }
-
-        const bool last_step = step_index + 1 >= step_count;
-        if (errored || last_step) {
-            // An errored step ends its iteration - and the VU starts the next
-            // one rather than being stranded, which would permanently shrink
-            // effective concurrency for the rest of the run.
-            if (last_step) {
-                state->iterations_completed.fetch_add (1, std::memory_order_relaxed);
-            } else {
-                state->iterations_abandoned.fetch_add (1, std::memory_order_relaxed);
-            }
-            vu->step = 0;
-            ++vu->iteration;
-            // Empty at the start of each iteration: a new iteration is a
-            // new user, not the same one logging in twice.
-            vu->cookies.clear ();
-        } else {
-            vu->step = step_index + 1;
-            // Replace, never merge - the captured list is the whole jar the
-            // handle held, so merging would resurrect a cookie the server
-            // deleted by expiring it.
-            vu->cookies =
-            next_cookies != nullptr ? *next_cookies : std::vector<std::string>{};
-        }
-
-        // Released *before* handle_result, which is what increments the
-        // completion count `in_flight()` is derived from: a VU that became
-        // ready after the count moved would leave the controller computing
-        // a deficit it cannot fill.
-        vu->busy.store (false, std::memory_order_release);
-    };
-
-    auto submit_one = [&] () {
-        VirtualUser* vu = take_ready_vu ();
-        if (vu == nullptr) {
-            // Every VU is in flight or retired. The controller's own 50ms tick
-            // retries; not counting a submission here is what keeps
-            // `in_flight()` honest.
-            return;
-        }
-
-        const size_t step_index         = vu->step;
-        const ScenarioStep& step        = plan.steps[step_index];
-        const std::optional<size_t> row = vu->data_row;
-        // Read here rather than in the completion: `finish_step` advances it at
-        // an iteration boundary, so the callback would report the iteration the
-        // VU moved on to instead of the one this step ran in.
-        const size_t iteration = vu->iteration;
-        vayu::Request request  = step.request;
-        request.track_cookies  = true;
-        request.cookie_lines   = vu->cookies;
-
-        // The data pass, per iteration and before the send. A step carrying no
-        // `{{data.*}}` token has empty templates and is not walked at all,
-        // which is what makes a token-free plan free per iteration.
-        if (row && !(step.data_template.empty () && step.auth_template.empty ())) {
-            auto bound = apply_data_template (
-            request, step.data_template, execution.data_rows[*row], *row);
-            if (bound.ok) {
-                // Then the credentials, which is why the plan left them typed:
-                // they have to carry the row's values *before* `apply_auth`
-                // base64-encodes them onto the request (issue #591).
-                bound = bind_step_auth (request, step, execution.data_rows[*row], *row);
-            }
-            if (!bound.ok) {
-                // Nothing goes on the wire, so nothing will ever complete for
-                // this step: this path owns the whole accounting a completion
-                // would have done. `requests_sent` is incremented beside the
-                // error record so `in_flight()` - sent minus completed - stays
-                // honest, and the step's `errors` column in the report's
-                // breakdown is what attributes the failure to a step.
-                context->requests_sent++;
-                finish_step (vu, step_index, /*errored=*/true, nullptr);
-                handle_result (context, db,
-                vayu::Result<vayu::Response> (vayu::Error{
-                vayu::ErrorCode::DataBindingFailed, step.name + ": " + bound.error }),
-                ResultAnnotations{ row, step_index, iteration });
-                return;
-            }
-        }
-
-        context->event_loop->submit (request,
-        [context, &db, state, vu, step_index, iteration, row, finish_step] (
-        size_t, const vayu::Result<vayu::Response>& result) {
-            const bool errored = result.is_error () || result.value ().has_error ();
-            if (!errored) {
-                state->steps.record (step_index, result.value ().timing.total_ms);
-            }
-            // Every completion, including the failed ones: a transport error is
-            // a request this operation was sent and did not answer, and coverage
-            // that counted only successes would report the send as if it never
-            // happened. `is_error()` is the no-response case, which records as
-            // status 0 and is reported as a transport error rather than a
-            // status the server never sent (issue #629).
-            state->coverage.record (
-            step_index, result.is_error () ? 0 : result.value ().status_code);
-            finish_step (vu, step_index, errored,
-            errored ? nullptr : &result.value ().cookie_lines);
-            handle_result (context, db, result,
-            ResultAnnotations{ row, step_index, iteration });
-        });
-        context->requests_sent++;
-    };
+    ScenarioLoadDriver driver (context, db, execution, state, max_iterations);
 
     // Through the one duration parser, so a mistyped "30sec" fails this run the
     // same way it fails a single-request one rather than silently running for a
@@ -472,7 +522,7 @@ const ScenarioExecution& execution) {
         0;
 
     maintain_concurrency (
-    context, submit_one,
+    context, [&driver] () { driver.submit_one (); },
     [type, start_vus, target_vus, ramp_ms] (int64_t elapsed) -> size_t {
         if (*type != LoadTestType::RampUp) {
             return target_vus;
@@ -482,9 +532,10 @@ const ScenarioExecution& execution) {
     // The budget is how many VUs could still be given work. For a duration-
     // bounded run that is every live VU; for an `iterations` run it shrinks to
     // zero as they retire, which is what ends the loop.
-    [&live_vus] () { return live_vus; },
-    [type, duration_ms, &live_vus] (int64_t elapsed) {
-        return *type == LoadTestType::Iterations ? live_vus > 0 : elapsed < duration_ms;
+    [&driver] () { return driver.live_vus (); },
+    [type, duration_ms, &driver] (int64_t elapsed) {
+        return *type == LoadTestType::Iterations ? driver.live_vus () > 0 :
+                                                   elapsed < duration_ms;
     });
 
     return state;

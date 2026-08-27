@@ -346,6 +346,44 @@ nlohmann::json build_sampled_validation_payload (const SampledValidationTotals& 
     return node;
 }
 
+/**
+ * Every subschema of @p node, queued for the walk.
+ *
+ * `items` is a subschema in draft-07 and a list in draft-04's tuple form; both
+ * spellings reach schemas, so both are followed.
+ */
+void queue_subschemas (const nlohmann::json& node,
+std::vector<const nlohmann::json*>& pending) {
+    for (const auto& key : subschema_keys ()) {
+        if (auto found = node.find (key); found != node.end () && found->is_object ()) {
+            pending.push_back (&*found);
+        }
+    }
+    for (const auto& key : subschema_map_keys ()) {
+        if (auto found = node.find (key); found != node.end () && found->is_object ()) {
+            for (const auto& [_, child] : found->items ()) {
+                pending.push_back (&child);
+            }
+        }
+    }
+    for (const auto& key : subschema_list_keys ()) {
+        if (auto found = node.find (key); found != node.end () && found->is_array ()) {
+            for (const auto& child : *found) {
+                pending.push_back (&child);
+            }
+        }
+    }
+    if (auto items = node.find ("items"); items != node.end ()) {
+        if (items->is_object ()) {
+            pending.push_back (&*items);
+        } else if (items->is_array ()) {
+            for (const auto& child : *items) {
+                pending.push_back (&child);
+            }
+        }
+    }
+}
+
 std::vector<std::pair<std::string, size_t>>
 collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json& ref_roots) {
     const nlohmann::json root = validation_root (schema, ref_roots);
@@ -380,36 +418,7 @@ collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json
                 }
             }
         }
-        for (const auto& key : subschema_keys ()) {
-            if (auto found = node->find (key); found != node->end () && found->is_object ()) {
-                pending.push_back (&*found);
-            }
-        }
-        for (const auto& key : subschema_map_keys ()) {
-            if (auto found = node->find (key); found != node->end () && found->is_object ()) {
-                for (const auto& [_, child] : found->items ()) {
-                    pending.push_back (&child);
-                }
-            }
-        }
-        for (const auto& key : subschema_list_keys ()) {
-            if (auto found = node->find (key); found != node->end () && found->is_array ()) {
-                for (const auto& child : *found) {
-                    pending.push_back (&child);
-                }
-            }
-        }
-        // `items` is a subschema in draft-07 and a list in draft-04's tuple
-        // form; both spellings reach schemas, so both are followed.
-        if (auto items = node->find ("items"); items != node->end ()) {
-            if (items->is_object ()) {
-                pending.push_back (&*items);
-            } else if (items->is_array ()) {
-                for (const auto& child : *items) {
-                    pending.push_back (&child);
-                }
-            }
-        }
+        queue_subschemas (*node, pending);
     }
 
     return { counts.begin (), counts.end () };
@@ -485,6 +494,35 @@ const nlohmann::json& body) {
     return verdict;
 }
 
+/**
+ * The responses one indexed operation declares.
+ *
+ * A row missing a status, a media type or a schema declares nothing checkable
+ * and is skipped rather than costing the document its index.
+ */
+void ResponseSchemaIndex::read_declared_responses (const nlohmann::json& row,
+IndexedOperation& operation) {
+    auto responses = row.find ("responses");
+    if (responses == row.end () || !responses->is_array ()) {
+        return;
+    }
+    for (const auto& response : *responses) {
+        if (!response.is_object ()) {
+            continue;
+        }
+        DeclaredSchema declared;
+        declared.status = response.value ("status", std::string ());
+        declared.content_type = lower (response.value ("contentType", std::string ()));
+        auto schema = response.find ("schema");
+        if (declared.status.empty () || declared.content_type.empty () ||
+        schema == response.end ()) {
+            continue;
+        }
+        declared.schema = *schema;
+        operation.responses.push_back (std::move (declared));
+    }
+}
+
 std::optional<ResponseSchemaIndex> ResponseSchemaIndex::parse (const std::string& stored) {
     if (stored.empty ()) {
         return std::nullopt;
@@ -523,25 +561,7 @@ std::optional<ResponseSchemaIndex> ResponseSchemaIndex::parse (const std::string
         }
 
         IndexedOperation operation;
-        if (auto responses = row.find ("responses");
-        responses != row.end () && responses->is_array ()) {
-            for (const auto& response : *responses) {
-                if (!response.is_object ()) {
-                    continue;
-                }
-                DeclaredSchema declared;
-                declared.status = response.value ("status", std::string ());
-                declared.content_type =
-                lower (response.value ("contentType", std::string ()));
-                auto schema = response.find ("schema");
-                if (declared.status.empty () ||
-                declared.content_type.empty () || schema == response.end ()) {
-                    continue;
-                }
-                declared.schema = *schema;
-                operation.responses.push_back (std::move (declared));
-            }
-        }
+        read_declared_responses (row, operation);
 
         const size_t at = index.operations_.size ();
         // First writer wins in both maps, the rule `OperationIndex` states: a
@@ -556,6 +576,78 @@ std::optional<ResponseSchemaIndex> ResponseSchemaIndex::parse (const std::string
     }
 
     return index;
+}
+
+/**
+ * Which indexed operation a stamp names.
+ *
+ * `operationId` first and `METHOD path` second - the rule
+ * `core/operation_match.hpp` applies when binding and `OperationIndex` applies
+ * when counting coverage, stated once more here because all three must answer a
+ * rename the same way.
+ */
+std::optional<size_t> resolve_stamped_operation (const std::string& spec_operation,
+const std::unordered_map<std::string, size_t>& by_operation_id,
+const std::unordered_map<std::string, size_t>& by_method_path) {
+    std::optional<size_t> at;
+    try {
+        const auto stamped = nlohmann::json::parse (spec_operation);
+        if (stamped.is_object ()) {
+            if (auto id = stamped.find ("operationId"); id != stamped.end () &&
+            id->is_string () && !id->get<std::string> ().empty ()) {
+                if (auto found = by_operation_id.find (id->get<std::string> ());
+                found != by_operation_id.end ()) {
+                    at = found->second;
+                }
+            }
+            if (!at) {
+                const auto method = stamped.value ("method", std::string ());
+                const auto path   = stamped.value ("path", std::string ());
+                if (!method.empty () && !path.empty ()) {
+                    if (auto found = by_method_path.find (method_path_key (method, path));
+                    found != by_method_path.end ()) {
+                        at = found->second;
+                    }
+                }
+            }
+        }
+    } catch (const std::exception&) {
+        // @deliberate: an unparseable stamp names no operation, which is
+        // what the absent-identity branch below already answers.
+    }
+    return at;
+}
+
+/**
+ * The declaration that answers for @p media under @p status.
+ *
+ * A wildcard declaration - "any media type", or "any subtype of this type" -
+ * which OpenAPI allows and generators emit, answers for a media type nothing
+ * else claimed. It is considered only after every exact match has been tried,
+ * so a document declaring both keeps the specific one.
+ */
+const ResponseSchemaIndex::DeclaredSchema* ResponseSchemaIndex::select_declared_schema (
+const std::vector<DeclaredSchema>& responses,
+const std::string& status,
+const std::string& media) {
+    for (const auto& declared : responses) {
+        if (declared.status == status && declared.content_type == media) {
+            return &declared;
+        }
+    }
+    for (const auto& declared : responses) {
+        if (declared.status != status) {
+            continue;
+        }
+        const auto slash    = declared.content_type.find ('/');
+        const bool wildcard = declared.content_type == "*/*" ||
+        (slash != std::string::npos && declared.content_type.substr (slash) == "/*" &&
+        media.rfind (declared.content_type.substr (0, slash + 1), 0) == 0);
+        if (wildcard) {
+            return &declared;
+        }
+    }
+    return nullptr;
 }
 
 ValidationVerdict ResponseSchemaIndex::check (const std::string& spec_operation,
@@ -573,35 +665,8 @@ const std::string& body) const {
     // rule `core/operation_match.hpp` applies when binding and `OperationIndex`
     // applies when counting coverage, stated once more here because all three
     // must answer a rename the same way.
-    std::optional<size_t> at;
-    if (!spec_operation.empty ()) {
-        try {
-            const auto stamped = nlohmann::json::parse (spec_operation);
-            if (stamped.is_object ()) {
-                if (auto id = stamped.find ("operationId"); id != stamped.end () &&
-                id->is_string () && !id->get<std::string> ().empty ()) {
-                    if (auto found = by_operation_id_.find (id->get<std::string> ());
-                    found != by_operation_id_.end ()) {
-                        at = found->second;
-                    }
-                }
-                if (!at) {
-                    const auto method = stamped.value ("method", std::string ());
-                    const auto path = stamped.value ("path", std::string ());
-                    if (!method.empty () && !path.empty ()) {
-                        if (auto found =
-                            by_method_path_.find (method_path_key (method, path));
-                        found != by_method_path_.end ()) {
-                            at = found->second;
-                        }
-                    }
-                }
-            }
-        } catch (const std::exception&) {
-            // @deliberate: an unparseable stamp names no operation, which is
-            // what the absent-identity branch below already answers.
-        }
-    }
+    const std::optional<size_t> at =
+    resolve_stamped_operation (spec_operation, by_operation_id_, by_method_path_);
     if (spec_operation.empty ()) {
         verdict.reason = UncheckedReason::NoOperation;
         return verdict;
@@ -630,36 +695,8 @@ const std::string& body) const {
     }
     const std::string& status = patterns[*matched];
 
-    const auto media               = media_type_of (content_type);
-    const DeclaredSchema* selected = nullptr;
-    for (const auto& declared : responses) {
-        if (declared.status != status) {
-            continue;
-        }
-        if (declared.content_type == media) {
-            selected = &declared;
-            break;
-        }
-    }
-    if (!selected) {
-        // A `*/*` or `application/*` declaration, which OpenAPI allows and
-        // generators emit, answers for a media type nothing else claimed.
-        // Checked only after every exact match has been tried, so a document
-        // declaring both keeps the specific one.
-        for (const auto& declared : responses) {
-            if (declared.status != status) {
-                continue;
-            }
-            const auto slash    = declared.content_type.find ('/');
-            const bool wildcard = declared.content_type == "*/*" ||
-            (slash != std::string::npos && declared.content_type.substr (slash) == "/*" &&
-            media.rfind (declared.content_type.substr (0, slash + 1), 0) == 0);
-            if (wildcard) {
-                selected = &declared;
-                break;
-            }
-        }
-    }
+    const DeclaredSchema* selected =
+    select_declared_schema (responses, status, media_type_of (content_type));
     if (!selected) {
         verdict.reason = UncheckedReason::NoSchemaForContentType;
         return verdict;

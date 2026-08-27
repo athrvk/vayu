@@ -470,6 +470,200 @@ bool proxy_refused_tunnel (CURL* curl) {
     return connect_code >= 400;
 }
 
+namespace {
+
+/**
+ * The user's trust anchors (issue #706) and the native-store flag.
+ *
+ * Written on every handle, empty path included, for the reason the proxy options
+ * are: handles are reused, so a bundle left behind by a previous policy would
+ * outlive the setting that asked for it. Null restores the backend's own default.
+ */
+void apply_ca_options (CURL* curl, const TransportPolicy& policy) {
+    // The return code is checked because this is the one transport option a
+    // TLS backend can refuse outright - `CURLE_NOT_BUILT_IN` from a backend
+    // with no CAINFO support - and a silently ignored bundle means every
+    // request fails verification with nothing anywhere saying the certificates
+    // were never loaded. Logged once per process: the load path applies a
+    // policy per transfer, and a per-request line would be the log.
+    const CURLcode ca_result = set_opt<CURLOPT_CAINFO> (curl,
+    policy.ca_bundle_path.empty () ? static_cast<const char*> (nullptr) :
+                                     policy.ca_bundle_path.c_str ());
+    if (ca_result != CURLE_OK && !policy.ca_bundle_path.empty ()) {
+        static std::once_flag warned;
+        std::call_once (warned, [ca_result] {
+            const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
+            vayu::utils::log_error ("This build's TLS backend (" +
+            std::string (info != nullptr && info->ssl_version != nullptr ? info->ssl_version : "unknown") +
+            ") refused a custom CA bundle: " + std::string (curl_easy_strerror (ca_result)) +
+            ". Custom CA certificates are not in use on this platform.");
+        });
+    }
+
+    // Ask the backend to consult the operating system's own store as well. On
+    // an OpenSSL build CAINFO *replaces* the default bundle, which is why the
+    // materialized file already carries the system anchors on the platforms
+    // that keep them in a file.
+    //
+    // Windows is the platform that does not, and since #851 it is an OpenSSL
+    // build like the others - so the flag is unconditional there, not only
+    // when a bundle is in force. An OpenSSL build on Windows has no CA file to
+    // fall back to: `curl_version_info()->cainfo` names a path from the
+    // machine the port was built on, which does not exist on the user's, so a
+    // Windows handle without this flag and without a paste trusts *nothing*
+    // and every HTTPS request fails verification. With it, #706's additive
+    // rule reads "the native store plus whatever the user pasted" on Windows
+    // too - the store supplying the anchors the merged file does elsewhere.
+    //
+    // Written in both directions - the default `0` where no bundle is set and
+    // the native store is not the anchor source - because a reused handle
+    // would otherwise keep a flag the current policy never asked for, the rule
+    // every option here follows.
+    long ssl_options = 0L;
+#ifdef _WIN32
+    ssl_options |= static_cast<long> (CURLSSLOPT_NATIVE_CA);
+#else
+    if (!policy.ca_bundle_path.empty ()) {
+        ssl_options |= static_cast<long> (CURLSSLOPT_NATIVE_CA);
+    }
+#endif
+    set_opt<CURLOPT_SSL_OPTIONS> (curl, ssl_options);
+}
+
+/** The proxy and its bypass list, per mode. */
+void apply_proxy_options (CURL* curl, const TransportPolicy& policy) {
+    switch (policy.proxy_mode) {
+    case ProxyMode::Environment:
+        // Null restores libcurl's default, which *is* the environment pickup.
+        // Written rather than skipped so a reused handle cannot keep a proxy
+        // the previous policy set - see the header.
+        set_opt<CURLOPT_PROXY> (curl, static_cast<const char*> (nullptr));
+        break;
+    case ProxyMode::System:
+        // What the app resolved from the OS, or - when nothing resolved, which
+        // is every headless run - the same null the environment mode writes.
+        // The resolver has already decided which of those this is; an empty
+        // `proxy_url` under `system` *is* the documented fallback, not a
+        // half-configured state to guess about here (issue #708).
+        set_opt<CURLOPT_PROXY> (curl,
+        policy.proxy_url.empty () ? static_cast<const char*> (nullptr) :
+                                    policy.proxy_url.c_str ());
+        break;
+    case ProxyMode::Manual:
+        set_opt<CURLOPT_PROXY> (curl, policy.proxy_url.c_str ());
+        break;
+    case ProxyMode::Off:
+        // Empty string, not null: an empty CURLOPT_PROXY is what disables the
+        // environment pickup. Null would re-enable it, and "off" that still
+        // proxies because a shell exported https_proxy is not off.
+        set_opt<CURLOPT_PROXY> (curl, "");
+        break;
+    }
+
+    // The bypass list, and the null-versus-empty distinction is load-bearing:
+    // libcurl falls back to the process's `no_proxy` variable whenever
+    // CURLOPT_NOPROXY is null, and an empty string means "exempt nothing".
+    //
+    // So `manual` always writes the list, empty or not. A user who names a
+    // proxy in Settings has said where their traffic goes, and an inherited
+    // `no_proxy` quietly exempting half of it is the same invisible failure
+    // this issue exists to end - it is also not hypothetical: a container that
+    // exports `no_proxy=...,127.0.0.1,...` bypassed a configured proxy for
+    // every local target and reported nothing.
+    //
+    // `environment` leaves it null on purpose: that mode *is* "do what the
+    // environment says", `no_proxy` included, unless a bypass list overrides
+    // it. `off` has no proxy for a list to modify.
+    //
+    // `system` follows whichever of those two it actually resolved to: with a
+    // proxy in force the user's bypass list is the whole rule, exactly as under
+    // `manual`, and with nothing resolved it is the environment mode and must
+    // leave `no_proxy` alone.
+    switch (policy.proxy_mode) {
+    case ProxyMode::System:
+        if (!policy.proxy_url.empty () || !policy.proxy_bypass.empty ()) {
+            set_opt<CURLOPT_NOPROXY> (curl, policy.proxy_bypass.c_str ());
+        } else {
+            // Nothing resolved and nothing exempted: the environment mode's
+            // null, so an inherited `no_proxy` still applies to the proxy this
+            // mode has fallen back to reading from the environment.
+            set_opt<CURLOPT_NOPROXY> (curl, static_cast<const char*> (nullptr));
+        }
+        break;
+    case ProxyMode::Manual:
+        set_opt<CURLOPT_NOPROXY> (curl, policy.proxy_bypass.c_str ());
+        break;
+    case ProxyMode::Environment:
+        set_opt<CURLOPT_NOPROXY> (curl,
+        policy.proxy_bypass.empty () ? static_cast<const char*> (nullptr) :
+                                       policy.proxy_bypass.c_str ());
+        break;
+    case ProxyMode::Off:
+        set_opt<CURLOPT_NOPROXY> (curl, static_cast<const char*> (nullptr));
+        break;
+    }
+}
+
+/**
+ * The client identity this URL's authority matches, if any (issue #707).
+ *
+ * Every option is written in both directions, the rule the rest of this function
+ * follows: a reused handle must not keep an identity the current policy never
+ * asked for.
+ */
+const ClientCertRule* apply_client_certificate (CURL* curl,
+const TransportPolicy& policy,
+const std::string& url) {
+    // Cookies need no thought here, and that is worth stating because it looks
+    // like they should: libcurl owns the wire cookies and matches them on the
+    // *origin* host, never the proxy hop, and curl 8.21's cross-origin
+    // redirect-cookie rule keys on origin too. A proxy changes which socket
+    // the bytes leave by and nothing about which jar lines apply.
+
+    // The client certificate for this target (issue #707). Written on every
+    // handle, null included, for the reason every option above is: handles are
+    // reused, and a certificate left behind by a previous transfer would be
+    // presented to a host that never registered one.
+    //
+    // The lookup is skipped entirely - URL parse included - when the registry
+    // is empty, which is every user who has not opted into mTLS.
+    const ClientCertRule* matched = nullptr;
+    if (!policy.client_certificates.empty ()) {
+        const UrlAuthority authority = parse_authority (url);
+        matched = match_client_certificate (policy, authority.host, authority.port);
+    }
+    set_opt<CURLOPT_SSLCERT> (curl,
+    matched != nullptr ? matched->cert_path.c_str () : static_cast<const char*> (nullptr));
+    // What that file is (issue #833). Without it libcurl reads whatever is
+    // there as PEM, so a registered `p12` bundle would be handed to the wrong
+    // parser - and on a Schannel build, which took no PEM pair at all, that
+    // meant presenting nothing a user registered. Written on every handle for
+    // the same reason as the path beside it, and null on no match so a pooled
+    // handle cannot keep the type a previous transfer set.
+    set_opt<CURLOPT_SSLCERTTYPE> (curl,
+    matched != nullptr ? curl_ssl_cert_type (matched->format) :
+                         static_cast<const char*> (nullptr));
+    // A PKCS#12 bundle carries its own key and stores no key path, so this is
+    // null there rather than "" - an empty string is a path, and libcurl would
+    // fail to open it.
+    set_opt<CURLOPT_SSLKEY> (curl,
+    matched != nullptr && !matched->key_path.empty () ?
+    matched->key_path.c_str () :
+    static_cast<const char*> (nullptr));
+    // Null rather than "" when there is no passphrase: an empty string is a
+    // passphrase attempt, and on a key that has none the backend answers by
+    // failing the load. One field for both formats, because libcurl reads it as
+    // the PKCS#12 import password too.
+    set_opt<CURLOPT_KEYPASSWD> (curl,
+    matched != nullptr && !matched->passphrase.empty () ?
+    matched->passphrase.c_str () :
+    static_cast<const char*> (nullptr));
+    return matched;
+    return matched;
+}
+
+} // namespace
+
 /**
  * Whether a failure with no mapping of its own happened on a TLS connection
  * that never answered - the shape every client-certificate refusal takes, and
@@ -576,176 +770,9 @@ const std::string& url) {
     set_opt<CURLOPT_SSL_VERIFYPEER> (curl, verify_ssl ? 1L : 0L);
     set_opt<CURLOPT_SSL_VERIFYHOST> (curl, verify_ssl ? 2L : 0L);
 
-    // The user's trust anchors (issue #706). Written on every handle, empty
-    // path included, for the reason the proxy options are: handles are reused,
-    // so a bundle left behind by a previous policy would outlive the setting
-    // that asked for it. Null restores the backend's own default.
-    //
-    // The return code is checked because this is the one transport option a
-    // TLS backend can refuse outright - `CURLE_NOT_BUILT_IN` from a backend
-    // with no CAINFO support - and a silently ignored bundle means every
-    // request fails verification with nothing anywhere saying the certificates
-    // were never loaded. Logged once per process: the load path applies a
-    // policy per transfer, and a per-request line would be the log.
-    const CURLcode ca_result = set_opt<CURLOPT_CAINFO> (curl,
-    policy.ca_bundle_path.empty () ? static_cast<const char*> (nullptr) :
-                                     policy.ca_bundle_path.c_str ());
-    if (ca_result != CURLE_OK && !policy.ca_bundle_path.empty ()) {
-        static std::once_flag warned;
-        std::call_once (warned, [ca_result] {
-            const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
-            vayu::utils::log_error ("This build's TLS backend (" +
-            std::string (info != nullptr && info->ssl_version != nullptr ? info->ssl_version : "unknown") +
-            ") refused a custom CA bundle: " + std::string (curl_easy_strerror (ca_result)) +
-            ". Custom CA certificates are not in use on this platform.");
-        });
-    }
-
-    // Ask the backend to consult the operating system's own store as well. On
-    // an OpenSSL build CAINFO *replaces* the default bundle, which is why the
-    // materialized file already carries the system anchors on the platforms
-    // that keep them in a file.
-    //
-    // Windows is the platform that does not, and since #851 it is an OpenSSL
-    // build like the others - so the flag is unconditional there, not only
-    // when a bundle is in force. An OpenSSL build on Windows has no CA file to
-    // fall back to: `curl_version_info()->cainfo` names a path from the
-    // machine the port was built on, which does not exist on the user's, so a
-    // Windows handle without this flag and without a paste trusts *nothing*
-    // and every HTTPS request fails verification. With it, #706's additive
-    // rule reads "the native store plus whatever the user pasted" on Windows
-    // too - the store supplying the anchors the merged file does elsewhere.
-    //
-    // Written in both directions - the default `0` where no bundle is set and
-    // the native store is not the anchor source - because a reused handle
-    // would otherwise keep a flag the current policy never asked for, the rule
-    // every option here follows.
-    long ssl_options = 0L;
-#ifdef _WIN32
-    ssl_options |= static_cast<long> (CURLSSLOPT_NATIVE_CA);
-#else
-    if (!policy.ca_bundle_path.empty ()) {
-        ssl_options |= static_cast<long> (CURLSSLOPT_NATIVE_CA);
-    }
-#endif
-    set_opt<CURLOPT_SSL_OPTIONS> (curl, ssl_options);
-
-    switch (policy.proxy_mode) {
-    case ProxyMode::Environment:
-        // Null restores libcurl's default, which *is* the environment pickup.
-        // Written rather than skipped so a reused handle cannot keep a proxy
-        // the previous policy set - see the header.
-        set_opt<CURLOPT_PROXY> (curl, static_cast<const char*> (nullptr));
-        break;
-    case ProxyMode::System:
-        // What the app resolved from the OS, or - when nothing resolved, which
-        // is every headless run - the same null the environment mode writes.
-        // The resolver has already decided which of those this is; an empty
-        // `proxy_url` under `system` *is* the documented fallback, not a
-        // half-configured state to guess about here (issue #708).
-        set_opt<CURLOPT_PROXY> (curl,
-        policy.proxy_url.empty () ? static_cast<const char*> (nullptr) :
-                                    policy.proxy_url.c_str ());
-        break;
-    case ProxyMode::Manual:
-        set_opt<CURLOPT_PROXY> (curl, policy.proxy_url.c_str ());
-        break;
-    case ProxyMode::Off:
-        // Empty string, not null: an empty CURLOPT_PROXY is what disables the
-        // environment pickup. Null would re-enable it, and "off" that still
-        // proxies because a shell exported https_proxy is not off.
-        set_opt<CURLOPT_PROXY> (curl, "");
-        break;
-    }
-
-    // The bypass list, and the null-versus-empty distinction is load-bearing:
-    // libcurl falls back to the process's `no_proxy` variable whenever
-    // CURLOPT_NOPROXY is null, and an empty string means "exempt nothing".
-    //
-    // So `manual` always writes the list, empty or not. A user who names a
-    // proxy in Settings has said where their traffic goes, and an inherited
-    // `no_proxy` quietly exempting half of it is the same invisible failure
-    // this issue exists to end - it is also not hypothetical: a container that
-    // exports `no_proxy=...,127.0.0.1,...` bypassed a configured proxy for
-    // every local target and reported nothing.
-    //
-    // `environment` leaves it null on purpose: that mode *is* "do what the
-    // environment says", `no_proxy` included, unless a bypass list overrides
-    // it. `off` has no proxy for a list to modify.
-    //
-    // `system` follows whichever of those two it actually resolved to: with a
-    // proxy in force the user's bypass list is the whole rule, exactly as under
-    // `manual`, and with nothing resolved it is the environment mode and must
-    // leave `no_proxy` alone.
-    switch (policy.proxy_mode) {
-    case ProxyMode::System:
-        if (!policy.proxy_url.empty () || !policy.proxy_bypass.empty ()) {
-            set_opt<CURLOPT_NOPROXY> (curl, policy.proxy_bypass.c_str ());
-        } else {
-            // Nothing resolved and nothing exempted: the environment mode's
-            // null, so an inherited `no_proxy` still applies to the proxy this
-            // mode has fallen back to reading from the environment.
-            set_opt<CURLOPT_NOPROXY> (curl, static_cast<const char*> (nullptr));
-        }
-        break;
-    case ProxyMode::Manual:
-        set_opt<CURLOPT_NOPROXY> (curl, policy.proxy_bypass.c_str ());
-        break;
-    case ProxyMode::Environment:
-        set_opt<CURLOPT_NOPROXY> (curl,
-        policy.proxy_bypass.empty () ? static_cast<const char*> (nullptr) :
-                                       policy.proxy_bypass.c_str ());
-        break;
-    case ProxyMode::Off:
-        set_opt<CURLOPT_NOPROXY> (curl, static_cast<const char*> (nullptr));
-        break;
-    }
-
-    // Cookies need no thought here, and that is worth stating because it looks
-    // like they should: libcurl owns the wire cookies and matches them on the
-    // *origin* host, never the proxy hop, and curl 8.21's cross-origin
-    // redirect-cookie rule keys on origin too. A proxy changes which socket
-    // the bytes leave by and nothing about which jar lines apply.
-
-    // The client certificate for this target (issue #707). Written on every
-    // handle, null included, for the reason every option above is: handles are
-    // reused, and a certificate left behind by a previous transfer would be
-    // presented to a host that never registered one.
-    //
-    // The lookup is skipped entirely - URL parse included - when the registry
-    // is empty, which is every user who has not opted into mTLS.
-    const ClientCertRule* matched = nullptr;
-    if (!policy.client_certificates.empty ()) {
-        const UrlAuthority authority = parse_authority (url);
-        matched = match_client_certificate (policy, authority.host, authority.port);
-    }
-    set_opt<CURLOPT_SSLCERT> (curl,
-    matched != nullptr ? matched->cert_path.c_str () : static_cast<const char*> (nullptr));
-    // What that file is (issue #833). Without it libcurl reads whatever is
-    // there as PEM, so a registered `p12` bundle would be handed to the wrong
-    // parser - and on a Schannel build, which took no PEM pair at all, that
-    // meant presenting nothing a user registered. Written on every handle for
-    // the same reason as the path beside it, and null on no match so a pooled
-    // handle cannot keep the type a previous transfer set.
-    set_opt<CURLOPT_SSLCERTTYPE> (curl,
-    matched != nullptr ? curl_ssl_cert_type (matched->format) :
-                         static_cast<const char*> (nullptr));
-    // A PKCS#12 bundle carries its own key and stores no key path, so this is
-    // null there rather than "" - an empty string is a path, and libcurl would
-    // fail to open it.
-    set_opt<CURLOPT_SSLKEY> (curl,
-    matched != nullptr && !matched->key_path.empty () ?
-    matched->key_path.c_str () :
-    static_cast<const char*> (nullptr));
-    // Null rather than "" when there is no passphrase: an empty string is a
-    // passphrase attempt, and on a key that has none the backend answers by
-    // failing the load. One field for both formats, because libcurl reads it as
-    // the PKCS#12 import password too.
-    set_opt<CURLOPT_KEYPASSWD> (curl,
-    matched != nullptr && !matched->passphrase.empty () ?
-    matched->passphrase.c_str () :
-    static_cast<const char*> (nullptr));
-    return matched;
+    apply_ca_options (curl, policy);
+    apply_proxy_options (curl, policy);
+    return apply_client_certificate (curl, policy, url);
 }
 
 CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& config, DnsCache* dns_cache) {

@@ -39,6 +39,7 @@
 #include "vayu/http/status.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/id.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -839,735 +840,875 @@ const vayu::core::MonitorLimits& monitor_limits) {
     return std::nullopt;
 }
 
-void register_execution_routes (RouteContext& ctx) {
-    /**
-     * POST /execute  (alias: POST /request, deprecated)
-     * Executes a single HTTP request (Design Mode).
-     *
-     * Returns:
-     * - 200: Request was processed (check response body for server status/errors)
-     * - 400: Invalid request format (malformed JSON, missing required fields)
-     */
-    httplib::Server::Handler execute_request = [&ctx] (const httplib::Request& req,
-                                               httplib::Response& res) {
-        // Absent for a transient execution (issue #382): no row exists to
-        // record against, and every recording step below keys off that.
-        std::optional<std::string> run_id;
+namespace {
+/** What `POST /execute` accepted off the wire, before any run row exists. */
+struct ExecutePayload {
+    nlohmann::json json;
+    /// No row is recorded for this execution (issue #382).
+    bool transient = false;
+    StreamFlag stream;
+    /// The row this send binds, if the caller named one (issue #601).
+    std::optional<nlohmann::json> data_row;
+    SendRowAuth row_auth;
+    vayu::http::RequestBuild built;
+};
 
-        // Parse and validate request
-        nlohmann::json json;
+/**
+ * One design-mode execution, after the payload is accepted: the run row it
+ * carries, the request it will send, and what the scripts around that send run
+ * under. Both paths below take it.
+ */
+struct DesignSend {
+    vayu::db::Run run;
+    /// Absent for a transient execution - no row exists to record against, and
+    /// every recording step keys off that.
+    std::optional<std::string> run_id;
+    vayu::Request request;
+    std::string pre_script;
+    std::string post_script;
+    std::optional<std::string> script_request_name;
+    std::string cookie_scope;
+    vayu::runtime::ScriptConfig script_config;
+    std::optional<nlohmann::json> data_row;
+    StreamFlag stream;
+};
+
+
+/**
+ * Everything `POST /execute` reads and can refuse before any run row exists.
+ *
+ * Each refusal here is a 400 with nothing recorded behind it - the rule the
+ * whole pre-row section is ordered by: a request that could not be flagged,
+ * bound or built must leave no trace of an execution that never happened.
+ *
+ * @return the message to answer with, already logged, or nothing.
+ */
+std::optional<std::string>
+read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePayload& out) {
+    // Parse and validate request
+    nlohmann::json json;
+    try {
+        json = nlohmann::json::parse (req.body);
+    } catch (const nlohmann::json::exception& e) {
+        vayu::utils::log_warning (
+        "POST /execute - Invalid JSON: " + std::string (e.what ()));
+        return "Invalid JSON: " + std::string (e.what ());
+    }
+
+    // Read before anything is built or written, with the other pre-row
+    // validation: a malformed flag must be a 400, not a run the caller
+    // believed would leave no trace.
+    const auto transient = read_transient_flag (json);
+    if (!transient.ok) {
+        vayu::utils::log_warning ("POST /execute - " + transient.error);
+        return transient.error;
+    }
+
+    // Beside the transient flag and for the same reason: `stream` changes
+    // the execution model, so a malformed one must be a 400 before anything
+    // is built or written rather than a send the caller did not ask for.
+    auto stream = read_stream_flag (json);
+    if (!stream.ok) {
+        vayu::utils::log_warning ("POST /execute - " + stream.error);
+        return stream.error;
+    }
+
+    // The row this send binds, if the caller named one (issue #601). Read
+    // here with the other pre-row validation for the reason the bind below
+    // is also placed before the run record: a request whose tokens could
+    // not bind must leave no trace of an execution that never happened.
+    auto data_row = read_data_row (json,
+    static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataBytes",
+    static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES))));
+    if (!data_row.ok) {
+        vayu::utils::log_warning ("POST /execute - " + data_row.error);
+        return data_row.error;
+    }
+
+    // How the credentials resolve, decided before the build because it is
+    // the build that would otherwise encode them out of reach (issue #642).
+    // The refusal it can carry - an oauth2 config with a data token - is a
+    // 400 here, beside the row's own, and for the same reason: nothing has
+    // been recorded or sent yet.
+    auto row_auth = plan_send_row_auth (json, data_row.value.has_value ());
+    if (!row_auth.ok) {
+        vayu::utils::log_warning ("POST /execute - " + row_auth.error);
+        return row_auth.error;
+    }
+
+    // Build the request once: deserialize + timeout + auth. A malformed
+    // payload fails here (before any run record is created); an auth
+    // failure is surfaced after the run exists (below). Credentials
+    // carrying a `{{data.*}}` are the one case the build leaves alone - the
+    // bind below applies them once the row has reached them.
+    const int request_timeout_ms = resolve_request_timeout_ms (json,
+    ctx.db.get_config_int ("defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
+    auto built =
+    vayu::http::build_request (json, &ctx.db, request_timeout_ms, row_auth.resolution);
+    if (built.parse_failed) {
+        vayu::utils::log_warning ("POST /execute - Invalid request format");
+        return built.error_message;
+    }
+
+    // Bind the row into what composition left written, before anything is
+    // recorded or sent. A failure here is a `400` with the binder's own
+    // message - it names the token, the row and the row's columns, which is
+    // what lets the request be fixed without opening the file - and the
+    // partially bound request is discarded rather than sent
+    // (scenario_data.hpp). Nothing runs, so nothing is recorded: the
+    // refusal precedes the run row exactly as the flag checks above do.
+    if (data_row.value) {
+        auto bound = vayu::core::bind_data_row (built.request, *data_row.value, 0);
+        if (bound.ok) {
+            // Then the credentials the build deferred, in the order the
+            // scenario executors bind theirs: the row reaches them before
+            // `apply_auth` encodes them onto the request. A no-op for the
+            // ordinary send, whose auth the build already applied.
+            bound = vayu::core::bind_auth_row (built.request, row_auth.auth,
+            row_auth.credentials, *data_row.value, 0);
+        }
+        if (!bound.ok) {
+            vayu::utils::log_warning ("POST /execute - " + bound.error);
+            return bound.error;
+        }
+    }
+    out.json      = std::move (json);
+    out.transient = transient.value;
+    out.stream    = std::move (stream);
+    out.data_row  = std::move (data_row.value);
+    out.row_auth  = std::move (row_auth);
+    out.built     = std::move (built);
+    return std::nullopt;
+}
+
+/**
+ * The run row this execution carries, and the persisted half of it.
+ *
+ * Built even for a transient execution, because it is also how the handler
+ * carries scope: `load_script_variable_scopes` and `persist_script_variables`
+ * read its `request_id` / `environment_id`, and the cookie scope comes from the
+ * same field. Only the *persisted* half - the id, the config snapshot, the
+ * create - is conditional, so a transient execution resolves variables and
+ * cookies exactly as a recorded one does.
+ *
+ * @return the message to answer 400 with, already logged, or nothing.
+ */
+std::optional<std::string> build_design_send (RouteContext& ctx,
+const httplib::Request& req,
+const ExecutePayload& payload,
+DesignSend& send) {
+    const nlohmann::json& json = payload.json;
+
+    // Extract scripts
+    send.pre_script  = vayu::http::read_pre_request_script (json);
+    send.post_script = vayu::http::read_post_request_script (json);
+
+    // The run row. Built even for a transient execution, because it is also
+    // how this handler carries scope: `load_script_variable_scopes` and
+    // `persist_script_variables` read its `request_id` / `environment_id`,
+    // and the cookie scope below comes from the same field. Only the
+    // *persisted* half - the id, the config snapshot, the create - is
+    // conditional, so a transient execution resolves variables and cookies
+    // exactly as a recorded one does.
+    send.run.type   = vayu::RunType::Design;
+    send.run.status = vayu::RunStatus::Running;
+    seed_run_times (send.run, now_ms ());
+
+    if (json.contains ("requestId") && !json["requestId"].is_null ()) {
+        send.run.request_id = json["requestId"].get<std::string> ();
+    }
+    if (json.contains ("environmentId") && !json["environmentId"].is_null ()) {
+        send.run.environment_id = json["environmentId"].get<std::string> ();
+    }
+
+    // What the scripts below read as `pm.info.requestName`. Resolved here,
+    // with the rest of the payload validation, so a malformed field is a
+    // 400 before any run row exists.
+    auto resolved_name = resolve_script_request_name (ctx.db, json, send.run.request_id);
+    if (!resolved_name.ok) {
+        vayu::utils::log_warning ("POST /execute - " + resolved_name.error);
+        return resolved_name.error;
+    }
+    send.script_request_name = std::move (resolved_name.name);
+
+    // The persisted half of the run row, skipped entirely when the caller
+    // asked for a transient execution. The config snapshot is built here
+    // rather than above because it is storage, not scope: sanitizing a
+    // payload nobody will store is work with no reader.
+    if (!payload.transient) {
+        send.run.id = vayu::utils::generate_id ("run_");
+        send.run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
+        send.run_id = send.run.id;
+    }
+
+    // Log request details
+    vayu::utils::log_info (
+    "POST /execute - Design Mode: run_id=" + send.run_id.value_or ("none (transient)") +
+    ", method=" + json.value ("method", "UNKNOWN") + ", url=" + json.value ("url", "UNKNOWN") +
+    ", request_id=" + send.run.request_id.value_or ("none") +
+    ", environment_id=" + send.run.environment_id.value_or ("none") +
+    ", has_pre_script=" + std::string (!send.pre_script.empty () ? "true" : "false") +
+    ", has_post_script=" + std::string (!send.post_script.empty () ? "true" : "false"));
+
+    if (send.run_id) {
         try {
-            json = nlohmann::json::parse (req.body);
-        } catch (const nlohmann::json::exception& e) {
-            vayu::utils::log_warning (
-            "POST /execute - Invalid JSON: " + std::string (e.what ()));
-            send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
-            return;
+            ctx.db.create_run (send.run);
+        } catch (const std::exception& e) {
+            vayu::utils::log_error ("Failed to create run: " + std::string (e.what ()));
+            return "Failed to create run record";
+        }
+    }
+
+    // Which jar this execution reads and writes: one per environment, with the
+    // no-environment jar for a request sent without one. Resolved once here so
+    // the send, the pre-request script's `pm.sendRequest` and both scripts'
+    // `pm.cookies` cannot disagree about which session they are looking at. See
+    // cookie_jar.hpp for the scope decision.
+    send.cookie_scope =
+    send.run.environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
+
+    // What both scripts run under. Read here rather than inside each path
+    // because it is three config lookups; the QuickJS runtime itself - the part
+    // that is not free - is still built only where a script exists.
+    send.script_config.timeout_ms = static_cast<uint64_t> (ctx.db.get_config_int (
+    "scriptTimeout", vayu::core::constants::script_engine::TIMEOUT_MS));
+    send.script_config.memory_limit = static_cast<size_t> (ctx.db.get_config_int (
+    "scriptMemoryLimit", vayu::core::constants::script_engine::MEMORY_LIMIT));
+    send.script_config.stack_size = static_cast<size_t> (ctx.db.get_config_int (
+    "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
+    send.script_config.enable_console = ctx.db.get_config_bool (
+    "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
+    // Payload-level, not config-level: whether a script may send is a property
+    // of *who asked for this execution*, not of the installation. Absent means
+    // no - see ScriptConfig::allow_send_request.
+    send.script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
+
+    send.data_row = payload.data_row;
+    send.stream   = payload.stream;
+    return std::nullopt;
+}
+
+/**
+ * The streaming half of a design send (issue #573).
+ *
+ * The same script/send/script ordering a buffered send performs, pulled apart
+ * by the transfer that sits between the two halves (issue #575): the
+ * pre-request script runs here, before anything is on the wire, so its
+ * `pm.request` write-back reaches the stream; the post-request script runs on
+ * the worker thread once the stream has terminated, because only then is there
+ * a response - and an event list - to assert over.
+ */
+void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignSend& send) {
+    // The same script/send/script ordering a buffered send performs,
+    // pulled apart by the transfer that sits between the two halves
+    // (issue #575). The pre-request script runs here, before anything
+    // is on the wire, so its `pm.request` write-back reaches the
+    // stream; the post-request script runs on the worker thread once
+    // the stream has terminated, because only then is there a response
+    // - and an event list - to assert over.
+    //
+    // The scopes both halves read are loaded once and travel with the
+    // completion callback, so a `pm.environment.set` in the
+    // pre-request script is visible to the post-request script exactly
+    // as it is on the buffered path.
+    ScriptVariableScopes scopes;
+    vayu::ScriptResult pre_script_result;
+    std::vector<vayu::http::CookieWrite> pre_cookie_writes;
+    // Resolved once here rather than at each of the three uses below
+    // (the pre-request script's `pm.sendRequest`, the transfer, and
+    // the post-request script's on the worker thread): they are one
+    // stream, and a settings change between them would otherwise send
+    // the two halves out by different routes.
+    const auto transport = vayu::http::resolve_transport_policy (ctx.db);
+    const bool has_scripts = !send.pre_script.empty () || !send.post_script.empty ();
+    if (has_scripts) {
+        scopes = load_script_variable_scopes (ctx.db, send.run);
+    }
+    if (!send.pre_script.empty ()) {
+        vayu::runtime::ScriptEngine script_engine (send.script_config);
+        auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (send.request);
+        bind_script_scopes (
+        pre_ctx, scopes, ctx.cookie_jar, send.cookie_scope, &pre_cookie_writes);
+        pre_ctx.request_id   = send.run.request_id;
+        pre_ctx.request_name = send.script_request_name;
+        pre_ctx.transport    = transport;
+        // The same row the transfer below carries, on the same terms
+        // as the buffered path: a stream is still one send, and one
+        // send with a row is iteration 0 of 1.
+        if (send.data_row) {
+            pre_ctx.iteration_data  = &*send.data_row;
+            pre_ctx.iteration       = 0;
+            pre_ctx.iteration_count = 1;
+        }
+        pre_script_result =
+        execute_script (script_engine, send.pre_script, pre_ctx, "Pre-request");
+    }
+
+    // `stream` and `transient` are mutually exclusive - `read_stream_flag`
+    // refuses the pair with a 400 - so a streaming send always has a run row.
+    // The rule holds in `read_execute_payload`, not here, which is what
+    // `invariant_value` is for.
+    const std::string run_id = vayu::utils::invariant_value (
+    send.run_id, "a streaming send has a run row: stream and transient are mutually exclusive");
+
+    vayu::http::SseStreamRequest spec;
+    spec.run_id          = run_id;
+    spec.request         = std::move (send.request);
+    spec.limits          = vayu::http::read_sse_limits (ctx.db);
+    spec.transport       = transport;
+    spec.max_duration_ms = send.stream.max_duration_ms;
+    spec.max_events      = send.stream.max_events;
+    spec.cookie_jar      = &ctx.cookie_jar;
+    spec.cookie_scope    = send.cookie_scope;
+    // The pre-request script's jar writes ride this transfer, which is
+    // what makes them happen exactly once - the same route
+    // `ClientConfig::cookie_writes` gives them on the buffered path.
+    spec.cookie_writes = std::move (pre_cookie_writes);
+    // Persistence stays the route's decision even though it happens on
+    // the worker thread - `ctx.db` outlives the manager, which is why
+    // the manager is declared before `server_` (see server.hpp).
+    // Copied into the callback rather than borrowed: the post-request
+    // script runs on the worker thread once the stream has terminated,
+    // long after this handler's frame - and its row must be the one the
+    // pre-request script and the transfer used.
+    spec.on_complete =
+    [&db = ctx.db, &jar = ctx.cookie_jar, id = run_id,
+    cookie_scope = send.cookie_scope, run = send.run,
+    script_config = send.script_config, post_request_script = send.post_script,
+    request_name = send.script_request_name, scopes, iteration_data = send.data_row,
+    transport, pre_script_result] (const vayu::Request& sent,
+    const vayu::Response& response, const vayu::http::SseStreamContext& context) mutable {
+        StreamRecord record;
+        nlohmann::json scripts = nlohmann::json::object ();
+        record.events          = vayu::http::stream_trace_node (context);
+        if (context.end_reason () == vayu::http::SseEndReason::Stopped) {
+            record.status = vayu::RunStatus::Stopped;
+        } else if (response.has_error ()) {
+            record.status = vayu::RunStatus::Failed;
+        } else {
+            record.status = vayu::RunStatus::Completed;
         }
 
-        // Read before anything is built or written, with the other pre-row
-        // validation: a malformed flag must be a 400, not a run the caller
-        // believed would leave no trace.
-        const auto transient = read_transient_flag (json);
-        if (!transient.ok) {
-            vayu::utils::log_warning ("POST /execute - " + transient.error);
-            send_error (res, 400, transient.error);
-            return;
-        }
-
-        // Beside the transient flag and for the same reason: `stream` changes
-        // the execution model, so a malformed one must be a 400 before anything
-        // is built or written rather than a send the caller did not ask for.
-        const auto stream = read_stream_flag (json);
-        if (!stream.ok) {
-            vayu::utils::log_warning ("POST /execute - " + stream.error);
-            send_error (res, 400, stream.error);
-            return;
-        }
-
-        // The row this send binds, if the caller named one (issue #601). Read
-        // here with the other pre-row validation for the reason the bind below
-        // is also placed before the run record: a request whose tokens could
-        // not bind must leave no trace of an execution that never happened.
-        const auto data_row = read_data_row (json,
-        static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataBytes",
-        static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES))));
-        if (!data_row.ok) {
-            vayu::utils::log_warning ("POST /execute - " + data_row.error);
-            send_error (res, 400, data_row.error);
-            return;
-        }
-
-        // How the credentials resolve, decided before the build because it is
-        // the build that would otherwise encode them out of reach (issue #642).
-        // The refusal it can carry - an oauth2 config with a data token - is a
-        // 400 here, beside the row's own, and for the same reason: nothing has
-        // been recorded or sent yet.
-        const auto row_auth = plan_send_row_auth (json, data_row.value.has_value ());
-        if (!row_auth.ok) {
-            vayu::utils::log_warning ("POST /execute - " + row_auth.error);
-            send_error (res, 400, row_auth.error);
-            return;
-        }
-
-        // Build the request once: deserialize + timeout + auth. A malformed
-        // payload fails here (before any run record is created); an auth
-        // failure is surfaced after the run exists (below). Credentials
-        // carrying a `{{data.*}}` are the one case the build leaves alone - the
-        // bind below applies them once the row has reached them.
-        const int request_timeout_ms = resolve_request_timeout_ms (json,
-        ctx.db.get_config_int (
-        "defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
-        auto built                   = vayu::http::build_request (
-        json, &ctx.db, request_timeout_ms, row_auth.resolution);
-        if (built.parse_failed) {
-            vayu::utils::log_warning ("POST /execute - Invalid request format");
-            send_error (res, 400, built.error_message);
-            return;
-        }
-
-        // Bind the row into what composition left written, before anything is
-        // recorded or sent. A failure here is a `400` with the binder's own
-        // message - it names the token, the row and the row's columns, which is
-        // what lets the request be fixed without opening the file - and the
-        // partially bound request is discarded rather than sent
-        // (scenario_data.hpp). Nothing runs, so nothing is recorded: the
-        // refusal precedes the run row exactly as the flag checks above do.
-        if (data_row.value) {
-            auto bound = vayu::core::bind_data_row (built.request, *data_row.value, 0);
-            if (bound.ok) {
-                // Then the credentials the build deferred, in the order the
-                // scenario executors bind theirs: the row reaches them before
-                // `apply_auth` encodes them onto the request. A no-op for the
-                // ordinary send, whose auth the build already applied.
-                bound = vayu::core::bind_auth_row (built.request, row_auth.auth,
-                row_auth.credentials, *data_row.value, 0);
-            }
-            if (!bound.ok) {
-                vayu::utils::log_warning ("POST /execute - " + bound.error);
-                send_error (res, 400, bound.error);
-                return;
-            }
-        }
-
-        // Extract scripts
-        std::string pre_request_script = vayu::http::read_pre_request_script (json);
-        std::string post_request_script = vayu::http::read_post_request_script (json);
-
-        // The run row. Built even for a transient execution, because it is also
-        // how this handler carries scope: `load_script_variable_scopes` and
-        // `persist_script_variables` read its `request_id` / `environment_id`,
-        // and the cookie scope below comes from the same field. Only the
-        // *persisted* half - the id, the config snapshot, the create - is
-        // conditional, so a transient execution resolves variables and cookies
-        // exactly as a recorded one does.
-        vayu::db::Run run;
-        run.type   = vayu::RunType::Design;
-        run.status = vayu::RunStatus::Running;
-        seed_run_times (run, now_ms ());
-
-        if (json.contains ("requestId") && !json["requestId"].is_null ()) {
-            run.request_id = json["requestId"].get<std::string> ();
-        }
-        if (json.contains ("environmentId") && !json["environmentId"].is_null ()) {
-            run.environment_id = json["environmentId"].get<std::string> ();
-        }
-
-        // What the scripts below read as `pm.info.requestName`. Resolved here,
-        // with the rest of the payload validation, so a malformed field is a
-        // 400 before any run row exists.
-        auto resolved_name = resolve_script_request_name (ctx.db, json, run.request_id);
-        if (!resolved_name.ok) {
-            vayu::utils::log_warning ("POST /execute - " + resolved_name.error);
-            send_error (res, 400, resolved_name.error);
-            return;
-        }
-        const std::optional<std::string> script_request_name =
-        std::move (resolved_name.name);
-
-        // The persisted half of the run row, skipped entirely when the caller
-        // asked for a transient execution. The config snapshot is built here
-        // rather than above because it is storage, not scope: sanitizing a
-        // payload nobody will store is work with no reader.
-        if (!transient.value) {
-            run.id = vayu::utils::generate_id ("run_");
-            run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
-            run_id = run.id;
-        }
-
-        // Log request details
-        vayu::utils::log_info (
-        "POST /execute - Design Mode: run_id=" + run_id.value_or ("none (transient)") +
-        ", method=" + json.value ("method", "UNKNOWN") +
-        ", url=" + json.value ("url", "UNKNOWN") +
-        ", request_id=" + run.request_id.value_or ("none") +
-        ", environment_id=" + run.environment_id.value_or ("none") +
-        ", has_pre_script=" + std::string (!pre_request_script.empty () ? "true" : "false") +
-        ", has_post_script=" + std::string (!post_request_script.empty () ? "true" : "false"));
-
-        if (run_id) {
+        const bool has_script_output = !post_request_script.empty () ||
+        !pre_script_result.tests.empty () ||
+        !pre_script_result.console_output.empty () || !pre_script_result.success;
+        if (has_script_output) {
+            // Guarded as a whole: a script surface that threw where
+            // `execute_script` does not catch - building the runtime,
+            // applying a cookie write - must not cost the run its
+            // result row, which is the only record the stream leaves.
             try {
-                ctx.db.create_run (run);
+                vayu::ScriptResult post_script_result;
+                if (!post_request_script.empty ()) {
+                    vayu::runtime::ScriptEngine script_engine (script_config);
+                    std::vector<vayu::http::CookieWrite> post_cookie_writes;
+                    auto post_ctx = vayu::runtime::ScriptContext::for_test (sent, response);
+                    bind_script_scopes (post_ctx, scopes, jar, cookie_scope, &post_cookie_writes);
+                    post_ctx.request_id   = run.request_id;
+                    post_ctx.request_name = request_name;
+                    post_ctx.transport    = transport;
+                    if (iteration_data) {
+                        post_ctx.iteration_data  = &*iteration_data;
+                        post_ctx.iteration       = 0;
+                        post_ctx.iteration_count = 1;
+                    }
+                    // The node the trace is about to store, not a copy
+                    // of it: `pm.response.eventsTruncated` and the
+                    // stored marker are then the same value by
+                    // construction rather than by agreement.
+                    post_ctx.response_events = &record.events;
+                    post_script_result       = execute_script (script_engine,
+                          post_request_script, post_ctx, "Post-request");
+                    // Nothing left to carry them - the transfer has
+                    // already captured, exactly as on the buffered path.
+                    jar.apply (cookie_scope, post_cookie_writes);
+                }
+                scripts = build_script_result_node (pre_script_result, post_script_result);
             } catch (const std::exception& e) {
                 vayu::utils::log_error (
-                "Failed to create run: " + std::string (e.what ()));
-                send_error (res, 400, "Failed to create run record");
-                return;
+                "Stream post-request script failed: " + std::string (e.what ()));
             }
+            // Best-effort and after both scripts, so one `set()` per
+            // run reaches disk rather than one per half.
+            persist_script_variables (
+            db, run, scopes.environment, scopes.globals, scopes.collection);
         }
 
-        // Take the request built above. Auth is already resolved into its
-        // headers/url - by the build, or by the bind above for credentials that
-        // carried the row - so pm.request reflects the real outgoing set - and
-        // because the pre-request script runs after that and writes back into
-        // this same object, a script-set Authorization header wins over the
-        // engine-applied one.
-        auto request = std::move (built.request);
+        // No verdict: a stream's body is an event stream, not a
+        // document any response schema describes (see the contract on
+        // the parameter).
+        record_design_result (db, id, sent, response, &record, std::nullopt, scripts);
+    };
 
-        // Auth failure: record a failed result against the run and return the
-        // error in the body (engine returns 200; the status lives in the body).
-        if (!built.ok) {
-            vayu::Response auth_resp;
-            auth_resp.status_code   = 0;
-            auth_resp.status_text   = vayu::http::status_text (0);
-            auth_resp.error_code    = built.error_code;
-            auth_resp.error_message = built.error_message;
-            record_design_result (ctx.db, run_id, request, auth_resp);
-            nlohmann::json body   = vayu::json::serialize (auth_resp);
-            body["authErrorCode"] = built.detail_code;
-            res.status            = 200;
-            res.set_content (body.dump (2), "application/json");
+    auto context = ctx.sse_manager.start (std::move (spec));
+    if (!context) {
+        // The daemon is draining its workers, or - impossibly - the id
+        // collided. The row exists but nothing will consume it, so it
+        // is failed here rather than left `running` forever.
+        vayu::utils::log_warning ("POST /execute - Stream refused for run: " + run_id);
+        try {
+            ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "Failed to fail a refused stream run: " + std::string (e.what ()));
+        }
+        send_error (res, 503, "Engine is shutting down");
+        return;
+    }
+
+    nlohmann::json body;
+    body["runId"]     = run_id;
+    body["eventsUrl"] = "/runs/" + run_id + "/events";
+    body["status"]    = to_string (vayu::RunStatus::Running);
+    res.status        = 202;
+    res.set_content (body.dump (), "application/json");
+}
+
+/**
+ * The buffered half of a design send: pre-request script, send, test script -
+ * the sequence a scenario step performs too, which is why it lives in
+ * request_exchange.cpp rather than here (issue #353).
+ */
+void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSend& send) {
+    vayu::runtime::ScriptEngine script_engine (send.script_config);
+
+    // Load variables. Mutated in place by both scripts, then persisted
+    // once below.
+    auto scopes = load_script_variable_scopes (ctx.db, send.run);
+
+    // Pre-request script, send, test script - the sequence a scenario step
+    // performs too, which is why it lives in request_exchange.cpp rather
+    // than here (issue #353). `iteration` is left unset for a send carrying
+    // no row: it has no iteration index, and a binding that cannot fail is
+    // worse than a missing one (issue #300).
+    ExchangeInputs inputs;
+    inputs.request      = std::move (send.request);
+    inputs.pre_script   = send.pre_script;
+    inputs.post_script  = send.post_script;
+    inputs.request_id   = send.run.request_id;
+    inputs.request_name = send.script_request_name;
+    // Read at the point of use, so a settings change applies to the next
+    // send without a restart (issue #705).
+    inputs.transport = vayu::http::resolve_transport_policy (ctx.db);
+    if (send.data_row) {
+        inputs.iteration_data = &*send.data_row;
+        // Row 0 of 1: a send-with-row *is* an iteration, and the one it is
+        // is the row it bound. This is the exception the comment above
+        // describes - an ordinary Send still leaves both unset, because it
+        // has no row and an invented index would be the binding that cannot
+        // fail (issue #300).
+        inputs.iteration       = 0;
+        inputs.iteration_count = 1;
+    }
+    auto exchange = execute_exchange (script_engine, ctx.cookie_jar,
+    send.cookie_scope, scopes, std::move (inputs), ctx.verbose);
+
+    // What the contract says this response should have been (#628).
+    // Resolved from the *stored* request: an unsaved editor request is not
+    // an operation of any document, and inventing a verdict for one would
+    // be a claim about a contract it is not bound by.
+    const auto validation =
+    validate_design_response (ctx.db, send.run.request_id, exchange.response);
+
+    // Built once, then sent *and* stored (#725). The live body and the
+    // trace's `scripts` node are the same object, so a restored Tests tab
+    // shows the assertions this send actually made rather than the
+    // empty-state that used to make "passed" and "never ran" identical.
+    const nlohmann::json scripts =
+    build_script_result_node (exchange.pre_script_result, exchange.post_script_result);
+
+    // Store result to database (non-blocking, errors logged). A transient
+    // execution stops here: no trace row, so the post-auth headers this
+    // exchange carries never reach disk - and neither do these results.
+    record_design_result (ctx.db, send.run_id, exchange.request, exchange.response,
+    /*send.stream=*/nullptr, validation, scripts);
+
+    // Persist script-set variables (design mode only; best-effort)
+    persist_script_variables (
+    ctx.db, send.run, scopes.environment, scopes.globals, scopes.collection);
+
+    // Build and send response
+    // Engine returns 200 - the server's status is in the response body
+    res.status = 200;
+    res.set_content (
+    build_response_json (exchange.response, scripts, validation).dump (2), "application/json");
+}
+
+/**
+ * POST /execute  (alias: POST /request, deprecated)
+ * Executes a single HTTP request (Design Mode).
+ *
+ * Returns:
+ * - 200: Request was processed (check response body for server status/errors)
+ * - 400: Invalid request format (malformed JSON, missing required fields)
+ */
+void handle_execute_request (RouteContext& ctx,
+const httplib::Request& req,
+httplib::Response& res) {
+    ExecutePayload payload;
+    if (auto rejection = read_execute_payload (ctx, req, payload)) {
+        send_error (res, 400, *rejection);
+        return;
+    }
+
+    DesignSend send;
+    if (auto rejection = build_design_send (ctx, req, payload, send)) {
+        send_error (res, 400, *rejection);
+        return;
+    }
+
+    // Take the request built above. Auth is already resolved into its
+    // headers/url - by the build, or by the bind for credentials that carried
+    // the row - so pm.request reflects the real outgoing set - and because the
+    // pre-request script runs after that and writes back into this same object,
+    // a script-set Authorization header wins over the engine-applied one.
+    send.request = std::move (payload.built.request);
+
+    // Auth failure: record a failed result against the run and return the
+    // error in the body (engine returns 200; the status lives in the body).
+    if (!payload.built.ok) {
+        vayu::Response auth_resp;
+        auth_resp.status_code   = 0;
+        auth_resp.status_text   = vayu::http::status_text (0);
+        auth_resp.error_code    = payload.built.error_code;
+        auth_resp.error_message = payload.built.error_message;
+        record_design_result (ctx.db, send.run_id, send.request, auth_resp);
+        nlohmann::json body   = vayu::json::serialize (auth_resp);
+        body["authErrorCode"] = payload.built.detail_code;
+        res.status            = 200;
+        res.set_content (body.dump (2), "application/json");
+        return;
+    }
+
+    // A streaming request diverges here: there is no synchronous exchange to
+    // run. The transfer moves to a managed consumer worker and the route
+    // answers at once with the run and the URL its events arrive on
+    // (issue #573). `stream` and `transient` are mutually exclusive, so
+    // `run_id` is always set on that path.
+    if (send.stream.value) {
+        run_streaming_execution (ctx, res, send);
+        return;
+    }
+    run_buffered_execution (ctx, res, send);
+}
+
+
+/**
+ * POST /runs  (alias: POST /run, deprecated)
+ * Starts a load test run (Vayu Mode).
+ *
+ * Returns:
+ * - 202: Load test accepted and started
+ * - 400: Invalid request format
+ */
+/**
+ * Every refusal `POST /runs` makes on the payload alone, before a run row
+ * exists - so a rejected request leaves nothing behind.
+ */
+std::optional<RouteError>
+validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario, bool is_scenario_load) {
+    // Refused before the run row exists, and never quietly downgraded to a
+    // closed-loop mode: a run that measured something other than what was
+    // asked for is worse than no run at all.
+    if (is_scenario_load) {
+        if (auto invalid = vayu::core::validate_scenario_load_config (json)) {
+            vayu::utils::log_warning (
+            "POST /runs - Invalid scenario load config: " + *invalid);
+            return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
+        }
+    }
+
+    // Validate required fields
+    if (!is_scenario) {
+        if (!json.contains ("method") || !json.contains ("url")) {
+            vayu::utils::log_warning (
+            "POST /runs - Missing required fields: method, url");
+            return RouteError{ 400, error_body (400, "Missing required fields: method, url") };
+        }
+
+        if (!json.contains ("mode") && !json.contains ("duration") &&
+        !json.contains ("iterations")) {
+            vayu::utils::log_warning (
+            "POST /runs - Missing mode/duration/iterations config");
+            return RouteError{ 400,
+                error_body (400, "Must specify either 'mode' with 'duration' or 'iterations'") };
+        }
+    }
+
+    // Range-check the numeric config *before* the run row exists, so a
+    // rejected request leaves nothing behind. `invalid_run_config` is the
+    // specific code this failure carries in place of the per-status default.
+    if (auto invalid =
+        validate_run_config (json, vayu::core::read_monitor_limits (ctx.db))) {
+        vayu::utils::log_warning ("POST /runs - Invalid run config: " + *invalid);
+        return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
+    }
+
+    // Validate/normalize the body's httpVersion, beside the config check
+    // above and for the same reason: both run before run.config_snapshot is
+    // built, so a rejected request leaves no row behind, and the snapshot
+    // still reflects the raw client body (sanitize_config_snapshot reads
+    // req.body directly, not this normalized `json`).
+    if (auto outcome = normalize_run_http_version (json); !outcome) {
+        vayu::utils::log_warning (
+        "POST /runs - Invalid httpVersion: " + outcome.error ().body.dump ());
+        return outcome.error ();
+    }
+    return std::nullopt;
+}
+
+/**
+ * The scenario block, resolved once - before the first send, and before any run
+ * row exists.
+ *
+ * An unknown collection, an empty sequence or a step that cannot be composed
+ * must leave no run behind, and resolution is what finds all three. It resolves
+ * exactly once because a collection edited mid-run must not change the sequence
+ * underneath itself, and the load-mode executor (phase 6) cannot query SQLite
+ * per step per virtual user. The resolved plan is then shared immutably with
+ * the run's worker and lives in memory for the run's life and nowhere else.
+ */
+std::optional<RouteError> resolve_run_scenario (RouteContext& ctx,
+const nlohmann::json& json,
+std::shared_ptr<const vayu::core::ScenarioExecution>& scenario_execution,
+nlohmann::json& scenario_manifest) {
+    vayu::core::ScenarioResolveOptions options;
+    if (auto it = json.find ("environmentId"); it != json.end () && it->is_string ()) {
+        options.environment_id = it->get<std::string> ();
+    }
+    options.timeout_ms       = resolve_request_timeout_ms (json,
+          ctx.db.get_config_int ("defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
+    options.limits.max_steps = static_cast<size_t> (ctx.db.get_config_int (
+    "maxScenarioSteps", static_cast<int> (vayu::core::constants::scenario::MAX_STEPS)));
+    options.limits.max_data_rows =
+    static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataRows",
+    static_cast<int> (vayu::core::constants::scenario::MAX_DATA_ROWS)));
+    options.limits.max_data_bytes =
+    static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataBytes",
+    static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES)));
+
+    auto resolved = vayu::core::resolve_scenario (ctx.db, json["scenario"], options);
+    if (!resolved.ok) {
+        vayu::utils::log_warning ("POST /runs - Invalid scenario: " + resolved.error);
+        return RouteError{ 400, error_body (400, resolved.error, "invalid_scenario") };
+    }
+
+    scenario_manifest = vayu::core::build_scenario_manifest (
+    resolved.request, resolved.plan, resolved.spec);
+
+    auto execution     = std::make_shared<vayu::core::ScenarioExecution> ();
+    execution->request = std::move (resolved.request);
+    execution->plan    = std::move (resolved.plan);
+    // The manifest above was built before this move, and from
+    // `resolved.request` - which carries the row *count* and never the
+    // rows. That is what keeps user data out of `config_snapshot`.
+    execution->data_rows = std::move (resolved.data_rows);
+    // The contract this run is measured against, carried to the runner
+    // so coverage counts against the document that was bound when the
+    // plan resolved (issue #629) rather than whatever it is by the time
+    // the run ends. The manifest above already stamped its identity.
+    execution->spec    = std::move (resolved.spec);
+    scenario_execution = std::move (execution);
+
+    vayu::utils::log_info (
+    "POST /runs - Scenario: collection=" + scenario_execution->request.collection_id +
+    ", steps=" + std::to_string (scenario_execution->plan.steps.size ()) +
+    ", iterations=" + std::to_string (scenario_execution->request.iterations));
+    return std::nullopt;
+}
+
+/**
+ * Pre-flight auth: reject an unauthorizable run before creating it, and warm
+ * the token cache so the worker's `apply_auth` is a cache hit.
+ *
+ * A scenario payload carries no run-level `auth` - each step's auth was
+ * resolved at plan time, and a step that could not be authorized already failed
+ * resolution with a 400 - so this is the single-request path's check alone.
+ */
+std::optional<RouteError> preflight_run_auth (RouteContext& ctx, const nlohmann::json& json) {
+    auto preflight =
+    vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
+    if (!preflight.ok) {
+        vayu::utils::log_warning (
+        "POST /runs - Auth pre-flight failed: " + preflight.message);
+        const int status = (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
+        return RouteError{ status,
+            error_body (status, preflight.message, preflight.detail_code) };
+    }
+    return std::nullopt;
+}
+
+/** What this run is, for the log: the two shapes read differently. */
+void log_started_run (const nlohmann::json& json,
+const vayu::db::Run& run,
+const std::string& run_id,
+const vayu::core::ScenarioExecution* scenario_execution) {
+
+    // Extract duration for logging
+    std::string duration_str = "0s";
+    if (json.contains ("duration")) {
+        if (json["duration"].is_string ()) {
+            duration_str = json["duration"].get<std::string> ();
+        } else if (json["duration"].is_number ()) {
+            duration_str = std::to_string (json["duration"].get<int> ()) + "s";
+        }
+    }
+
+    if (scenario_execution != nullptr) {
+        vayu::utils::log_info ("POST /runs - Collection run: run_id=" + run_id +
+        ", collection=" + scenario_execution->request.collection_id +
+        ", steps=" + std::to_string (scenario_execution->plan.steps.size ()) +
+        ", iterations=" + std::to_string (scenario_execution->request.iterations) +
+        ", environment_id=" + run.environment_id.value_or ("none"));
+    } else {
+        vayu::utils::log_info ("POST /runs - Load Test: run_id=" + run_id +
+        ", mode=" + json.value ("mode", "unspecified") +
+        ", method=" + json.value ("method", "UNKNOWN") +
+        ", url=" + json.value ("url", "UNKNOWN") + ", duration=" + duration_str +
+        ", iterations=" + std::to_string (json.value ("iterations", 0)) +
+        ", rps=" + std::to_string (json.value ("rps", json.value ("targetRps", 0))) +
+        ", concurrency=" + std::to_string (json.value ("concurrency", 1)) +
+        ", request_id=" + run.request_id.value_or ("none") +
+        ", environment_id=" + run.environment_id.value_or ("none"));
+    }
+}
+
+void handle_start_load_test (RouteContext& ctx,
+const httplib::Request& req,
+httplib::Response& res) {
+    // Parse JSON
+    nlohmann::json json;
+    try {
+        json = nlohmann::json::parse (req.body);
+    } catch (const nlohmann::json::exception& e) {
+        vayu::utils::log_warning ("POST /runs - Invalid JSON: " + std::string (e.what ()));
+        send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
+        return;
+    }
+
+    // A scenario run states its work as an ordered collection, so it has no
+    // single method/url to require and states its iteration count inside
+    // the block. Both checks in `validate_load_request` describe the
+    // single-request payload only; the scenario block's own required fields are
+    // checked by resolve_scenario, beside the shared numeric validation.
+    const bool is_scenario = json.contains ("scenario") && !json["scenario"].is_null ();
+    // A `scenario` block with a load `mode` beside it is a load-mode
+    // scenario: the same plan, driven by virtual users on the event loop
+    // instead of one sequence through the client. Without a mode it is the
+    // design-mode collection run every caller sent before phase 6, so the
+    // absence of `mode` cannot start meaning something new.
+    const bool is_scenario_load = vayu::core::is_scenario_load_run (json);
+
+    if (auto rejection = validate_load_request (ctx, json, is_scenario, is_scenario_load)) {
+        res.status = rejection->status;
+        res.set_content (rejection->body.dump (), "application/json");
+        return;
+    }
+
+    std::shared_ptr<const vayu::core::ScenarioExecution> scenario_execution;
+    nlohmann::json scenario_manifest;
+    if (is_scenario) {
+        if (auto rejection =
+            resolve_run_scenario (ctx, json, scenario_execution, scenario_manifest)) {
+            res.status = rejection->status;
+            res.set_content (rejection->body.dump (), "application/json");
             return;
         }
+    }
 
-        // Which jar this execution reads and writes: one per environment, with
-        // the no-environment jar for a request sent without one. Resolved once
-        // here so the send, the pre-request script's `pm.sendRequest` and both
-        // scripts' `pm.cookies` cannot disagree about which session they are
-        // looking at. See cookie_jar.hpp for the scope decision.
-        const std::string cookie_scope =
-        run.environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
+    // Create run record
+    std::string run_id = vayu::utils::generate_id ("run_");
+    vayu::db::Run run;
+    run.id = run_id;
+    // A scenario *load* run is a load run whose target happens to be a
+    // sequence: it publishes metric ticks, reports RPS and percentiles, and
+    // stores no per-step `results` rows - so `Scenario`, which is what the
+    // app reads to render a step list instead of the dashboard, would point
+    // every consumer at the wrong view of it. The step breakdown reaches
+    // the report through the summary's `scenario` object instead, and the
+    // snapshot still carries the manifest, so the list row still says which
+    // collection ran.
+    run.type   = (is_scenario && !is_scenario_load) ? vayu::RunType::Scenario :
+                                                      vayu::RunType::Load;
+    run.status = vayu::RunStatus::Pending;
+    run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
+    if (is_scenario) {
+        run.config_snapshot = scenario_snapshot (run.config_snapshot, scenario_manifest);
+    }
+    seed_run_times (run, now_ms ());
 
-        // What both scripts run under. Read here rather than inside each branch
-        // because it is three config lookups; the QuickJS runtime itself - the
-        // part that is not free - is still built only where a script exists.
-        vayu::runtime::ScriptConfig script_config;
-        script_config.timeout_ms = static_cast<uint64_t> (ctx.db.get_config_int (
-        "scriptTimeout", vayu::core::constants::script_engine::TIMEOUT_MS));
-        script_config.memory_limit = static_cast<size_t> (ctx.db.get_config_int (
-        "scriptMemoryLimit", vayu::core::constants::script_engine::MEMORY_LIMIT));
-        script_config.stack_size = static_cast<size_t> (ctx.db.get_config_int (
-        "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
-        script_config.enable_console = ctx.db.get_config_bool (
-        "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
-        // Payload-level, not config-level: whether a script may send is a
-        // property of *who asked for this execution*, not of the installation.
-        // Absent means no - see ScriptConfig::allow_send_request.
-        script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
+    if (json.contains ("requestId") && !json["requestId"].is_null ()) {
+        run.request_id = json["requestId"].get<std::string> ();
+    }
+    if (json.contains ("environmentId") && !json["environmentId"].is_null ()) {
+        run.environment_id = json["environmentId"].get<std::string> ();
+    }
 
-        // A streaming request diverges here: there is no synchronous exchange to
-        // run. The transfer moves to a managed consumer worker and the route
-        // answers at once with the run and the URL its events arrive on
-        // (issue #573). `stream` and `transient` are mutually exclusive, so
-        // `run_id` is always set on this path.
-        if (stream.value) {
-            // The same script/send/script ordering a buffered send performs,
-            // pulled apart by the transfer that sits between the two halves
-            // (issue #575). The pre-request script runs here, before anything
-            // is on the wire, so its `pm.request` write-back reaches the
-            // stream; the post-request script runs on the worker thread once
-            // the stream has terminated, because only then is there a response
-            // - and an event list - to assert over.
-            //
-            // The scopes both halves read are loaded once and travel with the
-            // completion callback, so a `pm.environment.set` in the
-            // pre-request script is visible to the post-request script exactly
-            // as it is on the buffered path.
-            ScriptVariableScopes scopes;
-            vayu::ScriptResult pre_script_result;
-            std::vector<vayu::http::CookieWrite> pre_cookie_writes;
-            // Resolved once here rather than at each of the three uses below
-            // (the pre-request script's `pm.sendRequest`, the transfer, and
-            // the post-request script's on the worker thread): they are one
-            // stream, and a settings change between them would otherwise send
-            // the two halves out by different routes.
-            const auto transport = vayu::http::resolve_transport_policy (ctx.db);
-            const bool has_scripts =
-            !pre_request_script.empty () || !post_request_script.empty ();
-            if (has_scripts) {
-                scopes = load_script_variable_scopes (ctx.db, run);
-            }
-            if (!pre_request_script.empty ()) {
-                vayu::runtime::ScriptEngine script_engine (script_config);
-                auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
-                bind_script_scopes (pre_ctx, scopes, ctx.cookie_jar,
-                cookie_scope, &pre_cookie_writes);
-                pre_ctx.request_id   = run.request_id;
-                pre_ctx.request_name = script_request_name;
-                pre_ctx.transport    = transport;
-                // The same row the transfer below carries, on the same terms
-                // as the buffered path: a stream is still one send, and one
-                // send with a row is iteration 0 of 1.
-                if (data_row.value) {
-                    pre_ctx.iteration_data  = &*data_row.value;
-                    pre_ctx.iteration       = 0;
-                    pre_ctx.iteration_count = 1;
-                }
-                pre_script_result = execute_script (
-                script_engine, pre_request_script, pre_ctx, "Pre-request");
-            }
+    log_started_run (json, run, run_id, scenario_execution.get ());
 
-            vayu::http::SseStreamRequest spec;
-            spec.run_id          = *run_id;
-            spec.request         = std::move (request);
-            spec.limits          = vayu::http::read_sse_limits (ctx.db);
-            spec.transport       = transport;
-            spec.max_duration_ms = stream.max_duration_ms;
-            spec.max_events      = stream.max_events;
-            spec.cookie_jar      = &ctx.cookie_jar;
-            spec.cookie_scope    = cookie_scope;
-            // The pre-request script's jar writes ride this transfer, which is
-            // what makes them happen exactly once - the same route
-            // `ClientConfig::cookie_writes` gives them on the buffered path.
-            spec.cookie_writes = std::move (pre_cookie_writes);
-            // Persistence stays the route's decision even though it happens on
-            // the worker thread - `ctx.db` outlives the manager, which is why
-            // the manager is declared before `server_` (see server.hpp).
-            // Copied into the callback rather than borrowed: the post-request
-            // script runs on the worker thread once the stream has terminated,
-            // long after this handler's frame - and its row must be the one the
-            // pre-request script and the transfer used.
-            spec.on_complete =
-            [&db = ctx.db, &jar = ctx.cookie_jar, id = *run_id, cookie_scope, run,
-            script_config, post_request_script, request_name = script_request_name,
-            scopes, iteration_data = data_row.value, transport,
-            pre_script_result] (const vayu::Request& sent, const vayu::Response& response,
-            const vayu::http::SseStreamContext& context) mutable {
-                StreamRecord record;
-                nlohmann::json scripts = nlohmann::json::object ();
-                record.events = vayu::http::stream_trace_node (context);
-                if (context.end_reason () == vayu::http::SseEndReason::Stopped) {
-                    record.status = vayu::RunStatus::Stopped;
-                } else if (response.has_error ()) {
-                    record.status = vayu::RunStatus::Failed;
-                } else {
-                    record.status = vayu::RunStatus::Completed;
-                }
-
-                const bool has_script_output = !post_request_script.empty () ||
-                !pre_script_result.tests.empty () ||
-                !pre_script_result.console_output.empty () || !pre_script_result.success;
-                if (has_script_output) {
-                    // Guarded as a whole: a script surface that threw where
-                    // `execute_script` does not catch - building the runtime,
-                    // applying a cookie write - must not cost the run its
-                    // result row, which is the only record the stream leaves.
-                    try {
-                        vayu::ScriptResult post_script_result;
-                        if (!post_request_script.empty ()) {
-                            vayu::runtime::ScriptEngine script_engine (script_config);
-                            std::vector<vayu::http::CookieWrite> post_cookie_writes;
-                            auto post_ctx =
-                            vayu::runtime::ScriptContext::for_test (sent, response);
-                            bind_script_scopes (post_ctx, scopes, jar,
-                            cookie_scope, &post_cookie_writes);
-                            post_ctx.request_id   = run.request_id;
-                            post_ctx.request_name = request_name;
-                            post_ctx.transport    = transport;
-                            if (iteration_data) {
-                                post_ctx.iteration_data  = &*iteration_data;
-                                post_ctx.iteration       = 0;
-                                post_ctx.iteration_count = 1;
-                            }
-                            // The node the trace is about to store, not a copy
-                            // of it: `pm.response.eventsTruncated` and the
-                            // stored marker are then the same value by
-                            // construction rather than by agreement.
-                            post_ctx.response_events = &record.events;
-                            post_script_result = execute_script (script_engine,
-                            post_request_script, post_ctx, "Post-request");
-                            // Nothing left to carry them - the transfer has
-                            // already captured, exactly as on the buffered path.
-                            jar.apply (cookie_scope, post_cookie_writes);
-                        }
-                        scripts = build_script_result_node (pre_script_result, post_script_result);
-                    } catch (const std::exception& e) {
-                        vayu::utils::log_error (
-                        "Stream post-request script failed: " + std::string (e.what ()));
-                    }
-                    // Best-effort and after both scripts, so one `set()` per
-                    // run reaches disk rather than one per half.
-                    persist_script_variables (db, run, scopes.environment,
-                    scopes.globals, scopes.collection);
-                }
-
-                // No verdict: a stream's body is an event stream, not a
-                // document any response schema describes (see the contract on
-                // the parameter).
-                record_design_result (db, id, sent, response, &record, std::nullopt, scripts);
-            };
-
-            auto context = ctx.sse_manager.start (std::move (spec));
-            if (!context) {
-                // The daemon is draining its workers, or - impossibly - the id
-                // collided. The row exists but nothing will consume it, so it
-                // is failed here rather than left `running` forever.
-                vayu::utils::log_warning (
-                "POST /execute - Stream refused for run: " + *run_id);
-                try {
-                    ctx.db.update_run_status_with_retry (*run_id, vayu::RunStatus::Failed);
-                } catch (const std::exception& e) {
-                    vayu::utils::log_error (
-                    "Failed to fail a refused stream run: " + std::string (e.what ()));
-                }
-                send_error (res, 503, "Engine is shutting down");
-                return;
-            }
-
-            nlohmann::json body;
-            body["runId"]     = *run_id;
-            body["eventsUrl"] = "/runs/" + *run_id + "/events";
-            body["status"]    = to_string (vayu::RunStatus::Running);
-            res.status        = 202;
-            res.set_content (body.dump (), "application/json");
+    if (!is_scenario) {
+        if (auto rejection = preflight_run_auth (ctx, json)) {
+            res.status = rejection->status;
+            res.set_content (rejection->body.dump (), "application/json");
             return;
         }
+    }
 
-        vayu::runtime::ScriptEngine script_engine (script_config);
+    try {
+        ctx.db.create_run (run);
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "POST /runs - Failed to create run: " + std::string (e.what ()));
+        send_error (res, 400, "Failed to create run record");
+        return;
+    }
 
-        // Load variables. Mutated in place by both scripts, then persisted
-        // once below.
-        auto scopes = load_script_variable_scopes (ctx.db, run);
+    // Start run via RunManager. A refusal means the daemon is draining its
+    // workers for shutdown; the row exists but nothing will ever run it, so
+    // say so rather than returning a 202 for a run that never starts.
+    // A load-mode scenario takes the load path: same event loop, metrics
+    // thread, drain and summary as a single-request run, with the virtual-
+    // user state machine in place of a LoadStrategy. Only the design-mode
+    // sequential runner needs the cookie jar, which is why only it is
+    // handed one.
+    const bool started = (is_scenario && !is_scenario_load) ?
+    ctx.run_manager.start_scenario_run (
+    run_id, json, scenario_execution, ctx.db, ctx.cookie_jar, ctx.verbose) :
+    ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose,
+    is_scenario_load ? scenario_execution : nullptr);
+    if (!started) {
+        send_error (res, 503, "Engine is shutting down");
+        return;
+    }
 
-        // Pre-request script, send, test script - the sequence a scenario step
-        // performs too, which is why it lives in request_exchange.cpp rather
-        // than here (issue #353). `iteration` is left unset for a send carrying
-        // no row: it has no iteration index, and a binding that cannot fail is
-        // worse than a missing one (issue #300).
-        ExchangeInputs inputs;
-        inputs.request      = std::move (request);
-        inputs.pre_script   = pre_request_script;
-        inputs.post_script  = post_request_script;
-        inputs.request_id   = run.request_id;
-        inputs.request_name = script_request_name;
-        // Read at the point of use, so a settings change applies to the next
-        // send without a restart (issue #705).
-        inputs.transport = vayu::http::resolve_transport_policy (ctx.db);
-        if (data_row.value) {
-            inputs.iteration_data = &*data_row.value;
-            // Row 0 of 1: a send-with-row *is* an iteration, and the one it is
-            // is the row it bound. This is the exception the comment above
-            // describes - an ordinary Send still leaves both unset, because it
-            // has no row and an invented index would be the binding that cannot
-            // fail (issue #300).
-            inputs.iteration       = 0;
-            inputs.iteration_count = 1;
-        }
-        auto exchange = execute_exchange (script_engine, ctx.cookie_jar,
-        cookie_scope, scopes, std::move (inputs), ctx.verbose);
+    nlohmann::json response;
+    response["runId"]  = run_id;
+    response["status"] = to_string (vayu::RunStatus::Pending);
+    if (is_scenario_load) {
+        response["message"] = "Scenario load test started";
+    } else if (is_scenario) {
+        response["message"] = "Collection run started";
+    } else {
+        response["message"] = "Load test started";
+    }
 
-        // What the contract says this response should have been (#628).
-        // Resolved from the *stored* request: an unsaved editor request is not
-        // an operation of any document, and inventing a verdict for one would
-        // be a claim about a contract it is not bound by.
-        const auto validation =
-        validate_design_response (ctx.db, run.request_id, exchange.response);
+    res.status = 202;
+    res.set_content (response.dump (), "application/json");
+}
 
-        // Built once, then sent *and* stored (#725). The live body and the
-        // trace's `scripts` node are the same object, so a restored Tests tab
-        // shows the assertions this send actually made rather than the
-        // empty-state that used to make "passed" and "never ran" identical.
-        const nlohmann::json scripts = build_script_result_node (
-        exchange.pre_script_result, exchange.post_script_result);
+} // namespace
 
-        // Store result to database (non-blocking, errors logged). A transient
-        // execution stops here: no trace row, so the post-auth headers this
-        // exchange carries never reach disk - and neither do these results.
-        record_design_result (ctx.db, run_id, exchange.request, exchange.response,
-        /*stream=*/nullptr, validation, scripts);
-
-        // Persist script-set variables (design mode only; best-effort)
-        persist_script_variables (
-        ctx.db, run, scopes.environment, scopes.globals, scopes.collection);
-
-        // Build and send response
-        // Engine returns 200 - the server's status is in the response body
-        res.status = 200;
-        res.set_content (
-        build_response_json (exchange.response, scripts, validation).dump (2), "application/json");
+void register_execution_routes (RouteContext& ctx) {
+    httplib::Server::Handler execute_request = [&ctx] (const httplib::Request& req,
+                                               httplib::Response& res) {
+        handle_execute_request (ctx, req, res);
     };
     ctx.server.Post ("/execute", execute_request);
     ctx.server.Post ("/request", deprecated_alias (execute_request));
 
-    /**
-     * POST /runs  (alias: POST /run, deprecated)
-     * Starts a load test run (Vayu Mode).
-     *
-     * Returns:
-     * - 202: Load test accepted and started
-     * - 400: Invalid request format
-     */
     httplib::Server::Handler start_load_test = [&ctx] (const httplib::Request& req,
                                                httplib::Response& res) {
-        // Parse JSON
-        nlohmann::json json;
-        try {
-            json = nlohmann::json::parse (req.body);
-        } catch (const nlohmann::json::exception& e) {
-            vayu::utils::log_warning (
-            "POST /runs - Invalid JSON: " + std::string (e.what ()));
-            send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
-            return;
-        }
-
-        // A scenario run states its work as an ordered collection, so it has no
-        // single method/url to require and states its iteration count inside
-        // the block. Both checks below describe the single-request payload
-        // only; the scenario block's own required fields are checked by
-        // resolve_scenario further down, beside the shared numeric validation.
-        const bool is_scenario =
-        json.contains ("scenario") && !json["scenario"].is_null ();
-        // A `scenario` block with a load `mode` beside it is a load-mode
-        // scenario: the same plan, driven by virtual users on the event loop
-        // instead of one sequence through the client. Without a mode it is the
-        // design-mode collection run every caller sent before phase 6, so the
-        // absence of `mode` cannot start meaning something new.
-        const bool is_scenario_load = vayu::core::is_scenario_load_run (json);
-
-        // Refused before the run row exists, and never quietly downgraded to a
-        // closed-loop mode: a run that measured something other than what was
-        // asked for is worse than no run at all.
-        if (is_scenario_load) {
-            if (auto invalid = vayu::core::validate_scenario_load_config (json)) {
-                vayu::utils::log_warning (
-                "POST /runs - Invalid scenario load config: " + *invalid);
-                send_error (res, 400, *invalid, "invalid_run_config");
-                return;
-            }
-        }
-
-        // Validate required fields
-        if (!is_scenario) {
-            if (!json.contains ("method") || !json.contains ("url")) {
-                vayu::utils::log_warning (
-                "POST /runs - Missing required fields: method, url");
-                send_error (res, 400, "Missing required fields: method, url");
-                return;
-            }
-
-            if (!json.contains ("mode") && !json.contains ("duration") &&
-            !json.contains ("iterations")) {
-                vayu::utils::log_warning (
-                "POST /runs - Missing mode/duration/iterations config");
-                send_error (res, 400,
-                "Must specify either 'mode' with 'duration' or 'iterations'");
-                return;
-            }
-        }
-
-        // Range-check the numeric config *before* the run row exists, so a
-        // rejected request leaves nothing behind. `invalid_run_config` is the
-        // specific code this failure carries in place of the per-status default.
-        if (auto invalid =
-            validate_run_config (json, vayu::core::read_monitor_limits (ctx.db))) {
-            vayu::utils::log_warning ("POST /runs - Invalid run config: " + *invalid);
-            send_error (res, 400, *invalid, "invalid_run_config");
-            return;
-        }
-
-        // Validate/normalize the body's httpVersion, beside the config check
-        // above and for the same reason: both run before run.config_snapshot is
-        // built, so a rejected request leaves no row behind, and the snapshot
-        // still reflects the raw client body (sanitize_config_snapshot reads
-        // req.body directly, not this normalized `json`).
-        if (auto outcome = normalize_run_http_version (json); !outcome) {
-            vayu::utils::log_warning (
-            "POST /runs - Invalid httpVersion: " + outcome.error ().body.dump ());
-            res.status = outcome.error ().status;
-            res.set_content (outcome.error ().body.dump (), "application/json");
-            return;
-        }
-
-        // Resolve the scenario block here, with the rest of the pre-row
-        // validation: an unknown collection, an empty sequence or a step that
-        // cannot be composed must leave no run behind, and resolution is what
-        // finds all three.
-        //
-        // Resolution happens exactly once, before the first send: a collection
-        // edited mid-run must not change the sequence underneath itself, and
-        // the load-mode executor (phase 6) cannot query SQLite per step per
-        // virtual user. The resolved plan is then shared immutably with the
-        // run's worker and lives in memory for the run's life and nowhere else.
-        std::shared_ptr<const vayu::core::ScenarioExecution> scenario_execution;
-        nlohmann::json scenario_manifest;
-        if (is_scenario) {
-            vayu::core::ScenarioResolveOptions options;
-            if (auto it = json.find ("environmentId");
-            it != json.end () && it->is_string ()) {
-                options.environment_id = it->get<std::string> ();
-            }
-            options.timeout_ms = resolve_request_timeout_ms (json,
-            ctx.db.get_config_int ("defaultTimeout",
-            vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
-            options.limits.max_steps =
-            static_cast<size_t> (ctx.db.get_config_int ("maxScenarioSteps",
-            static_cast<int> (vayu::core::constants::scenario::MAX_STEPS)));
-            options.limits.max_data_rows =
-            static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataRows",
-            static_cast<int> (vayu::core::constants::scenario::MAX_DATA_ROWS)));
-            options.limits.max_data_bytes =
-            static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataBytes",
-            static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES)));
-
-            auto resolved =
-            vayu::core::resolve_scenario (ctx.db, json["scenario"], options);
-            if (!resolved.ok) {
-                vayu::utils::log_warning (
-                "POST /runs - Invalid scenario: " + resolved.error);
-                send_error (res, 400, resolved.error, "invalid_scenario");
-                return;
-            }
-
-            scenario_manifest = vayu::core::build_scenario_manifest (
-            resolved.request, resolved.plan, resolved.spec);
-
-            auto execution = std::make_shared<vayu::core::ScenarioExecution> ();
-            execution->request = std::move (resolved.request);
-            execution->plan    = std::move (resolved.plan);
-            // The manifest above was built before this move, and from
-            // `resolved.request` - which carries the row *count* and never the
-            // rows. That is what keeps user data out of `config_snapshot`.
-            execution->data_rows = std::move (resolved.data_rows);
-            // The contract this run is measured against, carried to the runner
-            // so coverage counts against the document that was bound when the
-            // plan resolved (issue #629) rather than whatever it is by the time
-            // the run ends. The manifest above already stamped its identity.
-            execution->spec    = std::move (resolved.spec);
-            scenario_execution = std::move (execution);
-
-            vayu::utils::log_info (
-            "POST /runs - Scenario: collection=" + scenario_execution->request.collection_id +
-            ", steps=" + std::to_string (scenario_execution->plan.steps.size ()) +
-            ", iterations=" + std::to_string (scenario_execution->request.iterations));
-        }
-
-        // Create run record
-        std::string run_id = vayu::utils::generate_id ("run_");
-        vayu::db::Run run;
-        run.id = run_id;
-        // A scenario *load* run is a load run whose target happens to be a
-        // sequence: it publishes metric ticks, reports RPS and percentiles, and
-        // stores no per-step `results` rows - so `Scenario`, which is what the
-        // app reads to render a step list instead of the dashboard, would point
-        // every consumer at the wrong view of it. The step breakdown reaches
-        // the report through the summary's `scenario` object instead, and the
-        // snapshot still carries the manifest, so the list row still says which
-        // collection ran.
-        run.type = (is_scenario && !is_scenario_load) ? vayu::RunType::Scenario :
-                                                        vayu::RunType::Load;
-        run.status          = vayu::RunStatus::Pending;
-        run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
-        if (is_scenario) {
-            run.config_snapshot = scenario_snapshot (run.config_snapshot, scenario_manifest);
-        }
-        seed_run_times (run, now_ms ());
-
-        if (json.contains ("requestId") && !json["requestId"].is_null ()) {
-            run.request_id = json["requestId"].get<std::string> ();
-        }
-        if (json.contains ("environmentId") && !json["environmentId"].is_null ()) {
-            run.environment_id = json["environmentId"].get<std::string> ();
-        }
-
-        // Extract duration for logging
-        std::string duration_str = "0s";
-        if (json.contains ("duration")) {
-            if (json["duration"].is_string ()) {
-                duration_str = json["duration"].get<std::string> ();
-            } else if (json["duration"].is_number ()) {
-                duration_str = std::to_string (json["duration"].get<int> ()) + "s";
-            }
-        }
-
-        if (is_scenario) {
-            vayu::utils::log_info ("POST /runs - Collection run: run_id=" + run_id +
-            ", collection=" + scenario_execution->request.collection_id +
-            ", steps=" + std::to_string (scenario_execution->plan.steps.size ()) +
-            ", iterations=" + std::to_string (scenario_execution->request.iterations) +
-            ", environment_id=" + run.environment_id.value_or ("none"));
-        } else {
-            vayu::utils::log_info ("POST /runs - Load Test: run_id=" + run_id +
-            ", mode=" + json.value ("mode", "unspecified") +
-            ", method=" + json.value ("method", "UNKNOWN") +
-            ", url=" + json.value ("url", "UNKNOWN") + ", duration=" + duration_str +
-            ", iterations=" + std::to_string (json.value ("iterations", 0)) +
-            ", rps=" + std::to_string (json.value ("rps", json.value ("targetRps", 0))) +
-            ", concurrency=" + std::to_string (json.value ("concurrency", 1)) +
-            ", request_id=" + run.request_id.value_or ("none") +
-            ", environment_id=" + run.environment_id.value_or ("none"));
-        }
-
-        // Pre-flight auth: reject an unauthorizable run before creating it, and
-        // warm the token cache so the worker's apply_auth is a cache hit. A
-        // scenario payload carries no run-level `auth` - each step's auth was
-        // resolved at plan time, and a step that could not be authorized
-        // already failed resolution with a 400 - so this is the single-request
-        // path's check alone.
-        if (!is_scenario) {
-            auto preflight = vayu::http::preflight_auth (
-            json.value ("auth", nlohmann::json ()), ctx.db);
-            if (!preflight.ok) {
-                vayu::utils::log_warning (
-                "POST /runs - Auth pre-flight failed: " + preflight.message);
-                res.status = (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
-                res.set_content (
-                error_body (res.status, preflight.message, preflight.detail_code)
-                .dump (),
-                "application/json");
-                return;
-            }
-        }
-
-        try {
-            ctx.db.create_run (run);
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "POST /runs - Failed to create run: " + std::string (e.what ()));
-            send_error (res, 400, "Failed to create run record");
-            return;
-        }
-
-        // Start run via RunManager. A refusal means the daemon is draining its
-        // workers for shutdown; the row exists but nothing will ever run it, so
-        // say so rather than returning a 202 for a run that never starts.
-        // A load-mode scenario takes the load path: same event loop, metrics
-        // thread, drain and summary as a single-request run, with the virtual-
-        // user state machine in place of a LoadStrategy. Only the design-mode
-        // sequential runner needs the cookie jar, which is why only it is
-        // handed one.
-        const bool started = (is_scenario && !is_scenario_load) ?
-        ctx.run_manager.start_scenario_run (
-        run_id, json, scenario_execution, ctx.db, ctx.cookie_jar, ctx.verbose) :
-        ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose,
-        is_scenario_load ? scenario_execution : nullptr);
-        if (!started) {
-            send_error (res, 503, "Engine is shutting down");
-            return;
-        }
-
-        nlohmann::json response;
-        response["runId"]  = run_id;
-        response["status"] = to_string (vayu::RunStatus::Pending);
-        if (is_scenario_load) {
-            response["message"] = "Scenario load test started";
-        } else if (is_scenario) {
-            response["message"] = "Collection run started";
-        } else {
-            response["message"] = "Load test started";
-        }
-
-        res.status = 202;
-        res.set_content (response.dump (), "application/json");
+        handle_start_load_test (ctx, req, res);
     };
     ctx.server.Post ("/runs", start_load_test);
     ctx.server.Post ("/run", deprecated_alias (start_load_test));

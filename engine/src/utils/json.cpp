@@ -591,6 +591,39 @@ Json serialize (const vayu::db::ClientCertificate& certificate) {
     return json;
 }
 
+namespace {
+
+/**
+ * One stored variable, field by field.
+ *
+ * Per-field tolerance is the D17 rule of issue #226, decided once here for
+ * every reader: a non-string `value` reads as "" and a non-boolean `enabled`
+ * counts as enabled (absent already did). `Json::value()` would instead throw on
+ * the first malformed field, and the catch in `parse_variables` then discarded
+ * the whole scope - one bad variable silently emptied every other one.
+ */
+vayu::Variable read_variable (const Json& value) {
+    vayu::Variable var;
+    if (auto it = value.find ("value"); it != value.end () && it->is_string ()) {
+        var.value = it->get<std::string> ();
+    }
+    if (auto it = value.find ("enabled"); it != value.end () && it->is_boolean ()) {
+        var.enabled = it->get<bool> ();
+    }
+    if (auto it = value.find ("secret"); it != value.end () && it->is_boolean ()) {
+        var.secret = it->get<bool> ();
+    }
+    if (auto it = value.find ("type"); it != value.end () && it->is_string ()) {
+        var.type = it->get<std::string> ();
+    }
+    if (auto it = value.find ("createdAt"); it != value.end () && it->is_number ()) {
+        var.created_at = it->get<int64_t> ();
+    }
+    return var;
+}
+
+} // namespace
+
 vayu::Environment parse_variables (const std::string& json_str) {
     vayu::Environment env;
     if (json_str.empty ()) {
@@ -604,32 +637,7 @@ vayu::Environment parse_variables (const std::string& json_str) {
                 if (!value.is_object ()) {
                     continue;
                 }
-                // Per-field tolerance is the D17 rule of issue #226, decided
-                // once here for every reader: a non-string `value` reads as ""
-                // and a non-boolean `enabled` counts as enabled (absent already
-                // did). `Json::value()` would instead throw on the first
-                // malformed field, and the catch below then discarded the whole
-                // scope - one bad variable silently emptied every other one.
-                vayu::Variable var;
-                if (auto it = value.find ("value"); it != value.end () && it->is_string ()) {
-                    var.value = it->get<std::string> ();
-                }
-                if (auto it = value.find ("enabled");
-                it != value.end () && it->is_boolean ()) {
-                    var.enabled = it->get<bool> ();
-                }
-                if (auto it = value.find ("secret");
-                it != value.end () && it->is_boolean ()) {
-                    var.secret = it->get<bool> ();
-                }
-                if (auto it = value.find ("type"); it != value.end () && it->is_string ()) {
-                    var.type = it->get<std::string> ();
-                }
-                if (auto it = value.find ("createdAt");
-                it != value.end () && it->is_number ()) {
-                    var.created_at = it->get<int64_t> ();
-                }
-                env[key] = std::move (var);
+                env[key] = read_variable (value);
             }
         }
     } catch (const std::exception&) {
@@ -657,6 +665,88 @@ std::string serialize_variables (const vayu::Environment& env) {
 }
 
 namespace {
+
+/**
+ * The file half of a field. `type` is the discriminator and the D17 leniency
+ * stops here: an unreadable spelling would silently become a text part carrying
+ * an empty value - a part that is on the wire and yet is not the file that was
+ * asked for - so anything but the two known values is refused, as is a file part
+ * in a mode whose wire form has no file.
+ */
+std::optional<Error> read_form_field_type (const Json& item, BodyMode mode, FormField& field) {
+    if (const auto type = item.find ("type"); type != item.end () && !type->is_null ()) {
+        if (!type->is_string ()) {
+            return Error{ ErrorCode::InternalError,
+                "Body field 'type' must be the string \"text\" or \"file\"" };
+        }
+        const auto spelling = type->get<std::string> ();
+        if (spelling == "file") {
+            field.type = FormFieldType::File;
+        } else if (spelling != "text") {
+            return Error{ ErrorCode::InternalError,
+                "Body field 'type' must be \"text\" or \"file\", got \"" + spelling + "\"" };
+        }
+    }
+    if (field.type == FormFieldType::File && mode != BodyMode::FormData) {
+        return Error{ ErrorCode::InternalError,
+            "A file part is only valid in a 'form-data' body - "
+            "'x-www-form-urlencoded' has no file form" };
+    }
+    return std::nullopt;
+}
+
+/**
+ * One `fields` entry.
+ *
+ * A malformed field is refused rather than skipped: this endpoint's whole
+ * contract is "send exactly what was built", and a silently dropped field is the
+ * failure mode the form modes already had.
+ */
+Result<FormField> parse_form_field (const Json& item, BodyMode mode) {
+    if (!item.is_object ()) {
+        return Error{ ErrorCode::InternalError, "Each entry of body 'fields' must be an object" };
+    }
+    const auto key = item.find ("key");
+    if (key == item.end () || !key->is_string ()) {
+        return Error{ ErrorCode::InternalError,
+            "Each entry of body 'fields' needs a string 'key'" };
+    }
+
+    FormField field;
+    field.key = key->get<std::string> ();
+    if (const auto value = item.find ("value"); value != item.end () && value->is_string ()) {
+        field.value = value->get<std::string> ();
+    }
+    if (const auto enabled = item.find ("enabled");
+    enabled != item.end () && enabled->is_boolean ()) {
+        field.enabled = enabled->get<bool> ();
+    }
+
+    if (auto refusal = read_form_field_type (item, mode, field)) {
+        return *refusal;
+    }
+    for (const auto& [name, target] :
+    { std::pair<const char*, std::string*>{ "src", &field.src },
+    { "fileName", &field.file_name }, { "contentType", &field.content_type } }) {
+        const auto member = item.find (name);
+        if (member == item.end () || member->is_null ()) {
+            continue;
+        }
+        if (!member->is_string ()) {
+            return Error{ ErrorCode::InternalError,
+                std::string{ "Body field '" } + name + "' must be a string" };
+        }
+        *target = member->get<std::string> ();
+    }
+    // A text part carrying a file's source is ambiguous in the one direction
+    // that matters: the caller pointed at a file and nothing would send it.
+    if (field.type == FormFieldType::Text && !field.src.empty ()) {
+        return Error{ ErrorCode::InternalError,
+            "Body field '" + field.key +
+            "' has a 'src' but is not a file part - set 'type' to \"file\"" };
+    }
+    return field;
+}
 
 // The `fields` half of a body, for the two form modes.
 //
@@ -696,71 +786,122 @@ Result<std::vector<FormField>> parse_form_fields (const Json& body_json, BodyMod
     std::vector<FormField> fields;
     fields.reserve (entry->size ());
     for (const auto& item : *entry) {
-        if (!item.is_object ()) {
-            return Error{ ErrorCode::InternalError,
-                "Each entry of body 'fields' must be an object" };
+        auto field = parse_form_field (item, mode);
+        if (field.is_error ()) {
+            return field.error ();
         }
-        const auto key = item.find ("key");
-        if (key == item.end () || !key->is_string ()) {
-            return Error{ ErrorCode::InternalError,
-                "Each entry of body 'fields' needs a string 'key'" };
-        }
-
-        FormField field;
-        field.key = key->get<std::string> ();
-        if (const auto value = item.find ("value");
-        value != item.end () && value->is_string ()) {
-            field.value = value->get<std::string> ();
-        }
-        if (const auto enabled = item.find ("enabled");
-        enabled != item.end () && enabled->is_boolean ()) {
-            field.enabled = enabled->get<bool> ();
-        }
-
-        // The file half. `type` is the discriminator and the D17 leniency stops
-        // here: an unreadable spelling would silently become a text part
-        // carrying an empty value - a part that is on the wire and yet is not
-        // the file that was asked for - so anything but the two known values is
-        // refused, as is a file part in a mode whose wire form has no file.
-        if (const auto type = item.find ("type"); type != item.end () && !type->is_null ()) {
-            if (!type->is_string ()) {
-                return Error{ ErrorCode::InternalError, "Body field 'type' must be the string \"text\" or \"file\"" };
-            }
-            const auto spelling = type->get<std::string> ();
-            if (spelling == "file") {
-                field.type = FormFieldType::File;
-            } else if (spelling != "text") {
-                return Error{ ErrorCode::InternalError,
-                    "Body field 'type' must be \"text\" or \"file\", got \"" + spelling + "\"" };
-            }
-        }
-        if (field.type == FormFieldType::File && mode != BodyMode::FormData) {
-            return Error{ ErrorCode::InternalError,
-                "A file part is only valid in a 'form-data' body - "
-                "'x-www-form-urlencoded' has no file form" };
-        }
-        for (const auto& [name, target] :
-        { std::pair<const char*, std::string*>{ "src", &field.src },
-        { "fileName", &field.file_name }, { "contentType", &field.content_type } }) {
-            const auto member = item.find (name);
-            if (member == item.end () || member->is_null ()) {
-                continue;
-            }
-            if (!member->is_string ()) {
-                return Error{ ErrorCode::InternalError,
-                    std::string{ "Body field '" } + name + "' must be a string" };
-            }
-            *target = member->get<std::string> ();
-        }
-        // A text part carrying a file's source is ambiguous in the one direction
-        // that matters: the caller pointed at a file and nothing would send it.
-        if (field.type == FormFieldType::Text && !field.src.empty ()) {
-            return Error{ ErrorCode::InternalError,
-                "Body field '" + field.key + "' has a 'src' but is not a file part - set 'type' to \"file\"" };
-        }
-        fields.push_back (std::move (field));
+        fields.push_back (std::move (field).value ());
     }
     return fields;
+}
+
+} // namespace
+
+namespace {
+
+/**
+ * The `body` object: its mode, its content and its fields.
+ *
+ * Both spellings of each form mode reach the same enumerator: every client
+ * produces the long one ("x-www-form-urlencoded", "form-data"), while
+ * "form"/"formdata" are the engine's own older names, still accepted so a stored
+ * or replayed payload keeps working. The table here is the one place a spelling
+ * is added - the same rule `read_post_request_script`'s follows.
+ */
+std::optional<Error> read_request_body (const Json& json, Request& request) {
+    // Body (optional)
+    if (json.contains ("body") && json["body"].is_object ()) {
+        const auto& body_json = json["body"];
+
+        if (body_json.contains ("mode")) {
+            std::string mode = body_json["mode"].get<std::string> ();
+
+            // Both spellings of each form mode reach the same enumerator:
+            // every client produces the long one ("x-www-form-urlencoded",
+            // "form-data"), while "form"/"formdata" are the engine's own
+            // older names, still accepted so a stored or replayed payload
+            // keeps working. This table is the one place a spelling is
+            // added - same rule as read_post_request_script's.
+            if (mode == "json") {
+                request.body.mode = BodyMode::Json;
+            } else if (mode == "text") {
+                request.body.mode = BodyMode::Text;
+            } else if (mode == "form" || mode == "x-www-form-urlencoded") {
+                request.body.mode = BodyMode::Form;
+            } else if (mode == "formdata" || mode == "form-data") {
+                request.body.mode = BodyMode::FormData;
+            } else if (mode == "binary") {
+                request.body.mode = BodyMode::Binary;
+            } else if (mode == "graphql") {
+                request.body.mode = BodyMode::GraphQL;
+            } else if (mode == "jsonrpc") {
+                request.body.mode = BodyMode::JsonRpc;
+            } else if (mode == "xml") {
+                request.body.mode = BodyMode::Xml;
+            }
+        }
+
+        if (body_json.contains ("content")) {
+            if (body_json["content"].is_string ()) {
+                request.body.content = body_json["content"].get<std::string> ();
+            } else {
+                // Serialize nested JSON
+                request.body.content = body_json["content"].dump ();
+            }
+        }
+
+        auto fields = parse_form_fields (body_json, request.body.mode);
+        if (fields.is_error ()) {
+            return fields.error ();
+        }
+        request.body.fields = std::move (fields).value ();
+    }
+    return std::nullopt;
+}
+
+/** The per-request options, each optional and each with a documented default. */
+void read_request_options (const Json& json, Request& request) {
+    // Options
+    if (json.contains ("timeout")) {
+        request.timeout_ms = json["timeout"].get<int> ();
+    } else {
+        // Use default timeout constant if not specified
+        // Note: To use a custom default, specify timeout in the request JSON
+        request.timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
+    }
+    if (json.contains ("followRedirects")) {
+        request.follow_redirects = json["followRedirects"].get<bool> ();
+    }
+    if (json.contains ("maxRedirects")) {
+        request.max_redirects = json["maxRedirects"].get<int> ();
+    }
+    if (json.contains ("verifySSL")) {
+        request.verify_ssl = json["verifySSL"].get<bool> ();
+    }
+    if (json.contains ("httpVersion")) {
+        // A corrupted or downgraded stored row must not execute as
+        // something arbitrary, so an unrecognized *string* coerces to Auto
+        // rather than being rejected (rejecting user input is the route
+        // layer's job - see routes.hpp).
+        //
+        // Note POST /execute is the one write path that relies on this
+        // coercion instead of validating: POST /runs
+        // (normalize_run_http_version) and the requests CRUD
+        // (apply_http_version_field) both reject an unrecognized value
+        // with a 400. Neither shipped client can send one - the renderer
+        // sends a typed union, MCP validates with z.enum - so this is a
+        // gap in consistency, not a live hole.
+        //
+        // A non-string value throws here and fails the whole parse, which
+        // is deliberate and matches every sibling field in this block. It
+        // is unreachable from storage - db::Request::http_version is a
+        // std::string and both serializers emit it as one - so it can only
+        // come from a hand-crafted payload, where failing closed with a 400
+        // is the right answer.
+        auto parsed_version =
+        http_version_from_string (json["httpVersion"].get<std::string> ());
+        request.http_version = parsed_version.value_or (HttpVersion::Auto);
+    }
 }
 
 } // namespace
@@ -792,95 +933,11 @@ Result<Request> deserialize_request (const Json& json) {
             }
         }
 
-        // Body (optional)
-        if (json.contains ("body") && json["body"].is_object ()) {
-            const auto& body_json = json["body"];
+        if (auto refusal = read_request_body (json, request)) {
+            return *refusal;
+        }
+        read_request_options (json, request);
 
-            if (body_json.contains ("mode")) {
-                std::string mode = body_json["mode"].get<std::string> ();
-
-                // Both spellings of each form mode reach the same enumerator:
-                // every client produces the long one ("x-www-form-urlencoded",
-                // "form-data"), while "form"/"formdata" are the engine's own
-                // older names, still accepted so a stored or replayed payload
-                // keeps working. This table is the one place a spelling is
-                // added - same rule as read_post_request_script's.
-                if (mode == "json") {
-                    request.body.mode = BodyMode::Json;
-                } else if (mode == "text") {
-                    request.body.mode = BodyMode::Text;
-                } else if (mode == "form" || mode == "x-www-form-urlencoded") {
-                    request.body.mode = BodyMode::Form;
-                } else if (mode == "formdata" || mode == "form-data") {
-                    request.body.mode = BodyMode::FormData;
-                } else if (mode == "binary") {
-                    request.body.mode = BodyMode::Binary;
-                } else if (mode == "graphql") {
-                    request.body.mode = BodyMode::GraphQL;
-                } else if (mode == "jsonrpc") {
-                    request.body.mode = BodyMode::JsonRpc;
-                } else if (mode == "xml") {
-                    request.body.mode = BodyMode::Xml;
-                }
-            }
-
-            if (body_json.contains ("content")) {
-                if (body_json["content"].is_string ()) {
-                    request.body.content = body_json["content"].get<std::string> ();
-                } else {
-                    // Serialize nested JSON
-                    request.body.content = body_json["content"].dump ();
-                }
-            }
-
-            auto fields = parse_form_fields (body_json, request.body.mode);
-            if (fields.is_error ()) {
-                return fields.error ();
-            }
-            request.body.fields = std::move (fields).value ();
-        }
-
-        // Options
-        if (json.contains ("timeout")) {
-            request.timeout_ms = json["timeout"].get<int> ();
-        } else {
-            // Use default timeout constant if not specified
-            // Note: To use a custom default, specify timeout in the request JSON
-            request.timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
-        }
-        if (json.contains ("followRedirects")) {
-            request.follow_redirects = json["followRedirects"].get<bool> ();
-        }
-        if (json.contains ("maxRedirects")) {
-            request.max_redirects = json["maxRedirects"].get<int> ();
-        }
-        if (json.contains ("verifySSL")) {
-            request.verify_ssl = json["verifySSL"].get<bool> ();
-        }
-        if (json.contains ("httpVersion")) {
-            // A corrupted or downgraded stored row must not execute as
-            // something arbitrary, so an unrecognized *string* coerces to Auto
-            // rather than being rejected (rejecting user input is the route
-            // layer's job - see routes.hpp).
-            //
-            // Note POST /execute is the one write path that relies on this
-            // coercion instead of validating: POST /runs
-            // (normalize_run_http_version) and the requests CRUD
-            // (apply_http_version_field) both reject an unrecognized value
-            // with a 400. Neither shipped client can send one - the renderer
-            // sends a typed union, MCP validates with z.enum - so this is a
-            // gap in consistency, not a live hole.
-            //
-            // A non-string value throws here and fails the whole parse, which
-            // is deliberate and matches every sibling field in this block. It
-            // is unreachable from storage - db::Request::http_version is a
-            // std::string and both serializers emit it as one - so it can only
-            // come from a hand-crafted payload, where failing closed with a 400
-            // is the right answer.
-            auto parsed_version =
-            http_version_from_string (json["httpVersion"].get<std::string> ());
-            request.http_version = parsed_version.value_or (HttpVersion::Auto);
-        }
 
         return request;
     } catch (const std::exception& e) {
@@ -1022,54 +1079,71 @@ constexpr const char* YELLOW  = "\033[33m"; // Numbers
 constexpr const char* MAGENTA = "\033[35m"; // Booleans/null
 constexpr const char* WHITE   = "\033[37m"; // Brackets
 
-void pretty_print_impl (std::ostringstream& ss, const Json& json, int indent, int current_indent, bool color) {
-    const std::string indent_str (static_cast<size_t> (current_indent), ' ');
-    const std::string next_indent_str (static_cast<size_t> (current_indent + indent), ' ');
-
-    if (json.is_object ()) {
-        ss << (color ? WHITE : "") << "{" << (color ? RESET : "") << "\n";
-
-        size_t i = 0;
-        for (auto& [key, value] : json.items ()) {
-            ss << next_indent_str;
-            ss << (color ? CYAN : "") << "\"" << key << "\"" << (color ? RESET : "");
-            ss << ": ";
-            pretty_print_impl (ss, value, indent, current_indent + indent, color);
-
-            if (++i < json.size ()) {
-                ss << ",";
-            }
-            ss << "\n";
-        }
-
-        ss << indent_str << (color ? WHITE : "") << "}" << (color ? RESET : "");
-    } else if (json.is_array ()) {
-        ss << (color ? WHITE : "") << "[" << (color ? RESET : "") << "\n";
-
-        for (size_t i = 0; i < json.size (); ++i) {
-            ss << next_indent_str;
-            pretty_print_impl (ss, json[i], indent, current_indent + indent, color);
-
-            if (i < json.size () - 1) {
-                ss << ",";
-            }
-            ss << "\n";
-        }
-
-        ss << indent_str << (color ? WHITE : "") << "]" << (color ? RESET : "");
-    } else if (json.is_string ()) {
-        ss << (color ? GREEN : "") << "\"" << json.get<std::string> () << "\""
-           << (color ? RESET : "");
-    } else if (json.is_number ()) {
-        ss << (color ? YELLOW : "") << json.dump () << (color ? RESET : "");
-    } else if (json.is_boolean ()) {
-        ss << (color ? MAGENTA : "") << (json.get<bool> () ? "true" : "false")
-           << (color ? RESET : "");
-    } else if (json.is_null ()) {
-        ss << (color ? MAGENTA : "") << "null" << (color ? RESET : "");
-    }
+/** The escape a colourised dump writes, or nothing when colour is off. */
+const char* paint (const char* code, bool color) {
+    return color ? code : "";
 }
 
+void pretty_print_impl (std::ostringstream& ss, const Json& json, int indent, int current_indent, bool color);
+
+/** An object, one `"key": value` per line. */
+void pretty_print_object (std::ostringstream& ss, const Json& json, int indent, int current_indent, bool color) {
+    const std::string next_indent_str (static_cast<size_t> (current_indent + indent), ' ');
+    ss << paint (WHITE, color) << "{" << paint (RESET, color) << "\n";
+
+    size_t i = 0;
+    for (auto& [key, value] : json.items ()) {
+        ss << next_indent_str;
+        ss << paint (CYAN, color) << "\"" << key << "\"" << paint (RESET, color);
+        ss << ": ";
+        pretty_print_impl (ss, value, indent, current_indent + indent, color);
+
+        if (++i < json.size ()) {
+            ss << ",";
+        }
+        ss << "\n";
+    }
+
+    ss << std::string (static_cast<size_t> (current_indent), ' ')
+       << paint (WHITE, color) << "}" << paint (RESET, color);
+}
+
+/** An array, one element per line. */
+void pretty_print_array (std::ostringstream& ss, const Json& json, int indent, int current_indent, bool color) {
+    const std::string next_indent_str (static_cast<size_t> (current_indent + indent), ' ');
+    ss << paint (WHITE, color) << "[" << paint (RESET, color) << "\n";
+
+    for (size_t i = 0; i < json.size (); ++i) {
+        ss << next_indent_str;
+        pretty_print_impl (ss, json[i], indent, current_indent + indent, color);
+
+        if (i < json.size () - 1) {
+            ss << ",";
+        }
+        ss << "\n";
+    }
+
+    ss << std::string (static_cast<size_t> (current_indent), ' ')
+       << paint (WHITE, color) << "]" << paint (RESET, color);
+}
+
+void pretty_print_impl (std::ostringstream& ss, const Json& json, int indent, int current_indent, bool color) {
+    if (json.is_object ()) {
+        pretty_print_object (ss, json, indent, current_indent, color);
+    } else if (json.is_array ()) {
+        pretty_print_array (ss, json, indent, current_indent, color);
+    } else if (json.is_string ()) {
+        ss << paint (GREEN, color) << "\"" << json.get<std::string> () << "\""
+           << paint (RESET, color);
+    } else if (json.is_number ()) {
+        ss << paint (YELLOW, color) << json.dump () << paint (RESET, color);
+    } else if (json.is_boolean ()) {
+        ss << paint (MAGENTA, color) << (json.get<bool> () ? "true" : "false")
+           << paint (RESET, color);
+    } else if (json.is_null ()) {
+        ss << paint (MAGENTA, color) << "null" << paint (RESET, color);
+    }
+}
 } // namespace
 
 std::string pretty_print (const Json& json, bool color) {
@@ -1081,6 +1155,34 @@ std::string pretty_print (const Json& json, bool color) {
 // ============================================================================
 // Streaming Serialization
 // ============================================================================
+
+namespace {
+
+/**
+ * One stored JSON column, echoed as the value of @p wire_name.
+ *
+ * A column that will not parse - or one past the field cap - is written as
+ * @p fallback rather than failing the row: the list route streams many rows, and
+ * one unreadable column must not cost the caller every other one.
+ */
+void write_json_column (std::ostream& out,
+const char* wire_name,
+const std::string& stored,
+const char* fallback,
+size_t max_field_size) {
+    out << "\"" << wire_name << "\":";
+    if (stored.empty () || stored.size () > max_field_size) {
+        out << fallback;
+        return;
+    }
+    try {
+        out << Json::parse (stored).dump ();
+    } catch (const std::exception&) {
+        out << fallback;
+    }
+}
+
+} // namespace
 
 void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     const size_t max_field_size = vayu::core::constants::json::MAX_FIELD_SIZE;
@@ -1095,78 +1197,22 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"order\":" << r.order << ",";
 
     // Query params - JSON array of KeyValueEntry
-    out << "\"params\":";
-    if (r.params.empty ()) {
-        out << "[]";
-    } else {
-        try {
-            if (r.params.size () > max_field_size) {
-                out << "[]";
-            } else {
-                auto parsed = Json::parse (r.params);
-                out << parsed.dump ();
-            }
-        } catch (const std::exception&) {
-            out << "[]";
-        }
-    }
+    write_json_column (out, "params", r.params, "[]", max_field_size);
     out << ",";
 
     // Headers - JSON array of KeyValueEntry
-    out << "\"headers\":";
-    if (r.headers.empty ()) {
-        out << "[]";
-    } else {
-        try {
-            if (r.headers.size () > max_field_size) {
-                out << "[]";
-            } else {
-                auto parsed = Json::parse (r.headers);
-                out << parsed.dump ();
-            }
-        } catch (const std::exception&) {
-            out << "[]";
-        }
-    }
+    write_json_column (out, "headers", r.headers, "[]", max_field_size);
     out << ",";
 
     // Body - JSON discriminated union
-    out << "\"body\":";
-    if (r.body.empty ()) {
-        out << "{\"mode\":\"none\"}";
-    } else {
-        try {
-            if (r.body.size () > max_field_size) {
-                out << "{\"mode\":\"none\"}";
-            } else {
-                auto parsed = Json::parse (r.body);
-                out << parsed.dump ();
-            }
-        } catch (const std::exception&) {
-            out << "{\"mode\":\"none\"}";
-        }
-    }
+    write_json_column (out, "body", r.body, "{\"mode\":\"none\"}", max_field_size);
     out << ",";
 
     out << "\"bodyType\":" << Json (r.body_type.empty () ? "none" : r.body_type).dump ()
         << ",";
 
     // Auth - JSON RequestAuth object
-    out << "\"auth\":";
-    if (r.auth.empty ()) {
-        out << "{\"mode\":\"inherit\"}";
-    } else {
-        try {
-            if (r.auth.size () > max_field_size) {
-                out << "{\"mode\":\"inherit\"}";
-            } else {
-                auto parsed = Json::parse (r.auth);
-                out << parsed.dump ();
-            }
-        } catch (const std::exception&) {
-            out << "{\"mode\":\"inherit\"}";
-        }
-    }
+    write_json_column (out, "auth", r.auth, "{\"mode\":\"inherit\"}", max_field_size);
     out << ",";
 
     out << "\"preRequestScript\":" << Json (r.pre_request_script).dump () << ",";

@@ -236,6 +236,20 @@ class ResponseSchemaIndex {
         std::vector<DeclaredSchema> responses;
     };
 
+    /// The responses one indexed row declares. A response missing a status, a
+    /// media type or a schema declares nothing checkable and is skipped rather
+    /// than costing the document its index.
+    static void read_declared_responses (const nlohmann::json& row,
+    IndexedOperation& operation);
+
+    /// The declaration that answers for @p media under @p status, or nullptr.
+    /// A wildcard media type is considered only after every exact one, so a
+    /// document declaring both keeps the specific one.
+    static const DeclaredSchema* select_declared_schema (
+    const std::vector<DeclaredSchema>& responses,
+    const std::string& status,
+    const std::string& media);
+
     /// The document's `components` / `definitions` / `x-vayu-bundled` subtrees,
     /// merged into every schema at validation time so in-document `$ref`s
     /// resolve. Stored once; see the file comment.
