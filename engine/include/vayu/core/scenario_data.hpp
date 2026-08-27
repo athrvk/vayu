@@ -160,6 +160,24 @@ enum class DataValueEncoding : std::uint8_t {
     XmlInProcessingInstruction,
 };
 
+/**
+ * Which reserved namespace a template's tokens were split from.
+ *
+ * The two are the same machinery over different names, which is why they are a
+ * flag rather than two field lists: both survive composition, both are bound by
+ * the executor immediately before a send, and both write their value through
+ * the encodings the split decided. What differs is only how a token is spelled
+ * back into an error and what the value is bound *from* - a row of the data
+ * set, or the iteration that is sending.
+ */
+enum class TokenNamespace : std::uint8_t {
+    /// `{{data.column}}` - a column of the run's data set (issue #402).
+    Data,
+    /// `{{$vu}}` / `{{$iteration}}` - the identity of the iteration that is
+    /// about to send (issue #994).
+    Identity,
+};
+
 /** One bindable field, split once around the `{{data.column}}` it carries. */
 struct DataFieldTemplate {
     /// Which string this is, counted in `walk_bindable_fields` order. Both the
@@ -184,6 +202,10 @@ struct DataFieldTemplate {
 struct StepDataTemplate {
     /// Only the fields that carry at least one token, in walk order.
     std::vector<DataFieldTemplate> fields;
+    /// Which namespace @ref fields were split from, so an error can spell a
+    /// token back the way it was written. Data by default, because that is what
+    /// every caller predating the identity namespace splits.
+    TokenNamespace ns = TokenNamespace::Data;
 
     [[nodiscard]] bool empty () const noexcept {
         return fields.empty ();
@@ -238,6 +260,70 @@ struct StepDataTemplate {
 const StepDataTemplate& tmpl,
 const nlohmann::json& row,
 size_t row_index);
+
+/**
+ * Which iteration of which virtual user is about to send (issue #994).
+ *
+ * Both numbers already exist wherever a request is sent - a scenario load run's
+ * `VirtualUser` holds them, a single-request run counts its submissions, a
+ * design-mode send is a run of one - so this carries them to the bind rather
+ * than inventing a second source of truth for either.
+ */
+struct IterationIdentity;
+
+/**
+ * The virtual user every send outside a scenario *load* run belongs to.
+ *
+ * One request repeated under load, a collection walked in design mode and a
+ * plain Send are all one user's iterations, whatever their concurrency:
+ * `concurrency` says how many of that user's iterations are in flight at once,
+ * which is a different question from how many users there are. Virtual users
+ * that differ from one another are a scenario load run's own shape, and that is
+ * the run where `{{$vu}}` spans more than this (issue #994).
+ */
+inline constexpr size_t SOLE_VIRTUAL_USER = 1;
+
+struct IterationIdentity {
+    /// The virtual user, **1-based**: the first user of a run is `1`, so
+    /// `user-{{$vu}}@example.com` reads as a person would number them.
+    size_t vu = 1;
+    /// That virtual user's iteration, **0-based**, so it indexes the data set
+    /// the same way `{{data.*}}`'s row cursor does.
+    size_t iteration = 0;
+};
+
+/**
+ * Split every bindable field of @p request around its `{{$vu}}` and
+ * `{{$iteration}}` tokens - `tokenize_data_fields` over the identity namespace.
+ *
+ * **Empty for the overwhelming majority of requests**, which carry neither
+ * token, and that emptiness is what the identity costs a run that does not use
+ * it: one `empty()` test per iteration and no walk at all.
+ *
+ * Run once per run (a single request) or per step (a plan), never per
+ * iteration - the same bargain the data namespace makes, and for the same
+ * reason: a load run binds at its full rate.
+ */
+[[nodiscard]] StepDataTemplate tokenize_identity_fields (const vayu::Request& request);
+
+/**
+ * Join @p tmpl's fields against @p identity, in place on @p request.
+ *
+ * The identity is a row of two reserved columns rather than a second joiner:
+ * the values are written into the field, escaped for the document they land in
+ * and refused where no encoding fits, by exactly the code a data row goes
+ * through - so a `{{$vu}}` inside a JSON string cannot be escaped differently
+ * from a `{{data.id}}` beside it.
+ *
+ * Cannot fail on the identity's own account - both names always have a value -
+ * so the failures left are the template's: a token placed inside an XML comment
+ * or processing instruction, and two header names that bound to one name. On
+ * failure @p request is left partially bound and must not be sent, which is
+ * `apply_data_template`'s rule inherited whole.
+ */
+[[nodiscard]] DataBindResult apply_identity_template (vayu::Request& request,
+const StepDataTemplate& tmpl,
+IterationIdentity identity);
 
 /**
  * Split @p auth's credential strings around their `{{data.column}}` tokens.

@@ -123,19 +123,32 @@ duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t
  * a parameter, so a second such fact does not move every call site again.
  */
 struct ResultAnnotations {
-    /// Absent for every single-request run, and for a scenario run sent without
-    /// `data` - the record then carries no `dataRowIndex` at all rather than a
-    /// zero that reads like row 0.
+    /// Absent for a run sent without `data` - the record then carries no
+    /// `dataRowIndex` at all rather than a zero that reads like row 0. Carried
+    /// by either shape since issue #993: a single-request run binds rows too.
     std::optional<size_t> data_row_index;
     /**
-     * The plan step this completion belongs to, and the virtual user's
-     * iteration it ran in. Set by the scenario load executor and by nothing
-     * else, so their presence *is* how `handle_result` tells a scenario
-     * completion from a single-request one - which is what routes the response
-     * to the step's own sample reservoir instead of the run's (issue #450).
+     * The plan step this completion belongs to. Set by the scenario load
+     * executor and by nothing else, so its presence *is* how `handle_result`
+     * tells a scenario completion from a single-request one - which is what
+     * routes the response to the step's own sample reservoir instead of the
+     * run's (issue #450).
      */
     std::optional<size_t> step_index;
+    /**
+     * The iteration this completion ran in, 0-based: a virtual user's own on
+     * the scenario path, and the submission index on the single-request one
+     * (issue #994). Set by both load executors now, which is what lets a
+     * deferred script read `pm.info.iteration` whichever shape the run took.
+     */
     std::optional<size_t> iteration;
+    /**
+     * The virtual user this completion belongs to, **1-based**. `1` for every
+     * submission of a single-request run - one request repeated is one user's
+     * iterations, whatever the concurrency - and the user's own index on the
+     * scenario path.
+     */
+    std::optional<size_t> vu;
 };
 
 /**

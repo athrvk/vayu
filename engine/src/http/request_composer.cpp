@@ -200,6 +200,10 @@ bool is_data_variable_name (const std::string& name) {
     name.compare (0, DATA_NAMESPACE_PREFIX.size (), DATA_NAMESPACE_PREFIX) == 0;
 }
 
+bool is_identity_variable_name (const std::string& name) {
+    return name == IDENTITY_VU_NAME || name == IDENTITY_ITERATION_NAME;
+}
+
 std::optional<std::string> resolve_dynamic_variable (const std::string& name) {
     for (const auto& v : DYNAMIC_VARIABLES) {
         if (name == v.name) {
@@ -365,6 +369,13 @@ lookup_variable (const std::string& name, const VariableValues& vars) {
     // a variable someone named `data.id` must not answer for the column.
     if (is_data_variable_name (name)) {
         return std::nullopt; // bound per iteration, or not at all (#402)
+    }
+    // Ahead of the scopes for the same reason, and it is what makes the name
+    // bindable at all: a variable someone named `$vu` answering here would
+    // substitute one value into the composed request and leave every iteration
+    // of the run sending it (issue #994).
+    if (is_identity_variable_name (name)) {
+        return std::nullopt; // bound per iteration by the executor
     }
     if (auto defined = vars.find (name); defined != vars.end ()) {
         return defined->second;

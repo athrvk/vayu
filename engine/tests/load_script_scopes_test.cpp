@@ -243,7 +243,8 @@ TEST_F (LoadScriptScopesTest, AScenarioStepReplayReadsTheRunningCollectionsScope
         });
     )");
     context->metrics_collector->record_step_response_sample (
-    response_with ("{}"), 0, 0, std::nullopt);
+    response_with ("{}"), 0,
+    vayu::core::SampleIdentity{ /*iteration=*/0, /*vu=*/1, /*data_row_index=*/std::nullopt });
 
     const auto validation = vayu::core::validate_scripts (context, *db_, false);
 

@@ -118,15 +118,17 @@ std::vector<std::string>& failure_messages) {
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             script_ctx.request_id   = replay.request_id;
             script_ctx.request_name = replay.request_name;
-            // The iteration this response was actually sent in, for a scenario
-            // step that recorded one. Absent everywhere else, which is issue
-            // #300's ruling kept intact: a reservoir position is not an
-            // iteration, and reporting it as one would be a binding that
-            // cannot fail. `iterationCount` stays absent even here - a
-            // duration-bounded run has no total to report, and a script that
-            // could read it from one mode and not the other is worse than one
-            // that never reads it.
+            // The iteration this response was actually sent in and the virtual
+            // user that sent it, both claimed on the submission path before the
+            // send (issue #994) - which is what keeps issue #300's ruling
+            // intact rather than reopening it: what that ruling refuses is
+            // reporting a *reservoir position* as an iteration number, and
+            // neither of these is one. `iterationCount` stays absent even here
+            // - a duration-bounded run has no total to report, and a script
+            // that could read it from one mode and not the other is worse than
+            // one that never reads it.
             script_ctx.iteration = sample.iteration;
+            script_ctx.vu        = sample.vu;
             if (replay.data_rows != nullptr && sample.data_row_index &&
             *sample.data_row_index < replay.data_rows->size ()) {
                 script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
@@ -1140,6 +1142,12 @@ vayu::Request& request) {
     if (context->load_data) {
         context->load_data->fields = tokenize_data_fields (request);
     }
+    // The identity is split here too, and unconditionally: it binds off the
+    // iteration rather than off a row, so a run with no `data` at all still
+    // carries `{{$vu}}` / `{{$iteration}}` if its request spells them. A request
+    // carrying neither leaves this empty, and an empty template is what makes
+    // the per-submission join a single `empty()` test (issue #994).
+    context->load_identity = tokenize_identity_fields (request);
 
     // A streaming run's caps ride on the request itself, because the
     // event loop is what enforces them and the request is all it sees.

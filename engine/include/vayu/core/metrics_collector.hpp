@@ -43,6 +43,22 @@
 namespace vayu::core {
 
 /**
+ * @brief Who sent a sampled response, as the executor knew it at submission.
+ *
+ * One struct rather than three parameters because the two reservoirs take the
+ * same three facts, and a positional list of optionals is where a caller
+ * eventually passes the row where the iteration belongs.
+ */
+struct SampleIdentity {
+    /// 0-based, and claimed before the send - never a reservoir position.
+    std::optional<size_t> iteration;
+    /// 1-based; `1` for every shape but a scenario load run's users.
+    std::optional<size_t> vu;
+    /// The `data` row this submission bound, absent for a run sent without one.
+    std::optional<size_t> data_row_index;
+};
+
+/**
  * @brief Sampled response for deferred script validation
  * Stores minimal data needed to run test scripts after load test completes
  */
@@ -54,16 +70,16 @@ struct ResponseSample {
     double latency_ms = 0.0;
     int64_t timestamp = 0;
     /**
-     * The virtual user's iteration this response was sent in, and the data row
-     * the submission was bound to.
+     * The virtual user and the iteration this response was sent in, and the
+     * data row the submission was bound to.
      *
-     * `iteration` is a scenario load run's alone: a single-request run has no
-     * iteration index to report, and the deferred script reads
-     * `pm.info.iteration` as `undefined` there - issue #300's ruling, intact.
-     * What that ruling refuses is reporting a *reservoir position* as an
-     * iteration number, a binding that cannot fail; a scenario step carries the
-     * real index it ran in, so reporting that one is honest rather than
-     * invented.
+     * `iteration` and `vu` are carried by **either** shape since issue #994: a
+     * scenario step reports the virtual user's own index and iteration, and a
+     * single-request run reports user 1 and the submission this response was -
+     * the index the submission claimed before it was sent, which is also the
+     * row it bound. What issue #300's ruling refuses is reporting a *reservoir
+     * position* as an iteration number, and neither of these is one: both are
+     * claimed by the executor before the send and travel with the response.
      *
      * `data_row_index` is carried by **either** shape now (issue #993): a
      * single-request run started with `data` claims a row per submission, and
@@ -72,6 +88,7 @@ struct ResponseSample {
      * `pm.iterationData` `undefined`.
      */
     std::optional<size_t> iteration;
+    std::optional<size_t> vu;
     std::optional<size_t> data_row_index;
     /**
      * Events this transfer delivered, when it was a bounded stream
@@ -353,15 +370,13 @@ class MetricsCollector {
      * @brief Record a response sample for deferred script validation
      * Thread-safe, stores sampled responses for post-test script execution
      *
-     * @param data_row_index The `data` row this submission bound, for a
-     *        single-request run started with rows (issue #993). Carried onto
-     *        the sample so the deferred script reads that row as
-     *        `pm.iterationData` rather than the run's first one; absent - the
-     *        default, and every caller that has no rows - leaves the scope
-     *        `undefined`, which is what a run without a set means.
+     * @param identity Which iteration of which virtual user sent it, and the
+     *        row it bound - carried onto the sample so the deferred script
+     *        reads the iteration it actually ran in and the row it was actually
+     *        sent with. Defaulted for a caller that has none of the three,
+     *        which leaves each field `undefined` in the script.
      */
-    void record_response_sample (const Response& response,
-    std::optional<size_t> data_row_index = std::nullopt);
+    void record_response_sample (const Response& response, SampleIdentity identity = {});
 
     /**
      * @brief Size the per-step sample stores for a scenario load run (#450).
@@ -401,16 +416,15 @@ class MetricsCollector {
      * no store returns immediately - the common case for a plan where only
      * some steps assert anything.
      *
-     * @param iteration The virtual user's iteration this step ran in, and
-     * @param data_row_index the row that iteration was bound to (absent for a
-     *        run sent without `data`). Both are carried onto the sample so the
-     *        deferred script reads the iteration it actually ran in - see
-     *        ResponseSample.
+     * @param identity Which iteration of which virtual user ran this step, and
+     *        the row that iteration was bound to (absent for a run sent without
+     *        `data`) - the same shape the run-level store takes, so a script
+     *        cannot read a different identity depending on which reservoir kept
+     *        its response. See ResponseSample.
      */
     void record_step_response_sample (const Response& response,
     size_t step_index,
-    size_t iteration,
-    std::optional<size_t> data_row_index);
+    SampleIdentity identity);
 
     /**
      * @brief Record a failed request

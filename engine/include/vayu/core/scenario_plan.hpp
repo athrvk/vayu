@@ -103,6 +103,11 @@ struct ScenarioStep {
     /// happens in a run that has rows - a data token with no data set is
     /// refused when the plan resolves - so an executor always has a row for it.
     StepDataTemplate auth_template{};
+    /// `request`'s `{{$vu}}` / `{{$iteration}}` tokens, split once here for the
+    /// reason `data_template` is: the identity binds per iteration, and a plan
+    /// is composed once (issue #994). Empty for a step carrying neither, which
+    /// is what keeps an ordinary plan free of any identity work per iteration.
+    StepDataTemplate identity_template{};
 };
 
 /** An ordered, immutable sequence of composed steps. */
@@ -388,6 +393,26 @@ const ScenarioResolveOptions& options);
 const ScenarioStep& step,
 const nlohmann::json& row,
 size_t row_index);
+
+/**
+ * Bind one iteration's whole per-iteration state into @p step's @p request:
+ * @p row where the step has one, then @p identity.
+ *
+ * Both executors call this rather than the two binds in sequence, for the
+ * reason `bind_step_row` exists: a step must not bind differently depending on
+ * which executor ran it. The row goes first because the identity cannot fail on
+ * its own account and a row can, so the more specific refusal is the one a
+ * caller reports.
+ *
+ * `nullopt` @p row is a run sent without `data` - the identity still binds,
+ * which is the whole point of it being independent of the data set. A no-op
+ * returning success for the ordinary step, which carries neither kind of token.
+ */
+[[nodiscard]] DataBindResult bind_step_iteration (vayu::Request& request,
+const ScenarioStep& step,
+const std::vector<nlohmann::json>& rows,
+std::optional<size_t> row_index,
+IterationIdentity identity);
 
 /**
  * The `scenario` object a scenario run stores in `runs.config_snapshot`: the

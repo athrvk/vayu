@@ -108,6 +108,8 @@ struct ContextData {
     std::optional<std::string> request_name;
     std::optional<ScriptEvent> event;
     std::optional<size_t> iteration;
+    /// The virtual user `pm.info.vu` reads, 1-based - see `ScriptContext::vu`.
+    std::optional<size_t> vu;
     std::optional<size_t> iteration_count;
     /// The row `pm.iterationData` reads, or null - see
     /// `ScriptContext::iteration_data`, which owns the rationale.
@@ -4426,6 +4428,10 @@ void setup_pm_info (JSContext* ctx, JSValue pm) {
             JS_SetPropertyStr (ctx, info, "eventName",
             JS_NewString (ctx, *data->event == ScriptEvent::PreRequest ? "prerequest" : "test"));
         }
+        if (data->vu) {
+            JS_SetPropertyStr (ctx, info, "vu",
+            JS_NewInt64 (ctx, static_cast<int64_t> (*data->vu)));
+        }
         if (data->iteration) {
             JS_SetPropertyStr (ctx, info, "iteration",
             JS_NewInt64 (ctx, static_cast<int64_t> (*data->iteration)));
@@ -6471,6 +6477,7 @@ class ScriptEngine::Impl {
         ctx_data.request_name        = ctx.request_name;
         ctx_data.event               = ctx.event;
         ctx_data.iteration           = ctx.iteration;
+        ctx_data.vu                  = ctx.vu;
         ctx_data.iteration_count     = ctx.iteration_count;
         ctx_data.iteration_data      = ctx.iteration_data;
         ctx_data.response_events     = ctx.response_events;

@@ -1105,6 +1105,21 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
             return bound.error;
         }
     }
+
+    // The iteration identity, bound here for the same reason and with the same
+    // refusal (issue #994). A single send is a run of one - user 1, iteration 0
+    // - so `{{$vu}}` and `{{$iteration}}` answer with the numbers the same
+    // request would carry as the first iteration of a load run, rather than
+    // reaching the wire written as they stand. The scan is the send's own and
+    // costs a request carrying neither token one walk of its fields, which is
+    // the design path's rate rather than a load run's.
+    if (auto bound = vayu::core::apply_identity_template (built.request,
+        vayu::core::tokenize_identity_fields (built.request),
+        vayu::core::IterationIdentity{});
+    !bound.ok) {
+        vayu::utils::log_warning ("POST /execute - " + bound.error);
+        return bound.error;
+    }
     out.json      = std::move (json);
     out.transient = transient.value;
     out.stream    = std::move (stream);

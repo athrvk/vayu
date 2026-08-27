@@ -534,17 +534,20 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     std::string data_bind_error;
     if (ctx.data_row_index) {
         inputs.iteration_data = &ctx.data_rows[*ctx.data_row_index];
-        // Through the step's own templates rather than re-splitting
-        // the request here, and through the one binder every
-        // executor drives, so a step cannot bind differently
-        // depending on which one ran it - fields first, then the
-        // credentials the plan deliberately left unresolved, which
-        // is the order `apply_auth` makes load-bearing (issue #591).
-        auto bound = bind_step_row (inputs.request, step,
-        ctx.data_rows[*ctx.data_row_index], *ctx.data_row_index);
-        if (!bound.ok) {
-            data_bind_error = std::move (bound.error);
-        }
+    }
+    // Through the step's own templates rather than re-splitting
+    // the request here, and through the one binder every
+    // executor drives, so a step cannot bind differently
+    // depending on which one ran it - fields first, then the
+    // credentials the plan deliberately left unresolved, which
+    // is the order `apply_auth` makes load-bearing (issue #591) -
+    // and the iteration's identity last (issue #994). A collection
+    // run is one user walking the sequence, so `{{$vu}}` is 1 here
+    // and `{{$iteration}}` is the run's own iteration index.
+    if (auto bound = bind_step_iteration (inputs.request, step, ctx.data_rows,
+        ctx.data_row_index, IterationIdentity{ SOLE_VIRTUAL_USER, ctx.iteration });
+    !bound.ok) {
+        data_bind_error = std::move (bound.error);
     }
 
     if (data_bind_error.empty ()) {

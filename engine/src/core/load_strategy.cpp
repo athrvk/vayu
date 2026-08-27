@@ -20,6 +20,7 @@
 #include "vayu/core/load_pacing.hpp"
 #include "vayu/core/refill_deficit.hpp"
 #include "vayu/core/run_manager.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::core {
@@ -176,17 +177,17 @@ const ResultAnnotations& annotations) {
     // the step, not to the run, so it goes to that step's own reservoir;
     // the collector refuses the steps nothing will read. A single-request
     // run keeps the one run-level store it always had.
+    // Who sent it travels with the sample either way, so the deferred script
+    // reads the row it was bound to as `pm.iterationData` (issue #993) and the
+    // iteration and user it ran as through `pm.info` (issue #994) - the same
+    // three facts whichever reservoir kept the response.
+    const SampleIdentity identity{ annotations.iteration, annotations.vu,
+        annotations.data_row_index };
     if (annotations.step_index) {
-        context->metrics_collector->record_step_response_sample (response,
-        *annotations.step_index, annotations.iteration.value_or (0),
-        annotations.data_row_index);
+        context->metrics_collector->record_step_response_sample (
+        response, *annotations.step_index, identity);
     } else if (!context->test_script.empty ()) {
-        // The row this submission bound travels with the sample, so the
-        // deferred `tests` script reads it as `pm.iterationData` (issue #993).
-        // Absent for a run sent without rows, which is what keeps that scope
-        // `undefined` there.
-        context->metrics_collector->record_response_sample (
-        response, annotations.data_row_index);
+        context->metrics_collector->record_response_sample (response, identity);
     }
 }
 
@@ -312,15 +313,20 @@ class SubmissionRequest {
     }
 
     /**
-     * The row this submission binds, claimed off the run-wide cursor and
-     * wrapping always (issue #993) - the rule a scenario run's virtual users
-     * share, with one submission where that one has an iteration.
+     * This submission's 0-based index, claimed off the run-wide cursor.
+     *
+     * It is this run's **iteration** - what `{{$iteration}}` binds and what a
+     * retained record reports to the deferred script (issue #994) - and, taken
+     * modulo the row count, the row this submission claims off the same cursor,
+     * wrapping always (issue #993). One counter rather than two, so the
+     * iteration a script reads and the row it was sent with cannot disagree
+     * about which submission this was.
      *
      * The cursor lives here because the strategy thread is the event loop's
      * sole producer, so the claim needs no atomic and no lock.
      */
-    size_t claim_row (size_t row_count) {
-        return cursor_++ % row_count;
+    size_t claim_submission () {
+        return cursor_++;
     }
 
     private:
@@ -330,40 +336,87 @@ class SubmissionRequest {
     size_t cursor_            = 0;
 };
 
+/// Hand @p request to the event loop and account for it, with @p annotations on
+/// whatever record its completion produces.
+void submit_to_loop (const std::shared_ptr<RunContext>& context,
+vayu::db::Database& db,
+const vayu::Request& request,
+const ResultAnnotations& annotations) {
+    context->event_loop->submit (request,
+    [context, &db, annotations] (size_t, const vayu::Result<vayu::Response>& result) {
+        handle_result (context, db, result, annotations);
+    });
+    context->requests_sent++;
+}
+
 /**
- * One submission of the run's request, with this submission's data row bound
- * into it when the run carries rows (issue #993).
+ * Bind this submission's row and identity into @p request, in that order.
+ *
+ * Reached only for a run that has one or the other - the caller keeps the
+ * neither-of-them path clear of all of this - and each half still tests its own
+ * template, because a run may carry rows without identity tokens or the other
+ * way round.
+ */
+DataBindResult bind_submission (vayu::Request& request,
+const RunContext& context,
+const LoadDataSet* data,
+const ResultAnnotations& annotations) {
+    if (data != nullptr) {
+        const size_t row = vayu::utils::invariant_value (annotations.data_row_index,
+        "a run carrying rows claims one per submission");
+        if (auto bound = bind_iteration_row (request, data->fields, data->auth,
+            data->credentials, data->rows[row], row);
+        !bound.ok) {
+            return bound;
+        }
+    }
+    return apply_identity_template (request, context.load_identity,
+    IterationIdentity{ SOLE_VIRTUAL_USER,
+    vayu::utils::invariant_value (annotations.iteration,
+    "every submission claims its iteration before binding") });
+}
+
+/**
+ * One submission of the run's request, with this submission's data row (issue
+ * #993) and iteration identity (issue #994) bound into it when the run carries
+ * either.
  *
  * Every strategy submits through here rather than each writing its own
  * `submit_one`, so a run's rows reach whichever pacing mode the user picked
  * instead of the one whose lambda remembered them - and so does the
  * mid-run credential swap, which two of the four used to miss.
  *
- * **A run without rows takes the path it always did**: one test of a null
- * pointer, then the same submit of the same shared request. No copy, no claim,
- * no annotation - the throughput guard #992 states, kept structurally rather
- * than by measurement alone.
+ * **A run carrying neither takes the path it always did**: two tests of an
+ * empty template, then the same submit of the same shared request. No copy and
+ * no bind - the throughput guard #992 states, kept structurally rather than by
+ * measurement alone. What it does pay is the cursor increment below, which is
+ * one unsynchronised `size_t` on the sole producer thread and is what lets
+ * every load run - not only the ones spelling a token - tell a deferred script
+ * which iteration a sampled response was sent in.
  */
 void submit_one_request (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 SubmissionRequest& live) {
+    const size_t iteration  = live.claim_submission ();
     const LoadDataSet* data = context->load_data.get ();
-    if (data == nullptr) {
-        context->event_loop->submit (live.current (),
-        [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
-            handle_result (context, db, result);
-        });
-        context->requests_sent++;
+    // Every member named: `-Wmissing-field-initializers` is an error in the
+    // release build rather than a suggestion. A single-request run has no step
+    // - which is what `handle_result` reads to tell one shape from the other.
+    const ResultAnnotations annotations{ data == nullptr ?
+        std::nullopt :
+        std::optional<size_t> (iteration % data->rows.size ()),
+        std::nullopt, iteration, SOLE_VIRTUAL_USER };
+
+    if (data == nullptr && context->load_identity.empty ()) {
+        submit_to_loop (context, db, live.current (), annotations);
         return;
     }
 
-    const size_t row = live.claim_row (data->rows.size ());
     // Copied per submission because the bind rewrites it, exactly as a scenario
     // step's request is copied per iteration: the shared one has to stay the
     // template every later row is bound against.
     vayu::Request request = live.current ();
-    if (auto bound = bind_iteration_row (request, data->fields, data->auth,
-        data->credentials, data->rows[row], row);
+    if (auto bound = bind_submission (request, *context, data, annotations);
     !bound.ok) {
         // Nothing goes on the wire, so nothing will ever complete for this
         // submission: this path owns the whole accounting a completion would
@@ -374,19 +427,11 @@ SubmissionRequest& live) {
         handle_result (context, db,
         vayu::Result<vayu::Response> (
         vayu::Error{ vayu::ErrorCode::DataBindingFailed, bound.error }),
-        // Every member named: a single-request run has no step and no
-        // iteration to report, and `-Wmissing-field-initializers` is an error
-        // in the release build rather than a suggestion.
-        ResultAnnotations{ row, std::nullopt, std::nullopt });
+        annotations);
         return;
     }
 
-    context->event_loop->submit (request,
-    [context, &db, row] (size_t, const vayu::Result<vayu::Response>& result) {
-        handle_result (context, db, result,
-        ResultAnnotations{ row, std::nullopt, std::nullopt });
-    });
-    context->requests_sent++;
+    submit_to_loop (context, db, request, annotations);
 }
 
 } // namespace

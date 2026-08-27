@@ -451,6 +451,10 @@ ScenarioPlan& plan) {
     step.stored_url     = row.url;
     step.spec_operation = row.spec_operation.value_or (std::string ());
     step.data_template  = std::move (data_template);
+    // Split beside the data one and unconditionally: the identity binds off the
+    // iteration rather than off a row, so it needs no data set behind it and
+    // has nothing to refuse here (issue #994).
+    step.identity_template = tokenize_identity_fields (step.request);
     // Only ever reached with rows behind it: the refusal above returns for
     // a credential token in a run that has no data set, so a deferred step
     // cannot arrive at an executor with no row to bind.
@@ -582,6 +586,23 @@ size_t row_index) {
     // of the run requires.
     return bind_iteration_row (
     request, step.data_template, step.auth, step.auth_template, row, row_index);
+}
+
+DataBindResult bind_step_iteration (vayu::Request& request,
+const ScenarioStep& step,
+const std::vector<nlohmann::json>& rows,
+std::optional<size_t> row_index,
+IterationIdentity identity) {
+    if (row_index) {
+        // `.at()` rather than a subscript: the index was claimed off a cursor
+        // taken modulo this vector's own size, so a mismatch is a broken
+        // invariant and a throw names it instead of reading past the end.
+        if (auto bound = bind_step_row (request, step, rows.at (*row_index), *row_index);
+        !bound.ok) {
+            return bound;
+        }
+    }
+    return apply_identity_template (request, step.identity_template, identity);
 }
 
 nlohmann::json build_scenario_manifest (const ScenarioRequest& request,
