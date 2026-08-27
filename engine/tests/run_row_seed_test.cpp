@@ -110,11 +110,11 @@ TEST (ScenarioSnapshot, LeavesANonObjectSnapshotAlone) {
 // are the same user data a scenario's are, so the stored snapshot keeps their
 // count and not the set.
 TEST (LoadDataSnapshot, ReplacesTheRowsWithTheirCount) {
+    const json rows = json::array (
+    { json{ { "password", "hunter2" } }, json{ { "password", "hunter3" } } });
     const std::string sanitized =
     json{ { "method", "POST" }, { "url", "https://api.test/login" },
-        { "data", json::array ({ json{ { "password", "hunter2" } },
-        json{ { "password", "hunter3" } } }) },
-        { "environmentId", "env_1" } }
+        { "data", rows }, { "environmentId", "env_1" } }
     .dump ();
 
     const auto stored = json::parse (load_data_snapshot (sanitized, 2));

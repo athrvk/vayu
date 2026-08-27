@@ -782,7 +782,8 @@ const vayu::http::Auth& auth,
 const StepDataTemplate& credentials,
 const nlohmann::json& row,
 size_t row_index) {
-    if (auto bound = apply_data_template (request, fields, row, row_index); !bound.ok) {
+    if (auto bound = apply_data_template (request, fields, row, row_index);
+    !bound.ok) {
         return bound;
     }
     // The credentials second, which is the whole reason this order lives in one
