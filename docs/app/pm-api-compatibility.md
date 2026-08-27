@@ -33,7 +33,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
 | Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
-| Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - read-only, see below |
+| Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - read-only, a bound row's bare column names first, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback)` - synchronous, callback only, refused for agent-started runs, see below |
@@ -67,7 +67,15 @@ the same as setting it to `""`: an emptied variable is still an enabled row that
 variables editor is invisible to a script; `unset` and `clear` remove it regardless.
 
 `pm.variables` resolves a name across the scopes - environment, then collection, then
-global - the same order `{{name}}` uses. It is read-only: **`pm.variables.set()` throws**,
+global - the same order `{{name}}` uses. **While a data row is bound, that row's bare
+column names answer first, above all three scopes** (issue #1007): `get`, `has` and
+`toObject` check the row before the environment, so `pm.variables.get("username")` reads
+the current iteration's `username` cell rather than a same-named environment variable -
+Postman's own precedence for a dataset's columns. `get` and `toObject` hand back the
+row's value **typed**, exactly as `pm.iterationData.get` does (a number column reads as a
+number); a column the row does not carry falls through to the three scopes as an ordinary
+name, not a failed bind. With no row bound, `pm.variables` behaves exactly as before. It
+is read-only: **`pm.variables.set()` throws**,
 because Postman writes it to a per-request *local* scope that Vayu does not have, and both
 alternatives (persisting to the environment, or dropping the write) would misrepresent
 what happened. The error names the three scoped setters. See
@@ -100,20 +108,35 @@ handing the same string to `replaceIn` returned it with its braces still on.
 pm.variables.replaceIn("/users/{{data.userId}}"); // "/users/1001"
 ```
 
-Three rules come with it, all of them the ones the request binding already
-follows:
+**A bare column name resolves here too** (issue #1007), at the same
+above-the-environment position `pm.variables.get` reads it at:
+`pm.variables.replaceIn("{{userId}}")` reads the bound row's `userId` cell
+before it reads any scope. Unlike the reserved spelling, a bare name the row
+does not carry is **not** an error here either - it falls through to the
+scopes exactly as `pm.variables.get` does, which is what keeps one script's
+`replaceIn` calls working whether or not a request happens to share a name
+with a column.
+
+Three rules come with `{{data.column}}` specifically, all of them the ones the
+request binding already follows:
 
 - **A column the row does not have is a `TypeError`**, naming the token and the
   columns the row does have - not `""` and not the token verbatim. The token
   says the value came from the file, so a name no column answers is a mistake
-  about the column, and both quiet answers hide it.
-- **With no row bound the token keeps its braces**, unchanged. A plain design
-  send has no row by design, so a shared script that guards with
-  `pm.iterationData` still runs in both modes.
-- **`data.` is still not a variable scope.** `pm.variables.get("data.userId")`
-  and `.has(...)` read the scopes and answer `undefined` / `false`; the row's
-  accessor is `pm.iterationData`. `replaceIn` is different in kind - it resolves
-  a template, and this is a token that template syntax has.
+  about the column, and both quiet answers hide it. This refusal is the
+  prefixed spelling's alone - a bare name that misses falls through instead, as
+  above.
+- **With no row bound the token keeps its braces**, unchanged - true of both
+  spellings. A plain design send has no row by design, so a shared script that
+  guards with `pm.iterationData` still runs in both modes.
+- **The prefixed `data.` spelling is still not a variable scope.**
+  `pm.variables.get("data.userId")` and `.has(...)` remain `undefined` / `false`;
+  the row's accessor for it is `pm.iterationData`. `replaceIn` is different in
+  kind - it resolves a template, and `{{data.userId}}` is a token template
+  syntax has. **A bare column name is not the same question** (issue #1007):
+  `pm.variables.get("userId")` *does* read the bound row - see above - so
+  `replaceIn("{{userId}}")` and `pm.variables.get("userId")` agree with each
+  other the same way `replaceIn("{{data.userId}}")` and `pm.iterationData` do.
 
 This is the **only** way `{{...}}` works inside a script, and that is
 deliberate (issue #226, decision D16): script *source* is never interpolated,
@@ -569,6 +592,12 @@ Divergences from Postman:
 - **Which row was used is recorded.** Every step's stored row and live event
   carries `dataRowIndex`, and the step list shows it beside the iteration, so a
   wrapped run says which row a pass re-used.
+
+**The same row is also readable by column name through `pm.variables`** while
+it is bound (issue #1007) - see [above](#supported-surface) and
+[scripting.md](../engine/scripting.md#variables-pmvariables) - but
+`pm.iterationData` stays the accessor that reads *only* the row, with none of
+the three scopes behind it.
 
 Details are in
 [scripting.md](../engine/scripting.md#data-rows-pmiterationdata).

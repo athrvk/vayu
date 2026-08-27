@@ -78,13 +78,26 @@ vayu::http::VariableValues values_from_scopes (const json& scopes) {
     return vayu::http::build_variable_values (globals, chain, environment);
 }
 
+/// The bare names a case says a row will bind (issue #1007) - absent for every
+/// case that predates the field, which is exactly "no dataset is bound".
+vayu::http::BoundColumnNames bound_columns_from_case (const json& c) {
+    vayu::http::BoundColumnNames out;
+    if (const auto field = c.find ("boundColumns"); field != c.end ()) {
+        for (const auto& name : *field) {
+            out.insert (name.get<std::string> ());
+        }
+    }
+    return out;
+}
+
 TEST (VariableResolutionConformance, EveryFixtureCasePasses) {
     const json fixture = load_fixture ();
     ASSERT_FALSE (fixture["cases"].empty ())
     << "conformance fixture scanned nothing";
     for (const auto& c : fixture["cases"]) {
         const auto vars = values_from_scopes (c["scopes"]);
-        EXPECT_EQ (vayu::http::resolve_template (c["input"].get<std::string> (), vars),
+        EXPECT_EQ (vayu::http::resolve_template (c["input"].get<std::string> (),
+                   vars, bound_columns_from_case (c)),
         c["expected"].get<std::string> ())
         << "case: " << c["name"].get<std::string> ();
     }
@@ -781,6 +794,87 @@ TEST_F (RequestComposerTest, MalformedBodiesAre400sInTheNestedShape) {
         EXPECT_EQ (status, 400) << body.dump ();
         EXPECT_EQ (payload["error"]["code"], "invalid_compose_request") << body.dump ();
         EXPECT_TRUE (payload["error"]["message"].is_string ()) << body.dump ();
+    }
+}
+
+// --- Bound data columns (#1007) ---------------------------------------------
+//
+// Postman binds a dataset's columns to bare names, so an imported data-driven
+// collection spells them `{{username}}`. Composition cannot substitute one - a
+// plan is composed once and a row is bound per iteration - so what it does is
+// the same thing it does for the reserved spelling: leave the token written as
+// it stands, for `core::apply_data_template` to join. The field that says which
+// names those are is `dataColumns`.
+//
+// Mutation-check for the first: drop the `is_bound_column_name` arm of
+// `lookup_variable` and the request goes out carrying the environment's value
+// where this iteration's cell belonged.
+
+TEST_F (RequestComposerTest, ABoundColumnOutranksASameNamedVariableByBeingDeferred) {
+    seed_environment ("env_1", R"({"username":{"value":"from-the-environment","enabled":true},
+                                   "host":{"value":"api.test","enabled":true}})");
+
+    const json request = { { "method", "post" }, { "url", "https://{{host}}/u/{{username}}" },
+        { "headers", { { "X-User", "{{username}}" } } },
+        { "body", { { "mode", "raw" }, { "content", R"({"who":"{{username}}"})" } } },
+        { "auth", { { "mode", "basic" }, { "username", "{{username}}" }, { "password", "s3cret" } } } };
+
+    const json bound = { { "request", request }, { "environmentId", "env_1" },
+        { "dataColumns", json::array ({ "username" }) } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, bound);
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/u/{{username}}");
+    EXPECT_EQ (payload["headers"]["X-User"], "{{username}}");
+    EXPECT_EQ (payload["body"]["content"], R"({"who":"{{username}}"})");
+    EXPECT_EQ (payload["auth"]["username"], "{{username}}");
+
+    // The same payload with no dataset behind it resolves the name from the
+    // environment, exactly as it always did - the rule is "while a row is
+    // bound", and this is the other way round it has to be read.
+    const json unbound = { { "request", request }, { "environmentId", "env_1" } };
+    auto [plain_status, plain_payload] = vayu::http::compose_request_core (*db_, unbound);
+    ASSERT_EQ (plain_status, 200) << plain_payload.dump ();
+    EXPECT_EQ (plain_payload["url"], "https://api.test/u/from-the-environment");
+    EXPECT_EQ (plain_payload["headers"]["X-User"], "from-the-environment");
+    EXPECT_EQ (plain_payload["auth"]["username"], "from-the-environment");
+}
+
+TEST_F (RequestComposerTest, ABoundColumnDefersOnlyItsOwnNameAndNotTheReservedSpelling) {
+    seed_environment ("env_1", R"({"username":{"value":"env","enabled":true},
+                                   "region":{"value":"eu","enabled":true}})");
+    const json body = { { "request",
+                        { { "method", "get" },
+                        { "url", "https://api.test/{{username}}/{{region}}/{{data.id}}" } } },
+        { "environmentId", "env_1" }, { "dataColumns", json::array ({ "username" }) } };
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (status, 200) << payload.dump ();
+    // The bound column deferred, the ordinary variable resolved, and the
+    // reserved spelling still left alone by its own older rule.
+    EXPECT_EQ (payload["url"], "https://api.test/{{username}}/eu/{{data.id}}");
+}
+
+TEST_F (RequestComposerTest, DataColumnsMustBeAListOfNames) {
+    // A malformed field is a refusal rather than a silent empty set: a caller
+    // that meant to bind columns and is quietly composed without them sends the
+    // environment's values for a whole run and is told nothing.
+    for (const json columns : { json ("username"), json ({ { "username", true } }),
+         json::array ({ 7 }), json::array ({ "" }) }) {
+        const json body = { { "request", { { "method", "get" }, { "url", "https://api.test/" } } },
+            { "dataColumns", columns } };
+        auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+        EXPECT_EQ (status, 400) << body.dump ();
+        EXPECT_EQ (payload["error"]["code"], "invalid_compose_request") << body.dump ();
+    }
+
+    // Absent and null both mean "no dataset", which is what every client that
+    // has never heard of the field sends.
+    for (const json body :
+    { json{ { "request", { { "method", "get" }, { "url", "https://api.test/" } } } },
+    json{ { "request", { { "method", "get" }, { "url", "https://api.test/" } } },
+    { "dataColumns", nullptr } } }) {
+        auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+        EXPECT_EQ (status, 200) << payload.dump ();
     }
 }
 

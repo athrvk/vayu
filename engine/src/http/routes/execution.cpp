@@ -93,7 +93,7 @@ const std::optional<std::string>& request_id) {
     if (request_id && !request_id->empty ()) {
         try {
             if (auto stored = db.get_request (*request_id);
-            stored && !stored->name.empty ()) {
+                stored && !stored->name.empty ()) {
                 resolved.name = stored->name;
             }
         } catch (const std::exception& e) {
@@ -179,7 +179,7 @@ RouteResult normalize_run_http_version (nlohmann::json& json) {
     std::string version;
     if (auto outcome = apply_http_version_field (json, "httpVersion", version,
         vayu::to_string (vayu::DEFAULT_HTTP_VERSION), /*is_create=*/false);
-    !outcome) {
+        !outcome) {
         return outcome;
     }
     json["httpVersion"] = version;
@@ -384,7 +384,9 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
  * Non-static: send_with_row_test.cpp drives it directly. See routes.hpp for the
  * contract and for why the ordinary send is untouched.
  */
-SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row) {
+SendRowAuth plan_send_row_auth (const nlohmann::json& json,
+bool has_row,
+const vayu::http::BoundColumnNames& bound_columns) {
     SendRowAuth out;
     if (!has_row) {
         // Not merely the same answer as an unbindable payload's - deliberately
@@ -395,7 +397,7 @@ SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row) {
     }
     out.auth = vayu::http::parse_auth (json.value ("auth", nlohmann::json ()));
 
-    if (auto token = vayu::core::first_oauth2_data_token (out.auth)) {
+    if (auto token = vayu::core::first_oauth2_data_token (out.auth, bound_columns)) {
         out.ok    = false;
         out.error = "Auth credentials carry " + *token +
         " in an OAuth 2.0 configuration, and no row can reach it: the token is "
@@ -406,7 +408,7 @@ SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row) {
         return out;
     }
 
-    out.credentials = vayu::core::tokenize_auth_fields (out.auth);
+    out.credentials = vayu::core::tokenize_auth_fields (out.auth, bound_columns);
     if (!out.credentials.empty ()) {
         out.resolution = vayu::http::AuthResolution::Defer;
     }
@@ -456,7 +458,8 @@ bool is_scenario) {
     // reasoning, as a send that carries one row (issue #642). The refusal it
     // can carry is an oauth2 config with a data token, which no deferral can
     // serve.
-    auto row_auth = plan_send_row_auth (json, /*has_row=*/true);
+    set->bound_columns = vayu::core::bound_columns_of (set->rows);
+    auto row_auth = plan_send_row_auth (json, /*has_row=*/true, set->bound_columns);
     if (!row_auth.ok) {
         out.ok    = false;
         out.error = std::move (row_auth.error);
@@ -1063,7 +1066,13 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // The refusal it can carry - an oauth2 config with a data token - is a
     // 400 here, beside the row's own, and for the same reason: nothing has
     // been recorded or sent yet.
-    auto row_auth = plan_send_row_auth (json, data_row.value.has_value ());
+    // The one row's own columns, exactly as `bind_data_row` reads them below:
+    // a credential spelled `{{username}}` binds from the row for the same
+    // reason one spelled `{{data.username}}` does (issue #1007).
+    const auto row_columns = data_row.value ?
+    vayu::core::bound_columns_of (*data_row.value) :
+    vayu::http::BoundColumnNames{};
+    auto row_auth = plan_send_row_auth (json, data_row.value.has_value (), row_columns);
     if (!row_auth.ok) {
         vayu::utils::log_warning ("POST /execute - " + row_auth.error);
         return row_auth.error;

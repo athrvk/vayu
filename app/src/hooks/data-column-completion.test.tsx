@@ -133,6 +133,43 @@ describe("`{{data.` in a request body", () => {
 		contract.current = declared;
 		expect(inBody('{"email": "someone@example.com"')).toEqual([]);
 	});
+
+	/*
+	 * The bare spelling a bound row answers too (issue #1007) - Postman writes
+	 * `{{email}}`, not `{{data.email}}`, so the list has to offer the name that
+	 * spelling, not only the collision-proof one.
+	 */
+	it("offers the declared columns bare too, alongside the prefixed spelling", () => {
+		contract.current = declared;
+		const suggestions = inBody("{{");
+		const bareLabels = suggestions
+			.filter((s) => s.label === "id" || s.label === "email")
+			.map((s) => s.label);
+		expect(bareLabels).toEqual(["id", "email"]);
+	});
+
+	it("inserts the bare column as a bare token, not the prefixed one", () => {
+		contract.current = declared;
+		const bare = inBody("{{").find((s) => s.label === "email");
+		expect(bare!.insertText).toBe("{{email}}");
+		expect(bare!.filterText).toBe("{{email");
+	});
+
+	it("labels the two spellings so picking one is deliberate", () => {
+		contract.current = declared;
+		const suggestions = inBody("{{");
+		const prefixed = suggestions.find((s) => s.label === "data.email")!;
+		const bare = suggestions.find((s) => s.label === "email")!;
+		// Same column, two entries, and the details must not read identically -
+		// that is the whole point of offering both.
+		expect(prefixed.detail).not.toBe(bare.detail);
+		expect(bare.detail).toMatch(/bare/i);
+	});
+
+	it("does not offer a bare column when the chain declares no contract", () => {
+		contract.current = undefined;
+		expect(inBody("{{").some((s) => s.label === "email")).toBe(false);
+	});
 });
 
 describe('`pm.iterationData.get("` in a script', () => {

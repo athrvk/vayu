@@ -101,3 +101,89 @@ describe("with no contract anywhere in the chain", () => {
 		expect(token.className).not.toContain("text-warning-text");
 	});
 });
+
+/*
+ * A bare `{{column}}` (issue #1007): Postman writes a dataset's columns bare,
+ * and a bound row now substitutes `{{email}}` exactly as it substitutes
+ * `{{data.email}}` - so painting it `text-destructive-text` and offering to
+ * "create" a variable a bind will never consult is wrong for the one case
+ * this section covers: nothing in the scopes defines the name.
+ */
+describe("a bare token naming a declared column, undefined in every scope", () => {
+	function bareOverlayOf(value: string, dataColumns?: DataContractScope) {
+		const { container } = render(
+			<TooltipProvider>
+				<VariableInput
+					value={value}
+					onChange={() => {}}
+					placeholder="URL"
+					variables={variableSupportStub({}, { dataColumns })}
+				/>
+			</TooltipProvider>
+		);
+		const overlay = container.querySelector('[aria-hidden="true"]') as HTMLElement;
+		expect(overlay).toBeTruthy();
+		return overlay;
+	}
+
+	it("paints as the same muted, informational tone as {{data.column}}", () => {
+		// Revert the `boundColumn` check in `renderOverlayContent` and this token
+		// falls through to `EditableVariable` with `resolved={false}` instead -
+		// `text-destructive-text`, the exact false alarm #1007 exists to close.
+		const overlay = bareOverlayOf("https://x/{{email}}", contract);
+		const token = overlay.querySelector("[data-runtime-token] span") as HTMLElement;
+		expect(token).toBeTruthy();
+		expect(token.className).toContain("text-muted-foreground");
+		expect(token.className).not.toContain("text-destructive-text");
+	});
+
+	it("offers nothing to create - there is no variable here to make", () => {
+		const overlay = bareOverlayOf("{{email}}", contract);
+		expect(overlay.querySelector('[role="button"]')).toBeNull();
+	});
+
+	it("leaves a bare name outside the contract exactly as an undefined variable reads today", () => {
+		// Mutation check for the declared-column guard: widen it to "every bare
+		// name" and `baseUrl` here would stop being flagged as undefined, which
+		// is the false negative this test exists to catch.
+		const overlay = bareOverlayOf("{{baseUrl}}", contract);
+		const runtimeToken = overlay.querySelector("[data-runtime-token]");
+		expect(runtimeToken).toBeNull();
+		const token = overlay.querySelector("[data-variable-token] span") as HTMLElement;
+		expect(token.className).toContain("text-destructive-text");
+	});
+
+	it("leaves a bare name with no declared contract exactly as an undefined variable reads today", () => {
+		const overlay = bareOverlayOf("{{email}}");
+		const runtimeToken = overlay.querySelector("[data-runtime-token]");
+		expect(runtimeToken).toBeNull();
+		const token = overlay.querySelector("[data-variable-token] span") as HTMLElement;
+		expect(token.className).toContain("text-destructive-text");
+	});
+});
+
+describe("a bare token a scope already defines, that also names a declared column", () => {
+	it("keeps painting as that variable - shadowing the paint is out of this change's scope", () => {
+		// Mutation check: were the `boundColumn` check to run *before* checking
+		// `varInfo`, this token would flip to the muted runtime-token treatment
+		// instead of staying the resolved variable it is today.
+		const { container } = render(
+			<TooltipProvider>
+				<VariableInput
+					value="{{email}}"
+					onChange={() => {}}
+					placeholder="URL"
+					variables={variableSupportStub(
+						{ email: { value: "a@b.com", scope: "environment" } },
+						{ dataColumns: contract }
+					)}
+				/>
+			</TooltipProvider>
+		);
+		const overlay = container.querySelector('[aria-hidden="true"]') as HTMLElement;
+		const runtimeToken = overlay.querySelector("[data-runtime-token]");
+		expect(runtimeToken).toBeNull();
+		const token = overlay.querySelector("[data-variable-token] span") as HTMLElement;
+		expect(token.className).not.toContain("text-destructive-text");
+	});
+});

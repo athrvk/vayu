@@ -40,9 +40,12 @@ std::string describe_columns (const nlohmann::json& row) {
     return out.empty () ? "none" : out;
 }
 
-/// `{{data.<column>}}` - the token as it was written, for an error to name.
-std::string token_for (const std::string& column) {
-    return "{{" + std::string (vayu::http::DATA_NAMESPACE_PREFIX) + column + "}}";
+/// The token as the request wrote it, for an error to name - `{{data.id}}` for
+/// the reserved spelling, `{{id}}` for a bare bound column (issue #1007).
+std::string token_for (const DataColumnRef& ref) {
+    return ref.namespaced ?
+    "{{" + std::string (vayu::http::DATA_NAMESPACE_PREFIX) + ref.column + "}}" :
+    "{{" + ref.column + "}}";
 }
 
 /// What kind of text a visited field is, for the rules that depend on it.
@@ -203,7 +206,7 @@ FieldContext credential_context (vayu::http::CredentialDestination destination) 
  * be the quiet wrong request this namespace exists to remove - the header would
  * arrive holding something the file does not say.
  */
-std::string describe_header_line_break (const std::string& column, size_t row_index) {
+std::string describe_header_line_break (const DataColumnRef& column, size_t row_index) {
     return token_for (column) + " is bound into a header, and data row " +
     std::to_string (row_index) +
     " has a line break in that column - a CR or LF ends the header line rather "
@@ -399,7 +402,7 @@ void advance_xml_closer (char c, std::string_view closer, XmlScanState& state) {
 void advance_xml_state (std::string_view literal, XmlScanState& state) {
     for (const char c : literal) {
         if (const std::string_view closer = xml_closing_delimiter (state.position);
-        !closer.empty ()) {
+            !closer.empty ()) {
             advance_xml_closer (c, closer, state);
             continue;
         }
@@ -449,6 +452,13 @@ DataValueEncoding xml_encoding_at (XmlPosition position) {
  */
 class FieldSplitter {
     public:
+    /// @p bound_columns are the bare names a row will substitute (issue #1007);
+    /// empty for every run with no dataset behind it, which is what keeps the
+    /// split for those exactly the `data.*`-only scan it always was.
+    explicit FieldSplitter (const vayu::http::BoundColumnNames& bound_columns)
+    : bound_columns_ (bound_columns) {
+    }
+
     /// Takes its field by const reference: a split rewrites nothing, and the
     /// credential walk visits strings it has no copy of.
     void operator() (const std::string& field, FieldContext context) {
@@ -456,7 +466,10 @@ class FieldSplitter {
         if (field.empty ()) {
             return;
         }
-        auto split = vayu::http::split_tokens (field, vayu::http::is_data_variable_name);
+        auto split = vayu::http::split_tokens (field, [this] (const std::string& name) {
+            return vayu::http::is_data_variable_name (name) ||
+            vayu::http::is_bound_column_name (name, bound_columns_);
+        });
         if (split.names.empty ()) {
             return;
         }
@@ -468,8 +481,7 @@ class FieldSplitter {
         bool in_string = false;
         XmlScanState xml_state;
         for (size_t i = 0; i < split.names.size (); ++i) {
-            entry.columns.push_back (
-            split.names[i].substr (vayu::http::DATA_NAMESPACE_PREFIX.size ()));
+            entry.columns.push_back (column_ref (split.names[i]));
             DataValueEncoding encoding = DataValueEncoding::Verbatim;
             if (context == FieldContext::JsonDocument) {
                 in_string = advance_json_string_state (entry.literals[i], in_string);
@@ -489,6 +501,18 @@ class FieldSplitter {
     }
 
     private:
+    /// Which column a kept token names, and which way it was spelled. The
+    /// reserved namespace is answered first, the way every reader of the two
+    /// rules answers it, so a column literally named `data.x` in a file cannot
+    /// take the prefixed spelling away from column `x`.
+    static DataColumnRef column_ref (const std::string& name) {
+        if (vayu::http::is_data_variable_name (name)) {
+            return DataColumnRef{ name.substr (vayu::http::DATA_NAMESPACE_PREFIX.size ()), true };
+        }
+        return DataColumnRef{ name, false };
+    }
+
+    const vayu::http::BoundColumnNames& bound_columns_;
     StepDataTemplate template_;
     size_t next_field_ = 0;
 };
@@ -572,7 +596,7 @@ std::string escape_xml_cdata (const std::string& text) {
     out.reserve (text.size ());
     size_t cursor = 0;
     for (size_t found = text.find (CLOSER); found != std::string::npos;
-    found             = text.find (CLOSER, cursor)) {
+         found        = text.find (CLOSER, cursor)) {
         out.append (text, cursor, found - cursor);
         out += SPLIT;
         cursor = found + CLOSER.size ();
@@ -613,7 +637,7 @@ std::string encode_data_value (const nlohmann::json& value, DataValueEncoding en
  * into one the author did not write - so the row is refused, in the same shape
  * as the missing-column and null-cell errors: the token's own text first.
  */
-std::optional<std::string> describe_unwritable_placement (const std::string& column,
+std::optional<std::string> describe_unwritable_placement (const DataColumnRef& column,
 DataValueEncoding encoding) {
     if (encoding == DataValueEncoding::XmlInComment) {
         return token_for (column) +
@@ -673,7 +697,7 @@ class TemplateJoiner {
                 result_.error = std::move (*refusal);
                 return;
             }
-            const auto cell = row_.find (entry.columns[i]);
+            const auto cell = row_.find (entry.columns[i].column);
             if (cell == row_.end ()) {
                 result_.ok    = false;
                 result_.error = token_for (entry.columns[i]) +
@@ -732,13 +756,14 @@ std::optional<std::string> StepDataTemplate::first_token () const {
     return token_for (fields.front ().columns.front ());
 }
 
-StepDataTemplate tokenize_data_fields (const vayu::Request& request) {
+StepDataTemplate tokenize_data_fields (const vayu::Request& request,
+const vayu::http::BoundColumnNames& bound_columns) {
     // Copied because the walk rewrites in place; nothing is actually rewritten
     // here, since a split substitutes no token. Sharing the walk is what the
     // copy buys - see the header for why a second field list would be the wrong
     // trade.
     vayu::Request scratch = request;
-    FieldSplitter splitter;
+    FieldSplitter splitter (bound_columns);
     // The collision the walk can report is a bind-time fault only: a split
     // rewrites nothing, so the header map is rebuilt from its own unique keys.
     (void)walk_bindable_fields (
@@ -748,8 +773,9 @@ StepDataTemplate tokenize_data_fields (const vayu::Request& request) {
     return splitter.take ();
 }
 
-StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth) {
-    FieldSplitter splitter;
+StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth,
+const vayu::http::BoundColumnNames& bound_columns) {
+    FieldSplitter splitter (bound_columns);
     vayu::http::walk_auth_credentials (auth,
     [&splitter] (const std::string& field, vayu::http::CredentialDestination destination) {
         splitter (field, credential_context (destination));
@@ -783,7 +809,7 @@ const StepDataTemplate& credentials,
 const nlohmann::json& row,
 size_t row_index) {
     if (auto bound = apply_data_template (request, fields, row, row_index);
-    !bound.ok) {
+        !bound.ok) {
         return bound;
     }
     // The credentials second, which is the whole reason this order lives in one
@@ -801,7 +827,7 @@ size_t row_index) {
     }
 
     if (auto bound = apply_auth_data_template (auth, tmpl, row, row_index);
-    !bound.ok) {
+        !bound.ok) {
         return bound;
     }
 
@@ -813,10 +839,14 @@ size_t row_index) {
     return DataBindResult{ true, {} };
 }
 
-std::optional<std::string> first_data_token_in (const nlohmann::json& value) {
+std::optional<std::string> first_data_token_in (const nlohmann::json& value,
+const vayu::http::BoundColumnNames& bound_columns) {
     if (value.is_string ()) {
         const auto split = vayu::http::split_tokens (
-        value.get<std::string> (), vayu::http::is_data_variable_name);
+        value.get<std::string> (), [&bound_columns] (const std::string& name) {
+            return vayu::http::is_data_variable_name (name) ||
+            vayu::http::is_bound_column_name (name, bound_columns);
+        });
         if (split.names.empty ()) {
             return std::nullopt;
         }
@@ -824,7 +854,7 @@ std::optional<std::string> first_data_token_in (const nlohmann::json& value) {
     }
     if (value.is_object () || value.is_array ()) {
         for (const auto& child : value) {
-            if (auto found = first_data_token_in (child)) {
+            if (auto found = first_data_token_in (child, bound_columns)) {
                 return found;
             }
         }
@@ -832,12 +862,13 @@ std::optional<std::string> first_data_token_in (const nlohmann::json& value) {
     return std::nullopt;
 }
 
-std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth) {
+std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth,
+const vayu::http::BoundColumnNames& bound_columns) {
     const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth);
     if (oauth2 == nullptr) {
         return std::nullopt;
     }
-    return first_data_token_in (oauth2->config);
+    return first_data_token_in (oauth2->config, bound_columns);
 }
 
 DataBindResult apply_data_template (vayu::Request& request,
@@ -866,8 +897,33 @@ size_t row_index) {
     return result;
 }
 
+vayu::http::BoundColumnNames bound_columns_of (const nlohmann::json& row) {
+    vayu::http::BoundColumnNames out;
+    if (!row.is_object ()) {
+        return out;
+    }
+    for (const auto& [column, cell] : row.items ()) {
+        (void)cell;
+        out.insert (column);
+    }
+    return out;
+}
+
+vayu::http::BoundColumnNames bound_columns_of (const std::vector<nlohmann::json>& rows) {
+    vayu::http::BoundColumnNames out;
+    for (const auto& row : rows) {
+        out.merge (bound_columns_of (row));
+    }
+    return out;
+}
+
 DataBindResult bind_data_row (vayu::Request& request, const nlohmann::json& row, size_t row_index) {
-    return apply_data_template (request, tokenize_data_fields (request), row, row_index);
+    // The row itself says which bare names it can bind (issue #1007), which is
+    // the whole set for a caller that holds one row: a name it does not carry
+    // is an ordinary variable, left for the residual pass to resolve rather
+    // than split here only to fail as a column no row has.
+    return apply_data_template (request,
+    tokenize_data_fields (request, bound_columns_of (row)), row, row_index);
 }
 
 } // namespace vayu::core

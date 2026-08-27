@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for {{variable}} resolution (issue #226). Read by BOTH the engine gtest suite (request_composer_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/lib/variable-resolution.conformance.test.ts) - the engine owns execution-time resolution, the renderer's copy is preview-only, and this table is what keeps the two from drifting. Each scope is a raw stored-variables bag exactly as it sits in SQLite, so deliberately malformed entries (non-string values, absent or non-boolean 'enabled') exercise the D17 rules on both sides: a definition with absent 'enabled' is enabled, and a non-string 'value' reads as empty string. 'chain' is the collection ancestor chain, root first.",
+  "$comment": "Cross-language conformance fixture for {{variable}} resolution (issue #226). Read by BOTH the engine gtest suite (request_composer_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/lib/variable-resolution.conformance.test.ts) - the engine owns execution-time resolution, the renderer's copy is preview-only, and this table is what keeps the two from drifting. Each scope is a raw stored-variables bag exactly as it sits in SQLite, so deliberately malformed entries (non-string values, absent or non-boolean 'enabled') exercise the D17 rules on both sides: a definition with absent 'enabled' is enabled, and a non-string 'value' reads as empty string. 'chain' is the collection ancestor chain, root first. A case may carry 'boundColumns': the bare column names a bound data row will substitute (issue #1007), which composition leaves written as they stand for the per-row bind - absent means no dataset is bound, which is what every case written before it assumes.",
   "dynamicVariableNames": [
     "$guid",
     "$randomUUID",
@@ -304,6 +304,42 @@
       },
       "input": "{{n}}|{{j}}",
       "expected": "007|{\"k\": 1}"
+    },
+    {
+      "name": "a bound column keeps its braces even where an environment variable shares the name (issue #1007)",
+      "scopes": {
+        "environment": { "username": { "value": "from-the-environment", "enabled": true } }
+      },
+      "boundColumns": ["username"],
+      "input": "https://api.test/u/{{username}}",
+      "expected": "https://api.test/u/{{username}}"
+    },
+    {
+      "name": "the same name resolves from the environment when no row is bound (issue #1007)",
+      "scopes": {
+        "environment": { "username": { "value": "from-the-environment", "enabled": true } }
+      },
+      "input": "https://api.test/u/{{username}}",
+      "expected": "https://api.test/u/from-the-environment"
+    },
+    {
+      "name": "a bound set defers only the names it holds (issue #1007)",
+      "scopes": {
+        "environment": {
+          "username": { "value": "ada", "enabled": true },
+          "region": { "value": "eu", "enabled": true }
+        }
+      },
+      "boundColumns": ["username"],
+      "input": "https://api.test/{{region}}/{{username}}",
+      "expected": "https://api.test/eu/{{username}}"
+    },
+    {
+      "name": "a bound column spelled like a generator is deferred before the table answers (issue #1007)",
+      "scopes": {},
+      "boundColumns": ["$guid"],
+      "input": "[{{$guid}}]",
+      "expected": "[{{$guid}}]"
     }
   ]
 }

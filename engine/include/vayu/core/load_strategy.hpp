@@ -66,6 +66,12 @@ struct LoadDataSet {
     /// its fields per submission - the same bargain a plan step makes, at a
     /// single request's full rate.
     StepDataTemplate fields;
+    /// The bare column names @ref rows can bind (issue #1007), read off the
+    /// rows once by `core::bound_columns_of`. It is what both splits above are
+    /// told, so a bare `{{username}}` this set answers is bound per iteration
+    /// rather than sent as the literal token - and it is empty for a run
+    /// without rows, which carries no set at all.
+    vayu::http::BoundColumnNames bound_columns;
 
     /// What `build_request` must be told: the credentials are bound after the
     /// build, so an auth carrying a token must not be encoded during it.

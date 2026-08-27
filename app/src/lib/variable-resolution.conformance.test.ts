@@ -52,6 +52,12 @@ interface ConformanceCase {
 		chain?: StoredVariableBag[];
 		environment?: StoredVariableBag;
 	};
+	/**
+	 * The bare column names a bound data row will substitute (issue #1007).
+	 * Absent means no dataset is bound, which is what every case written before
+	 * it assumes - so it reads as the empty set rather than as "not stated".
+	 */
+	boundColumns?: string[];
 	input: string;
 	expected: string;
 }
@@ -69,7 +75,8 @@ describe("variable-resolution conformance fixture", () => {
 
 	it.each(fixture.cases.map((c) => [c.name, c] as const))("%s", (_name, c) => {
 		const values = buildVariableValues(c.scopes);
-		expect(resolveTemplate(c.input, (name) => values.get(name))).toBe(c.expected);
+		const boundColumns = new Set(c.boundColumns ?? []);
+		expect(resolveTemplate(c.input, (name) => values.get(name), boundColumns)).toBe(c.expected);
 	});
 
 	it("the dynamic-variable table lists exactly the fixture's names", () => {

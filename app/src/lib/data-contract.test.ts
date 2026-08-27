@@ -18,6 +18,7 @@
 import { describe, it, expect } from "vitest";
 import {
 	collectionsUnderContract,
+	describeBareColumnToken,
 	describeDataToken,
 	resolveDataContract,
 	type ContractNode,
@@ -141,5 +142,36 @@ describe("describeDataToken", () => {
 		// `{{data.}}` addresses no column, so it is not the namespace's business -
 		// the boundary `isDataVariableName` draws.
 		expect(describeDataToken("data.", contract).tone).toBe("muted");
+	});
+});
+
+/*
+ * The bare spelling (issue #1007). `describeBareColumnToken` is only ever
+ * called once the caller (`VariableInput`) has already confirmed the name is
+ * a declared column and that no scope defines it, so unlike `describeDataToken`
+ * it takes no name and has no "undeclared" branch to test.
+ */
+describe("describeBareColumnToken", () => {
+	const contract = {
+		collectionId: "col-users",
+		collectionName: "Users",
+		columns: ["id", "email", "plan"],
+	};
+
+	it("matches {{data.column}}'s tone and description for the same column", () => {
+		const bare = describeBareColumnToken(contract);
+		const prefixed = describeDataToken("data.email", contract);
+		expect(bare.tone).toBe(prefixed.tone);
+		expect(bare.description).toBe(prefixed.description);
+	});
+
+	it("names the declaring collection, as the prefixed spelling does", () => {
+		expect(describeBareColumnToken(contract).note).toContain("Users");
+	});
+
+	it("says a bound row answers the name, which is the fact bare needs and prefixed does not", () => {
+		// The prefixed spelling's tooltip never has to say this - `data.*` never
+		// collides with a scope - so this line is bare-only.
+		expect(describeBareColumnToken(contract).note).toContain("bound row");
 	});
 });

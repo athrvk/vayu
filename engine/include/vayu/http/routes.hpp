@@ -952,10 +952,18 @@ struct SendRowAuth {
  * against, so a `{{data.*}}` in a credential keeps today's goes-out-literal
  * behaviour rather than becoming a new refusal this endpoint never had.
  *
+ * @p bound_columns are the bare names the row can bind (issue #1007), so a
+ * credential written `{{username}}` is deferred and joined against the row the
+ * way `{{data.username}}` always was. Empty for a send with no row, and for a
+ * caller that has not read the row's columns - which resolves those names from
+ * the scopes, as it did before there was a row to ask.
+ *
  * Extracted from the handler (execution.cpp) so send_with_row_test.cpp can
  * drive it directly, matching the suite's other route-core tests.
  */
-SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row);
+SendRowAuth plan_send_row_auth (const nlohmann::json& json,
+bool has_row,
+const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**
  * The outcome of reading `POST /runs`' top-level `data` rows (issue #993).

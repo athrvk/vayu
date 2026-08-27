@@ -25,6 +25,19 @@
  * global, collection or environment variable. That is what makes the feature
  * safe to add to collections people already have.
  *
+ * **A bound row answers for bare column names too** (issue #1007), and that one
+ * *is* a tier - the highest, and only while a row is bound. Postman writes a
+ * dataset's columns bare, so every imported data-driven collection spells them
+ * `{{username}}`, and a run that answered those from the scopes (or from
+ * nowhere) sends a request the file's author never wrote. Which bare names a
+ * bind owns is decided where the dataset is known and travels as
+ * `http::BoundColumnNames`: composition leaves those tokens written as it
+ * stands, exactly as it does the reserved ones, and this module joins both
+ * spellings against the row through the same walk - so the escaping, the
+ * missing-column refusal, the null-cell refusal and the header rules below hold
+ * for a bare column identically. A file bound to a run cannot reach the wire
+ * through a path with fewer rules than the prefixed spelling has.
+ *
  * A column the row does not carry is an **error, not an empty string**: the
  * whole point of the token is that the value came from the file, and sending a
  * request with a silently blank field is the failure mode this namespace
@@ -112,6 +125,7 @@
 #include <vector>
 
 #include "vayu/http/auth_resolver.hpp"
+#include "vayu/http/request_composer.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::core {
@@ -160,7 +174,24 @@ enum class DataValueEncoding : std::uint8_t {
     XmlInProcessingInstruction,
 };
 
-/** One bindable field, split once around the `{{data.column}}` it carries. */
+/**
+ * One `{{...}}` a bind substitutes: which column it names, and how the request
+ * spells it.
+ *
+ * The spelling is kept because an error quotes the token, and the reader will
+ * search their request for the text they wrote: a bare `{{username}}` (issue
+ * #1007) reported as `{{data.username}}` sends them looking for a token that is
+ * not there.
+ */
+struct DataColumnRef {
+    /// The column name, with the `data.` prefix stripped where there was one.
+    std::string column;
+    /// Whether the request wrote the token in the reserved namespace
+    /// (`{{data.username}}`) rather than bare (`{{username}}`).
+    bool namespaced = true;
+};
+
+/** One bindable field, split once around the data tokens it carries. */
 struct DataFieldTemplate {
     /// Which string this is, counted in `walk_bindable_fields` order. Both the
     /// split and the join drive that one walk, so neither can address a field
@@ -168,8 +199,8 @@ struct DataFieldTemplate {
     size_t field = 0;
     /// `literals.size() == columns.size() + 1`; see `http::TokenSplit`.
     std::vector<std::string> literals;
-    /// The column names, with the `data.` prefix already stripped.
-    std::vector<std::string> columns;
+    /// The columns the tokens name, in the order they appear.
+    std::vector<DataColumnRef> columns;
     /// One per entry of `columns`, in the same order.
     std::vector<DataValueEncoding> encodings;
 };
@@ -190,15 +221,38 @@ struct StepDataTemplate {
     }
 
     /**
-     * The first `{{data.column}}` token in walk order, written back with its
-     * braces (`{{data.id}}`), or `nullopt` for a step that carries none.
+     * The first data token in walk order, written back with its braces
+     * (`{{data.id}}`, or `{{id}}` for a bare one), or `nullopt` for a step that
+     * carries none.
      *
      * This is what lets plan resolution refuse a run whose steps carry data
      * tokens and whose payload has no `data` set (issue #415): nothing would
-     * bind them, so they would reach the wire written as they stand.
+     * bind them, so they would reach the wire written as they stand. A bare
+     * column can only have been split against a set of bound names, so a run
+     * with no data set has none of them to refuse.
      */
     [[nodiscard]] std::optional<std::string> first_token () const;
 };
+
+/**
+ * The bare column names a bound row - or a whole dataset - can substitute
+ * (issue #1007).
+ *
+ * One definition rather than a keys-walk per caller, because every path that
+ * binds rows needs the same set and a path that built it differently would bind
+ * a different request: the single send takes its one row's keys, and a run
+ * takes the union over its rows, so a column only some rows carry is still
+ * split - and refused per row by the missing-column rule, which is the answer
+ * the reserved spelling has always given.
+ *
+ * A non-object row contributes nothing; `read_data_rows` has already refused
+ * one by the time a run holds it, and the single send's reader does the same.
+ */
+[[nodiscard]] vayu::http::BoundColumnNames bound_columns_of (const nlohmann::json& row);
+
+/** @copydoc bound_columns_of(const nlohmann::json&) */
+[[nodiscard]] vayu::http::BoundColumnNames bound_columns_of (
+const std::vector<nlohmann::json>& rows);
 
 /**
  * Split every bindable field of @p request around its `{{data.column}}` tokens.
@@ -213,7 +267,8 @@ struct StepDataTemplate {
  * binds. A template is therefore only valid for a request whose body mode is
  * the one it was split from.
  */
-[[nodiscard]] StepDataTemplate tokenize_data_fields (const vayu::Request& request);
+[[nodiscard]] StepDataTemplate tokenize_data_fields (const vayu::Request& request,
+const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**
  * Join @p tmpl's fields against @p row, in place on @p request.
@@ -262,7 +317,8 @@ size_t row_index);
  * Empty for the ordinary step, whose credentials carry no token and whose auth
  * is therefore resolved into the plan once, as it always was.
  */
-[[nodiscard]] StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth);
+[[nodiscard]] StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth,
+const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**
  * Join @p tmpl's credentials against @p row, in place on @p auth.
@@ -334,15 +390,21 @@ const nlohmann::json& row,
 size_t row_index);
 
 /**
- * The first `{{data.column}}` in any string of @p value, recursively, written
- * back with its braces - or `nullopt` when it carries none.
+ * The first data token in any string of @p value, recursively, written back
+ * with its braces - or `nullopt` when it carries none.
+ *
+ * @p bound_columns extends the scan to the bare spelling (issue #1007), for the
+ * same reason the bind reads it: a run's column reaching a block that cannot
+ * defer is the failure this scan exists to name, and which way the token was
+ * written does not change that.
  *
  * For a block that has no bind to offer at all and must therefore refuse rather
  * than defer: an OAuth 2.0 config, whose token is acquired once when the plan
  * is resolved. Object *keys* are not scanned - a column name where a config key
  * belongs is not a placement anyone means.
  */
-[[nodiscard]] std::optional<std::string> first_data_token_in (const nlohmann::json& value);
+[[nodiscard]] std::optional<std::string> first_data_token_in (const nlohmann::json& value,
+const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**
  * The first `{{data.column}}` in @p auth's OAuth 2.0 configuration, or
@@ -360,8 +422,8 @@ size_t row_index);
  * bound; an oauth2 config is deliberately absent from that walk, which is why
  * it needs this second, config-shaped scan.
  */
-[[nodiscard]] std::optional<std::string> first_oauth2_data_token (
-const vayu::http::Auth& auth);
+[[nodiscard]] std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth,
+const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**
  * `render_data_value` moved to `http/request_composer.hpp` (issue #890).

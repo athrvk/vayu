@@ -866,21 +866,45 @@ rule, and why ancestors are read-only, is in
 
 ## Variables (`pm.variables`)
 
-`pm.variables` reads a name without naming its scope, resolving
-**environment, then collection, then global** and stopping at the first scope
-that has it enabled. That is the same order `{{baseUrl}}` is resolved in before
-the request is sent (see
+`pm.variables` reads a name without naming its scope, resolving **the bound
+data row first (if one is bound), then environment, then collection, then
+global**, and stopping at the first tier that has it. That is the same order
+`{{baseUrl}}` is resolved in before the request is sent (see
 [Variable Resolution](../app/variable-resolution.md)), so a script and a URL in
 the same request cannot read one name two different ways.
+
+**While a data row is bound, its bare column names answer first** (issue
+#1007) - above environment, collection and globals. Postman binds a dataset's
+columns bare, so an imported data-driven collection is written
+`{{username}}` rather than `{{data.username}}`, and `pm.variables.get`,
+`.has` and `.toObject` read the row before any scope for exactly that reason:
+
+```javascript
+// In a data-driven run, with a row carrying username and city:
+pm.variables.get('username');   // this iteration's `username` cell, typed
+pm.variables.has('username');   // true, even if an environment var of the
+                                 // same name exists - the row wins
+```
+
+`get` and `toObject` hand the row's cell back **typed**, exactly as
+`pm.iterationData.get` does - a number column reads as a number, not a
+stringified one. A name the bound row does **not** carry is not a miss on this
+tier alone; it falls through to environment, collection and globals precisely
+as it would with no data file at all, which is what lets one script run both
+in a data-driven run and a plain Send. With no row bound, this tier is simply
+absent and `pm.variables` behaves exactly as it always has. The reserved
+`data.` prefix is not part of this tier at all - `pm.variables.get("data.userId")`
+still answers `undefined` regardless of what row is bound (see below).
 
 ```javascript
 const baseUrl = pm.variables.get('baseUrl'); // wherever it is defined
 if (pm.variables.has('debug')) { /* ... */ }
-console.log(pm.variables.toObject()); // all three scopes, merged
+console.log(pm.variables.toObject()); // the bound row, then all three scopes, merged
 ```
 
 It has `get`, `has` and `toObject` - and no `unset` or `clear`, because it owns
-no scope to remove a name from.
+no scope to remove a name from (the row is read-only too - see
+[`pm.iterationData`](#data-rows-pmiterationdata) below).
 
 **`pm.variables.set()` throws.** In Postman it writes to a *local* scope that
 lives for one request and is never stored; Vayu has no such scope. Writing to
@@ -917,9 +941,18 @@ stands because a plan is composed once, before any row is bound, while this runs
 per step with the iteration's row in hand. A column the row does not carry is a
 `TypeError` naming the token and the row's columns - the bind-time rule
 (`apply_data_template`) in a shape a script can catch - and with no row bound at
-all the token keeps its braces. It stops at `replaceIn`: `pm.variables.get` and
-`.has` read the variable *scopes*, and `data.` is disjoint from them by design
-(`core/scenario_data.hpp`), with `pm.iterationData` as its accessor.
+all the token keeps its braces.
+
+**The reserved `data.` prefix is still not a variable scope, though.**
+`pm.variables.get("data.userId")` and `.has(...)` answer `undefined` / `false`
+regardless of what row is bound - `data.` is disjoint from the variable scopes
+by design (`core/scenario_data.hpp`), and `pm.iterationData` remains its only
+accessor. That is a different question from the **bare** column names above:
+`pm.variables.get("userId")` *does* read the bound row (issue #1007), so only
+the prefixed spelling stays outside `pm.variables` entirely. `replaceIn`
+resolves both spellings because it renders a *template*, and `{{data.userId}}`
+is a token template syntax has - `get` and `.has` are lookups by name, and
+`data.userId` was never a name any scope, or now the row, answers to.
 
 **Dynamic variables are otherwise not readable from a script.** `{{$guid}}`,
 `{{$timestamp}}` and the rest of the set in
@@ -1264,15 +1297,19 @@ const user = pm.iterationData ? pm.iterationData.get('username') : 'default-user
 A stashed reference (`globalThis.saved = pm.iterationData`) read from a later
 script throws rather than answering with the finished run's row.
 
-**To put the row into the request itself, use `{{data.column}}` instead.** A
-script reads `pm.iterationData` *after* its step's request was composed, so it
-cannot change where the request goes without editing `pm.request` by hand. The
+**To put the row into the request itself, use `{{data.column}}` - or, while a
+row is bound, the bare column name - instead.** A script reads
+`pm.iterationData` *after* its step's request was composed, so it cannot
+change where the request goes without editing `pm.request` by hand. The
 reserved `data.*` namespace does that directly: a URL, header, body, form field
 or **credential** carrying `{{data.email}}` has it substituted with the
 iteration's row immediately before the send. It is a namespace, not a variable
 scope - it cannot be read or written through `pm.variables` - and it is
 documented under
-[Scenario runs](api-reference.md#scenario-runs).
+[Scenario runs](api-reference.md#scenario-runs). **A bare `{{email}}` binds the
+same way while a row is bound** (issue #1007), and unlike the prefixed
+spelling it *is* readable through `pm.variables.get("email")` too - see
+[`pm.variables`](#variables-pmvariables) above.
 
 The substitution is written for the place it lands in: a token inside a JSON or
 XML body is escaped for that document, and a cell carrying a line break bound

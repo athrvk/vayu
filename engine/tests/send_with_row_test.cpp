@@ -237,6 +237,32 @@ TEST (SendWithRowAuth, Oauth2DataTokenIsRefusedByName) {
     EXPECT_NE (plan.error.find ("token endpoint"), std::string::npos);
 }
 
+/// The same refusal for a bare bound column (issue #1007). Without it the token
+/// is deferred by composition - it is a bound name - and then reaches the token
+/// endpoint as the literal text `{{client}}`, which is the silent wrong request
+/// the prefixed spelling has been refused for since #591.
+///
+/// Mutation-check: drop `bound_columns` from `first_oauth2_data_token` and this
+/// send is accepted.
+TEST (SendWithRowAuth, ABoundColumnInAnOauth2ConfigIsRefusedToo) {
+    const json payload{ { "auth",
+    { { "mode", "oauth2" },
+    { "config",
+    { { "grantType", "client_credentials" }, { "clientId", "{{client}}" },
+    { "tokenUrl", "https://issuer.example/token" } } } } } };
+
+    const auto plan = plan_send_row_auth (payload, true, { "client" });
+    ASSERT_FALSE (plan.ok);
+    EXPECT_NE (plan.error.find ("{{client}}"), std::string::npos) << plan.error;
+    EXPECT_NE (plan.error.find ("OAuth 2.0"), std::string::npos) << plan.error;
+
+    // And the same config with no row bound to that name is untouched: the
+    // refusal is about a column reaching a block that cannot defer, not about
+    // every `{{name}}` in an oauth2 config.
+    const auto unbound = plan_send_row_auth (payload, true);
+    EXPECT_TRUE (unbound.ok) << unbound.error;
+}
+
 /// The refusal is scoped to the mode, not to the endpoint: an oauth2 config
 /// with no data token in it is an ordinary send that happens to carry a row.
 TEST (SendWithRowAuth, Oauth2WithoutADataTokenIsNotRefused) {
@@ -348,6 +374,32 @@ TEST_F (SendWithRowTest, BoundValuesReachTheWire) {
     request.headers["X-Tenant"] = "{{data.tenant}}";
     request.body.mode           = vayu::BodyMode::Json;
     request.body.content        = R"({"email":"{{data.email}}"})";
+
+    const json row{ { "id", "7" }, { "tenant", "acme" }, { "email", "ada@example.com" } };
+    ASSERT_TRUE (bind_data_row (request, row, 0).ok);
+
+    auto outcome = send (request, &row, "", "");
+    ASSERT_EQ (outcome.response.status_code, 200);
+
+    EXPECT_EQ (server_->path (), "/echo/users/7");
+    EXPECT_EQ (server_->header ("X-Tenant"), "acme");
+    EXPECT_EQ (server_->body (), R"({"email":"ada@example.com"})");
+}
+
+/// The bare spelling reaches the wire too (issue #1007) - the shape every
+/// imported Postman collection is written in, and the reason a send with a row
+/// reads the row's own keys as the bound set.
+///
+/// Mutation-check: take the column set out of `bind_data_row` and the path
+/// arrives as `/echo/users/{{id}}`, which is the literal token this issue was
+/// filed about.
+TEST_F (SendWithRowTest, ABareColumnReachesTheWireAsWell) {
+    vayu::Request request;
+    request.method              = vayu::HttpMethod::POST;
+    request.url                 = server_->url () + "/users/{{id}}";
+    request.headers["X-Tenant"] = "{{tenant}}";
+    request.body.mode           = vayu::BodyMode::Json;
+    request.body.content        = R"({"email":"{{email}}"})";
 
     const json row{ { "id", "7" }, { "tenant", "acme" }, { "email", "ada@example.com" } };
     ASSERT_TRUE (bind_data_row (request, row, 0).ok);
