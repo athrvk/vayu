@@ -1222,6 +1222,36 @@ DesignSend& send) {
 }
 
 /**
+ * Refuse a streaming send before its stream opens, failing the run row behind
+ * it.
+ *
+ * By the time either refusal is reached the row exists and nothing is going to
+ * consume it, so it is failed here rather than left `running` forever - guarded,
+ * because a throw while recording that would cost the caller the answer as well
+ * as the stream.
+ *
+ * One helper for both refusals - the draining daemon's, and the header-name
+ * collision the residual pass reports (#1051) - because they are the same three
+ * statements, and a second copy is one that stops receiving this one's fixes.
+ */
+void refuse_stream_before_it_opens (RouteContext& ctx,
+httplib::Response& res,
+const std::string& run_id,
+int status,
+const std::string& reason,
+std::string_view code = {}) {
+    vayu::utils::log_warning (
+    "POST /execute - Stream refused for run: " + run_id + " - " + reason);
+    try {
+        ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "Failed to fail a refused stream run: " + std::string (e.what ()));
+    }
+    send_error (res, status, reason, code);
+}
+
+/**
  * The streaming half of a design send (issue #573).
  *
  * The same script/send/script ordering a buffered send performs, pulled apart
@@ -1292,18 +1322,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     if (auto refusal = resolve_residual_tokens (send.request, scopes)) {
         // The one thing that pass can refuse (issue #1051), in the same words
         // the buffered send refuses it with; what differs is where the caller
-        // reads it, this route not having answered yet. The row is failed for
-        // the reason the refused-stream branch below fails it: it exists, and
-        // nothing is now going to consume it.
-        vayu::utils::log_warning (
-        "POST /execute - Stream refused for run: " + run_id + " - " + refusal->message);
-        try {
-            ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "Failed to fail a refused stream run: " + std::string (e.what ()));
-        }
-        send_error (res, 400, refusal->message, "colliding_header_names");
+        // reads it, this route not having answered yet.
+        refuse_stream_before_it_opens (
+        ctx, res, run_id, 400, refusal->message, "colliding_header_names");
         return;
     }
 
@@ -1399,16 +1420,8 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     auto context = ctx.sse_manager.start (std::move (spec));
     if (!context) {
         // The daemon is draining its workers, or - impossibly - the id
-        // collided. The row exists but nothing will consume it, so it
-        // is failed here rather than left `running` forever.
-        vayu::utils::log_warning ("POST /execute - Stream refused for run: " + run_id);
-        try {
-            ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "Failed to fail a refused stream run: " + std::string (e.what ()));
-        }
-        send_error (res, 503, "Engine is shutting down");
+        // collided.
+        refuse_stream_before_it_opens (ctx, res, run_id, 503, "Engine is shutting down");
         return;
     }
 
