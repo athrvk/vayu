@@ -26,7 +26,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Response headers    | `pm.response.headers.get(name)`, `.has(name)` - case-insensitive              |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Streamed events     | `pm.response.events` (array of `{ event, id, data }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
-| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`set`/`unset`/`clear`, see below |
+| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`set`/`unset`/`clear(url?)`, see below |
 | Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url`, `.method`, `.headers`, `.body`                                 |
 | Request headers     | `pm.request.headers.get/has(name)`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
@@ -450,6 +450,7 @@ const jar = pm.cookies.jar();
 jar.set(pm.request.url, { name: 'session', value: token });  // or (url, name, value)
 jar.get('https://api.example.com/', 'session');              // value, or undefined
 jar.unset('https://api.example.com/', 'session');
+jar.clear('https://api.example.com/');                       // that URL's cookies
 jar.clear();                                                 // this environment's jar
 ```
 
@@ -466,8 +467,11 @@ Divergences from Postman:
   it is called - so it rides that request and cannot be lost when the response's
   cookies are captured. Details in
   [scripting.md](../engine/scripting.md#writing-to-the-jar-pmcookiesjar).
-- **`jar.clear()` takes no URL** and empties this environment's jar. Postman's
-  clears per URL; Vayu's scope is the environment, so that is the unit here.
+- **`jar.clear(url)` matches Postman** - it removes every cookie that URL would
+  have carried, which is `unset` with no name to narrow it. **`jar.clear()`
+  with no URL is Vayu's own** and empties this environment's jar, because the
+  environment is Vayu's scope unit. A URL the engine cannot parse is refused
+  rather than cleared as a wipe matching nothing.
 - **`expires` is seconds since the epoch**, not a date string.
 - **Scope is the environment**, not the domain-with-permission model Postman
   uses. One jar per environment plus one for "no environment", in memory only,

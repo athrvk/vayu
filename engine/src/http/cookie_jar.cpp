@@ -68,6 +68,60 @@ std::optional<std::string> url_part (CURLU* handle, CURLUPart part) {
     return out;
 }
 
+/// What every URL-scoped jar operation needs off a URL. `scheme` may be empty
+/// where the caller does not care; `nullopt` means libcurl could not read a
+/// host and a path, which is the whole of "this URL cannot scope anything".
+struct UrlScope {
+    std::string host;
+    std::string path;
+    std::string scheme;
+};
+
+std::optional<UrlScope> url_scope_of (const std::string& url) {
+    CURLU* parsed = curl_url ();
+    if (!parsed) {
+        return std::nullopt;
+    }
+    std::optional<std::string> host;
+    std::optional<std::string> path;
+    std::optional<std::string> scheme;
+    if (curl_url_set (parsed, CURLUPART_URL, url.c_str (), 0) == CURLUE_OK) {
+        host   = url_part (parsed, CURLUPART_HOST);
+        path   = url_part (parsed, CURLUPART_PATH);
+        scheme = url_part (parsed, CURLUPART_SCHEME);
+    }
+    curl_url_cleanup (parsed);
+    if (!host || !path) {
+        return std::nullopt;
+    }
+    return UrlScope{ std::move (*host), std::move (*path),
+        scheme ? std::move (*scheme) : std::string{} };
+}
+
+/**
+ * @brief Erase the cookies among @p lines that a request to @p url would have
+ *        carried, optionally narrowed to one @p name.
+ *
+ * The one removal rule behind both `Unset` and `ClearUrl`: the name filter is
+ * the only difference between them, so it is a parameter rather than a second
+ * copy of the matching.
+ */
+void erase_url_scoped (std::vector<std::string>& lines,
+const std::string& url,
+std::optional<std::string_view> name) {
+    const auto doomed = matching_in (lines, url);
+    std::erase_if (lines, [&doomed, name] (const std::string& line) {
+        const auto held = parse_cookie_line (line);
+        if (!held || (name && held->name != *name)) {
+            return false;
+        }
+        return std::any_of (doomed.begin (), doomed.end (), [&held] (const JarCookie& match) {
+            return match.name == held->name && match.domain == held->domain &&
+            match.path == held->path;
+        });
+    });
+}
+
 } // namespace
 
 std::optional<JarCookie> parse_cookie_line (std::string_view line) {
@@ -207,31 +261,21 @@ std::optional<JarCookie> cookie_for_url (const std::string& url, JarCookie cooki
         return cookie;
     }
 
-    CURLU* parsed = curl_url ();
-    if (!parsed) {
-        return std::nullopt;
-    }
-    std::optional<std::string> host;
-    std::optional<std::string> path;
-    if (curl_url_set (parsed, CURLUPART_URL, url.c_str (), 0) == CURLUE_OK) {
-        host = url_part (parsed, CURLUPART_HOST);
-        path = url_part (parsed, CURLUPART_PATH);
-    }
-    curl_url_cleanup (parsed);
-    if (!host || !path) {
+    const auto scope = url_scope_of (url);
+    if (!scope) {
         return std::nullopt;
     }
 
     if (cookie.domain.empty ()) {
         // Host-only, which is what a Set-Cookie with no Domain attribute is.
-        cookie.domain = *host;
+        cookie.domain = scope->host;
     }
     if (cookie.path.empty ()) {
         // RFC 6265 §5.1.4 default-path: everything up to the last `/`, and `/`
         // when that leaves nothing.
-        const size_t last = path->rfind ('/');
+        const size_t last = scope->path.rfind ('/');
         cookie.path =
-        (last == std::string::npos || last == 0) ? "/" : path->substr (0, last);
+        (last == std::string::npos || last == 0) ? "/" : scope->path.substr (0, last);
     }
     cookie.include_subdomains = cookie.domain.starts_with (".");
     return cookie;
@@ -262,54 +306,42 @@ const std::vector<CookieWrite>& writes) {
             break;
         }
 
-        case CookieWrite::Kind::Unset: {
+        case CookieWrite::Kind::Unset:
             // URL-scoped, like the read half: `unset` removes what a request to
             // that URL would have carried, not every cookie sharing the name.
-            const auto doomed = matching_in (lines, write.url);
-            std::erase_if (lines, [&write, &doomed] (const std::string& line) {
-                const auto held = parse_cookie_line (line);
-                if (!held || held->name != write.name) {
-                    return false;
-                }
-                return std::any_of (doomed.begin (), doomed.end (),
-                [&held] (const JarCookie& match) {
-                    return match.name == held->name &&
-                    match.domain == held->domain && match.path == held->path;
-                });
-            });
+            erase_url_scoped (lines, write.url, write.name);
             break;
-        }
+
+        case CookieWrite::Kind::ClearUrl:
+            // Postman's `jar.clear(url)`: the same scoping `unset` uses, with
+            // no name to narrow it. One definition of "this URL's cookies"
+            // rather than a second that differs in the corners.
+            erase_url_scoped (lines, write.url, std::nullopt);
+            break;
         }
     }
     return lines;
 }
 
+bool url_can_scope_cookies (const std::string& url) {
+    return url_scope_of (url).has_value ();
+}
+
 std::vector<JarCookie>
 matching_in (const std::vector<std::string>& lines, const std::string& url) {
-    CURLU* parsed = curl_url ();
-    if (!parsed) {
-        return {};
-    }
-    std::optional<std::string> host;
-    std::optional<std::string> path;
-    std::optional<std::string> scheme;
-    if (curl_url_set (parsed, CURLUPART_URL, url.c_str (), 0) == CURLUE_OK) {
-        host   = url_part (parsed, CURLUPART_HOST);
-        path   = url_part (parsed, CURLUPART_PATH);
-        scheme = url_part (parsed, CURLUPART_SCHEME);
-    }
-    curl_url_cleanup (parsed);
-    if (!host || !path) {
+    const auto scope = url_scope_of (url);
+    if (!scope) {
         return {};
     }
 
-    const bool secure_transport = scheme && hosts_equal (*scheme, "https");
+    const bool secure_transport = hosts_equal (scope->scheme, "https");
     const auto now              = static_cast<int64_t> (std::time (nullptr));
 
     std::vector<JarCookie> out;
     for (const auto& line : lines) {
         auto cookie = parse_cookie_line (line);
-        if (cookie && cookie_matches (*cookie, *host, *path, secure_transport, now)) {
+        if (cookie &&
+        cookie_matches (*cookie, scope->host, scope->path, secure_transport, now)) {
             out.push_back (std::move (*cookie));
         }
     }

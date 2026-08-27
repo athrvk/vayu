@@ -897,11 +897,13 @@ jar.set(pm.request.url, { name: 'session', value: token });
 jar.set(pm.request.url, 'session', token);            // the same, flat
 jar.get('https://api.example.com/', 'session');        // value, or undefined
 jar.unset('https://api.example.com/', 'session');
+jar.clear('https://api.example.com/');                 // that URL's cookies
 jar.clear();                                           // this environment's jar
 ```
 
 Postman's jar object, whole. Every method is **URL-scoped** - it takes the URL
-the cookie belongs to rather than assuming this request's - and each accepts an
+the cookie belongs to rather than assuming this request's (`clear`'s URL is
+optional; see below) - and each accepts an
 optional trailing `callback(err, value)`, invoked inline the way
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest)'s is,
 since the work has already happened by the time it is called. `get` also
@@ -944,11 +946,19 @@ made, and the next transfer of that execution carries it:
 - A `set` in a **post-request script** has no transfer left to ride, so it is
   applied to the jar when the script ends.
 
-`clear()` empties **this environment's jar and no other**. Nothing is on disk,
-so the cost is a re-login; other environments, and the no-environment jar, are
-untouched. There is no confirmation gate for scripts - "reset my session" is a
-legitimate thing for a script to want, and Settings → General → Cookies shows
-the result.
+**`clear` has two forms.** `clear(url)` is Postman's: it removes every cookie a
+request to that URL would have carried - `unset` with no name to narrow it, and
+the same matching, so a cookie stored for another host or under `/admin` when
+you cleared `/` is left alone. `clear()` with no URL empties **this
+environment's jar and no other**. Nothing is on disk either way, so the cost is
+a re-login; other environments, and the no-environment jar, are untouched.
+There is no confirmation gate for scripts - "reset my session" is a legitimate
+thing for a script to want, and Settings → General → Cookies shows the result.
+
+A URL the engine cannot parse is **refused** rather than cleared as a wipe that
+happens to match nothing: `clear` is destructive, so "cleared no cookies" and
+"that was not a URL" must not read the same to the script. Pass no argument at
+all for the whole-jar form.
 
 Load runs have no jar, so these throw there exactly as the read half does.
 

@@ -318,7 +318,7 @@ TEST (ScriptTypesTest, ACallInsideALabelDoesNotEmptyTheSignature) {
     "get(url: string, name: string, callback?: "
     "Function): string | undefined;"));
     EXPECT_TRUE (contains (dts, "unset(url: string, name: string, callback?: Function): void;"));
-    EXPECT_TRUE (contains (dts, "clear(callback?: Function): void;"));
+    EXPECT_TRUE (contains (dts, "clear(url?: string, callback?: Function): void;"));
     // The flat `set(url, name, value)` form the docs also show has to fit the
     // one signature the table can express.
     EXPECT_TRUE (contains (dts,
