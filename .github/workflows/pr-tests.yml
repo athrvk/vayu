@@ -146,10 +146,18 @@ jobs:
           predicate-quantifier: some-with-excludes
           # `shared/**` belongs to the app: vitest and vite both alias it to
           # `@shared`, so an icon or asset there is compiled into the renderer.
-          # `build.py` and `VERSION` are listed under both trees because either
-          # can change how either side builds, and a version bump touches both
-          # anyway. This workflow is listed everywhere so that a change to the
-          # split itself is exercised by every job it describes.
+          # `VERSION` is listed under both trees because a version bump touches
+          # both. `build.py` deliberately is NOT: neither work job invokes it -
+          # `app` is pnpm + vitest, `engine` is lukka/run-cmake on the presets
+          # plus ctest - so routing a build.py edit there ran ~15 runner-minutes
+          # of three-platform matrix that the change could not turn red. The
+          # jobs that do exercise build.py are `build-script` (its plumbing
+          # tests) and `Script lint` (ruff), and both already route on it. What
+          # this costs is honest to name: build.py's *build path* - the cmake
+          # invocations it composes - is exercised by no CI job on any routing,
+          # only by every developer and release build, so a filter cannot buy
+          # coverage of it. This workflow is listed everywhere so that a change
+          # to the split itself is exercised by every job it describes.
           #
           # A change can be `code` and still match no area, and that is a pass,
           # not a hole. Replaying the last 120 non-merge commits through these
@@ -163,7 +171,6 @@ jobs:
             app:
               - 'app/**'
               - 'shared/**'
-              - 'build.py'
               - 'VERSION'
               - '.github/workflows/pr-tests.yml'
               # Both forms, for the reason the `code` filter gives above: the
@@ -172,7 +179,6 @@ jobs:
               - '!**/*.md'
             engine:
               - 'engine/**'
-              - 'build.py'
               - 'VERSION'
               - '.clang-format'
               - '.github/check-windows-deps.py'
@@ -988,8 +994,10 @@ jobs:
 
   # build.py's plumbing, on its own job because it needs neither a C++ toolchain
   # nor Node: throwaway git repositories and python3. Linux only - the code under
-  # test shells out to git, which behaves the same on every runner, and the
-  # engine job already covers build.py's real use on all three.
+  # test shells out to git, which behaves the same on every runner. This and
+  # `Script lint` are the only jobs that read build.py at all: the app and
+  # engine jobs build through pnpm and the cmake presets directly, which is why
+  # the area filters above no longer route build.py edits into their matrices.
   build-script:
     name: Build script
     runs-on: ubuntu-latest
