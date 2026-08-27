@@ -17,6 +17,7 @@
 
 #include <httplib.h>
 
+#include "vayu/core/cli_args.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
@@ -38,12 +39,6 @@
 #include <vector>
 
 namespace {
-// Default daemon URL. A view rather than a `std::string`, so the alias costs
-// nothing before `main` - a namespace-scope `std::string` allocates during
-// dynamic initialisation, where the allocation failure cannot be caught
-// (`cert-err58-cpp`).
-constexpr std::string_view DEFAULT_DAEMON_URL = vayu::core::constants::defaults::DAEMON_URL;
-
 void print_version () {
     std::cout << "vayu-cli " << vayu::Version::string << "\n";
     vayu::utils::log_info ("vayu-cli " + std::string (vayu::Version::string));
@@ -273,94 +268,6 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
     }
 }
 
-/** What the argument vector says to do, once it has been read. */
-struct CliOptions {
-    std::string command;
-    int verbosity = 0; ///< 0=warn/error, 1=info+, 2=debug+
-    bool color    = true;
-    std::string filepath;
-    std::string daemon_url{ DEFAULT_DAEMON_URL };
-};
-
-/**
- * One argument.
- *
- * @param next the argument a flag would consume; @p has_next is kept apart from
- *        its emptiness on purpose - `--daemon ""` is a value, badly chosen, and
- *        it stays the caller's to be told about downstream rather than silently
- *        reinterpreted as a missing one.
- * @param consumed_next set when the flag took @p next as its value.
- * @return the exit code to stop on - `--help` and `--version` answer here - or
- *         nothing to carry on.
- */
-std::optional<int> read_cli_flag (const std::string& arg,
-std::string_view next,
-bool has_next,
-CliOptions& options,
-bool& consumed_next) {
-    if (arg == "-h" || arg == "--help") {
-        print_help ();
-        return 0;
-    }
-    if (arg == "-v" || arg == "--version") {
-        print_version ();
-        return 0;
-    }
-    if (arg == "--verbose") {
-        // The level is optional: `--verbose` on its own means info. Clamped to
-        // the range the logger has.
-        if (!next.empty () &&
-        std::isdigit (static_cast<unsigned char> (next.front ())) != 0) {
-            options.verbosity =
-            std::max (0, std::min (2, std::stoi (std::string (next))));
-            consumed_next = true;
-        } else {
-            options.verbosity = 1;
-        }
-        return std::nullopt;
-    }
-    if (arg == "--no-color") {
-        options.color = false;
-        return std::nullopt;
-    }
-    if (arg == "--daemon" && has_next) {
-        options.daemon_url = next;
-        consumed_next      = true;
-        return std::nullopt;
-    }
-    if (arg == "run" && has_next) {
-        options.filepath = next;
-        consumed_next    = true;
-        return std::nullopt;
-    }
-    // First non-flag argument after 'run' is the filepath
-    if (options.command == "run" && options.filepath.empty () && arg[0] != '-') {
-        options.filepath = arg;
-    }
-    return std::nullopt;
-}
-
-/**
- * The flags and the command's own argument, in one pass.
- *
- * @return the exit code to stop on, or nothing to carry on with what it read.
- */
-std::optional<int> read_cli_flags (std::span<char* const> args, CliOptions& options) {
-    for (size_t i = 1; i < args.size (); ++i) {
-        const bool has_next = i + 1 < args.size ();
-        const std::string_view next =
-        has_next ? std::string_view (args[i + 1]) : std::string_view ();
-        bool consumed_next = false;
-        if (auto stop = read_cli_flag (args[i], next, has_next, options, consumed_next)) {
-            return stop;
-        }
-        if (consumed_next) {
-            ++i;
-        }
-    }
-    return std::nullopt;
-}
-
 /**
  * The whole of the CLI, so that `main` is a catch and nothing else.
  *
@@ -383,10 +290,24 @@ int run_cli (std::span<char* const> args) {
         return 1;
     }
 
-    CliOptions options;
-    options.command = args[1];
-    if (auto stop = read_cli_flags (args, options)) {
-        return *stop;
+    vayu::core::CliOptions options;
+    options.command    = args[1];
+    const auto request = vayu::core::read_cli_flags (args, options);
+    if (!request) {
+        // Refused where it was typed, in the shape every bad argument answers
+        // with (#1028, #1031) - not dropped, which is what left a mistyped
+        // flag indistinguishable from no flag at all.
+        std::cerr << "vayu-cli: " << request.error () << "\n";
+        vayu::utils::log_error ("vayu-cli: " + request.error ());
+        return 1;
+    }
+    if (*request == vayu::core::CliRequest::Help) {
+        print_help ();
+        return 0;
+    }
+    if (*request == vayu::core::CliRequest::Version) {
+        print_version ();
+        return 0;
     }
 
     // Initialize curl (still needed for httplib?)

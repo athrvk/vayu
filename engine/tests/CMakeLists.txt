@@ -53,6 +53,8 @@ add_executable(vayu_tests
     load_stream_events_test.cpp
     sse_stream_test.cpp
     server_bind_test.cpp
+    numeric_flag_test.cpp
+    argument_rules_test.cpp
     transport_policy_test.cpp
     tls_verification_test.cpp
     client_certificates_test.cpp

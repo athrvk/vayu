@@ -152,7 +152,19 @@ engine/
   (`utils/parse.hpp`) is a whole `std::string_view` as an integer or nothing -
   the five sites that spelled `from_chars`'s pointer range themselves each had
   to remember the `ptr != end` half that separates "42abc is 42" from "42abc is
-  not a number" - and **`vayu::http::CurlErrorBuffer`**
+  not a number". **`vayu::core::parse_numeric_flag`**
+  (`core/numeric_flag.hpp`, #1028) is the layer above it for a *flag*: it holds
+  the value to the range the flag documents and answers a refusal naming the
+  flag, the range and what was typed, because the two argument loops used to
+  reach for `std::stoi` and answer `vayu-engine: stoi`. A new numeric flag is
+  described there, never parsed at the site. **`core/flag_value.hpp`** (#1031)
+  is the rule that runs before either: a flag with nothing after it, and a value
+  beginning with `-`, are refused rather than defaulted or taken - `--data-dir
+  --port 9999` used to create a data directory named `--port`. Both argument
+  loops live in headers now (`core/daemon_args.hpp`, `core/cli_args.hpp`)
+  because a rule is only worth the loop wired to it, and the loop is what
+  `tests/argument_rules_test.cpp` has to be able to call - and
+  **`vayu::http::CurlErrorBuffer`**
   (`http/curl_error_buffer.hpp`) owns `CURLOPT_ERRORBUFFER`, whose three rules
   (at least `CURL_ERROR_SIZE` bytes, alive for the whole transfer, written only
   on failure so a reused handle must be cleared between transfers) a bare

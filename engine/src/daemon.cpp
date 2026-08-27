@@ -24,6 +24,7 @@
 #include <thread>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/daemon_args.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
@@ -59,54 +60,22 @@ bool acquire_lock (const std::string& lock_path) {
 
     return true;
 }
-/**
- * The daemon's own arguments.
- *
- * @return the exit code to stop on - `--help` answers here - or nothing to
- *         carry on with what the pass read.
- */
-std::optional<int>
-read_daemon_args (std::span<char* const> args, int& port, int& verbosity, std::string& data_dir) {
-    for (size_t i = 1; i < args.size (); ++i) {
-        std::string arg = args[i];
 
-        if (arg == vayu::core::constants::cli::ARG_PORT_SHORT ||
-        arg == vayu::core::constants::cli::ARG_PORT_LONG) {
-            if (i + 1 < args.size ()) {
-                port = std::stoi (args[++i]);
-            }
-        } else if (arg == "-d" || arg == "--data-dir") {
-            if (i + 1 < args.size ()) {
-                data_dir = args[++i];
-            }
-        } else if (arg == "-v" || arg == "--verbose") {
-            // Check if next arg is a number (verbosity level)
-            if (i + 1 < args.size () &&
-            std::isdigit (static_cast<unsigned char> (*args[i + 1])) != 0) {
-                verbosity = std::stoi (args[++i]);
-                // Clamp to valid range [0, 2]
-                verbosity = std::max (0, std::min (2, verbosity));
-            } else {
-                // No level specified, default to 1 (info level)
-                verbosity = 1;
-            }
-        } else if (arg == "-h" || arg == "--help") {
-            std::cout << "Vayu Engine " << vayu::Version::string << "\n\n";
-            std::cout << "Usage: vayu-engine [OPTIONS]\n\n";
-            std::cout << "Options:\n";
-            std::cout
-            << "  -p, --port <PORT>        Port to listen on (default: 9876)\n";
-            std::cout << "  -d, --data-dir <DIR>     Data directory for DB, "
-                         "logs, and lock file "
-                         "(default: ../data)\n";
-            std::cout << "  -v, --verbose [LEVEL]    Enable verbose output "
-                         "(0=warn/error, 1=info, "
-                         "2=debug, default: 1)\n";
-            std::cout << "  -h, --help               Show this help message\n";
-            return 0;
-        }
-    }
-    return std::nullopt;
+/// The usage `-h` / `--help` answers with. Printed here rather than by the
+/// parse, which reports the request and owns no output stream (#1031).
+void print_help () {
+    std::cout << "Vayu Engine " << vayu::Version::string << "\n\n";
+    std::cout << "Usage: vayu-engine [OPTIONS]\n\n";
+    std::cout << "Options:\n";
+    std::cout << "  -p, --port <PORT>        Port to listen on (default: 9876, "
+                 "1-65535)\n";
+    std::cout << "  -d, --data-dir <DIR>     Data directory for DB, "
+                 "logs, and lock file "
+                 "(default: ../data)\n";
+    std::cout << "  -v, --verbose [LEVEL]    Enable verbose output "
+                 "(0=warn/error, 1=info, "
+                 "2=debug, default: 1)\n";
+    std::cout << "  -h, --help               Show this help message\n";
 }
 
 /// The daemon proper. `main` is the wrapper that keeps a throw from escaping
@@ -115,14 +84,25 @@ read_daemon_args (std::span<char* const> args, int& port, int& verbosity, std::s
 /// and only `main`'s own signature is exempt from saying so.
 int run_daemon (std::span<char* const> args) {
     // Parse arguments first (need data_dir for logging)
-    int port             = vayu::core::constants::defaults::PORT;
-    int verbosity        = 0; // 0=warn/error, 1=info+, 2=debug+
-    std::string data_dir = get_default_data_dir ();
+    vayu::core::DaemonArgs parsed;
+    parsed.data_dir = get_default_data_dir ();
 
-    if (auto stop = read_daemon_args (args, port, verbosity, data_dir)) {
-        return *stop;
+    const auto request = vayu::core::read_daemon_args (args, parsed);
+    if (!request) {
+        // Refused before anything starts - no logger yet, so stderr is the
+        // whole of the report, and it is the same shape every bad argument
+        // answers with (#1028, #1031).
+        std::cerr << "vayu-engine: " << request.error () << "\n";
+        return 1;
+    }
+    if (*request == vayu::core::DaemonRequest::Help) {
+        print_help ();
+        return 0;
     }
 
+    const int port             = parsed.port;
+    const int verbosity        = parsed.verbosity;
+    const std::string data_dir = parsed.data_dir;
 
     // Ensure data directory exists
     try {
@@ -302,9 +282,18 @@ int main (int argc, char* argv[]) {
     } catch (const std::exception& e) {
         // Reported rather than terminated on, for the reason `cli.cpp` gives:
         // an escape from `main` aborts with no message and a status no caller
-        // can tell from a crash. A daemon a supervisor restarts owes that
-        // distinction more than the CLI does. `read_daemon_args` still reaches
-        // an unchecked `std::stoi`, so this is not hypothetical - see #1028.
+        // can tell from a crash.
+        //
+        // Honest about what this is now worth: #1028 and #1031 closed the
+        // argument-parsing route, which was the one case with a demonstration
+        // behind it (`--port notanumber` used to abort with 134). No input
+        // reaching this handler is known today. It stays because three
+        // constructions in `run_daemon` still throw where nothing catches -
+        // `Logger::init`, the `Database` object itself (the `try` below it
+        // guards the *next* call, not the constructor) and `Server` - and
+        // because `cli.cpp` has held this invariant for far longer than any
+        // one reachable input justified. Defence in depth, said plainly,
+        // rather than a fix advertised by a bug it no longer has.
         std::cerr << "vayu-engine: " << e.what () << "\n";
         vayu::utils::log_error (std::string ("vayu-engine: ") + e.what ());
         return 1;
