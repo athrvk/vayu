@@ -1278,18 +1278,34 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         execute_script (script_engine, send.pre_script, pre_ctx, "Pre-request");
     }
 
-    // The same pass the buffered send makes between its script and its send
-    // (issue #1008), here because this path runs the pre-request script itself
-    // rather than through `execute_exchange`: a `{{token}}` the script has just
-    // defined resolves before the stream opens.
-    resolve_residual_tokens (send.request, scopes);
-
     // `stream` and `transient` are mutually exclusive - `read_stream_flag`
     // refuses the pair with a 400 - so a streaming send always has a run row.
     // The rule holds in `read_execute_payload`, not here, which is what
     // `invariant_value` is for.
     const std::string run_id = vayu::utils::invariant_value (
     send.run_id, "a streaming send has a run row: stream and transient are mutually exclusive");
+
+    // The same pass the buffered send makes between its script and its send
+    // (issue #1008), here because this path runs the pre-request script itself
+    // rather than through `execute_exchange`: a `{{token}}` the script has just
+    // defined resolves before the stream opens.
+    if (auto refusal = resolve_residual_tokens (send.request, scopes)) {
+        // The one thing that pass can refuse (issue #1051), in the same words
+        // the buffered send refuses it with; what differs is where the caller
+        // reads it, this route not having answered yet. The row is failed for
+        // the reason the refused-stream branch below fails it: it exists, and
+        // nothing is now going to consume it.
+        vayu::utils::log_warning (
+        "POST /execute - Stream refused for run: " + run_id + " - " + refusal->message);
+        try {
+            ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "Failed to fail a refused stream run: " + std::string (e.what ()));
+        }
+        send_error (res, 400, refusal->message, "colliding_header_names");
+        return;
+    }
 
     vayu::http::SseStreamRequest spec;
     spec.run_id          = run_id;

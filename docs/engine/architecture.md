@@ -474,7 +474,12 @@ of every value that had an answer. The one thing this costs: an ad-hoc payload
 posted straight to `/execute` with a literal `{{...}}` in it is no longer
 inert - if the run's scopes define that name, the send now carries its value.
 A name nothing defines still goes out written as it stands, and the load path
-does not run this pass at all. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+does not run this pass at all. The one thing the pass can *refuse* is a
+resolved header name landing on a name the request already carries (#1051):
+the map holds one value per name, so the send would go out a header short, and
+it is stopped instead - in composition's words, as a `statusCode: 0` response
+carrying the reason (a `400` on the streaming path, which has not answered
+yet). An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 

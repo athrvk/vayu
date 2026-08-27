@@ -20,9 +20,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <map>
 #include <utility>
 
 #include "vayu/http/client.hpp"
+#include "vayu/http/event_loop/curl_utils.hpp"
+#include "vayu/http/header_names.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
@@ -349,17 +352,45 @@ bool a_header_name_holds_a_token (const vayu::Headers& headers) {
     [] (const auto& entry) { return holds_a_token (entry.first); });
 }
 
-/// Rebuilt rather than edited in place, because a resolved name is a different
-/// key. Values are moved: this runs after they have been resolved.
-void resolve_header_names (vayu::Headers& headers, const vayu::http::VariableValues& vars) {
+/**
+ * Rebuilt rather than edited in place, because a resolved name is a different
+ * key. Values are copied rather than moved, so a refusal leaves the request as
+ * it found it.
+ *
+ * A name a script has just defined can resolve onto a name the request already
+ * carries, and a map holds one value per name - so the rebuild is where a
+ * header goes missing. Composition refuses that (`http/header_names.hpp`) and
+ * so does this, on the same rule and in the same words; the caller is what
+ * differs, having a send to stop rather than a payload to reject.
+ *
+ * Every collision here is one resolution made: the map this walks compares
+ * names without case already, so two names that survive untouched cannot have
+ * been equal to begin with.
+ *
+ * @return the first collision, the headers left as they were; nothing, and the
+ *         map rebuilt, when every name is still its own.
+ */
+std::optional<vayu::http::HeaderNameCollision>
+resolve_header_names (vayu::Headers& headers, const vayu::http::VariableValues& vars) {
     if (!a_header_name_holds_a_token (headers)) {
-        return;
+        return std::nullopt;
     }
     vayu::Headers resolved;
-    for (auto& [name, value] : headers) {
-        resolved[vayu::http::resolve_template (name, vars)] = std::move (value);
+    // Each resolved name against the name as written that produced it, so a
+    // refusal can name both spellings - `resolved` alone remembers only the
+    // one that got there first.
+    std::map<std::string, std::string, vayu::CaseInsensitiveLess> produced;
+    for (const auto& [name, value] : headers) {
+        std::string resolved_name = vayu::http::resolve_template (name, vars);
+        if (const auto [taken, was_free] = produced.emplace (resolved_name, name); !was_free) {
+            // Reported with the map untouched: the caller refuses the send, so
+            // a half-rebuilt request is one nothing goes on to read.
+            return vayu::http::HeaderNameCollision{ name, taken->second, taken->first };
+        }
+        resolved[std::move (resolved_name)] = value;
     }
     headers = std::move (resolved);
+    return std::nullopt;
 }
 
 /// The scopes as one map, with composition's precedence - environment over the
@@ -373,13 +404,14 @@ vayu::http::VariableValues values_from_scopes (const ScriptVariableScopes& scope
 
 } // namespace
 
-void resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& scopes) {
+std::optional<vayu::Error> resolve_residual_tokens (vayu::Request& request,
+const ScriptVariableScopes& scopes) {
     auto targets             = resolvable_strings (request);
     const bool anything_left = a_header_name_holds_a_token (request.headers) ||
     std::any_of (targets.begin (), targets.end (),
     [] (const std::string* text) { return holds_a_token (*text); });
     if (!anything_left) {
-        return; // composition answered everything - the ordinary case
+        return std::nullopt; // composition answered everything - the ordinary case
     }
 
     const auto vars = values_from_scopes (scopes);
@@ -388,8 +420,17 @@ void resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes
             *text = vayu::http::resolve_template (*text, vars);
         }
     }
-    // Last: it moves the values `targets` points at into a new map.
-    resolve_header_names (request.headers, vars);
+    // Last: it rebuilds the map the values `targets` points at live in.
+    if (auto collision = resolve_header_names (request.headers, vars)) {
+        // The shape the pre-send gate answers in, because this is a refusal of
+        // the same send and the drivers already render that one: an
+        // `InternalError` carrying the message, which each caller turns into a
+        // status-0 response rather than a transfer (see `validate_transferable`
+        // in `event_loop/curl_utils.cpp`).
+        return vayu::Error{ vayu::ErrorCode::InternalError,
+            vayu::http::describe_header_name_collision (*collision) };
+    }
+    return std::nullopt;
 }
 
 ExchangeOutcome execute_exchange (vayu::runtime::ScriptEngine& engine,
@@ -451,16 +492,26 @@ bool verbose) {
     // sends nothing resolves nothing; before the send, because the point is the
     // wire. A step of a scenario run reaches this with the *previous* steps'
     // writes in `scopes` too, which is the same rule one step further on.
-    resolve_residual_tokens (outcome.request, scopes);
-
-    vayu::http::ClientConfig config;
-    config.verbose       = verbose;
-    config.cookie_jar    = &jar;
-    config.cookie_scope  = cookie_scope;
-    config.cookie_writes = std::move (pre_cookie_writes);
-    config.transport     = inputs.transport;
-    vayu::http::Client client (config);
-    outcome.response = client.send (outcome.request).value ();
+    if (auto refusal = resolve_residual_tokens (outcome.request, scopes)) {
+        // Answered exactly as the pre-send gate answers its own refusals, which
+        // is what the transfer below would have done with this request had the
+        // collision been something the gate could see: a status-0 response
+        // carrying the reason, with the staged jar writes dropped along with
+        // the send that was to carry them. The test script still runs, and
+        // reads a response reporting an error rather than a status - the
+        // false-pass rule issue #180 exists for.
+        outcome.response = vayu::http::detail::error_response (*refusal);
+        outcome.response.request_headers = outcome.request.headers;
+    } else {
+        vayu::http::ClientConfig config;
+        config.verbose       = verbose;
+        config.cookie_jar    = &jar;
+        config.cookie_scope  = cookie_scope;
+        config.cookie_writes = std::move (pre_cookie_writes);
+        config.transport     = inputs.transport;
+        vayu::http::Client client (config);
+        outcome.response = client.send (outcome.request).value ();
+    }
 
     auto post_ctx =
     vayu::runtime::ScriptContext::for_test (outcome.request, outcome.response);
