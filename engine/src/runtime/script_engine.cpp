@@ -3340,11 +3340,7 @@ JSValue js_response_reason (JSContext* ctx, JSValueConst this_val, int argc, JSV
     if (!data || !data->response) {
         return JS_ThrowInternalError (ctx, "No response available");
     }
-    if (!data->response->status_text.empty ()) {
-        return JS_NewString (ctx, data->response->status_text.c_str ());
-    }
-    return JS_NewString (
-    ctx, vayu::http::status_text (data->response->status_code).c_str ());
+    return JS_NewString (ctx, response_reason_phrase (*data->response).c_str ());
 }
 
 // pm.response.size() -> { body, header, total }, in bytes.
