@@ -851,6 +851,13 @@ export const API_ENDPOINTS = {
   // Cookie jar - GET reads every scope, DELETE clears one or all
   COOKIES: "/cookies",
 
+  // Workspace backup - one VACUUM INTO snapshot into `backups/` beside the
+  // database, with retention. A verb path for the reason the inbox uses one:
+  // the engine takes a snapshot and the file is not a row anything reads back.
+  // There is no restore counterpart on purpose - restoring is a manual copy
+  // with the engine stopped, which is why the card prints the path.
+  WORKSPACE_BACKUP: "/workspace/backup",
+
   // Execution
   EXECUTE_REQUEST: "/execute",
   START_LOAD_TEST: "/runs",

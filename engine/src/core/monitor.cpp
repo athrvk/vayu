@@ -144,7 +144,6 @@ MonitorConfig& out) {
         return rejection;
     }
     return read_monitor_series (monitor, limits, out);
-    return std::nullopt;
 }
 
 /// The `monitor` value on a run config, or null when the run declared none.

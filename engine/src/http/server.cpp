@@ -176,6 +176,7 @@ void Server::setup_routes () {
 
     routes::register_health_routes (*route_ctx_);
     routes::register_config_routes (*route_ctx_);
+    routes::register_workspace_routes (*route_ctx_);
     routes::register_collection_routes (*route_ctx_);
     routes::register_request_routes (*route_ctx_);
     routes::register_request_example_routes (*route_ctx_);

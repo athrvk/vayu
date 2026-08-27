@@ -882,6 +882,16 @@ constexpr int MAX_RUNS_RETAINED = 200;
 /// Run retention: delete runs older than N days (0 = unlimited).
 constexpr int RUN_RETENTION_DAYS = 30;
 /**
+ * Workspace backups: keep at most N snapshots in `backups/` (0 = unlimited).
+ *
+ * Five rather than one, because the failure a backup guards against is often
+ * noticed late - a collection deleted last week is discovered missing today -
+ * and a single slot would have been overwritten by then. Each snapshot is a
+ * compacted copy of the whole workspace, so the ceiling is about disk: five is
+ * a few times the live file for a workspace of any ordinary size.
+ */
+constexpr int MAX_BACKUPS_RETAINED = 5;
+/**
  * How recently a stored OpenAPI document must have arrived to be spared by the
  * orphan sweep, whatever else says nothing references it (issue #718).
  *

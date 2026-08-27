@@ -89,6 +89,14 @@ export const APP_SETTINGS = [
 		keywords: ["clear history", "delete runs", "database"],
 	},
 	{
+		anchor: "workspace-backup",
+		panel: "general",
+		label: "Workspace backup",
+		searchText:
+			"Take a complete copy of the workspace database, and where the snapshot was written.",
+		keywords: ["backup", "snapshot", "restore", "export database", "copy"],
+	},
+	{
 		anchor: "cookies",
 		panel: "general",
 		label: "Cookies",

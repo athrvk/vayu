@@ -53,7 +53,8 @@ USAGE:
 
 COMMANDS:
     run <file>          Execute a request or load test via the daemon
-    
+    backup              Snapshot the workspace database and print the file path
+
 OPTIONS:
     -h, --help          Show this help message
     -v, --version       Show version information
@@ -64,6 +65,7 @@ OPTIONS:
 EXAMPLES:
     vayu-cli run request.json
     vayu-cli run load-test.json --daemon http://localhost:9876
+    vayu-cli backup
 
 REQUEST FILE FORMAT:
     See documentation for request and load test configuration formats.
@@ -269,6 +271,56 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
 }
 
 /**
+ * `vayu-cli backup` - one snapshot of the workspace, printed as the path it was
+ * written to (issue #987).
+ *
+ * Through the daemon rather than by opening the database directly, like every
+ * other CLI verb: the engine holds the file open, and a second process taking a
+ * copy of it is exactly the unsafe-under-WAL move this feature exists to
+ * replace. The path goes to stdout on its own line so a shell can capture it;
+ * everything else is a log line or stderr.
+ */
+int backup_via_daemon (const std::string& daemon_url) {
+    httplib::Client cli (daemon_url);
+    cli.set_connection_timeout (5);
+    // A snapshot of a large workspace outlives httplib's default read timeout,
+    // and a timed-out client would report a failure for a backup that is still
+    // being written - and then be told 409 on the retry.
+    cli.set_read_timeout (std::chrono::minutes (10));
+
+    auto res = cli.Post ("/workspace/backup", "", "application/json");
+    if (!res) {
+        const std::string msg = "Error: Failed to connect to daemon at " + daemon_url;
+        std::cerr << msg << "\n";
+        vayu::utils::log_error (msg);
+        return 1;
+    }
+    if (res->status != 200) {
+        const std::string msg =
+        "Backup failed (Status " + std::to_string (res->status) + ")";
+        std::cerr << msg << "\n";
+        std::cerr << res->body << "\n";
+        vayu::utils::log_error (msg);
+        vayu::utils::log_error (res->body);
+        return 1;
+    }
+
+    try {
+        const auto body = nlohmann::json::parse (res->body);
+        std::cout << body.value ("path", std::string{}) << "\n";
+        vayu::utils::log_info ("Workspace backed up (" +
+        std::to_string (body.value ("sizeBytes", int64_t{ 0 })) + " bytes)");
+        return 0;
+    } catch (const std::exception& e) {
+        const std::string msg =
+        "Error parsing daemon response: " + std::string (e.what ());
+        std::cerr << msg << "\n";
+        vayu::utils::log_error (msg);
+        return 1;
+    }
+}
+
+/**
  * The whole of the CLI, so that `main` is a catch and nothing else.
  *
  * `main` must not let an exception escape: an uncaught one terminates the
@@ -331,6 +383,8 @@ int run_cli (std::span<char* const> args) {
             result = run_via_daemon (options.daemon_url, options.filepath,
             options.verbosity, options.color);
         }
+    } else if (options.command == "backup") {
+        result = backup_via_daemon (options.daemon_url);
     } else if (options.command[0] == '-') {
         // Already handled flags above
         result = 0;
