@@ -235,10 +235,27 @@ Postman's `header` array of `{ key, value }` or a plain object under either
 `header` or `headers`; sending both spellings at once is refused rather than
 resolved by precedence.
 
-`{{variables}}` in a script-supplied URL are **not** resolved. Interpolation
-happens strictly before the pre-request script and a payload is resolved exactly
-once; a second pass inside the script would break that. Use
-`pm.variables.replaceIn(template)`.
+`{{variables}}` in the script-supplied URL, header values, a raw body and an
+`auth` credential **are** resolved, as the call is made (issue #1001) - so a
+value the same script set two lines earlier is visible, which is Postman's rule
+and the reason an imported token-refresh script works. This is not a second pass
+over the composed payload: those fields were composed once, before the script
+ran, and nothing here revisits them. A name nothing defines keeps its braces
+rather than becoming empty, as everywhere else. Header *names* are sent as
+written - two that resolve to one name are a collision rule composition owns
+(issue #1051), and a second answer to it invented here would be one more place
+for the two to drift.
+
+`auth` takes Postman's `{ type, <type>: params }` shape, with the parameter block
+in either spelling - the exported `[{ key, value }]` array or a plain object.
+`basic`, `bearer` and `apikey` are composed by the engine's own auth resolver,
+the same one `POST /execute` sends through, so an api key sent as a query
+parameter is percent-encoded onto the URL exactly as it would be on the main
+request and an `Authorization` header the script set itself still wins. Every
+other type - `oauth2` included, whose token acquisition needs a database this
+path deliberately does not carry - is refused by name rather than dropped: a
+request that goes out unauthenticated because the sandbox skipped an option is
+the same silent wrong request the body modes are refused to prevent.
 
 ### Hashing (`pm.crypto`) is Vayu's own name, and it is synchronous
 

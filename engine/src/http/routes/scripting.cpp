@@ -1154,7 +1154,10 @@ nlohmann::json get_script_completions () {
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail",
     "pm.sendRequest(urlOrOptions: string | { url: string; method?: string; "
-    "header?: object; body?: string | { mode: 'raw'; raw: string }; timeout?: "
+    "header?: object; headers?: object; body?: string | { mode: 'raw'; raw: "
+    "string }; auth?: { type: string; basic?: object; bearer?: object; "
+    "apikey?: "
+    "object }; timeout?: "
     "number }, callback: (err: Error | null, res: any) => void): void" },
     { "documentation",
     "Send an auxiliary request - fetching a token in a pre-request script is "
@@ -1165,7 +1168,16 @@ nlohmann::json get_script_completions () {
     "Transport failures - refused, DNS, timeout - arrive as err with a .code; "
     "res is null then. res carries code, status, responseTime, headers.get() "
     "and json()/text() - a subset of pm.response, not the assertion "
-    "chain.\n\nBounded on purpose: the request's timeout is capped "
+    "chain.\n\nThe url may be a string or pm.request.url, and {{variables}} in "
+    "it, in header values, in a raw body and in auth credentials resolve as "
+    "the "
+    "call is made - so a value this script set two lines earlier is visible. "
+    "Header names are sent as written.\n\nauth takes Postman's { type, <type>: "
+    "params } shape in either spelling, and composes basic, bearer and apikey. "
+    "Any other type - oauth2 included - is refused by name rather than "
+    "dropped, "
+    "and an Authorization header the script set itself wins.\n\nBounded on "
+    "purpose: the request's timeout is capped "
     "at whatever is left of the script's own time budget, and one script may "
     "issue at most 10 requests. Both throw when exceeded.\n\n**Not available "
     "to agents.** Vayu's MCP target allowlist is checked before the engine is "
