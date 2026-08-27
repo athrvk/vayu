@@ -60,7 +60,8 @@ written exactly as it stands, because only a scenario run's iteration knows
 which row is bound; the run's worker substitutes it immediately before each
 send. A `data.*` token in an ordinary Send therefore reaches the wire as
 written: there is no row. `{{data.}}` with nothing after the dot names no column
-and follows the ordinary unknown-name rule (resolves to `""`) instead.
+and follows the ordinary unknown-name rule instead - which since #1009 also
+leaves it written as it stands, for a different reason.
 
 **The UI paints it as its own state, not as a broken variable.** Unresolved is
 the accurate word for what the resolvers do with the token, but it is the wrong
@@ -243,11 +244,26 @@ copy at all: it composes via the engine and its old `resolve.ts` port is
 deleted (#226).
 
 The resolved map is then used by `resolveString(input)` (preview) and
-`resolve_template` (engine) which replace all `{{name}}` occurrences. An
-ordinary name nothing defines resolves to the **empty string** - the token
-disappears from the outgoing request. A `{{$name}}` is the exception; see
-below. Resolution is a **single pass**: a value that itself contains
-`{{other}}` stays literal, and there is no way to escape a literal `{{`.
+`resolve_template` (engine) which replace all `{{name}}` occurrences.
+
+**A name nothing defines keeps its braces** (#1009), plain and `{{$name}}`
+alike. The token goes out on the wire, where it becomes a DNS or a `4xx`
+failure naming the thing that was never set; it used to resolve to the empty
+string, which sent `https://{{host}}/x` as `https:///x` - a different request,
+made silently. A definition that *exists* and holds an empty value still
+substitutes empty: the rule is about a name nothing answers, not about a blank
+answer. There is no way to escape a literal `{{`.
+
+**A value that itself holds `{{tokens}}` resolves through them** (#1009), which
+is how `baseUrl = "{{protocol}}://{{host}}"` - the shape most imported
+environments are written in - composes as the URL it spells. Two rules bound
+the walk, because the values come from a user's environment and nothing there
+promises to terminate: a name already being expanded is a **cycle** and its
+token is left written as it stands (`a = "{{b}}"` with `b = "{{a}}"` resolves
+to the literal `{{a}}`), and expansion stops after **8 levels**, keeping what
+it resolved and leaving the rest literal. Text that a substitution did *not*
+put there is never rescanned, and a value holding no `{{` costs one search - so
+everything that is not layered still resolves in a single pass.
 
 ### One value composition refuses: a header a variable would forge (#738)
 

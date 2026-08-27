@@ -31,9 +31,11 @@ namespace {
  * The one `{{name}}` pattern, shared by every reader of a token in this file.
  *
  * Same as the clients' VARIABLE_PATTERN: no nested braces, no escape hatch.
- * Matches are consumed left to right over the *original* string only, which is
- * what makes both readers below a single pass - a replacement is never
- * rescanned, so `{{a}}` whose value contains `{{b}}` stays literal.
+ * Matches are consumed left to right over the string being scanned, never over
+ * the text a replacement put there - a substituted value is followed by
+ * re-entering the scanner on the *value* (`substitute_tokens_nested`, #1009),
+ * which is what bounds the work and lets a cycle be seen; the surrounding
+ * literal is never rescanned.
  */
 const std::regex& token_pattern () {
     static const std::regex pattern (R"(\{\{([^{}]+)\}\})");
@@ -238,8 +240,34 @@ const vayu::Environment& environment) {
     return values;
 }
 
-std::string substitute_tokens (const std::string& input,
-const std::function<std::optional<std::string> (const std::string& name)>& resolve) {
+namespace {
+
+/**
+ * How deep a value's own `{{tokens}}` are followed before the rest are left
+ * written as they stand (issue #1009).
+ *
+ * A bound rather than "until it stops changing", because the resolver has no
+ * way to know a chain is finite: the values come from a user's environment,
+ * and `a = "{{a}} "` grows on every pass. Eight is past every layering anyone
+ * writes by hand - `baseUrl = "{{protocol}}://{{host}}:{{port}}"` is two - and
+ * far short of a stack anyone would notice.
+ */
+constexpr size_t MAX_NESTED_RESOLUTIONS = 8;
+
+/**
+ * One pass over @p input, following each replacement that carries tokens of
+ * its own back through @p resolve.
+ *
+ * @p expanding is the chain of names currently being expanded, innermost last.
+ * A name already on it is a cycle, and its token is left written as it stands
+ * rather than expanded again - `a = "{{b}}"`, `b = "{{a}}"` resolves to the
+ * literal `{{a}}` instead of recurring until the stack ends. At the depth bound
+ * the value still substitutes; only its own tokens stay literal, so a chain
+ * longer than the bound keeps the work it had already done.
+ */
+std::string substitute_tokens_nested (const std::string& input,
+const std::function<std::optional<std::string> (const std::string& name)>& resolve,
+std::vector<std::string>& expanding) {
     if (input.empty ()) {
         return input;
     }
@@ -253,15 +281,44 @@ const std::function<std::optional<std::string> (const std::string& name)>& resol
     for (; it != end; ++it) {
         const auto& match = *it;
         out.append (input, last, static_cast<size_t> (match.position ()) - last);
-        if (auto replacement = resolve (trim (match[1].str ()))) {
-            out += *replacement;
-        } else {
-            out += match.str (); // left written as it stands
-        }
         last = static_cast<size_t> (match.position () + match.length ());
+
+        std::string name = trim (match[1].str ());
+        // The cycle is answered before `resolve` runs, not after: the callbacks
+        // record what they substituted (a header a value would forge, a column
+        // no row has), and a name this pass is not going to substitute must not
+        // leave a record saying it did.
+        if (std::find (expanding.begin (), expanding.end (), name) != expanding.end ()) {
+            out += match.str (); // a cycle - left written as it stands
+            continue;
+        }
+        auto replacement = resolve (name);
+        if (!replacement) {
+            out += match.str (); // left written as it stands
+            continue;
+        }
+        // The `find` is what keeps this a single pass for every value that
+        // holds no token, which is nearly all of them: only a value that
+        // itself spells `{{` pays a second scan.
+        if (replacement->find ("{{") == std::string::npos ||
+        expanding.size () >= MAX_NESTED_RESOLUTIONS) {
+            out += *replacement;
+            continue;
+        }
+        expanding.push_back (std::move (name));
+        out += substitute_tokens_nested (*replacement, resolve, expanding);
+        expanding.pop_back ();
     }
     out.append (input, last, input.size () - last);
     return out;
+}
+
+} // namespace
+
+std::string substitute_tokens (const std::string& input,
+const std::function<std::optional<std::string> (const std::string& name)>& resolve) {
+    std::vector<std::string> expanding;
+    return substitute_tokens_nested (input, resolve, expanding);
 }
 
 TokenSplit split_tokens (const std::string& input,
@@ -315,7 +372,14 @@ lookup_variable (const std::string& name, const VariableValues& vars) {
     if (is_dynamic_variable_name (name)) {
         return resolve_dynamic_variable (name); // unknown $name keeps its braces (#186)
     }
-    return std::string{}; // ordinary unknown name resolves to ""
+    // An unknown ordinary name keeps its braces too (#1009), on the rule the
+    // line above has held since #186: a token that resolved to "" left the
+    // request *different* and said nothing - `https://{{host}}/x` went out as
+    // `https:///x`, a URL nobody wrote, where the literal reaches DNS or the
+    // server and comes back as an error naming the host that was never set.
+    // It is also what makes a token survive composition for something later to
+    // resolve, which is the half #1008's residual pass is built on.
+    return std::nullopt;
 }
 
 std::string resolve_template (const std::string& input, const VariableValues& vars) {

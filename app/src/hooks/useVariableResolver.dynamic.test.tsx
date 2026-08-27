@@ -90,10 +90,25 @@ describe("resolveString with dynamic variables", () => {
 		expect(resolveString("a={{$randomInteger}}")).toBe("a={{$randomInteger}}");
 	});
 
-	it("still resolves an ordinary unknown name to an empty string", () => {
-		// Unchanged behaviour - the `$` prefix is what marks the intent.
+	it("leaves an ordinary unknown name written as it stands too", () => {
+		// Since issue #1009 the `$` prefix no longer marks the difference: the
+		// preview shows the token because that is what the engine will send,
+		// and a preview that showed a hole would disagree with the request.
 		const { resolveString } = setup();
-		expect(resolveString("a={{nope}}")).toBe("a=");
+		expect(resolveString("a={{nope}}")).toBe("a={{nope}}");
+	});
+
+	it("follows a value that itself holds tokens, and stops on a cycle", () => {
+		// The layering imported environments are written with, previewed as
+		// the URL it spells rather than as braces the engine would resolve.
+		const { resolveString } = setup({
+			baseUrl: v("{{protocol}}://{{host}}"),
+			protocol: v("https"),
+			host: v("api.example.test"),
+			loop: v("x{{loop}}"),
+		});
+		expect(resolveString("{{baseUrl}}/orders")).toBe("https://api.example.test/orders");
+		expect(resolveString("{{loop}}")).toBe("x{{loop}}");
 	});
 
 	it("resolves generators inside nested objects via resolveObject", () => {

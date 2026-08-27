@@ -751,16 +751,17 @@ TEST_F (ScenarioPlanTest, TheNoDataRefusalStaysUnchangedWithoutAContract) {
 }
 
 TEST_F (ScenarioPlanTest, ThePrefixAloneDoesNotBlockARunWithoutData) {
-    // `{{data.}}` names no column, so composition resolves it to "" like any
-    // other unknown name and nothing survives for the scan to find. Refusing it
-    // would block a run over a token that never reaches the wire.
+    // `{{data.}}` names no column, so composition treats it as any other
+    // unknown name - since #1009 that means the token is left written as it
+    // stands, and the scan for *columns* still finds nothing. Refusing the run
+    // would block it over a token that binds to nothing either way.
     seed_collection ("col", "");
     seed_request ("req", "col", /*order=*/0, "https://example.test/u/{{data.}}");
 
     const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
 
     ASSERT_TRUE (resolved.ok) << resolved.error;
-    EXPECT_EQ (resolved.plan.steps[0].request.url, "https://example.test/u/");
+    EXPECT_EQ (resolved.plan.steps[0].request.url, "https://example.test/u/{{data.}}");
 }
 
 // --- Data tokens in the credentials (issue #591) ------------------------------
