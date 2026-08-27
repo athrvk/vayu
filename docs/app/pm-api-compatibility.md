@@ -34,7 +34,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
 | Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - read-only, see below |
-| Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.iterationCount` - each optional, see below |
+| Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback)` - synchronous, callback only, refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
@@ -129,7 +129,7 @@ ancestor, the same walk `pm.collectionVariables` does (#234). The argument must
 be a string; anything else is a `TypeError` rather than a silently coerced
 `"undefined"`.
 
-### Script identity (`pm.info`) - five fields, all optional
+### Script identity (`pm.info`) - six fields, all optional
 
 `pm.info` is always an object; each field is present only when there is a
 truthful value for it, so a script tests with `typeof` rather than assuming:
@@ -139,8 +139,9 @@ truthful value for it, so a script tests with `typeof` rather than assuming:
 | `requestId` | The saved request the send is filed under | An ad-hoc request (MCP's `run_request` with no `requestId`, a load run started from a URL) |
 | `requestName` | The request's name **as the client sent it** - the name in the editor, which for an unsaved edit differs from the stored row | A request with no name, and an ad-hoc one |
 | `eventName` | `"prerequest"` in the Pre-request tab, `"test"` in the Tests tab | Never, for a script Vayu runs - both hooks set it |
-| `iteration` | The 0-based pass over the plan, in a collection run | Anywhere else - a single Send, a load run's Tests script |
-| `iterationCount` | How many passes that run will make | The same places |
+| `iteration` | The 0-based pass this response was sent in - a collection run's pass, or the iteration a load run's sampled response carried | A single Send, which is one request rather than a pass of anything |
+| `vu` | The 1-based virtual user that sent it. Spans the concurrency in a collection load run; `1` everywhere else, because one request repeated is one user's iterations | A single Send |
+| `iterationCount` | How many passes that run will make | Anywhere but a collection run |
 
 ```javascript
 if (pm.info.eventName === "prerequest") {
@@ -149,14 +150,17 @@ if (pm.info.eventName === "prerequest") {
 console.log("running " + (pm.info.requestName || "an unnamed request"));
 ```
 
-`iteration` and `iterationCount` are set by the **collection runner and by
-nothing else**, which is the same decision issue #300 recorded rather than a
-reversal of it. There is now a runner to count, so a scenario run's steps read
-the real index (`iteration` counts from 0, and reads as `0` on the first pass);
-everywhere else both stay `undefined`, because a load test's Tests script runs
-**once per sampled response, after the run finishes**, and samples are a
-reservoir rather than the first N iterations - a number reported there would not
-be an iteration count.
+`iterationCount` is set by the **collection runner and by nothing else**: a
+duration-bounded load run has no total to report, and a field readable from one
+mode and not another is worse than one that is never readable at all.
+
+`iteration` and `vu` are reported by every run, load runs included (issue #994).
+That is not a reversal of issue #300's ruling but the case it excluded: what
+#300 refused was reporting a *reservoir position* as an iteration number, and
+neither of these is one - a load run's submission claims its iteration and its
+virtual user before it is sent, and both travel with the response into the
+sample, exactly as the bound data row does. A single Send reads `undefined` for
+both.
 
 ### `pm.sendRequest` is synchronous, callback-only, and not available to agents
 

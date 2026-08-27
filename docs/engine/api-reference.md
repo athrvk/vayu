@@ -4579,12 +4579,14 @@ the same request does, and the two cannot drift apart.
 > `pm.request`. This is the price of resolving once, and resolving once is what
 > keeps a collection edited mid-run from changing the sequence underneath it.
 >
-> The one exception is the reserved `{{data.*}}` namespace below, which
-> composition deliberately leaves alone so the runner can bind it per iteration.
+> The two exceptions are the reserved namespaces below - `{{data.*}}` and the
+> `{{$vu}}` / `{{$iteration}}` identity - which composition deliberately leaves
+> alone so the runner can bind them per iteration.
 
-**Scripts** additionally read `pm.info.iteration` (0-based) and
-`pm.info.iterationCount`. No other caller sets them - see
-[scripting.md](scripting.md#script-identity-pminfo).
+**Scripts** additionally read `pm.info.iteration` (0-based), `pm.info.vu`
+(1-based) and `pm.info.iterationCount`. See
+[scripting.md](scripting.md#script-identity-pminfo) for which run shapes report
+which.
 
 **A run with `data` binds one row per iteration.** Row `i % rows` binds to
 iteration `i`, and the run's scripts read it as `pm.iterationData` -
@@ -4626,6 +4628,20 @@ composition (resolution is one pass and never rescans a substituted value), and
 the data pass then binds it. That is usable, and it is also why the
 no-data refusal below says "or from the variable value it was written into" -
 the token it names may not appear anywhere in the request as you wrote it.
+
+**`{{$vu}}` and `{{$iteration}}` are the second reserved namespace** (issue
+#994), and they bind at the same moment out of the same walk - a field carrying
+one of each is one string, so both are split once and joined together. They need
+no rows behind them: `{{$vu}}` is the virtual user's own 1-based number in a
+scenario run and `1` in every other shape (one request repeated is one user's
+iterations, whatever the concurrency), and `{{$iteration}}` is that user's
+0-based iteration, the submission index on a single-request run, and `0` on a
+plain `POST /execute`. A variable named `$vu` does not answer for the identity,
+for the reason a variable named `data.id` does not answer for the column, and
+`{{$vus}}` is an ordinary unknown `$name` that keeps its braces. They bind
+everywhere a `data.*` token does **except the credential fields**: a credential
+is encoded at build time and the deferral that lets a row reach one first
+happens only in a run that has rows (issue #1055).
 
 **A run binds only what it was given rows for.** A `POST /runs` carrying
 `scenario.data` binds per iteration, one carrying the top-level

@@ -319,7 +319,7 @@ const IterationBinding& binding);
  * data-driven run and go out base64-encoded as written in every other, which is
  * a rule nobody could hold in their head. It goes out written as it stands in
  * both, loudly, and the identity binds the request rather than its credentials
- * (issue #1050 carries the deferral change that would lift this).
+ * (issue #1055 carries the deferral change that would lift this).
  *
  * The same splitter the request walk drives, over `walk_auth_credentials`
  * instead of `walk_bindable_fields` - one field list per walk, and the join
