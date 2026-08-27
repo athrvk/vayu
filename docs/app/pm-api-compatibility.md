@@ -501,7 +501,9 @@ Divergences from Postman:
 
 ```javascript
 pm.execution.setNextRequest('Checkout');  // run that request next
+pm.execution.setNextRequest(pm.info.requestId); // the same jump, by id
 pm.execution.setNextRequest(null);        // end this iteration, start the next
+pm.execution.setNextRequest('null');      // the quoted stop form, read the same way
 pm.execution.skipRequest();               // pre-request only: do not send this one
 ```
 
@@ -510,11 +512,18 @@ sentence naming why rather than being ignored - a single Send has no next
 request, and a load run's test scripts run after the run has finished, against
 responses already recorded.
 
+Both target spellings Postman accepts work: a request's name, and the id a
+script reads off `pm.info.requestId`. So does the quoted stop form
+`setNextRequest('null')` - with one stated precedence, which is a divergence
+only in the sense that Postman has no answer for it: a run that carries a
+request actually named `null` jumps to that request rather than stopping.
+
 Divergences from Postman:
 
-- **An unresolvable target fails the step**, by name. A name no request in the
-  run carries, and a name two of them share, are both errors that end the
-  iteration; Postman resolves an ambiguous name to whichever it finds.
+- **An unresolvable target fails the step**, naming it. A target no request in
+  the run answers to by name or by id, and a name two of them share, are both
+  errors that end the iteration; Postman resolves an ambiguous name to whichever
+  it finds.
 - **A cycle is bounded.** Two requests pointing at each other run forever in
   Postman's runner; here the iteration is cut off by `maxStepsPerIteration` and
   the failure names the steps that were looping.
