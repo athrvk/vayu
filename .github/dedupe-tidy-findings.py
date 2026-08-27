@@ -62,14 +62,24 @@ UNLOCATED = re.compile(
 NOT_PROCESSED = re.compile(r"^Error while processing ")
 
 
-def repo_relative(path: str, root: pathlib.PurePath) -> str:
-    """`path` under `root`, as a POSIX path; unchanged if it is outside."""
+def repo_relative(path: str, root: pathlib.PurePath) -> str | None:
+    """`path` under `root`, as a POSIX path; None if it is outside the tree.
+
+    A finding in a file this repository does not contain is not this
+    repository's finding, and counting one is how a scan reports a defect
+    nobody can fix and no `NOLINT` can reach. `clang-analyzer-*` diagnostics
+    are why this is not hypothetical: they do not honour `-header-filter`, so
+    a walk that inlines into the platform's standard library reports there -
+    `C:/Program Files/.../xfilesystem_abi.h` in the run that prompted this.
+    Such a finding is still worth *seeing*, so the caller counts what was
+    dropped and prints it rather than discarding it silently.
+    """
     normalised = pathlib.PurePath(path.replace("\\", "/")).as_posix()
     root_posix = pathlib.PurePath(str(root).replace("\\", "/")).as_posix()
     prefix = root_posix.rstrip("/") + "/"
     if normalised.startswith(prefix):
         return normalised[len(prefix) :]
-    return normalised
+    return None
 
 
 def main() -> int:
@@ -104,6 +114,7 @@ def main() -> int:
 
     root = pathlib.PurePath(args.root)
     findings = {}
+    outside = {}
     unfinished = 0
     diagnostic_shaped = 0
     unreadable = []
@@ -119,8 +130,15 @@ def main() -> int:
             # An alias reports under both names on one line; the first is
             # canonical.
             check = match.group("check").split(",")[0]
+            relative = repo_relative(match.group("file"), root)
+            if relative is None:
+                outside.setdefault(
+                    (match.group("file"), match.group("line"), check),
+                    match.group("text"),
+                )
+                continue
             key = (
-                repo_relative(match.group("file"), root),
+                relative,
                 int(match.group("line")),
                 int(match.group("col")),
                 check,
@@ -144,6 +162,17 @@ def main() -> int:
     )
     print()
 
+    if outside:
+        print(
+            f"Ignored **{len(outside)}** finding(s) in files outside the repository "
+            f"(`clang-analyzer-*` does not honour `-header-filter`). Not this tree's "
+            f"to fix, and listed so the exclusion is visible rather than assumed:"
+        )
+        print()
+        for (file, line, check), message in sorted(outside.items()):
+            print(f"- `{file}:{line}` `{check}` - {message}")
+        print()
+
     if unfinished:
         print(
             f"::error::{unfinished} translation unit(s) clang-tidy could not finish "
@@ -152,7 +181,11 @@ def main() -> int:
         )
         print()
 
-    if not findings and diagnostic_shaped:
+    # `outside` counts as parsed: the guard asks whether the patterns could READ
+    # the log, not whether what they read was this tree's. Without that, a log
+    # whose every finding sits in a system header would parse perfectly and be
+    # reported as a broken parser.
+    if not findings and not outside and diagnostic_shaped:
         print(
             f"::error::{args.label}: the log holds {diagnostic_shaped} diagnostic-shaped "
             f"line(s) and this script parsed none of them into a finding. That is a "

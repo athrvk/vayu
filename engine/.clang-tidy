@@ -22,6 +22,7 @@ Checks: '
   readability-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-exception-escape,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
   -cert-arr39-c,
   -cert-con36-c,
   -cert-con54-cpp,
@@ -98,6 +99,26 @@ Checks: '
 # this file existed, which is what makes them relitigable - none is a hard
 # call, and a line each is cheaper than having the argument twice.
 #
+#   clang-analyzer-optin.core.EnumCastOutOfRange
+#     Reports the ordinary bitmask-enum idiom as an out-of-range cast, and it
+#     reports it inside the platform's own standard library, where nothing this
+#     repository writes can reach. `std::filesystem::file_size` in
+#     `utils/logger.cpp` walks into MSVC's `_BITMASK_OPS`, which is
+#     `static_cast<_BITMASK>(static_cast<_IntTy>(_Left) | ...)`; for
+#     `__std_fs_stats_flags` that produced the value 9 from
+#     `_Follow_symlinks | _File_size`. Both operands are enumerators, their OR
+#     deliberately is not, and that is what a bitmask enum IS - so the check is
+#     not finding a defect, it is objecting to the pattern.
+#     Two things make it undeclinable at the site rather than here.
+#     `clang-analyzer-*` diagnostics do not honour `HeaderFilterRegex` or
+#     `-header-filter`, so a system header reaches the report whatever the
+#     filter says; and the location is a file inside Visual Studio, so there is
+#     no site to put a `NOLINT` on. It is `optin.` - off by default upstream,
+#     and here only because this config enables the family - which is the
+#     clearest statement that it was never meant to run unconditionally.
+#     Found by #1023 on the Windows leg after a `file_size` call reached
+#     `logger.cpp` from #985; the Linux leg never sees it, because libstdc++
+#     does not spell its flags this way.
 #   bugprone-exception-escape
 #     Off on the measurement (#1023), not on the principle. The check fires only
 #     on a `throw` it can SEE, so what it reports is a property of the standard
