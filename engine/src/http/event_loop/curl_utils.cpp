@@ -659,7 +659,6 @@ const std::string& url) {
     matched->passphrase.c_str () :
     static_cast<const char*> (nullptr));
     return matched;
-    return matched;
 }
 
 } // namespace
