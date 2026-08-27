@@ -651,6 +651,21 @@ declare const pm: {
 			 */
 			add(...args: any[]): void;
 			/**
+			 * Every outgoing header as a { key, value }, in the object's own key order. A snapshot: adding a header afterwards does not change the array.
+			 */
+			all(): { key: string; value: string }[];
+			/**
+			 * How many headers the request will send - all().length without building the array.
+			 */
+			count(): number;
+			/**
+			 * Call fn for each outgoing header, with { key, value } as Postman does. The list is taken once, so removing a header from inside the callback does not shorten the walk.
+			 * 
+			 * Example:
+			 * pm.request.headers.each(h => console.log(h.key, h.value));
+			 */
+			each(fn: (header: { key: string; value: string }, index: number, all: { key: string; value: string }[]) => void, thisArg?: any): void;
+			/**
 			 * Read an outgoing header by name, case-insensitively - unlike indexing, which is case-sensitive. Returns undefined when it is absent.
 			 */
 			get(name: string): string | undefined;
@@ -659,9 +674,21 @@ declare const pm: {
 			 */
 			has(name: string, value?: string): boolean;
 			/**
+			 * Where the header sits in all(), case-insensitively, or -1 when it is absent. A { key } member from all() or one() is accepted in place of the name.
+			 */
+			indexOf(name: string): number;
+			/**
+			 * The header itself rather than its value, case-insensitively - undefined when it is absent. Its key is the spelling the request holds, which is what upsert() writes through.
+			 */
+			one(name: string): { key: string; value: string } | undefined;
+			/**
 			 * Remove a header from the outgoing request, including one the Auth tab applied. Case-insensitive, and removing an absent header is a no-op.
 			 */
 			remove(name: string): void;
+			/**
+			 * A plain { name: value } copy. Keys are lower-cased, as Postman's case-insensitive list does it, so toObject()['content-type'] reads the header whatever casing it was set with; pass a truthy second argument to keep the spelling. The copy is not the header set - writing to it sends nothing.
+			 */
+			toObject(excludeDisabled?: boolean, caseSensitive?: boolean): Record<string, string>;
 			/**
 			 * Add the header, replacing any existing one of that name whatever its casing. The pre-request equivalent of assigning to pm.request.headers[name], and the safe choice when you do not know whether the header is already there.
 			 */
@@ -835,10 +862,25 @@ declare const pm: {
 		 */
 		eventsTruncated: boolean | undefined;
 		/**
-		 * Response headers as key-value pairs, keyed by the lower-cased name the HTTP client parsed. Index it (pm.response.headers['content-type']) or use the case-insensitive get()/has() over it.
+		 * Response headers as key-value pairs, keyed by the lower-cased name the HTTP client parsed. Index it (pm.response.headers['content-type']), use the case-insensitive get()/has() over it, or walk it with each()/all()/toObject().
 		 */
 		headers: {
 			[key: string]: any;
+			/**
+			 * Every response header as a { key, value }, in the object's own key order. A name the server sent twice is one entry here, its values already folded with ', ' - the wire order and the duplicate are gone before a script sees them.
+			 */
+			all(): { key: string; value: string }[];
+			/**
+			 * How many headers the response carries - all().length without building the array.
+			 */
+			count(): number;
+			/**
+			 * Call fn for each response header, with { key, value } as Postman does. The list is taken once, so it is the set the call started with.
+			 * 
+			 * Example:
+			 * pm.response.headers.each(h => console.log(h.key, h.value));
+			 */
+			each(fn: (header: { key: string; value: string }, index: number, all: { key: string; value: string }[]) => void, thisArg?: any): void;
 			/**
 			 * Read a response header by name, case-insensitively. Returns undefined when the header is absent.
 			 * 
@@ -850,6 +892,18 @@ declare const pm: {
 			 * Whether the response carries a header of that name, case-insensitively. With a second argument, whether it also carries that exact value - the comparison is strict, so a number never matches the wire's string.
 			 */
 			has(name: string, value?: string): boolean;
+			/**
+			 * Where the header sits in all(), case-insensitively, or -1 when it is absent. A { key } member from all() or one() is accepted in place of the name.
+			 */
+			indexOf(name: string): number;
+			/**
+			 * The header itself rather than its value, case-insensitively - undefined when it is absent. get() is the value half of the same lookup.
+			 */
+			one(name: string): { key: string; value: string } | undefined;
+			/**
+			 * A plain { name: value } object. Keys are lower-cased, as Postman's case-insensitive list does it; pass a truthy second argument to keep the stored spelling. Postman's other two switches decide nothing here - these headers hold no duplicate and no empty name.
+			 */
+			toObject(excludeDisabled?: boolean, caseSensitive?: boolean): Record<string, string>;
 		};
 		/**
 		 * Parse and return the response body as JSON.

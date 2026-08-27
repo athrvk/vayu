@@ -3077,6 +3077,17 @@ const std::string& value) {
     JS_NewString (ctx, value.c_str ()), JS_PROP_C_W_E);
 }
 
+/// A header name as a case-insensitive index keys it - which is the spelling
+/// Postman's `toObject()` hands back, and the only place here that needs one.
+/// The engine has no primitive for the fold and hand-rolls it 29 times; that is
+/// filed as #1060 rather than converted from under this one caller.
+std::string header_name_lowered (const std::string& name) {
+    std::string lowered = name;
+    std::transform (lowered.begin (), lowered.end (), lowered.begin (),
+    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+    return lowered;
+}
+
 bool header_names_equal (const std::string& a, const std::string& b) {
     return a.size () == b.size () &&
     std::equal (a.begin (), a.end (), b.begin (), [] (unsigned char c1, unsigned char c2) {
@@ -3089,30 +3100,31 @@ bool header_names_equal (const std::string& a, const std::string& b) {
 // exact lookup would miss `Content-Type` on a response (whose keys the HTTP
 // client has lower-cased) and `content-type` on a request (whose keys keep
 // whatever the user typed).
-std::optional<std::string>
-find_header_key (JSContext* ctx, JSValueConst headers, const std::string& name) {
-    JSPropertyEnum* props = nullptr;
-    uint32_t count        = 0;
-    if (JS_GetOwnPropertyNames (ctx, &props, &count, headers,
-        JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0) {
+/// The header names the object holds, in the order it holds them - which is the
+/// order the source `Headers` map was walked in when the entries were defined,
+/// and so the order every read below reports. The methods are non-enumerable
+/// (HEADER_METHOD_FLAGS), so they are never among the names. `std::nullopt`
+/// means QuickJS left an exception pending.
+std::optional<std::vector<std::string>> header_key_order (JSContext* ctx, JSValueConst headers) {
+    std::vector<std::string> keys;
+    if (!js_own_enumerable_keys (ctx, headers, keys)) {
         return std::nullopt;
     }
+    return keys;
+}
 
-    std::optional<std::string> found;
-    for (uint32_t i = 0; i < count; i++) {
-        if (!found) {
-            const char* raw = JS_AtomToCString (ctx, props[i].atom);
-            if (raw) {
-                if (header_names_equal (raw, name)) {
-                    found = std::string (raw);
-                }
-                JS_FreeCString (ctx, raw);
-            }
-        }
-        JS_FreeAtom (ctx, props[i].atom);
+std::optional<std::string>
+find_header_key (JSContext* ctx, JSValueConst headers, const std::string& name) {
+    auto keys = header_key_order (ctx, headers);
+    if (!keys) {
+        return std::nullopt;
     }
-    js_free (ctx, props);
-    return found;
+    for (auto& key : *keys) {
+        if (header_names_equal (key, name)) {
+            return std::move (key);
+        }
+    }
+    return std::nullopt;
 }
 
 // `this` is the header object the method was reached through. Detaching a
@@ -3206,6 +3218,209 @@ JSValue js_headers_has (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     const std::string actual = js_to_string (ctx, stored);
     JS_FreeValue (ctx, stored);
     return JS_NewBool (ctx, actual == js_to_string (ctx, argv[1]) ? 1 : 0);
+}
+
+// Postman's header object is a PropertyList, and the six reads below are the
+// half of it that only looks. `each` in particular is an everyday idiom - it
+// threw here, which is how an imported script died on a line that reads nothing
+// - so all six install on the response and sendRequest objects too, ahead of
+// the `mutators` gate.
+//
+// What they cannot report is what this object no longer holds: `Headers` is a
+// single-valued case-insensitive map, so a name the server sent twice arrived
+// folded with ", " and the wire order is gone with it. The order below is the
+// map's; the fold is documented beside these methods in both script docs.
+
+/// One `{ key, value }` member - the shape Postman's PropertyList hands its
+/// iterator, and the shape `add`/`upsert` already read back.
+JSValue header_member (JSContext* ctx, JSValueConst headers, const std::string& key) {
+    JSValue member = JS_NewObject (ctx);
+    JS_SetPropertyStr (
+    ctx, member, "key", JS_NewStringLen (ctx, key.data (), key.size ()));
+    JS_SetPropertyStr (
+    ctx, member, "value", JS_GetPropertyStr (ctx, headers, key.c_str ()));
+    return member;
+}
+
+/// Every member as an array. `all()` itself, and the list `each()` walks - built
+/// once, so a callback that removes a header does not shorten the walk under it.
+JSValue header_member_list (JSContext* ctx,
+JSValueConst headers,
+const std::vector<std::string>& keys) {
+    JSValue list  = JS_NewArray (ctx);
+    uint32_t next = 0;
+    for (const auto& key : keys) {
+        JS_SetPropertyUint32 (ctx, list, next++, header_member (ctx, headers, key));
+    }
+    return list;
+}
+
+/// A name, or the `{ key, value }` member `all()` and `one()` hand back - the
+/// two spellings `indexOf` answers to.
+std::optional<std::string>
+read_header_member_arg (JSContext* ctx, const char* member, int argc, JSValueConst* argv) {
+    if (argc >= 1 && JS_IsObject (argv[0]) && !JS_IsFunction (ctx, argv[0]) &&
+    !JS_IsArray (argv[0])) {
+        JSValue js_key = JS_GetPropertyStr (ctx, argv[0], "key");
+        JSValueConst only[1]{ js_key };
+        auto name = read_header_name_arg (ctx, member, 1, only);
+        JS_FreeValue (ctx, js_key);
+        return name;
+    }
+    return read_header_name_arg (ctx, member, argc, argv);
+}
+
+/// `headers.all()` - every header as a `{ key, value }`, in key order.
+JSValue js_headers_all (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    if (!header_this_is_usable (ctx, this_val, "all")) {
+        return JS_EXCEPTION;
+    }
+    auto keys = header_key_order (ctx, this_val);
+    if (!keys) {
+        return JS_EXCEPTION;
+    }
+    return header_member_list (ctx, this_val, *keys);
+}
+
+/// `headers.count()` - how many headers, which is `all().length` without
+/// building the array.
+JSValue js_headers_count (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    if (!header_this_is_usable (ctx, this_val, "count")) {
+        return JS_EXCEPTION;
+    }
+    auto keys = header_key_order (ctx, this_val);
+    if (!keys) {
+        return JS_EXCEPTION;
+    }
+    return JS_NewInt32 (ctx, static_cast<int32_t> (keys->size ()));
+}
+
+/**
+ * `headers.each(fn, thisArg)` - the iteration idiom, with Postman's arguments.
+ *
+ * postman-collection's `each` is `_.forEach(members, iterator.bind(context))`,
+ * so the callback is handed `(member, index, list)` and the optional second
+ * argument becomes its `this`. Passing only the member would have been the
+ * smaller change and would silently hand `undefined` to a script that reads the
+ * index - the class of quiet wrong answer this surface exists to close.
+ */
+JSValue js_headers_each (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (!header_this_is_usable (ctx, this_val, "each")) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1 || !JS_IsFunction (ctx, argv[0])) {
+        return JS_ThrowTypeError (ctx, "headers.each(fn) needs a function, got %s",
+        argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
+    }
+    auto keys = header_key_order (ctx, this_val);
+    if (!keys) {
+        return JS_EXCEPTION;
+    }
+
+    JSValue list                = header_member_list (ctx, this_val, *keys);
+    const JSValueConst this_arg = argc >= 2 ? argv[1] : JS_UNDEFINED;
+    JSValue outcome             = JS_UNDEFINED;
+    for (uint32_t i = 0; i < keys->size (); i++) {
+        JSValue member = JS_GetPropertyUint32 (ctx, list, i);
+        JSValue index  = JS_NewInt32 (ctx, static_cast<int32_t> (i));
+        JSValueConst args[3]{ member, index, list };
+        JSValue returned = JS_Call (ctx, argv[0], this_arg, 3, args);
+        JS_FreeValue (ctx, member);
+        JS_FreeValue (ctx, index);
+        if (JS_IsException (returned)) {
+            // A throw out of the callback is the script's, not ours - it goes
+            // back up as it is rather than being reported as an `each` failure.
+            outcome = JS_EXCEPTION;
+            break;
+        }
+        JS_FreeValue (ctx, returned);
+    }
+    JS_FreeValue (ctx, list);
+    return outcome;
+}
+
+/**
+ * `headers.toObject(excludeDisabled, caseSensitive)` - Postman's signature.
+ *
+ * Its header list is indexed case-insensitively, so `toObject()` there
+ * **lower-cases every key**, and only `caseSensitive` keeps the spelling the
+ * header was stored with. Copying the object's own keys instead - which is what
+ * a plain enumeration would do - reads as the harmless choice and is not:
+ * `pm.request.headers` keeps whatever the user typed, so
+ * `toObject()['content-type']` would answer `undefined` here against a request
+ * carrying `Content-Type`, and answer correctly in Postman.
+ *
+ * The other two switches Postman takes decide nothing here: `multiValue` has no
+ * duplicate to unfold (they arrived folded), and `sanitizeKeys` no falsy key to
+ * drop, since a header name is a non-empty string on both surfaces.
+ */
+JSValue js_headers_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (!header_this_is_usable (ctx, this_val, "toObject")) {
+        return JS_EXCEPTION;
+    }
+    auto keys = header_key_order (ctx, this_val);
+    if (!keys) {
+        return JS_EXCEPTION;
+    }
+    const bool case_sensitive = argc >= 2 && JS_ToBool (ctx, argv[1]) == 1;
+
+    JSValue out = JS_NewObject (ctx);
+    for (const auto& key : *keys) {
+        JSValue value = JS_GetPropertyStr (ctx, this_val, key.c_str ());
+        const std::string prop = case_sensitive ? key : header_name_lowered (key);
+        JS_SetPropertyStr (ctx, out, prop.c_str (), value);
+    }
+    return out;
+}
+
+/// `headers.one(name)` - the member rather than its value, `undefined` when the
+/// header is absent. `get` is the value half of the same lookup.
+JSValue js_headers_one (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (!header_this_is_usable (ctx, this_val, "one")) {
+        return JS_EXCEPTION;
+    }
+    auto name = read_header_name_arg (ctx, "one", argc, argv);
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    auto key = find_header_key (ctx, this_val, *name);
+    if (!key) {
+        return JS_UNDEFINED;
+    }
+    return header_member (ctx, this_val, *key);
+}
+
+/**
+ * `headers.indexOf(name)` - the header's position in `all()`, `-1` when absent.
+ *
+ * Postman takes a member object here as well as a name, and finds it by
+ * identity in its own member list. The members handed out here are built per
+ * call, so identity would answer `-1` for a member of this very list; matching
+ * the object's `key` answers what Postman answers for that case, and `-1` for
+ * an object naming a header this list does not hold, as Postman's does.
+ */
+JSValue js_headers_index_of (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (!header_this_is_usable (ctx, this_val, "indexOf")) {
+        return JS_EXCEPTION;
+    }
+    auto name = read_header_member_arg (ctx, "indexOf", argc, argv);
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    auto keys = header_key_order (ctx, this_val);
+    if (!keys) {
+        return JS_EXCEPTION;
+    }
+    for (uint32_t i = 0; i < keys->size (); i++) {
+        if (header_names_equal ((*keys)[i], *name)) {
+            return JS_NewInt32 (ctx, static_cast<int32_t> (i));
+        }
+    }
+    return JS_NewInt32 (ctx, -1);
 }
 
 // Postman spells this `add({ key, value })`; Bruno spells it `(name, value)`.
@@ -3311,10 +3526,29 @@ JSValue js_request_headers_remove (JSContext* ctx, JSValueConst this_val, int ar
 // they mutate an object nothing reads back - the same no-op that assignment
 // already is there, documented in both script docs.
 void install_header_methods (JSContext* ctx, JSValue headers, bool mutators) {
-    JS_DefinePropertyValueStr (ctx, headers, "get",
-    JS_NewCFunction (ctx, js_headers_get, "get", 1), HEADER_METHOD_FLAGS);
-    JS_DefinePropertyValueStr (ctx, headers, "has",
-    JS_NewCFunction (ctx, js_headers_has, "has", 1), HEADER_METHOD_FLAGS);
+    // The reads are eight of one shape, so they are a table and a loop - the
+    // idiom `build_query_object` uses for the same job further down. The three
+    // mutators are not: two of them share one implementation through a magic
+    // number, and spelling that in the table would cost more than it saves.
+    struct HeaderRead {
+        const char* name;
+        JSCFunction* fn;
+        int length;
+    };
+    static constexpr std::array<HeaderRead, 8> READS = {
+        HeaderRead{ "get", js_headers_get, 1 },
+        HeaderRead{ "has", js_headers_has, 1 },
+        HeaderRead{ "each", js_headers_each, 1 },
+        HeaderRead{ "all", js_headers_all, 0 },
+        HeaderRead{ "count", js_headers_count, 0 },
+        HeaderRead{ "toObject", js_headers_to_object, 0 },
+        HeaderRead{ "one", js_headers_one, 1 },
+        HeaderRead{ "indexOf", js_headers_index_of, 1 },
+    };
+    for (const auto& read : READS) {
+        JS_DefinePropertyValueStr (ctx, headers, read.name,
+        JS_NewCFunction (ctx, read.fn, read.name, read.length), HEADER_METHOD_FLAGS);
+    }
 
     if (!mutators) {
         return;

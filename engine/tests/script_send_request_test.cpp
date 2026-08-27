@@ -228,6 +228,42 @@ TEST_F (SendRequestTest, DeliversTheResponseToTheCallback) {
     EXPECT_EQ (server.hit_count (), 1);
 }
 
+TEST_F (SendRequestTest, TheCallbackResponseCarriesTheHeaderPropertyListReads) {
+    // The third header object. It is built by the same `install_header_methods`
+    // the two pm.* ones are, so this is the assertion that keeps that true
+    // rather than a second surface drifting behind.
+    SendRequestServer server;
+
+    auto result = run ("var seen = {}; "
+                       "pm.sendRequest('" +
+    server.url ("/token") +
+    "', function (err, res) { "
+    "  seen.count = res.headers.count(); "
+    "  seen.keys = res.headers.all().map(function (h) { return h.key; }); "
+    "  seen.type = res.headers.toObject()['content-type']; "
+    "  seen.one = res.headers.one('CONTENT-TYPE').value; "
+    "  seen.index = res.headers.indexOf('X-Absent'); "
+    "  seen.walked = []; "
+    "  res.headers.each(function (h) { seen.walked.push(h.key); }); "
+    "  seen.enumerated = Object.keys(res.headers).length; "
+    "}); "
+    "pm.test('reads', function () { "
+    "  pm.expect(seen.count > 0).to.equal(true); "
+    "  pm.expect(seen.keys.length).to.equal(seen.count); "
+    "  pm.expect(seen.walked.length).to.equal(seen.count); "
+    // The methods are non-enumerable here too, so enumerating the object sees
+    // the headers and nothing else - the guard the two pm.* objects have.
+    "  pm.expect(seen.enumerated).to.equal(seen.count); "
+    "  pm.expect(seen.type).to.equal('application/json'); "
+    "  pm.expect(seen.one).to.equal('application/json'); "
+    "  pm.expect(seen.index).to.equal(-1); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
 TEST_F (SendRequestTest, OptionsObjectCarriesMethodHeadersAndBody) {
     SendRequestServer server;
 

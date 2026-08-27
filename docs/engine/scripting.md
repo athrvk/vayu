@@ -336,16 +336,53 @@ pm.response.headers.has('X-Request-Id');   // name present, boolean
 pm.response.headers.has('Content-Type', 'application/json');
                                            // present and holding that exact value
 pm.response.headers['content-type'];       // indexing: exact key only
+pm.response.headers.all();                 // [{key, value}, ...] in map order
+pm.response.headers.count();               // how many headers there are
+pm.response.headers.one('Content-Type');   // {key, value}, or undefined
+pm.response.headers.toObject();            // {'content-type': 'application/json', ...}
+pm.response.headers.toObject(false, true); // same, keys keep the stored spelling
+pm.response.headers.indexOf('Content-Type');
+                                           // position in all(), or -1
+pm.response.headers.each(function (header, index, all) {
+  console.log(header.key, header.value, index, all.length);
+});
 ```
 
 `has()`'s optional second argument is compared strictly against the header's
 wire value - a number never matches, since the wire value is always a string.
 
-`headers` is a plain object, not Postman's `HeaderList`, but `get()` and `has()`
-are on it and behave the way HTTP header names do - case-insensitively. Indexing
-does not: the engine lower-cases every response header name as it parses it, so
-`headers['Content-Type']` is `undefined` while `headers.get('Content-Type')`
-works. Prefer the methods unless you know the exact key.
+`headers` is a plain object, not Postman's `HeaderList`, but the read half of a
+Postman `PropertyList` is on it: `get()`, `has()`, `each()`, `all()`, `count()`,
+`toObject()`, `one()` and `indexOf()`. Every one of them that takes a header
+name matches it the way HTTP header names work - case-insensitively, and
+`toObject()`'s keys come back lower-cased for the same reason. Indexing does
+not: the engine lower-cases
+every response header name as it parses it, so `headers['Content-Type']` is
+`undefined` while `headers.get('Content-Type')` works. Prefer the methods
+unless you know the exact key.
+
+The six beyond `get`/`has`:
+
+- `all()` - every header as `{ key, value }`, in the object's own key order.
+- `count()` - how many headers there are, i.e. `all().length`.
+- `toObject(excludeDisabled?, caseSensitive?)` - a plain `{name: value}` object.
+  **Keys are lower-cased by default**; pass a truthy second argument to keep
+  the stored spelling instead. Postman's `toObject()` lower-cases whenever the
+  list it is called on is indexed case-insensitively, which a header list
+  always is.
+- `one(name)` - the `{ key, value }` member rather than its value,
+  case-insensitive, `undefined` when absent. `get` is the value half of the
+  same lookup.
+- `indexOf(name)` - the header's position in `all()`, case-insensitive, `-1`
+  when absent. It also accepts a `{ key }` member (what `all()` / `one()` hand
+  back) in place of a name.
+- `each(fn, thisArg?)` - calls `fn(header, index, all)` for every header, the
+  same three arguments Postman's iterator receives; `thisArg` becomes the
+  callback's `this`. The member list is built once before the walk starts, so
+  a callback that removes the header it was just handed does not shorten it.
+
+All six are non-enumerable, exactly like `get()` and `has()`, so none of them
+ever appear in `Object.keys()` or `JSON.stringify()`.
 
 The response object has **no** `add`/`upsert`/`remove` - the response has
 already arrived, so a mutator there would only appear to change something.
@@ -359,6 +396,12 @@ the RFC 7230 §3.2.2 equivalence for comma-list headers; before it, only the
 on `", "` - but not for `Set-Cookie`, whose values contain commas of their own
 (`Expires=Wed, 21 Oct ...`). Read `pm.response.cookies` instead: it is that
 header already parsed, boundaries and all.
+
+**`all()` reports the object's key order, not wire order, and can never report
+a duplicate.** Postman's `HeaderList` keeps both; this object cannot, because
+it is built from a single-valued case-insensitive map and a name sent twice has
+already been folded into the one entry above by the time any script sees
+it - there is only ever one member to report for it.
 
 ### Reading response cookies
 
@@ -593,6 +636,15 @@ pm.request.headers.upsert({ key: 'X-Trace', value: id }); // add or replace
 pm.request.headers.upsert('X-Trace', id);                 // same, two-arg form
 pm.request.headers.add({ key: 'X-New', value: '1' });     // add; throws if present
 pm.request.headers.remove('Authorization');               // case-insensitive
+pm.request.headers.all();                                 // [{key, value}, ...]
+pm.request.headers.count();                               // how many there are
+pm.request.headers.one('Content-Type');                   // {key, value} or undefined
+pm.request.headers.toObject();                            // lower-cased keys
+pm.request.headers.toObject(false, true);                 // keys kept as typed
+pm.request.headers.indexOf('Content-Type');               // position in all(), or -1
+pm.request.headers.each(function (header, index, all) {
+  console.log(header.key, header.value, index, all.length);
+});
 ```
 
 These act on the **same object** as indexing and `delete`, so the two styles
@@ -600,7 +652,7 @@ mix freely and the write-back sees one header set either way. They are
 non-enumerable properties of it, so they never appear in `Object.keys()`,
 `JSON.stringify()` or on the wire.
 
-Three behaviours worth knowing:
+Behaviours worth knowing:
 
 - **The methods are case-insensitive; indexing is not.** `upsert('authorization', v)`
   replaces an existing `Authorization` rather than adding a second spelling -
@@ -614,11 +666,28 @@ Three behaviours worth knowing:
 - **`has`'s optional value argument is a strict string compare**, the same rule
   `pm.response.headers.has` follows - a number never matches, since the
   outgoing header is always a string.
+- **`toObject()` lower-cases its keys by default.** `pm.request.headers` keeps
+  whatever casing the request holds - which can be whatever the user typed -
+  so copying its own keys would have answered `undefined` for
+  `toObject()['content-type']` on a request carrying `Content-Type`. Pass a
+  truthy second argument (`toObject(false, true)`) to keep the stored spelling
+  instead.
+- **`all()` reports this object's key order, not wire order, and can never
+  report a duplicate** - unlike Postman's `HeaderList`, which keeps both. A
+  name assigned twice already collapsed into one entry (the second write
+  replaced the first), so there is only ever one member for `all()` to report.
+- **`indexOf` matches a `{ key }` member by its `key`, not by identity.**
+  Postman finds a member by identity in its own list; the members here are
+  built fresh on every call, so identity would answer `-1` for a member of the
+  very list it came from. Matching the key answers what Postman answers for
+  that case, and `-1` for an object naming a header this list does not hold.
 
 A bad argument fails loudly: a name must be a non-empty string and a value a
-string, number or boolean - the same set plain assignment accepts. Detaching a
-method from its object (`const get = pm.request.headers.get`) throws rather than
-answering as though the header were missing.
+string, number or boolean - the same set plain assignment accepts. `each`
+throws if its first argument is not a function. Detaching a method from its
+object (`const get = pm.request.headers.get`) throws rather than answering as
+though the header were missing. A throw out of an `each` callback propagates as
+the script's own error.
 
 ### URL parts (`pm.request.url`)
 
@@ -977,8 +1046,10 @@ script's own mistakes throw out of the call instead: an unusable argument, an
 unsupported body mode, exceeding the request cap, and the capability being off.
 
 `res` carries `code`, `status` (the numeric code, as on `pm.response`),
-`responseTime`, `headers` with `get()`/`has()`, `json()` and `text()`. It is a
-subset of `pm.response` and has no `to.*` assertion chain.
+`responseTime`, `headers` with `get()`/`has()`/`each()`/`all()`/`count()`/
+`toObject()`/`one()`/`indexOf()` - the same read methods documented under
+[Reading response headers](#reading-response-headers) - `json()` and `text()`.
+It is a subset of `pm.response` and has no `to.*` assertion chain.
 
 **Two bounds, both hard.**
 
