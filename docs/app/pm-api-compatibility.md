@@ -79,9 +79,10 @@ what happened. The error names the three scoped setters. See
 with the exact semantics the request's own URL/headers/body get at compose
 time: scopes first (in `pm.variables`' precedence), then the dynamic-variable
 table - so `{{$guid}}`, `{{$timestamp}}` and the `{{$random*}}` set generate a
-fresh value **per occurrence**, an unknown `$name` keeps its braces, an
-ordinary unknown name becomes `""`, and resolution is a single pass over the
-raw stored strings.
+fresh value **per occurrence**, a name nothing defines keeps its braces
+(`$name` and ordinary alike, issue #1009), and a value that itself holds
+`{{tokens}}` resolves through them to a bounded depth, cycles left literal.
+Always over the raw stored strings.
 
 ```javascript
 const id      = pm.variables.replaceIn("{{$guid}}");

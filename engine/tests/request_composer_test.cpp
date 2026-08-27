@@ -489,6 +489,86 @@ TEST_F (RequestComposerTest, ResolvesVariablesInsideAFilePart) {
     EXPECT_EQ (field["type"], "file");
 }
 
+// Issue #1009's rule 1, at the layer that decides what is *sent*: a name no
+// scope defines leaves its token on the wire instead of a hole. Every field
+// composition resolves, because the fixture pins `resolve_template` and this
+// pins the fields wired to it - the URL is where the divergence shows worst
+// (`https:///x` is a URL nobody wrote), and a form field is the one that
+// reaches resolution through a second function.
+TEST_F (RequestComposerTest, AnUnknownNameReachesTheWireAsItsTokenNotAsAHole) {
+    seed_environment ("env_1", R"({"known":{"value":"k","enabled":true},
+                                   "blank":{"value":"","enabled":true}})");
+
+    const json body = {
+        { "request",
+        { { "method", "post" }, { "url", "https://{{host}}/x?k={{known}}" },
+        { "headers", { { "X-Note", "{{missing}}" }, { "X-Known", "{{known}}" } } },
+        { "body",
+        { { "mode", "form-data" },
+        { "fields", json::array ({ { { "key", "f" }, { "value", "{{gone}}" }, { "enabled", true } } }) } } } } },
+        { "environmentId", "env_1" }
+    };
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://{{host}}/x?k=k");
+    EXPECT_EQ (payload["headers"]["X-Note"], "{{missing}}");
+    EXPECT_EQ (payload["headers"]["X-Known"], "k");
+    EXPECT_EQ (payload["body"]["fields"][0]["value"], "{{gone}}");
+
+    // Defined-and-empty is still empty: the rule is about a name nothing
+    // answers, and erasing that distinction would make an intentionally blank
+    // variable send its own token.
+    const json blank = { { "request", { { "method", "get" }, { "url", "https://x.test/?b={{blank}}" } } },
+        { "environmentId", "env_1" } };
+    auto [blank_status, blank_payload] = vayu::http::compose_request_core (*db_, blank);
+    ASSERT_EQ (blank_status, 200) << blank_payload.dump ();
+    EXPECT_EQ (blank_payload["url"], "https://x.test/?b=");
+}
+
+// Issue #1009's rule 2. The layering under test is the one every imported
+// Postman environment is written with, and the cycle is the reason the walk is
+// bounded rather than run to a fixpoint.
+TEST_F (RequestComposerTest, AValueCarryingTokensResolvesThroughThemAndStopsOnACycle) {
+    seed_collection ("col", "",
+    R"({"baseUrl":{"value":"{{protocol}}://{{host}}","enabled":true}})");
+    seed_environment ("env_1", R"({"protocol":{"value":"https","enabled":true},
+                                   "host":{"value":"api.example.test","enabled":true},
+                                   "a":{"value":"A{{b}}","enabled":true},
+                                   "b":{"value":"B{{a}}","enabled":true}})");
+
+    const json body = { { "request",
+                        { { "method", "get" }, { "url", "{{baseUrl}}/orders" },
+                        { "headers", { { "X-Cycle", "{{a}}" } } } } },
+        { "collectionId", "col" }, { "environmentId", "env_1" } };
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.example.test/orders");
+    // A name already being expanded is left written as it stands, so the
+    // composition terminates and the request says where it gave up.
+    EXPECT_EQ (payload["headers"]["X-Cycle"], "AB{{a}}");
+}
+
+// The header refusal reads *substituted values*, and since #1009 a value can
+// arrive through another variable. The refusal has to name the variable that
+// carried the bytes, not the one the header spells - naming the outer one
+// would send an author looking at a value that is fine.
+TEST_F (RequestComposerTest, ANestedValueCarryingCrlfIsRefusedByTheNameThatCarriesIt) {
+    seed_environment ("env_1", R"({"outer":{"value":"pre-{{inner}}","enabled":true},
+                                   "inner":{"value":"ok\r\nX-Admin: true","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", { { "X-Note", "{{outer}}" } } } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "unsendable_header");
+    const auto message = payload["error"]["message"].get<std::string> ();
+    EXPECT_NE (message.find ("{{inner}}"), std::string::npos) << message;
+}
+
 TEST_F (RequestComposerTest, InlineOverlayReplacesStoredFieldsAndStillResolves) {
     seed_collection ("col", "", R"({"host":{"value":"stored.test","enabled":true}})");
     auto r = make_request ("req_1", "col");
@@ -686,8 +766,11 @@ TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {
     const json body = { { "request", { { "method", "GET" }, { "url", "https://x.test/{{missing}}" } } },
         { "collectionId", "col_missing" }, { "environmentId", "env_missing" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    // What degrades is the *scope lookup* - an id naming nothing is an empty
+    // scope rather than a refusal. The token it leaves behind is #1009's rule:
+    // a name no scope defines is written as it stands.
     ASSERT_EQ (status, 200);
-    EXPECT_EQ (payload["url"], "https://x.test/");
+    EXPECT_EQ (payload["url"], "https://x.test/{{missing}}");
 }
 
 } // namespace

@@ -212,7 +212,8 @@ export function useVariableResolver(
 	 * generator that sent an empty field silently is the defect this table was
 	 * added to fix (issue #186); leaving `{{$randomInteger}}` on the wire makes
 	 * it visible in the request, and `EditableVariable` keeps painting the token
-	 * as unresolved. Ordinary unknown names still resolve to "" - unchanged.
+	 * as unresolved. Since issue #1009 an ordinary unknown name is the same
+	 * rule - the preview shows the token the engine will send.
 	 */
 	const resolveString = useCallback(
 		(input: string): string => resolveTemplate(input, (name) => variableMap[name]?.value),

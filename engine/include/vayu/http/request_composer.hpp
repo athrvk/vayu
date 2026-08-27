@@ -95,13 +95,19 @@ inline constexpr std::string_view DATA_NAMESPACE_PREFIX = "data.";
 bool is_data_variable_name (const std::string& name);
 
 /**
- * Scan `{{name}}` occurrences left to right in one pass over @p input and
- * replace each through @p resolve, which receives the trimmed name.
+ * Scan `{{name}}` occurrences left to right over @p input and replace each
+ * through @p resolve, which receives the trimmed name.
  *
  * `nullopt` leaves that occurrence written exactly as it stands; any string -
- * including an empty one - replaces it. Nested braces never match, and a
- * replacement is never rescanned, so a substituted value containing `{{b}}`
- * stays literal.
+ * including an empty one - replaces it. Nested braces never match.
+ *
+ * **A replacement that carries tokens of its own is resolved too** (#1009),
+ * through the same @p resolve, to a bound of 8 levels: `baseUrl =
+ * "{{protocol}}://{{host}}"` composes as the URL it spells rather than as
+ * literal braces. A name already being expanded is a cycle and its token is
+ * left written as it stands, so `a = "{{b}}"` with `b = "{{a}}"` terminates.
+ * A value holding no `{{` costs one search and nothing else, which is what
+ * keeps composition a single pass for everything that is not layered.
  *
  * This is the one scanner: `resolve_template` and the scenario runner's data
  * pass both drive it, so the two cannot disagree about what a token *is*.
@@ -120,9 +126,10 @@ struct TokenSplit {
 };
 
 /**
- * The same left-to-right pass as `substitute_tokens`, *reported* rather than
+ * The same left-to-right scan as `substitute_tokens`, *reported* rather than
  * applied: @p input split into its literal text and the names of the `{{name}}`
- * occurrences @p keep accepts. A token @p keep rejects stays part of the
+ * occurrences @p keep accepts. One pass and no nesting - it reports names, and
+ * a name has no value here to hold tokens of its own. A token @p keep rejects stays part of the
  * surrounding literal, written exactly as it stands.
  *
  * Through the same pattern as `substitute_tokens`, so the two cannot disagree
@@ -152,10 +159,11 @@ std::optional<std::string> resolve_dynamic_variable (const std::string& name);
 const std::vector<std::string>& dynamic_variable_names ();
 
 /**
- * Substitute `{{name}}` occurrences in one pass. The reserved `data.*`
- * namespace first (kept verbatim), then scopes, then the dynamic-variable
- * table; an ordinary unknown name becomes "", an unknown `$name` keeps its
- * braces. Nested braces never match and replacements are never rescanned.
+ * Substitute `{{name}}` occurrences. The reserved `data.*` namespace first
+ * (kept verbatim), then scopes, then the dynamic-variable table; a name
+ * nothing answers - ordinary or `$name` - keeps its braces (#186, #1009), and
+ * a value that itself holds tokens is resolved through them under
+ * `substitute_tokens`' bound. Nested braces never match.
  */
 std::string resolve_template (const std::string& input, const VariableValues& vars);
 

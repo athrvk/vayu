@@ -2730,13 +2730,14 @@ TEST_F (ScriptEngineTest, PmVariablesResolvesEnvironmentThenCollectionThenGlobal
 // pm.variables.replaceIn - the sanctioned way to use {{...}} inside a script
 // (script *text* is never interpolated; see D16 in issue #226). Semantics must
 // match the engine's compose-time resolver: same precedence, same unknown-name
-// pair, same single pass, raw stored strings.
+// rule, same nested resolution, raw stored strings.
 TEST_F (ScriptEngineTest, ReplaceInResolvesScopesLikeTheRequestFieldsDo) {
     Environment globals;
     globals["everywhere"] = Variable{ "from-globals", false, true };
     Environment collVars;
     collVars["everywhere"] = Variable{ "from-collection", false, true };
     collVars["nested"]     = Variable{ "{{everywhere}}", false, true };
+    collVars["selfRef"]    = Variable{ "{{selfRef}}", false, true };
     Environment environment;
     environment["everywhere"] = Variable{ "from-environment", false, true };
     environment["disabled"]   = Variable{ "hidden", false, false };
@@ -2754,19 +2755,23 @@ TEST_F (ScriptEngineTest, ReplaceInResolvesScopesLikeTheRequestFieldsDo) {
         pm.globals.set('unknownDollar', pm.variables.replaceIn('{{$notAGenerator}}'));
         pm.globals.set('definedDollar', pm.variables.replaceIn('{{$guid}}'));
         pm.globals.set('disabledIsInvisible', pm.variables.replaceIn('[{{disabled}}]'));
-        // Single pass, like every other {{}} in Vayu: a value containing
-        // {{other}} stays literal rather than being rescanned.
-        pm.globals.set('singlePass', pm.variables.replaceIn('{{nested}}'));
+        // Nested, like every other {{}} in Vayu since #1009: a value that
+        // itself holds {{other}} resolves through it, to the same bound.
+        pm.globals.set('nestedResolves', pm.variables.replaceIn('{{nested}}'));
+        pm.globals.set('cycleStopsLiteral', pm.variables.replaceIn('{{selfRef}}'));
     )JS",
     ctx);
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (globals["winner"].value, "from-environment");
-    EXPECT_EQ (globals["unknownPlain"].value, "[]");
+    // Both halves of #1009's unknown-name rule: the token is what a script
+    // gets back, so a name nothing defines is visible rather than vanished.
+    EXPECT_EQ (globals["unknownPlain"].value, "[{{missing}}]");
     EXPECT_EQ (globals["unknownDollar"].value, "{{$notAGenerator}}");
     EXPECT_EQ (globals["definedDollar"].value, "pinned-guid");
-    EXPECT_EQ (globals["disabledIsInvisible"].value, "[]");
-    EXPECT_EQ (globals["singlePass"].value, "{{everywhere}}");
+    EXPECT_EQ (globals["disabledIsInvisible"].value, "[{{disabled}}]");
+    EXPECT_EQ (globals["nestedResolves"].value, "from-environment");
+    EXPECT_EQ (globals["cycleStopsLiteral"].value, "{{selfRef}}");
 }
 
 // ============================================================================
@@ -4061,8 +4066,9 @@ TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
         pm.test("the bare prefix names nothing", function() {
             // `{{data.}}` is not a column reference, so it falls through to the
             // ordinary unknown-name rule rather than erroring about a column
-            // called "".
-            pm.expect(pm.variables.replaceIn("[{{data.}}]")).to.equal("[]");
+            // called "" - and that rule leaves the token written as it stands
+            // (issue #1009), which is what a script gets back.
+            pm.expect(pm.variables.replaceIn("[{{data.}}]")).to.equal("[{{data.}}]");
         });
 
         pm.test("the scope readers stay out of the namespace", function() {

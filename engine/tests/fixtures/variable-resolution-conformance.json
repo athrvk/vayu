@@ -55,13 +55,13 @@
       "expected": "chain.test"
     },
     {
-      "name": "a name whose every definition is disabled resolves to empty",
+      "name": "a name whose every definition is disabled is unknown, so it stays literal",
       "scopes": {
         "globals": { "gone": { "value": "a", "enabled": false } },
         "environment": { "gone": { "value": "b", "enabled": false } }
       },
       "input": "[{{gone}}]",
-      "expected": "[]"
+      "expected": "[{{gone}}]"
     },
     {
       "name": "D17: absent 'enabled' counts as enabled",
@@ -107,10 +107,10 @@
       "expected": "kept/"
     },
     {
-      "name": "an ordinary unknown name resolves to empty string",
+      "name": "an ordinary unknown name keeps its braces (issue #1009)",
       "scopes": { "environment": { "known": { "value": "x", "enabled": true } } },
       "input": "a={{missing}}&b={{known}}",
-      "expected": "a=&b=x"
+      "expected": "a={{missing}}&b=x"
     },
     {
       "name": "an unknown $name keeps its braces (issue #186)",
@@ -134,7 +134,7 @@
       "name": "the data. prefix alone names no column and follows the unknown-name rule",
       "scopes": {},
       "input": "a{{data.}}b{{data}}c",
-      "expected": "abc"
+      "expected": "a{{data.}}b{{data}}c"
     },
     {
       "name": "a user-defined variable named $guid beats the generator",
@@ -149,7 +149,7 @@
       "expected": "trim.test"
     },
     {
-      "name": "single pass: a value containing {{other}} is not rescanned",
+      "name": "a value containing {{other}} resolves through it (issue #1009)",
       "scopes": {
         "environment": {
           "a": { "value": "{{b}}", "enabled": true },
@@ -157,7 +157,82 @@
         }
       },
       "input": "{{a}}",
-      "expected": "{{b}}"
+      "expected": "resolved-b"
+    },
+    {
+      "name": "the layered baseUrl every imported environment is written with",
+      "scopes": {
+        "globals": { "protocol": { "value": "https", "enabled": true } },
+        "chain": [{ "baseUrl": { "value": "{{protocol}}://{{host}}", "enabled": true } }],
+        "environment": { "host": { "value": "api.example.test", "enabled": true } }
+      },
+      "input": "{{baseUrl}}/orders",
+      "expected": "https://api.example.test/orders"
+    },
+    {
+      "name": "nesting resolves through several levels",
+      "scopes": {
+        "environment": {
+          "one": { "value": "<{{two}}>", "enabled": true },
+          "two": { "value": "[{{three}}]", "enabled": true },
+          "three": { "value": "end", "enabled": true }
+        }
+      },
+      "input": "{{one}}",
+      "expected": "<[end]>"
+    },
+    {
+      "name": "a token inside a value that nothing defines stays literal, like any other",
+      "scopes": { "environment": { "a": { "value": "x={{nope}}", "enabled": true } } },
+      "input": "{{a}}",
+      "expected": "x={{nope}}"
+    },
+    {
+      "name": "a two-name cycle stops with the token literal instead of looping",
+      "scopes": {
+        "environment": {
+          "a": { "value": "A{{b}}", "enabled": true },
+          "b": { "value": "B{{a}}", "enabled": true }
+        }
+      },
+      "input": "{{a}}",
+      "expected": "AB{{a}}"
+    },
+    {
+      "name": "a value referring to itself stops at its own token",
+      "scopes": { "environment": { "loop": { "value": "x{{loop}}", "enabled": true } } },
+      "input": "{{loop}}",
+      "expected": "x{{loop}}"
+    },
+    {
+      "name": "the same name twice side by side is two expansions, not a cycle",
+      "scopes": {
+        "environment": {
+          "a": { "value": "[{{b}}]", "enabled": true },
+          "b": { "value": "v", "enabled": true }
+        }
+      },
+      "input": "{{a}}{{a}}",
+      "expected": "[v][v]"
+    },
+    {
+      "name": "a chain longer than the depth bound keeps what it resolved and leaves the rest literal",
+      "scopes": {
+        "environment": {
+          "d0": { "value": "0{{d1}}", "enabled": true },
+          "d1": { "value": "1{{d2}}", "enabled": true },
+          "d2": { "value": "2{{d3}}", "enabled": true },
+          "d3": { "value": "3{{d4}}", "enabled": true },
+          "d4": { "value": "4{{d5}}", "enabled": true },
+          "d5": { "value": "5{{d6}}", "enabled": true },
+          "d6": { "value": "6{{d7}}", "enabled": true },
+          "d7": { "value": "7{{d8}}", "enabled": true },
+          "d8": { "value": "8{{d9}}", "enabled": true },
+          "d9": { "value": "9", "enabled": true }
+        }
+      },
+      "input": "{{d0}}",
+      "expected": "012345678{{d9}}"
     },
     {
       "name": "empty braces never match and stay literal",

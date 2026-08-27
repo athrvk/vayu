@@ -23,12 +23,14 @@
  *  - a definition is disabled only by an explicit `enabled: false`; absent or
  *    malformed counts as enabled (D17 - matches the importers and the engine)
  *  - a non-string stored `value` reads as "" (D17)
- *  - unknown plain name resolves to ""; unknown `$name` keeps its braces
+ *  - a name nothing defines keeps its braces, plain or `$name` (issue #1009)
  *  - a `data.*` name keeps its braces too: it addresses the reserved data
  *    namespace (issue #402), which only a scenario run's iteration can bind
  *  - a user-defined variable named `$guid` beats the generator; generators run
  *    once per occurrence
- *  - single pass, no recursion; the raw string, never the typed value
+ *  - a value that itself holds `{{tokens}}` resolves through them, to a depth
+ *    bound, cycles left literal (issue #1009); the raw string, never the typed
+ *    value
  *
  * The `{{name}}` matcher itself is `VARIABLE_PATTERN` from
  * `constants/variables.ts` - this module used to declare its own identical
@@ -120,28 +122,62 @@ export function dataColumnName(name: string): string | null {
 }
 
 /**
- * Substitute `{{name}}` occurrences in one pass: the reserved `data.*`
- * namespace first (kept verbatim), then scopes, then the dynamic-variable
- * table. A defined name (even one spelled `$guid`) wins over a generator; an
- * unknown `$name` keeps its braces (issue #186); an ordinary unknown name
- * becomes "". Replacements are never rescanned, so a value containing
- * `{{other}}` stays literal.
+ * How deep a value's own `{{tokens}}` are followed before the rest are left
+ * written as they stand (issue #1009). The engine's `MAX_NESTED_RESOLUTIONS`,
+ * restated: the two are pinned by the conformance fixture's cycle case, which
+ * only terminates because both sides bound the work.
+ */
+const MAX_NESTED_RESOLUTIONS = 8;
+
+/**
+ * Substitute `{{name}}` occurrences: the reserved `data.*` namespace first
+ * (kept verbatim), then scopes, then the dynamic-variable table. A defined
+ * name (even one spelled `$guid`) wins over a generator; a name nothing
+ * answers keeps its braces, `$name` (issue #186) and ordinary alike (issue
+ * #1009) - the token reaching the wire is what makes the miss visible, where
+ * an empty string silently changed the request.
+ *
+ * A replacement that carries tokens of its own is resolved through the same
+ * lookup, to `MAX_NESTED_RESOLUTIONS` levels, so a layered `{{baseUrl}}`
+ * previews as the URL it spells. A name already being expanded is a cycle and
+ * its token stays literal; the surrounding text is never rescanned.
  */
 export function resolveTemplate(
 	input: string,
 	lookup: (name: string) => string | undefined
 ): string {
 	if (!input || typeof input !== "string") return input;
-	return input.replace(VARIABLE_PATTERN, (match, rawName: string) => {
-		const name = rawName.trim();
-		// Before the lookup, not after: the namespace is disjoint from the
-		// scopes, so a variable named `data.id` must not answer for the column.
-		// Only a scenario run's iteration can bind one, and the engine's
-		// composer leaves it written as it stands for exactly that reason.
-		if (isDataVariableName(name)) return match;
-		const defined = lookup(name);
-		if (defined !== undefined) return defined;
-		if (isDynamicVariableName(name)) return resolveDynamicVariable(name) ?? match;
-		return "";
-	});
+	// The names currently being expanded, innermost last - the chain the cycle
+	// check reads, not a set of every name seen: `{{a}} {{a}}` side by side is
+	// two expansions of one name and neither is a cycle.
+	const expanding: string[] = [];
+	const substitute = (text: string): string =>
+		text.replace(VARIABLE_PATTERN, (match, rawName: string) => {
+			const name = rawName.trim();
+			// Before the lookup, not after: the namespace is disjoint from the
+			// scopes, so a variable named `data.id` must not answer for the column.
+			// Only a scenario run's iteration can bind one, and the engine's
+			// composer leaves it written as it stands for exactly that reason.
+			if (isDataVariableName(name)) return match;
+			if (expanding.includes(name)) return match;
+			const defined = lookup(name);
+			// The generator answers `null` for a name its table does not have,
+			// where a scope answers `undefined` - one shape here, so the miss is
+			// tested once rather than at each use below.
+			const value =
+				defined !== undefined
+					? defined
+					: isDynamicVariableName(name)
+						? (resolveDynamicVariable(name) ?? undefined)
+						: undefined;
+			if (value === undefined) return match;
+			if (!value.includes("{{") || expanding.length >= MAX_NESTED_RESOLUTIONS) return value;
+			expanding.push(name);
+			try {
+				return substitute(value);
+			} finally {
+				expanding.pop();
+			}
+		});
+	return substitute(input);
 }
