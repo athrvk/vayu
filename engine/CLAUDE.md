@@ -258,13 +258,36 @@ engine/
   (#1023): its clang-tidy 20 over MSVC saw a backlog no Linux scan could
   (`pro-type-vararg` on every libcurl option call, 20-only checks, Windows-only
   code), measured at ~85 findings by #946's own PR, and it gates whole files
-  now that its own whole-tree scan reads zero - `clang-tidy-diff.py` went with
-  the promotion. `.github/workflows/engine-tidy-scan.yml` is how either leg is
-  re-measured. Nothing
-  lints at *build*
-  time: the commented-out `CMAKE_CXX_CLANG_TIDY` block went with #885, because a
+  now that that backlog is paid down - `clang-tidy-diff.py` went with the
+  promotion. The whole-tree scan is what says the payment landed, per leg and
+  by number rather than by assertion. `.github/workflows/engine-tidy-scan.yml` is how either leg is
+  re-measured, weekly on both plus `workflow_dispatch`.
+  **The scan is the only thing that reads a header**, which is why its zero is
+  not the gate's zero restated: the gate lints translation units and never a
+  header (#940), so a header-only change is linted by no CI job at all. Two
+  false greens came out of building it, both the same shape - a real diagnostic
+  in a form the report's regex did not anticipate, counted as nothing - and the
+  second one (a Windows drive letter, `D:\a\...`, against a file pattern that
+  forbade colons) reported `0 findings` for a log holding 679. So the report now
+  fails when it parses no finding out of a log that holds diagnostic-shaped
+  lines: a zero is reported only where a zero was measured.
+
+  Nothing lints at *build* time: the commented-out `CMAKE_CXX_CLANG_TIDY` block went with #885, because a
   lint that runs when someone uncomments it never runs. See
   `docs/engine/building.md`.
+- **A destructor and a `main` are total, and no linter is what says so**
+  (#1023). `bugprone-exception-escape` is declined in `engine/.clang-tidy` -
+  it fires only on a `throw` it can *see*, so it answers about the standard
+  library being read rather than about this code: 33 findings on the Windows
+  leg against 0 on Linux, same commit, landing on the implicit destructors of
+  ordinary aggregates, and reporting `cli.cpp`'s `main` even though it already
+  catches `...`. The rule it was reporting is real and stays: a throw out of a
+  destructor terminates, and so does one out of a thread entry function or
+  `main`. `~SseStreamManager` and `~Logger` are the shape - a `try` around the
+  whole body, `catch (...)` at the end, and where it can report at all it goes
+  through a `noexcept` helper (`log_unrecoverable`) so the reporting cannot
+  throw either. `~Logger` is the exception that proves it: it reports nothing,
+  because the logger is what is being destroyed.
 - **An empty `catch` opens with `@deliberate` and then says why** (#944).
   `bugprone-empty-catch` is enabled and a plain comment does not satisfy it - the
   check reads only the keywords in `IgnoreCatchWithKeywords`, which

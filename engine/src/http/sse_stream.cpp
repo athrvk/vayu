@@ -632,20 +632,14 @@ std::shared_ptr<SseStreamContext> SseStreamManager::start (SseStreamRequest requ
     }
     auto& stream   = streams_[run_id];
     stream.context = context;
-    // The `NOLINT` is for what the check cannot separate, and the `try` below
-    // is a real fix that stands without it. `bugprone-exception-escape` reports
-    // this lambda on the Windows leg only, and the escaping path it models is
-    // not in the body: MSVC's `<thread>` invokes the callable from
-    // `_Invoke(void*) noexcept`, whose own operations it can see throw, and the
-    // diagnostic lands on the lambda that invoker wraps. Two measurements say
-    // so - libstdc++ hides the same throws behind out-of-line functions the
-    // analyser cannot see, and a local reproduction of this exact shape (a
-    // thread lambda whose body is wrapped in `catch (...)` reporting through a
-    // `noexcept` function) is *not* reported, while the same body without the
-    // handler is not reported either. So the check does not flag thread entry
-    // points as such, and what it is flagging here is a frame in the standard
-    // library, named after ours.
-    // NOLINTNEXTLINE(bugprone-exception-escape)
+    // The `try` below is a real fix and does not depend on a linter asking for
+    // it. `bugprone-exception-escape` used to report this lambda on the Windows
+    // leg alone, for a path that is not in the body: MSVC's `<thread>` invokes
+    // the callable from `_Invoke(void*) noexcept`, whose own operations it can
+    // see throw, so the diagnostic landed on the lambda that invoker wraps.
+    // That reading is what took the check out of `engine/.clang-tidy` (#1023,
+    // 33 findings on Windows against 0 on Linux over the same commit); the
+    // reasoning is recorded there and the handler stays here regardless.
     stream.worker = std::thread ([context, spec = std::move (request)] () mutable {
         // The outermost frame this thread has: `std::thread` calls
         // `std::terminate` if its entry function throws. The inner handlers

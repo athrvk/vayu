@@ -21,6 +21,7 @@ Checks: '
   performance-*,
   readability-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
   -cert-arr39-c,
   -cert-con36-c,
   -cert-con54-cpp,
@@ -97,6 +98,29 @@ Checks: '
 # this file existed, which is what makes them relitigable - none is a hard
 # call, and a line each is cheaper than having the argument twice.
 #
+#   bugprone-exception-escape
+#     Off on the measurement (#1023), not on the principle. The check fires only
+#     on a `throw` it can SEE, so what it reports is a property of the standard
+#     library the analyzer is reading rather than of this code: MSVC's STL
+#     inlines throws where the analyzer reaches them and libstdc++ hides them
+#     behind out-of-line functions. The whole-tree scan measured exactly that -
+#     33 findings on windows-latest and 0 on ubuntu-latest, same check, same
+#     tree, same commit. They land on the implicit destructors of ordinary
+#     platform-neutral aggregates (`ResponseSample`, `Request`, `Response`,
+#     `DetailedReport` - structs of `std::string` and maps), which are already
+#     implicitly `noexcept`; there is no more-correct code to write, so every
+#     one of the 33 would have to be a NOLINT, and every aggregate added later
+#     a 34th. What settles it: `cli.cpp`'s and `tests/main.cpp`'s `main` each
+#     already catch `...` and return, and the check reports them anyway. A
+#     function that demonstrably cannot let anything escape is still flagged,
+#     which is the definition of a check answering about the STL rather than
+#     about the code.
+#     The real defects in this family are found and fixed, not waived: the
+#     destructors that could genuinely terminate - `SseStreamManager` and
+#     `Logger` - are total, `daemon.cpp`'s `main` gained the wrapper `cli.cpp`
+#     already had, and `engine/CLAUDE.md`'s rule that a class with a destructor
+#     states all five is what keeps the shape from coming back. Turn this on
+#     again the day a Windows leg and a Linux leg agree about it.
 #   bugprone-easily-swappable-parameters
 #     Fires on any two adjacent parameters of the same type. Nearly every
 #     `(host, path)`, `(name, value)` and `(from, to)` in the engine is one, and

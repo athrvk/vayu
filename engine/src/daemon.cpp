@@ -16,8 +16,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <span>
+#include <string>
 #include <thread>
 
 #include "vayu/core/constants.hpp"
@@ -58,15 +60,16 @@ bool acquire_lock (const std::string& lock_path) {
 }
 } // namespace
 
-int main (int argc, char* argv[]) {
+namespace {
+/// The daemon proper. `main` is the wrapper that keeps a throw from
+/// escaping it - see the note there, and it is where `argc`/`argv` become the
+/// bounded range this takes: `argv[i]` is arithmetic on a pointer carrying no
+/// length, and only `main`'s signature is exempt from saying so.
+int run_daemon (std::span<char* const> args) {
     // Parse arguments first (need data_dir for logging)
     int port             = vayu::core::constants::defaults::PORT;
     int verbosity        = 0; // 0=warn/error, 1=info+, 2=debug+
     std::string data_dir = get_default_data_dir ();
-
-    // The argument vector as the bounded range it is: `argv[i]` is arithmetic
-    // on a pointer that carries no length, and the count is right there.
-    const std::span<char* const> args (argv, static_cast<size_t> (argc));
 
     for (size_t i = 1; i < args.size (); ++i) {
         std::string arg = args[i];
@@ -277,4 +280,23 @@ int main (int argc, char* argv[]) {
     // 1 = the listener never took its port (see the start() check above); 0 =
     // an ordinary shutdown. Documented in docs/engine/cli.md.
     return exit_code;
+}
+} // namespace
+
+int main (int argc, char* argv[]) {
+    try {
+        return run_daemon (std::span<char* const> (argv, static_cast<size_t> (argc)));
+    } catch (const std::exception& e) {
+        // Reported rather than terminated on, for the reason `cli.cpp`
+        // gives: an escape from `main` aborts with no message and a
+        // status no caller can tell from a crash. A daemon a supervisor
+        // restarts owes that distinction more than the CLI does.
+        std::cerr << "vayu-engine: " << e.what () << "\n";
+        vayu::utils::log_error (std::string ("vayu-engine: ") + e.what ());
+        return 1;
+    } catch (...) {
+        std::cerr << "vayu-engine: unknown error\n";
+        vayu::utils::log_error ("vayu-engine: unknown error");
+        return 1;
+    }
 }
