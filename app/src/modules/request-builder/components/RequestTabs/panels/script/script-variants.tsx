@@ -82,7 +82,8 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			'pm.request.headers["X-Timestamp"] = Date.now().toString()',
 			'pm.request.headers.upsert("X-Trace", traceId)',
 			'delete pm.request.headers["Authorization"]',
-			'pm.request.url = pm.request.url + "?trace=1"',
+			'pm.request.url.query.get("page")',
+			'pm.request.url = "https://api.example.com/v2/users"',
 			"pm.request.body = JSON.stringify({ n: 2 })",
 			"pm.sendRequest(url, (err, res) => { ... })",
 			"pm.info.requestName",
@@ -98,6 +99,15 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			<>
 				A script wins over the <strong>Auth</strong> tab - auth is applied before the script
 				runs, so setting <code className={CODE_CLASS}>Authorization</code> here replaces it.
+			</>,
+			<>
+				<code className={CODE_CLASS}>url</code> is Postman&apos;s URL object -{" "}
+				<code className={CODE_CLASS}>protocol</code>,{" "}
+				<code className={CODE_CLASS}>host</code>, <code className={CODE_CLASS}>path</code>,{" "}
+				<code className={CODE_CLASS}>query</code> and{" "}
+				<code className={CODE_CLASS}>getQueryString()</code> - and still reads as the full
+				URL string everywhere except <code className={CODE_CLASS}>===</code> and{" "}
+				<code className={CODE_CLASS}>typeof</code>. Assign a string to retarget.
 			</>,
 			<>
 				Indexing is case-sensitive in JS: use the exact name (

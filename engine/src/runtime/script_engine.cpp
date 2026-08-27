@@ -39,6 +39,7 @@
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/http/url_parts.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/sha256.hpp"
@@ -337,6 +338,78 @@ void setup_console (JSContext* ctx) {
 
     JS_SetPropertyStr (ctx, global, "console", console);
     JS_FreeValue (ctx, global);
+}
+
+// ============================================================================
+// pm.request.url - the identity half of Postman's Url object
+// ============================================================================
+
+/**
+ * @brief What `pm.request.url` is, behind the members a script reads.
+ *
+ * `pm.request.url` was a string primitive; issue #991 records the owner
+ * decision that Postman compatibility wins over keeping that shape, so it is
+ * now the `Url` object a lifted Postman script expects - `url.query.get(...)`,
+ * `url.getPath()`, `url.host` and the rest. The members are built in
+ * `build_request_url` further down; what lives up here is the *identity*, which
+ * three surfaces before that point need: the `pm.request` write-back, the jar
+ * methods and `pm.sendRequest` all had "is this a string?" as their entire
+ * type check, and each of them is documented as taking `pm.request.url`.
+ *
+ * `text` is authoritative and `parts` is derived from it. `built` says whether
+ * the JS members have been materialised yet: a script that never mentions the
+ * URL never pays for the parse, which is why the property is an accessor rather
+ * than a plain member (see `install_request_url`).
+ */
+struct RequestUrlState {
+    std::string text;
+    vayu::http::UrlParts parts;
+    bool built = false;
+};
+
+JSClassID request_url_class_id = 0;
+
+void request_url_finalizer (JSRuntime* rt, JSValue val) {
+    (void)rt;
+    delete static_cast<RequestUrlState*> (JS_GetOpaque (val, request_url_class_id));
+}
+
+// No gc_mark: the state holds C++ strings, never a JSValue, so it can be part
+// of no cycle the collector has to break.
+JSClassDef request_url_class = { .class_name = "Url",
+    .finalizer                               = request_url_finalizer,
+    .gc_mark                                 = nullptr,
+    .call                                    = nullptr,
+    .exotic                                  = nullptr };
+
+/// The state behind a Url object, or nullptr for anything else. A real class
+/// test rather than a marker property, so a script cannot forge one by naming
+/// a field the same thing.
+RequestUrlState* request_url_state (JSValueConst value) {
+    return static_cast<RequestUrlState*> (JS_GetOpaque (value, request_url_class_id));
+}
+
+/**
+ * @brief The URL a value carries, for the surfaces that used to require a
+ *        string and are documented as taking `pm.request.url`.
+ *
+ * A JS string is itself; a Url object is the string it was built from. Anything
+ * else is `nullopt` - the caller says so in its own words, because
+ * "pm.sendRequest was given a number" and "jar().set needs a URL" are different
+ * sentences about the same refusal.
+ *
+ * Deliberately *not* "any object, via toString": `pm.request.url = {}` would
+ * then become the string `[object Object]` and reach the wire, which is exactly
+ * the silent-wrong-request class this program exists to close.
+ */
+std::optional<std::string> script_url_text (JSContext* ctx, JSValueConst value) {
+    if (JS_IsString (value)) {
+        return js_to_string (ctx, value);
+    }
+    if (auto* state = request_url_state (value)) {
+        return state->text;
+    }
+    return std::nullopt;
 }
 
 // ============================================================================
@@ -978,8 +1051,16 @@ JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValue
 
     bool includes = false;
 
-    if (JS_IsString (state->actual)) {
-        std::string str    = js_to_string (ctx, state->actual);
+    // A Url object takes the substring branch, not the "neither string nor
+    // array" one that answers false. `pm.expect(pm.request.url).to.include(...)`
+    // is the idiom in this repo's own docs and tests, and #991 turned its
+    // target from a string into an object - a verdict that silently flipped to
+    // failing is the worst thing an assertion can do.
+    const RequestUrlState* url = request_url_state (state->actual);
+
+    if (JS_IsString (state->actual) || url != nullptr) {
+        const std::string str =
+        url != nullptr ? url->text : js_to_string (ctx, state->actual);
         std::string substr = js_to_string (ctx, argv[0]);
         includes           = str.find (substr) != std::string::npos;
     } else if (JS_IsArray (state->actual)) {
@@ -3381,6 +3462,468 @@ const Headers& script_request_header_view (const ContextData& data) {
     return data.request->headers;
 }
 
+// ============================================================================
+// pm.request.url - the Url object's members
+// ============================================================================
+
+void build_request_url_members (JSContext* ctx, JSValue url, RequestUrlState& state);
+
+// `this` is the Url object every one of these was reached through. A method
+// pulled off it and called bare has no state, which is a script error rather
+// than an engine one - the same rule the header methods follow.
+//
+// The parts are built here rather than assumed: today the only way a script can
+// hold this object is through the accessor, which builds - but `getHost()`
+// reading unbuilt parts would answer `""` for a real host, and a rule that
+// holds only because of how the object is reached today is one a later change
+// breaks silently. Built already, this costs a branch.
+RequestUrlState* url_state_of_this (JSContext* ctx, JSValueConst this_val, const char* member) {
+    auto* state = request_url_state (this_val);
+    if (!state) {
+        JS_ThrowTypeError (ctx, "pm.request.url.%s must be called on the URL object, not detached from it",
+        member);
+        return nullptr;
+    }
+    if (!state->built) {
+        build_request_url_members (ctx, this_val, *state);
+    }
+    return state;
+}
+
+/**
+ * The whole URL, and the single answer behind every string context.
+ *
+ * `toString`, `valueOf`, `toJSON` and `@@toPrimitive` all land here, so
+ * concatenation, a template literal, `==` against a string, `JSON.stringify`
+ * and `String.prototype`'s generic methods (which coerce through
+ * `ToString(this)`) keep behaving the way they did when this was a string.
+ * `@@toPrimitive`'s hint argument is ignored on purpose: a URL has one
+ * primitive form, and answering a number hint with anything else would make
+ * `+url` a different kind of surprise.
+ */
+JSValue js_url_to_string (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = url_state_of_this (ctx, this_val, "toString");
+    if (!state) {
+        return JS_EXCEPTION;
+    }
+    return JS_NewStringLen (ctx, state->text.data (), state->text.size ());
+}
+
+/// `getHost()` / `getPath()` / `getQueryString()`, told apart by their magic -
+/// three readers of the same state that differ only in which part they join.
+enum UrlPartGetter : int { URL_GET_HOST, URL_GET_PATH, URL_GET_QUERY_STRING };
+
+JSValue
+js_url_part_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)argc;
+    (void)argv;
+    const char* member = magic == URL_GET_HOST ? "getHost" :
+    magic == URL_GET_PATH                      ? "getPath" :
+                                                 "getQueryString";
+    auto* state        = url_state_of_this (ctx, this_val, member);
+    if (!state) {
+        return JS_EXCEPTION;
+    }
+    std::string out;
+    switch (magic) {
+    case URL_GET_HOST: out = vayu::http::join_host (state->parts.host); break;
+    case URL_GET_PATH: out = vayu::http::join_path (state->parts.path); break;
+    default: out = state->parts.query; break;
+    }
+    return JS_NewStringLen (ctx, out.data (), out.size ());
+}
+
+/**
+ * `url.update(newUrl)` - Postman's spelling of a whole-URL write, and the same
+ * write `pm.request.url = '...'` performs.
+ *
+ * Mutates in place rather than handing back a new object, because Postman's
+ * does: a script that held a reference to the URL before the update has to see
+ * the update through it, or the write-back and the script disagree about what
+ * is being sent. Member mutation (pushing to `path`, editing a query member) is
+ * out of scope for v1 and documented as such.
+ */
+JSValue js_url_update (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    auto* state = url_state_of_this (ctx, this_val, "update");
+    if (!state) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "pm.request.url.update needs a URL string");
+    }
+    auto text = script_url_text (ctx, argv[0]);
+    if (!text) {
+        return JS_ThrowTypeError (ctx, "pm.request.url.update needs a URL string, got %s",
+        js_type_name (ctx, argv[0]));
+    }
+    state->text = std::move (*text);
+    build_request_url_members (ctx, this_val, *state);
+    return JS_UNDEFINED;
+}
+
+/// The Url object a query method was bound to. Query methods hang off
+/// `url.query`, so `this` is that sub-object and the URL comes through the
+/// bound data instead - one source of truth for the parsed params rather than a
+/// second copy living on the query object.
+RequestUrlState* url_state_of_query (JSContext* ctx, JSValue* func_data, const char* member) {
+    auto* state = request_url_state (func_data[0]);
+    if (!state) {
+        JS_ThrowInternalError (ctx, "pm.request.url.query.%s lost its URL", member);
+    }
+    return state;
+}
+
+/// The value of the first param named @p name, or nullptr when there is none.
+const std::optional<std::string>*
+find_query_param (const RequestUrlState& state, const std::string& name) {
+    for (const auto& param : state.parts.query_params) {
+        if (param.key == name) {
+            return &param.value;
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * `query.get(name)` - the *first* match's value, `null` when the name is absent
+ * and `null` for a bare `?flag` that carries no value.
+ *
+ * First rather than last: postman-collection's `PropertyList.one` answers with
+ * the first, and a duplicated query key is exactly where a "last wins" guess
+ * would silently sign the wrong string. `toObject()` is the last-wins view, and
+ * it says so.
+ */
+JSValue js_url_query_get (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    auto* state = url_state_of_query (ctx, func_data, magic == 0 ? "get" : "has");
+    if (!state) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1 || !JS_IsString (argv[0])) {
+        return JS_ThrowTypeError (ctx,
+        "pm.request.url.query.%s needs a name string, got %s", magic == 0 ? "get" : "has",
+        argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
+    }
+    const std::string name = js_to_string (ctx, argv[0]);
+    const auto* found      = find_query_param (*state, name);
+    if (magic != 0) {
+        return JS_NewBool (ctx, found != nullptr ? 1 : 0);
+    }
+    if (!found || !found->has_value ()) {
+        return JS_NULL;
+    }
+    return JS_NewStringLen (ctx, (*found)->data (), (*found)->size ());
+}
+
+/// One `{ key, value }`, with a bare key's value as `null` - the distinction
+/// between `?flag` and `?flag=` survives into the script.
+JSValue query_param_entry (JSContext* ctx, const vayu::http::UrlQueryParam& param) {
+    JSValue entry = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, entry, "key",
+    JS_NewStringLen (ctx, param.key.data (), param.key.size ()));
+    JS_SetPropertyStr (ctx, entry, "value",
+    param.value ? JS_NewStringLen (ctx, param.value->data (), param.value->size ()) : JS_NULL);
+    return entry;
+}
+
+/**
+ * `query.all()` - every param, in wire order, duplicates kept.
+ *
+ * The canonicalization workhorse this whole issue exists for: an HMAC over a
+ * sorted query has to see the parameters as they were sent, which is the one
+ * view a `{name: value}` map cannot give.
+ */
+JSValue js_url_query_all (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    (void)magic;
+    auto* state = url_state_of_query (ctx, func_data, "all");
+    if (!state) {
+        return JS_EXCEPTION;
+    }
+    JSValue list  = JS_NewArray (ctx);
+    uint32_t next = 0;
+    for (const auto& param : state->parts.query_params) {
+        JS_SetPropertyUint32 (ctx, list, next++, query_param_entry (ctx, param));
+    }
+    return list;
+}
+
+/// `query.toObject()` - last wins, because that is what a plain object can say.
+/// `all()` is the view that keeps duplicates.
+JSValue js_url_query_to_object (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    (void)magic;
+    auto* state = url_state_of_query (ctx, func_data, "toObject");
+    if (!state) {
+        return JS_EXCEPTION;
+    }
+    JSValue out = JS_NewObject (ctx);
+    for (const auto& param : state->parts.query_params) {
+        JS_SetPropertyStr (ctx, out, param.key.c_str (),
+        param.value ? JS_NewStringLen (ctx, param.value->data (), param.value->size ()) : JS_NULL);
+    }
+    return out;
+}
+
+JSValue js_url_query_count (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    (void)magic;
+    auto* state = url_state_of_query (ctx, func_data, "count");
+    if (!state) {
+        return JS_EXCEPTION;
+    }
+    return JS_NewInt32 (ctx, static_cast<int32_t> (state->parts.query_params.size ()));
+}
+
+/// The `query` sub-object: the params as an array plus the PropertyList reads
+/// over them, each bound to @p url so the two can never describe different
+/// URLs.
+JSValue build_query_object (JSContext* ctx, JSValue url, const RequestUrlState& state) {
+    JSValue query = JS_NewObject (ctx);
+
+    struct QueryMethod {
+        const char* name;
+        JSCFunctionData* fn;
+        int length;
+        int magic;
+    };
+    static constexpr std::array<QueryMethod, 5> METHODS = {
+        QueryMethod{ "get", js_url_query_get, 1, 0 },
+        QueryMethod{ "has", js_url_query_get, 1, 1 },
+        QueryMethod{ "all", js_url_query_all, 0, 0 },
+        QueryMethod{ "toObject", js_url_query_to_object, 0, 0 },
+        QueryMethod{ "count", js_url_query_count, 0, 0 },
+    };
+    for (const auto& method : METHODS) {
+        JS_SetPropertyStr (ctx, query, method.name,
+        JS_NewCFunctionData (ctx, method.fn, method.length, method.magic, 1, &url));
+    }
+
+    // Deliberately no `members` array beside them. Postman's PropertyList has
+    // one, but a copy of it here would be a second view of the same params
+    // that no doc names and no completion offers - and `all()` is that view,
+    // documented. The real PropertyList is a list of QueryParam objects with
+    // their own methods, which is more than v1 ships either way.
+    return query;
+}
+
+/// A JS array of strings, for the two parts Postman presents as segment lists.
+JSValue string_array (JSContext* ctx, const std::vector<std::string>& values) {
+    JSValue list  = JS_NewArray (ctx);
+    uint32_t next = 0;
+    for (const auto& value : values) {
+        JS_SetPropertyUint32 (
+        ctx, list, next++, JS_NewStringLen (ctx, value.data (), value.size ()));
+    }
+    return list;
+}
+
+/**
+ * @brief Parse `state.text` and (re)define the members a script reads.
+ *
+ * Called on the first read of `pm.request.url` and again after every write to
+ * it, so the members and the string can never disagree. Redefining rather than
+ * patching: a URL with no fragment must not keep the previous URL's `hash`.
+ *
+ * A URL libcurl cannot parse leaves every part empty (see `parse_url_parts`)
+ * and the string intact. That is deliberate: `toString()` still answers, so a
+ * script reading the whole URL is unaffected, while a script reading parts of
+ * an unparseable URL gets nothing rather than a plausible half.
+ */
+void build_request_url_members (JSContext* ctx, JSValue url, RequestUrlState& state) {
+    state.parts = vayu::http::parse_url_parts (state.text);
+    state.built = true;
+
+    // **Defined, not set.** The prototype here is `String.prototype`, which is
+    // itself a String object holding "" - so it carries a non-writable own
+    // `length`, and a plain `JS_SetPropertyStr` (which is `[[Set]]`, and walks
+    // the chain) is *refused* by it. Defining puts the property on this object
+    // and never consults the prototype, which is what every member wants
+    // anyway: these are the URL's own facts, not writes through to something.
+    const auto define = [&] (const char* name, JSValue value) {
+        JS_DefinePropertyValueStr (ctx, url, name, value, JS_PROP_C_W_E);
+    };
+    const auto define_string = [&] (const char* name, const std::string& value) {
+        define (name, JS_NewStringLen (ctx, value.data (), value.size ()));
+    };
+    define_string ("protocol", state.parts.protocol);
+    define_string ("port", state.parts.port);
+    define_string ("hash", state.parts.hash);
+    // `length` is defined rather than left as one of the documented breaks,
+    // because the alternative is not "absent": inherited from that same String
+    // prototype it answers `0` - a plausible number for a URL that is not
+    // empty, which is the silent-wrong-answer class this program exists to
+    // close. One property, and `url.length` means what it always did.
+    define ("length", JS_NewInt64 (ctx, static_cast<int64_t> (state.text.size ())));
+    define ("host", string_array (ctx, state.parts.host));
+    define ("path", string_array (ctx, state.parts.path));
+    define ("query", build_query_object (ctx, url, state));
+}
+
+/// The well-known symbol, reached through the `Symbol` global because QuickJS
+/// does not export its atom.
+JSAtom well_known_symbol_atom (JSContext* ctx, const char* name) {
+    JSValue global = JS_GetGlobalObject (ctx);
+    JSValue symbol = JS_GetPropertyStr (ctx, global, "Symbol");
+    JSValue member = JS_GetPropertyStr (ctx, symbol, name);
+    JSAtom atom    = JS_ValueToAtom (ctx, member);
+    JS_FreeValue (ctx, member);
+    JS_FreeValue (ctx, symbol);
+    JS_FreeValue (ctx, global);
+    return atom;
+}
+
+/// A fresh Url object holding @p text, with its members not yet built.
+JSValue new_request_url (JSContext* ctx, std::string text) {
+    JSValue url = JS_NewObjectClass (ctx, request_url_class_id);
+    if (JS_IsException (url)) {
+        return url;
+    }
+    auto* state = new RequestUrlState{ std::move (text), {}, false };
+    if (JS_SetOpaque (url, state) < 0) {
+        // The object is not of this class, so the finalizer will never run and
+        // nothing else would free the state.
+        delete state;
+        JS_FreeValue (ctx, url);
+        return JS_EXCEPTION;
+    }
+
+    // Defined rather than set, for the reason build_request_url_members gives:
+    // `String.prototype` is the prototype here, and `[[Set]]` consults it.
+    const auto define = [&] (const char* name, JSValue value) {
+        JS_DefinePropertyValueStr (ctx, url, name, value, JS_PROP_C_W_E);
+    };
+    define ("toString", JS_NewCFunction (ctx, js_url_to_string, "toString", 0));
+    define ("valueOf", JS_NewCFunction (ctx, js_url_to_string, "valueOf", 0));
+    define ("toJSON", JS_NewCFunction (ctx, js_url_to_string, "toJSON", 0));
+    JSAtom to_primitive = well_known_symbol_atom (ctx, "toPrimitive");
+    JS_DefinePropertyValue (ctx, url, to_primitive,
+    JS_NewCFunction (ctx, js_url_to_string, "[Symbol.toPrimitive]", 1), JS_PROP_CONFIGURABLE);
+    JS_FreeAtom (ctx, to_primitive);
+
+    define ("update", JS_NewCFunction (ctx, js_url_update, "update", 1));
+    for (const auto& [name, magic] :
+    std::array<std::pair<const char*, int>, 3>{ { { "getHost", URL_GET_HOST },
+    { "getPath", URL_GET_PATH }, { "getQueryString", URL_GET_QUERY_STRING } } }) {
+        define (name,
+        JS_NewCFunctionMagic (ctx, js_url_part_getter, name, 0, JS_CFUNC_generic_magic, magic));
+    }
+    return url;
+}
+
+/// The Url object behind the accessor, with its members materialised.
+JSValue bound_request_url (JSContext* ctx, JSValue* func_data) {
+    auto* state = request_url_state (func_data[0]);
+    if (state && !state->built) {
+        build_request_url_members (ctx, func_data[0], *state);
+    }
+    return JS_DupValue (ctx, func_data[0]);
+}
+
+JSValue js_request_url_get (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    (void)magic;
+    return bound_request_url (ctx, func_data);
+}
+
+/**
+ * `pm.request.url = '...'` - the write that shipped, still working, still
+ * feeding `apply_pm_request_writeback`.
+ *
+ * Refuses anything that is neither a string nor a Url object *at the assignment
+ * itself*, rather than letting the write-back reject it several lines later:
+ * the script author is told which line was wrong, and a test script - which has
+ * no write-back to be rejected by - stops silently accepting a number.
+ */
+JSValue js_request_url_set (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)magic;
+    auto text = argc > 0 ? script_url_text (ctx, argv[0]) : std::nullopt;
+    if (!text) {
+        return JS_ThrowTypeError (ctx,
+        "pm.request.url must be assigned a URL string, got %s (call "
+        ".toString() "
+        "on a value that is not one)",
+        argc > 0 ? js_type_name (ctx, argv[0]) : "no value");
+    }
+    auto* state = request_url_state (func_data[0]);
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "pm.request.url lost its URL");
+    }
+    state->text = std::move (*text);
+    build_request_url_members (ctx, func_data[0], *state);
+    return JS_UNDEFINED;
+}
+
+/**
+ * @brief Install `pm.request.url` as the accessor pair over a Url object.
+ *
+ * An accessor rather than a plain member for two reasons. The parse is paid on
+ * the first *read*, so a script that never mentions the URL - most scripts -
+ * costs one object allocation and nothing else. And a write goes through the
+ * setter, so `pm.request.url = 'https://...'` leaves a Url object behind rather
+ * than replacing the object with a bare string, which is what would make
+ * `pm.request.url = x; pm.request.url.query.get('a')` throw.
+ *
+ * Enumerable, like every other member of `pm.request`: `JSON.stringify` and
+ * `console.log` have to keep showing the URL, and the object's own `toJSON`
+ * makes that the string it always was.
+ */
+void install_request_url (JSContext* ctx, JSValue request, const std::string& url_text) {
+    JSValue url = new_request_url (ctx, url_text);
+    if (JS_IsException (url)) {
+        JS_FreeValue (ctx, url);
+        return;
+    }
+    JSAtom atom = JS_NewAtom (ctx, "url");
+    JS_DefinePropertyGetSet (ctx, request, atom,
+    JS_NewCFunctionData (ctx, js_request_url_get, 0, 0, 1, &url),
+    JS_NewCFunctionData (ctx, js_request_url_set, 1, 0, 1, &url),
+    JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom (ctx, atom);
+    JS_FreeValue (ctx, url);
+}
+
 void setup_pm_request (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
 
@@ -3393,9 +3936,8 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
     JSValue request = JS_NewObject (ctx);
 
     if (data && data->request) {
-        // pm.request.url
-        JS_SetPropertyStr (
-        ctx, request, "url", JS_NewString (ctx, data->request->url.c_str ()));
+        // pm.request.url - Postman's Url object, not the string it used to be.
+        install_request_url (ctx, request, data->request->url);
 
         // pm.request.method
         JS_SetPropertyStr (ctx, request, "method",
@@ -3608,12 +4150,16 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
 
     Request staged = request;
 
+    // Either shape: the Url object `pm.request.url` normally holds, or a plain
+    // string, which is what a script that replaced `pm.request` wholesale with
+    // an object literal leaves there. Both are the URL; neither is a diff.
     ScopedValue js_url (ctx, JS_GetPropertyStr (ctx, js_request.get (), "url"));
-    if (!JS_IsString (js_url.get ())) {
-        return "pm.request.url must be a string, got " +
+    auto url_text = script_url_text (ctx, js_url.get ());
+    if (!url_text) {
+        return "pm.request.url must be a string or a URL object, got " +
         std::string (js_type_name (ctx, js_url.get ()));
     }
-    staged.url = js_to_string (ctx, js_url.get ());
+    staged.url = std::move (*url_text);
     if (staged.url.empty ()) {
         return std::string ("pm.request.url must not be empty");
     }
@@ -4246,8 +4792,12 @@ read_send_request_body (JSContext* ctx, JSValueConst value, Body& out) {
 // @return why it was rejected, or nullopt when `out` is filled.
 std::optional<std::string>
 build_send_request (JSContext* ctx, JSValueConst arg, Request& out) {
-    if (JS_IsString (arg)) {
-        out.url = js_to_string (ctx, arg);
+    // A Url object here is `pm.sendRequest(pm.request.url, cb)`, which #991
+    // made the natural spelling of "send this request again" - it has to be
+    // read before the options-object branch, or the Url object falls into it
+    // and is refused for having no `url` member.
+    if (auto direct = script_url_text (ctx, arg)) {
+        out.url = std::move (*direct);
         if (out.url.empty ()) {
             return std::string ("pm.sendRequest was given an empty URL");
         }
@@ -4261,12 +4811,15 @@ build_send_request (JSContext* ctx, JSValueConst arg, Request& out) {
     }
 
     ScopedValue js_url (ctx, JS_GetPropertyStr (ctx, arg, "url"));
-    if (!JS_IsString (js_url.get ())) {
-        return "pm.sendRequest options.url must be a string, got " +
-        std::string (js_type_name (ctx, js_url.get ())) +
-        " (Postman's URL-object form is not supported)";
+    auto options_url = script_url_text (ctx, js_url.get ());
+    if (!options_url) {
+        // Postman's *literal* URL-object form - a `{host: [...], path: [...]}`
+        // built by hand - is still not accepted; pm.request.url is.
+        return "pm.sendRequest options.url must be a string or pm.request.url, "
+               "got " +
+        std::string (js_type_name (ctx, js_url.get ()));
     }
-    out.url = js_to_string (ctx, js_url.get ());
+    out.url = std::move (*options_url);
     if (out.url.empty ()) {
         return std::string ("pm.sendRequest options.url is empty");
     }
@@ -4649,19 +5202,33 @@ std::vector<vayu::http::CookieWrite>* jar_writes (JSContext* ctx, const char* me
 // One required string argument of a jar() method. Every one of them is
 // URL-scoped, which is the whole reason Postman's write half hangs off `jar()`
 // rather than off `pm.cookies` - so the URL is never optional.
+//
+// @p url_arg marks the positions that take a URL, which since #991 also accept
+// the Url object `pm.request.url` holds - `jar().set(pm.request.url, ...)` is
+// the documented example in both script docs and was a string argument until
+// that object replaced the string. A cookie *name* stays string-only: nothing
+// makes a URL a plausible name, so accepting one there would only let a
+// misplaced argument through.
 std::optional<std::string> read_jar_string_arg (JSContext* ctx,
 const char* member,
 const char* label,
 int index,
 int argc,
-JSValueConst* argv) {
-    if (index >= argc || !JS_IsString (argv[index])) {
+JSValueConst* argv,
+bool url_arg = false) {
+    std::optional<std::string> text;
+    if (index < argc) {
+        text = url_arg ? script_url_text (ctx, argv[index]) :
+                         (JS_IsString (argv[index]) ?
+                         std::optional<std::string> (js_to_string (ctx, argv[index])) :
+                         std::nullopt);
+    }
+    if (!text) {
         JS_ThrowTypeError (ctx, "pm.cookies.jar().%s needs a %s string, got %s", member,
         label, index >= argc ? "no argument" : js_type_name (ctx, argv[index]));
         return std::nullopt;
     }
-    std::string text = js_to_string (ctx, argv[index]);
-    if (text.empty ()) {
+    if (text->empty ()) {
         JS_ThrowTypeError (ctx, "pm.cookies.jar().%s needs a non-empty %s", member, label);
         return std::nullopt;
     }
@@ -4826,7 +5393,7 @@ JSValue finish_jar_call (JSContext* ctx, int argc, JSValueConst* argv, int callb
 
 JSValue js_jar_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
-    auto url = read_jar_string_arg (ctx, "get", "URL", 0, argc, argv);
+    auto url = read_jar_string_arg (ctx, "get", "URL", 0, argc, argv, /*url_arg=*/true);
     if (!url) {
         return JS_EXCEPTION;
     }
@@ -4849,7 +5416,7 @@ JSValue js_jar_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
 
 JSValue js_jar_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
-    auto url = read_jar_string_arg (ctx, "set", "URL", 0, argc, argv);
+    auto url = read_jar_string_arg (ctx, "set", "URL", 0, argc, argv, /*url_arg=*/true);
     if (!url) {
         return JS_EXCEPTION;
     }
@@ -4902,7 +5469,7 @@ JSValue js_jar_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
 
 JSValue js_jar_unset (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
-    auto url = read_jar_string_arg (ctx, "unset", "URL", 0, argc, argv);
+    auto url = read_jar_string_arg (ctx, "unset", "URL", 0, argc, argv, /*url_arg=*/true);
     if (!url) {
         return JS_EXCEPTION;
     }
@@ -4926,12 +5493,13 @@ JSValue js_jar_clear (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     (void)this_val;
     // Two forms, told apart by the first argument. Postman's is
     // `clear(url, cb?)`, scoped to one URL; Vayu's own `clear(cb?)` empties
-    // the scope and is what this method shipped as. A string in that position
-    // is unambiguously the URL - the only other thing it takes is a function.
+    // the scope and is what this method shipped as. A string or a Url object in
+    // that position is unambiguously the URL - the only other thing it takes is
+    // a function.
     std::optional<std::string> url;
     int callback_index = 0;
-    if (argc > 0 && JS_IsString (argv[0])) {
-        url = read_jar_string_arg (ctx, "clear", "URL", 0, argc, argv);
+    if (argc > 0 && (JS_IsString (argv[0]) || request_url_state (argv[0]) != nullptr)) {
+        url = read_jar_string_arg (ctx, "clear", "URL", 0, argc, argv, /*url_arg=*/true);
         if (!url) {
             return JS_EXCEPTION;
         }
@@ -5292,6 +5860,17 @@ void setup_pm_object (JSContext* ctx) {
     JS_FreeValue (ctx, plain);
     JS_SetClassProto (ctx, response_chain_class_id, object_proto);
 
+    // `pm.request.url` inherits from **String.prototype**, which is the whole
+    // of how `url.startsWith(...)`, `.includes(...)`, `.slice(...)` and the
+    // rest keep working on what used to be a string: every one of them coerces
+    // through `ToString(this)`, which the object's own `@@toPrimitive` answers
+    // with the URL. What it does not restore is `.length` - an own property of
+    // a real string, and one of the three breaks #991 documents.
+    JSValue string_ctor  = JS_GetPropertyStr (ctx, global, "String");
+    JSValue string_proto = JS_GetPropertyStr (ctx, string_ctor, "prototype");
+    JS_FreeValue (ctx, string_ctor);
+    JS_SetClassProto (ctx, request_url_class_id, string_proto);
+
     // pm.test()
     JS_SetPropertyStr (ctx, pm, "test", JS_NewCFunction (ctx, js_pm_test, "test", 2));
 
@@ -5416,6 +5995,13 @@ class ScriptEngine::Impl {
             JS_NewClassID (rt, &response_chain_class_id);
         }
         JS_NewClass (rt, response_chain_class_id, &response_chain_class);
+
+        // Register the pm.request.url class - see setup_pm_object for the
+        // prototype that keeps it usable as the string it replaced.
+        if (request_url_class_id == 0) {
+            JS_NewClassID (rt, &request_url_class_id);
+        }
+        JS_NewClass (rt, request_url_class_id, &request_url_class);
 
         JSContext* ctx = JS_NewContext (rt);
         if (ctx) {

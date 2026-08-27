@@ -351,11 +351,170 @@ nlohmann::json get_script_completions () {
     { "sortText", "0_pm_request" } });
 
     completions.push_back ({ { "label", "pm.request.url" }, { "kind", KIND_FIELD },
-    { "insertText", "pm.request.url" }, { "detail", "string (writable pre-request)" },
+    { "insertText", "pm.request.url" }, { "detail", "string & object (writable pre-request)" },
     { "documentation",
-    "The full request URL. Assign to retarget the request before it is sent - "
-    "must be a non-empty string. {{variables}} are already resolved here." },
+    "The full request URL, as Postman's Url object: protocol, host, port, "
+    "path, query and hash, plus getHost(), getPath(), getQueryString() and "
+    "toString(). {{variables}} are already resolved here.\n\nIt still behaves "
+    "as the string it used to be - concatenation, template literals, ==, the "
+    "String methods and .length all give the full URL - so `===` and `typeof` "
+    "are the two things that changed. Assign a string to retarget "
+    "the request before it is sent, or call url.update(...); either way it "
+    "must be non-empty." },
     { "sortText", "1_pm_request_url" } });
+
+    completions.push_back ({ { "label", "pm.request.url.protocol" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.url.protocol" }, { "detail", "string" },
+    { "documentation",
+    "The scheme with no trailing colon (\"https\"). Empty when the URL "
+    "cannot be parsed." },
+    { "sortText", "2_pm_request_url_protocol" } });
+
+    completions.push_back ({ { "label", "pm.request.url.host" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.url.host" }, { "detail", "string[]" },
+    { "documentation",
+    "The host split on dots, as Postman presents it: \"api.example.com\" is "
+    "[\"api\", \"example\", \"com\"]. Use getHost() for the joined form." },
+    { "sortText", "2_pm_request_url_host" } });
+
+    completions.push_back ({ { "label", "pm.request.url.port" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.url.port" }, { "detail", "string" },
+    { "documentation",
+    "The port the URL states, as a string. Empty when it states none - a "
+    "scheme's default port is never filled in." },
+    { "sortText", "2_pm_request_url_port" } });
+
+    completions.push_back ({ { "label", "pm.request.url.path" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.url.path" }, { "detail", "string[]" },
+    { "documentation",
+    "The path as decoded segments: \"/v2/users\" is [\"v2\", \"users\"]. Each "
+    "segment is decoded on its own, so an encoded slash stays inside the "
+    "segment it belongs to. Use getPath() for the joined form." },
+    { "sortText", "2_pm_request_url_path" } });
+
+    completions.push_back ({ { "label", "pm.request.url.length" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.url.length" }, { "detail", "number" },
+    { "documentation",
+    "The length of the whole URL string - defined on the object rather than "
+    "inherited, so it is the URL's own length and not the 0 that String's "
+    "prototype would have answered." },
+    { "sortText", "2_pm_request_url_length" } });
+
+    completions.push_back ({ { "label", "pm.request.url.hash" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.url.hash" }, { "detail", "string" },
+    { "documentation", "The fragment with no leading #. Empty when there is none." },
+    { "sortText", "2_pm_request_url_hash" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.url.query" }, { "detail", "Url query object" },
+    { "documentation",
+    "The query parameters, with Postman's PropertyList reads over them: "
+    "get(name), has(name), all(), toObject() and count(). Values are the "
+    "wire bytes, not decoded - a signature has to canonicalize what was "
+    "sent." },
+    { "sortText", "2_pm_request_url_query" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.get" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.get(\"${1:page}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.url.query.get(name: string): string | null" },
+    { "documentation",
+    "The first value of that parameter, or null when the name is absent or "
+    "carries no value (\"?flag\"). First rather than last, matching "
+    "Postman's PropertyList - all() is the view that keeps duplicates." },
+    { "sortText", "3_pm_request_url_query_get" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.has" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.has(\"${1:page}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.url.query.has(name: string): boolean" },
+    { "documentation",
+    "Whether the query carries that parameter at all, including a bare "
+    "\"?flag\" that has no value." },
+    { "sortText", "3_pm_request_url_query_has" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.all" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.all()" },
+    { "detail", "pm.request.url.query.all(): { key: string, value: string | null }[]" },
+    { "documentation",
+    "Every parameter as { key, value }, in wire order, duplicates kept - the "
+    "view a canonical query string is built from. A parameter with no value "
+    "has value null." },
+    { "sortText", "3_pm_request_url_query_all" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.toObject" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.toObject()" },
+    { "detail", "pm.request.url.query.toObject(): { [key: string]: string | null }" },
+    { "documentation",
+    "The query as a plain { name: value } object, last wins on a repeated "
+    "name. Use all() when duplicates matter." },
+    { "sortText", "3_pm_request_url_query_toObject" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.count" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.count()" },
+    { "detail", "pm.request.url.query.count(): number" },
+    { "documentation", "How many parameters the query carries, counting duplicates separately." },
+    { "sortText", "3_pm_request_url_query_count" } });
+
+    completions.push_back ({ { "label", "pm.request.url.getHost" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.getHost()" },
+    { "detail", "pm.request.url.getHost(): string" },
+    { "documentation", "The host as one string - the segments of host joined by dots." },
+    { "sortText", "2_pm_request_url_getHost" } });
+
+    completions.push_back ({ { "label", "pm.request.url.getPath" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.getPath()" },
+    { "detail", "pm.request.url.getPath(): string" },
+    { "documentation",
+    "The decoded path as one string, leading slash included (\"/v2/users\"). "
+    "A URL with no path answers \"/\"." },
+    { "sortText", "2_pm_request_url_getPath" } });
+
+    completions.push_back ({ { "label", "pm.request.url.getQueryString" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.getQueryString()" },
+    { "detail", "pm.request.url.getQueryString(): string" },
+    { "documentation",
+    "The query exactly as it appears on the wire, with no leading ?. Empty "
+    "when the URL carries none." },
+    { "sortText", "2_pm_request_url_getQueryString" } });
+
+    completions.push_back ({ { "label", "pm.request.url.toString" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.toString()" },
+    { "detail", "pm.request.url.toString(): string" },
+    { "documentation",
+    "The whole URL as a string. The same answer concatenation, a template "
+    "literal and JSON.stringify already give, spelled out for the one place "
+    "that needs a real string - strict equality." },
+    { "sortText", "2_pm_request_url_toString" } });
+
+    // `valueOf` and `toJSON` are the same answer toString gives - offered
+    // because the runtime binds them, and a bound member the list never names
+    // is one no user can discover in the editor.
+    completions.push_back ({ { "label", "pm.request.url.valueOf" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.valueOf()" },
+    { "detail", "pm.request.url.valueOf(): string" },
+    { "documentation",
+    "The whole URL as a string - what == and arithmetic-style coercion use, "
+    "and the same answer toString() gives." },
+    { "sortText", "2_pm_request_url_valueOf" } });
+
+    completions.push_back ({ { "label", "pm.request.url.toJSON" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.toJSON()" },
+    { "detail", "pm.request.url.toJSON(): string" },
+    { "documentation",
+    "The whole URL as a string, which is why JSON.stringify embeds the URL "
+    "rather than an object dump." },
+    { "sortText", "2_pm_request_url_toJSON" } });
+
+    completions.push_back ({ { "label", "pm.request.url.update" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.url.update(\"${1:https://api.example.com/v2/users}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.url.update(url: string): void" },
+    { "documentation",
+    "Retarget the request, Postman's spelling of pm.request.url = '...'. "
+    "Both re-parse the whole URL in place; editing a single member (pushing "
+    "to path, changing a query entry) is not supported." },
+    { "sortText", "2_pm_request_url_update" } });
 
     completions.push_back ({ { "label", "pm.request.method" }, { "kind", KIND_FIELD },
     { "insertText", "pm.request.method" }, { "detail", "string (writable pre-request)" },
