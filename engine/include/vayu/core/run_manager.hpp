@@ -314,7 +314,7 @@ struct RunContext {
      * `build_load_request` before the first submission - and only read
      * afterwards, all on the run's worker thread.
      */
-    std::unique_ptr<LoadDataSet> data;
+    std::unique_ptr<LoadDataSet> load_data;
 
     // Real-time counters (also tracked by MetricsCollector, but kept for backward compat)
     std::atomic<size_t> requests_sent{ 0 }; // Number of requests submitted to event loop

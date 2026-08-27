@@ -187,7 +187,7 @@ class LoadDataTest : public ::testing::Test {
 
         auto context =
         std::make_shared<vayu::core::RunContext> ("test-load-data", payload);
-        context->data = std::move (read.set);
+        context->load_data = std::move (read.set);
         vayu::http::EventLoopConfig loop_config;
         loop_config.max_concurrent = 100;
         loop_config.max_per_host   = 100;
@@ -386,7 +386,7 @@ TEST_F (LoadDataTest, ARunWithoutRowsCarriesNoSetAndAnnotatesNothing) {
 
     run (payload);
 
-    EXPECT_EQ (context_->data, nullptr)
+    EXPECT_EQ (context_->load_data, nullptr)
     << "a run sent without `data` must carry no set - the strategies test "
        "exactly this pointer before doing any per-submission work";
     const auto results = context_->metrics_collector->success_results ();

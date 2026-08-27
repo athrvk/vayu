@@ -347,7 +347,7 @@ class SubmissionRequest {
 void submit_one_request (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 SubmissionRequest& live) {
-    const LoadDataSet* data = context->data.get ();
+    const LoadDataSet* data = context->load_data.get ();
     if (data == nullptr) {
         context->event_loop->submit (live.current (),
         [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {

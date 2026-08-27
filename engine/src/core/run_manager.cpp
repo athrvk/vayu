@@ -459,7 +459,8 @@ bool verbose) {
         // step's replay gets, off the row index the sample was stamped with
         // (issue #993). Null for a run sent without rows, which is what keeps
         // `pm.iterationData` `undefined` there.
-        replay.data_rows = context->data == nullptr ? nullptr : &context->data->rows;
+        replay.data_rows =
+        context->load_data == nullptr ? nullptr : &context->load_data->rows;
         replay.request_id   = script_request_id;
         replay.request_name = script_request_name;
         replay.sse_limits   = sse_limits;
@@ -984,7 +985,7 @@ std::unique_ptr<LoadDataSet> data) {
         context->scenario = std::move (scenario);
         // Same rule, same moment: the worker splits this set's request template
         // before its first submission and every strategy reads it after.
-        context->data = std::move (data);
+        context->load_data = std::move (data);
         // Spawn metrics collection thread first - it is NOT detached and is
         // joined by the worker thread below.
         context->metrics_thread =
@@ -1120,8 +1121,10 @@ vayu::Request& request) {
     // out of reach (issue #591), so a run with rows tells the build to defer
     // and `bind_iteration_row` applies them per submission. Every other run
     // resolves its auth here exactly as it always did.
-    auto built = vayu::http::build_request (config, db_ptr, timeout_ms,
-    context->data ? context->data->auth_resolution () : vayu::http::AuthResolution::Apply);
+    const auto auth_resolution = context->load_data ?
+    context->load_data->auth_resolution () :
+    vayu::http::AuthResolution::Apply;
+    auto built = vayu::http::build_request (config, db_ptr, timeout_ms, auth_resolution);
     if (!built.ok) {
         vayu::utils::log_error (built.parse_failed ?
         std::string ("Load test: invalid request format") :
@@ -1134,8 +1137,8 @@ vayu::Request& request) {
     // run binds at its full rate, which is the same reason a plan step is split
     // when the plan resolves (issue #993). The `{}` a row-free run keeps is
     // what makes the join free for it - it has no set at all.
-    if (context->data) {
-        context->data->fields = tokenize_data_fields (request);
+    if (context->load_data) {
+        context->load_data->fields = tokenize_data_fields (request);
     }
 
     // A streaming run's caps ride on the request itself, because the
