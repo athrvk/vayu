@@ -99,7 +99,7 @@ constexpr long DNS_NEGATIVE_CACHE_SECONDS = 5;
 /// Largest response body a single load-run transfer may buffer in memory.
 /// A transfer past this fails with CURLE_WRITE_ERROR rather than growing as
 /// concurrency x body-size until the daemon is OOM-killed. 0 = unbounded.
-constexpr size_t MAX_RESPONSE_BODY_BYTES = 32UL * 1024 * 1024;
+constexpr size_t MAX_RESPONSE_BODY_BYTES = size_t{ 32 } * 1024 * 1024;
 /// TCP keep-alive idle time in seconds
 constexpr long TCP_KEEPALIVE_IDLE_SECONDS = 60;
 /// TCP keep-alive probe interval in seconds
@@ -515,7 +515,7 @@ constexpr std::size_t RETAINED_EVENTS_CEILING = 200000;
 /// on any single unterminated line, which is what bounds the parser itself.
 constexpr std::size_t MAX_EVENT_BYTES     = std::size_t{ 64 } * 1024;
 constexpr std::size_t MIN_EVENT_BYTES     = 256;
-constexpr std::size_t EVENT_BYTES_CEILING = 8UL * 1024 * 1024;
+constexpr std::size_t EVENT_BYTES_CEILING = std::size_t{ 8 } * 1024 * 1024;
 
 /// Events written into a completed run's trace, seeding `sseMaxStoredEvents`.
 /// Smaller than the ring: the ring is a live window that dies with the run,
@@ -605,7 +605,7 @@ constexpr int MIN_LIVE_CLAIM_STALE_MS = 100;
 /// and records nothing - a payload this size is not a webhook. A rail rather
 /// than a setting: it bounds what an unauthenticated *remote* caller can make
 /// the engine buffer, which is not the local user's preference to spend.
-constexpr size_t MAX_PAYLOAD_BYTES = 8UL * 1024 * 1024;
+constexpr size_t MAX_PAYLOAD_BYTES = size_t{ 8 } * 1024 * 1024;
 /// Upper bound on the canned response's artificial delay. It occupies a
 /// listener thread for its whole duration - and the teardown join waits for it
 /// - so it is bounded well below any client timeout. A rail for the same

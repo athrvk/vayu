@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -67,7 +68,7 @@ bool env_is_set (const char* name) {
     if (_dupenv_s (&value, &length, name) != 0 || value == nullptr) {
         return false;
     }
-    std::free (value);
+    const std::unique_ptr<char, decltype (&std::free)> owned (value, &std::free);
     return true;
 #else
     // NOLINTNEXTLINE(concurrency-mt-unsafe)

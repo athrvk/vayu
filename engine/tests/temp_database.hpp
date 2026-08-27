@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -55,7 +56,7 @@ inline bool scratch_isolation_disabled () {
     if (_dupenv_s (&value, &length, "VAYU_TEST_NO_SCRATCH_ISOLATION") != 0 || value == nullptr) {
         return false;
     }
-    std::free (value);
+    const std::unique_ptr<char, decltype (&std::free)> owned (value, &std::free);
     return true;
 #else
     // NOLINTNEXTLINE(concurrency-mt-unsafe)

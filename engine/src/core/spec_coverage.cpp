@@ -274,8 +274,8 @@ void CoverageTally::record (size_t step, int status_code) {
     size_t slot = OTHER_SLOT;
     if (status_code == 0) {
         slot = TRANSPORT_SLOT;
-    } else if (status_code >= static_cast<int> (FIRST_STATUS) &&
-    status_code <= static_cast<int> (LAST_STATUS)) {
+    } else if (std::cmp_greater_equal (status_code, FIRST_STATUS) &&
+    std::cmp_less_equal (status_code, LAST_STATUS)) {
         slot = static_cast<size_t> (status_code) - FIRST_STATUS;
     }
     counts_[step][slot].fetch_add (1, std::memory_order_relaxed);

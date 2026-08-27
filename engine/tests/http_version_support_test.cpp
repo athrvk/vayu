@@ -53,12 +53,16 @@ bool os_at_least (DWORD major, DWORD minor, bool use_rtl) {
     osver.dwMinorVersion      = minor;
     osver.dwPlatformId        = VER_PLATFORM_WIN32_NT;
 
-    ULONGLONG mask = 0;
-    mask = VerSetConditionMask (mask, VER_MAJORVERSION, VER_GREATER_EQUAL);
-    mask = VerSetConditionMask (mask, VER_MINORVERSION, VER_GREATER_EQUAL);
-    mask = VerSetConditionMask (mask, VER_SERVICEPACKMAJOR, VER_GREATER_EQUAL);
-    mask = VerSetConditionMask (mask, VER_SERVICEPACKMINOR, VER_GREATER_EQUAL);
-    mask = VerSetConditionMask (mask, VER_PLATFORMID, VER_EQUAL);
+    ULONGLONG condition_mask = 0;
+    condition_mask =
+    VerSetConditionMask (condition_mask, VER_MAJORVERSION, VER_GREATER_EQUAL);
+    condition_mask =
+    VerSetConditionMask (condition_mask, VER_MINORVERSION, VER_GREATER_EQUAL);
+    condition_mask =
+    VerSetConditionMask (condition_mask, VER_SERVICEPACKMAJOR, VER_GREATER_EQUAL);
+    condition_mask =
+    VerSetConditionMask (condition_mask, VER_SERVICEPACKMINOR, VER_GREATER_EQUAL);
+    condition_mask = VerSetConditionMask (condition_mask, VER_PLATFORMID, VER_EQUAL);
 
     const DWORD type_mask = VER_MAJORVERSION | VER_MINORVERSION |
     VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR | VER_PLATFORMID;
@@ -70,12 +74,18 @@ bool os_at_least (DWORD major, DWORD minor, bool use_rtl) {
         if (!ntdll) {
             return false;
         }
+        // A function pointer off `GetProcAddress` is the cast `engine/CLAUDE.md`
+        // names as having no primitive to route through - there is no
+        // `byte_view`-shaped seam for "the address the loader returned is this
+        // signature". Going through `void*` to soften it only added
+        // `bugprone-casting-through-void`, whose own advice is this one cast.
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         auto* fn = reinterpret_cast<RtlVerifyVersionInfoFn> (
-        reinterpret_cast<void*> (GetProcAddress (ntdll, "RtlVerifyVersionInfo")));
+        GetProcAddress (ntdll, "RtlVerifyVersionInfo"));
         if (!fn) {
             return false;
         }
-        return fn (&osver, type_mask, mask) == 0; // STATUS_SUCCESS
+        return fn (&osver, type_mask, condition_mask) == 0; // STATUS_SUCCESS
     }
 
 // VerifyVersionInfoW carries a deprecation attribute whose whole message is
@@ -86,7 +96,7 @@ bool os_at_least (DWORD major, DWORD minor, bool use_rtl) {
 #pragma warning(push)
 #pragma warning(disable : 4996)
 #endif
-    return VerifyVersionInfoW (&osver, type_mask, mask) != FALSE;
+    return VerifyVersionInfoW (&osver, type_mask, condition_mask) != FALSE;
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif

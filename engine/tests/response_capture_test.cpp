@@ -138,7 +138,7 @@ TEST_F (ResponseCaptureTest, ExemplarsAreBoundedPerStatusCode) {
     for (int status : { 200, 404, 503 }) {
         for (int i = 0; i < 50; ++i) {
             EXPECT_EQ (collector.claim_status_exemplar (status),
-            i < static_cast<int> (constants::metrics_collector::EXEMPLARS_PER_STATUS));
+            std::cmp_less (i, constants::metrics_collector::EXEMPLARS_PER_STATUS));
         }
     }
 }

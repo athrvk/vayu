@@ -45,6 +45,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_set>
+#include <utility>
 
 namespace vayu::http {
 
@@ -503,7 +504,7 @@ bool should_inject_error (int rate_pct, std::atomic<std::uint64_t>& counter) {
     x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
     x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
     x ^= x >> 31;
-    return static_cast<int> (x % 100) < rate_pct;
+    return std::cmp_less (x % 100, rate_pct);
 }
 
 } // namespace
