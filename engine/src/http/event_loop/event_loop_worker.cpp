@@ -342,10 +342,161 @@ void EventLoopWorker::cancel_active_transfers () {
     current_active_count.store (0, std::memory_order_relaxed);
 }
 
-void EventLoopWorker::run_loop () {
+bool EventLoopWorker::submit_pending_transfers (size_t& local_active) {
+    bool did_work = false;
+    std::unique_ptr<TransferData> data;
+
+    // Fetch Phase: get up to max_concurrent items, but only while tokens are
+    // available - driving IO for the transfers already in flight matters more
+    // than accepting new work when rate limited. Rate-limiter tokens are never
+    // waited for, so the loop keeps moving.
+    while (local_active < config.max_concurrent) {
+        // Check rate limiter WITHOUT blocking (single-threaded access, no lock needed)
+        if (!rate_limiter.try_acquire_unlocked ()) {
+            // Rate limit reached. Stop fetching new work.
+            // Go drive the IO machinery for existing requests.
+            break;
+        }
+
+        // Have token, try get data
+        if (!pending_queue.pop (data)) {
+            // Queue empty, but we acquired a token.
+            // It's a small inefficiency (wasted token) but simpler code path.
+            // Given 60k RPS, a few wasted tokens are negligible noise.
+            break;
+        }
+
+        did_work = true;
+
+        // A request curl cannot put on the wire as written is refused here
+        // rather than quietly sent as something else.
+        if (auto invalid = validate_transferable (data->request)) {
+            // Delivered as a failed *response*, the shape a request that
+            // never reached the wire already has everywhere else.
+            complete_transfer (*data, error_response (*invalid));
+            continue;
+        }
+
+        // Acquire handle from pool (lock-free or specialized pool)
+        CURL* easy = handle_pool_.acquire ();
+        // Note: setup_easy_handle might take time, good to do it outside locks
+        easy = setup_easy_handle (easy, data.get (), config, &dns_cache ());
+
+        if (!easy) {
+            // Handle creation failure
+            complete_transfer (*data,
+            Error{ ErrorCode::InternalError, "Failed to create curl handle" });
+            continue;
+        }
+
+        // A handle the multi rejects never yields a completion message, so
+        // tracking it as active would strand it: the run never drains and
+        // stop(true) never returns.
+        if (auto rejected = add_to_multi (multi_handle, easy)) {
+            complete_transfer (*data, *rejected);
+            handle_pool_.release (easy);
+            continue;
+        }
+
+        // Track active transfer
+        {
+            // No lock needed - private resource
+            active_transfers[easy] = std::move (data);
+            // Update atomic size
+            current_active_count.store (active_transfers.size (), std::memory_order_relaxed);
+            local_active++; // Local cache update for loop condition
+        }
+    }
+    return did_work;
+}
+
+bool EventLoopWorker::drain_completions () {
+    bool did_work = false;
+    // 3. Process completions
+    // Check often to free up slots
+    int msgs_left = 0;
+    CURLMsg* msg  = nullptr;
+    while ((msg = curl_multi_info_read (multi_handle, &msgs_left))) {
+        did_work = true;
+
+        if (msg->msg == CURLMSG_DONE) {
+            CURL* easy = msg->easy_handle;
+            // `CURLMsg::data` is a union whose active member is named by
+            // `msg`, and libcurl documents `CURLMSG_DONE` as the one that
+            // selects `result` - the branch above is that check. A variant
+            // is not on offer: the struct is libcurl's.
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access)
+            CURLcode result = msg->data.result;
+
+            // Named for the transfer that just finished rather than `data`,
+            // which is the fetch phase's handle on the transfer being
+            // *submitted* and stays in scope here (MSVC C4456).
+            std::unique_ptr<TransferData> completed;
+            {
+                // No lock needed - private resource
+                auto it = active_transfers.find (easy);
+                if (it != active_transfers.end ()) {
+                    completed = std::move (it->second);
+                    active_transfers.erase (it);
+                    // Update atomic size
+                    current_active_count.store (
+                    active_transfers.size (), std::memory_order_relaxed);
+                }
+            }
+
+            if (completed) {
+                auto response_result = extract_response (easy, completed.get (), result);
+                if (completed->callback)
+                    completed->callback (completed->request_id, response_result);
+                if (completed->has_promise)
+                    completed->promise.set_value (std::move (response_result));
+                local_processed.fetch_add (1, std::memory_order_relaxed);
+            }
+
+            curl_multi_remove_handle (multi_handle, easy);
+            handle_pool_.release (easy);
+        }
+    }
+    return did_work;
+}
+
+void EventLoopWorker::wait_for_work (int still_running) {
     // Adaptive spinning parameters
     constexpr int SPIN_COUNT = core::constants::queue::SPIN_COUNT;
+    // 4. Wait Strategy
+    // 4. Wait strategy: park until there is IO or new work.
+    if (still_running > 0) {
+        // Wait for IO activity, but allow interruption via curl_multi_wakeup
+        // Use a short timeout to keep checking the queue even if no IO events
+        curl_multi_poll (multi_handle, nullptr, 0,
+        core::constants::event_loop::POLL_TIMEOUT_MS, nullptr);
+    } else if (!stop_requested) {
+        // No active transfers, and no pending items recently.
+        // This is the idle storage.
+        // Use atomic wait instead of Condition Variable for lower
+        // latency wakeup We wait on queue_has_items flag
 
+        // Adaptive spinning before sleeping
+        for (int i = 0; i < SPIN_COUNT; ++i) {
+            if (pending_queue.read_available () > 0)
+                break;
+            // Busy-wait / pause to avoid context switch
+            // std::this_thread::yield(); // REMOVED: Yield causes too much latency
+        }
+
+        if (pending_queue.read_available () == 0) {
+            // Check again before sleep
+            queue_has_items.wait (false, std::memory_order_acquire);
+        }
+        // Reset flag consumption is partly implicit by checking queue
+        // size But we can reset it if queue is empty to allow next wait
+        if (pending_queue.read_available () == 0) {
+            queue_has_items.store (false, std::memory_order_release);
+        }
+    }
+}
+
+void EventLoopWorker::run_loop () {
     // Core loop optimized for latency and throughput.
     // When drain_on_stop=true (stop(true)): keep running until pending queue
     // AND active transfers are both empty, or until the drain deadline passes.
@@ -367,165 +518,28 @@ void EventLoopWorker::run_loop () {
 
         bool did_work = false;
 
-        // 1. Process pending queue (Lock-free Consumer)
-        // We avoid blocking acquisition of rate limiter tokens to keep IO loop moving
-
-        // Use atomic load for active count check (Lock-free hot path)
-        // The check is "loose" (data race only leads to trying to add and
-        // finding map full, which is fine)
+        // 1. Process pending queue (Lock-free Consumer).
+        // Use atomic load for the active-count check (lock-free hot path). The
+        // check is "loose": a data race only leads to trying to add and finding
+        // the map full, which is fine.
         size_t local_active = current_active_count.load (std::memory_order_relaxed);
-
-        std::unique_ptr<TransferData> data;
-
-        // Fetch Phase: Get up to max_concurrent items, BUT only if tokens available.
-        // We prioritize DRIVING IO over accepting new work if rate limited.
         // When stop(false) is in progress, skip new work so the queue remains
         // untouched for the caller's post-join cancel drain.
-        const bool accept_new =
-        !stop_requested || drain_on_stop.load (std::memory_order_relaxed);
-        while (accept_new && local_active < config.max_concurrent) {
-            // Check rate limiter WITHOUT blocking (single-threaded access, no lock needed)
-            if (!rate_limiter.try_acquire_unlocked ()) {
-                // Rate limit reached. Stop fetching new work.
-                // Go drive the IO machinery for existing requests.
-                break;
-            }
-
-            // Have token, try get data
-            if (!pending_queue.pop (data)) {
-                // Queue empty, but we acquired a token.
-                // It's a small inefficiency (wasted token) but simpler code path.
-                // Given 60k RPS, a few wasted tokens are negligible noise.
-                break;
-            }
-
-            did_work = true;
-
-            // A request curl cannot put on the wire as written is refused here
-            // rather than quietly sent as something else.
-            if (auto invalid = validate_transferable (data->request)) {
-                // Delivered as a failed *response*, the shape a request that
-                // never reached the wire already has everywhere else.
-                complete_transfer (*data, error_response (*invalid));
-                continue;
-            }
-
-            // Acquire handle from pool (lock-free or specialized pool)
-            CURL* easy = handle_pool_.acquire ();
-            // Note: setup_easy_handle might take time, good to do it outside locks
-            easy = setup_easy_handle (easy, data.get (), config, &dns_cache ());
-
-            if (!easy) {
-                // Handle creation failure
-                complete_transfer (*data,
-                Error{ ErrorCode::InternalError, "Failed to create curl handle" });
-                continue;
-            }
-
-            // A handle the multi rejects never yields a completion message, so
-            // tracking it as active would strand it: the run never drains and
-            // stop(true) never returns.
-            if (auto rejected = add_to_multi (multi_handle, easy)) {
-                complete_transfer (*data, *rejected);
-                handle_pool_.release (easy);
-                continue;
-            }
-
-            // Track active transfer
-            {
-                // No lock needed - private resource
-                active_transfers[easy] = std::move (data);
-                // Update atomic size
-                current_active_count.store (active_transfers.size (), std::memory_order_relaxed);
-                local_active++; // Local cache update for loop condition
-            }
+        if (!stop_requested.load (std::memory_order_acquire) ||
+        drain_on_stop.load (std::memory_order_acquire)) {
+            did_work = submit_pending_transfers (local_active);
         }
 
         // 2. Drive CURL state machine
         int still_running = 0;
-        CURLMcode mc      = curl_multi_perform (multi_handle, &still_running);
-        if (mc == CURLM_OK) {
-            // curl_multi_perform is non-blocking, but might do some work
-        }
+        curl_multi_perform (multi_handle, &still_running);
 
-        // 3. Process completions
-        // Check often to free up slots
-        int msgs_left = 0;
-        CURLMsg* msg  = nullptr;
-        while ((msg = curl_multi_info_read (multi_handle, &msgs_left))) {
-            did_work = true;
-
-            if (msg->msg == CURLMSG_DONE) {
-                CURL* easy = msg->easy_handle;
-                // `CURLMsg::data` is a union whose active member is named by
-                // `msg`, and libcurl documents `CURLMSG_DONE` as the one that
-                // selects `result` - the branch above is that check. A variant
-                // is not on offer: the struct is libcurl's.
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access)
-                CURLcode result = msg->data.result;
-
-                // Named for the transfer that just finished rather than `data`,
-                // which is the fetch phase's handle on the transfer being
-                // *submitted* and stays in scope here (MSVC C4456).
-                std::unique_ptr<TransferData> completed;
-                {
-                    // No lock needed - private resource
-                    auto it = active_transfers.find (easy);
-                    if (it != active_transfers.end ()) {
-                        completed = std::move (it->second);
-                        active_transfers.erase (it);
-                        // Update atomic size
-                        current_active_count.store (
-                        active_transfers.size (), std::memory_order_relaxed);
-                    }
-                }
-
-                if (completed) {
-                    auto response_result =
-                    extract_response (easy, completed.get (), result);
-                    if (completed->callback)
-                        completed->callback (completed->request_id, response_result);
-                    if (completed->has_promise)
-                        completed->promise.set_value (std::move (response_result));
-                    local_processed.fetch_add (1, std::memory_order_relaxed);
-                }
-
-                curl_multi_remove_handle (multi_handle, easy);
-                handle_pool_.release (easy);
-            }
-        }
+        // 3. Process completions - checked often, to free up slots
+        did_work = drain_completions () || did_work;
 
         // 4. Wait Strategy
         if (!did_work) {
-            if (still_running > 0) {
-                // Wait for IO activity, but allow interruption via curl_multi_wakeup
-                // Use a short timeout to keep checking the queue even if no IO events
-                curl_multi_poll (multi_handle, nullptr, 0,
-                core::constants::event_loop::POLL_TIMEOUT_MS, nullptr);
-            } else if (!stop_requested) {
-                // No active transfers, and no pending items recently.
-                // This is the idle storage.
-                // Use atomic wait instead of Condition Variable for lower
-                // latency wakeup We wait on queue_has_items flag
-
-                // Adaptive spinning before sleeping
-                for (int i = 0; i < SPIN_COUNT; ++i) {
-                    if (pending_queue.read_available () > 0)
-                        break;
-                    // Busy-wait / pause to avoid context switch
-                    // std::this_thread::yield(); // REMOVED: Yield causes too much latency
-                }
-
-                if (pending_queue.read_available () == 0) {
-                    // Check again before sleep
-                    queue_has_items.wait (false, std::memory_order_acquire);
-                }
-                // Reset flag consumption is partly implicit by checking queue
-                // size But we can reset it if queue is empty to allow next wait
-                if (pending_queue.read_available () == 0) {
-                    queue_has_items.store (false, std::memory_order_release);
-                }
-            }
+            wait_for_work (still_running);
         }
     }
 }

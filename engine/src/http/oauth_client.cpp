@@ -212,30 +212,22 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now, int64_t skew_ms) {
     return now > t.created_at + t.expires_in * 1000 - skew_ms;
 }
 
-std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database& db,
+namespace {
+
+/**
+ * The cached token, or the refresh this call can make from it.
+ *
+ * @return the token to answer with, an error that must not be swallowed, or
+ *         nothing at all - which means the cache had nothing usable and the
+ *         caller should acquire a fresh grant.
+ */
+std::optional<std::variant<vayu::db::OAuthToken, TokenError>> token_from_cache (
+vayu::db::Database& db,
 const nlohmann::json& config,
+const std::string& key,
+const std::string& token_url,
 bool force_refresh,
-const std::optional<InteractiveExchange>& interactive) {
-    if (!config.is_object ()) {
-        return TokenError{ 400, "oauth2_invalid_config", "Missing OAuth 2.0 config" };
-    }
-
-    const std::string token_url = field (config, "accessTokenUrl");
-    if (token_url.rfind ("http://", 0) != 0 && token_url.rfind ("https://", 0) != 0) {
-        return TokenError{ 400, "oauth2_invalid_config", "accessTokenUrl must be an http(s) URL" };
-    }
-    if (field (config, "clientId").empty ()) {
-        return TokenError{ 400, "oauth2_invalid_config", "clientId is required" };
-    }
-    const std::string grant = field (config, "grantType");
-    if (grant != "client_credentials" && grant != "password" && grant != "authorization_code") {
-        return TokenError{ 400, "oauth2_invalid_config",
-            "Unsupported grantType: " + (grant.empty () ? "(none)" : grant) };
-    }
-
-    const std::string key = cache_key (config);
-    const int64_t now     = now_ms ();
-
+int64_t now) {
     // Cache hit
     if (auto cached = db.get_oauth_token (key)) {
         if (!force_refresh && !is_expired (*cached, now)) {
@@ -272,9 +264,18 @@ const std::optional<InteractiveExchange>& interactive) {
             }
         }
     }
+    return std::nullopt;
+}
 
-    // Fresh acquisition
-    TokenRequest req;
+/**
+ * The form a fresh grant posts.
+ *
+ * @return the refusal this grant cannot be built without, or nothing.
+ */
+std::optional<TokenError> build_grant_request (const nlohmann::json& config,
+const std::string& grant,
+const std::optional<InteractiveExchange>& interactive,
+TokenRequest& req) {
     if (grant == "client_credentials") {
         req.form.emplace_back ("grant_type", "client_credentials");
     } else if (grant == "password") {
@@ -299,6 +300,44 @@ const std::optional<InteractiveExchange>& interactive) {
         }
     }
     apply_client_auth (req, config);
+    return std::nullopt;
+}
+
+} // namespace
+
+std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database& db,
+const nlohmann::json& config,
+bool force_refresh,
+const std::optional<InteractiveExchange>& interactive) {
+    if (!config.is_object ()) {
+        return TokenError{ 400, "oauth2_invalid_config", "Missing OAuth 2.0 config" };
+    }
+
+    const std::string token_url = field (config, "accessTokenUrl");
+    if (token_url.rfind ("http://", 0) != 0 && token_url.rfind ("https://", 0) != 0) {
+        return TokenError{ 400, "oauth2_invalid_config", "accessTokenUrl must be an http(s) URL" };
+    }
+    if (field (config, "clientId").empty ()) {
+        return TokenError{ 400, "oauth2_invalid_config", "clientId is required" };
+    }
+    const std::string grant = field (config, "grantType");
+    if (grant != "client_credentials" && grant != "password" && grant != "authorization_code") {
+        return TokenError{ 400, "oauth2_invalid_config",
+            "Unsupported grantType: " + (grant.empty () ? "(none)" : grant) };
+    }
+
+    const std::string key = cache_key (config);
+    const int64_t now     = now_ms ();
+
+    if (auto answer = token_from_cache (db, config, key, token_url, force_refresh, now)) {
+        return *answer;
+    }
+
+    TokenRequest req;
+    if (auto refusal = build_grant_request (config, grant, interactive, req)) {
+        return *refusal;
+    }
+
 
     vayu::utils::log_info ("OAuth2: requesting " + grant + " token from " + token_url);
     return post_token_request (db, config, token_url, req, key);

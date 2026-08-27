@@ -558,6 +558,66 @@ MockServerManager::~MockServerManager () {
     servers_.clear ();
 }
 
+/**
+ * What one mock server answers with, as its handler sees it: built once at
+ * start, then read with no lock at all (see `MockServer::routes`).
+ */
+struct MockConfig {
+    int latency_ms     = 0;
+    int error_rate_pct = 0;
+    const std::vector<MockRoute>& routes;
+    /// Feeds the error-injection roll; every pool thread bumps it.
+    std::atomic<std::uint64_t>& served;
+};
+
+/**
+ * One mock exchange: the configured latency, the injected-failure roll, then the
+ * route table's answer.
+ *
+ * A free function rather than the handler lambda itself so the responder each
+ * listener installs is one line, and this reads as what a mock answers with.
+ */
+void serve_mock_request (const MockConfig& mock,
+const httplib::Request& req,
+httplib::Response& res) {
+
+    if (mock.latency_ms > 0) {
+        std::this_thread::sleep_for (std::chrono::milliseconds (mock.latency_ms));
+    }
+    if (should_inject_error (mock.error_rate_pct, mock.served)) {
+        res.status = 500;
+        res.set_content (
+        routes::error_body (500,
+        "Injected failure (errorRatePct=" + std::to_string (mock.error_rate_pct) + ")", "mock_injected_error")
+        .dump (),
+        "application/json");
+        return;
+    }
+
+    const auto match = resolve_mock_route (mock.routes, req.method, req.path);
+    if (!match.route_index) {
+        const auto body = mock_miss_body (mock.routes, match, req.method, req.path);
+        res.status = match.miss == MockMissKind::NoExample ? 501 : 404;
+        res.set_content (body.dump (), "application/json");
+        return;
+    }
+
+    const MockRoute& route = mock.routes[*match.route_index];
+    res.status             = route.response.status;
+    for (const auto& [name, value] : route.response.headers) {
+        if (!header_is (name, "content-type")) {
+            // Appended rather than set: a repeated `Set-Cookie` is exactly
+            // why an example stores its headers as an ordered array.
+            res.headers.emplace (name, value);
+        }
+    }
+    if (!route.response.body.empty ()) {
+        res.set_content (route.response.body, route.response.content_type);
+    } else {
+        res.set_header ("Content-Type", route.response.content_type);
+    }
+}
+
 MockServerManager::StartResult MockServerManager::start (vayu::db::Database& db,
 const MockStartRequest& request) {
     StartResult out;
@@ -616,47 +676,11 @@ const MockStartRequest& request) {
     static_cast<int> (std::count_if (server->routes.begin (), server->routes.end (),
     [] (const MockRoute& route) { return !route.has_response; }));
 
-    MockServer* raw                    = server.get ();
-    httplib::Server::Handler responder = [raw] (const httplib::Request& req,
-                                         httplib::Response& res) {
-        if (raw->latency_ms > 0) {
-            std::this_thread::sleep_for (std::chrono::milliseconds (raw->latency_ms));
-        }
-        if (should_inject_error (raw->error_rate_pct, raw->served)) {
-            res.status = 500;
-            res.set_content (
-            routes::error_body (500,
-            "Injected failure (errorRatePct=" + std::to_string (raw->error_rate_pct) + ")",
-            "mock_injected_error")
-            .dump (),
-            "application/json");
-            return;
-        }
-
-        const auto match = resolve_mock_route (raw->routes, req.method, req.path);
-        if (!match.route_index) {
-            const auto body =
-            mock_miss_body (raw->routes, match, req.method, req.path);
-            res.status = match.miss == MockMissKind::NoExample ? 501 : 404;
-            res.set_content (body.dump (), "application/json");
-            return;
-        }
-
-        const MockRoute& route = raw->routes[*match.route_index];
-        res.status             = route.response.status;
-        for (const auto& [name, value] : route.response.headers) {
-            if (!header_is (name, "content-type")) {
-                // Appended rather than set: a repeated `Set-Cookie` is exactly
-                // why an example stores its headers as an ordered array.
-                res.headers.emplace (name, value);
-            }
-        }
-        if (!route.response.body.empty ()) {
-            res.set_content (route.response.body, route.response.content_type);
-        } else {
-            res.set_header ("Content-Type", route.response.content_type);
-        }
-    };
+    MockServer* raw = server.get ();
+    httplib::Server::Handler responder =
+    [config = MockConfig{ server->latency_ms, server->error_rate_pct,
+     raw->routes, raw->served }] (const httplib::Request& req,
+    httplib::Response& res) { serve_mock_request (config, req, res); };
 
     httplib::Server& svr = server->listener.server ();
     // Every method cpp-httplib routes, on every path: the route table decides
@@ -745,6 +769,71 @@ std::optional<std::vector<MockRoute>> MockServerManager::routes (const std::stri
 
 namespace vayu::http::routes {
 
+namespace {
+
+void handle_start_mock (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    nlohmann::json body;
+    try {
+        body = req.body.empty () ? nlohmann::json::object () :
+                                   nlohmann::json::parse (req.body);
+    } catch (const std::exception& e) {
+        send_error (res, 400, std::string ("Invalid JSON body: ") + e.what ());
+        return;
+    }
+    const auto start = parse_mock_start (body);
+    if (!start) {
+        const auto& refusal = start.error ();
+        vayu::utils::log_warning ("POST /mock/start - " + refusal.message);
+        send_error (res, refusal.http_status, refusal.message, refusal.code);
+        return;
+    }
+    try {
+        auto result = ctx.mock_server_manager.start (ctx.db, *start);
+        if (!result.ok) {
+            vayu::utils::log_warning ("POST /mock/start - " + result.error_message);
+            send_error (res, result.http_status, result.error_message, result.error_code);
+            return;
+        }
+        send_json (res, mock_server_info_json (result.info));
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("POST /mock/start - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_stop_mock (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string mock_id = req.matches[1];
+    if (!ctx.mock_server_manager.stop (mock_id)) {
+        send_error (res, 404, "Mock server not found");
+        return;
+    }
+    send_json (res, nlohmann::json{ { "mockId", mock_id }, { "stopped", true } });
+}
+
+void handle_list_mocks (RouteContext& ctx, const httplib::Request&, httplib::Response& res) {
+    nlohmann::json data = nlohmann::json::array ();
+    for (const auto& info : ctx.mock_server_manager.list ()) {
+        data.push_back (mock_server_info_json (info));
+    }
+    send_json (res, nlohmann::json{ { "data", std::move (data) } });
+}
+
+void handle_mock_routes (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string mock_id = req.matches[1];
+    const auto routes         = ctx.mock_server_manager.routes (mock_id);
+    if (!routes) {
+        send_error (res, 404, "Mock server not found");
+        return;
+    }
+    nlohmann::json data = nlohmann::json::array ();
+    for (const auto& route : *routes) {
+        data.push_back (mock_route_json (route));
+    }
+    send_json (res, nlohmann::json{ { "data", std::move (data) } });
+}
+
+} // namespace
+
 void register_mock_server_routes (RouteContext& ctx) {
     /**
      * POST /mock/start
@@ -756,35 +845,7 @@ void register_mock_server_routes (RouteContext& ctx) {
      */
     ctx.server.Post (
     "/mock/start", [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = req.body.empty () ? nlohmann::json::object () :
-                                       nlohmann::json::parse (req.body);
-        } catch (const std::exception& e) {
-            send_error (res, 400, std::string ("Invalid JSON body: ") + e.what ());
-            return;
-        }
-        const auto start = parse_mock_start (body);
-        if (!start) {
-            const auto& refusal = start.error ();
-            vayu::utils::log_warning ("POST /mock/start - " + refusal.message);
-            send_error (res, refusal.http_status, refusal.message, refusal.code);
-            return;
-        }
-        try {
-            auto result = ctx.mock_server_manager.start (ctx.db, *start);
-            if (!result.ok) {
-                vayu::utils::log_warning ("POST /mock/start - " + result.error_message);
-                send_error (res, result.http_status, result.error_message,
-                result.error_code);
-                return;
-            }
-            send_json (res, mock_server_info_json (result.info));
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "POST /mock/start - Error: " + std::string (e.what ()));
-            send_error (res, 500, e.what ());
-        }
+        handle_start_mock (ctx, req, res);
     });
 
     /**
@@ -795,21 +856,12 @@ void register_mock_server_routes (RouteContext& ctx) {
      */
     ctx.server.Post (R"(/mock/([^/]+)/stop)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const std::string mock_id = req.matches[1];
-        if (!ctx.mock_server_manager.stop (mock_id)) {
-            send_error (res, 404, "Mock server not found");
-            return;
-        }
-        send_json (res, nlohmann::json{ { "mockId", mock_id }, { "stopped", true } });
+        handle_stop_mock (ctx, req, res);
     });
 
     /** GET /mock - every running mock server. */
     ctx.server.Get ("/mock", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        nlohmann::json data = nlohmann::json::array ();
-        for (const auto& info : ctx.mock_server_manager.list ()) {
-            data.push_back (mock_server_info_json (info));
-        }
-        send_json (res, nlohmann::json{ { "data", std::move (data) } });
+        handle_list_mocks (ctx, {}, res);
     });
 
     /**
@@ -820,17 +872,7 @@ void register_mock_server_routes (RouteContext& ctx) {
      */
     ctx.server.Get (R"(/mock/([^/]+)/routes)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        const std::string mock_id = req.matches[1];
-        const auto routes         = ctx.mock_server_manager.routes (mock_id);
-        if (!routes) {
-            send_error (res, 404, "Mock server not found");
-            return;
-        }
-        nlohmann::json data = nlohmann::json::array ();
-        for (const auto& route : *routes) {
-            data.push_back (mock_route_json (route));
-        }
-        send_json (res, nlohmann::json{ { "data", std::move (data) } });
+        handle_mock_routes (ctx, req, res);
     });
 }
 

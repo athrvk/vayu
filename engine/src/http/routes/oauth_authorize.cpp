@@ -108,6 +108,59 @@ bool pkce) {
 // Attempt + manager
 // ---------------------------------------------------------------------------
 
+/** What the loopback callback resolved to, for the attempt to record. */
+struct CallbackOutcome {
+    int result_state = 2; ///< 0 pending, 1 completed, 2 failed - Attempt's own scale.
+    std::string error;
+    std::string cache_key;
+    const char* heading = "Authorization failed";
+};
+
+/** The one-page reply the callback tab gets, whatever happened. */
+std::string callback_page (const char* heading) {
+    return std::string (
+           "<html><body style='font-family:sans-serif;padding:2rem'><h3>") +
+    heading + "</h3><p>You can close this tab.</p></body></html>";
+}
+
+/**
+ * The callback's outcome: the IdP's own refusal, a state mismatch, or the token
+ * exchange this redirect exists to make.
+ */
+CallbackOutcome resolve_oauth_callback (vayu::db::Database& db,
+const nlohmann::json& config,
+const std::string& expected_state,
+const std::string& code_verifier,
+const std::string& redirect_uri,
+const std::map<std::string, std::string>& params) {
+    CallbackOutcome outcome;
+    if (const auto err = params.find ("error"); err != params.end ()) {
+        outcome.error = err->second;
+        if (auto description = params.find ("error_description");
+        description != params.end ()) {
+            outcome.error += ": " + description->second;
+        }
+        return outcome;
+    }
+    if (params.count ("state") == 0 || params.at ("state") != expected_state) {
+        outcome.error = "State mismatch (possible CSRF)";
+        return outcome;
+    }
+
+    const std::string code = params.count ("code") ? params.at ("code") : "";
+    oauth::InteractiveExchange exchange{ code, code_verifier, redirect_uri };
+    auto result = oauth::acquire_token (db, config, false, exchange);
+    if (!std::holds_alternative<vayu::db::OAuthToken> (result)) {
+        outcome.error   = std::get<oauth::TokenError> (result).message;
+        outcome.heading = "Token exchange failed";
+        return outcome;
+    }
+    outcome.cache_key    = oauth::cache_key (config);
+    outcome.result_state = 1;
+    outcome.heading      = "Authorization received";
+    return outcome;
+}
+
 struct OAuth2AuthorizeManager::Attempt {
     std::string state;
     std::string code_verifier;
@@ -208,41 +261,14 @@ const std::string& mode) {
             const auto params = parse_query (req.target.find ('?') != std::string::npos ?
             req.target.substr (req.target.find ('?') + 1) :
             std::string{});
-            std::string body =
-            "<html><body style='font-family:sans-serif;padding:2rem'>";
-
-            if (const auto err = params.find ("error"); err != params.end ()) {
-                raw->error = err->second;
-                if (auto d = params.find ("error_description"); d != params.end ()) {
-                    raw->error += ": " + d->second;
-                }
-                raw->result_state.store (2);
-                body +=
-                "<h3>Authorization failed</h3><p>You can close this tab.</p>";
-            } else if (params.count ("state") == 0 || params.at ("state") != raw->state) {
-                raw->error = "State mismatch (possible CSRF)";
-                raw->result_state.store (2);
-                body +=
-                "<h3>Authorization failed</h3><p>You can close this tab.</p>";
-            } else {
-                const std::string code =
-                params.count ("code") ? params.at ("code") : "";
-                oauth::InteractiveExchange ex{ code, raw->code_verifier, raw->redirect_uri };
-                auto result = oauth::acquire_token (db, raw->config, false, ex);
-                if (std::holds_alternative<vayu::db::OAuthToken> (result)) {
-                    raw->cache_key = oauth::cache_key (raw->config);
-                    raw->result_state.store (1);
-                    body += "<h3>Authorization received</h3><p>You can close "
-                            "this tab.</p>";
-                } else {
-                    raw->error = std::get<oauth::TokenError> (result).message;
-                    raw->result_state.store (2);
-                    body += "<h3>Token exchange failed</h3><p>You can close "
-                            "this tab.</p>";
-                }
-            }
-            body += "</body></html>";
-            res.set_content (body, "text/html");
+            const CallbackOutcome outcome = resolve_oauth_callback (db, raw->config,
+            raw->state, raw->code_verifier, raw->redirect_uri, params);
+            raw->error     = outcome.error;
+            raw->cache_key = outcome.cache_key;
+            // Written last: it is what `status()` polls, so every field it
+            // reports has to be in place before the state says to read them.
+            raw->result_state.store (outcome.result_state);
+            res.set_content (callback_page (outcome.heading), "text/html");
         });
 
         // Ephemeral only, so the port guard never refuses this one; the label

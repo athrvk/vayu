@@ -31,6 +31,102 @@ const vayu::core::RunContext& context) {
     return summary;
 }
 
+namespace {
+
+/** The per-phase timings summed across the results that carried them. */
+struct TimingTotals {
+    double dns        = 0;
+    double connect    = 0;
+    double tls        = 0;
+    double first_byte = 0;
+    double download   = 0;
+    size_t samples    = 0;
+
+    void apply_averages (DetailedReport& report) const {
+        if (samples == 0) {
+            return;
+        }
+        const auto n             = static_cast<double> (samples);
+        report.avg_dns_ms        = dns / n;
+        report.avg_connect_ms    = connect / n;
+        report.avg_tls_ms        = tls / n;
+        report.avg_first_byte_ms = first_byte / n;
+        report.avg_download_ms   = download / n;
+    }
+};
+
+/**
+ * What one result's stored trace adds to the report: its error type, its phase
+ * timings, and whether it was slow.
+ *
+ * One unreadable trace row contributes nothing and the run keeps counting - the
+ * per-result counters are recorded by the caller, and a report that stopped at
+ * the first bad row would describe fewer requests than the run made.
+ */
+void add_trace_metrics (const std::string& trace_data, DetailedReport& report, TimingTotals& timings) {
+    if (trace_data.empty ()) {
+        return;
+    }
+    try {
+        auto trace = nlohmann::json::parse (trace_data);
+
+        // Error details (supports both snake_case and camelCase)
+        if (trace.contains ("error_type") || trace.contains ("errorType")) {
+            report.errors_with_details++;
+            std::string error_type = trace.contains ("error_type") ?
+            trace["error_type"].get<std::string> () :
+            trace["errorType"].get<std::string> ();
+            report.error_types[error_type]++;
+        }
+
+        if (trace.contains ("dnsMs")) {
+            report.has_timing_data = true;
+            timings.samples++;
+            timings.dns += trace["dnsMs"].get<double> ();
+            timings.connect += trace["connectMs"].get<double> ();
+            timings.tls += trace["tlsMs"].get<double> ();
+            timings.first_byte += trace["firstByteMs"].get<double> ();
+            timings.download += trace["downloadMs"].get<double> ();
+        }
+
+        if (trace.contains ("isSlow") && trace["isSlow"].get<bool> ()) {
+            report.slow_requests_count++;
+            if (trace.contains ("thresholdMs") && report.slow_threshold_ms == 0) {
+                report.slow_threshold_ms = trace["thresholdMs"].get<size_t> ();
+            }
+        }
+    } catch (const std::exception&) {
+        // @deliberate: see the contract above - a bad row is skipped, not fatal.
+    }
+}
+
+/** The latency distribution, from the sample this report was built from. */
+void apply_latency_percentiles (std::vector<double>& latencies, DetailedReport& report) {
+    if (latencies.empty ()) {
+        return;
+    }
+    std::sort (latencies.begin (), latencies.end ());
+    report.latency_min = latencies.front ();
+    report.latency_max = latencies.back ();
+
+    const auto percentile = [&latencies] (double p) {
+        size_t idx =
+        static_cast<size_t> (std::ceil (p * static_cast<double> (latencies.size ()))) - 1U;
+        // Clamp index to valid range
+        idx = std::max (size_t (0), std::min (idx, latencies.size () - 1));
+        return latencies[idx];
+    };
+
+    report.latency_p50  = percentile (0.50);
+    report.latency_p75  = percentile (0.75);
+    report.latency_p90  = percentile (0.90);
+    report.latency_p95  = percentile (0.95);
+    report.latency_p99  = percentile (0.99);
+    report.latency_p999 = percentile (0.999);
+}
+
+} // namespace
+
 MetricsHelper::DetailedReport MetricsHelper::calculate_detailed_report (
 const std::vector<vayu::db::Result>& results,
 double duration_s) {
@@ -47,10 +143,7 @@ double duration_s) {
     latencies.reserve (results.size ());
     double total_latency = 0;
 
-    // Timing breakdown accumulators
-    double total_dns = 0, total_connect = 0, total_tls = 0;
-    double total_first_byte = 0, total_download = 0;
-    size_t timing_samples = 0;
+    TimingTotals timings;
 
     for (const auto& result : results) {
         report.total_requests++;
@@ -65,46 +158,7 @@ double duration_s) {
         latencies.push_back (result.latency_ms);
         total_latency += result.latency_ms;
 
-        // Parse trace_data for enhanced metrics
-        if (!result.trace_data.empty ()) {
-            try {
-                auto trace = nlohmann::json::parse (result.trace_data);
-
-                // Check for error details (supports both snake_case and camelCase)
-                if (trace.contains ("error_type") || trace.contains ("errorType")) {
-                    report.errors_with_details++;
-                    std::string error_type = trace.contains ("error_type") ?
-                    trace["error_type"].get<std::string> () :
-                    trace["errorType"].get<std::string> ();
-                    report.error_types[error_type]++;
-                }
-
-                // Check for timing breakdown
-                if (trace.contains ("dnsMs")) {
-                    report.has_timing_data = true;
-                    timing_samples++;
-                    total_dns += trace["dnsMs"].get<double> ();
-                    total_connect += trace["connectMs"].get<double> ();
-                    total_tls += trace["tlsMs"].get<double> ();
-                    total_first_byte += trace["firstByteMs"].get<double> ();
-                    total_download += trace["downloadMs"].get<double> ();
-                }
-
-                // Check for slow requests
-                if (trace.contains ("isSlow") && trace["isSlow"].get<bool> ()) {
-                    report.slow_requests_count++;
-                    if (trace.contains ("thresholdMs") && report.slow_threshold_ms == 0) {
-                        report.slow_threshold_ms = trace["thresholdMs"].get<size_t> ();
-                    }
-                }
-            } catch (const std::exception&) {
-                // @deliberate: one unreadable trace row contributes nothing to
-                // the derived tallies and the loop keeps going - the per-result
-                // counters above it are already recorded, and a report that
-                // stopped at the first bad row would describe fewer requests
-                // than the run made.
-            }
-        }
+        add_trace_metrics (result.trace_data, report, timings);
     }
 
     // Calculate averages and rates
@@ -119,37 +173,8 @@ double duration_s) {
     total_latency / static_cast<double> (report.total_requests) :
     0.0;
 
-    // Calculate timing breakdown averages
-    if (timing_samples > 0) {
-        report.avg_dns_ms = total_dns / static_cast<double> (timing_samples);
-        report.avg_connect_ms = total_connect / static_cast<double> (timing_samples);
-        report.avg_tls_ms = total_tls / static_cast<double> (timing_samples);
-        report.avg_first_byte_ms = total_first_byte / static_cast<double> (timing_samples);
-        report.avg_download_ms = total_download / static_cast<double> (timing_samples);
-    }
-
-    // Calculate percentiles
-    if (!latencies.empty ()) {
-        std::sort (latencies.begin (), latencies.end ());
-        report.latency_min = latencies.front ();
-        report.latency_max = latencies.back ();
-
-        auto get_percentile = [&] (double p) {
-            size_t idx = static_cast<size_t> (
-                         std::ceil (p * static_cast<double> (latencies.size ()))) -
-            1U;
-            // Clamp index to valid range
-            idx = std::max (size_t (0), std::min (idx, latencies.size () - 1));
-            return latencies[idx];
-        };
-
-        report.latency_p50  = get_percentile (0.50);
-        report.latency_p75  = get_percentile (0.75); // Phase 1
-        report.latency_p90  = get_percentile (0.90);
-        report.latency_p95  = get_percentile (0.95);
-        report.latency_p99  = get_percentile (0.99);
-        report.latency_p999 = get_percentile (0.999); // Phase 1
-    }
+    timings.apply_averages (report);
+    apply_latency_percentiles (latencies, report);
 
     // Phase 1: Categorize errors by status code
     for (const auto& [code, count] : report.status_codes) {

@@ -205,6 +205,87 @@ class Sampler {
         is_binary (prop (schema, "items"), depth + 1, std::move (seen));
     }
 
+    /**
+     * The value a schema *states*, whatever its type says - a `const`, an
+     * `example`, or the first of 3.1's `examples` array.
+     *
+     * `const` outranks `example`: JSON Schema says the value MUST be exactly
+     * this, where `example` is only an annotation.
+     */
+    [[nodiscard]] static const json* stated_value (const json* node) {
+        if (const json* constant = prop (node, "const")) {
+            return constant;
+        }
+        if (const json* example = prop (node, "example")) {
+            return example;
+        }
+        // 3.1 replaced the singular `example` with an `examples` array.
+        if (const json* examples = prop (node, "examples");
+        examples != nullptr && examples->is_array () && !examples->empty ()) {
+            return &(*examples)[0];
+        }
+        return nullptr;
+    }
+
+    /**
+     * The type this sampler stubs for.
+     *
+     * 3.1 writes a nullable field as a type array (`["string", "null"]`) where
+     * 3.0 wrote `nullable: true`. The first non-null member is the one sampled:
+     * a typed stub is what the user edits, and only an all-`"null"` type has
+     * nothing else to offer. A member that is not a string is still the one
+     * found, and then matches no arm below, exactly as it matches no `case`
+     * in the renderer's switch.
+     */
+    [[nodiscard]] static std::string declared_type (const json* node) {
+        const json* declared = prop (node, "type");
+        if (declared == nullptr) {
+            return {};
+        }
+        if (declared->is_string ()) {
+            return declared->get<std::string> ();
+        }
+        if (!declared->is_array ()) {
+            return {};
+        }
+        for (const json& member : *declared) {
+            if (!(member.is_string () && member.get_ref<const std::string&> () == "null")) {
+                return member.is_string () ? member.get<std::string> () : std::string ();
+            }
+        }
+        return "null";
+    }
+
+    /**
+     * The stub a scalar type is sampled as, or nothing for a structured one.
+     *
+     * `make_optional` rather than a bare return, for the reason `rows_for` in
+     * `spec_sync.cpp` carries: copy-initializing an `optional<json>` from a
+     * `json` puts nlohmann's `operator ValueType()` up against `optional`'s
+     * converting constructor, which GCC reports as an ambiguity under
+     * `-Werror`.
+     */
+    [[nodiscard]] static std::optional<json>
+    scalar_stub (const json* node, const std::string& type) {
+        if (type == "string") {
+            const json* values = prop (node, "enum");
+            if (values != nullptr && values->is_array () && !values->empty ()) {
+                return std::make_optional ((*values)[0]);
+            }
+            return std::make_optional (json (""));
+        }
+        if (type == "integer" || type == "number") {
+            return std::make_optional (json (0));
+        }
+        if (type == "boolean") {
+            return std::make_optional (json (false));
+        }
+        if (type == "null") {
+            return std::make_optional (json (nullptr));
+        }
+        return std::nullopt;
+    }
+
     [[nodiscard]] json walk (const json* node, int depth, SeenRefs seen) const {
         // `typeof node === "object"` in the renderer, which an array satisfies -
         // and an array falls through every branch below to an empty object.
@@ -223,63 +304,17 @@ class Sampler {
             return walk (resolved, depth + 1, std::move (seen));
         }
 
-        // `const` outranks `example`: JSON Schema says the value MUST be exactly
-        // this, where `example` is only an annotation.
-        if (const json* constant = prop (node, "const")) {
-            return *constant;
-        }
-        if (const json* example = prop (node, "example")) {
-            return *example;
-        }
-        // 3.1 replaced the singular `example` with an `examples` array.
-        if (const json* examples = prop (node, "examples");
-        examples != nullptr && examples->is_array () && !examples->empty ()) {
-            return (*examples)[0];
+        if (const json* stated = stated_value (node)) {
+            return *stated;
         }
 
         if (const json* branch = first_branch (node)) {
             return walk (branch, depth + 1, std::move (seen));
         }
 
-        // 3.1 writes a nullable field as a type array (`["string", "null"]`)
-        // where 3.0 wrote `nullable: true`. Sample the first non-null member: a
-        // typed stub is what the user edits, and only an all-`"null"` type has
-        // nothing else to offer.
-        std::string type;
-        if (const json* declared = prop (node, "type")) {
-            if (declared->is_array ()) {
-                // `type.find(t => t !== "null") ?? "null"` - and a member that is
-                // not a string is still the one found, which then matches no arm
-                // below, exactly as it matches no `case` there.
-                type = "null";
-                for (const json& member : *declared) {
-                    if (!(member.is_string () &&
-                        member.get_ref<const std::string&> () == "null")) {
-                        type = member.is_string () ? member.get<std::string> () :
-                                                     std::string ();
-                        break;
-                    }
-                }
-            } else if (declared->is_string ()) {
-                type = declared->get<std::string> ();
-            }
-        }
-
-        if (type == "string") {
-            const json* values = prop (node, "enum");
-            if (values != nullptr && values->is_array () && !values->empty ()) {
-                return (*values)[0];
-            }
-            return "";
-        }
-        if (type == "integer" || type == "number") {
-            return 0;
-        }
-        if (type == "boolean") {
-            return false;
-        }
-        if (type == "null") {
-            return nullptr;
+        const std::string type = declared_type (node);
+        if (auto stub = scalar_stub (node, type)) {
+            return *stub;
         }
         if (type == "array") {
             const json* items = prop (node, "items");
@@ -748,16 +783,28 @@ examples_v3 (const Sampler& sampler, const json* responses, ImportTally* tally) 
  * operation's `produces`, falling back to the document's, because a 2.0
  * response does not name its own.
  */
-std::vector<DraftExample> examples_v2 (const json& document,
-const Sampler& sampler,
-const json* operation,
-ImportTally* tally) {
-    std::vector<DraftExample> out;
-    const json* map = as_record (prop (operation, "responses"));
-    if (map == nullptr) {
-        return out;
+/**
+ * The JSON media type a 2.0 operation says it produces, if it says one.
+ *
+ * An operation with no `produces` at all - and no document-level default -
+ * documents JSON by convention, which is what the fallback says.
+ */
+std::optional<std::string> json_produced_type (const std::vector<std::string>& produces) {
+    for (const std::string& type : produces) {
+        const std::string bare = media_type (json (type));
+        if (bare == "application/json" ||
+        (bare.size () >= 5 && bare.compare (bare.size () - 5, 5, "+json") == 0)) {
+            return type;
+        }
     }
+    if (produces.empty ()) {
+        return std::string ("application/json");
+    }
+    return std::nullopt;
+}
 
+/** What a 2.0 operation declares it produces - its own list, or the document's. */
+std::vector<std::string> produced_types (const json& document, const json* operation) {
     const json* declared = prop (operation, "produces");
     if (declared == nullptr || !declared->is_array ()) {
         declared = prop (&document, "produces");
@@ -769,51 +816,56 @@ ImportTally* tally) {
             entry.is_string () ? entry.get<std::string> () : std::string ());
         }
     }
-    std::optional<std::string> json_produced;
-    for (const std::string& type : produces) {
-        const std::string bare = media_type (json (type));
-        if (bare == "application/json" ||
-        (bare.size () >= 5 && bare.compare (bare.size () - 5, 5, "+json") == 0)) {
-            json_produced = type;
-            break;
+    return produces;
+}
+
+/**
+ * One 2.0 response's body: the example it documents, or a sample of its schema.
+ *
+ * `declared[contentType] ?? declared["application/json"]`, then `!== undefined` -
+ * so an explicitly documented `null` is a body ("null"), while a `null` under
+ * the produced type falls through to the plain one first.
+ */
+std::optional<ExamplePayload> response_payload_v2 (const json& node,
+const Sampler& sampler,
+const std::string& content_type) {
+    if (const json* documented = as_record (prop (&node, "examples"))) {
+        const json* value = prop (documented, content_type);
+        if (value == nullptr || value->is_null ()) {
+            const json* plain = prop (documented, "application/json");
+            value             = plain != nullptr ? plain : value;
+        }
+        if (value != nullptr) {
+            return ExamplePayload{ example_body_text (*value), content_type };
         }
     }
-    if (!json_produced && produces.empty ()) {
-        json_produced = std::string ("application/json");
+    const json* schema = prop (&node, "schema");
+    if (!truthy (schema)) {
+        return std::nullopt;
     }
+    return ExamplePayload{ example_body_text (sampler.sample (schema)), content_type };
+}
+
+std::vector<DraftExample> examples_v2 (const json& document,
+const Sampler& sampler,
+const json* operation,
+ImportTally* tally) {
+    std::vector<DraftExample> out;
+    const json* map = as_record (prop (operation, "responses"));
+    if (map == nullptr) {
+        return out;
+    }
+
+    const std::vector<std::string> produces = produced_types (document, operation);
+    const std::optional<std::string> json_produced = json_produced_type (produces);
+    const std::string content_type = json_produced.value_or (
+    produces.empty () ? std::string ("application/json") : produces.front ());
 
     for (auto entry = map->begin (); entry != map->end (); ++entry) {
         const json* response = sampler.deref (&entry.value ());
-        auto example         = response_example (entry.key (), response, tally,
-                [&] (const json& node) -> std::optional<ExamplePayload> {
-            const std::string content_type = [&] {
-                if (json_produced) {
-                    return *json_produced;
-                }
-                if (produces.empty ()) {
-                    return std::string ("application/json");
-                }
-                return produces.front ();
-            }();
-            if (const json* documented = as_record (prop (&node, "examples"))) {
-                // `declared[contentType] ?? declared["application/json"]`, then
-                // `!== undefined` - so an explicitly documented `null` is a body
-                // ("null"), while a `null` under the produced type falls through
-                // to the plain one first.
-                const json* value = prop (documented, content_type);
-                if (value == nullptr || value->is_null ()) {
-                    const json* plain = prop (documented, "application/json");
-                    value             = plain != nullptr ? plain : value;
-                }
-                if (value != nullptr) {
-                    return ExamplePayload{ example_body_text (*value), content_type };
-                }
-            }
-            const json* schema = prop (&node, "schema");
-            if (!truthy (schema)) {
-                return std::nullopt;
-            }
-            return ExamplePayload{ example_body_text (sampler.sample (schema)), content_type };
+        auto example =
+        response_example (entry.key (), response, tally, [&] (const json& node) {
+            return response_payload_v2 (node, sampler, content_type);
         });
         if (example) {
             out.push_back (std::move (*example));
@@ -858,6 +910,158 @@ std::vector<std::string> consumes_of (const json& document, const json* operatio
 
 namespace {
 
+/** What the request an operation becomes is called, and what it says it does. */
+void name_draft (const json* operation, const walk::WalkedOperation& walked, DraftRequest& draft) {
+    const std::string& path = walked.identity.path;
+
+    if (const std::string* summary = as_str (prop (operation, "summary"))) {
+        draft.name = *summary;
+    } else if (const std::string* id = as_str (prop (operation, "operationId"))) {
+        // The operation's own id, not the identity's: a repeated one is
+        // dropped from the *identity* (issue #715), and the request an
+        // import builds is still named after it.
+        draft.name = *id;
+    } else {
+        draft.name = walked.identity.method + " " + path;
+    }
+    if (const std::string* description = as_str (prop (operation, "description"))) {
+        draft.description = *description;
+    }
+    draft.method = walked.identity.method;
+}
+
+/**
+ * Every parameter the operation and its path item declare, as the rows a draft
+ * carries - query, header, 2.0's `body` and `formData`, and the 3.x `cookie`
+ * that is dropped and counted.
+ */
+/**
+ * One parameter, as the row it becomes.
+ *
+ * `in: "path"` is deliberately neither a row nor counted: a path parameter is
+ * already carried, as the `{{var}}` the URL was rewritten with.
+ */
+void read_draft_parameter (const json* parameter,
+walk::Dialect dialect,
+const Sampler& sampler,
+ImportTally* tally,
+DraftRequest& draft,
+std::vector<DraftField>& form_fields) {
+    const json* name_node = prop (parameter, "name");
+    const std::string name =
+    name_node == nullptr ? std::string () : js_string_of (*name_node);
+    const std::string* in          = as_str (prop (parameter, "in"));
+    const std::string kind         = in == nullptr ? std::string () : *in;
+    const json* required           = prop (parameter, "required");
+    const std::string* description = as_str (prop (parameter, "description"));
+
+    if (kind == "query") {
+        const json* value = dialect == walk::Dialect::V3 ?
+        declared_param_value_v3 (sampler, parameter) :
+        // 2.0 states a non-body parameter's value inline as `default`;
+        // it has no `example` keyword (that arrived with 3.x).
+        prop (parameter, "default");
+        draft.params.push_back (declared_param_row (name, value, required, description));
+    } else if (kind == "header") {
+        if (is_self_produced_header (name)) {
+            return;
+        }
+        const json* value = dialect == walk::Dialect::V3 ?
+        declared_param_value_v3 (sampler, parameter) :
+        prop (parameter, "default");
+        // No description: the Headers table has no column for one, so
+        // carrying it would be a field nothing reads.
+        draft.headers.push_back (declared_param_row (name, value, required, nullptr));
+    } else if (dialect == walk::Dialect::V2 && kind == "body") {
+        const json* schema = prop (parameter, "schema");
+        const json sample = truthy (schema) ? sampler.sample (schema) : json::object ();
+        draft.body.content = js_json_text (sample);
+        draft.body.mode    = "json"; // Corrected below against `consumes`.
+    } else if (dialect == walk::Dialect::V2 && kind == "formData") {
+        DraftField field;
+        field.key                   = name;
+        const std::string* declared = as_str (prop (parameter, "type"));
+        field.file = declared != nullptr && *declared == "file";
+        form_fields.push_back (std::move (field));
+    } else if (dialect == walk::Dialect::V3 && kind == "cookie") {
+        // Dropped - a request's cookies come from the jar - and counted
+        // rather than folded into one `Cookie` header, which would
+        // invent a merge the document never wrote (#719). 2.0 has no
+        // cookie parameter, so its parser counts none either.
+        tally_add (tally, "cookie_param");
+    }
+}
+
+/**
+ * Every parameter the operation and its path item declare, as the rows a draft
+ * carries.
+ */
+void read_draft_parameters (const json& document,
+const walk::WalkedOperation& walked,
+walk::Dialect dialect,
+const Sampler& sampler,
+ImportTally* tally,
+DraftRequest& draft,
+std::vector<DraftField>& form_fields) {
+    for (const json* parameter :
+    merged_parameters (document, walked.path_item, walked.node, tally)) {
+        read_draft_parameter (parameter, dialect, sampler, tally, draft, form_fields);
+    }
+}
+
+/**
+ * The 2.0 body, corrected against what the operation `consumes`.
+ *
+ * 2.0 ties `formData` encoding to `consumes` - urlencoded and multipart are
+ * distinct wire encodings and distinct body modes here. Multipart wins when both
+ * are listed (only it can carry a `type: file` field), and a `consumes` naming
+ * neither keeps the historical multipart default. A file part has no urlencoded
+ * wire form, so a document declaring one under a urlencoded-only `consumes`
+ * contradicts itself; multipart is the half of that contradiction which can
+ * carry the field.
+ */
+void apply_v2_body_encoding (const json& document,
+const json* operation,
+std::vector<DraftField>& form_fields,
+DraftRequest& draft) {
+    const std::vector<std::string> consumes = consumes_of (document, operation);
+    if (draft.body.mode == "json") {
+        const bool json_consumed = consumes.empty () ||
+        std::any_of (consumes.begin (), consumes.end (), [] (const std::string& type) {
+            return type == "application/json" ||
+            type.rfind ("application/json;", 0) == 0 ||
+            (type.size () >= 5 && type.compare (type.size () - 5, 5, "+json") == 0);
+        });
+        if (!json_consumed) {
+            draft.body.mode = "text";
+        }
+    }
+    if (!form_fields.empty ()) {
+        // 2.0 ties `formData` encoding to `consumes` - urlencoded and
+        // multipart are distinct wire encodings and distinct body modes
+        // here. Multipart wins when both are listed (only it can carry a
+        // `type: file` field), and a `consumes` naming neither keeps the
+        // historical multipart default. A file part has no urlencoded
+        // wire form, so a document declaring one under a urlencoded-only
+        // `consumes` contradicts itself; multipart is the half of that
+        // contradiction which can carry the field.
+        const bool urlencoded =
+        std::any_of (consumes.begin (), consumes.end (), [] (const std::string& type) {
+            return media_type (type) == "application/x-www-form-urlencoded";
+        });
+        const bool multipart =
+        std::any_of (consumes.begin (), consumes.end (), [] (const std::string& type) {
+            return media_type (type) == "multipart/form-data";
+        });
+        const bool has_file = std::any_of (form_fields.begin (),
+        form_fields.end (), [] (const DraftField& field) { return field.file; });
+        draft.body.mode =
+        (urlencoded && !multipart && !has_file) ? "x-www-form-urlencoded" : "form-data";
+        draft.body.content = "";
+        draft.body.fields  = std::move (form_fields);
+    }
+}
+
 /**
  * The drafts, for either caller: the sync diff, which wants the operations a
  * document *declares*, and the import, which wants a request for every
@@ -890,116 +1094,17 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         folder_of (prop (operation, "tags"), path);
 
         DraftRequest& draft = entry.draft;
-        if (const std::string* summary = as_str (prop (operation, "summary"))) {
-            draft.name = *summary;
-        } else if (const std::string* id = as_str (prop (operation, "operationId"))) {
-            // The operation's own id, not the identity's: a repeated one is
-            // dropped from the *identity* (issue #715), and the request an
-            // import builds is still named after it.
-            draft.name = *id;
-        } else {
-            draft.name = walked.identity.method + " " + path;
-        }
-        if (const std::string* description = as_str (prop (operation, "description"))) {
-            draft.description = *description;
-        }
-        draft.method = walked.identity.method;
+        name_draft (operation, walked, draft);
 
         std::vector<DraftField> form_fields;
-        for (const json* parameter :
-        merged_parameters (document, walked.path_item, operation, tally)) {
-            const json* name_node = prop (parameter, "name");
-            const std::string name =
-            name_node == nullptr ? std::string () : js_string_of (*name_node);
-            const std::string* in  = as_str (prop (parameter, "in"));
-            const std::string kind = in == nullptr ? std::string () : *in;
-            const json* required   = prop (parameter, "required");
-            const std::string* description = as_str (prop (parameter, "description"));
-
-            if (kind == "query") {
-                const json* value = dialect == walk::Dialect::V3 ?
-                declared_param_value_v3 (sampler, parameter) :
-                // 2.0 states a non-body parameter's value inline as `default`;
-                // it has no `example` keyword (that arrived with 3.x).
-                prop (parameter, "default");
-                draft.params.push_back (
-                declared_param_row (name, value, required, description));
-            } else if (kind == "header") {
-                if (is_self_produced_header (name)) {
-                    continue;
-                }
-                const json* value = dialect == walk::Dialect::V3 ?
-                declared_param_value_v3 (sampler, parameter) :
-                prop (parameter, "default");
-                // No description: the Headers table has no column for one, so
-                // carrying it would be a field nothing reads.
-                draft.headers.push_back (declared_param_row (name, value, required, nullptr));
-            } else if (dialect == walk::Dialect::V2 && kind == "body") {
-                const json* schema = prop (parameter, "schema");
-                const json sample =
-                truthy (schema) ? sampler.sample (schema) : json::object ();
-                draft.body.content = js_json_text (sample);
-                draft.body.mode = "json"; // Corrected below against `consumes`.
-            } else if (dialect == walk::Dialect::V2 && kind == "formData") {
-                DraftField field;
-                field.key                   = name;
-                const std::string* declared = as_str (prop (parameter, "type"));
-                field.file = declared != nullptr && *declared == "file";
-                form_fields.push_back (std::move (field));
-            } else if (dialect == walk::Dialect::V3 && kind == "cookie") {
-                // Dropped - a request's cookies come from the jar - and counted
-                // rather than folded into one `Cookie` header, which would
-                // invent a merge the document never wrote (#719). 2.0 has no
-                // cookie parameter, so its parser counts none either.
-                tally_add (tally, "cookie_param");
-            }
-            // `in: "path"` is deliberately neither a row nor counted: a path
-            // parameter is already carried, as the `{{var}}` the URL was
-            // rewritten with.
-        }
+        read_draft_parameters (document, walked, dialect, sampler, tally, draft, form_fields);
 
         if (dialect == walk::Dialect::V2) {
-            const std::vector<std::string> consumes = consumes_of (document, operation);
-            if (draft.body.mode == "json") {
-                const bool json_consumed = consumes.empty () ||
-                std::any_of (consumes.begin (), consumes.end (), [] (const std::string& type) {
-                    return type == "application/json" ||
-                    type.rfind ("application/json;", 0) == 0 ||
-                    (type.size () >= 5 && type.compare (type.size () - 5, 5, "+json") == 0);
-                });
-                if (!json_consumed) {
-                    draft.body.mode = "text";
-                }
-            }
-            if (!form_fields.empty ()) {
-                // 2.0 ties `formData` encoding to `consumes` - urlencoded and
-                // multipart are distinct wire encodings and distinct body modes
-                // here. Multipart wins when both are listed (only it can carry a
-                // `type: file` field), and a `consumes` naming neither keeps the
-                // historical multipart default. A file part has no urlencoded
-                // wire form, so a document declaring one under a urlencoded-only
-                // `consumes` contradicts itself; multipart is the half of that
-                // contradiction which can carry the field.
-                const bool urlencoded = std::any_of (consumes.begin (),
-                consumes.end (), [] (const std::string& type) {
-                    return media_type (type) == "application/x-www-form-urlencoded";
-                });
-                const bool multipart  = std::any_of (consumes.begin (),
-                 consumes.end (), [] (const std::string& type) {
-                    return media_type (type) == "multipart/form-data";
-                });
-                const bool has_file =
-                std::any_of (form_fields.begin (), form_fields.end (),
-                [] (const DraftField& field) { return field.file; });
-                draft.body.mode    = (urlencoded && !multipart && !has_file) ?
-                   "x-www-form-urlencoded" :
-                   "form-data";
-                draft.body.content = "";
-                draft.body.fields  = std::move (form_fields);
-            }
+            apply_v2_body_encoding (document, operation, form_fields, draft);
         } else {
             draft.body = body_v3 (sampler, prop (operation, "requestBody"), tally);
         }
+
 
         draft.examples = dialect == walk::Dialect::V3 ?
         examples_v3 (sampler, prop (operation, "responses"), tally) :

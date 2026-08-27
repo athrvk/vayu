@@ -398,6 +398,101 @@ namespace {
 using Issuer = detail::MockIssuerState;
 
 /**
+ * The password grant's own requirement. Answers the refusal itself and returns
+ * false, the shape every grant helper here takes.
+ */
+bool read_password_grant (const httplib::Request& req, httplib::Response& res, std::string& subject) {
+    const std::string username = req.get_param_value ("username");
+    if (username.empty () || !req.has_param ("password")) {
+        send_oauth_error (res, 400, "invalid_request",
+        "password grant needs username and password");
+        return false;
+    }
+    subject = username;
+    return true;
+}
+
+/**
+ * Spends an authorization code: single use, whatever happens after, then the
+ * checks RFC 6749 §4.1.3 puts on redeeming one.
+ *
+ * Called with `issuer.state_mutex` held - it reads and erases issuer state.
+ */
+bool redeem_authorization_code (Issuer& issuer,
+const ClientAuth& auth,
+const httplib::Request& req,
+httplib::Response& res,
+std::string& scope) {
+    const std::string code = req.get_param_value ("code");
+    const auto it          = issuer.codes.find (code);
+    if (code.empty () || it == issuer.codes.end ()) {
+        send_oauth_error (res, 400, "invalid_grant", "Unknown or already-used code");
+        return false;
+    }
+    const Issuer::IssuedCode issued = it->second;
+    issuer.codes.erase (it); // single use, whatever happens below
+    if (now_ms () > issued.issued_at + mi::CODE_TTL_MS) {
+        send_oauth_error (res, 400, "invalid_grant", "Authorization code expired");
+        return false;
+    }
+    if (issued.client_id != auth.client_id) {
+        send_oauth_error (res, 400, "invalid_grant", "Code was issued to another client");
+        return false;
+    }
+    if (const std::string redirect = req.get_param_value ("redirect_uri");
+    redirect != issued.redirect_uri) {
+        send_oauth_error (res, 400, "invalid_grant",
+        "redirect_uri does not match the authorize call");
+        return false;
+    }
+    if (!issued.code_challenge.empty ()) {
+        const std::string verifier = req.get_param_value ("code_verifier");
+        if (verifier.empty () || pkce::code_challenge (verifier) != issued.code_challenge) {
+            send_oauth_error (res, 400, "invalid_grant", "PKCE verification failed");
+            return false;
+        }
+    }
+    if (scope.empty ()) {
+        scope = issued.scope;
+    }
+    return true;
+}
+
+/**
+ * Spends a refresh token. Rotation: the presented token is spent here, and
+ * `mint_token_response` issues its replacement - so a client that keeps the old
+ * one fails, which is exactly the path worth being able to exercise locally.
+ *
+ * Called with `issuer.state_mutex` held.
+ */
+bool redeem_refresh_token (Issuer& issuer,
+const ClientAuth& auth,
+const httplib::Request& req,
+httplib::Response& res,
+std::string& subject,
+std::string& scope) {
+    const std::string token = req.get_param_value ("refresh_token");
+    const auto it           = issuer.refresh_tokens.find (token);
+    if (token.empty () || it == issuer.refresh_tokens.end ()) {
+        send_oauth_error (res, 400, "invalid_grant", "Unknown or already-rotated refresh token");
+        return false;
+    }
+    const Issuer::IssuedRefresh issued = it->second;
+    issuer.refresh_tokens.erase (it);
+    if (issued.client_id != auth.client_id) {
+        send_oauth_error (res, 400, "invalid_grant", "Refresh token was issued to another client");
+        return false;
+    }
+    if (!issued.subject.empty ()) {
+        subject = issued.subject;
+    }
+    if (scope.empty ()) {
+        scope = issued.scope;
+    }
+    return true;
+}
+
+/**
  * Build the access token for one grant. Called with the issuer's state lock
  * held, so `settings` cannot change between the expiry stamped in the payload
  * and the `expires_in` reported beside it.
@@ -489,69 +584,16 @@ void handle_token (Issuer& issuer, const httplib::Request& req, httplib::Respons
     if (grant == "client_credentials") {
         // Nothing further to check.
     } else if (grant == "password") {
-        const std::string username = req.get_param_value ("username");
-        if (username.empty () || !req.has_param ("password")) {
-            send_oauth_error (res, 400, "invalid_request",
-            "password grant needs username and password");
+        if (!read_password_grant (req, res, subject)) {
             return;
         }
-        subject = username;
     } else if (grant == "authorization_code") {
-        const std::string code = req.get_param_value ("code");
-        const auto it          = issuer.codes.find (code);
-        if (code.empty () || it == issuer.codes.end ()) {
-            send_oauth_error (res, 400, "invalid_grant", "Unknown or already-used code");
+        if (!redeem_authorization_code (issuer, auth, req, res, scope)) {
             return;
-        }
-        const Issuer::IssuedCode issued = it->second;
-        issuer.codes.erase (it); // single use, whatever happens below
-        if (now_ms () > issued.issued_at + mi::CODE_TTL_MS) {
-            send_oauth_error (res, 400, "invalid_grant", "Authorization code expired");
-            return;
-        }
-        if (issued.client_id != auth.client_id) {
-            send_oauth_error (res, 400, "invalid_grant", "Code was issued to another client");
-            return;
-        }
-        if (const std::string redirect = req.get_param_value ("redirect_uri");
-        redirect != issued.redirect_uri) {
-            send_oauth_error (res, 400, "invalid_grant",
-            "redirect_uri does not match the authorize call");
-            return;
-        }
-        if (!issued.code_challenge.empty ()) {
-            const std::string verifier = req.get_param_value ("code_verifier");
-            if (verifier.empty () || pkce::code_challenge (verifier) != issued.code_challenge) {
-                send_oauth_error (res, 400, "invalid_grant", "PKCE verification failed");
-                return;
-            }
-        }
-        if (scope.empty ()) {
-            scope = issued.scope;
         }
     } else if (grant == "refresh_token") {
-        const std::string token = req.get_param_value ("refresh_token");
-        const auto it           = issuer.refresh_tokens.find (token);
-        if (token.empty () || it == issuer.refresh_tokens.end ()) {
-            send_oauth_error (res, 400, "invalid_grant",
-            "Unknown or already-rotated refresh token");
+        if (!redeem_refresh_token (issuer, auth, req, res, subject, scope)) {
             return;
-        }
-        const Issuer::IssuedRefresh issued = it->second;
-        // Rotation: the presented token is spent here, and mint_token_response
-        // issues its replacement - so a client that keeps the old one fails,
-        // which is exactly the path worth being able to exercise locally.
-        issuer.refresh_tokens.erase (it);
-        if (issued.client_id != auth.client_id) {
-            send_oauth_error (res, 400, "invalid_grant",
-            "Refresh token was issued to another client");
-            return;
-        }
-        if (!issued.subject.empty ()) {
-            subject = issued.subject;
-        }
-        if (scope.empty ()) {
-            scope = issued.scope;
         }
     } else {
         send_oauth_error (res, 400, "unsupported_grant_type", grant);

@@ -50,6 +50,141 @@ void annotate (nlohmann::json& record, const ResultAnnotations& annotations) {
 
 } // namespace
 
+/** A response that reached this engine carrying a client-side error. */
+void record_failed_response (const std::shared_ptr<RunContext>& context,
+const vayu::Response& response,
+const ResultAnnotations& annotations) {
+    // Response carrying a client-side error
+
+    // Build detailed error trace data
+    nlohmann::json error_json = { { "error_code", static_cast<int> (response.error_code) },
+        { "error_type", error_type_name (response.error_code) },
+        { "message", response.error_message },
+        { "request_number", context->total_requests () } };
+
+    annotate (error_json, annotations);
+
+    // Include timing info if available
+    if (response.timing.total_ms > 0) {
+        error_json["timing"] = { { "totalMs", response.timing.total_ms },
+            { "wireMs", response.timing.wire_ms },
+            { "queueWaitMs", response.timing.queue_wait_ms },
+            { "dnsMs", response.timing.dns_ms }, { "connectMs", response.timing.connect_ms },
+            { "tlsMs", response.timing.tls_ms },
+            { "firstByteMs", response.timing.first_byte_ms },
+            { "downloadMs", response.timing.download_ms } };
+    }
+
+    // Every error is a capture candidate: a failure is exactly the sample a
+    // user opens the Samples tab for, and errors are already bounded by
+    // `maxStoredErrors`. Passing the response rather than a copy keeps the
+    // body-sized work inside the collector, after it has decided to keep
+    // the record (see MetricsCollector::record_error).
+    context->metrics_collector->record_error (response.error_code, response.error_message,
+    error_json.dump (), context->capture_response_bodies ? &response : nullptr);
+    context->metrics_collector->record_bytes (
+    response.timing.bytes_up, response.timing.bytes_down);
+}
+
+/** A response that completed, and everything the run keeps of it. */
+void record_successful_response (const std::shared_ptr<RunContext>& context,
+const vayu::Response& response,
+const ResultAnnotations& annotations) {
+    // Successful response
+    double latency = response.timing.total_ms;
+
+    // Two independent reasons to keep a trace, and both are decided before
+    // anything is serialised: the 1-in-N sampler (which advances its period
+    // on every completion, so this call is not optional) and the slow
+    // threshold. Building first and sampling afterwards meant 99 of every
+    // 100 traces were constructed and dumped inline in the completion
+    // drain, then thrown away - work that delays socket processing for
+    // every other transfer on the same worker.
+    const bool is_slow = context->slow_threshold_ms > 0 &&
+    latency >= static_cast<double> (context->slow_threshold_ms);
+    const bool sampled = context->metrics_collector->should_sample_success ();
+    // Third reason, and the cheapest: one relaxed fetch_add deciding
+    // whether this completion is among the first few of its status code. A
+    // uniform slice of a 30M-request run is a thousand identical 200s;
+    // three of each code is what answers "what does this target's 503
+    // look like".
+    const bool exemplar =
+    context->metrics_collector->claim_status_exemplar (response.status_code);
+
+    std::string trace_data;
+    auto trace_reason = SuccessTraceReason::None;
+
+    if (sampled || is_slow || exemplar) {
+        // Slow still wins, then sampled: the trace is identical either way,
+        // and charging an outlier to the slow budget leaves the 1-in-N
+        // budget for ordinary traffic.
+        //
+        // Exemplar is *last*, and only decides the store for a completion
+        // no other budget wanted. Ranking it first stole outliers from the
+        // slow store - the first few completions of a status code are
+        // usually where a run's outliers are - which is a behaviour change
+        // nobody asked for, on the store whose whole purpose is to hold
+        // what the user asked for. Being retained is still guaranteed:
+        // whichever budget claims it, the record is stored, and the
+        // exemplar's real job (capturing a body for it) is decided
+        // separately below.
+        if (is_slow) {
+            trace_reason = SuccessTraceReason::Slow;
+        } else if (sampled) {
+            trace_reason = SuccessTraceReason::Sampled;
+        } else {
+            trace_reason = SuccessTraceReason::Exemplar;
+        }
+
+        nlohmann::json timing_json = { { "totalMs", response.timing.total_ms },
+            { "wireMs", response.timing.wire_ms },
+            { "queueWaitMs", response.timing.queue_wait_ms },
+            { "dnsMs", response.timing.dns_ms }, { "connectMs", response.timing.connect_ms },
+            { "tlsMs", response.timing.tls_ms },
+            { "firstByteMs", response.timing.first_byte_ms },
+            { "downloadMs", response.timing.download_ms } };
+
+        if (is_slow) {
+            timing_json["isSlow"]      = true;
+            timing_json["thresholdMs"] = context->slow_threshold_ms;
+        }
+        annotate (timing_json, annotations);
+
+        trace_data = timing_json.dump ();
+    }
+
+    // Whether a body is captured is decided here, not by which store won
+    // above. Capture is failure-and-outlier-shaped: an outlier or a claimed
+    // exemplar gets one, a plain 1-in-N sample does not - a thousand
+    // identical 200s are not worth a thousand bodies. A completion that is
+    // both sampled and an exemplar is stored in the sampled budget *and*
+    // keeps its body, which is the case the old precedence-based version
+    // could only express by moving the record.
+    const bool capture_body = context->capture_response_bodies && (is_slow || exemplar);
+    // The phase breakdown goes in whatever the retention gate above
+    // decided: `trace_data` carries these same five numbers for the ~1% of
+    // completions something retains, and the histograms are how the other
+    // 99% reach the report.
+    context->metrics_collector->record_success (response.status_code, latency,
+    response.timing.queue_wait_ms, trace_data, trace_reason,
+    capture_body ? &response : nullptr, &response.timing);
+    context->metrics_collector->record_bytes (
+    response.timing.bytes_up, response.timing.bytes_down);
+
+    // Sample the response for the deferred validation passes. What reads a
+    // scenario sample - a step's script, a step's contract - is keyed to
+    // the step, not to the run, so it goes to that step's own reservoir;
+    // the collector refuses the steps nothing will read. A single-request
+    // run keeps the one run-level store it always had.
+    if (annotations.step_index) {
+        context->metrics_collector->record_step_response_sample (response,
+        *annotations.step_index, annotations.iteration.value_or (0),
+        annotations.data_row_index);
+    } else if (!context->test_script.empty ()) {
+        context->metrics_collector->record_response_sample (response);
+    }
+}
+
 void handle_result (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& /* db - unused, kept for API compat */,
 const vayu::Result<vayu::Response>& result,
@@ -103,132 +238,9 @@ const ResultAnnotations& annotations) {
     }
 
     if (response.has_error ()) {
-        // Response carrying a client-side error
-
-        // Build detailed error trace data
-        nlohmann::json error_json = { { "error_code", static_cast<int> (response.error_code) },
-            { "error_type", error_type_name (response.error_code) },
-            { "message", response.error_message },
-            { "request_number", context->total_requests () } };
-
-        annotate (error_json, annotations);
-
-        // Include timing info if available
-        if (response.timing.total_ms > 0) {
-            error_json["timing"] = { { "totalMs", response.timing.total_ms },
-                { "wireMs", response.timing.wire_ms },
-                { "queueWaitMs", response.timing.queue_wait_ms },
-                { "dnsMs", response.timing.dns_ms },
-                { "connectMs", response.timing.connect_ms },
-                { "tlsMs", response.timing.tls_ms },
-                { "firstByteMs", response.timing.first_byte_ms },
-                { "downloadMs", response.timing.download_ms } };
-        }
-
-        // Every error is a capture candidate: a failure is exactly the sample a
-        // user opens the Samples tab for, and errors are already bounded by
-        // `maxStoredErrors`. Passing the response rather than a copy keeps the
-        // body-sized work inside the collector, after it has decided to keep
-        // the record (see MetricsCollector::record_error).
-        context->metrics_collector->record_error (response.error_code, response.error_message,
-        error_json.dump (), context->capture_response_bodies ? &response : nullptr);
-        context->metrics_collector->record_bytes (
-        response.timing.bytes_up, response.timing.bytes_down);
+        record_failed_response (context, response, annotations);
     } else {
-        // Successful response
-        double latency = response.timing.total_ms;
-
-        // Two independent reasons to keep a trace, and both are decided before
-        // anything is serialised: the 1-in-N sampler (which advances its period
-        // on every completion, so this call is not optional) and the slow
-        // threshold. Building first and sampling afterwards meant 99 of every
-        // 100 traces were constructed and dumped inline in the completion
-        // drain, then thrown away - work that delays socket processing for
-        // every other transfer on the same worker.
-        const bool is_slow = context->slow_threshold_ms > 0 &&
-        latency >= static_cast<double> (context->slow_threshold_ms);
-        const bool sampled = context->metrics_collector->should_sample_success ();
-        // Third reason, and the cheapest: one relaxed fetch_add deciding
-        // whether this completion is among the first few of its status code. A
-        // uniform slice of a 30M-request run is a thousand identical 200s;
-        // three of each code is what answers "what does this target's 503
-        // look like".
-        const bool exemplar =
-        context->metrics_collector->claim_status_exemplar (response.status_code);
-
-        std::string trace_data;
-        auto trace_reason = SuccessTraceReason::None;
-
-        if (sampled || is_slow || exemplar) {
-            // Slow still wins, then sampled: the trace is identical either way,
-            // and charging an outlier to the slow budget leaves the 1-in-N
-            // budget for ordinary traffic.
-            //
-            // Exemplar is *last*, and only decides the store for a completion
-            // no other budget wanted. Ranking it first stole outliers from the
-            // slow store - the first few completions of a status code are
-            // usually where a run's outliers are - which is a behaviour change
-            // nobody asked for, on the store whose whole purpose is to hold
-            // what the user asked for. Being retained is still guaranteed:
-            // whichever budget claims it, the record is stored, and the
-            // exemplar's real job (capturing a body for it) is decided
-            // separately below.
-            if (is_slow) {
-                trace_reason = SuccessTraceReason::Slow;
-            } else if (sampled) {
-                trace_reason = SuccessTraceReason::Sampled;
-            } else {
-                trace_reason = SuccessTraceReason::Exemplar;
-            }
-
-            nlohmann::json timing_json = { { "totalMs", response.timing.total_ms },
-                { "wireMs", response.timing.wire_ms },
-                { "queueWaitMs", response.timing.queue_wait_ms },
-                { "dnsMs", response.timing.dns_ms },
-                { "connectMs", response.timing.connect_ms },
-                { "tlsMs", response.timing.tls_ms },
-                { "firstByteMs", response.timing.first_byte_ms },
-                { "downloadMs", response.timing.download_ms } };
-
-            if (is_slow) {
-                timing_json["isSlow"]      = true;
-                timing_json["thresholdMs"] = context->slow_threshold_ms;
-            }
-            annotate (timing_json, annotations);
-
-            trace_data = timing_json.dump ();
-        }
-
-        // Whether a body is captured is decided here, not by which store won
-        // above. Capture is failure-and-outlier-shaped: an outlier or a claimed
-        // exemplar gets one, a plain 1-in-N sample does not - a thousand
-        // identical 200s are not worth a thousand bodies. A completion that is
-        // both sampled and an exemplar is stored in the sampled budget *and*
-        // keeps its body, which is the case the old precedence-based version
-        // could only express by moving the record.
-        const bool capture_body = context->capture_response_bodies && (is_slow || exemplar);
-        // The phase breakdown goes in whatever the retention gate above
-        // decided: `trace_data` carries these same five numbers for the ~1% of
-        // completions something retains, and the histograms are how the other
-        // 99% reach the report.
-        context->metrics_collector->record_success (response.status_code,
-        latency, response.timing.queue_wait_ms, trace_data, trace_reason,
-        capture_body ? &response : nullptr, &response.timing);
-        context->metrics_collector->record_bytes (
-        response.timing.bytes_up, response.timing.bytes_down);
-
-        // Sample the response for the deferred validation passes. What reads a
-        // scenario sample - a step's script, a step's contract - is keyed to
-        // the step, not to the run, so it goes to that step's own reservoir;
-        // the collector refuses the steps nothing will read. A single-request
-        // run keeps the one run-level store it always had.
-        if (annotations.step_index) {
-            context->metrics_collector->record_step_response_sample (response,
-            *annotations.step_index, annotations.iteration.value_or (0),
-            annotations.data_row_index);
-        } else if (!context->test_script.empty ()) {
-            context->metrics_collector->record_response_sample (response);
-        }
+        record_successful_response (context, response, annotations);
     }
 
     // Wake the closed-loop controller (no-op/near-free for open-loop modes).
@@ -376,106 +388,7 @@ class ConstantLoadStrategy : public LoadStrategy {
             target_rps = config.value ("targetRps", 0.0);
 
         if (target_rps > 0.0) {
-            // Rate-limited mode
-            vayu::utils::log_info (
-            "Starting Constant Load Test (Rate-Limited)");
-            vayu::utils::log_info ("  Duration: " + std::to_string (duration_ms) + " ms");
-            vayu::utils::log_info ("  Target RPS: " + std::to_string (target_rps));
-
-            // Calculate expected requests
-            size_t expected = static_cast<size_t> (
-            (static_cast<double> (duration_ms) / 1000.0) * target_rps);
-            context->requests_expected = expected;
-
-            // Tick length: the request interval up to 1000 RPS, 1ms above it
-            // (below 1ms we would busy-spin). How many requests a tick owes is
-            // not the tick's business - take_due_requests accrues the exact
-            // fractional amount, so 1500 RPS owes 1 or 2 per 1ms tick rather
-            // than the floored 1 the old batch_size gave.
-            const int64_t base_interval_us = static_cast<int64_t> (1000000.0 / target_rps);
-            const int64_t tick_us = std::max<int64_t> (base_interval_us, 1000);
-
-            // Read once: the config cannot change mid-run.
-            const size_t max_pending = config.value ("maxInFlight",
-            std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
-
-            vayu::utils::log_debug ("Submission config: tick_us=" + std::to_string (tick_us) +
-            ", max_in_flight=" + std::to_string (max_pending) +
-            ", expected_requests=" + std::to_string (expected));
-
-            const auto test_start = std::chrono::steady_clock::now ();
-            const auto duration_end = test_start + std::chrono::milliseconds (duration_ms);
-            auto accrued_through = test_start;
-            double debt          = 0.0;
-            size_t submitted     = 0;
-
-            while (!context->should_stop) {
-                const auto now = std::chrono::steady_clock::now ();
-
-                // The run is time-bound, not quota-bound: never accrue past the
-                // deadline, so the final tick pays out only the slice of the
-                // window it covers and the loop cannot push a backlog beyond it.
-                const auto accrue_to = std::min (now, duration_end);
-                const int64_t elapsed_us =
-                std::chrono::duration_cast<std::chrono::microseconds> (accrue_to - accrued_through)
-                .count ();
-                accrued_through = accrue_to;
-
-                const size_t due = take_due_requests (debt, target_rps, elapsed_us);
-                if (due > 0) {
-                    const size_t in_flight = context->in_flight ();
-                    const size_t headroom =
-                    max_pending > in_flight ? max_pending - in_flight : 0;
-                    const size_t to_submit = std::min (due, headroom);
-
-                    // Requests the in-flight cap refuses are dropped at the
-                    // instant they came due, not deferred. Deferring is what
-                    // let a saturated run submit its backlog past the deadline
-                    // and still report itself on rate.
-                    if (due > to_submit) {
-                        context->metrics_collector->record_drop_batch (due - to_submit);
-                    }
-
-                    for (size_t i = 0; i < to_submit && !context->should_stop; ++i) {
-                        context->event_loop->submit (live.current (),
-                        [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
-                            handle_result (context, db, result);
-                        });
-                        submitted++;
-                        context->requests_sent++;
-                    }
-                }
-
-                if (now >= duration_end) {
-                    break;
-                }
-
-                // Wait for the next tick. Oversleeping is self-correcting - the
-                // next tick accrues the extra elapsed time - so the sleep can be
-                // the full remainder; on Windows short waits still spin, since
-                // 15.6ms timer rounding would make sub-tick sleeps bursty.
-                const auto next_tick =
-                accrued_through + std::chrono::microseconds (tick_us);
-                const auto sleep_us = std::chrono::duration_cast<std::chrono::microseconds> (
-                next_tick - std::chrono::steady_clock::now ())
-                                      .count ();
-                if (sleep_us > 100) {
-#ifdef _WIN32
-                    if (sleep_us <= 2000) {
-                        while (std::chrono::steady_clock::now () < next_tick &&
-                        !context->should_stop) {
-                            /* spin */
-                        }
-                    } else
-#endif
-                    {
-                        std::this_thread::sleep_for (std::chrono::microseconds (sleep_us));
-                    }
-                }
-            }
-
-            vayu::utils::log_info ("Submitted " + std::to_string (submitted) + " requests");
-
+            run_rate_limited (context, db, live, duration_ms, target_rps);
         } else {
             // Concurrency-based mode: closed-loop, hold ~N in flight.
             size_t concurrency =
@@ -499,6 +412,115 @@ class ConstantLoadStrategy : public LoadStrategy {
             [] () { return std::numeric_limits<size_t>::max (); }, // unbounded budget
             [duration_ms] (int64_t el) { return el < duration_ms; }); // stop at duration
         }
+    }
+
+    private:
+    /**
+     * Rate-limited mode: submit what each tick owes, drop what the in-flight
+     * cap refuses, and stop at the deadline.
+     */
+    static void run_rate_limited (const std::shared_ptr<RunContext>& context,
+    vayu::db::Database& db,
+    SubmissionRequest& live,
+    int64_t duration_ms,
+    double target_rps) {
+        // Rate-limited mode
+        vayu::utils::log_info ("Starting Constant Load Test (Rate-Limited)");
+        vayu::utils::log_info ("  Duration: " + std::to_string (duration_ms) + " ms");
+        vayu::utils::log_info ("  Target RPS: " + std::to_string (target_rps));
+
+        // Calculate expected requests
+        size_t expected = static_cast<size_t> (
+        (static_cast<double> (duration_ms) / 1000.0) * target_rps);
+        context->requests_expected = expected;
+
+        // Tick length: the request interval up to 1000 RPS, 1ms above it
+        // (below 1ms we would busy-spin). How many requests a tick owes is
+        // not the tick's business - take_due_requests accrues the exact
+        // fractional amount, so 1500 RPS owes 1 or 2 per 1ms tick rather
+        // than the floored 1 the old batch_size gave.
+        const int64_t base_interval_us = static_cast<int64_t> (1000000.0 / target_rps);
+        const int64_t tick_us = std::max<int64_t> (base_interval_us, 1000);
+
+        // Read once: the config cannot change mid-run.
+        const size_t max_pending = context->config.value ("maxInFlight",
+        std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
+
+        vayu::utils::log_debug ("Submission config: tick_us=" + std::to_string (tick_us) +
+        ", max_in_flight=" + std::to_string (max_pending) +
+        ", expected_requests=" + std::to_string (expected));
+
+        const auto test_start = std::chrono::steady_clock::now ();
+        const auto duration_end = test_start + std::chrono::milliseconds (duration_ms);
+        auto accrued_through = test_start;
+        double debt          = 0.0;
+        size_t submitted     = 0;
+
+        while (!context->should_stop) {
+            const auto now = std::chrono::steady_clock::now ();
+
+            // The run is time-bound, not quota-bound: never accrue past the
+            // deadline, so the final tick pays out only the slice of the
+            // window it covers and the loop cannot push a backlog beyond it.
+            const auto accrue_to = std::min (now, duration_end);
+            const int64_t elapsed_us =
+            std::chrono::duration_cast<std::chrono::microseconds> (accrue_to - accrued_through)
+            .count ();
+            accrued_through = accrue_to;
+
+            const size_t due = take_due_requests (debt, target_rps, elapsed_us);
+            if (due > 0) {
+                const size_t in_flight = context->in_flight ();
+                const size_t headroom =
+                max_pending > in_flight ? max_pending - in_flight : 0;
+                const size_t to_submit = std::min (due, headroom);
+
+                // Requests the in-flight cap refuses are dropped at the
+                // instant they came due, not deferred. Deferring is what
+                // let a saturated run submit its backlog past the deadline
+                // and still report itself on rate.
+                if (due > to_submit) {
+                    context->metrics_collector->record_drop_batch (due - to_submit);
+                }
+
+                for (size_t i = 0; i < to_submit && !context->should_stop; ++i) {
+                    context->event_loop->submit (live.current (),
+                    [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
+                        handle_result (context, db, result);
+                    });
+                    submitted++;
+                    context->requests_sent++;
+                }
+            }
+
+            if (now >= duration_end) {
+                break;
+            }
+
+            // Wait for the next tick. Oversleeping is self-correcting - the
+            // next tick accrues the extra elapsed time - so the sleep can be
+            // the full remainder; on Windows short waits still spin, since
+            // 15.6ms timer rounding would make sub-tick sleeps bursty.
+            const auto next_tick = accrued_through + std::chrono::microseconds (tick_us);
+            const auto sleep_us = std::chrono::duration_cast<std::chrono::microseconds> (
+            next_tick - std::chrono::steady_clock::now ())
+                                  .count ();
+            if (sleep_us > 100) {
+#ifdef _WIN32
+                if (sleep_us <= 2000) {
+                    while (std::chrono::steady_clock::now () < next_tick &&
+                    !context->should_stop) {
+                        /* spin */
+                    }
+                } else
+#endif
+                {
+                    std::this_thread::sleep_for (std::chrono::microseconds (sleep_us));
+                }
+            }
+        }
+
+        vayu::utils::log_info ("Submitted " + std::to_string (submitted) + " requests");
     }
 };
 

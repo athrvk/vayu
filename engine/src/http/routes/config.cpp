@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <chrono>
 #include <format>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -108,6 +109,198 @@ nlohmann::json config_error (const std::string& message) {
     return error_body (400, message, "invalid_config");
 }
 
+// One config value as the string the store holds. Shared by the two body
+// shapes below so a number or a boolean cannot mean different text depending
+// on which of them carried it.
+std::string config_value_string (const nlohmann::json& value) {
+    if (value.is_string ()) {
+        return value.get<std::string> ();
+    }
+    if (value.is_number ()) {
+        return std::to_string (value.get<double> ());
+    }
+    if (value.is_boolean ()) {
+        return value.get<bool> () ? "true" : "false";
+    }
+    return value.dump ();
+}
+
+/**
+ * The key/value pairs a POST /config body asks to write, in either shape the
+ * route accepts.
+ *
+ * @return why the body is neither of them, or nothing.
+ */
+std::optional<std::string> read_config_updates (const nlohmann::json& json,
+std::unordered_map<std::string, std::string>& out) {
+    // Bulk update format: { "entries": { "key": "value", ... } }
+    if (json.contains ("entries") && json["entries"].is_object ()) {
+        for (const auto& [key, value] : json["entries"].items ()) {
+            out[key] = config_value_string (value);
+        }
+    }
+    // Single update format: { "key": "key1", "value": "value1" }
+    else if (json.contains ("key") && json.contains ("value")) {
+        out[json["key"].get<std::string> ()] =
+        config_value_string (json["value"]);
+    } else {
+        return "Invalid request format. Expected { \"entries\": {...} } "
+               "or { \"key\": \"...\", \"value\": \"...\" }";
+    }
+    if (out.empty ()) {
+        return "No updates provided";
+    }
+    return std::nullopt;
+}
+
+/**
+ * Why @p value is not a number this entry accepts, or an empty string.
+ *
+ * The bounds are parsed inside the same `try` as the value on purpose: a stored
+ * `min` that does not parse is a broken row, and rejecting the write is the
+ * safe direction for a validator that cannot tell whether the bound was met.
+ */
+template <typename Value, typename Parse>
+std::string numeric_rejection (const vayu::db::ConfigEntry& entry,
+const std::string& key,
+const std::string& value,
+const char* expected,
+Parse parse) {
+    try {
+        const Value parsed = parse (value);
+        if (entry.min_value && parsed < parse (*entry.min_value)) {
+            return std::format (
+            "'{}' must be at least {} (got {})", key, *entry.min_value, value);
+        }
+        if (entry.max_value && parsed > parse (*entry.max_value)) {
+            return std::format (
+            "'{}' must be at most {} (got {})", key, *entry.max_value, value);
+        }
+    } catch (...) {
+        return std::format ("'{}' must be {} (got '{}')", key, expected, value);
+    }
+    return {};
+}
+
+/** Why @p value is not one of this enum entry's options, or an empty string. */
+std::string enum_rejection (const vayu::db::ConfigEntry& entry,
+const std::string& key,
+const std::string& value) {
+    std::vector<std::string> allowed;
+    std::string allowed_list;
+    if (entry.options) {
+        try {
+            for (const auto& option : nlohmann::json::parse (*entry.options)) {
+                std::string opt_value = option.at ("value").get<std::string> ();
+                allowed.push_back (opt_value);
+                allowed_list += (allowed_list.empty () ? "" : ", ") + opt_value;
+            }
+        } catch (const std::exception&) {
+            // @deliberate: malformed options fall through with an empty
+            // allowed list, so the value is rejected rather than
+            // accepted - the safe direction for a validator.
+        }
+    }
+    if (std::find (allowed.begin (), allowed.end (), value) == allowed.end ()) {
+        return std::format ("'{}' must be one of [{}] (got '{}')", key, allowed_list, value);
+    }
+    return {};
+}
+
+/** Why @p value does not satisfy the entry's declared type, or an empty string. */
+std::string type_rejection (const vayu::db::ConfigEntry& entry,
+const std::string& key,
+const std::string& value) {
+    if (entry.type == "integer") {
+        return numeric_rejection<int> (entry, key, value, "an integer",
+        [] (const std::string& text) { return std::stoi (text); });
+    }
+    if (entry.type == "number") {
+        return numeric_rejection<double> (entry, key, value, "a number",
+        [] (const std::string& text) { return std::stod (text); });
+    }
+    if (entry.type == "boolean") {
+        if (value != "true" && value != "false") {
+            return std::format ("'{}' must be 'true' or 'false' (got '{}')", key, value);
+        }
+        return {};
+    }
+    if (entry.type == "enum") {
+        return enum_rejection (entry, key, value);
+    }
+    return {};
+}
+
+/**
+ * The rules a single key carries beyond its declared type, the way the proxy
+ * URL's lives in `proxy_url_rejection`: the type system says "text" and only
+ * the key knows what the text has to be.
+ *
+ * `customCaCertificates` is rejected at the boundary rather than at handshake
+ * time, because a pasted key or a truncated block would otherwise be stored,
+ * materialized, and reported as an unrelated verification failure on every
+ * request afterwards (issue #706).
+ *
+ * `proxySystemUrl` the app writes from the operating system's answer (issue
+ * #708), and the same rule applies to it as to a hand-typed `proxyUrl`: a shape
+ * libcurl has no proxy support for would be stored, read under `system` mode,
+ * and fall back to the environment with only a log line to say so. Empty is not
+ * a rejection - it is how the app records "this machine has no proxy", and
+ * clearing it is how `system` goes direct.
+ */
+std::string key_rejection (const std::string& key, const std::string& value) {
+    if (key == "customCaCertificates" && !value.empty ()) {
+        if (const auto rejection = vayu::http::ca_pem_rejection (value)) {
+            return "'customCaCertificates' is not a usable PEM bundle: " + *rejection;
+        }
+    }
+    if (key == "proxySystemUrl" && !value.empty ()) {
+        if (const auto rejection = vayu::http::proxy_url_rejection (value)) {
+            return "'proxySystemUrl' is not usable: " + *rejection;
+        }
+    }
+    return {};
+}
+
+/**
+ * The cross-field proxy rule: `manual` mode with no usable URL would accept the
+ * write, say "Manual" in Settings and send every request direct - the invisible
+ * failure issue #705 exists to end. Judged against the state the batch would
+ * *leave*, not against either half alone, because the two keys may arrive in one
+ * request or in either order across two.
+ */
+std::optional<std::string> proxy_batch_rejection (vayu::db::Database& db,
+const std::unordered_map<std::string, std::string>& updates) {
+    if (updates.count ("proxyMode") == 0 && updates.count ("proxyUrl") == 0) {
+        return std::nullopt;
+    }
+    const auto effective = [&] (const char* key) {
+        const auto it = updates.find (key);
+        if (it != updates.end ()) {
+            return it->second;
+        }
+        const auto stored = db.get_config_entry (key);
+        return stored ? stored->value : std::string ();
+    };
+    const std::string mode = effective ("proxyMode");
+    const std::string url  = effective ("proxyUrl");
+    if (vayu::http::proxy_mode_from_string (mode) == vayu::http::ProxyMode::Manual) {
+        if (const auto rejection = vayu::http::proxy_url_rejection (url)) {
+            return "'proxyUrl' is required when 'proxyMode' is 'manual': " + *rejection;
+        }
+        return std::nullopt;
+    }
+    // A URL stored under another mode is inert rather than wrong - it is how
+    // someone keeps their proxy while temporarily switching it off - so it is
+    // validated but not required.
+    if (!url.empty ()) {
+        if (const auto rejection = vayu::http::proxy_url_rejection (url)) {
+            return "'proxyUrl' is not usable: " + *rejection;
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 /**
@@ -132,45 +325,8 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
     }
 
     std::unordered_map<std::string, std::string> updates;
-
-    // Bulk update format: { "entries": { "key": "value", ... } }
-    if (json.contains ("entries") && json["entries"].is_object ()) {
-        for (const auto& [key, value] : json["entries"].items ()) {
-            if (value.is_string ()) {
-                updates[key] = value.get<std::string> ();
-            } else if (value.is_number ()) {
-                updates[key] = std::to_string (value.get<double> ());
-            } else if (value.is_boolean ()) {
-                updates[key] = value.get<bool> () ? "true" : "false";
-            } else {
-                updates[key] = value.dump ();
-            }
-        }
-    }
-    // Single update format: { "key": "key1", "value": "value1" }
-    else if (json.contains ("key") && json.contains ("value")) {
-        std::string key = json["key"].get<std::string> ();
-        std::string value;
-        const auto& v = json["value"];
-        if (v.is_string ()) {
-            value = v.get<std::string> ();
-        } else if (v.is_number ()) {
-            value = std::to_string (v.get<double> ());
-        } else if (v.is_boolean ()) {
-            value = v.get<bool> () ? "true" : "false";
-        } else {
-            value = v.dump ();
-        }
-        updates[key] = value;
-    } else {
-        return { 400,
-            config_error (
-            "Invalid request format. Expected { \"entries\": {...} } "
-            "or { \"key\": \"...\", \"value\": \"...\" }") };
-    }
-
-    if (updates.empty ()) {
-        return { 400, config_error ("No updates provided") };
+    if (const auto rejection = read_config_updates (json, updates)) {
+        return { 400, config_error (*rejection) };
     }
 
     // Validate every key first; apply nothing unless all pass (all-or-nothing).
@@ -184,85 +340,10 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
             continue;
         }
 
-        std::string reason;
-        if (existing->type == "integer") {
-            try {
-                int int_val = std::stoi (value);
-                if (existing->min_value && int_val < std::stoi (*existing->min_value)) {
-                    reason = std::format ("'{}' must be at least {} (got {})",
-                    key, *existing->min_value, value);
-                } else if (existing->max_value && int_val > std::stoi (*existing->max_value)) {
-                    reason = std::format ("'{}' must be at most {} (got {})",
-                    key, *existing->max_value, value);
-                }
-            } catch (...) {
-                reason = std::format ("'{}' must be an integer (got '{}')", key, value);
-            }
-        } else if (existing->type == "number") {
-            try {
-                double double_val = std::stod (value);
-                if (existing->min_value && double_val < std::stod (*existing->min_value)) {
-                    reason = std::format ("'{}' must be at least {} (got {})",
-                    key, *existing->min_value, value);
-                } else if (existing->max_value &&
-                double_val > std::stod (*existing->max_value)) {
-                    reason = std::format ("'{}' must be at most {} (got {})",
-                    key, *existing->max_value, value);
-                }
-            } catch (...) {
-                reason = std::format ("'{}' must be a number (got '{}')", key, value);
-            }
-        } else if (existing->type == "boolean") {
-            if (value != "true" && value != "false") {
-                reason =
-                std::format ("'{}' must be 'true' or 'false' (got '{}')", key, value);
-            }
-        } else if (existing->type == "enum") {
-            std::vector<std::string> allowed;
-            std::string allowed_list;
-            if (existing->options) {
-                try {
-                    for (const auto& option : nlohmann::json::parse (*existing->options)) {
-                        std::string opt_value = option.at ("value").get<std::string> ();
-                        allowed.push_back (opt_value);
-                        allowed_list += (allowed_list.empty () ? "" : ", ") + opt_value;
-                    }
-                } catch (const std::exception&) {
-                    // @deliberate: malformed options fall through with an empty
-                    // allowed list, so the value is rejected rather than
-                    // accepted - the safe direction for a validator.
-                }
-            }
-            if (std::find (allowed.begin (), allowed.end (), value) == allowed.end ()) {
-                reason = std::format (
-                "'{}' must be one of [{}] (got '{}')", key, allowed_list, value);
-            }
+        std::string reason = type_rejection (*existing, key, value);
+        if (reason.empty ()) {
+            reason = key_rejection (key, value);
         }
-
-        // Per-key rule, the way the proxy URL's lives in `proxy_url_rejection`:
-        // the type system says "text" and only this key knows that the text has
-        // to be PEM. Rejected at the boundary rather than at handshake time,
-        // because a pasted key or a truncated block would otherwise be stored,
-        // materialized, and reported as an unrelated verification failure on
-        // every request afterwards (issue #706).
-        if (reason.empty () && key == "customCaCertificates" && !value.empty ()) {
-            if (const auto rejection = vayu::http::ca_pem_rejection (value)) {
-                reason = "'customCaCertificates' is not a usable PEM bundle: " + *rejection;
-            }
-        }
-
-        // The app writes this one from the operating system's answer (issue
-        // #708), and the same rule applies to it as to a hand-typed `proxyUrl`:
-        // a shape libcurl has no proxy support for would be stored, read under
-        // `system` mode, and fall back to the environment with only a log line
-        // to say so. Empty is not a rejection - it is how the app records "this
-        // machine has no proxy", and clearing it is how `system` goes direct.
-        if (reason.empty () && key == "proxySystemUrl" && !value.empty ()) {
-            if (const auto rejection = vayu::http::proxy_url_rejection (value)) {
-                reason = "'proxySystemUrl' is not usable: " + *rejection;
-            }
-        }
-
         if (!reason.empty ()) {
             errors.push_back (reason);
             continue;
@@ -276,46 +357,16 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
         to_update.push_back (updated);
     }
 
-    // Cross-field rule: `manual` mode with no usable URL would accept the
-    // write, say "Manual" in Settings and send every request direct - the
-    // invisible failure issue #705 exists to end. Judged against the state the
-    // batch would *leave*, not against either half alone, because the two keys
-    // may arrive in one request or in either order across two.
-    if (errors.empty () &&
-    (updates.count ("proxyMode") != 0 || updates.count ("proxyUrl") != 0)) {
-        const auto effective = [&] (const char* key) {
-            const auto it = updates.find (key);
-            if (it != updates.end ()) {
-                return it->second;
-            }
-            const auto stored = db.get_config_entry (key);
-            return stored ? stored->value : std::string ();
-        };
-        const std::string mode = effective ("proxyMode");
-        const std::string url  = effective ("proxyUrl");
-        if (vayu::http::proxy_mode_from_string (mode) == vayu::http::ProxyMode::Manual) {
-            if (const auto rejection = vayu::http::proxy_url_rejection (url)) {
-                errors.push_back ("'proxyUrl' is required when 'proxyMode' is "
-                                  "'manual': " +
-                *rejection);
-            }
-        } else if (!url.empty ()) {
-            // A URL stored under another mode is inert rather than wrong - it
-            // is how someone keeps their proxy while temporarily switching it
-            // off - so it is validated but not required.
-            if (const auto rejection = vayu::http::proxy_url_rejection (url)) {
-                errors.push_back ("'proxyUrl' is not usable: " + *rejection);
-            }
+    if (errors.empty ()) {
+        if (const auto rejection = proxy_batch_rejection (db, updates)) {
+            errors.push_back (*rejection);
         }
     }
 
     if (!errors.empty ()) {
         std::string joined;
-        for (size_t i = 0; i < errors.size (); ++i) {
-            if (i > 0) {
-                joined += "; ";
-            }
-            joined += errors[i];
+        for (const auto& error : errors) {
+            joined += (joined.empty () ? "" : "; ") + error;
         }
         vayu::utils::log_error ("POST /config - Validation failed: " + joined);
         return { 400, config_error (joined) };

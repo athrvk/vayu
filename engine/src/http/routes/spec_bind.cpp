@@ -81,7 +81,180 @@ nlohmann::json operation_json (const vayu::core::MatchableOperation& operation) 
     return out;
 }
 
+/**
+ * The document row this bind stores.
+ *
+ * The document is read here and nowhere else in this route. One that cannot be
+ * read is a 400 *before* anything is written, which is what leaves the
+ * collection bound to whatever it was bound to.
+ */
+std::optional<std::pair<int, nlohmann::json>> read_bound_document (
+const nlohmann::json& spec_item,
+const std::string& content,
+size_t cap,
+int64_t now,
+vayu::db::SpecDocument& spec) {
+    spec.id         = vayu::utils::generate_id ("spec_");
+    spec.content    = content;
+    spec.hash       = spec_content_hash (content);
+    spec.fetched_at = now;
+    if (auto reason = read_spec_indexes (spec_item, spec, cap)) {
+        return body_error (*reason);
+    }
+    if (spec_item.contains ("sourceUrl") && !spec_item["sourceUrl"].is_null ()) {
+        if (!spec_item["sourceUrl"].is_string ()) {
+            return body_error (
+            "Invalid 'spec.sourceUrl': must be a string or null");
+        }
+        const auto url = spec_item["sourceUrl"].get<std::string> ();
+        if (!url.empty ()) {
+            spec.source_url = url;
+        }
+    }
+    return std::nullopt;
+}
+
+/** What the matching pass did, which is what the route answers with. */
+struct StampOutcome {
+    size_t stamped                      = 0;
+    size_t cleared                      = 0;
+    nlohmann::json unmatched_requests   = nlohmann::json::array ();
+    nlohmann::json unmatched_operations = nlohmann::json::array ();
+};
+
+/**
+ * Which request carries which operation, and which carries none any more.
+ *
+ * The pairing is `core::match_operations` - the rule `POST /specs/match`
+ * previews with. The operations it matches against are read back out of the
+ * index this write is about to store rather than out of the document a second
+ * time: the identity a request is stamped with has to be one
+ * `OperationIndex::resolve` will find in the stored column, and reading both out
+ * of one derivation is what guarantees it. `parse_declared_operations` returns
+ * nothing for a document that declares none, which matches nothing and clears
+ * everything - the honest outcome of binding a contract with no operations in it.
+ */
+std::optional<std::pair<int, nlohmann::json>> stamp_subtree (vayu::db::Database& db,
+const std::vector<vayu::db::Request>& stored,
+const vayu::db::SpecDocument& spec,
+int64_t now,
+vayu::db::SpecSyncBatch& batch,
+StampOutcome& outcome) {
+    std::vector<vayu::core::MatchableRequest> matchable;
+    matchable.reserve (stored.size ());
+    for (const auto& request : stored) {
+        matchable.push_back (
+        { request.id, vayu::to_string (request.method), request.url });
+    }
+
+    std::vector<vayu::core::MatchableOperation> operations;
+    if (auto declared = vayu::core::parse_declared_operations (spec.operations)) {
+        operations.reserve (declared->size ());
+        for (const auto& row : *declared) {
+            operations.push_back ({ row.operation_id, row.method, row.path });
+        }
+    }
+
+    const auto match = vayu::core::match_operations (matchable, operations);
+
+    std::unordered_set<size_t> matched_requests;
+    matched_requests.reserve (match.matched.size ());
+    for (const auto& pair : match.matched) {
+        matched_requests.insert (pair.request);
+        vayu::db::Request row = stored[pair.request];
+        row.updated_at        = now;
+        const nlohmann::json fields{ { "specOperation",
+        operation_json (operations[pair.operation]) } };
+        // Through the applier every other write of this column uses, so a
+        // stamp written by a bind and one written by an import are the same
+        // bytes, validated by the same rule.
+        if (auto applied = apply_request_fields (db, row, fields, /*is_create=*/false);
+        !applied) {
+            return as_response (applied.error ());
+        }
+        batch.updated.push_back (std::move (row));
+    }
+
+    for (size_t i = 0; i < stored.size (); ++i) {
+        // Only a request that *carries* one: clearing a column that is
+        // already NULL would rewrite rows a bind never touched, and
+        // `updated_at` is read.
+        const auto& carried = stored[i].spec_operation;
+        if (matched_requests.contains (i) || !carried || carried->empty ()) {
+            continue;
+        }
+        vayu::db::Request row = stored[i];
+        row.updated_at        = now;
+        row.spec_operation    = std::nullopt;
+        batch.updated.push_back (std::move (row));
+        ++outcome.cleared;
+    }
+
+    outcome.stamped = match.matched.size ();
+    for (const size_t index : match.unmatched_requests) {
+        outcome.unmatched_requests.push_back (matchable[index].id);
+    }
+    for (const size_t index : match.unmatched_operations) {
+        outcome.unmatched_operations.push_back (operation_json (operations[index]));
+    }
+    return std::nullopt;
+}
+
+/**
+ * The whole bind, under the lock its caller holds: the document, the stamps and
+ * the binding land together or not at all.
+ */
+std::pair<int, nlohmann::json> bind_locked (vayu::db::Database& db,
+const std::string& collection_id,
+const nlohmann::json& spec_item,
+const std::string& content) {
+    const auto collections = db.get_collections ();
+    auto root = std::find_if (collections.begin (), collections.end (),
+    [&] (const vayu::db::Collection& c) { return c.id == collection_id; });
+    if (root == collections.end ()) {
+        return { 404, error_body (404, "Collection not found") };
+    }
+
+    const size_t cap = spec_size_cap (db);
+    if (content.size () > cap) {
+        return body_error ("Spec document is " + std::to_string (content.size ()) +
+        " bytes, over the limit of " + std::to_string (cap) +
+        " (raise the 'maxSpecDocumentBytes' setting to allow more)");
+    }
+
+    const int64_t now = now_ms ();
+    vayu::db::SpecSyncBatch batch;
+    if (auto refusal = read_bound_document (spec_item, content, cap, now, batch.spec)) {
+        return *refusal;
+    }
+
+    const auto subtree = collection_subtree_ids (collections, collection_id);
+    const auto stored  = collection_subtree_requests (db, collections, subtree);
+
+    StampOutcome outcome;
+    if (auto refusal = stamp_subtree (db, stored, batch.spec, now, batch, outcome)) {
+        return *refusal;
+    }
+
+    // The binding moves with the stamps.
+    batch.binding         = *root;
+    batch.binding.openapi = nlohmann::json{
+        { "specId", batch.spec.id }, { "specHash", batch.spec.hash }, { "syncedAt", now }
+    }.dump ();
+    batch.binding.updated_at = now;
+
+    db.spec_sync_apply (batch);
+
+    return { 200,
+        nlohmann::json{ { "specId", batch.spec.id },
+        { "specHash", batch.spec.hash }, { "syncedAt", now },
+        { "stamped", outcome.stamped }, { "cleared", outcome.cleared },
+        { "unmatchedRequests", std::move (outcome.unmatched_requests) },
+        { "unmatchedOperations", std::move (outcome.unmatched_operations) } } };
+}
+
 } // namespace
+
 
 /**
  * Testable core of `POST /specs/bind`, returning {http_status, json_body}.
@@ -131,136 +304,8 @@ bind_spec_response (vayu::db::Database& db, const nlohmann::json& body) {
     }
 
     std::pair<int, nlohmann::json> result;
-    db.with_lock ([&] {
-        const auto collections = db.get_collections ();
-        auto root = std::find_if (collections.begin (), collections.end (),
-        [&] (const vayu::db::Collection& c) { return c.id == collection_id; });
-        if (root == collections.end ()) {
-            result = { 404, error_body (404, "Collection not found") };
-            return;
-        }
-
-        const size_t cap = spec_size_cap (db);
-        if (content.size () > cap) {
-            result = body_error ("Spec document is " + std::to_string (content.size ()) +
-            " bytes, over the limit of " + std::to_string (cap) +
-            " (raise the 'maxSpecDocumentBytes' setting to allow more)");
-            return;
-        }
-
-        const int64_t now = now_ms ();
-        vayu::db::SpecSyncBatch batch;
-        batch.spec.id         = vayu::utils::generate_id ("spec_");
-        batch.spec.content    = content;
-        batch.spec.hash       = spec_content_hash (content);
-        batch.spec.fetched_at = now;
-        // The document is read here and nowhere else in this route. A document
-        // that cannot be read is a 400 *before* anything is written, which is
-        // what leaves the collection bound to whatever it was bound to.
-        if (auto reason = read_spec_indexes (spec_item, batch.spec, cap)) {
-            result = body_error (*reason);
-            return;
-        }
-        if (spec_item.contains ("sourceUrl") && !spec_item["sourceUrl"].is_null ()) {
-            if (!spec_item["sourceUrl"].is_string ()) {
-                result = body_error (
-                "Invalid 'spec.sourceUrl': must be a string or null");
-                return;
-            }
-            const auto url = spec_item["sourceUrl"].get<std::string> ();
-            if (!url.empty ()) {
-                batch.spec.source_url = url;
-            }
-        }
-
-        // ---- who is what -----------------------------------------------------
-        const auto subtree = collection_subtree_ids (collections, collection_id);
-        const auto stored = collection_subtree_requests (db, collections, subtree);
-
-        std::vector<vayu::core::MatchableRequest> matchable;
-        matchable.reserve (stored.size ());
-        for (const auto& request : stored) {
-            matchable.push_back (
-            { request.id, vayu::to_string (request.method), request.url });
-        }
-
-        // The index this write is about to store, read back rather than the
-        // document read a second time: the identity a request is stamped with
-        // has to be one `OperationIndex::resolve` will find in the stored
-        // column, and reading the two out of one derivation is what guarantees
-        // it. `parse_declared_operations` returns nothing for a document that
-        // declares none, which matches nothing and clears everything - the
-        // honest outcome of binding a contract with no operations in it.
-        std::vector<vayu::core::MatchableOperation> operations;
-        if (auto declared = vayu::core::parse_declared_operations (batch.spec.operations)) {
-            operations.reserve (declared->size ());
-            for (const auto& row : *declared) {
-                operations.push_back ({ row.operation_id, row.method, row.path });
-            }
-        }
-
-        const auto match = vayu::core::match_operations (matchable, operations);
-
-        // ---- the stamps, both halves ------------------------------------------
-        std::unordered_set<size_t> matched_requests;
-        matched_requests.reserve (match.matched.size ());
-        for (const auto& pair : match.matched) {
-            matched_requests.insert (pair.request);
-            vayu::db::Request row = stored[pair.request];
-            row.updated_at        = now;
-            const nlohmann::json fields{ { "specOperation",
-            operation_json (operations[pair.operation]) } };
-            // Through the applier every other write of this column uses, so a
-            // stamp written by a bind and one written by an import are the same
-            // bytes, validated by the same rule.
-            if (auto outcome = apply_request_fields (db, row, fields, /*is_create=*/false);
-            !outcome) {
-                result = as_response (outcome.error ());
-                return;
-            }
-            batch.updated.push_back (std::move (row));
-        }
-
-        size_t cleared = 0;
-        for (size_t i = 0; i < stored.size (); ++i) {
-            // Only a request that *carries* one: clearing a column that is
-            // already NULL would rewrite rows a bind never touched, and
-            // `updated_at` is read.
-            if (matched_requests.contains (i) || !stored[i].spec_operation ||
-            stored[i].spec_operation->empty ()) {
-                continue;
-            }
-            vayu::db::Request row = stored[i];
-            row.updated_at        = now;
-            row.spec_operation    = std::nullopt;
-            batch.updated.push_back (std::move (row));
-            ++cleared;
-        }
-
-        // ---- the binding moves with the stamps ---------------------------------
-        batch.binding         = *root;
-        batch.binding.openapi = nlohmann::json{
-            { "specId", batch.spec.id }, { "specHash", batch.spec.hash }, { "syncedAt", now }
-        }.dump ();
-        batch.binding.updated_at = now;
-
-        db.spec_sync_apply (batch);
-
-        nlohmann::json unmatched_requests = nlohmann::json::array ();
-        for (const size_t index : match.unmatched_requests) {
-            unmatched_requests.push_back (matchable[index].id);
-        }
-        nlohmann::json unmatched_operations = nlohmann::json::array ();
-        for (const size_t index : match.unmatched_operations) {
-            unmatched_operations.push_back (operation_json (operations[index]));
-        }
-        result = { 200,
-            nlohmann::json{ { "specId", batch.spec.id },
-            { "specHash", batch.spec.hash }, { "syncedAt", now },
-            { "stamped", match.matched.size () }, { "cleared", cleared },
-            { "unmatchedRequests", std::move (unmatched_requests) },
-            { "unmatchedOperations", std::move (unmatched_operations) } } };
-    });
+    db.with_lock (
+    [&] { result = bind_locked (db, collection_id, spec_item, content); });
     return result;
 }
 

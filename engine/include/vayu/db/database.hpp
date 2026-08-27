@@ -654,6 +654,26 @@ class Database {
     void deactivate_other_environments_locked (const std::string& keep_id);
 
     /**
+     * @brief Refuse a spec write whose target rows have moved under it.
+     *
+     * Throws `MissingRowError` for the bound collection or any updated request
+     * that no longer exists - a spec write updates rows, never resurrects them,
+     * which is `apply_reorder`'s rule and its reason. The caller must already
+     * hold the DB mutex and be inside the write's own transaction, so what this
+     * proves is still true when the write lands.
+     */
+    void verify_spec_sync_rows_locked (const SpecSyncBatch& batch);
+
+    /**
+     * @brief Write one spec batch: deletes first, then the document, the
+     *        folders, the binding and the rows.
+     *
+     * Same scope rule as @ref verify_spec_sync_rows_locked - mutex held, inside
+     * the transaction, after the verification.
+     */
+    void write_spec_sync_batch_locked (const SpecSyncBatch& batch);
+
+    /**
      * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked error.
      *
      * On a busy error the mutex is released *before* sleeping (exponential
