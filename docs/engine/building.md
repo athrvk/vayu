@@ -772,12 +772,15 @@ the next build picks it up, nothing to opt into:
 2. **ccache** (or sccache) on PATH becomes the compiler launcher
    (`CMAKE_<LANG>_COMPILER_LAUNCHER`), so a clean rebuild or a branch switch
    replays unchanged compiles out of the cache instead of re-running them.
-   `build.py` also sets `CCACHE_SLOPPINESS=pch_defines,time_macros` (unless
-   already set): without it every translation unit that uses the nlohmann
-   precompiled header - all of `vayu_core` - is a guaranteed cache miss.
+   Detecting a launcher also turns the nlohmann precompiled header **off**
+   (`CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`): the two are mutually exclusive,
+   because GCC's `.gch` is not byte-reproducible and the cache hashes it into
+   every consuming translation unit's key, so any rebuild of the PCH
+   invalidates the whole cache - a clean rebuild measured 11 hits out of 498
+   compiles with the PCH on. [#805](https://github.com/athrvk/vayu/issues/805)
+   already established the PCH only pays in regimes without a compile cache.
    Not on Windows, where the MSVC PCH makes compiles non-cacheable and a
-   launcher costs bookkeeping for nothing - measured on issue
-   [#805](https://github.com/athrvk/vayu/issues/805).
+   launcher costs bookkeeping for nothing - measured on the same issue.
 3. **mold, else lld** on Linux links executables via `-fuse-ld=<linker>`
    (`ld.lld` on PATH is what GCC needs for lld, so that is what is probed).
    The Debug link of `vayu_tests` - one binary, ~150 objects, static gtest -

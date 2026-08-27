@@ -1251,12 +1251,24 @@ def build_engine(preset: str, clean: bool, run_tests: bool, project_root: Path) 
         extra_args += [
             f"-DCMAKE_C_COMPILER_LAUNCHER={launcher}",
             f"-DCMAKE_CXX_COMPILER_LAUNCHER={launcher}",
+            # The nlohmann PCH and a compile cache are mutually exclusive, and
+            # the cache wins wherever both are possible. Every engine target
+            # precompiles <nlohmann/json.hpp>, GCC's .gch is not byte
+            # reproducible (measured: two builds of the identical cmake_pch.hxx
+            # differ), and the cache hashes the PCH into every consuming TU's
+            # key - so any rebuild of the PCH invalidates the entire cache: a
+            # clean rebuild measured 11 hits out of 498 compiles even with the
+            # PCH sloppinesses set. #805 already established the PCH only pays
+            # in regimes *without* a compile cache, which is exactly the regime
+            # this branch is not in.
+            "-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON",
         ]
         if Path(launcher).stem == "ccache":
-            # Without this, every TU that uses the nlohmann PCH (all of
-            # vayu_core) is a guaranteed cache miss: ccache refuses to cache
-            # GCC/Clang PCH compiles unless told these two sloppinesses are
-            # acceptable. setdefault so an explicit environment wins.
+            # Belt and braces alongside the PCH disable above: without it, any
+            # PCH compile that does slip through (a tree configured before the
+            # disable, a target added later) is refused by ccache outright
+            # rather than merely missing. setdefault so an explicit
+            # environment wins.
             os.environ.setdefault("CCACHE_SLOPPINESS", "pch_defines,time_macros")
     linker = find_fast_linker()
     if linker:
