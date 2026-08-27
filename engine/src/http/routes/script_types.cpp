@@ -431,7 +431,9 @@ std::string intersection_base (const std::string& detail) {
     if (amp == std::string::npos || trim (base.substr (amp + 1)) != "object") {
         return {};
     }
-    const std::string left = trim (base.substr (0, amp));
+    // Not `const`: it is returned by value, and a const local is copied where a
+    // non-const one is moved (performance-no-automatic-move).
+    std::string left = trim (base.substr (0, amp));
     if (left == "string" || left == "number" || left == "boolean") {
         return left;
     }
