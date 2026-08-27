@@ -91,6 +91,14 @@ does not ship that module. The same name comes off the
 no argument, a name nothing implements - because nothing was asserted: the call
 itself was wrong.
 
+**Anything the chain does not implement throws, called or not** (issue #999).
+`pm.expect(x).to.be.NaN` is an expression statement, so before the chain was
+armed a member nothing implemented evaluated to `undefined` and the test
+reported PASS whatever the value was - a typo (`.to.be.trueish`) and a chai
+matcher Vayu does not have (`.finite`, `.sealed`, `.frozen`, `.extensible`)
+were equally silent. Every unimplemented name now raises a `TypeError` naming
+itself, the way `pm.response.to` has since #487.
+
 **`equal` is strict, `eql` is deep.** `equal` is `===`, so two objects with the
 same contents are *not* equal - only the same reference is. `eql` (and its alias
 `deep.equal`) compares contents recursively and does not care about key order.
@@ -121,8 +129,9 @@ pm.expect(value).to.be.undefined;
 pm.expect(value).to.be.ok;
 pm.expect(value).to.be.empty;
 pm.expect(value).to.exist;
+pm.expect(value).to.be.NaN;
 
-// Numbers
+// Numbers (a number or a Date on both sides - nothing is coerced)
 pm.expect(value).to.be.above(n);
 pm.expect(value).to.be.below(n);
 pm.expect(value).to.be.at.least(n);
@@ -135,6 +144,7 @@ pm.expect(value).to.be.instanceOf(Array);
 
 // Strings, collections and objects
 pm.expect(value).to.include(item);           // alias .contain
+pm.expect(value).to.include({ a: 1 });       // an object target: subset match
 pm.expect(value).to.have.string(substring);  // string target only
 pm.expect(value).to.match(/regex/);
 pm.expect(value).to.have.length(n);          // alias .lengthOf
@@ -146,8 +156,10 @@ pm.expect(value).to.have.members([1, 2, 3]); // same members, any order
 
 // Functions
 pm.expect(fn).to.throw();                    // alias .throws
-pm.expect(fn).to.throw('message substring');
+pm.expect(fn).to.throw('message substring'); // matched against err.message
 pm.expect(fn).to.throw(/pattern/);
+pm.expect(fn).to.throw(TypeError);
+pm.expect(fn).to.throw(TypeError, 'substring');
 pm.expect(value).to.satisfy(function (v) { return v > 0; });
 
 // Chainers
@@ -177,6 +189,28 @@ Notes on the edges:
   `RegExp` by pattern.
 - **A cycle fails loudly.** Deep equality gives up after 64 levels with a
   `RangeError` naming the cause.
+- **`eql` separates `+0` from `-0`; `equal` does not.** That is chai: `equal`
+  is `===`, under which the two zeros are one value, while `eql` is deep-eql,
+  whose number rule is `x === y && (x !== 0 || 1/x === 1/y)`. The
+  [response assertions](#response-assertions) keep the other rule, because
+  chai-postman compares them with lodash `_.isEqual` and lodash says equal.
+- **`NaN` is chai's `value !== value`**, so only the number `NaN` satisfies it -
+  `expect('foo').to.be.NaN` fails rather than reading the string as a number.
+- **`include` on an object target is subset matching**, as in chai: every key of
+  the argument must be present on the target holding an equal value, strictly
+  unless the chain says `deep`. Any target other than a string or an array takes
+  an *object* argument, so `expect({a:1}).to.include('a')` and
+  `expect(5).to.include('x')` are both a `TypeError` - a combination chai
+  refuses rather than a verdict.
+- **The ordering matchers type-assert both sides.** `above`, `below`,
+  `at.least` and `at.most` take a number or a `Date` and refuse anything else,
+  which is chai's rule: `expect('5').to.be.above(3)` used to pass here through
+  `ToNumber`, and now names what it was given.
+- **`throw` reads the error's `message`.** A string or a regular expression is
+  matched against `err.message` alone, never `String(err)` - so
+  `.to.throw('Error')` no longer passes for every `Error` thrown. A constructor
+  is accepted as the first argument (`instanceof`), with an optional message
+  matcher after it.
 - **`.and` carries the chain's flags**, `not` included, exactly as in chai.
 
 ## Response Object (`pm.response`)

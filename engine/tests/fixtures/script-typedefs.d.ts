@@ -4,6 +4,10 @@
 interface VayuExpectTo {
 	be: {
 		/**
+		 * Assert the value is NaN. chai's rule is `value !== value`, so only the number NaN passes - a string that would read as NaN does not.
+		 */
+		NaN: void;
+		/**
 		 * Assert the value is of a specific type.
 		 * 
 		 * Example:
@@ -12,12 +16,12 @@ interface VayuExpectTo {
 		 */
 		a(type: string): VayuExpectation;
 		/**
-		 * Assert the number is greater than n.
+		 * Assert the number is greater than n. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 		 * 
 		 * Example:
 		 * pm.expect(responseTime).to.be.above(0);
 		 */
-		above(n: number): VayuExpectation;
+		above(n: number | Date): VayuExpectation;
 		/**
 		 * Assert the value is of a specific type (use with vowels).
 		 * 
@@ -28,21 +32,21 @@ interface VayuExpectTo {
 		an(type: string): VayuExpectation;
 		at: {
 			/**
-			 * Assert the number is greater than or equal to n.
+			 * Assert the number is greater than or equal to n. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 			 */
-			least(n: number): VayuExpectation;
+			least(n: number | Date): VayuExpectation;
 			/**
-			 * Assert the number is less than or equal to n.
+			 * Assert the number is less than or equal to n. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 			 */
-			most(n: number): VayuExpectation;
+			most(n: number | Date): VayuExpectation;
 		};
 		/**
-		 * Assert the number is less than n.
+		 * Assert the number is less than n. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 		 * 
 		 * Example:
 		 * pm.expect(pm.response.responseTime).to.be.below(1000);
 		 */
-		below(n: number): VayuExpectation;
+		below(n: number | Date): VayuExpectation;
 		/**
 		 * Assert the number is within delta of expected. The delta is required.
 		 * 
@@ -218,10 +222,11 @@ interface VayuExpectTo {
 		string(substring: string): VayuExpectation;
 	};
 	/**
-	 * Assert array includes value or string contains substring.
+	 * Assert an array includes the value, a string contains the substring, or - given an object - that the target holds every one of its keys with an equal value.
 	 * 
 	 * Example:
 	 * pm.expect(tags).to.include('featured');
+	 * pm.expect(body).to.include({status: 'ok'});
 	 */
 	include(value: any): VayuExpectation;
 	/**
@@ -246,16 +251,17 @@ interface VayuExpectTo {
 	 */
 	satisfy(predicate: (value: any) => boolean): VayuExpectation;
 	/**
-	 * Assert the function throws, optionally matching the message.
+	 * Assert the function throws. A string or regular expression is matched against the error's message, and an error constructor against what was thrown - with an optional message matcher after it.
 	 * 
 	 * Example:
 	 * pm.expect(function() { JSON.parse("{"); }).to.throw();
+	 * pm.expect(parse).to.throw(SyntaxError, "unexpected");
 	 */
-	throw(message?: string | RegExp): VayuExpectation;
+	throw(error?: ErrorConstructor | string | RegExp, message?: string | RegExp): VayuExpectation;
 	/**
 	 * Assert the function throws (alias for .to.throw).
 	 */
-	throws(message?: string | RegExp): VayuExpectation;
+	throws(error?: ErrorConstructor | string | RegExp, message?: string | RegExp): VayuExpectation;
 }
 
 interface VayuExpectation {

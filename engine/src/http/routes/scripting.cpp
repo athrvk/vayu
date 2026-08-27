@@ -1375,37 +1375,50 @@ nlohmann::json get_script_completions () {
     { "documentation", "Assert the value is truthy." },
     { "sortText", "2_to_be_ok" }, { "filterText", ".to.be.ok" } });
 
+    completions.push_back ({ { "label", "to.be.NaN" }, { "kind", KIND_FIELD },
+    { "insertText", "to.be.NaN" }, { "detail", ".to.be.NaN" },
+    { "documentation",
+    "Assert the value is NaN. chai's rule is `value !== value`, so only the "
+    "number NaN passes - a string that would read as NaN does not." },
+    { "sortText", "2_to_be_NaN" }, { "filterText", ".to.be.NaN" } });
+
     completions.push_back ({ { "label", "to.exist" }, { "kind", KIND_FIELD },
     { "insertText", "to.exist" }, { "detail", ".to.exist" },
     { "documentation", "Assert the value is not null or undefined." },
     { "sortText", "2_to_exist" }, { "filterText", ".to.exist" } });
 
-    completions.push_back ({ { "label", "to.be.above" },
-    { "kind", KIND_FUNCTION }, { "insertText", "to.be.above(${1:n})" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.above(n: number)" },
+    completions.push_back ({ { "label", "to.be.above" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.be.above(${1:n})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.above(n: number | Date)" },
     { "documentation",
-    "Assert the number is greater than "
-    "n.\n\nExample:\npm.expect(responseTime).to.be.above(0);" },
+    "Assert the number is greater than n. Both sides must be a number or a "
+    "Date, as in chai: a string is refused rather than coerced.\n\nExample:\n"
+    "pm.expect(responseTime).to.be.above(0);" },
     { "sortText", "2_to_be_above" }, { "filterText", ".to.be.above" } });
 
-    completions.push_back ({ { "label", "to.be.below" },
-    { "kind", KIND_FUNCTION }, { "insertText", "to.be.below(${1:n})" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.below(n: number)" },
+    completions.push_back ({ { "label", "to.be.below" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.be.below(${1:n})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.below(n: number | Date)" },
     { "documentation",
-    "Assert the number is less than "
-    "n.\n\nExample:\npm.expect(pm.response.responseTime).to.be.below(1000);" },
+    "Assert the number is less than n. Both sides must be a number or a Date, "
+    "as in chai: a string is refused rather than coerced.\n\nExample:\n"
+    "pm.expect(pm.response.responseTime).to.be.below(1000);" },
     { "sortText", "2_to_be_below" }, { "filterText", ".to.be.below" } });
 
-    completions.push_back ({ { "label", "to.be.at.least" },
-    { "kind", KIND_FUNCTION }, { "insertText", "to.be.at.least(${1:n})" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.at.least(n: number)" },
-    { "documentation", "Assert the number is greater than or equal to n." },
+    completions.push_back ({ { "label", "to.be.at.least" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.be.at.least(${1:n})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.at.least(n: number | Date)" },
+    { "documentation",
+    "Assert the number is greater than or equal to n. Both sides must be a "
+    "number or a Date, as in chai: a string is refused rather than coerced." },
     { "sortText", "2_to_be_at_least" }, { "filterText", ".to.be.at.least" } });
 
-    completions.push_back ({ { "label", "to.be.at.most" },
-    { "kind", KIND_FUNCTION }, { "insertText", "to.be.at.most(${1:n})" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.at.most(n: number)" },
-    { "documentation", "Assert the number is less than or equal to n." },
+    completions.push_back ({ { "label", "to.be.at.most" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.be.at.most(${1:n})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.at.most(n: number | Date)" },
+    { "documentation",
+    "Assert the number is less than or equal to n. Both sides must be a number "
+    "or a Date, as in chai: a string is refused rather than coerced." },
     { "sortText", "2_to_be_at_most" }, { "filterText", ".to.be.at.most" } });
 
     completions.push_back ({ { "label", "to.have.property" },
@@ -1435,8 +1448,10 @@ nlohmann::json get_script_completions () {
     { "kind", KIND_FUNCTION }, { "insertText", "to.include(${1:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.include(value: any)" },
     { "documentation",
-    "Assert array includes value or string contains "
-    "substring.\n\nExample:\npm.expect(tags).to.include('featured');" },
+    "Assert an array includes the value, a string contains the substring, or - "
+    "given an object - that the target holds every one of its keys with an "
+    "equal value.\n\nExample:\npm.expect(tags).to.include('featured');\n"
+    "pm.expect(body).to.include({status: 'ok'});" },
     { "sortText", "2_to_include" }, { "filterText", ".to.include" } });
 
     completions.push_back ({ { "label", "to.contain" },
@@ -1551,14 +1566,19 @@ nlohmann::json get_script_completions () {
     { "sortText", "2_to_have_string" }, { "filterText", ".to.have.string" } });
 
     completions.push_back ({ { "label", "to.throw" }, { "kind", KIND_FUNCTION },
-    { "insertText", "to.throw()" }, { "detail", ".to.throw(message?: string | RegExp)" },
+    { "insertText", "to.throw()" },
+    { "detail", ".to.throw(error?: ErrorConstructor | string | RegExp, message?: string | RegExp)" },
     { "documentation",
-    "Assert the function throws, optionally matching the message.\n\nExample:\n"
-    "pm.expect(function() { JSON.parse(\"{\"); }).to.throw();" },
+    "Assert the function throws. A string or regular expression is matched "
+    "against the error's message, and an error constructor against what was "
+    "thrown - with an optional message matcher after it.\n\nExample:\n"
+    "pm.expect(function() { JSON.parse(\"{\"); }).to.throw();\n"
+    "pm.expect(parse).to.throw(SyntaxError, \"unexpected\");" },
     { "sortText", "2_to_throw" }, { "filterText", ".to.throw" } });
 
-    completions.push_back ({ { "label", "to.throws" }, { "kind", KIND_FUNCTION },
-    { "insertText", "to.throws()" }, { "detail", ".to.throws(message?: string | RegExp)" },
+    completions.push_back ({ { "label", "to.throws" },
+    { "kind", KIND_FUNCTION }, { "insertText", "to.throws()" },
+    { "detail", ".to.throws(error?: ErrorConstructor | string | RegExp, message?: string | RegExp)" },
     { "documentation", "Assert the function throws (alias for .to.throw)." },
     { "sortText", "2_to_throws" }, { "filterText", ".to.throws" } });
 
