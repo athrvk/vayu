@@ -85,6 +85,7 @@ add_executable(vayu_tests
     execution_timeout_test.cpp
     execution_http_version_test.cpp
     load_strategy_test.cpp
+    load_data_test.cpp
     refill_deficit_test.cpp
     reservoir_test.cpp
     sample_capture_test.cpp
@@ -140,6 +141,7 @@ add_executable(vayu_tests
     spec_diff_test.cpp
     openapi_export_test.cpp
     spec_export_route_test.cpp
+    workspace_backup_test.cpp
     spec_coverage_test.cpp
     schema_validation_test.cpp
     version_isolation_test.cpp
@@ -149,6 +151,7 @@ add_executable(vayu_tests
     ../src/http/routes/diagnostics.cpp
     ../src/http/routes/compose.cpp
     ../src/http/routes/config.cpp
+    ../src/http/routes/workspace.cpp
     ../src/http/routes/requests.cpp
     ../src/http/routes/examples.cpp
     ../src/http/routes/specs.cpp
@@ -308,6 +311,7 @@ set(vayu_scratch_database_suites
     ImportParseRoute
     InboxListenerTest
     InboxStorageTest
+    LoadDataTest
     LoadReplayEventsTest
     LoadScriptScopesTest
     LoadStrategyTest
@@ -353,6 +357,7 @@ set(vayu_scratch_database_suites
     StreamedSampleRouteTest
     TransportPolicyDbTest
     TreeOrderTest
+    WorkspaceBackupTest
 )
 
 # Both guards read the same scan: every test macro in this suite sits at the

@@ -54,16 +54,22 @@ struct ResponseSample {
     double latency_ms = 0.0;
     int64_t timestamp = 0;
     /**
-     * Scenario load runs only: the virtual user's iteration this response was
-     * sent in, and the data row that iteration was bound to.
+     * The virtual user's iteration this response was sent in, and the data row
+     * the submission was bound to.
      *
-     * Both absent for a single-request load run, where neither exists - the
-     * deferred script then reads `pm.info.iteration` and `pm.iterationData` as
-     * `undefined`, which is issue #300's ruling and stays intact: what that
-     * ruling refuses is reporting a *reservoir position* as an iteration
-     * number, a binding that cannot fail. A scenario step carries the real
-     * iteration index it ran in, so reporting it is the honest answer rather
-     * than the invented one.
+     * `iteration` is a scenario load run's alone: a single-request run has no
+     * iteration index to report, and the deferred script reads
+     * `pm.info.iteration` as `undefined` there - issue #300's ruling, intact.
+     * What that ruling refuses is reporting a *reservoir position* as an
+     * iteration number, a binding that cannot fail; a scenario step carries the
+     * real index it ran in, so reporting that one is honest rather than
+     * invented.
+     *
+     * `data_row_index` is carried by **either** shape now (issue #993): a
+     * single-request run started with `data` claims a row per submission, and
+     * the row it claimed is a fact about this response the same way it is for a
+     * step. Absent for every run sent without rows, which is what leaves
+     * `pm.iterationData` `undefined`.
      */
     std::optional<size_t> iteration;
     std::optional<size_t> data_row_index;
@@ -346,8 +352,16 @@ class MetricsCollector {
     /**
      * @brief Record a response sample for deferred script validation
      * Thread-safe, stores sampled responses for post-test script execution
+     *
+     * @param data_row_index The `data` row this submission bound, for a
+     *        single-request run started with rows (issue #993). Carried onto
+     *        the sample so the deferred script reads that row as
+     *        `pm.iterationData` rather than the run's first one; absent - the
+     *        default, and every caller that has no rows - leaves the scope
+     *        `undefined`, which is what a run without a set means.
      */
-    void record_response_sample (const Response& response);
+    void record_response_sample (const Response& response,
+    std::optional<size_t> data_row_index = std::nullopt);
 
     /**
      * @brief Size the per-step sample stores for a scenario load run (#450).

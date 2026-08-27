@@ -181,7 +181,12 @@ const ResultAnnotations& annotations) {
         *annotations.step_index, annotations.iteration.value_or (0),
         annotations.data_row_index);
     } else if (!context->test_script.empty ()) {
-        context->metrics_collector->record_response_sample (response);
+        // The row this submission bound travels with the sample, so the
+        // deferred `tests` script reads it as `pm.iterationData` (issue #993).
+        // Absent for a run sent without rows, which is what keeps that scope
+        // `undefined` there.
+        context->metrics_collector->record_response_sample (
+        response, annotations.data_row_index);
     }
 }
 
@@ -306,11 +311,83 @@ class SubmissionRequest {
         return request_;
     }
 
+    /**
+     * The row this submission binds, claimed off the run-wide cursor and
+     * wrapping always (issue #993) - the rule a scenario run's virtual users
+     * share, with one submission where that one has an iteration.
+     *
+     * The cursor lives here because the strategy thread is the event loop's
+     * sole producer, so the claim needs no atomic and no lock.
+     */
+    size_t claim_row (size_t row_count) {
+        return cursor_++ % row_count;
+    }
+
     private:
     std::shared_ptr<AuthRefreshState> state_;
     vayu::Request request_;
     uint64_t seen_generation_ = 0;
+    size_t cursor_            = 0;
 };
+
+/**
+ * One submission of the run's request, with this submission's data row bound
+ * into it when the run carries rows (issue #993).
+ *
+ * Every strategy submits through here rather than each writing its own
+ * `submit_one`, so a run's rows reach whichever pacing mode the user picked
+ * instead of the one whose lambda remembered them - and so does the
+ * mid-run credential swap, which two of the four used to miss.
+ *
+ * **A run without rows takes the path it always did**: one test of a null
+ * pointer, then the same submit of the same shared request. No copy, no claim,
+ * no annotation - the throughput guard #992 states, kept structurally rather
+ * than by measurement alone.
+ */
+void submit_one_request (const std::shared_ptr<RunContext>& context,
+vayu::db::Database& db,
+SubmissionRequest& live) {
+    const LoadDataSet* data = context->load_data.get ();
+    if (data == nullptr) {
+        context->event_loop->submit (live.current (),
+        [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
+            handle_result (context, db, result);
+        });
+        context->requests_sent++;
+        return;
+    }
+
+    const size_t row = live.claim_row (data->rows.size ());
+    // Copied per submission because the bind rewrites it, exactly as a scenario
+    // step's request is copied per iteration: the shared one has to stay the
+    // template every later row is bound against.
+    vayu::Request request = live.current ();
+    if (auto bound = bind_iteration_row (request, data->fields, data->auth,
+        data->credentials, data->rows[row], row);
+    !bound.ok) {
+        // Nothing goes on the wire, so nothing will ever complete for this
+        // submission: this path owns the whole accounting a completion would
+        // have done. `requests_sent` is incremented beside the error record so
+        // `in_flight()` - sent minus completed - stays honest, which is the
+        // same discipline the scenario executor's bind failure keeps.
+        context->requests_sent++;
+        handle_result (context, db,
+        vayu::Result<vayu::Response> (
+        vayu::Error{ vayu::ErrorCode::DataBindingFailed, bound.error }),
+        // Every member named: a single-request run has no step and no
+        // iteration to report, and `-Wmissing-field-initializers` is an error
+        // in the release build rather than a suggestion.
+        ResultAnnotations{ row, std::nullopt, std::nullopt });
+        return;
+    }
+
+    context->event_loop->submit (request,
+    [context, &db, row] (size_t, const vayu::Result<vayu::Response>& result) {
+        handle_result (context, db, result,
+        ResultAnnotations{ row, std::nullopt, std::nullopt });
+    });
+    context->requests_sent++;
+}
 
 } // namespace
 
@@ -400,11 +477,7 @@ class ConstantLoadStrategy : public LoadStrategy {
             vayu::utils::log_info ("  Concurrency: " + std::to_string (concurrency));
 
             auto submit_one = [&context, &db, &live] () {
-                context->event_loop->submit (live.current (),
-                [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
-                    handle_result (context, db, result);
-                });
-                context->requests_sent++;
+                submit_one_request (context, db, live);
             };
 
             maintain_concurrency (
@@ -435,12 +508,11 @@ class ConstantLoadStrategy : public LoadStrategy {
         }
         size_t sent = 0;
         for (size_t i = 0; i < to_submit && !context->should_stop; ++i) {
-            context->event_loop->submit (live.current (),
-            [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
-                handle_result (context, db, result);
-            });
+            // The same submission every other mode makes, rows and all: this
+            // is the open-loop half of `constant_rps`, and a copy of the submit
+            // here is a copy that stops receiving what that one is given.
+            submit_one_request (context, db, live);
             sent++;
-            context->requests_sent++;
         }
         return sent;
     }
@@ -562,11 +634,7 @@ class IterationsLoadStrategy : public LoadStrategy {
         context->requests_expected = iterations;
 
         auto submit_one = [&context, &db, &live] () {
-            context->event_loop->submit (live.current (),
-            [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
-                handle_result (context, db, result);
-            });
-            context->requests_sent++;
+            submit_one_request (context, db, live);
         };
 
         maintain_concurrency (
@@ -612,11 +680,7 @@ class RampUpLoadStrategy : public LoadStrategy {
         vayu::utils::log_info ("  Target Concurrency: " + std::to_string (target_concurrency));
 
         auto submit_one = [&context, &db, &live] () {
-            context->event_loop->submit (live.current (),
-            [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
-                handle_result (context, db, result);
-            });
-            context->requests_sent++;
+            submit_one_request (context, db, live);
         };
 
         // target(t): linear from start_concurrency to target_concurrency over
@@ -810,12 +874,13 @@ class CapacityLoadStrategy : public LoadStrategy {
         " -> " + std::to_string (capacity_config.max_concurrency));
         vayu::utils::log_info ("  Deadline: " + std::to_string (deadline_ms) + " ms");
 
-        auto submit_one = [&context, &db, &request] () {
-            context->event_loop->submit (request,
-            [context, &db] (size_t, const vayu::Result<vayu::Response>& result) {
-                handle_result (context, db, result);
-            });
-            context->requests_sent++;
+        // Through `SubmissionRequest` like every other mode since #993: a
+        // capacity search binds its data rows the same way, and picks up a
+        // credential the refresh watchdog renewed mid-search, which submitting
+        // the built request directly never did.
+        SubmissionRequest live (context, request);
+        auto submit_one = [&context, &db, &live] () {
+            submit_one_request (context, db, live);
         };
 
         CapacitySearch search (capacity_config, context);

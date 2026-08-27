@@ -62,7 +62,7 @@
  * arrival-rate executor, which Vayu does not implement - so it is not offered.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Loader2, Play } from "lucide-react";
 import {
 	Dialog,
@@ -78,13 +78,11 @@ import {
 	Switch,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
-import { useCollectionsQuery, useStartScenarioRunMutation } from "@/queries";
-import { resolveDataContract } from "@/lib/data-contract";
-import { useDashboardStore, useDataFileStore, useSessionStore, useTabsStore } from "@/stores";
+import { useStartScenarioRunMutation } from "@/queries";
+import { useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
 import { loadTestService, scenarioRunService } from "@/services";
-import { DataFileError, describeDataSchemaDiff } from "@/services/data-files";
-import { canReadDeclaredDataFile, readDeclaredDataFile } from "@/services/data-files/read-declared";
-import { useDataFileLimits } from "@/hooks/useDataFileLimits";
+import { describeDataSchemaDiff } from "@/services/data-files";
+import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
 import type { Collection } from "@/types";
 import DataFilePicker, { type SelectedDataFile } from "./DataFilePicker";
 
@@ -139,7 +137,6 @@ export default function RunCollectionDialog({
 	 * was still being read.
 	 */
 	const iterationsTouched = useRef(false);
-	const [dataFile, setDataFile] = useState<SelectedDataFile | null>(null);
 	const [dataFileError, setDataFileError] = useState<string | null>(null);
 	const [loadTest, setLoadTest] = useState(false);
 	/**
@@ -152,13 +149,6 @@ export default function RunCollectionDialog({
 	const [failOnSchemaError, setFailOnSchemaError] = useState(false);
 	const [virtualUsers, setVirtualUsers] = useState(DEFAULT_VIRTUAL_USERS);
 	const [durationSeconds, setDurationSeconds] = useState(DEFAULT_DURATION_SECONDS);
-	/**
-	 * A file that could not be re-read - moved, renamed, or over a cap that has
-	 * since been lowered. Kept apart from `dataFileError`, which is a *blocking*
-	 * refusal of a file the user just picked: this one leaves the picker empty
-	 * and usable, because picking the file again is the whole fix.
-	 */
-	const [prefillNote, setPrefillNote] = useState<string | null>(null);
 
 	/*
 	 * The contract this run is measured against, resolved through the chain
@@ -172,81 +162,40 @@ export default function RunCollectionDialog({
 	 * collection that *declared* the contract, since that is whose Data tab the
 	 * file was picked in - and falling back to this collection's own id, which
 	 * is what the store holds when no contract is in scope at all.
-	 */
-	const { data: collections = [] } = useCollectionsQuery();
-	// The collection being run stands ahead of the query's copy of itself: it is
-	// the row the caller opened this dialog with, and the walk must find a
-	// contract it declares even on a render where the query has not answered.
-	// Ancestors can only come from the query, which is the half that is new here.
-	const chain = useMemo(
-		() => [collection, ...collections.filter((row) => row.id !== collection.id)],
-		[collection, collections]
-	);
-	const contract = resolveDataContract(collection.id, chain);
-	const declaringCollectionId = contract?.collectionId ?? collection.id;
-	const rememberedFile = useDataFileStore((s) => s.locations[declaringCollectionId]);
-	/*
-	 * The row cap the pre-filled file has to fit inside, same as a hand-picked
-	 * one (issue #751). Read here as well as in the picker below because the
-	 * re-read happens before any picker holds the file - a file that grew past
-	 * the setting would otherwise pre-fill, preview, and be refused by the
-	 * engine at Run.
-	 */
-	const { maxRows } = useDataFileLimits();
-
-	/**
-	 * Whether the pre-fill has had its one turn.
 	 *
-	 * The effect below used to key off mount alone. It cannot any more: which
-	 * file is remembered now depends on the resolved contract, and the
-	 * collections query behind it may answer a render *after* this dialog
-	 * mounts - a mount-only effect would read an empty chain, find no file and
-	 * never look again. The ref keeps the one property the mount-only spelling
-	 * was there for: writing the store while the dialog is open must not yank
-	 * the user's selection back to what was remembered.
-	 */
-	const prefillAttempted = useRef(false);
-
-	/**
-	 * Pre-fill from the file this collection's contract was last run with
-	 * (issue #599; through the chain since #729).
+	 * ...and the file that contract was last run with, pre-filled (issue #599;
+	 * through the chain since #729; shared with the load dialog since #1039).
 	 *
 	 * Still part of the dialog's mount-is-reset contract: the options start at
 	 * their defaults every time this component appears, and one of those
 	 * defaults is "the file you declared" rather than a value carried over from
-	 * a previous open.
+	 * a previous open. The hook owns the one-attempt rule, the row cap and the
+	 * moved-file note; what stays here is the half that is *this* dialog's -
+	 * the iterations coupling below, which is a fact about the engine's default
+	 * for a collection run and not about the file.
+	 *
+	 * `collection` is handed over because the row this dialog was opened with
+	 * stands ahead of the query's copy of itself: the walk must find a contract
+	 * it declares even on a render where the query has not answered.
 	 */
-	useEffect(() => {
-		if (prefillAttempted.current) return;
-		if (!rememberedFile?.path) return;
-		prefillAttempted.current = true;
-		let cancelled = false;
-		// No Electron, no path to re-read - the picker stands.
-		if (!canReadDeclaredDataFile()) return;
-
-		void readDeclaredDataFile(rememberedFile.path, { maxRows })
-			.then((read) => {
-				if (cancelled) return;
-				setDataFile(read);
-				// Same rule as a hand-picked file: a pristine `1` becomes "one
-				// pass per row", a typed one is the user's.
-				if (!iterationsTouched.current) {
-					setIterations((current) => (current === "1" ? "" : current));
-				}
-			})
-			.catch((e: unknown) => {
-				if (cancelled) return;
-				setPrefillNote(
-					e instanceof DataFileError || e instanceof Error
-						? e.message
-						: `The declared file is no longer at ${rememberedFile.fileName} - pick it again.`
-				);
-			});
-
-		return () => {
-			cancelled = true;
-		};
-	}, [rememberedFile, maxRows]);
+	const {
+		file: dataFile,
+		setFile: setDataFile,
+		note: prefillNote,
+		contract,
+		dismissNote,
+	} = useDeclaredDataFile(collection.id, {
+		collection,
+		// Same rule as a hand-picked file: a pristine `1` becomes "one pass per
+		// row", a typed one is the user's. It rides `onPrefill` rather than the
+		// hook because it is a fact about the engine's default for a *collection*
+		// run - the load dialog shares the pre-fill and must not share this.
+		onPrefill: () => {
+			if (!iterationsTouched.current) {
+				setIterations((current) => (current === "1" ? "" : current));
+			}
+		},
+	});
 
 	/*
 	 * Empty is a meaningful value only with a data file: it means "one pass per
@@ -298,7 +247,7 @@ export default function RunCollectionDialog({
 		setDataFile(next);
 		// A file the user picks by hand replaces whatever was pre-filled, so the
 		// note about a file that could not be re-read has nothing left to say.
-		if (next) setPrefillNote(null);
+		if (next) dismissNote();
 		if (next && !iterationsTouched.current && iterations === "1") setIterations("");
 		if (!next && iterationsBlank) setIterations("1");
 	};

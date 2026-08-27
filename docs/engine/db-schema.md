@@ -34,6 +34,13 @@ on every launch forever - but it is total: collections, requests, environments,
 saved examples, spec documents and run history are all gone, and the app comes
 up looking like a fresh install.
 
+> **`<db>.bak` is not a user backup.** It is rewritten on every clean start, so
+> it exists to give a corrupt file something to restore *from*, not to let
+> anyone go back to last week - and the row above where it is the only copy
+> left is the one that ends in an empty workspace. The snapshot a user owns is
+> `POST /workspace/backup` / `vayu-cli backup`, described in
+> [architecture.md](architecture.md#workspace-backups).
+
 ### The quarantine (issue #984)
 
 A database that fails validation is **moved, not deleted**: `<db>` becomes

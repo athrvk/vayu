@@ -578,6 +578,25 @@ export interface StartLoadTestRequest {
 	maxStreamDurationMs?: number;
 	/** Ceiling on events delivered by one stream; omitted takes `sseMaxStreamEvents`. */
 	maxStreamEvents?: number;
+
+	/**
+	 * The data set this run binds, one object per row (issue #993).
+	 *
+	 * The single-request spelling of `scenario.data`, read by the same engine
+	 * validator and bounded by the same `maxScenarioDataRows` /
+	 * `maxScenarioDataBytes` settings - a present-but-empty array is refused
+	 * rather than run. **One row per submission**, claimed off a run-wide cursor
+	 * that wraps, so a run longer than the set repeats it; a scenario run's row
+	 * is per iteration and shared by every step instead, which is why the two
+	 * fields are separate and why sending both is a `400`.
+	 *
+	 * Every `{{data.column}}` in the URL, headers, body and auth credentials
+	 * binds per submission, and the deferred `tests` script reads the row its
+	 * sample carried as `pm.iterationData`. The set is never persisted - the run
+	 * snapshot records `dataRowCount` alone - but a bound cell travels in the
+	 * request that carried it, which the run stores with its retained traces.
+	 */
+	data?: Record<string, unknown>[];
 }
 
 export interface StartLoadTestResponse {
@@ -864,6 +883,28 @@ export interface ConnectionTestResult {
 	errorCode?: string;
 	/** libcurl's own message, absent on `ok`. */
 	detail?: string;
+}
+
+// Workspace backup (issue #987)
+
+/**
+ * What `POST /workspace/backup` answers with.
+ *
+ * `path` is the whole point of the shape: restoring is a file copy the user
+ * performs themselves, with the engine stopped, so the one thing they need back
+ * is where the snapshot went. There is deliberately no restore call to pair
+ * with this - a live engine overwriting its own open database is the footgun
+ * the feature avoids.
+ */
+export interface WorkspaceBackupResult {
+	/** Absolute path of the snapshot written. */
+	path: string;
+	/** Its size on disk - a compacted copy, so smaller than the live database. */
+	sizeBytes: number;
+	/** When it was taken, in Unix ms. */
+	createdAt: number;
+	/** How many older snapshots `maxBackupsRetained` removed in the same call. */
+	pruned: number;
 }
 
 // Webhook inbox API (issue #480). An inbox is engine-hosted listener state, so

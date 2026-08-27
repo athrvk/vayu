@@ -2473,6 +2473,10 @@ const SINGLE_TARGET_LOAD_FIELDS: ReadonlyArray<[string, string]> = [
 		"maxRedirects",
 		"each step keeps its own stored redirect policy - set it on the saved request",
 	],
+	[
+		"data",
+		"a collection run states its rows as `scenario.data`, where one row is bound per iteration and shared by every step",
+	],
 	["postRequestScript", "each step runs the scripts stored on it and its collection chain"],
 	["tests", "each step runs the scripts stored on it and its collection chain"],
 	[
@@ -6025,6 +6029,18 @@ export const TOOLS: McpTool[] = [
 			collectionId: collectionIdInput,
 			postRequestScript: validationScriptInput,
 			tests: validationScriptAliasInput,
+			// The single-target data set (issue #993). Bounded by the engine's
+			// own `maxScenarioDataRows` / `maxScenarioDataBytes`, whose 400 is
+			// surfaced verbatim rather than re-derived here - the same posture
+			// `scenarioDataInput` takes, and for the same reason: a copy of a
+			// limit the user can raise in Settings would refuse payloads the
+			// engine accepts.
+			data: z
+				.array(z.record(z.unknown()))
+				.optional()
+				.describe(
+					'Data rows for a single-target run, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). One row is bound per request sent, claimed off a run-wide cursor that wraps, so a run longer than the set repeats it. Every {{data.column}} in the URL, headers, body and auth credentials binds per submission, and the post-request script reads that submission\'s row as pm.iterationData. A present-but-empty array is refused by the engine, as is `data` beside a `scenario` block - a collection run states its rows as scenario.data instead. The set is not persisted (only its count is recorded on the run), but a bound value travels in the request that carried it and is stored with the run\'s retained traces.'
+				),
 			// The other shape POST /runs accepts (issue #754). Mutually exclusive
 			// with every single-target argument, which the handler refuses by name
 			// rather than ignoring - see SINGLE_TARGET_LOAD_FIELDS.
@@ -6139,6 +6155,10 @@ export const TOOLS: McpTool[] = [
 				const v = str(args, key);
 				if (v !== undefined) payload[key] = v;
 			}
+			// Forwarded verbatim, rows and all: the engine validates the set
+			// before the run row exists and its refusal names the field, so a
+			// second copy of those rules here could only drift (issue #993).
+			if (Array.isArray(args.data)) payload.data = args.data;
 			// Forwarded verbatim - the keys are the engine's own metric names,
 			// and they come back unchanged in `get_run_report`'s
 			// `thresholdValidation`. Zod has already bounded every value.

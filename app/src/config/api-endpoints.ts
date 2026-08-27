@@ -207,6 +207,14 @@ export const API_ENDPOINTS = {
 	// deliberately not a second IMPORT_FETCH.
 	DIAGNOSTICS_CONNECTION: `/diagnostics/connection`,
 
+	// Workspace backup (issue #987). A verb path rather than a stored resource,
+	// like INBOX_START and MOCK_SERVER_START: the engine takes a snapshot and
+	// the file it writes is not a row anything here reads back. There is no
+	// restore counterpart on purpose - a live engine overwriting its own open
+	// database is the thing this feature exists to spare the user, so restoring
+	// is a documented manual copy with the engine stopped.
+	WORKSPACE_BACKUP: `/workspace/backup`,
+
 	// Webhook inbox (issue #480). The engine hosts the listener; these drive its
 	// lifecycle and read what it captured. START is a verb path rather than a
 	// POST to `/inbox` because an inbox is not a stored resource - it exists for

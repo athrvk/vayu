@@ -834,6 +834,52 @@ range, nothing is applied and the response is `400` with the specific reason(s):
 **Success response:** `200` - the full updated entries array (same shape as
 `GET /config`) plus `"success": true`.
 
+## Workspace
+
+### POST /workspace/backup
+
+Write one complete, compacted snapshot of the workspace database into
+`backups/` beside it, then prune older snapshots to `maxBackupsRetained`
+(issue #987). Takes no body.
+
+```json
+{
+  "path": "/home/someone/.local/share/vayu/db/backups/vayu-20260827-124932-118.db",
+  "sizeBytes": 2097152,
+  "createdAt": 1787745600000,
+  "pruned": 1
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `path` | The snapshot written. The whole point of the response: restoring is a file copy you perform yourself |
+| `sizeBytes` | Its size on disk. A compacted copy, so smaller than the live database |
+| `createdAt` | When it was taken, epoch milliseconds - the stamp its file name carries |
+| `pruned` | How many older snapshots retention removed in the same call |
+
+**It runs SQLite's `VACUUM INTO`, which is why it is safe while the engine is
+working.** Copying `vayu.db` by hand is not: the `-wal` beside it holds
+committed transactions the main file does not, so a hand copy is a database
+missing its most recent writes. `VACUUM INTO` reads one consistent snapshot and
+writes a defragmented database complete on its own, and is read-only with
+respect to the workspace.
+
+**A second backup while one is running is a `409`.** Two concurrent copies would
+each write a whole second database - unbounded disk for a button someone
+double-clicked - and the second would race the first's retention pass. Anything
+else that goes wrong is a `500` naming what SQLite or the filesystem refused;
+there is no success response with an empty path.
+
+**Retention only removes files this endpoint wrote** (`vayu-<stamp>.db`), so a
+copy you put in that directory yourself is left where it is. `0` keeps every
+snapshot.
+
+**There is deliberately no restore endpoint.** A running engine overwriting the
+database file it holds open is the failure this feature exists to prevent.
+Restore by hand with the engine stopped - see
+[architecture.md](architecture.md#restoring).
+
 ## Collections
 
 Collections are folders that organize requests in a hierarchy.
@@ -4209,6 +4255,7 @@ Start a load test run (Vayu Mode).
   "requestName": "Create user",       // Optional, read by the tests script as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional
   "tests": "",               // Optional, deferred validation script
+  "data": [],                // Optional data rows, one object per row - see below
   "thresholds": {},          // Optional pass/fail budgets - see below
   "monitor": {},             // Optional server-vitals scrape - see below
   "followRedirects": true,   // Optional, default true - see POST /execute
@@ -4272,6 +4319,55 @@ capped one.
 Streaming is **not** supported on a scenario run: `scenario` composes its steps
 at plan time and each step is its own request, so there is no single stream for
 the caps to bound.
+
+#### The `data` rows (a data-driven load run)
+
+A single-request run may carry a top-level `data` array - one flat object per
+row - and bind it into the request it repeats (issue #993):
+
+```jsonc
+{
+  "method": "POST",
+  "url": "https://api.example.com/orders/{{data.id}}",
+  "mode": "constant_concurrency",
+  "duration": "30s",
+  "concurrency": 50,
+  "data": [
+    { "id": "1", "email": "ada@example.com" },
+    { "id": "2", "email": "grace@example.com" }
+  ]
+}
+```
+
+**One row per request sent**, claimed off a run-wide cursor that wraps: a run
+longer than the set repeats it from the top, so the file bounds which values go
+out and never how many requests do - that is the load profile's job. The row a
+completion was bound to is recorded as `dataRowIndex` on every retained result,
+and the deferred `tests` script reads that submission's own row as
+`pm.iterationData`.
+
+Everything else is the scenario path's, because it is the same code: the same
+validation (an array of objects, present-but-empty refused, bounded by
+`maxScenarioDataRows` / `maxScenarioDataBytes`), the same `{{data.column}}`
+placement rules and escaping, the same credentials-bind-before-they-are-encoded
+order, and the same refusal of a `{{data.*}}` in an `oauth2` config. Every
+rejection is a `400` `invalid_run_config` before the run row exists, so a
+refused set leaves nothing behind.
+
+Two differences from `scenario.data` worth stating:
+
+- **`iterations` is not defaulted from the row count.** A load profile already
+  says how long the run is; a collection run without an explicit count takes one
+  pass per row.
+- **The two fields cannot be combined.** A top-level `data` beside a `scenario`
+  block is a `400` naming `scenario.data` - the two bind differently (per
+  submission here, per iteration and shared by every step there), so a payload
+  carrying both would have one of them silently dropped.
+
+The rows are **never persisted**: the stored run snapshot carries
+`dataRowCount` in their place, exactly as a scenario manifest does. A cell that
+*binds* travels in the request that carried it, so it is stored with whatever
+traces the run retains.
 
 #### The `thresholds` block (pass/fail budgets)
 
@@ -4531,13 +4627,17 @@ the data pass then binds it. That is usable, and it is also why the
 no-data refusal below says "or from the variable value it was written into" -
 the token it names may not appear anywhere in the request as you wrote it.
 
-**Only scenario runs bind at all.** `POST /execute` and a non-scenario
-`POST /runs` have no rows and perform no data pass, so a `{{data.*}}` token in
-either reaches the wire as the literal text `{{data.id}}` - no substitution, and
-no warning, since composition leaves the reserved namespace written as it stands
-by design. The refusal below exists for scenario runs only. A raw API or MCP
-caller putting `{{data.*}}` into a single request is asking for the literal
-braces and gets them.
+**A run binds only what it was given rows for.** A `POST /runs` carrying
+`scenario.data` binds per iteration, one carrying the top-level
+[`data`](#the-data-rows-a-data-driven-load-run) binds per submission, and a
+`POST /execute` carrying a `data` object binds that one row. A request sent
+*without* rows performs no data pass at all, so a `{{data.*}}` token in it
+reaches the wire as the literal text `{{data.id}}` - no substitution, and no
+warning, since composition leaves the reserved namespace written as it stands by
+design. The no-data refusal below is the scenario path's alone: a single request
+has no plan to refuse before it starts, so a raw API or MCP caller putting
+`{{data.*}}` into one without rows is asking for the literal braces and gets
+them.
 
 > **Credentials bind before they are encoded.** A credentials file behind basic
 > auth is the canonical data-driven run, so a step whose credentials carry a
@@ -5838,7 +5938,8 @@ named it.
       "concurrency": 100,
       "followRedirects": true,
       "maxRedirects": 10,
-      "httpVersion": "auto"
+      "httpVersion": "auto",
+      "dataRowCount": 2
     },
     "openapi": {
       "specId": "spec_3f2b1c9a-...",

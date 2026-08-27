@@ -14,13 +14,67 @@
 #include <optional>
 #include <string>
 
+#include "vayu/core/scenario_data.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/request_builder.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::core {
 
 struct RunContext; // Forward declaration
+
+/**
+ * @brief The `data` rows a **single-request** load run binds, split once
+ *        (issue #993).
+ *
+ * Before this, `{{data.column}}` bound on the scenario path alone, so the
+ * canonical load shape - one request, N users, a row each - was expressible
+ * only by wrapping the request in a one-step collection. The rows now ride the
+ * run payload's top-level `data`, validated by the same `read_data_rows` the
+ * scenario block goes through, and are claimed one per submission off a
+ * run-wide cursor that wraps: a run longer than the set repeats it, exactly as
+ * a scenario run's iterations do.
+ *
+ * **Null on the context for every run sent without rows**, and that emptiness
+ * is the throughput guard made structural: the strategies test one pointer and
+ * otherwise submit the shared request they always did - no copy, no claim, no
+ * annotation. Nothing here is per-iteration work a token-free run can pay.
+ *
+ * Filled in two stages, because the halves are known at different moments: the
+ * route validates the rows and decides how the credentials resolve before any
+ * run row exists, and `fields` can only be split once the request has been
+ * composed and built on the run's own worker thread.
+ */
+struct LoadDataSet {
+    /// The validated rows, in payload order. Never empty - a present-but-empty
+    /// `data` array is refused by the route, and a run without rows carries no
+    /// set at all.
+    std::vector<nlohmann::json> rows;
+    /**
+     * The parsed auth, read only when @ref credentials is non-empty - which is
+     * exactly when the request's build was deferred and carries no credential
+     * until a row reaches it. `NoAuth` for every run whose auth the build
+     * applied.
+     */
+    vayu::http::Auth auth;
+    /// The credentials split around their `{{data.column}}` tokens; empty when
+    /// none carries one.
+    StepDataTemplate credentials;
+    /// The built request's own tokens, split once so the run does not re-scan
+    /// its fields per submission - the same bargain a plan step makes, at a
+    /// single request's full rate.
+    StepDataTemplate fields;
+
+    /// What `build_request` must be told: the credentials are bound after the
+    /// build, so an auth carrying a token must not be encoded during it.
+    /// Derived rather than stored, so it cannot disagree with @ref credentials.
+    [[nodiscard]] vayu::http::AuthResolution auth_resolution () const {
+        return credentials.empty () ? vayu::http::AuthResolution::Apply :
+                                      vayu::http::AuthResolution::Defer;
+    }
+};
 
 /**
  * @brief Closed-loop concurrency controller. Seeds target(0), then refills the

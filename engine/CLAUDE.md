@@ -351,6 +351,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
+| POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (issue #987); no restore endpoint - see `docs/engine/architecture.md` |
 | POST | `/import/parse` | Read a raw import document - OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4 - into the tree `/import/apply` persists (issue #877); reads only |
 | POST | `/import` | The same parse, flattened and applied in one call - what MCP `import_document` wraps; the app parses and applies separately because a person previews in between |
 | POST | `/import/document` | A document's bytes as a JSON DOM, through the engine's one reader - the whole of what the app's `$ref` bundler needs, and what took the last YAML dependency out of `app/src` |

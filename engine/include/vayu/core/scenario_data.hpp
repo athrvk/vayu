@@ -307,6 +307,33 @@ const nlohmann::json& row,
 size_t row_index);
 
 /**
+ * One iteration's whole bind, in the order that makes it correct: @p fields
+ * into @p request, then @p credentials into the auth applied on top of it.
+ *
+ * The order is the point, and it is why this is one function rather than two
+ * calls each executor makes in sequence: a credential has to carry the row's
+ * value *before* `apply_auth` base64-encodes it (issue #591), so a caller that
+ * bound them the other way round would send base64 of the literal token text -
+ * the failure that is invisible once encoded. Both load executors drive this,
+ * so a request cannot bind differently depending on whether it was repeated on
+ * its own or as a step of a sequence.
+ *
+ * A no-op returning success when both templates are empty, so a caller may call
+ * it unconditionally. @p auth is only read when @p credentials is non-empty,
+ * which is exactly when the request's build was deferred; a caller whose auth
+ * was applied at build time passes its `NoAuth` and pays nothing.
+ *
+ * On failure @p request is left partially bound and must not be sent - see
+ * `apply_data_template`, whose rule this inherits.
+ */
+[[nodiscard]] DataBindResult bind_iteration_row (vayu::Request& request,
+const StepDataTemplate& fields,
+const vayu::http::Auth& auth,
+const StepDataTemplate& credentials,
+const nlohmann::json& row,
+size_t row_index);
+
+/**
  * The first `{{data.column}}` in any string of @p value, recursively, written
  * back with its braces - or `nullopt` when it carries none.
  *

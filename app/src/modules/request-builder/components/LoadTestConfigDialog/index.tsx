@@ -64,6 +64,9 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { Callout, SEVERITY_ORDER, type Severity } from "@/components/shared";
+import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
+import { describeDataSchemaDiff } from "@/services/data-files";
+import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
 import {
@@ -229,6 +232,17 @@ export interface LoadTestConfigDialogProps {
 	 * happening.
 	 */
 	isStreamingRequest: boolean;
+	/**
+	 * The collection the request being load-tested belongs to, for the data
+	 * file's column audit (issue #993).
+	 *
+	 * Only the *contract* is resolved from it - the nearest declaring ancestor,
+	 * the rule every other surface applies (`resolveDataContract`) - so a file
+	 * missing a column the collection declares is said here rather than at the
+	 * first bind. Undefined for a request that belongs to no collection, which
+	 * simply audits nothing.
+	 */
+	collectionId?: string;
 }
 
 export default function LoadTestConfigDialog({
@@ -239,6 +253,7 @@ export default function LoadTestConfigDialog({
 	hasDynamicVariables,
 	oauth2Config,
 	isStreamingRequest,
+	collectionId,
 }: LoadTestConfigDialogProps) {
 	const saved = loadSavedConfig();
 
@@ -335,6 +350,17 @@ export default function LoadTestConfigDialog({
 	);
 	const [monitorOpen, setMonitorOpen] = useState(false);
 	const [comment, setComment] = useState(""); // Per-run: never restored.
+	/**
+	 * The data set this run binds (issue #993), and the parse failure that
+	 * blocks starting one.
+	 *
+	 * Per-run and deliberately not memoed like the numbers above: rows are user
+	 * data of unknown sensitivity, and neither side stores the set - the same
+	 * rule the collection run dialog keeps. Picking a file again is the whole
+	 * cost of that - which is what the declared-file pre-fill below spares the
+	 * user, without the rows ever being what is remembered.
+	 */
+	const [dataFileError, setDataFileError] = useState<string | null>(null);
 	const [oauthGated, setOauthGated] = useState(false);
 	const [recordingOpen, setRecordingOpen] = useState(false);
 
@@ -348,6 +374,50 @@ export default function LoadTestConfigDialog({
 	 * a duration-based warning would be nonsense.
 	 */
 	const usesDuration = mode !== "iterations";
+
+	/*
+	 * The chosen file against the contract in scope for this request's
+	 * collection - the nearest declaring ancestor, as everywhere else in the
+	 * feature (issue #729). A mismatch is a warning and never blocks: a missing
+	 * column fails loudly engine-side at bind time, and a file carrying extra
+	 * columns is simply a file with extra columns. What it buys is hearing about
+	 * it here rather than at the first submission.
+	 */
+	/*
+	 * ...and the file that contract was last run with, pre-filled (issue #1039).
+	 *
+	 * The same hook the Run collection dialog reads, so the two cannot drift on
+	 * which ancestor is consulted or on what a moved file says. What does *not*
+	 * come across with it is that dialog's iterations coupling: a load run's
+	 * length is its profile's, so nothing about a data file may touch the fields
+	 * below. `contract` comes back from the same call because the audit and the
+	 * pre-fill are answers about the same declaration.
+	 */
+	const {
+		file: dataFile,
+		setFile: setDataFile,
+		note: prefillNote,
+		contract,
+		dismissNote,
+	} = useDeclaredDataFile(collectionId);
+
+	/*
+	 * Picking by hand replaces whatever was pre-filled, so the note about a file
+	 * that could not be re-read has nothing left to say. Deliberately *not* a
+	 * write back to `useDataFileStore`: the Data tab is where a contract is
+	 * declared, and starting one load run with a different file is not a
+	 * redeclaration of it for every collection run that follows. And no
+	 * `onPrefill`: a load run's length is its profile's, so a file arriving
+	 * changes no field of it.
+	 */
+	const handleSelectDataFile = (next: SelectedDataFile | null) => {
+		setDataFile(next);
+		if (next) dismissNote();
+	};
+
+	const schemaDiff = dataFile
+		? describeDataSchemaDiff(contract?.columns ?? [], dataFile.parsed.columns)
+		: [];
 
 	const rampDurationError = validateRampDuration(mode, duration, rampDuration);
 	// Checked before the two range rules, which both compare the start against
@@ -364,7 +434,12 @@ export default function LoadTestConfigDialog({
 		startConcurrencyError ??
 		capacityRangeError ??
 		budgetsError ??
-		monitoringError;
+		monitoringError ??
+		// A file the parser refused leaves no rows behind, so starting the run
+		// would send the request with its `{{data.*}}` tokens written as they
+		// stand - the failure the whole namespace exists to prevent. The picker
+		// prints the reason; this is what stops the Start button.
+		dataFileError;
 
 	const notices = useMemo(() => {
 		const list: { key: string; severity: Severity; node: React.ReactNode }[] = [];
@@ -526,6 +601,11 @@ export default function LoadTestConfigDialog({
 		// Omitted in `iterations` - see `usesDuration`. Sending a value the engine
 		// discards makes the stored run config claim something untrue about it.
 		if (usesDuration) config.duration_seconds = duration;
+
+		// The parsed rows themselves - the same array the preview showed, never
+		// a re-parse (issue #993). Absent when no file was picked, which is what
+		// keeps a run without data on exactly the path it took before.
+		if (dataFile) config.data = dataFile.parsed.rows;
 
 		// Streaming requests only. Always sent when the request streams, never
 		// elided as "the engine has defaults": the engine's default is the
@@ -756,6 +836,41 @@ export default function LoadTestConfigDialog({
 							blockingError !== null
 						)}
 					</p>
+
+					{/*
+					    A data file, for a run that parameterises its request
+					    (issue #993). Beside the profile rather than under
+					    Recording & limits: rows change what each submission
+					    *sends*, which is the same kind of decision the profile
+					    fields are, while everything folded away below changes
+					    only what the run keeps.
+
+					    `loadTest` is set, so the picker describes what a row
+					    means here - one per submission off a shared cursor that
+					    wraps - rather than the design-mode "one row is one
+					    iteration" reading, which would be wrong for every run
+					    this dialog starts.
+					 */}
+					{/* A file that could not be re-read is a warning, not a blocker -
+					    the run is startable without one, and picking the file again
+					    is the whole remedy. Same rule, same words, as the Run
+					    collection dialog (issue #1039). */}
+					{prefillNote && (
+						<Callout severity="warning" title="The remembered data file">
+							{prefillNote}
+						</Callout>
+					)}
+
+					<DataFilePicker
+						selected={dataFile}
+						onSelect={handleSelectDataFile}
+						error={dataFileError}
+						onError={setDataFileError}
+						iterations={undefined}
+						loadTest
+						additionalWarnings={schemaDiff}
+						disabled={isStarting}
+					/>
 
 					{/*
 					 * Header and contents are one card, not a bordered header with
