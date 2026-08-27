@@ -830,6 +830,79 @@ TEST (CookieJarWrite, ClearEmptiesOnlyThisEnvironmentsJar) {
     EXPECT_EQ (*survivor, "env_b");
 }
 
+TEST (CookieJarWrite, ClearWithAUrlRemovesOnlyThatUrlsCookies) {
+    // Postman's spelling, which used to be a TypeError *and* a whole-jar wipe
+    // (issue #997). Scoped exactly as unset is, minus the name filter.
+    CookieJar jar;
+    vayu::Environment env;
+    jar.store ("env_a",
+    { netscape_line ("example.com", "FALSE", "/", "FALSE",
+      std::to_string (FAR_FUTURE), "session", "here"),
+    netscape_line ("example.com", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "csrf", "here-too"),
+    netscape_line ("other.example.org", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "session", "elsewhere") });
+
+    const std::string error = apply_after_script (jar, "env_a",
+    "pm.cookies.jar().clear('http://example.com/', function (err) {"
+    "  pm.environment.set('err', String(err)); });",
+    "http://example.com/users", env);
+    EXPECT_TRUE (error.empty ()) << error;
+    EXPECT_EQ (env["err"].value, "null")
+    << "the per-URL clear did not invoke its callback with (null)";
+
+    EXPECT_TRUE (jar.matching ("env_a", "http://example.com/users").empty ())
+    << "the URL's own cookies survived the clear";
+    const auto elsewhere = jar.matching ("env_a", "http://other.example.org/users");
+    ASSERT_EQ (elsewhere.size (), 1u)
+    << "clear(url) reached a cookie stored for another host";
+    EXPECT_EQ (elsewhere[0].value, "elsewhere");
+}
+
+TEST (CookieJarWrite, NoJarMethodStagesItsWriteBeforeItsArgumentsValidate) {
+    // The #997 regression, and the rule it teaches. Each of these fails
+    // validation *after* the argument that decides what would be staged, so a
+    // method that staged first would leave a write behind that then rode the
+    // next transfer - the script seeing only an error that points elsewhere.
+    //
+    // Mutation check: move any of the three `classify_jar_callback` calls back
+    // below its `writes->push_back` and this reddens on a wiped survivor.
+    const auto seeded = [] (const std::string& domain, const std::string& value) {
+        return netscape_line (domain, "FALSE", "/", "FALSE",
+        std::to_string (FAR_FUTURE), "session", value);
+    };
+
+    const auto cases = std::to_array<const char*> ({
+    "pm.cookies.jar().clear('http://example.com/', 'not a function');",
+    "pm.cookies.jar().unset('http://example.com/', 'session', 'nope');",
+    "pm.cookies.jar().set('http://example.com/', { name: 'session', value: "
+    "'new' }, 'not a function');",
+    // The original report: a URL where the whole-jar clear expected its
+    // callback. It must not wipe the environment on its way to the error.
+    "pm.cookies.jar().clear(pm.request.url, 42);",
+    });
+
+    for (const char* script : cases) {
+        CookieJar jar;
+        vayu::Environment env;
+        jar.store ("env_a",
+        { seeded ("example.com", "here"), seeded ("other.example.org", "elsewhere") });
+
+        const std::string error =
+        apply_after_script (jar, "env_a", script, "http://example.com/users", env);
+        EXPECT_NE (error.find ("callback must be a function"), std::string::npos)
+        << "script: " << script << "\ngot: " << error;
+
+        const auto named = jar.matching ("env_a", "http://example.com/users");
+        ASSERT_EQ (named.size (), 1u)
+        << "a refused call staged its write anyway: " << script;
+        EXPECT_EQ (named[0].value, "here")
+        << "a refused set replaced the value anyway: " << script;
+        EXPECT_EQ (jar.matching ("env_a", "http://other.example.org/x").size (), 1u)
+        << "a refused call wiped a cookie it never named: " << script;
+    }
+}
+
 TEST (CookieJarWrite, AWrittenCookieDoesNotCrossAnEnvironmentBoundary) {
     // The isolation guarantee has to hold for written cookies too, or the
     // write half becomes the way a staging session reaches production.
@@ -892,7 +965,10 @@ TEST (CookieJarWrite, BadInputIsRefusedLoudlyRatherThanStoredWrong) {
     { "pm.cookies.jar().set('not a url', { name: 'n', value: 'v' });", "parseable" },
     { "pm.cookies.jar().set();", "URL string" },
     { "pm.cookies.jar().unset('http://example.com/');", "cookie name string" },
-    { "pm.cookies.jar().clear('nope');", "callback must be a function" },
+    // A clear is destructive, so a string that is not a URL is refused
+    // rather than staged as a wipe that quietly matches nothing.
+    { "pm.cookies.jar().clear('nope');", "could not scope" },
+    { "pm.cookies.jar().clear(42);", "callback must be a function" },
     });
 
     for (const auto& one : cases) {
@@ -1022,6 +1098,34 @@ TEST (CookieJarWriteValue, ASecondWriteOfTheSameNameDomainAndPathReplaces) {
     { vayu::http::CookieWrite::Kind::Set, line_for ("/", "after"), {}, {} } });
     ASSERT_EQ (lines.size (), 1u);
     EXPECT_NE (lines[0].find ("after"), std::string::npos);
+}
+
+TEST (CookieJarWriteValue, ClearUrlTakesEveryCookieThatUrlWouldHaveCarried) {
+    // The path half of the scoping, which the host-level test above cannot
+    // see: `/admin` is a different cookie from `/`, and a clear at `/` must
+    // not reach it - the same rule `unset` is held to.
+    const auto line_for = [] (const std::string& path, const std::string& name) {
+        return vayu::http::format_cookie_line (
+        JarCookie{ "example.com", false, path, false, false, 0, name, "v" });
+    };
+
+    std::vector<std::string> lines = { line_for ("/", "session"),
+        line_for ("/", "csrf"), line_for ("/admin", "elevated") };
+    lines = vayu::http::apply_cookie_writes (std::move (lines),
+    { { vayu::http::CookieWrite::Kind::ClearUrl, {}, "http://example.com/", {} } });
+
+    ASSERT_EQ (lines.size (), 1u)
+    << "a clear at / missed a cookie there, or reached /admin";
+    EXPECT_NE (lines[0].find ("elevated"), std::string::npos);
+}
+
+TEST (CookieJarWriteValue, OnlyAUrlThatParsesCanScopeAJarOperation) {
+    // What separates "cleared nothing" from "that was not a URL" - the
+    // distinction `matching_in`'s empty list cannot carry (issue #997).
+    EXPECT_TRUE (
+    vayu::http::url_can_scope_cookies ("https://api.example.com/v1"));
+    EXPECT_FALSE (vayu::http::url_can_scope_cookies ("nope"));
+    EXPECT_FALSE (vayu::http::url_can_scope_cookies (""));
 }
 
 // ============================================================================
