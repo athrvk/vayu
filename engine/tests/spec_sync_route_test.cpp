@@ -282,6 +282,46 @@ TEST_F (SpecSyncRouteTest, AppliesCreateUpdateAndDeleteInOneCall) {
     EXPECT_EQ (response["deleted"].get<int> (), 1);
 }
 
+// A sync's deletions are permanent, where every delete a person makes is soft
+// (issues #988, #1046 - owner decision). Both halves are asserted, and against
+// each other: making these deletes soft would still pass "the row is gone from
+// every read", because a stamped row reads as gone - what it would not pass is
+// the trash being empty afterwards and the restore refusing.
+TEST_F (SpecSyncRouteTest, ASyncsDeletionsAreNotRecoverableWhereAUsersDeleteIs) {
+    const std::string gone = create_request (root_, json{ { "name", "list owners" } });
+    const std::string stayed = create_request (root_, json{ { "name", "list pets" } });
+
+    vayu::db::RequestExample owned;
+    owned.id         = "exa_sync_1";
+    owned.request_id = gone;
+    owned.name       = "200 - owners";
+    owned.status     = 200;
+    owned.headers    = "[]";
+    owned.body       = "{}";
+    db_->save_request_example (owned);
+
+    auto [status, response] = routes::spec_sync_response (
+    *db_, body (json{ { "delete", json::array ({ gone }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    EXPECT_FALSE (db_->get_request (gone).has_value ());
+    EXPECT_FALSE (db_->get_request_example ("exa_sync_1").has_value ())
+    << "the examples the removed request owned go with it, in the same "
+       "transaction";
+    EXPECT_TRUE (db_->get_trash ().empty ())
+    << "a sync reconciles to a document - its removals are shown by "
+       "/specs/diff "
+       "before they land, so they are not put in the trash";
+    EXPECT_FALSE (db_->restore_deleted (gone).has_value ());
+
+    // The same request removed by a person *is* recoverable, which is what makes
+    // the assertion above a decision rather than a missing filter.
+    db_->delete_request (stayed);
+    auto entries = db_->get_trash ();
+    ASSERT_EQ (entries.size (), 1u);
+    EXPECT_EQ (entries.front ().id, stayed);
+}
+
 TEST_F (SpecSyncRouteTest, AnEmptySelectionStillMovesTheBindingAndNothingElse) {
     const std::string kept = create_request (root_);
 

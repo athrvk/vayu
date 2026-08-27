@@ -1921,6 +1921,15 @@ void Database::verify_spec_sync_rows_locked (const SpecSyncBatch& batch) {
 }
 
 void Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
+    // These deletes are **hard**, and stay hard now that every delete a person
+    // makes is soft (issues #988, #1046 - owner decision). A sync is a
+    // reconciliation to a document, not somebody removing a request, and it is
+    // the one delete path whose removals are shown before they land: `POST
+    // /specs/diff` reports each one, the app renders them as ticks to untick,
+    // and `policy: "safe"` refuses deletions outright. Stamping them would fill
+    // the trash with operations a document dropped, where restoring one puts
+    // back a request the current document cannot explain. A caller that wants
+    // them recoverable omits them here and calls `DELETE /requests/:id`.
     for (const auto& id : batch.deleted) {
         impl_->storage.remove_all<RequestExample> (
         where (c (&RequestExample::request_id) == id));

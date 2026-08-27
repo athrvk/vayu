@@ -169,6 +169,18 @@ still binds its OpenAPI document, so the orphan sweep leaves that document alone
 until the collection is purged. Reclaiming it earlier would restore a binding
 that points at nothing.
 
+**One delete path stays hard, by decision** (issue #1046): the requests a
+`POST /specs/sync` removes because the re-fetched document no longer declares
+their operation. A sync is a reconciliation to a document rather than a person
+removing a request, and it is the one delete whose removals are shown before
+they happen - `POST /specs/diff` reports every one, the app renders them as
+ticks the user can untick, and `policy: "safe"` declines deletions altogether.
+Stamping them instead would fill the Trash with operations a document dropped,
+where restoring one puts back a request the current document cannot explain. A
+caller that wants those rows recoverable leaves them out of the sync payload and
+deletes them with `DELETE /requests/:id`, which is soft like every other delete
+a person makes.
+
 ### 6. Response Viewer
 
 The Response Viewer shows the **RESOLVED** request in the "Raw Request" tab:

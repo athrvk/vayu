@@ -2228,8 +2228,21 @@ diff bounds its buckets rather than dropping entries: a call that answered only
 with what it wrote would read as "applied the drift", and the part it did not
 apply is exactly the part somebody has to decide about.
 
-Four rules the payload cannot opt out of:
+Five rules the payload cannot opt out of:
 
+- **A `delete` here is permanent - it does not go to the [Trash](#trash)**
+  (issues #988, #1046). Every other delete in the engine is soft: the row is
+  stamped and restorable. A sync is not a person removing a request, it is a
+  *reconciliation* to a document, and the two differ in where the decision is
+  made - [`POST /specs/diff`](#post-specsdiff) reports every removal before
+  anything is written, the app renders them as ticks the user unticks one by
+  one, and `policy: "safe"` refuses deletions outright, so a deletion here is
+  one a caller stated after being shown it. Leaving those rows stamped instead
+  would put the operations a document no longer declares back in the trash on
+  every sync, where restoring one re-creates a request the document cannot
+  explain. The rows and the examples they own are removed in the sync's own
+  transaction. A caller that wants the deletions recoverable omits them from the
+  payload and issues `DELETE /requests/:id` per row, which is soft.
 - **The bound subtree is the boundary.** Every request an `update` or a `delete`
   names, and every collection a created request lands in, must be the collection
   being synced or one beneath it. Anything else is a `400` naming the item -
