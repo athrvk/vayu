@@ -36,7 +36,9 @@ describe("$vu / $iteration in the plain-field list", () => {
 	});
 
 	it("is still offered when a stored variable of the same name exists - not shadowed like a generator", () => {
-		render(<VariableAutocomplete variables={{ $vu: variable("shadowed") }} onSelect={vi.fn()} />);
+		render(
+			<VariableAutocomplete variables={{ $vu: variable("shadowed") }} onSelect={vi.fn()} />
+		);
 		expect(screen.getAllByText("$vu")).toHaveLength(2); // once in Variables, once in Iteration
 		expect(screen.getByText("Iteration")).toBeInTheDocument();
 	});
@@ -49,7 +51,9 @@ describe("$vu / $iteration in the plain-field list", () => {
 
 	it("selects by name, braces included in the caller's insert", () => {
 		const onSelect = vi.fn();
-		render(<VariableAutocomplete variables={{}} searchQuery="$iteration" onSelect={onSelect} />);
+		render(
+			<VariableAutocomplete variables={{}} searchQuery="$iteration" onSelect={onSelect} />
+		);
 		screen.getByText("$iteration").click();
 		expect(onSelect).toHaveBeenCalledWith("$iteration");
 	});

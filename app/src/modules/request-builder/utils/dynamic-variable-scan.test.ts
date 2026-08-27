@@ -68,11 +68,13 @@ describe("requestUsesDynamicVariables", () => {
 
 	it("does not warn for $vu / $iteration (issue #994) - the whole point of the two is that a run rebinds them per iteration, unlike a generator", () => {
 		expect(
-			requestUsesDynamicVariables(request({ url: "https://api.test/u{{$vu}}/i{{$iteration}}" }))
+			requestUsesDynamicVariables(
+				request({ url: "https://api.test/u{{$vu}}/i{{$iteration}}" })
+			)
 		).toBe(false);
-		expect(
-			requestUsesDynamicVariables(request({ headers: [kv("X-VU", "{{$vu}}")] }))
-		).toBe(false);
+		expect(requestUsesDynamicVariables(request({ headers: [kv("X-VU", "{{$vu}}")] }))).toBe(
+			false
+		);
 		// The other direction, in the same request: a real generator alongside
 		// them still trips the warning - the scan is not simply disabled for a
 		// request that also happens to carry these two.

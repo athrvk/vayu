@@ -28,7 +28,7 @@
  * table, the same way `isDataVariableName` keeps `data.*` out of both.
  *
  * Mirrors the engine's reserved set exactly:
- * `vayu::http::is_identity_variable_name` (`engine/src/http/composer.cpp`).
+ * `vayu::http::is_identity_variable_name` (`engine/src/http/request_composer.cpp`).
  */
 
 /** One reserved identity name: the name as written (with `$`), and what it is. */

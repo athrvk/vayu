@@ -98,8 +98,10 @@ describe("$vu / $iteration in the `{{` completion list", () => {
 		variables.$vu = { value: "shadowed", scope: "global" };
 		const offered = suggestionsFor().filter((s) => s.label === "$vu");
 		expect(offered).toHaveLength(2);
-		expect(offered.some((s) => s.documentation === "Bound per iteration by the run, not generated here")).toBe(
-			true
-		);
+		expect(
+			offered.some(
+				(s) => s.documentation === "Bound per iteration by the run, not generated here"
+			)
+		).toBe(true);
 	});
 });
