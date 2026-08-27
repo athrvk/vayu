@@ -27,6 +27,7 @@
 #include <cmath>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -34,6 +35,7 @@
 #include <utility>
 #include <vector>
 
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/request_composer.hpp"
@@ -5169,18 +5171,12 @@ std::string describe_iteration_columns (const nlohmann::json& row) {
     return out.empty () ? "none" : out;
 }
 
-JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    (void)this_val;
-    if (argc < 1 || !JS_IsString (argv[0])) {
-        return JS_ThrowTypeError (ctx,
-        "pm.variables.replaceIn expects a string, e.g. "
-        "pm.variables.replaceIn(\"{{$guid}}\")");
-    }
-
-    const std::string input = js_to_string (ctx, argv[0]);
+// Every name a script can see, folded weakest scope first so a stronger one
+// overwrites - the same walk toObject() does, and the same answer get() would
+// give per name. Read at call time rather than at bind time, which is what
+// makes a write earlier in the same script visible here.
+vayu::http::VariableValues visible_variable_values (JSContext* ctx) {
     vayu::http::VariableValues values;
-    // Weakest scope first so a stronger one overwrites - the same walk
-    // toObject() does, and the same answer get() would give per name.
     for (auto it = std::rbegin (variables_precedence);
     it != std::rend (variables_precedence); ++it) {
         merge_visible_variables (
@@ -5188,6 +5184,22 @@ JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int a
             values[key] = variable.value;
         });
     }
+    return values;
+}
+
+// One resolution of `input` against everything the script can see: the three
+// scopes as they stand now, plus the bound data row's columns when the run has
+// one. `pm.variables.replaceIn` and `pm.sendRequest` both resolve through this,
+// so a script cannot get one answer from the template it renders and another
+// from the request it sends.
+//
+// @param missing_column receives the {{data.column}} name the bound row does
+//        not carry, when that is why the resolution failed.
+// @return the resolved text, or nullopt when a column was named and missing.
+std::optional<std::string> resolve_script_template (JSContext* ctx,
+const std::string& input,
+std::string& missing_column) {
+    const vayu::http::VariableValues values = visible_variable_values (ctx);
 
     auto* data = get_context_data (ctx);
     if (data == nullptr || data->iteration_data == nullptr ||
@@ -5195,7 +5207,7 @@ JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int a
         // No row to resolve against, so the namespace stays written as it
         // stands - what composition does, and what lets one script run in both
         // a data-driven run and a plain send.
-        return JS_NewString (ctx, vayu::http::resolve_template (input, values).c_str ());
+        return vayu::http::resolve_template (input, values);
     }
 
     vayu::http::DataRowColumns row;
@@ -5204,18 +5216,45 @@ JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int a
     }
 
     std::optional<std::string> missing;
-    const std::string resolved =
+    std::string resolved =
     vayu::http::resolve_template_with_data (input, values, row, missing);
     if (missing) {
-        // The bind-time rule, in the shape a script can catch: naming the token
-        // and the columns the row does carry, because the mistake is almost
-        // always a spelling and the answer is in the second half.
-        return JS_ThrowTypeError (ctx,
-        "pm.variables.replaceIn: {{%s}} names a column this data row does not "
-        "have (columns: %s)",
-        missing->c_str (), describe_iteration_columns (*data->iteration_data).c_str ());
+        missing_column = *missing;
+        return std::nullopt;
     }
-    return JS_NewString (ctx, resolved.c_str ());
+    return resolved;
+}
+
+// The bind-time rule, in the shape a script can catch: naming the token and the
+// columns the row does carry, because the mistake is almost always a spelling
+// and the answer is in the second half. One message for both callers, since
+// they resolve through one function and so must fail the same way.
+std::string
+missing_column_message (JSContext* ctx, const std::string& what, const std::string& column) {
+    auto* data = get_context_data (ctx);
+    const std::string columns = (data != nullptr && data->iteration_data != nullptr &&
+                                data->iteration_data->is_object ()) ?
+    describe_iteration_columns (*data->iteration_data) :
+    std::string ("none");
+    return what + ": {{" + column +
+    "}} names a column this data row does not have (columns: " + columns + ")";
+}
+
+JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    if (argc < 1 || !JS_IsString (argv[0])) {
+        return JS_ThrowTypeError (ctx,
+        "pm.variables.replaceIn expects a string, e.g. "
+        "pm.variables.replaceIn(\"{{$guid}}\")");
+    }
+
+    std::string missing;
+    auto resolved = resolve_script_template (ctx, js_to_string (ctx, argv[0]), missing);
+    if (!resolved) {
+        return JS_ThrowTypeError (ctx, "%s",
+        missing_column_message (ctx, "pm.variables.replaceIn", missing).c_str ());
+    }
+    return JS_NewString (ctx, resolved->c_str ());
 }
 
 // Postman's pm.variables.set writes to the *local* scope: alive for one
@@ -5351,10 +5390,226 @@ read_send_request_body (JSContext* ctx, JSValueConst value, Body& out) {
     return std::nullopt;
 }
 
+// One auth block's parameters, by name.
+using AuthParameters = std::map<std::string, std::string>;
+
+// Postman writes an auth block in two shapes and a script may hand over either:
+// `[{ key, value }]` as an exported collection carries it, or `{ name: value }`
+// as a script hand-writes it. Both are read, for the same reason the header
+// option reads both spellings - a parameter silently vanishing is a request
+// sent with the wrong credential.
+std::optional<std::string> read_auth_parameters (JSContext* ctx,
+JSValueConst block,
+const std::string& type,
+AuthParameters& out) {
+    const std::string where = "pm.sendRequest options.auth." + type;
+    if (JS_IsUndefined (block) || JS_IsNull (block)) {
+        return std::nullopt;
+    }
+    // A scalar the block's own value: `{ type: 'bearer', bearer: 'tok' }` is
+    // not a shape Postman writes, and reading it as a token would guess which
+    // parameter was meant.
+    if (!JS_IsObject (block) || JS_IsFunction (ctx, block)) {
+        return where + " must be an object or an array of { key, value } entries, got " +
+        std::string (js_type_name (ctx, block));
+    }
+
+    const auto read_value = [&] (JSValueConst value, const std::string& name,
+                            std::optional<std::string>& reason) -> std::optional<std::string> {
+        if (JS_IsUndefined (value) || JS_IsNull (value)) {
+            return std::nullopt;
+        }
+        if (!JS_IsString (value) && !JS_IsNumber (value) && !JS_IsBool (value)) {
+            reason = where + "." + name + " must be a string, got " +
+            std::string (js_type_name (ctx, value));
+            return std::nullopt;
+        }
+        return js_to_string (ctx, value);
+    };
+
+    std::optional<std::string> reason;
+    if (JS_IsArray (block)) {
+        int64_t length = 0;
+        if (JS_GetLength (ctx, block, &length) < 0) {
+            return where + " could not be enumerated";
+        }
+        for (int64_t i = 0; i < length; i++) {
+            ScopedValue entry (ctx, JS_GetPropertyInt64 (ctx, block, i));
+            if (!JS_IsObject (entry.get ()) || JS_IsArray (entry.get ())) {
+                return where + " entries must be { key, value } objects, got " +
+                std::string (js_type_name (ctx, entry.get ()));
+            }
+            ScopedValue key (ctx, JS_GetPropertyStr (ctx, entry.get (), "key"));
+            if (!JS_IsString (key.get ())) {
+                return where + " entries need a string 'key', got " +
+                std::string (js_type_name (ctx, key.get ()));
+            }
+            const std::string name = js_to_string (ctx, key.get ());
+            ScopedValue value (ctx, JS_GetPropertyStr (ctx, entry.get (), "value"));
+            if (auto text = read_value (value.get (), name, reason)) {
+                out[name] = std::move (*text);
+            }
+            if (reason) {
+                return reason;
+            }
+        }
+        return std::nullopt;
+    }
+
+    for (const char* name : { "token", "username", "password", "key", "value", "in" }) {
+        ScopedValue value (ctx, JS_GetPropertyStr (ctx, block, name));
+        if (auto text = read_value (value.get (), name, reason)) {
+            out[name] = std::move (*text);
+        }
+        if (reason) {
+            return reason;
+        }
+    }
+    return std::nullopt;
+}
+
+// pm.sendRequest's `auth`, in Postman's own shape: `{ type, <type>: params }`.
+//
+// The three types the engine can compose become its typed `Auth`, applied by
+// `vayu::http::apply_auth` - the same function every other send here composes
+// credentials with, because a second copy of "Basic " + base64 in the script
+// layer would not receive that one's fixes. Every other type is refused by
+// name: dropping the option sends an unauthenticated request that looks like
+// the script's own mistake, which is the silent wrong request the body modes
+// are refused to prevent.
+std::optional<std::string>
+read_send_request_auth (JSContext* ctx, JSValueConst value, vayu::http::Auth& out) {
+    if (JS_IsUndefined (value) || JS_IsNull (value)) {
+        return std::nullopt;
+    }
+    if (!JS_IsObject (value) || JS_IsArray (value) || JS_IsFunction (ctx, value)) {
+        return "pm.sendRequest options.auth must be an object like "
+               "{ type: 'bearer', bearer: { token: '...' } }, got " +
+        std::string (js_type_name (ctx, value));
+    }
+
+    ScopedValue js_type (ctx, JS_GetPropertyStr (ctx, value, "type"));
+    if (!JS_IsString (js_type.get ())) {
+        return "pm.sendRequest options.auth needs a string 'type' (basic, "
+               "bearer, apikey or noauth), got " +
+        std::string (js_type_name (ctx, js_type.get ()));
+    }
+
+    const std::string type = js_to_string (ctx, js_type.get ());
+    if (type == "noauth" || type == "none") {
+        out = vayu::http::NoAuth{};
+        return std::nullopt;
+    }
+    if (type != "basic" && type != "bearer" && type != "apikey") {
+        // oauth2 included, and deliberately: acquiring a token needs the
+        // database this path does not have, so composing it here would either
+        // reach for state the sandbox has no business holding or send the
+        // request with no token at all.
+        return "pm.sendRequest options.auth type \"" + type +
+        "\" is not supported - the sandbox composes basic, bearer and apikey. "
+        "Build the credential yourself and set the header; the request is "
+        "refused rather than sent unauthenticated.";
+    }
+
+    AuthParameters params;
+    ScopedValue block (ctx, JS_GetPropertyStr (ctx, value, type.c_str ()));
+    if (auto reason = read_auth_parameters (ctx, block.get (), type, params)) {
+        return reason;
+    }
+    const auto parameter = [&params] (const std::string& name) {
+        const auto it = params.find (name);
+        return it == params.end () ? std::string () : it->second;
+    };
+
+    if (type == "bearer") {
+        std::string token = parameter ("token");
+        if (token.empty ()) {
+            return std::string ("pm.sendRequest options.auth.bearer needs a "
+                                "'token' - an empty one would send the header "
+                                "with nothing after \"Bearer\"");
+        }
+        out = vayu::http::BearerAuth{ std::move (token) };
+        return std::nullopt;
+    }
+    if (type == "basic") {
+        // Neither half is required: Postman sends an empty username or password
+        // as the empty string, and the pair is base64-encoded either way.
+        out = vayu::http::BasicAuth{ parameter ("username"), parameter ("password") };
+        return std::nullopt;
+    }
+
+    const std::string in = parameter ("in");
+    if (!in.empty () && in != "header" && in != "query") {
+        return "pm.sendRequest options.auth.apikey.in must be 'header' or "
+               "'query' (got \"" +
+        in + "\")";
+    }
+    std::string key = parameter ("key");
+    if (key.empty ()) {
+        return std::string (
+        "pm.sendRequest options.auth.apikey needs a 'key' - "
+        "the header name, or query parameter name, the "
+        "value is sent under");
+    }
+    out = vayu::http::ApiKeyAuth{ std::move (key), parameter ("value"), in == "query" };
+    return std::nullopt;
+}
+
+// Every string pm.sendRequest was handed, resolved once against the scopes the
+// script can see: the URL, each header value, a raw body, and each credential
+// of an auth block. Postman resolves these, and until #1001 Vayu sent them as
+// written - so `pm.sendRequest("{{baseUrl}}/token", cb)` was a wrong request
+// sent silently rather than a refusal. Resolving here rather than at parse time
+// is what gives it Postman's mid-script visibility: a value the same script set
+// two lines earlier is in the scopes this reads.
+//
+// Header *names* are deliberately left as written. Two names that resolve to
+// one are a collision rule composition owns (#1051), and a second answer to it
+// invented here is how the two drift.
+std::optional<std::string>
+interpolate_send_request (JSContext* ctx, Request& request, vayu::http::Auth& auth) {
+    const auto resolve = [ctx] (std::string& text,
+                         const std::string& what) -> std::optional<std::string> {
+        std::string missing;
+        auto resolved = resolve_script_template (ctx, text, missing);
+        if (!resolved) {
+            return missing_column_message (ctx, "pm.sendRequest " + what, missing);
+        }
+        text = std::move (*resolved);
+        return std::nullopt;
+    };
+
+    if (auto reason = resolve (request.url, "options.url")) {
+        return reason;
+    }
+    for (auto& [name, value] : request.headers) {
+        if (auto reason = resolve (value, "header '" + name + "'")) {
+            return reason;
+        }
+    }
+    if (request.body.mode == BodyMode::Text) {
+        if (auto reason = resolve (request.body.content, "options.body")) {
+            return reason;
+        }
+    }
+
+    // Driven by the walk `apply_auth` shares, so a credential cannot be
+    // resolved in one place and applied from another.
+    std::optional<std::string> failure;
+    vayu::http::walk_auth_credentials (
+    auth, [&] (std::string& credential, vayu::http::CredentialDestination) {
+        if (failure) {
+            return;
+        }
+        failure = resolve (credential, "options.auth");
+    });
+    return failure;
+}
+
 // Translate pm.sendRequest's first argument into a Request.
 // @return why it was rejected, or nullopt when `out` is filled.
 std::optional<std::string>
-build_send_request (JSContext* ctx, JSValueConst arg, Request& out) {
+build_send_request (JSContext* ctx, JSValueConst arg, Request& out, vayu::http::Auth& auth) {
     // A Url object here is `pm.sendRequest(pm.request.url, cb)`, which #991
     // made the natural spelling of "send this request again" - it has to be
     // read before the options-object branch, or the Url object falls into it
@@ -5454,7 +5709,8 @@ build_send_request (JSContext* ctx, JSValueConst arg, Request& out) {
         std::min (ms, static_cast<double> (std::numeric_limits<int>::max ())));
     }
 
-    return std::nullopt;
+    ScopedValue js_auth (ctx, JS_GetPropertyStr (ctx, arg, "auth"));
+    return read_send_request_auth (ctx, js_auth.get (), auth);
 }
 
 // The response a pm.sendRequest callback receives.
@@ -5548,8 +5804,22 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     }
 
     Request request;
-    if (auto reason = build_send_request (ctx, argv[0], request)) {
+    vayu::http::Auth auth = vayu::http::NoAuth{};
+    if (auto reason = build_send_request (ctx, argv[0], request, auth)) {
         return JS_ThrowTypeError (ctx, "%s", reason->c_str ());
+    }
+    if (auto reason = interpolate_send_request (ctx, request, auth)) {
+        return JS_ThrowTypeError (ctx, "%s", reason->c_str ());
+    }
+    // The engine's own composition rather than a second copy of it: a header
+    // the script set still wins, and an api key sent as a query parameter is
+    // percent-encoded onto the URL exactly as every other send does it. `db` is
+    // null because the three types this path accepts need none - oauth2, the
+    // one that would, is refused by name while the options are read.
+    if (const auto applied = vayu::http::apply_auth (request, auth, nullptr);
+        !applied.ok) {
+        return JS_ThrowPlainError (ctx,
+        "pm.sendRequest could not apply options.auth: %s", applied.message.c_str ());
     }
 
     // The script's wall-clock budget is enforced by a QuickJS interrupt handler

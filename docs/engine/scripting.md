@@ -958,10 +958,11 @@ and must be a function.
 
 | Option | Shape |
 | ------ | ----- |
-| `url` | string, required. Postman's URL-object form is not accepted |
+| `url` | string, required, or `pm.request.url` - the Url object, so `pm.sendRequest(pm.request.url, cb)` reads as "send this again". A hand-built `{ host, path }` object is still not accepted |
 | `method` | string, default `GET`; case-insensitive, an unknown verb throws |
 | `header` / `headers` | `{ name: value }` or Postman's `[{ key, value }]`. Both names read; sending both at once throws |
 | `body` | a string, or `{ mode: 'raw', raw }`. Only `raw` - other modes throw |
+| `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
 | `timeout` | milliseconds, clamped to the script's remaining budget (below) |
 
 **Synchronous, and callback-shaped for that reason.** The send blocks and the
@@ -1008,11 +1009,48 @@ so a streaming send's pre- and post-request scripts are governed by exactly the
 bit a buffered send's are (issue #653). Pressing Send with the **Event stream**
 setting on and off gives `pm.sendRequest` the same answer.
 
-**No `{{variable}}` resolution.** A script-supplied URL is sent as written.
-This request was never composed - it is a URL the script spelled, not a field
-of the request the engine resolved - so there is nothing here to have left a
-token behind, and the residual pass the main send makes (#1008) does not run
-over it. Use `pm.variables.replaceIn(template)`.
+**`{{variables}}` resolve as the call is made** (#1001). The URL, each header
+value, a raw body and each credential of an `auth` block are resolved once,
+against the three scopes and the bound data row exactly as
+`pm.variables.replaceIn` reads them - so a value this same script set two lines
+earlier is visible, which is Postman's rule and what makes an imported
+token-refresh script work. It is not a second pass over the composed request:
+that payload was resolved before the script ran and nothing here revisits it.
+A name nothing defines keeps its braces (#1009), and a `{{data.column}}` the
+bound row lacks throws naming the column, the same way `replaceIn` does.
+
+Header **names** are sent as written. Two names that resolve to one name are a
+collision rule composition owns (#1051); answering it a second way here is how
+the two would drift.
+
+```javascript
+pm.environment.set("tenant", "acme");
+pm.sendRequest(
+  {
+    url: "{{baseUrl}}/{{tenant}}/token",
+    method: "POST",
+    auth: { type: "basic", basic: { username: "{{id}}", password: "{{secret}}" } },
+  },
+  function (err, res) {
+    if (err) {
+      return;
+    }
+    pm.environment.set("token", res.json().access_token);
+  }
+);
+```
+
+**`auth` is composed, or refused by name.** The block takes Postman's
+`{ type, <type>: params }` shape, with the parameters in either spelling Postman
+writes - the exported `[{ key, value }]` array, or a plain object. `basic`,
+`bearer` and `apikey` (`in: 'header'` by default, `'query'` for a parameter) go
+through `vayu::http::apply_auth`, the engine's one auth composer, so the header
+or the percent-encoded query parameter is the one every other send would have
+written, and an `Authorization` header the script set itself still wins. Every
+other type throws naming it - `oauth2` included, because acquiring its token
+needs the database this path deliberately does not carry. Dropping the option
+would send an unauthenticated request that looks like the script's own mistake,
+which is the reason the body modes are refused too.
 
 ## The cookie jar (`pm.cookies`)
 

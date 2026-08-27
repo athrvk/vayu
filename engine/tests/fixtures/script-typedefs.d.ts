@@ -1074,6 +1074,10 @@ declare const pm: {
 	 * 
 	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status, responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
 	 * 
+	 * The url may be a string or pm.request.url, and {{variables}} in it, in header values, in a raw body and in auth credentials resolve as the call is made - so a value this script set two lines earlier is visible. Header names are sent as written.
+	 * 
+	 * auth takes Postman's { type, <type>: params } shape in either spelling, and composes basic, bearer and apikey. Any other type - oauth2 included - is refused by name rather than dropped, and an Authorization header the script set itself wins.
+	 * 
 	 * Bounded on purpose: the request's timeout is capped at whatever is left of the script's own time budget, and one script may issue at most 10 requests. Both throw when exceeded.
 	 * 
 	 * **Not available to agents.** Vayu's MCP target allowlist is checked before the engine is called, so a request sent from inside a script would bypass it. When a run comes from the MCP server this throws instead of sending.
@@ -1084,7 +1088,7 @@ declare const pm: {
 	 *   pm.environment.set('token', res.json().access_token);
 	 * });
 	 */
-	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; body?: string | { mode: 'raw'; raw: string }; timeout?: number }, callback: (err: Error | null, res: any) => void): void;
+	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; headers?: object; body?: string | { mode: 'raw'; raw: string }; auth?: { type: string; basic?: object; bearer?: object; apikey?: object }; timeout?: number }, callback: (err: Error | null, res: any) => void): void;
 	/**
 	 * Define a test with assertions. The test name appears in results.
 	 * 

@@ -65,6 +65,12 @@ class SendRequestServer {
             echo["body"]   = req.body;
             echo["marker"] = req.get_header_value ("X-Marker");
             echo["type"]   = req.get_header_value ("Content-Type");
+            // The three an auth block can land in: the composed Authorization
+            // line, an api key's own header, and the target with its query,
+            // which is where an api key sent as a parameter shows up.
+            echo["auth"]   = req.get_header_value ("Authorization");
+            echo["apikey"] = req.get_header_value ("X-Api-Key");
+            echo["target"] = req.target;
             res.set_content (echo.dump (), "application/json");
         });
 
@@ -270,6 +276,218 @@ TEST_F (SendRequestTest, PostmanArrayHeaderFormIsAccepted) {
     EXPECT_TRUE (result.success) << result.error_message;
     ASSERT_EQ (result.tests.size (), 1u);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// `pm.request.url` is a Url object since #991, and "send this request again" is
+// the idiom that reads it - so the whole-argument form has to take one. Pinned
+// here because nothing asserted it in either direction (issue #1001).
+TEST_F (SendRequestTest, PmRequestUrlIsAcceptedAsTheWholeArgument) {
+    SendRequestServer server;
+    request.url = server.url ("/token");
+
+    auto result = run ("var body = null; "
+                       "pm.sendRequest(pm.request.url, function (err, res) { "
+                       "  body = res.json(); "
+                       "}); "
+                       "pm.test('sent', function () { "
+                       "  pm.expect(body.access_token).to.equal('tok_123'); "
+                       "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (server.hit_count (), 1);
+}
+
+// ============================================================================
+// options.auth - composed by the engine's own resolver, refused by name where
+// it cannot be composed (issue #1001)
+// ============================================================================
+
+TEST_F (SendRequestTest, AuthBasicComposesTheAuthorizationHeader) {
+    SendRequestServer server;
+
+    auto result = run ("var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', "
+    "  auth: { type: 'basic', basic: { username: 'alice', password: 's3cret' } "
+    "} "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.auth).to.equal('Basic YWxpY2U6czNjcmV0'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Postman's array spelling of the parameter block, and the token written as a
+// variable the same script set two lines earlier - the two halves an imported
+// token-refresh script depends on.
+TEST_F (SendRequestTest, AuthBearerReadsTheArrayFormAndResolvesTheToken) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('tok', 'tok_123'); "
+                       "var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', "
+    "  auth: { type: 'bearer', bearer: [{ key: 'token', value: '{{tok}}' }] } "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.auth).to.equal('Bearer tok_123'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (SendRequestTest, AuthApiKeyGoesWhereItsInSays) {
+    SendRequestServer server;
+
+    auto result = run ("var header = null; var query = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', "
+    "  auth: { type: 'apikey', apikey: { key: 'X-Api-Key', value: 'k123' } } "
+    "}, function (err, res) { header = res.json(); }); "
+    "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', "
+    "  auth: { type: 'apikey', apikey: [{ key: 'key', value: 'api_key' }, "
+    "    { key: 'value', value: 'k123' }, { key: 'in', value: 'query' }] } "
+    "}, function (err, res) { query = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(header.apikey).to.equal('k123'); "
+    "  pm.expect(query.target.indexOf('api_key=k123') >= 0).to.equal(true); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// The engine's rule, reached rather than restated: a header the caller wrote
+// wins over the credential auth would compose into the same line.
+TEST_F (SendRequestTest, AHeaderTheScriptSetWinsOverTheAuthOption) {
+    SendRequestServer server;
+
+    auto result = run ("var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', "
+    "  header: { 'Authorization': 'Token abc' }, "
+    "  auth: { type: 'bearer', bearer: { token: 'tok_123' } } "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.auth).to.equal('Token abc'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// The silent drop this issue exists to close: before #1001 an `auth` block the
+// sandbox could not compose was ignored and the request went out
+// unauthenticated. Restore the drop and this reddens - the send succeeds.
+TEST_F (SendRequestTest, AnAuthTypeTheSandboxCannotComposeIsRefusedByName) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', "
+    "  auth: { type: 'oauth2', oauth2: { accessToken: 'x' } } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("oauth2"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0)
+    << "an auth block the sandbox cannot compose was dropped and the request "
+       "sent unauthenticated";
+}
+
+TEST_F (SendRequestTest, AnAuthBlockMissingItsCredentialIsRefused) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', auth: { type: 'bearer', bearer: {} } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("token"), std::string::npos) << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0);
+}
+
+// ============================================================================
+// {{variables}} in script-supplied strings (issue #1001)
+// ============================================================================
+
+TEST_F (SendRequestTest, ScriptSuppliedStringsResolveAsTheCallIsMade) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('base', '" + server.url ("") +
+    "'); "
+    "pm.environment.set('marker', 'from-variable'); "
+    "pm.environment.set('payload', 'body-from-variable'); "
+    "var echo = null; "
+    "pm.sendRequest({ url: '{{base}}/echo', method: 'POST', "
+    "  header: { 'X-Marker': '{{marker}}' }, body: '{{payload}}' "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.marker).to.equal('from-variable'); "
+    "  pm.expect(echo.body).to.equal('body-from-variable'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (server.hit_count (), 1);
+}
+
+// #1009's pass-through rule, which this resolution inherits rather than
+// replaces: a name nothing defines keeps its braces instead of becoming empty.
+TEST_F (SendRequestTest, ANameNothingDefinesKeepsItsBraces) {
+    SendRequestServer server;
+
+    auto result = run ("var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { 'X-Marker': '{{nothing_defines_this}}' } "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.marker).to.equal('{{nothing_defines_this}}'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Resolution makes a variable's bytes header text, so the line-forging refusal
+// has to cover them - it does, because the send goes through the same
+// `validate_transferable` gate every other transfer does.
+TEST_F (SendRequestTest, AResolvedValueThatWouldForgeAHeaderIsRefused) {
+    SendRequestServer server;
+
+    auto result =
+    run ("pm.environment.set('marker', 'ok\\r\\nX-Injected: yes'); "
+         "var seen = ''; "
+         "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { 'X-Marker': '{{marker}}' } "
+    "}, function (err) { seen = err ? err.message : ''; }); "
+    "pm.test('refused', function () { "
+    "  pm.expect(seen.indexOf('forging a header') >= 0).to.equal(true); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (server.hit_count (), 0);
 }
 
 // ============================================================================
