@@ -519,6 +519,7 @@ TEST_F (ScenarioIdentityTest, EachVirtualUserBindsItsOwnNumberAndAdvancesItsOwnI
         << "a user numbered outside the run's own: " << user;
         std::sort (iterations.begin (), iterations.end ());
         std::vector<std::string> expected;
+        expected.reserve (iterations.size ());
         for (size_t i = 0; i < iterations.size (); ++i) {
             expected.push_back (std::to_string (i));
         }
@@ -561,9 +562,13 @@ TEST_F (ScenarioIdentityTest, ADeferredStepScriptReadsTheUserAndIterationItRanAs
 
     const auto validation = vayu::core::validate_scripts (context_, *db_, false);
     ASSERT_EQ (validation.steps.size (), 1u);
-    ASSERT_HAS_VALUE (validation.steps[0]);
-    EXPECT_EQ (validation.steps[0]->failed, 0u) << replay_failures ();
-    EXPECT_EQ (validation.steps[0]->passed, 4u);
+    // Read through one binding rather than re-derived per assertion: the guard
+    // and the uses have to be the same expression for the checker - and for a
+    // reader - to connect them (engine/CLAUDE.md).
+    const auto& step_tally = validation.steps[0];
+    ASSERT_HAS_VALUE (step_tally);
+    EXPECT_EQ (step_tally->failed, 0u) << replay_failures ();
+    EXPECT_EQ (step_tally->passed, 4u);
 }
 
 // A plan carrying no identity token is not walked for one, which is the same
