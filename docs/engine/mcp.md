@@ -766,8 +766,17 @@ resolves `{{variables}}` and walks the collection ancestor chain to resolve
 `POST /runs` accept unchanged. Composition is pure - nothing is sent - which
 is exactly what MCP's safety model needs: every execute/load tool composes
 first, checks the **allowlist against the composed (resolved) URL**, and only
-then executes the composed payload, byte-for-byte, so nothing is ever
-interpolated twice.
+then executes the composed payload.
+
+Two things the engine may still do to that payload after the gate has run, both
+of them reasons the gate refuses a URL whose *authority* still carries a
+`{{template}}` rather than trying to check one (`safety.ts`): a pre-request
+script can assign `pm.request.url`, and since #1008 a name composition could
+not answer is resolved once more before the send. Neither can move the request
+to a host the allowlist did not see - an unresolved authority is denied
+outright, and a resolved one is the one that was checked - but a tool call that
+forwards a `preRequestScript` is not sending the composed bytes untouched, and
+the allowlist is a host rule rather than a payload one for exactly that reason.
 
 Scripts: the by-id compose path builds the ordered part list
 (`{ origin, id, name?, script }` - collection chain root→leaf, then the

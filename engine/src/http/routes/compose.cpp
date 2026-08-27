@@ -11,7 +11,11 @@
  *
  * Pure: composes and returns an execute-ready payload, sends nothing, creates
  * no run row. Clients POST the result to /execute or /runs unchanged; those
- * endpoints stay non-interpolating, so a payload is resolved exactly once.
+ * endpoints compose nothing of their own, so a value substituted here is
+ * substituted once and never revisited. What they do resolve is the leftovers:
+ * a name composition could not answer keeps its braces (#1009) and is resolved
+ * after the pre-request script, before the send (#1008,
+ * `resolve_residual_tokens`).
  * The logic lives in compose_request_core (request_composer.cpp) so the tests
  * drive it without an in-process HTTP server.
  */
