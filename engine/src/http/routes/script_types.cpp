@@ -117,8 +117,13 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 "no filesystem to load from." },
 { "process", "Not Node. There is no process, no argv and no env." },
 { "Buffer", "Not Node. Use btoa/atob, or pm.crypto for hashing." },
-{ "URL", "No URL parser in the sandbox. pm.request.url is a plain string." },
-{ "URLSearchParams", "No URL parser in the sandbox." },
+{ "URL",
+"No WHATWG URL constructor in the sandbox. pm.request.url is "
+"already Postman's Url object - read its protocol, host, port, "
+"path, query and hash there." },
+{ "URLSearchParams",
+"No URLSearchParams. pm.request.url.query answers the same "
+"questions: get, has, all, toObject, count." },
 { "TextEncoder", "Absent. pm.crypto accepts strings directly." },
 { "TextDecoder", "Absent. pm.crypto accepts strings directly." },
 { "structuredClone", "Absent. Use JSON.parse(JSON.stringify(value))." },
@@ -402,6 +407,40 @@ bool is_string_literal_union (const std::string& base) {
 }
 
 /**
+ * @brief The primitive a member's own members sit on top of, or "" for none.
+ *
+ * One member needs it: `pm.request.url` is Postman's `Url` object, with
+ * `query`/`path`/`host` members *and* a prototype and `@@toPrimitive` that keep
+ * it usable everywhere the string it replaced was (issue #991). Declared as an
+ * object alone, every documented `jar().set(pm.request.url, ...)` stops
+ * compiling; declared as a string alone, `url.query.get(...)` does. `string &
+ * { ... }` is the only declaration that types both halves, and the table says
+ * so by spelling the member's type `string & object`.
+ *
+ * The member is emitted as an accessor pair, because that is what it *is* at
+ * run time: the getter answers the object, and the setter takes the string a
+ * script assigns.
+ */
+std::string intersection_base (const std::string& detail) {
+    std::string base = trim (detail);
+    const auto paren = base.find (" (");
+    if (paren != std::string::npos) {
+        base = trim (base.substr (0, paren));
+    }
+    const auto amp = base.find ('&');
+    if (amp == std::string::npos || trim (base.substr (amp + 1)) != "object") {
+        return {};
+    }
+    // Not `const`: it is returned by value, and a const local is copied where a
+    // non-const one is moved (performance-no-automatic-move).
+    std::string left = trim (base.substr (0, amp));
+    if (left == "string" || left == "number" || left == "boolean") {
+        return left;
+    }
+    return {};
+}
+
+/**
  * @brief The type of a non-function leaf, read from its `detail`.
  *
  * A `detail` that restates the member's own dotted name (`.to.be.true`) is an
@@ -525,6 +564,15 @@ bool in_chain) {
             out += indent + name + "(" + (sig.parsed ? sig.params : "") + "): {\n";
             out += render_body (node, indent + "\t", in_chain);
             out += indent + "};\n";
+            return out;
+        }
+        // `pm.request.url` - members on top of the string it still behaves as.
+        // See intersection_base.
+        if (const std::string base = intersection_base (node.detail); !base.empty ()) {
+            out += indent + "get " + name + "(): " + base + " & {\n";
+            out += render_body (node, indent + "\t", in_chain);
+            out += indent + "};\n";
+            out += indent + "set " + name + "(value: " + base + ");\n";
             return out;
         }
         // `pm.iterationData?: {...}` - the surface is undefined outside a

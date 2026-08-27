@@ -433,7 +433,7 @@ Access request data:
 
 ```javascript
 pm.request.method            // HTTP method (string)
-pm.request.url               // Full URL (string)
+pm.request.url               // Full URL (Postman Url object - see below)
 pm.request.headers           // Request headers (object, with the methods below)
 pm.request.body              // Request body (string, if any)
 ```
@@ -522,8 +522,9 @@ Rules worth knowing before you rely on them:
 - **A script beats engine-applied auth.** Auth (bearer / basic / apikey /
   oauth2) is resolved into the request *before* the script runs, so the script
   sees the real `Authorization` header and can replace or remove it.
-- **A bad value is refused, not coerced.** `url` and `method` must be strings
-  (`method` one of the seven HTTP verbs), header values must be strings,
+- **A bad value is refused, not coerced.** `method` must be a string (one of the
+  seven HTTP verbs), `url` a URL string (assigning anything else throws at the
+  assignment), header values must be strings,
   numbers or booleans, and `body` must be a string. Anything else fails the
   whole write-back - the request is sent unchanged and the reason is reported
   as the pre-request script error, visible in the response pane's Console tab.
@@ -570,16 +571,126 @@ string, number or boolean - the same set plain assignment accepts. Detaching a
 method from its object (`const get = pm.request.headers.get`) throws rather than
 answering as though the header were missing.
 
-### URL parts are not exposed (deferred)
+### URL parts (`pm.request.url`)
 
-Postman has `pm.request.url.query` / `.path` / `.host`. Vayu does not, and it is
-not an oversight: `pm.request.url` is a **writable string**, and the write-back
-requires it to still be one when the script returns. A JS string primitive
-cannot carry properties, and boxing it into a `String` object to hang them off
-would make the write-back reject every request. Any URL-parts accessor therefore
-has to be a separate member (something like `pm.request.getUrlParts()`) rather
-than `url.*`; that shape has not been decided, so parsing the URL remains string
-work - see [Add or replace a query parameter](#add-or-replace-a-query-parameter).
+`pm.request.url` is Postman's `Url` object, so a script lifted from Postman
+reads its parts under the same names:
+
+```javascript
+pm.request.url.protocol          // 'https'          - scheme, no colon
+pm.request.url.host              // ['api','example','com'] - segments
+pm.request.url.port              // '8443'           - '' when unstated
+pm.request.url.path              // ['v2','users']   - decoded segments
+pm.request.url.hash              // 'top'            - fragment, no '#'
+pm.request.url.query             // the query, with the reads below
+
+pm.request.url.getHost();        // 'api.example.com'
+pm.request.url.getPath();        // '/v2/users'
+pm.request.url.getQueryString(); // 'page=2&sort=name' - no '?'
+pm.request.url.toString();       // the whole URL
+```
+
+```javascript
+pm.request.url.query.get('page');     // first value, or null
+pm.request.url.query.has('page');     // boolean
+pm.request.url.query.all();           // [{key, value}, ...] in wire order
+pm.request.url.query.toObject();      // {page: '2'} - last wins
+pm.request.url.query.count();         // 3
+```
+
+Four rules behind those answers:
+
+- **Path segments are decoded, query values are not.** A path is what you want
+  to read; a query is what you want to *sign*, and a canonical string has to be
+  built from the bytes that were sent. `getQueryString()` is byte-exact against
+  the wire.
+- **`all()` keeps wire order and duplicates**, which is the whole reason it
+  exists beside `toObject()`. `get(name)` answers the **first** match (Postman's
+  `PropertyList.one`); `toObject()` is last-wins and says so.
+- **A bare `?flag` reads as `null`, an empty `?flag=` as `''`.** Both are
+  `has()`-true.
+- **A URL the parser cannot read has no parts.** `toString()` still answers the
+  whole string, and every part is empty rather than a plausible half.
+
+#### Writing
+
+The whole URL - assign a string, or call `update()`, which is Postman's
+spelling of the same write:
+
+```javascript
+pm.request.url = 'https://api.example.com/v3/orders';   // re-parses in place
+pm.request.url.update('https://api.example.com/v3/orders'); // the same write
+```
+
+Or one member at a time. `path` and `host` are live arrays, and the query has
+Postman's `PropertyList` writers beside its reads:
+
+```javascript
+pm.request.url.path.push('active');          // .../v2/users/active
+pm.request.url.path[0] = 'v3';               // index assignment, splice, pop,
+pm.request.url.path.length = 1;              //   unshift and length all work
+pm.request.url.host = ['api', 'staging', 'example', 'com'];
+pm.request.url.protocol = 'http';            // and port / hash likewise
+
+pm.request.url.query.add({ key: 'trace', value: id });  // appends, duplicates ok
+pm.request.url.query.add({ key: 'flag' });              // a bare ?flag
+pm.request.url.query.upsert({ key: 'page', value: 4 }); // replaces in place
+pm.request.url.query.remove('page');                    // every match, not the first
+pm.request.url.query.clear();                           // and the '?' with them
+```
+
+Four rules behind those, each the reason for a decision you might otherwise
+undo:
+
+- **A URL nobody edited is sent exactly as it arrived.** The parts are
+  recomposed only when a member was actually written to, so a read-only script
+  cannot change a single byte - which is what keeps `getQueryString()`
+  byte-exact against the wire.
+- **`upsert` keeps wire position**, `add` appends. A parameter that quietly
+  moved to the end would change the shape of any signature computed over the
+  query.
+- **`remove(name)` takes every match.** Removing `page` from `?page=1&page=2`
+  and getting one back has removed nothing the caller can observe.
+- **An edit that cannot reach the wire is an error, never a no-op.** A URL the
+  parser could not read has no parts to edit, so a write is refused rather than
+  composing `://` out of empty pieces, and a path segment that is not a string
+  or a number is refused rather than becoming `[object Object]`. `path` and
+  `host` are ordinary arrays that are **read back** when the URL is needed - the
+  same rule `pm.request.headers` follows - so a bad segment surfaces as a
+  rejected write-back, with the member and the index named, rather than at the
+  `push`.
+
+In a **test** script these behave like every other `pm.request` write: they
+change what the script sees and reach nothing, because the request has already
+gone out.
+
+#### It was a string, and mostly still behaves as one
+
+This shape replaced a plain string (issue #991: Postman compatibility over the
+shipped string shape). The object keeps as much of the old behaviour as
+JavaScript allows - it carries its own `toString`, `valueOf`, `toJSON` and
+`Symbol.toPrimitive`, and inherits from `String.prototype`:
+
+```javascript
+'' + pm.request.url;                    // the URL
+`${pm.request.url}`;                    // the URL
+pm.request.url == 'https://a/b';        // compares as the URL
+pm.request.url.startsWith('https://');  // String methods work
+pm.request.url.split('?')[0];           //   ... including this one
+JSON.stringify({ u: pm.request.url });  // embeds the URL string
+```
+
+Two things did change, and no mitigation can fix them:
+
+| Was | Now | Use |
+|-----|-----|-----|
+| `pm.request.url === 'https://a/b'` | `false` | `==`, or `.toString()` |
+| `typeof pm.request.url` | `'object'` | - |
+
+`.length` is **not** one of them: it is defined on the object as the URL's own
+length. Inheriting it from `String.prototype` - which is a String object holding
+`""` - would have answered `0` for every URL, and a plausible wrong number is
+worse than a break you can see.
 
 ## Script Identity (`pm.info`)
 
@@ -1257,25 +1368,24 @@ you do not need to. Any header you derive yourself works the same way.
 
 ### Add or replace a query parameter
 
-There is no `URL` or `URLSearchParams` in the sandbox, so this is string work.
-Handle three cases - no query, parameter absent, parameter already present -
-and encode the value.
+`pm.request.url.query` reads the parameters; the write is the whole URL, so
+rebuild the query string and assign it back.
 
 ```javascript
-function setQueryParam(url, name, value) {
-  var pair = encodeURIComponent(name) + '=' + encodeURIComponent(value);
-  var hashAt = url.indexOf('#');
-  var fragment = hashAt === -1 ? '' : url.slice(hashAt);
-  var base = hashAt === -1 ? url : url.slice(0, hashAt);
+function withQueryParam(url, name, value) {
+  var pair = { key: encodeURIComponent(name), value: encodeURIComponent(value) };
+  var kept = url.query.all().filter(function (p) { return p.key !== pair.key; });
+  kept.push(pair);
 
-  var re = new RegExp('([?&])' + name + '=[^&]*');
-  if (re.test(base)) {
-    return base.replace(re, '$1' + pair) + fragment;
-  }
-  return base + (base.indexOf('?') === -1 ? '?' : '&') + pair + fragment;
+  var query = kept
+    .map(function (p) { return p.value === null ? p.key : p.key + '=' + p.value; })
+    .join('&');
+
+  return url.protocol + '://' + url.getHost() + (url.port ? ':' + url.port : '') +
+    url.getPath() + (query ? '?' + query : '') + (url.hash ? '#' + url.hash : '');
 }
 
-pm.request.url = setQueryParam(pm.request.url, 'traceId', 'run-' + Date.now());
+pm.request.url = withQueryParam(pm.request.url, 'traceId', 'run-' + Date.now());
 ```
 
 ### Switch method and body together
@@ -1335,9 +1445,19 @@ can be signed for what it actually became:
 
 ```javascript
 var timestamp = Date.now().toString();
+
+// The sorted-query canonicalization every HMAC scheme wants. `all()` is the
+// view that keeps duplicates and wire-order values, so what is signed is what
+// was sent.
+var sortedQuery = pm.request.url.query.all()
+  .map(function (p) { return p.key + '=' + (p.value === null ? '' : p.value); })
+  .sort()
+  .join('&');
+
 var canonical = [
   pm.request.method,
-  pm.request.url,
+  pm.request.url.getPath(),
+  sortedQuery,
   timestamp,
   pm.request.body || ''
 ].join('\n');
@@ -1431,9 +1551,8 @@ silently falling back to hex.
 
 **Not** available: `crypto` / `crypto.subtle`, `TextEncoder`, `URL`,
 `URLSearchParams`, `setTimeout`, `require`, `fetch`. The practical
-consequences: no URL parsing helper - which is why `pm.request.url` has no
-`.query` / `.path` accessors either, see
-[URL parts are not exposed](#url-parts-are-not-exposed-deferred) - no hash
+consequences: no general URL constructor - the request's own URL is already
+parsed for you, see [URL parts](#url-parts-pmrequesturl) - no hash
 other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and nothing
 asynchronous. There is no `fetch`, but there **is**
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest), which is

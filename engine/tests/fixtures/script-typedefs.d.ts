@@ -672,9 +672,110 @@ declare const pm: {
 		 */
 		method: string;
 		/**
-		 * The full request URL. Assign to retarget the request before it is sent - must be a non-empty string. {{variables}} are already resolved here.
+		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString() and toString(). {{variables}} are already resolved here.
+		 * 
+		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the full URL - so `===` and `typeof` are the two things that changed. Assign a string to retarget the request before it is sent, or call url.update(...); either way it must be non-empty.
 		 */
-		url: string;
+		get url(): string & {
+			/**
+			 * The host as one string - the segments of host joined by dots.
+			 */
+			getHost(): string;
+			/**
+			 * The decoded path as one string, leading slash included ("/v2/users"). A URL with no path answers "/".
+			 */
+			getPath(): string;
+			/**
+			 * The query exactly as it appears on the wire, with no leading ?. Empty when the URL carries none.
+			 */
+			getQueryString(): string;
+			/**
+			 * The fragment with no leading #. Empty when there is none.
+			 */
+			hash: string;
+			/**
+			 * The host split on dots, as Postman presents it: "api.example.com" is ["api", "example", "com"]. Use getHost() for the joined form.
+			 * 
+			 * Editable in a pre-request script, the same way path is.
+			 */
+			host: string[];
+			/**
+			 * The length of the whole URL string - defined on the object rather than inherited, so it is the URL's own length and not the 0 that String's prototype would have answered.
+			 */
+			length: number;
+			/**
+			 * The path as decoded segments: "/v2/users" is ["v2", "users"]. Each segment is decoded on its own, so an encoded slash stays inside the segment it belongs to. Use getPath() for the joined form.
+			 * 
+			 * Editable in a pre-request script - push, splice, index assignment and replacing the whole array all reach the URL that is sent.
+			 */
+			path: string[];
+			/**
+			 * The port the URL states, as a string. Empty when it states none - a scheme's default port is never filled in.
+			 */
+			port: string;
+			/**
+			 * The scheme with no trailing colon ("https"). Empty when the URL cannot be parsed.
+			 */
+			protocol: string;
+			/**
+			 * The query parameters, with Postman's PropertyList reads over them - get(name), has(name), all(), toObject(), count() - and its writers: add, upsert, remove, clear. Values are the wire bytes, not decoded - a signature has to canonicalize what was sent.
+			 */
+			query: {
+				/**
+				 * Append a parameter, even when the name is already there - a query may repeat a name, which is why all() exists. Omit value for a bare "?flag". Use upsert to replace instead of appending.
+				 */
+				add(param: { key: string, value?: string | number | boolean | null }): void;
+				/**
+				 * Every parameter as { key, value }, in wire order, duplicates kept - the view a canonical query string is built from. A parameter with no value has value null.
+				 */
+				all(): { key: string, value: string | null }[];
+				/**
+				 * Drop every query parameter. The URL loses its "?" with them.
+				 */
+				clear(): void;
+				/**
+				 * How many parameters the query carries, counting duplicates separately.
+				 */
+				count(): number;
+				/**
+				 * The first value of that parameter, or null when the name is absent or carries no value ("?flag"). First rather than last, matching Postman's PropertyList - all() is the view that keeps duplicates.
+				 */
+				get(name: string): string | null;
+				/**
+				 * Whether the query carries that parameter at all, including a bare "?flag" that has no value.
+				 */
+				has(name: string): boolean;
+				/**
+				 * Remove every parameter of that name, not just the first. A name that is not there is a no-op, the same rule pm.request.headers.remove follows.
+				 */
+				remove(name: string): void;
+				/**
+				 * The query as a plain { name: value } object, last wins on a repeated name. Use all() when duplicates matter.
+				 */
+				toObject(): { [key: string]: string | null };
+				/**
+				 * Replace the first parameter of that name, keeping its position in the query, or append it when there is none. Position is kept because a signature over the query changes shape if a parameter moves.
+				 */
+				upsert(param: { key: string, value?: string | number | boolean | null }): void;
+			};
+			/**
+			 * The whole URL as a string, which is why JSON.stringify embeds the URL rather than an object dump.
+			 */
+			toJSON(): string;
+			/**
+			 * The whole URL as a string. The same answer concatenation, a template literal and JSON.stringify already give, spelled out for the one place that needs a real string - strict equality.
+			 */
+			toString(): string;
+			/**
+			 * Retarget the request, Postman's spelling of pm.request.url = '...'. Both re-parse the whole URL in place; editing a single member (pushing to path, changing a query entry) is not supported.
+			 */
+			update(url: string): void;
+			/**
+			 * The whole URL as a string - what == and arithmetic-style coercion use, and the same answer toString() gives.
+			 */
+			valueOf(): string;
+		};
+		set url(value: string);
 	};
 	/**
 	 * Access the HTTP response data including status code, headers, body, and timing information.
@@ -1073,14 +1174,14 @@ declare const Buffer: never;
 /**
  * Not available in the Vayu script sandbox.
  *
- * No URL parser in the sandbox. pm.request.url is a plain string.
+ * No WHATWG URL constructor in the sandbox. pm.request.url is already Postman's Url object - read its protocol, host, port, path, query and hash there.
  */
 declare const URL: never;
 
 /**
  * Not available in the Vayu script sandbox.
  *
- * No URL parser in the sandbox.
+ * No URLSearchParams. pm.request.url.query answers the same questions: get, has, all, toObject, count.
  */
 declare const URLSearchParams: never;
 

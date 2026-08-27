@@ -28,7 +28,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Streamed events     | `pm.response.events` (array of `{ event, id, data }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`set`/`unset`/`clear(url?)`, see below |
 | Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`, and the `pm.response.to.be.*` status classes below |
-| Request             | `pm.request.url`, `.method`, `.headers`, `.body`                                 |
+| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`), `.method`, `.headers`, `.body` |
 | Request headers     | `pm.request.headers.get/has(name)`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
@@ -573,13 +573,6 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
 - `pm.cookies.set(...)` / `.unset(...)` / `.clear()` - the *flat* write half.
   Writing goes through `pm.cookies.jar()`, which ships whole - see
   [above](#the-cookie-jar-pmcookies)
-- `pm.request.url.query` / `.path` / `.host` - and any other `url.*` accessor.
-  `pm.request.url` is a writable **string** that the write-back requires to still
-  be one, and a JS string primitive cannot carry properties; boxing it would
-  reject every request. A separate accessor (`pm.request.getUrlParts()`-shaped)
-  could work, but that shape has not been decided, so URL parsing is string work
-  today. Deferred deliberately - see
-  [scripting.md](../engine/scripting.md#url-parts-are-not-exposed-deferred).
 - `pm.visualizer`
 - The `tests["name"] = bool` legacy assertion style (use `pm.test`)
 - Chai matchers outside the list above: `.include.keys` (the subset form),
@@ -618,10 +611,26 @@ pm.request.body = JSON.stringify({ n: 2 });
   engine applied.
 - **The script wins over engine-applied auth.** `build_request` resolves auth into the
   request before the script runs, so a script-set `Authorization` replaces the resolved one.
-- **A value the engine cannot send is refused, not coerced.** `url`/`method`/`body` must be
+- **A value the engine cannot send is refused, not coerced.** `method`/`body` must be
   strings (`method` one of the seven verbs); a header value may be a string, number or
   boolean. Anything else rejects the whole write-back - all or nothing - and surfaces as
-  `preScriptError`, which the response pane's Console tab shows.
+  `preScriptError`, which the response pane's Console tab shows. `url` is refused a step
+  earlier: assigning anything that is not a URL string throws at the assignment, so the
+  script author is told which line was wrong rather than reading it off the write-back.
+- **`url` is Postman's `Url` object, not a string** (#991 - the owner decision that
+  compatibility wins over the shipped string shape). `protocol`, `host`, `port`, `path`,
+  `hash`, `query` with `get`/`has`/`all`/`toObject`/`count`, plus `getHost()`,
+  `getPath()`, `getQueryString()`, `toString()` and `update()`. It still behaves as a
+  string in every context JavaScript allows - concatenation, template literals, `==`,
+  `String.prototype` methods, `JSON.stringify`, `.length` - and two things changed:
+  `===` and `typeof`. The full surface and the migration note are in
+  [scripting.md](../engine/scripting.md#url-parts-pmrequesturl).
+- **The URL is writable a member at a time, not only whole** (#1040). `path` and
+  `host` are arrays a script mutates in place (`push`, `splice`, index assignment,
+  a `length` truncation); `protocol` / `port` / `hash` take an assignment; and the
+  query carries Postman's `PropertyList` writers - `add`, `upsert`, `remove`,
+  `clear`. A URL nobody edited is sent as the exact bytes it arrived as, because
+  the parts are recomposed only when a member actually changed.
 - **`body` is a string for every mode, including the two that store fields.** A
   `x-www-form-urlencoded` or `form-data` body reads as its **enabled** fields encoded
   `key=value&…` rather than as `""` - the empty string a `content`-only read used to give,
