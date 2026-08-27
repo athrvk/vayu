@@ -3858,7 +3858,11 @@ export const TOOLS: McpTool[] = [
 			if (authArg) request.auth = authArg;
 
 			// Compose engine-side (pure), gate on the *resolved* URL, then execute
-			// the composed payload unchanged - resolved exactly once.
+			// the composed payload. The gate is a host rule: a pre-request script
+			// this call forwards can still edit `pm.request`, and since #1008 a
+			// name compose could not answer is resolved before the send - neither
+			// of which can reach a host the allowlist did not see, because an
+			// unresolved authority is refused rather than checked (safety.ts).
 			let payload: Record<string, unknown>;
 			try {
 				payload = await composeViaEngine(

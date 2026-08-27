@@ -23,9 +23,11 @@
  *    A pass that reaches the request struct and not the wire is the defect this
  *    exists to end, so the headline cases assert on the wire.
  *
- * The half that is NOT here: composition. Nothing in this file composes -
- * `request_composer_test.cpp` owns that, and the token surviving composition at
- * all is #1009's rule, pinned there.
+ * The half that is NOT here: composition's own rules. One case below composes a
+ * string, because the text it needs under test is the text composition would
+ * have produced - but what composition *does* with a token is
+ * `request_composer_test.cpp`'s, and the token surviving composition at all is
+ * #1009's rule, pinned there.
  */
 
 #include <gtest/gtest.h>
@@ -36,6 +38,7 @@
 #include "echo_server.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
@@ -206,6 +209,39 @@ TEST (ResidualTokens, InheritsTheNestedResolutionAndItsCycleBound) {
     cycled.url = "https://example.test/{{a}}";
     resolve_residual_tokens (cycled, cyclic);
     EXPECT_EQ (cycled.url, "https://example.test/{{a}}");
+}
+
+/// The guard that matters: a script redefining a name composition **already
+/// answered** must not rewrite what composition sent. It cannot, and the reason
+/// is structural rather than a rule the pass enforces - a substituted token's
+/// `{{name}}` text is gone from the request, so there is nothing left to match.
+/// Composed here by the real resolver, so the text under test is the text
+/// `POST /compose` would have produced.
+TEST (ResidualTokens, ARedefinedNameDoesNotRewriteWhatCompositionSubstituted) {
+    vayu::http::VariableValues compose_time;
+    compose_time["token"] = "secret-v1";
+    compose_time["greeting"] = "hello {{name}}"; // `name` answered by nothing yet
+
+    vayu::Request request;
+    request.headers["Authorization"] =
+    vayu::http::resolve_template ("Bearer {{token}}", compose_time);
+    request.body.mode = vayu::BodyMode::Text;
+    request.body.content = vayu::http::resolve_template ("{{greeting}}", compose_time);
+    ASSERT_EQ (request.headers["Authorization"], "Bearer secret-v1");
+    ASSERT_EQ (request.body.content, "hello {{name}}");
+
+    ScriptVariableScopes scopes;
+    scopes.environment["token"]    = value_of ("secret-v2");
+    scopes.environment["greeting"] = value_of ("should never appear");
+    scopes.environment["name"]     = value_of ("world");
+
+    resolve_residual_tokens (request, scopes);
+
+    // The two composition answered keep the answers it gave.
+    EXPECT_EQ (request.headers["Authorization"], "Bearer secret-v1");
+    // Only the token composition left open is filled in - the value it came
+    // from is not consulted again.
+    EXPECT_EQ (request.body.content, "hello world");
 }
 
 /// The pass reads the request, never composition's decisions: text a value

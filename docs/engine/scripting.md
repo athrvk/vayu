@@ -965,9 +965,10 @@ bit a buffered send's are (issue #653). Pressing Send with the **Event stream**
 setting on and off gives `pm.sendRequest` the same answer.
 
 **No `{{variable}}` resolution.** A script-supplied URL is sent as written.
-Interpolation happens strictly before the pre-request script and a payload is
-resolved exactly once; a second pass here would break that invariant. Use
-`pm.variables.replaceIn(template)`.
+This request was never composed - it is a URL the script spelled, not a field
+of the request the engine resolved - so there is nothing here to have left a
+token behind, and the residual pass the main send makes (#1008) does not run
+over it. Use `pm.variables.replaceIn(template)`.
 
 ## The cookie jar (`pm.cookies`)
 
