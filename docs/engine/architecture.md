@@ -915,7 +915,7 @@ row exists - and the executor is the only thing that differs.
   *submission* off the same kind of run-wide cursor, wrapping the same way - a
   single request has no sequence for an iteration to span, so the unit of a claim
   is the request. The templates are split once, when the run's one request is
-  built (`LoadDataSet::fields`), the credentials defer exactly as a step's do,
+  built (`RunContext::load_template`), the credentials defer exactly as a step's do,
   and every retained result carries its `dataRowIndex`. **A run without rows
   carries no set at all**, which is the throughput guard stated structurally: the
   strategies test one pointer and otherwise submit the shared request they always

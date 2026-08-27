@@ -528,6 +528,44 @@ TEST_F (ScenarioIdentityTest, EachVirtualUserBindsItsOwnNumberAndAdvancesItsOwnI
     EXPECT_EQ (total, 4u);
 }
 
+// The deferred half on this path: a step's own script reads the user and the
+// iteration its sampled response was sent as, which is what makes an assertion
+// about "user 2's third request" possible at all. Both users' numbers are
+// checked against the run's concurrency rather than against a fixed one, since
+// which user a sample came from is the scheduler's business.
+TEST_F (ScenarioIdentityTest, ADeferredStepScriptReadsTheUserAndIterationItRanAs) {
+    RecordingServer server;
+    auto execution = plan_over (server.url ("/plain"));
+    execution.plan.steps[0].post_script =
+    "pm.test('identity', function () {"
+    "  if (pm.info.vu !== 1 && pm.info.vu !== 2) {"
+    "    throw new Error('vu was ' + pm.info.vu);"
+    "  }"
+    "  if (typeof pm.info.iteration !== 'number') {"
+    "    throw new Error('no iteration');"
+    "  }"
+    "});";
+
+    run_scenario (json{ { "mode", "iterations" }, { "iterations", 4 },
+                  { "concurrency", 2 }, { "response_sample_rate", 1 } },
+    execution);
+
+    // Every sample carries a user inside the run's own range - the assertion
+    // the script cannot make about itself, since it only ever sees its own.
+    for (const auto& sample : context_->metrics_collector->step_response_samples (0)) {
+        ASSERT_HAS_VALUE (sample.vu) << "a step sample carries no virtual user";
+        EXPECT_TRUE (*sample.vu == 1 || *sample.vu == 2) << *sample.vu;
+        ASSERT_HAS_VALUE (sample.iteration)
+        << "a step sample carries no iteration";
+    }
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    ASSERT_EQ (validation.steps.size (), 1u);
+    ASSERT_HAS_VALUE (validation.steps[0]);
+    EXPECT_EQ (validation.steps[0]->failed, 0u) << replay_failures ();
+    EXPECT_EQ (validation.steps[0]->passed, 4u);
+}
+
 // A plan carrying no identity token is not walked for one, which is the same
 // guard the single-request path keeps - asserted on the plan the executor
 // actually runs rather than on the executor's behaviour.

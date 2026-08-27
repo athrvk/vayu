@@ -4100,7 +4100,7 @@ TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
  *
  * Not "" and not the token verbatim: the token says the value came from the
  * file, so a name the file has no column for is a mistake about the column, and
- * both quiet answers hide it. This is the rule `apply_data_template` already
+ * both quiet answers hide it. This is the rule `apply_iteration_template` already
  * enforces on a URL - a script asking the same question gets the same answer.
  */
 TEST_F (ScriptEngineTest, ReplaceInThrowsForAColumnTheRowDoesNotCarry) {

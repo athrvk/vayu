@@ -314,6 +314,7 @@ set(vayu_scratch_database_suites
     InboxStorageTest
     LoadDataTest
     LoadIdentityTest
+    ScenarioIdentityTest
     LoadReplayEventsTest
     LoadScriptScopesTest
     LoadStrategyTest

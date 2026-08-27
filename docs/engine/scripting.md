@@ -878,7 +878,7 @@ deliberately does not: `resolve_template` leaves `{{data.column}}` written as it
 stands because a plan is composed once, before any row is bound, while this runs
 per step with the iteration's row in hand. A column the row does not carry is a
 `TypeError` naming the token and the row's columns - the bind-time rule
-(`apply_data_template`) in a shape a script can catch - and with no row bound at
+(`apply_iteration_template`) in a shape a script can catch - and with no row bound at
 all the token keeps its braces. It stops at `replaceIn`: `pm.variables.get` and
 `.has` read the variable *scopes*, and `data.` is disjoint from them by design
 (`core/scenario_data.hpp`), with `pm.iterationData` as its accessor.
