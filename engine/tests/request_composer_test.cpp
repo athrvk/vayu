@@ -766,8 +766,11 @@ TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {
     const json body = { { "request", { { "method", "GET" }, { "url", "https://x.test/{{missing}}" } } },
         { "collectionId", "col_missing" }, { "environmentId", "env_missing" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    // What degrades is the *scope lookup* - an id naming nothing is an empty
+    // scope rather than a refusal. The token it leaves behind is #1009's rule:
+    // a name no scope defines is written as it stands.
     ASSERT_EQ (status, 200);
-    EXPECT_EQ (payload["url"], "https://x.test/");
+    EXPECT_EQ (payload["url"], "https://x.test/{{missing}}");
 }
 
 } // namespace

@@ -4066,8 +4066,9 @@ TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
         pm.test("the bare prefix names nothing", function() {
             // `{{data.}}` is not a column reference, so it falls through to the
             // ordinary unknown-name rule rather than erroring about a column
-            // called "".
-            pm.expect(pm.variables.replaceIn("[{{data.}}]")).to.equal("[]");
+            // called "" - and that rule leaves the token written as it stands
+            // (issue #1009), which is what a script gets back.
+            pm.expect(pm.variables.replaceIn("[{{data.}}]")).to.equal("[{{data.}}]");
         });
 
         pm.test("the scope readers stay out of the namespace", function() {

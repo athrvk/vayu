@@ -83,11 +83,22 @@ TEST (ScenarioDataNamespaceTest, AVariableNamedLikeAColumnDoesNotAnswerForIt) {
 
 TEST (ScenarioDataNamespaceTest, ThePrefixAloneIsNotAColumnReference) {
     // `{{data.}}` names nothing, so no iteration could ever bind it. It falls
-    // through to the ordinary unknown-name rule instead of surviving as a token
-    // that would reach the wire verbatim.
+    // through to the ordinary unknown-name rule - which since #1009 also leaves
+    // the token written as it stands. The two rules agree on the text and not
+    // on the reason: the namespace keeps a token *for* a later binder, and an
+    // unknown name keeps one because nothing will ever answer it. What this
+    // case still pins is that neither `data.` nor `data` is treated as a
+    // column, so no scan and no bind reads one.
     vayu::http::VariableValues vars;
-    EXPECT_EQ (vayu::http::resolve_template ("a{{data.}}b", vars), "ab");
-    EXPECT_EQ (vayu::http::resolve_template ("a{{data}}b", vars), "ab");
+    EXPECT_FALSE (vayu::http::is_data_variable_name ("data."));
+    EXPECT_FALSE (vayu::http::is_data_variable_name ("data"));
+    EXPECT_EQ (vayu::http::resolve_template ("a{{data.}}b", vars), "a{{data.}}b");
+    EXPECT_EQ (vayu::http::resolve_template ("a{{data}}b", vars), "a{{data}}b");
+    // A defined variable of either name answers, which is what says they took
+    // the ordinary path rather than the reserved one.
+    vars["data."] = "dot";
+    vars["data"]  = "bare";
+    EXPECT_EQ (vayu::http::resolve_template ("a{{data.}}b{{data}}c", vars), "adotbbarec");
 }
 
 TEST (ScenarioDataNamespaceTest, TheNameIsTrimmedTheSameWayEveryOtherNameIs) {
@@ -986,9 +997,10 @@ TEST (ScenarioDataAuthLineBreakTest, BasicCredentialsAndAQueryApiKeyStillBind) {
 }
 
 TEST (ScenarioDataScanTest, ThePrefixAloneIsNotSomethingToRefuse) {
-    // `{{data.}}` names no column, so composition already resolved it to "" and
-    // there is nothing left to send literally. Refusing it would block a run
-    // over a token that never reaches the wire.
+    // `{{data.}}` names no column, so the scan finds nothing to bind - it is
+    // not a data token, whatever composition left in the field (since #1009,
+    // the token itself). Refusing it would block a run over a token no row
+    // could ever answer.
     EXPECT_FALSE (vayu::core::tokenize_data_fields (
     request_with_url ("https://api.test/{{data.}}"))
     .first_token ()
