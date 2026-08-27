@@ -651,12 +651,18 @@ pm.request.body = JSON.stringify({ n: 2 });
   written to a body the transfer layer would ignore. Full table in
   [scripting.md](../engine/scripting.md#request-object-pmrequest). Reading a form body
   never rewrites it: an unchanged string means untouched.
-- **Setting a variable still does not re-render the URL.** `{{…}}` placeholders are resolved
-  at **compose time** (`POST /compose`, engine-side since #226), whereas the
-  pre-request script runs **later**, at execute. So `pm.environment.set("host", …)` with
-  a `{{host}}` in the URL affects subsequent runs only - assign `pm.request.url` to change
-  this one. Keeping this order (rather than adopting Postman's script-first one) was
-  #226's decision D1: today's semantics preserved, divergence documented.
+- **Setting a variable now re-renders whatever composition left unresolved.**
+  `{{…}}` placeholders are still resolved at **compose time** (`POST /compose`,
+  engine-side since #226) before the pre-request script runs - #226's decision
+  D1 stands, composition is not being moved. What changed (#1008) is that a
+  name composition could not answer keeps its braces (#1009) instead of
+  becoming `""`, and gets resolved a second time after the pre-request script
+  and before the send, against the scopes as the script left them. So
+  `pm.environment.set("host", …)` reaches a `{{host}}` in the same request's
+  URL, as long as nothing already defined `host` at compose time. A value
+  composition *did* substitute is finished text - that pass reads the request,
+  not composition's decisions, so it is not re-resolved - and `pm.request.url`
+  is still how a script changes a value composition already substituted.
 - **Load tests do not run pre-request scripts** at all, so this is a Send / Design Mode
   capability.
 
@@ -697,16 +703,6 @@ Three deliberate divergences from Postman:
 Bad input fails loudly: a name must be a non-empty string, a value a string, number or
 boolean (the set plain assignment already accepts), and calling a method detached from
 its object throws rather than answering as though the header were missing.
-
-### TODO (future)
-
-"Set a variable in a pre-request script and have it change the outgoing URL" still does not
-work. Resolution ownership *did* move into the engine (#226 - `POST /compose`
-interpolates), but interpolation deliberately stayed **before** the pre-request
-script (decision D1: today's semantics, not Postman's script-first order).
-Adopting Postman's order is now an engine-side re-ordering rather than an
-ownership change - possible, but a separate, deliberate compatibility decision
-with its own tests.
 
 ---
 

@@ -530,11 +530,16 @@ Rules worth knowing before you rely on them:
   as the pre-request script error, visible in the response pane's Console tab.
   Assigning a string to a `form-data` body fails the same way, for the same
   reason: a value the engine cannot send is refused rather than dropped.
-- **Setting a variable does not re-render the URL.** `{{placeholders}}` are
-  resolved at compose time (`POST /compose`), strictly before any script runs,
-  so `pm.environment.set('host', …)` affects later runs only - a deliberate
-  divergence from Postman's script-first order (#226, D1). To change this
-  request's URL, assign `pm.request.url` directly.
+- **Setting a variable can re-render the URL, if composition left it
+  unresolved.** `{{placeholders}}` are still resolved at compose time
+  (`POST /compose`), strictly before any script runs (#226, D1 stands) - but a
+  name composition could not answer keeps its braces (#1009) and is resolved
+  again after the pre-request script and before the send (#1008), against the
+  scopes as the script left them. So `pm.environment.set('host', …)` reaches a
+  `{{host}}` in this send's URL as long as nothing already answered `host` at
+  compose time; a `{{host}}` composition already substituted is finished text
+  and this pass does not touch it - assign `pm.request.url` directly to change
+  that.
 - **Load tests do not run pre-request scripts** - only the `tests` (post-request)
   script runs there, so this applies to Send / Design Mode.
 

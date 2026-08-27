@@ -123,6 +123,7 @@ add_executable(vayu_tests
     http_version_support_test.cpp
     http_version_test.cpp
     request_composer_test.cpp
+    residual_token_test.cpp
     scenario_data_test.cpp
     scenario_load_test.cpp
     scenario_plan_test.cpp
