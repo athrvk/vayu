@@ -18,6 +18,7 @@
 #include <httplib.h>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/numeric_flag.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/utils/diagnostics.hpp"
@@ -307,13 +308,22 @@ bool& consumed_next) {
         return 0;
     }
     if (arg == "--verbose") {
-        // The level is optional: `--verbose` on its own means info. Clamped to
-        // the range the logger has.
+        // The level is optional: `--verbose` on its own means info, and a
+        // leading digit is what says the next argument was meant as a level at
+        // all - `--verbose run` is the command, not a bad level. Once it is
+        // meant as one it is held to the range the logger has rather than
+        // clamped into it, and `--verbose 1abc` is refused rather than read as
+        // 1 (see core/numeric_flag.hpp).
         if (!next.empty () &&
         std::isdigit (static_cast<unsigned char> (next.front ())) != 0) {
-            options.verbosity =
-            std::max (0, std::min (2, std::stoi (std::string (next))));
-            consumed_next = true;
+            const auto parsed =
+            vayu::core::parse_numeric_flag (vayu::core::VERBOSITY_FLAG, next);
+            if (!parsed) {
+                std::cerr << "vayu-cli: " << parsed.error () << "\n";
+                return 1;
+            }
+            options.verbosity = *parsed;
+            consumed_next     = true;
         } else {
             options.verbosity = 1;
         }
