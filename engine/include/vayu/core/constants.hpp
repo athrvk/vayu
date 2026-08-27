@@ -882,6 +882,17 @@ constexpr int MAX_RUNS_RETAINED = 200;
 /// Run retention: delete runs older than N days (0 = unlimited).
 constexpr int RUN_RETENTION_DAYS = 30;
 /**
+ * Trash retention: purge collections and requests deleted more than N days ago
+ * (0 = keep them forever), swept at startup (issue #988).
+ *
+ * Thirty days for the same reason runs get thirty: the mistake soft delete
+ * exists to undo - a collection removed by a misclick - is usually noticed the
+ * same day, and the tail is someone coming back from a month away. A stamped
+ * subtree costs only the rows it already occupied, so the ceiling is about not
+ * growing the file forever rather than about reclaiming space soon.
+ */
+constexpr int TRASH_RETENTION_DAYS = 30;
+/**
  * Workspace backups: keep at most N snapshots in `backups/` (0 = unlimited).
  *
  * Five rather than one, because the failure a backup guards against is often

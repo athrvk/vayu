@@ -625,6 +625,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/collections.cpp
         src/http/routes/requests.cpp
         src/http/routes/examples.cpp
+        src/http/routes/trash.cpp
         src/http/routes/specs.cpp
         src/http/routes/spec_sync.cpp
         src/http/routes/spec_match.cpp

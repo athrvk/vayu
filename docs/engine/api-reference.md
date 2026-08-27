@@ -640,6 +640,7 @@ governs what a run measures rather than what it keeps:
 | `phaseHistograms`   | `true`    | boolean      | Record DNS/connect/TLS/first-byte/download times for **every** load-test completion into five HdrHistograms, so the report can carry `timingBreakdown.phases` percentiles instead of averages over the retained trace sample. Costs five atomic histogram writes per completion; see [benchmarks](benchmarks.md). |
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
+| `trashRetentionDays` | `30`     | 0–3650       | Destroy collections and requests deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
 | `monitorMaxSeries`  | `8`       | 1–64         | How many metric names one run may chart from its monitored endpoint. A longer `series` list is a `400`. Raising it past 4 repeats chart colours (the categorical palette has four line-legible hues). |
 | `monitorScrapeTimeoutMs` | `0`  | 0–60000      | How long one scrape may take before it counts as a gap. `0` derives it from the cadence in force for that run - three quarters of the interval. Set it explicitly for an exposition that is slow to render: one taking longer than three quarters of the interval fails *every* scrape otherwise, and the only other way out is a slower cadence, which also thins the data. A value longer than the interval a run scrapes at is shortened to it (logged once per run), because a scrape that outlives its own cadence puts the loop behind itself. |
@@ -1016,10 +1017,16 @@ never cascaded away, see [DELETE /specs/:id](#delete-specsid).
 
 ### DELETE /collections/:id
 
-Delete a collection and all its requests (cascading delete). The cascade removes
-every descendant collection and its requests in a single transaction, and
-terminates even if the stored `parent_id` tree contains a cycle (see
+Delete a collection and all its requests (cascading delete). **The delete is
+soft** (issue #988): the collection and every descendant are stamped
+`deleted_at` in a single transaction rather than removed, which is why every
+read surface stops returning them while [`GET /trash`](#get-trash) still can.
+The walk terminates even if the stored `parent_id` tree contains a cycle (see
 [db-schema.md](db-schema.md) - collections).
+
+Restore it with [`POST /trash/:id/restore`](#post-trashidrestore); destroy it
+for good with [`DELETE /trash/:id`](#delete-trashid), which is also what the
+startup sweep does once `trashRetentionDays` has passed.
 
 **Response:**
 ```json
@@ -1241,9 +1248,12 @@ malformed `params` / `headers` entry, a malformed `specOperation`, or an
 
 ### DELETE /requests/:id
 
-Delete a request. Cascades to the request's
-[saved examples](#request-examples) - they are owned by it, and every read of
-them is by request id, so a row left behind would be unreachable.
+Delete a request. **The delete is soft** (issue #988) - the row is stamped
+`deleted_at` and [`GET /trash`](#get-trash) lists it until a purge. Its
+[saved examples](#request-examples) stay on the row rather than being removed:
+every read of them is by request id and runs the owner check first, so they are
+as unreachable as the request is, and a restore gets them back with it. A purge
+takes them.
 
 **Response:**
 ```json
@@ -1252,6 +1262,101 @@ them is by request id, so a row left behind would be unreachable.
   "id": "req_1234567890"
 }
 ```
+
+## Trash
+
+What deleting a collection or a request now does, and how to undo it
+(issue #988). `DELETE /collections/:id` and `DELETE /requests/:id` stamp rows
+instead of removing them; every other read surface filters stamped rows out, so
+the tree the app sees is unchanged, and these three endpoints are the whole of
+what the stamp buys.
+
+Two rules decide what a restore puts back:
+
+- **Cohort.** One delete stamps its whole subtree with one timestamp, and a
+  restore clears exactly the rows carrying the timestamp of the row it was
+  given. So restoring a collection cannot resurrect a request the user had
+  deleted separately beforehand - that request stays in the trash and becomes a
+  root of its own again, since its collection is live.
+- **Re-parent.** A restored collection whose parent is gone, or is itself in the
+  trash, comes back at the tree root (`parentId` cleared). A *request* has no
+  such root - `collectionId` is required - so restoring one whose collection is
+  in the trash is a `409` naming the collection to restore first.
+
+Rows sit in the trash until they are purged: explicitly through
+`DELETE /trash/:id`, or by the startup sweep once they are older than
+`trashRetentionDays` (default 30; `0` keeps them forever).
+
+### GET /trash
+
+Everything deleted and still restorable, newest first. **Roots only** - the rows
+a user asked to delete, never what their cascade took with them; that is what
+`collections` and `requests` count.
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": "col_1234567890",
+      "kind": "collection",
+      "name": "Payments API",
+      "deletedAt": 1787745600000,
+      "parentId": null,
+      "collections": 2,
+      "requests": 14
+    }
+  ],
+  "total": 1
+}
+```
+
+`kind` is `"collection"` or `"request"`. `parentId` is a collection's parent
+(`null` at the tree root) or a request's owning collection. An empty trash is
+`{"items": [], "total": 0}`, never a `404`.
+
+### POST /trash/:id/restore
+
+Put a deleted collection or request back, with everything the same delete took.
+Takes no body.
+
+**Response:** the entry that was restored, plus what happened to it:
+```json
+{
+  "id": "col_1234567890",
+  "kind": "collection",
+  "name": "Payments API",
+  "deletedAt": 1787745600000,
+  "parentId": null,
+  "collections": 2,
+  "requests": 14,
+  "restored": true,
+  "reparentedToRoot": false
+}
+```
+
+**Errors:**
+
+| Status | When |
+|--------|------|
+| `404` | Nothing in the trash carries that id - a live row, or one already purged |
+| `409` | A request whose collection is itself deleted or gone; restore the collection first |
+
+### DELETE /trash/:id
+
+Destroy a deleted collection or request for good, with its whole subtree -
+requests, and the examples they own. This is the hard cascade soft delete
+replaced, asked for deliberately; there is no undo for it.
+
+Unlike a restore, a purge is not limited to the cohort: a row an earlier delete
+left inside the subtree goes too, because a request under a removed collection
+is reachable by no read and restorable by nothing.
+
+**Response:** the entry that was purged, with `"purged": true`. Its
+`collections` / `requests` are the deleted row's own cohort, so they are a floor
+here rather than the whole: a purge that also swept up an earlier delete's rows
+destroyed more than they count. A `404` if the trash does not hold that id -
+which is also what stops a mistyped id from destroying a live collection.
 
 ## Request examples
 

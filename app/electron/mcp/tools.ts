@@ -2782,8 +2782,9 @@ async function readCascadeScope(
 /** One sentence naming everything a cascade delete destroys. */
 function describeCascade(scope: CascadeScope): string {
 	return (
-		`Deleting "${scope.name}" also destroys ${scope.descendants} sub-collection(s) and ` +
-		`${scope.requests} saved request(s) inside it. This cannot be undone.`
+		`Deleting "${scope.name}" also removes ${scope.descendants} sub-collection(s) and ` +
+		`${scope.requests} saved request(s) inside it. All of it goes to Vayu's Trash, ` +
+		`where it can be restored.`
 	);
 }
 
@@ -4094,7 +4095,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Delete a collection AND EVERYTHING INSIDE IT - every nested sub-collection and every saved request in them. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the number of sub-collections and requests this destroys; otherwise call once to see those counts, then again with `confirmed: true`. There is no undo.",
+			"Delete a collection AND EVERYTHING INSIDE IT - every nested sub-collection and every saved request in them. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the number of sub-collections and requests this destroys; otherwise call once to see those counts, then again with `confirmed: true`. It goes to Vayu's Trash, where the user can restore it until the retention window (`trashRetentionDays`, 30 days by default) runs out - not something to undo from here.",
 		annotations: {
 			title: "Delete collection",
 			readOnlyHint: false,
@@ -4841,7 +4842,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Delete a saved request. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the request's name and URL; otherwise call once for a preview, then again with `confirmed: true`. There is no undo.",
+			"Delete a saved request. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the request's name and URL; otherwise call once for a preview, then again with `confirmed: true`. It goes to Vayu's Trash, where the user can restore it until the retention window (`trashRetentionDays`, 30 days by default) runs out - not something to undo from here.",
 		annotations: {
 			title: "Delete saved request",
 			readOnlyHint: false,
@@ -4877,13 +4878,13 @@ export const TOOLS: McpTool[] = [
 				.join(" ");
 			const subject = target ? `"${name}" (${target})` : `"${name}"`;
 			const unconfirmed = await confirmDestructive(args, ctx, {
-				message: `Delete the saved request ${subject}?\n\nThis cannot be undone.`,
+				message: `Delete the saved request ${subject}?\n\nIt goes to Vayu's Trash, where it can be restored.`,
 				acceptTitle: "Delete the request",
 				acceptDescription: "Confirm to delete this saved request.",
 				declined: "Request not deleted - the user declined.",
 				preview:
 					"AWAITING CONFIRMATION - nothing was deleted.\n\n" +
-					`This would delete the saved request ${subject}. This cannot be undone.\n\n` +
+					`This would delete the saved request ${subject}. It would go to Vayu's Trash, where it can be restored.\n\n` +
 					"This is a preview. To delete it, call delete_request again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
