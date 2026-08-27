@@ -765,9 +765,29 @@ check that scans an empty set passes for the wrong reason.
 
 ### Faster Rebuilds
 
-1. Use Ninja generator (faster than Makefiles)
-2. Use ccache if available (auto-detected by build script)
-3. Use mold linker on Linux (auto-detected by build script)
+`build.py` sets these up on its own at configure time - install the tool and
+the next build picks it up, nothing to opt into:
+
+1. **Ninja** is the generator in every preset - faster than Makefiles.
+2. **ccache** (or sccache) on PATH becomes the compiler launcher
+   (`CMAKE_<LANG>_COMPILER_LAUNCHER`), so a clean rebuild or a branch switch
+   replays unchanged compiles out of the cache instead of re-running them.
+   `build.py` also sets `CCACHE_SLOPPINESS=pch_defines,time_macros` (unless
+   already set): without it every translation unit that uses the nlohmann
+   precompiled header - all of `vayu_core` - is a guaranteed cache miss.
+   Not on Windows, where the MSVC PCH makes compiles non-cacheable and a
+   launcher costs bookkeeping for nothing - measured on issue
+   [#805](https://github.com/athrvk/vayu/issues/805).
+3. **mold, else lld** on Linux links executables via `-fuse-ld=<linker>`
+   (`ld.lld` on PATH is what GCC needs for lld, so that is what is probed).
+   The Debug link of `vayu_tests` - one binary, ~150 objects, static gtest -
+   is a large share of the incremental loop on the default bfd linker.
+4. **The configure step is skipped on warm builds.** `cmake --preset` re-runs
+   the vcpkg manifest check every time, seconds of pure overhead when nothing
+   configure-level changed. `build.py` fingerprints what ninja's own re-run
+   rule cannot replay (the preset files and the arguments above) and only
+   configures when that moved; edits to `CMakeLists.txt` or `vcpkg.json` are
+   already configure dependencies, which ninja re-runs CMake for itself.
 
 ### Debugging
 

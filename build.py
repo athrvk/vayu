@@ -6,6 +6,7 @@ Modern unified build system for C++ Engine + Electron App
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import signal
@@ -1085,18 +1086,83 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None, description: str = "
         print_error(f"Command not found: {cmd[0]}")
         return False, ""
 
-def cached_generator(build_dir: Path) -> Optional[str]:
-    """Read CMAKE_GENERATOR out of an existing CMake cache, if any."""
+def cached_variable(build_dir: Path, name: str) -> Optional[str]:
+    """Read one variable out of an existing CMake cache, if any."""
     cache = build_dir / "CMakeCache.txt"
     if not cache.exists():
         return None
     try:
         for line in cache.read_text(errors="replace").splitlines():
-            if line.startswith("CMAKE_GENERATOR:"):
+            if line.startswith(f"{name}:"):
                 return line.split("=", 1)[1].strip()
     except OSError:
         pass
     return None
+
+def cached_generator(build_dir: Path) -> Optional[str]:
+    """Read CMAKE_GENERATOR out of an existing CMake cache, if any."""
+    return cached_variable(build_dir, "CMAKE_GENERATOR")
+
+def find_compiler_launcher() -> Optional[str]:
+    """ccache or sccache, whichever is installed - ccache preferred.
+
+    Passed as CMAKE_<LANG>_COMPILER_LAUNCHER so a clean rebuild (or a branch
+    switch) replays compiles out of the cache instead of re-running them. Not
+    on Windows: the MSVC PCH interacts badly with compile caches - sccache
+    marks /Fp compiles non-cacheable, measured on #805 - so the flag would
+    cost cache bookkeeping and return nothing.
+    """
+    system_name, _ = detect_platform()
+    if system_name == "Windows":
+        return None
+    for tool in ("ccache", "sccache"):
+        path = shutil.which(tool)
+        if path:
+            return path
+    return None
+
+def find_fast_linker() -> Optional[str]:
+    """The fastest linker installed: mold, else lld. Linux only.
+
+    Debug links of vayu_tests (one binary, ~150 objects, static gtest) are a
+    large share of the incremental loop on the default bfd linker; mold and
+    lld cut that link to a fraction. GCC needs `ld.lld` on PATH to honour
+    `-fuse-ld=lld`, so that - not the `lld` driver - is what is probed.
+    macOS's ld64 does not accept these; Windows links with MSVC's own.
+    """
+    system_name, _ = detect_platform()
+    if system_name != "Linux":
+        return None
+    if shutil.which("mold"):
+        return "mold"
+    if shutil.which("ld.lld"):
+        return "lld"
+    return None
+
+def configure_fingerprint(engine_dir: Path, preset: str, extra_args: List[str]) -> str:
+    """What a configure depends on that ninja's own re-run rule does not cover.
+
+    Ninja re-runs CMake itself when CMakeLists.txt or vcpkg.json change - they
+    are configure dependencies - but a re-run replays the *cached* variables,
+    so an edited preset (or a newly installed ccache/mold changing the extra
+    arguments) needs a real `cmake --preset` to be applied. Hashing those
+    inputs is what lets every other warm build skip the configure entirely.
+    """
+    digest = hashlib.sha256()
+    digest.update(preset.encode())
+    for name in ("CMakePresets.json", "CMakeUserPresets.json"):
+        presets_file = engine_dir / name
+        if presets_file.exists():
+            digest.update(presets_file.read_bytes())
+    for arg in extra_args:
+        digest.update(arg.encode())
+    return digest.hexdigest()
+
+def read_stamp(stamp: Path) -> Optional[str]:
+    try:
+        return stamp.read_text().strip()
+    except OSError:
+        return None
 
 def preset_generator(engine_dir: Path, preset_name: str) -> Optional[str]:
     """Resolve the generator a configure preset will use, following 'inherits'."""
@@ -1173,22 +1239,63 @@ def build_engine(preset: str, clean: bool, run_tests: bool, project_root: Path) 
     if vcpkg_root:
         heal_stale_vcpkg_baseline(vcpkg_root, engine_dir)
 
-    # Configure
-    spinner = Spinner("Configuring CMake")
-    spinner.start()
+    # Configure - or skip it. `cmake --preset` re-runs the vcpkg toolchain's
+    # manifest check every time, which is seconds of pure overhead on a build
+    # where nothing configure-level changed. Ninja already re-runs CMake on its
+    # own when a configure *dependency* (CMakeLists.txt, vcpkg.json) changes;
+    # what it cannot replay is the preset file and the arguments below, so
+    # those are fingerprinted and the configure only runs when they moved.
+    extra_args = []
+    launcher = find_compiler_launcher()
+    if launcher:
+        extra_args += [
+            f"-DCMAKE_C_COMPILER_LAUNCHER={launcher}",
+            f"-DCMAKE_CXX_COMPILER_LAUNCHER={launcher}",
+        ]
+        if Path(launcher).stem == "ccache":
+            # Without this, every TU that uses the nlohmann PCH (all of
+            # vayu_core) is a guaranteed cache miss: ccache refuses to cache
+            # GCC/Clang PCH compiles unless told these two sloppinesses are
+            # acceptable. setdefault so an explicit environment wins.
+            os.environ.setdefault("CCACHE_SLOPPINESS", "pch_defines,time_macros")
+    linker = find_fast_linker()
+    if linker:
+        extra_args.append(f"-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld={linker}")
 
-    configure_cmd = [CMAKE_PATH, "--preset", preset]
-    if run_tests:
-        configure_cmd.append("-DVAYU_BUILD_TESTS=ON")
+    # Deliberately not part of the fingerprint: VAYU_BUILD_TESTS defaults ON
+    # and sticks in the cache, so alternating `-e` and `-e -t` must not force
+    # a reconfigure. The cache is checked instead.
+    tests_ready = not run_tests or cached_variable(build_dir, "VAYU_BUILD_TESTS") == "ON"
 
-    success, output = run_command(configure_cmd, cwd=engine_dir, description="CMake configuration")
+    fingerprint = configure_fingerprint(engine_dir, preset, extra_args)
+    stamp = build_dir / ".vayu-configure-fingerprint"
 
-    if success:
-        spinner.stop()
+    if ((build_dir / "build.ninja").exists()
+            and (build_dir / "CMakeCache.txt").exists()
+            and tests_ready
+            and read_stamp(stamp) == fingerprint):
+        log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Configure up to date - skipped '
+            f'{Style.DIM}(ninja re-runs CMake itself if CMakeLists.txt or vcpkg.json changed){Style.RESET}')
     else:
-        spinner.stop(Style.CROSS, Style.RED)
-        explain_vcpkg_failure(output, vcpkg_root)
-        return None
+        spinner = Spinner("Configuring CMake")
+        spinner.start()
+
+        configure_cmd = [CMAKE_PATH, "--preset", preset] + extra_args
+        if run_tests:
+            configure_cmd.append("-DVAYU_BUILD_TESTS=ON")
+
+        success, output = run_command(configure_cmd, cwd=engine_dir, description="CMake configuration")
+
+        if success:
+            spinner.stop()
+            try:
+                stamp.write_text(fingerprint + "\n")
+            except OSError:
+                pass  # No stamp just means the next run configures again.
+        else:
+            spinner.stop(Style.CROSS, Style.RED)
+            explain_vcpkg_failure(output, vcpkg_root)
+            return None
 
     print()
 

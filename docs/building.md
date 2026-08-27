@@ -163,6 +163,12 @@ This starts:
 - Rebuild: `python build.py --dev -e`
 - Restart the Electron app
 
+Engine rebuilds are cheaper than they look: `build.py` skips the CMake
+configure step when nothing configure-level changed, and picks up ccache
+and the mold/lld linkers on its own when they are installed. See
+[Faster Rebuilds](engine/building.md#faster-rebuilds) for what is detected
+and why.
+
 ## Production Build
 
 ### Building
