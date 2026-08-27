@@ -1249,7 +1249,11 @@ function readRequestOverrides(args: Record<string, unknown>): Record<string, unk
  * walk (issue #226 deleted the MCP-side copy). Composition is pure - nothing
  * is sent - which is what lets the caller run the allowlist gate on the
  * *resolved* URL before any traffic flows, and the composed payload is passed
- * to `/execute` or `/runs` unchanged, so it is never interpolated twice.
+ * to `/execute` or `/runs` unchanged: a value composition substituted is never
+ * substituted again. What the engine does resolve past this point is the
+ * leftovers - a name composition could not answer keeps its braces (#1009) and
+ * is resolved after the pre-request script, before the send (#1008) - which is
+ * why the gate refuses an unresolved *authority* rather than checking one.
  *
  * A 404 for a named `requestId` surfaces as a {@link ToolArgError} so the
  * agent reads "no such saved request", not a transport failure.
