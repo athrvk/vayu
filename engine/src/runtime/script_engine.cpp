@@ -2638,17 +2638,12 @@ JSValue js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, 
         js_type_name (ctx, argv[0]));
     }
 
-    // A regular expression is recognised by its class tag or, as `expect(...)
-    // .to.match` reads one, by carrying a callable `test` - so a script that
-    // built its own matcher object is not silently deep-equalled instead.
-    JSValue test_fn       = JS_GetPropertyStr (ctx, argv[0], "test");
-    const bool is_pattern = js_class_tag (ctx, argv[0]) == "[object RegExp]" ||
-    JS_IsFunction (ctx, test_fn);
-    if (is_pattern) {
-        if (!JS_IsFunction (ctx, test_fn)) {
-            JS_FreeValue (ctx, test_fn);
-            return JS_ThrowTypeError (ctx, "body() pattern has no test() to run");
-        }
+    // A pattern is whatever carries a callable `test`, which is how
+    // `expect(...).to.match` reads one: a regular expression literal is a real
+    // RegExp here and satisfies it, and a matcher object a script built itself
+    // is run rather than silently deep-equalled against the body.
+    JSValue test_fn = JS_GetPropertyStr (ctx, argv[0], "test");
+    if (JS_IsFunction (ctx, test_fn)) {
         JSValue subject = JS_NewString (ctx, body.c_str ());
         JSValue result  = JS_Call (ctx, test_fn, argv[0], 1, &subject);
         JS_FreeValue (ctx, subject);
