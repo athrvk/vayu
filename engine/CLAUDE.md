@@ -352,6 +352,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
 | POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (issue #987); no restore endpoint - see `docs/engine/architecture.md` |
+| GET | `/trash` | What deleting a collection or request left recoverable (issue #988) - roots only, each with what its cascade took; `POST /trash/:id/restore` puts one back, `DELETE /trash/:id` destroys it, and `trashRetentionDays` purges the rest at startup |
 | POST | `/import/parse` | Read a raw import document - OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4 - into the tree `/import/apply` persists (issue #877); reads only |
 | POST | `/import` | The same parse, flattened and applied in one call - what MCP `import_document` wraps; the app parses and applies separately because a person previews in between |
 | POST | `/import/document` | A document's bytes as a JSON DOM, through the engine's one reader - the whole of what the app's `$ref` bundler needs, and what took the last YAML dependency out of `app/src` |
@@ -855,9 +856,14 @@ The **engine owns** request composition (shipped in issue #226):
 `{{variables}}` and `inherit` auth (collection-chain walk, `noauth`
 terminates, `none` steps over) and returns the execute-ready payload that
 `POST /execute` / `POST /runs` accept unchanged. Compose is **pure** (sends
-nothing, no run row) and the execution endpoints **never interpolate**, so a
-payload is resolved exactly once - that split is load-bearing, do not "merge"
-compose into execute. Two entry shapes: `requestId` (stored request; MCP uses
+nothing, no run row) and is still the one place a payload is *composed* - that
+split is load-bearing, do not "merge" compose into execute. Since #1008,
+execute is not silent past that point either: a name compose could not answer
+(it kept its braces, #1009) is resolved once more, after the pre-request
+script and before the send (`resolve_residual_tokens`,
+`engine/src/http/request_exchange.cpp`) - a value compose already substituted
+is finished text and this pass does not revisit it, so nothing is resolved
+twice. Two entry shapes: `requestId` (stored request; MCP uses
 this, and gates its allowlist on the *composed* URL) and an inline `request`
 (+ `collectionId` scope; the renderer uses this because Send/replay execute
 *editor state*, which may be unsaved or detached). Inline over stored = the
@@ -877,9 +883,10 @@ the fixture fails whichever side forgot. The dynamic-variable name set
 in `request_composer.cpp`, renderer table in `lib/dynamic-variables.ts`).
 The D17 malformed-data rules (absent/non-boolean `enabled` = enabled;
 non-string `value` = "") live engine-side in `parse_variables` and
-renderer-side in `lib/variable-resolution.ts`. Interpolation happens strictly
-**before** the pre-request script (D1 - deliberate Postman divergence), and
-script text is never interpolated (D16). **MCP has no composition copy
+renderer-side in `lib/variable-resolution.ts`. Compose still resolves strictly
+**before** the pre-request script runs (D1 - deliberate Postman divergence,
+not reversed by #1008 - see the residual pass above), and script text is never
+interpolated (D16). **MCP has no composition copy
 anymore** (`resolve.ts` deleted) - a new engine client should call
 `POST /compose`, never re-implement resolution client-side.
 

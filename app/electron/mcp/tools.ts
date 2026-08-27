@@ -1249,7 +1249,11 @@ function readRequestOverrides(args: Record<string, unknown>): Record<string, unk
  * walk (issue #226 deleted the MCP-side copy). Composition is pure - nothing
  * is sent - which is what lets the caller run the allowlist gate on the
  * *resolved* URL before any traffic flows, and the composed payload is passed
- * to `/execute` or `/runs` unchanged, so it is never interpolated twice.
+ * to `/execute` or `/runs` unchanged: a value composition substituted is never
+ * substituted again. What the engine does resolve past this point is the
+ * leftovers - a name composition could not answer keeps its braces (#1009) and
+ * is resolved after the pre-request script, before the send (#1008) - which is
+ * why the gate refuses an unresolved *authority* rather than checking one.
  *
  * A 404 for a named `requestId` surfaces as a {@link ToolArgError} so the
  * agent reads "no such saved request", not a transport failure.
@@ -2786,8 +2790,9 @@ async function readCascadeScope(
 /** One sentence naming everything a cascade delete destroys. */
 function describeCascade(scope: CascadeScope): string {
 	return (
-		`Deleting "${scope.name}" also destroys ${scope.descendants} sub-collection(s) and ` +
-		`${scope.requests} saved request(s) inside it. This cannot be undone.`
+		`Deleting "${scope.name}" also removes ${scope.descendants} sub-collection(s) and ` +
+		`${scope.requests} saved request(s) inside it. All of it goes to Vayu's Trash, ` +
+		`where it can be restored.`
 	);
 }
 
@@ -3858,7 +3863,11 @@ export const TOOLS: McpTool[] = [
 			if (authArg) request.auth = authArg;
 
 			// Compose engine-side (pure), gate on the *resolved* URL, then execute
-			// the composed payload unchanged - resolved exactly once.
+			// the composed payload. The gate is a host rule: a pre-request script
+			// this call forwards can still edit `pm.request`, and since #1008 a
+			// name compose could not answer is resolved before the send - neither
+			// of which can reach a host the allowlist did not see, because an
+			// unresolved authority is refused rather than checked (safety.ts).
 			let payload: Record<string, unknown>;
 			try {
 				payload = await composeViaEngine(
@@ -4098,7 +4107,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Delete a collection AND EVERYTHING INSIDE IT - every nested sub-collection and every saved request in them. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the number of sub-collections and requests this destroys; otherwise call once to see those counts, then again with `confirmed: true`. There is no undo.",
+			"Delete a collection AND EVERYTHING INSIDE IT - every nested sub-collection and every saved request in them. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the number of sub-collections and requests this destroys; otherwise call once to see those counts, then again with `confirmed: true`. It goes to Vayu's Trash, where the user can restore it until the retention window (`trashRetentionDays`, 30 days by default) runs out - not something to undo from here.",
 		annotations: {
 			title: "Delete collection",
 			readOnlyHint: false,
@@ -4845,7 +4854,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Delete a saved request. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the request's name and URL; otherwise call once for a preview, then again with `confirmed: true`. There is no undo.",
+			"Delete a saved request. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the request's name and URL; otherwise call once for a preview, then again with `confirmed: true`. It goes to Vayu's Trash, where the user can restore it until the retention window (`trashRetentionDays`, 30 days by default) runs out - not something to undo from here.",
 		annotations: {
 			title: "Delete saved request",
 			readOnlyHint: false,
@@ -4881,13 +4890,13 @@ export const TOOLS: McpTool[] = [
 				.join(" ");
 			const subject = target ? `"${name}" (${target})` : `"${name}"`;
 			const unconfirmed = await confirmDestructive(args, ctx, {
-				message: `Delete the saved request ${subject}?\n\nThis cannot be undone.`,
+				message: `Delete the saved request ${subject}?\n\nIt goes to Vayu's Trash, where it can be restored.`,
 				acceptTitle: "Delete the request",
 				acceptDescription: "Confirm to delete this saved request.",
 				declined: "Request not deleted - the user declined.",
 				preview:
 					"AWAITING CONFIRMATION - nothing was deleted.\n\n" +
-					`This would delete the saved request ${subject}. This cannot be undone.\n\n` +
+					`This would delete the saved request ${subject}. It would go to Vayu's Trash, where it can be restored.\n\n` +
 					"This is a preview. To delete it, call delete_request again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;

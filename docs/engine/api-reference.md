@@ -640,6 +640,7 @@ governs what a run measures rather than what it keeps:
 | `phaseHistograms`   | `true`    | boolean      | Record DNS/connect/TLS/first-byte/download times for **every** load-test completion into five HdrHistograms, so the report can carry `timingBreakdown.phases` percentiles instead of averages over the retained trace sample. Costs five atomic histogram writes per completion; see [benchmarks](benchmarks.md). |
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
+| `trashRetentionDays` | `30`     | 0–3650       | Destroy collections and requests deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
 | `monitorMaxSeries`  | `8`       | 1–64         | How many metric names one run may chart from its monitored endpoint. A longer `series` list is a `400`. Raising it past 4 repeats chart colours (the categorical palette has four line-legible hues). |
 | `monitorScrapeTimeoutMs` | `0`  | 0–60000      | How long one scrape may take before it counts as a gap. `0` derives it from the cadence in force for that run - three quarters of the interval. Set it explicitly for an exposition that is slow to render: one taking longer than three quarters of the interval fails *every* scrape otherwise, and the only other way out is a slower cadence, which also thins the data. A value longer than the interval a run scrapes at is shortened to it (logged once per run), because a scrape that outlives its own cadence puts the loop behind itself. |
@@ -1016,10 +1017,16 @@ never cascaded away, see [DELETE /specs/:id](#delete-specsid).
 
 ### DELETE /collections/:id
 
-Delete a collection and all its requests (cascading delete). The cascade removes
-every descendant collection and its requests in a single transaction, and
-terminates even if the stored `parent_id` tree contains a cycle (see
+Delete a collection and all its requests (cascading delete). **The delete is
+soft** (issue #988): the collection and every descendant are stamped
+`deleted_at` in a single transaction rather than removed, which is why every
+read surface stops returning them while [`GET /trash`](#get-trash) still can.
+The walk terminates even if the stored `parent_id` tree contains a cycle (see
 [db-schema.md](db-schema.md) - collections).
+
+Restore it with [`POST /trash/:id/restore`](#post-trashidrestore); destroy it
+for good with [`DELETE /trash/:id`](#delete-trashid), which is also what the
+startup sweep does once `trashRetentionDays` has passed.
 
 **Response:**
 ```json
@@ -1241,9 +1248,12 @@ malformed `params` / `headers` entry, a malformed `specOperation`, or an
 
 ### DELETE /requests/:id
 
-Delete a request. Cascades to the request's
-[saved examples](#request-examples) - they are owned by it, and every read of
-them is by request id, so a row left behind would be unreachable.
+Delete a request. **The delete is soft** (issue #988) - the row is stamped
+`deleted_at` and [`GET /trash`](#get-trash) lists it until a purge. Its
+[saved examples](#request-examples) stay on the row rather than being removed:
+every read of them is by request id and runs the owner check first, so they are
+as unreachable as the request is, and a restore gets them back with it. A purge
+takes them.
 
 **Response:**
 ```json
@@ -1252,6 +1262,101 @@ them is by request id, so a row left behind would be unreachable.
   "id": "req_1234567890"
 }
 ```
+
+## Trash
+
+What deleting a collection or a request now does, and how to undo it
+(issue #988). `DELETE /collections/:id` and `DELETE /requests/:id` stamp rows
+instead of removing them; every other read surface filters stamped rows out, so
+the tree the app sees is unchanged, and these three endpoints are the whole of
+what the stamp buys.
+
+Two rules decide what a restore puts back:
+
+- **Cohort.** One delete stamps its whole subtree with one timestamp, and a
+  restore clears exactly the rows carrying the timestamp of the row it was
+  given. So restoring a collection cannot resurrect a request the user had
+  deleted separately beforehand - that request stays in the trash and becomes a
+  root of its own again, since its collection is live.
+- **Re-parent.** A restored collection whose parent is gone, or is itself in the
+  trash, comes back at the tree root (`parentId` cleared). A *request* has no
+  such root - `collectionId` is required - so restoring one whose collection is
+  in the trash is a `409` naming the collection to restore first.
+
+Rows sit in the trash until they are purged: explicitly through
+`DELETE /trash/:id`, or by the startup sweep once they are older than
+`trashRetentionDays` (default 30; `0` keeps them forever).
+
+### GET /trash
+
+Everything deleted and still restorable, newest first. **Roots only** - the rows
+a user asked to delete, never what their cascade took with them; that is what
+`collections` and `requests` count.
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": "col_1234567890",
+      "kind": "collection",
+      "name": "Payments API",
+      "deletedAt": 1787745600000,
+      "parentId": null,
+      "collections": 2,
+      "requests": 14
+    }
+  ],
+  "total": 1
+}
+```
+
+`kind` is `"collection"` or `"request"`. `parentId` is a collection's parent
+(`null` at the tree root) or a request's owning collection. An empty trash is
+`{"items": [], "total": 0}`, never a `404`.
+
+### POST /trash/:id/restore
+
+Put a deleted collection or request back, with everything the same delete took.
+Takes no body.
+
+**Response:** the entry that was restored, plus what happened to it:
+```json
+{
+  "id": "col_1234567890",
+  "kind": "collection",
+  "name": "Payments API",
+  "deletedAt": 1787745600000,
+  "parentId": null,
+  "collections": 2,
+  "requests": 14,
+  "restored": true,
+  "reparentedToRoot": false
+}
+```
+
+**Errors:**
+
+| Status | When |
+|--------|------|
+| `404` | Nothing in the trash carries that id - a live row, or one already purged |
+| `409` | A request whose collection is itself deleted or gone; restore the collection first |
+
+### DELETE /trash/:id
+
+Destroy a deleted collection or request for good, with its whole subtree -
+requests, and the examples they own. This is the hard cascade soft delete
+replaced, asked for deliberately; there is no undo for it.
+
+Unlike a restore, a purge is not limited to the cohort: a row an earlier delete
+left inside the subtree goes too, because a request under a removed collection
+is reachable by no read and restorable by nothing.
+
+**Response:** the entry that was purged, with `"purged": true`. Its
+`collections` / `requests` are the deleted row's own cohort, so they are a floor
+here rather than the whole: a purge that also swept up an earlier delete's rows
+destroyed more than they count. A `404` if the trash does not hold that id -
+which is also what stops a mistyped id from destroying a live collection.
 
 ## Request examples
 
@@ -2123,8 +2228,21 @@ diff bounds its buckets rather than dropping entries: a call that answered only
 with what it wrote would read as "applied the drift", and the part it did not
 apply is exactly the part somebody has to decide about.
 
-Four rules the payload cannot opt out of:
+Five rules the payload cannot opt out of:
 
+- **A `delete` here is permanent - it does not go to the [Trash](#trash)**
+  (issues #988, #1046). Every other delete in the engine is soft: the row is
+  stamped and restorable. A sync is not a person removing a request, it is a
+  *reconciliation* to a document, and the two differ in where the decision is
+  made - [`POST /specs/diff`](#post-specsdiff) reports every removal before
+  anything is written, the app renders them as ticks the user unticks one by
+  one, and `policy: "safe"` refuses deletions outright, so a deletion here is
+  one a caller stated after being shown it. Leaving those rows stamped instead
+  would put the operations a document no longer declares back in the trash on
+  every sync, where restoring one re-creates a request the document cannot
+  explain. The rows and the examples they own are removed in the sync's own
+  transaction. A caller that wants the deletions recoverable omits them from the
+  payload and issues `DELETE /requests/:id` per row, which is soft.
 - **The bound subtree is the boundary.** Every request an `update` or a `delete`
   names, and every collection a created request lands in, must be the collection
   being synced or one beneath it. Anything else is a `400` naming the item -
@@ -3611,9 +3729,15 @@ Compose a request without sending it: resolve `{{variables}}` and `inherit`
 auth engine-side and return the execute-ready payload that `POST /execute` and
 `POST /runs` accept unchanged (issue #226). Pure - no traffic, no run row -
 which is what lets a client (e.g. MCP's allowlist gate) inspect the *resolved*
-request before anything is sent. The execution endpoints never interpolate, so
-composing here and executing the result resolves everything exactly once; a
-payload that skips composition is sent byte-for-byte as supplied.
+request before anything is sent. Composition is still the only place a payload
+is composed; a payload that skips it is sent byte-for-byte as supplied. Since
+issue #1008 the execution endpoints are not silent past that point either: a
+name composition could not answer keeps its braces (issue #1009) instead of
+resolving to `""`, and both `POST /execute` and a scenario step resolve it once
+more, after the pre-request script and before the send, against whatever the
+script just wrote. A value composition already substituted is finished text
+and is never re-resolved - see [POST /execute](#post-execute) and
+[Scenario runs](#scenario-runs) for what that changes.
 
 **Request** - at least one of `requestId` / `request` is required:
 
@@ -3704,6 +3828,29 @@ the pre-request script runs, so `pm.request` reflects the real outgoing headers.
 If a non-interactive OAuth 2.0 token cannot be obtained, the engine still returns
 `200` but the body carries `statusCode: 0`, an `errorCode` of `AUTH_REQUIRED`
 (interactive sign-in needed) or `AUTH_FAILED`, and an `authErrorCode` hint.
+
+**A name compose could not answer is resolved once more, after the
+pre-request script and before the send** (issue #1008). Composition still runs
+first and is still the only place a payload is *composed* - what changed is
+that an unknown ordinary `{{name}}` keeps its braces at compose time instead of
+becoming `""` (issue #1009), so it survives to be resolved here against the
+variable scopes as the pre-request script left them. This is what makes the
+canonical imported auth pattern work: a pre-request script does
+`pm.environment.set("token", …)` and the same send's `Authorization: Bearer
+{{token}}` carries the fresh value, rather than the previous run's token or
+`""` on the first run. It resolves the same fields composition does - the URL,
+header names and values, body content, and the five strings a form field
+carries - by the same resolver and the same rules (scope precedence, nested
+resolution, cycles, the 8-level bound); a value composition already
+substituted is finished text and is not touched again. `{{data.column}}` is
+left alone here too - the data namespace is bound per iteration by whoever owns
+the row. A request skipped by `pm.execution.skipRequest()` resolves nothing,
+having nothing left to send. **`POST /compose`'s own output is unchanged** -
+a preview, a tab title, the unresolved-token painting and "Copy as cURL" still
+show compose-time resolution, so a preview can show `{{token}}` where the wire
+will actually carry the resolved value. **The LOAD path does not do this
+pass** - a load run never runs a pre-request script, so there is nothing for it
+to resolve against; see [Scenario load runs](#scenario-load-runs).
 
 **Request:**
 ```json
@@ -4572,16 +4719,29 @@ the same request does, and the two cannot drift apart.
 - **Cookies.** The environment's jar, unchanged - so a step that logs in leaves
   a session the next step sends.
 
-> **`{{variables}}` are resolved before the first send, not per step.** The plan
-> is composed once, so a value a script sets mid-run does **not** appear in a
-> later step's URL, headers or body. It reaches later steps through the script
-> API - `pm.environment.get(...)` in a pre-request script, which may then edit
-> `pm.request`. This is the price of resolving once, and resolving once is what
-> keeps a collection edited mid-run from changing the sequence underneath it.
+> **`{{variables}}` composition could answer are resolved once, before the
+> first send, not per step.** The plan is composed once, so a name that already
+> had a value when the run started is fixed for the whole run: a value a script
+> sets mid-run does **not** change what a *composed* `{{name}}` becomes in a
+> later step's URL, headers or body. This is the price of resolving once, and
+> resolving once is what keeps a collection edited mid-run from changing the
+> sequence underneath it.
 >
-> The two exceptions are the reserved namespaces below - `{{data.*}}` and the
-> `{{$vu}}` / `{{$iteration}}` identity - which composition deliberately leaves
-> alone so the runner can bind them per iteration.
+> **A name composition could not answer is a different story** (issue #1008).
+> Since #1009 that name keeps its braces instead of resolving to `""`, so each
+> step resolves it again, immediately before that step's own send, against the
+> scopes as every script up to and including that step's own pre-request script
+> left them - not just through `pm.environment.get(...)` and a `pm.request`
+> edit, though a script can still reach it that way too. That is what lets a
+> step early in the plan fetch a token and a later step's `Bearer {{token}}`
+> carry it with no script of its own. A step's own request holds one search per
+> field, and a plan where every name was already defined at run start pays that
+> and nothing else.
+>
+> The exceptions are the two reserved namespaces below, which neither pass
+> touches: `{{data.*}}` and the `{{$vu}}` / `{{$iteration}}` identity (issue
+> #994). Composition leaves both alone so the runner can bind them per
+> iteration, and neither is a name any script scope answers either.
 
 **Scripts** additionally read `pm.info.iteration` (0-based), `pm.info.vu`
 (1-based) and `pm.info.iterationCount`. See

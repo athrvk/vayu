@@ -662,9 +662,9 @@ declare const pm: {
 			 */
 			get(name: string): string | undefined;
 			/**
-			 * Whether the outgoing request carries that header, case-insensitively.
+			 * Whether the outgoing request carries that header, case-insensitively. With a second argument, whether it also carries that exact value - the comparison is strict, so a number never matches the header's string.
 			 */
-			has(name: string): boolean;
+			has(name: string, value?: string): boolean;
 			/**
 			 * Remove a header from the outgoing request, including one the Auth tab applied. Case-insensitive, and removing an absent header is a no-op.
 			 */
@@ -854,9 +854,9 @@ declare const pm: {
 			 */
 			get(name: string): string | undefined;
 			/**
-			 * Whether the response carries a header of that name, case-insensitively.
+			 * Whether the response carries a header of that name, case-insensitively. With a second argument, whether it also carries that exact value - the comparison is strict, so a number never matches the wire's string.
 			 */
-			has(name: string): boolean;
+			has(name: string, value?: string): boolean;
 		};
 		/**
 		 * Parse and return the response body as JSON.
@@ -969,7 +969,7 @@ declare const pm: {
 				 */
 				notFound: void;
 				/**
-				 * Assert that the response has a 2xx status code.
+				 * Assert that the response has status 200.
 				 * 
 				 * Written without parentheses - the property access is the assertion.
 				 * 
@@ -1034,24 +1034,39 @@ declare const pm: {
 			};
 			have: {
 				/**
-				 * Assert that a specific header exists in the response.
+				 * Assert what the response body is. A string must equal the body exactly, a regular expression must match it, and an object must deeply equal the parsed JSON.
+				 * 
+				 * Example:
+				 * pm.response.to.have.body('pong');
+				 * pm.response.to.have.body(/^\{"ok"/);
+				 * pm.response.to.have.body({ ok: true });
+				 */
+				body(expected: string | RegExp | object): void;
+				/**
+				 * Assert that a specific header exists in the response, and - with a second argument - that it holds that exact value. The value comparison is strict, so a number never matches the wire's string.
 				 * 
 				 * Example:
 				 * pm.response.to.have.header('Content-Type');
+				 * pm.response.to.have.header('Content-Type', 'application/json');
 				 */
-				header(name: string): void;
+				header(name: string, value?: string): void;
 				/**
-				 * Assert that the response has a valid JSON body.
+				 * Assert that the response has a valid JSON body; with a path, that the body holds that property; with a value, that the property deeply equals it.
+				 * 
+				 * Example:
+				 * pm.response.to.have.jsonBody();
+				 * pm.response.to.have.jsonBody('data.id');
+				 * pm.response.to.have.jsonBody('data.id', 42);
 				 */
-				jsonBody(): void;
+				jsonBody(path?: string, value?: unknown): void;
 				/**
-				 * Assert that the response has a specific HTTP status code.
+				 * Assert that the response has a specific HTTP status code, or - given a string - the reason phrase pm.response.reason() answers.
 				 * 
 				 * Example:
 				 * pm.response.to.have.status(200);
-				 * pm.response.to.have.status(201);
+				 * pm.response.to.have.status('OK');
 				 */
-				status(code: number): void;
+				status(code: number | string): void;
 			};
 		};
 		/**

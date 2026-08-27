@@ -15,7 +15,31 @@
     "$randomCompanyName",
     "$randomUrl",
     "$randomIP",
-    "$randomPassword"
+    "$randomPassword",
+    "$randomPhoneNumber",
+    "$randomCity",
+    "$randomStreetAddress",
+    "$randomCountry",
+    "$randomCountryCode",
+    "$randomDatePast",
+    "$randomDateFuture",
+    "$randomDateRecent",
+    "$randomWord",
+    "$randomWords",
+    "$randomLoremWord",
+    "$randomLoremWords",
+    "$randomLoremSentence",
+    "$randomLoremSentences",
+    "$randomLoremParagraph",
+    "$randomColor",
+    "$randomHexColor",
+    "$randomUserAgent",
+    "$randomDomainName",
+    "$randomAbbreviation",
+    "$randomPrice",
+    "$randomCurrencyCode",
+    "$randomProductName",
+    "$randomJobTitle"
   ],
   "cases": [
     {
@@ -117,6 +141,12 @@
       "scopes": {},
       "input": "id={{$notAGenerator}}",
       "expected": "id={{$notAGenerator}}"
+    },
+    {
+      "name": "a Postman generator outside the carried tier keeps its braces too (issue #1010)",
+      "scopes": {},
+      "input": "iban={{$randomBankAccountIban}}",
+      "expected": "iban={{$randomBankAccountIban}}"
     },
     {
       "name": "a data.* name keeps its braces - only a scenario iteration binds it (issue #402)",

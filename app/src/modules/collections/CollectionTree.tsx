@@ -364,9 +364,13 @@ export default function CollectionTree() {
 							: "Delete request?"
 					}
 					description={
+						// What the engine does is a soft delete (issue #988): the row is
+						// stamped and kept, and the Trash view (issue #989) is where it
+						// is restored from. So the copy says where it went rather than
+						// "cannot be undone", which stopped being true.
 						panel.deleteConfirm?.type === "collection"
-							? `"${panel.deleteConfirm?.name}" and all its requests will be permanently removed. This cannot be undone.`
-							: `"${panel.deleteConfirm?.name}" will be permanently removed. This cannot be undone.`
+							? `"${panel.deleteConfirm?.name}" and all its requests will be moved to the Trash, where they can be restored.`
+							: `"${panel.deleteConfirm?.name}" will be moved to the Trash, where it can be restored.`
 					}
 					onConfirm={panel.confirmDelete}
 					isDeleting={panel.isDeleteInFlight}

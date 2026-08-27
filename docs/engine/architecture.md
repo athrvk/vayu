@@ -457,13 +457,24 @@ ids, and returns the execute-ready payload that `POST /execute` and `POST
   `requestId` lays over the stored fields before resolution (how MCP's
   `start_load_run` overrides work).
 
-Composition is **pure** - nothing is sent, no run row is created - and the
-execution endpoints still interpolate **nothing**, so a payload is resolved
-exactly once and ad-hoc bodies with literal `{{...}}` are safe on the direct
-`/execute` / `/runs` path. Interpolation therefore always happens strictly
-*before* the pre-request script runs (a deliberate divergence from Postman's
-script-first order; a `pm.environment.set` cannot affect `{{var}}` in the same
-send's URL). An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+Composition is **pure** - nothing is sent, no run row is created - and it is
+still the only place a payload is *composed*: an execution endpoint never
+composes one, so a payload that skipped composition is sent as supplied.
+Interpolation still happens strictly *before* the pre-request script runs
+(#226's decision D1 stands - composition was not moved to after the script the
+way Postman orders it).
+
+What #1008 added is narrower than a second composition: a name composition
+could **not** answer keeps its braces (#1009) rather than becoming `""`, and
+`resolve_residual_tokens` resolves those - and only those - once more, after
+the pre-request script and before the send, so `pm.environment.set("token", …)`
+does reach `{{token}}` in the same send. A value composition substituted is
+finished text and is never revisited, which is what keeps "resolved once" true
+of every value that had an answer. The one thing this costs: an ad-hoc payload
+posted straight to `/execute` with a literal `{{...}}` in it is no longer
+inert - if the run's scopes define that name, the send now carries its value.
+A name nothing defines still goes out written as it stands, and the load path
+does not run this pass at all. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 
@@ -516,8 +527,12 @@ See [Database Schema](db-schema.md) for the full column list.
 2. **Pruning**: run history is trimmed per `maxRunsRetained` / `runRetentionDays`.
    Reconciliation runs first so an orphan is terminal, and therefore prunable, in the
    same startup.
+3. **Trash retention**: collections and requests deleted more than
+   `trashRetentionDays` ago are destroyed for good (issue #988) - the subtree,
+   its requests and their examples. Until then a delete is only a stamp, and
+   `POST /trash/:id/restore` puts it back.
 
-Both passes are best-effort: a failure is logged and never blocks startup.
+All three passes are best-effort: a failure is logged and never blocks startup.
 
 ## Request Flow
 

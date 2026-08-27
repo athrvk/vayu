@@ -1085,6 +1085,7 @@ void register_workspace_routes (RouteContext& ctx);
 void register_collection_routes (RouteContext& ctx);
 void register_request_routes (RouteContext& ctx);
 void register_request_example_routes (RouteContext& ctx);
+void register_trash_routes (RouteContext& ctx);
 void register_spec_routes (RouteContext& ctx);
 void register_spec_sync_routes (RouteContext& ctx);
 void register_spec_match_routes (RouteContext& ctx);

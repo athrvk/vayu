@@ -1261,10 +1261,11 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // stream, and a settings change between them would otherwise send
     // the two halves out by different routes.
     const auto transport = vayu::http::resolve_transport_policy (ctx.db);
-    const bool has_scripts = !send.pre_script.empty () || !send.post_script.empty ();
-    if (has_scripts) {
-        scopes = load_script_variable_scopes (ctx.db, send.run);
-    }
+    // Loaded whether or not this send carries a script, because the
+    // residual-token pass below reads them too (issue #1008): a `{{token}}`
+    // that resolves on the buffered path and stays literal here would be one
+    // send behaving two ways.
+    scopes = load_script_variable_scopes (ctx.db, send.run);
     if (!send.pre_script.empty ()) {
         vayu::runtime::ScriptEngine script_engine (send.script_config);
         auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (send.request);
@@ -1285,6 +1286,12 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         pre_script_result =
         execute_script (script_engine, send.pre_script, pre_ctx, "Pre-request");
     }
+
+    // The same pass the buffered send makes between its script and its send
+    // (issue #1008), here because this path runs the pre-request script itself
+    // rather than through `execute_exchange`: a `{{token}}` the script has just
+    // defined resolves before the stream opens.
+    resolve_residual_tokens (send.request, scopes);
 
     // `stream` and `transient` are mutually exclusive - `read_stream_flag`
     // refuses the pair with a 400 - so a streaming send always has a run row.

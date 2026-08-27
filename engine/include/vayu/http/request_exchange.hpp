@@ -262,6 +262,38 @@ struct ExchangeOutcome {
 };
 
 /**
+ * Resolve the `{{tokens}}` composition left behind, against the variable state
+ * a pre-request script has just written (issue #1008).
+ *
+ * Composition still happens first, and still exactly once: this pass only ever
+ * sees names composition could not answer, because since #1009 those keep their
+ * braces instead of resolving to `""`. A value composition *did* substitute is
+ * finished text here - the pass reads the request, not composition's decisions -
+ * so nothing is resolved twice.
+ *
+ * It exists because the canonical imported auth pattern is a pre-request script
+ * that fetches a token, `pm.environment.set("token", …)`, and a request that
+ * sends `Bearer {{token}}`. Composition ran before the script, so without this
+ * the send carried the *previous* run's token, or `""` on the first - silently,
+ * and against a lenient API successfully. Postman resolves after the script;
+ * this is the half of that order Vayu can adopt without moving composition
+ * (#226's decision D1 stands - see docs/app/variable-resolution.md).
+ *
+ * The same rules composition resolves by, because it is the same resolver: a
+ * name nothing answers stays literal, a value holding tokens of its own is
+ * followed under #1009's bound, and `{{data.column}}` is left alone - the data
+ * namespace is bound per iteration by whoever owns the row, and a column no row
+ * has has already been refused there.
+ *
+ * @param scopes Read as the scripts left them; the same layering
+ *               `pm.variables.get` reads a name through.
+ *
+ * A request holding no `{{` at all - nearly all of them, composition having
+ * resolved what it could - pays one search per field and nothing else.
+ */
+void resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& scopes);
+
+/**
  * Run one exchange: pre-request script, send, test script.
  *
  * @param engine     Reused across calls; contexts are pooled, so a scenario run

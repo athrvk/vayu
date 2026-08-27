@@ -23,13 +23,13 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | ------------------- | -------------------------------------------------------------------------------- |
 | Core                | `pm`, `pm.test(name, fn)` - in either script, each result naming the one that made it (see below), `pm.expect(value[, message])` - the message prefixes the failure, as in chai |
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
-| Response headers    | `pm.response.headers.get(name)`, `.has(name)` - case-insensitive              |
+| Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Streamed events     | `pm.response.events` (array of `{ event, id, data }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`set`/`unset`/`clear(url?)`, see below |
-| Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`, and the `pm.response.to.be.*` status classes below |
+| Response assertions | `pm.response.to.have.status(code \| reason)`, `.header(name[, value])`, `.body(expected)`, `.jsonBody(path?[, value])`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`), `.method`, `.headers`, `.body` |
-| Request headers     | `pm.request.headers.get/has(name)`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
+| Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
 | Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
@@ -355,7 +355,7 @@ raises a `RangeError` after 64 levels rather than hanging.
 Getters, so the paren-less form is the assertion:
 
 ```
-.to.be.ok          .to.be.success       (2xx)
+.to.be.ok          (200 only)           .to.be.success       (2xx)
 .to.be.info        (1xx)                .to.be.redirection   (3xx)
 .to.be.clientError (4xx)                .to.be.serverError   (5xx)
 .to.be.error       (4xx or 5xx)
@@ -365,6 +365,19 @@ Getters, so the paren-less form is the assertion:
 .to.be.json        (body parses as JSON)
 .to.be.withBody    (body is not empty)
 ```
+
+**`ok` narrowed to status 200 only (#998)** - it used to match any 2xx, the same
+class `success` still matches. A script that asserted `.ok` meaning "any 2xx"
+should assert `.success` instead; a script that meant "200 exactly" needed no
+change. Postman's own named statuses (`accepted`, `badRequest`, `notFound`, ...)
+match by reason phrase as well as by code; Vayu's stay code-only.
+
+**`have.body`'s substring form is gone (#998).** A string argument now has to
+equal the body exactly, not merely appear in it - `.to.have.body(sub)` written
+for "the body contains `sub`" should become `.to.have.body(new RegExp(sub))`.
+`.have.jsonBody(path, value)` also started comparing `value`, which it used to
+accept and ignore - a script relying on the old no-op should not pass an
+argument it does not want checked.
 
 **Every other name under `pm.response.to` throws a `TypeError`** naming the
 chain - a misspelling, or an idiom Vayu does not implement such as the negated
@@ -655,12 +668,18 @@ pm.request.body = JSON.stringify({ n: 2 });
   written to a body the transfer layer would ignore. Full table in
   [scripting.md](../engine/scripting.md#request-object-pmrequest). Reading a form body
   never rewrites it: an unchanged string means untouched.
-- **Setting a variable still does not re-render the URL.** `{{…}}` placeholders are resolved
-  at **compose time** (`POST /compose`, engine-side since #226), whereas the
-  pre-request script runs **later**, at execute. So `pm.environment.set("host", …)` with
-  a `{{host}}` in the URL affects subsequent runs only - assign `pm.request.url` to change
-  this one. Keeping this order (rather than adopting Postman's script-first one) was
-  #226's decision D1: today's semantics preserved, divergence documented.
+- **Setting a variable now re-renders whatever composition left unresolved.**
+  `{{…}}` placeholders are still resolved at **compose time** (`POST /compose`,
+  engine-side since #226) before the pre-request script runs - #226's decision
+  D1 stands, composition is not being moved. What changed (#1008) is that a
+  name composition could not answer keeps its braces (#1009) instead of
+  becoming `""`, and gets resolved a second time after the pre-request script
+  and before the send, against the scopes as the script left them. So
+  `pm.environment.set("host", …)` reaches a `{{host}}` in the same request's
+  URL, as long as nothing already defined `host` at compose time. A value
+  composition *did* substitute is finished text - that pass reads the request,
+  not composition's decisions, so it is not re-resolved - and `pm.request.url`
+  is still how a script changes a value composition already substituted.
 - **Load tests do not run pre-request scripts** at all, so this is a Send / Design Mode
   capability.
 
@@ -701,16 +720,6 @@ Three deliberate divergences from Postman:
 Bad input fails loudly: a name must be a non-empty string, a value a string, number or
 boolean (the set plain assignment already accepts), and calling a method detached from
 its object throws rather than answering as though the header were missing.
-
-### TODO (future)
-
-"Set a variable in a pre-request script and have it change the outgoing URL" still does not
-work. Resolution ownership *did* move into the engine (#226 - `POST /compose`
-interpolates), but interpolation deliberately stayed **before** the pre-request
-script (decision D1: today's semantics, not Postman's script-first order).
-Adopting Postman's order is now an engine-side re-ordering rather than an
-ownership change - possible, but a separate, deliberate compatibility decision
-with its own tests.
 
 ---
 
