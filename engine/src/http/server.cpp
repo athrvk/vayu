@@ -180,6 +180,7 @@ void Server::setup_routes () {
     routes::register_collection_routes (*route_ctx_);
     routes::register_request_routes (*route_ctx_);
     routes::register_request_example_routes (*route_ctx_);
+    routes::register_trash_routes (*route_ctx_);
     routes::register_spec_routes (*route_ctx_);
     routes::register_spec_sync_routes (*route_ctx_);
     routes::register_spec_match_routes (*route_ctx_);

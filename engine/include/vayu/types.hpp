@@ -982,6 +982,15 @@ struct Collection {
     int order          = 0;
     int64_t created_at = 0;
     int64_t updated_at = 0;
+    // When this collection was deleted, in Unix ms - NULL while it is live
+    // (issue #988). Every read surface filters on it, so a stamped row is gone
+    // to every caller that is not the trash itself; the value is also the
+    // *cohort key*, shared by every row one cascade stamped, which is what
+    // makes a restore put back exactly what that delete took and nothing a
+    // separate earlier delete removed. Nullable rather than 0-means-live for
+    // the reason `spec_operation` is: NULL is the absence, and a second
+    // spelling of it is one every reader would have to handle.
+    std::optional<int64_t> deleted_at;
 };
 
 struct Request {
@@ -1033,6 +1042,11 @@ struct Request {
     std::optional<std::string> spec_operation;
     int64_t created_at = 0;
     int64_t updated_at = 0;
+    // When this request was deleted, in Unix ms - NULL while it is live
+    // (issue #988). Same rule and same cohort meaning as `Collection::deleted_at`;
+    // a request stamped by its collection's cascade carries that cascade's
+    // timestamp, not one of its own.
+    std::optional<int64_t> deleted_at;
 };
 
 /**

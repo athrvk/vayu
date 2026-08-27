@@ -88,6 +88,54 @@ struct DesignResultOutcome {
 };
 
 /**
+ * @brief One thing the user deleted, as the trash lists it (issue #988).
+ *
+ * A *root* only: the row the user asked to delete, never the descendants that
+ * went with it. What a cascade took is the two counts, because that is the
+ * question a trash view asks ("restoring this brings back what?") and listing
+ * every stamped row would answer a different one.
+ */
+struct TrashEntry {
+    std::string id;
+    /// "collection" or "request" - the two tables the trash spans, so a client
+    /// knows which shape it is looking at without a second read.
+    std::string kind;
+    std::string name;
+    /// When the delete ran, in Unix ms. Also the cohort key - see
+    /// `Collection::deleted_at`.
+    int64_t deleted_at = 0;
+    /// The collection this row hung under: a collection's parent (absent at the
+    /// tree root), a request's owning collection (always present).
+    std::optional<std::string> parent_id;
+    /// Descendants *this delete* took with it - the cohort, and therefore
+    /// exactly what a restore puts back. A purge may take more (a row an
+    /// earlier delete left inside the same subtree), which is the one place
+    /// these counts are a floor rather than the whole. Both 0 for a request.
+    int64_t collections = 0;
+    int64_t requests    = 0;
+};
+
+/// What a restore or a purge acted on - the entry as it was, plus whether the
+/// restore had to re-parent it (issue #988).
+struct TrashOutcome {
+    TrashEntry entry;
+    /// True when the restored collection's parent was gone or itself deleted,
+    /// so the row came back at the tree root instead. Always false for a purge.
+    bool reparented = false;
+};
+
+/// Why a restore did not happen. `NotFound` is a 404 - nothing in the trash
+/// carries that id; `OwnerGone` is a 409 - a request whose collection is itself
+/// deleted or missing, which has no root to come back to.
+enum class RestoreRefusal { NotFound, OwnerGone };
+
+/// A refused restore, as the route reports it (issue #988).
+struct RestoreFailure {
+    RestoreRefusal reason = RestoreRefusal::NotFound;
+    std::string message;
+};
+
+/**
  * Thrown by `apply_reorder` when a row it was told to write is not stored at
  * commit time. The batch is rolled back whole, and the row stays deleted.
  *
@@ -226,16 +274,72 @@ class Database {
 
     // Project Management
     void create_collection (const Collection& c);
+    /// Live collections only - a deleted one is gone to every reader but the
+    /// trash (issue #988).
     std::vector<Collection> get_collections ();
+    /// Live only, like `get_collections` - a deleted row reads as absent, which
+    /// is what turns every by-id route into its own 404 (issue #988).
     std::optional<Collection> get_collection (const std::string& id);
+    /// Stamps the collection and its whole subtree as deleted rather than
+    /// removing them (issue #988). `GET /trash` lists it, restore puts it back
+    /// and purge is what finally destroys it.
     void delete_collection (const std::string& id);
 
     void save_request (const Request& r);
+    /// Live only - see `get_collection` (issue #988).
     std::optional<Request> get_request (const std::string& id);
+    /// Live only, and empty for a deleted collection (issue #988).
     std::vector<Request> get_requests_in_collection (const std::string& collection_id);
-    /// Cascades to the request's examples - see the definition for why they
-    /// cannot be left behind.
+    /// Stamps the request as deleted (issue #988). Its examples stay on the
+    /// row - nothing can read them while the request is stamped, and a purge
+    /// takes them with it.
     void delete_request (const std::string& id);
+
+    // Trash - what soft delete left behind (issue #988)
+
+    /// Every deleted root, newest first. A root is a stamped row whose owner is
+    /// *not* stamped: the thing the user deleted, never what its cascade took.
+    std::vector<TrashEntry> get_trash ();
+
+    /**
+     * @brief Put a deleted row, and everything its delete took with it, back.
+     *
+     * Restores the *cohort*: the stamped subtree rows carrying this row's own
+     * `deleted_at`. A row deleted separately and earlier keeps its stamp, so
+     * restoring a collection cannot resurrect a request the user deleted before
+     * it - it becomes a trash root of its own again instead.
+     *
+     * A collection whose parent is gone or itself deleted comes back at the tree
+     * root (`parent_id` cleared) - the rule the issue names, and the only place
+     * a restore rewrites anything but the stamp.
+     */
+    std::expected<TrashOutcome, RestoreFailure> restore_deleted (const std::string& id);
+
+    /**
+     * @brief Destroy a deleted row for good - the hard cascade soft delete
+     *        replaced.
+     *
+     * Takes the whole subtree, stamp or no stamp, because a row left under a
+     * removed collection is reachable by no read and restorable by nothing.
+     * `nullopt` when no *deleted* row carries that id: purging a live row is
+     * not something this endpoint can be asked for by accident.
+     */
+    std::optional<TrashOutcome> purge_deleted (const std::string& id);
+
+    /**
+     * @brief Purge everything deleted longer ago than @p retention_days.
+     *
+     * @param retention_days 0 keeps the trash forever - the same reading
+     *        `maxRunsRetained` and `runRetentionDays` give 0.
+     * @param now the caller's clock in Unix ms, so a test can state the age it
+     *        is asking about rather than sleep for it.
+     * @return how many roots were purged.
+     */
+    int64_t purge_expired_trash (int retention_days, int64_t now);
+
+    /// `purge_expired_trash` with the configured `trashRetentionDays` and the
+    /// system clock - what startup runs (issue #988).
+    int64_t purge_expired_trash_configured ();
 
     // Saved example responses, owned by a request (issue #481). Every read is
     // by request id or by example id; there is no all-examples query, because
@@ -747,6 +851,69 @@ class Database {
      * function. The caller must already hold the DB mutex.
      */
     void remove_run_cascade_locked (const std::string& id);
+
+    /**
+     * @brief Every collection id in @p root_id's subtree, @p root_id first.
+     *
+     * The single definition of "the subtree", shared by the delete cascade, the
+     * restore, the purge and the trash's counts, so all four agree about what
+     * one collection owns. Stamped and live rows alike: a walk that skipped
+     * deleted rows could not find what a restore has to put back.
+     *
+     * The visited set is load-bearing rather than defensive - a cycle in
+     * `parent_id` written before write-time validation existed would otherwise
+     * loop forever while the global DB mutex is held (issue #79). The caller
+     * must already hold that mutex.
+     */
+    std::vector<std::string> collection_subtree_locked (const std::string& root_id);
+
+    /**
+     * @brief Destroy a collection subtree or a single request outright -
+     *        examples, requests, then collections, deepest first.
+     *
+     * The hard cascade soft delete replaced (issue #988), kept as the one
+     * definition purge and retention both reach for. The caller must already
+     * hold the DB mutex.
+     */
+    void purge_collection_locked (const std::string& id);
+    void purge_request_locked (const std::string& id);
+
+    /**
+     * @brief The trash entry for one deleted row, or nothing when @p id names
+     *        no *deleted* row.
+     *
+     * By id rather than by root, because restore and purge both take an id and
+     * a row a cascade took is not a root - so answering only about roots would
+     * make the re-parent rule unreachable and "restore this one request" a 404.
+     * The listing filters roots out of *its* answer; these three still agree
+     * about what an entry says. The caller must already hold the DB mutex.
+     */
+    std::optional<TrashEntry> trash_entry_locked (const std::string& id);
+
+    /**
+     * @brief Whether the collection @p owner_id names is missing or itself
+     *        deleted - the question both halves of a restore ask about the row
+     *        they are putting back.
+     *
+     * An empty optional is the *tree root*, which is not an absent owner: a
+     * collection that sits at the top has nothing above it by design. The
+     * caller must already hold the DB mutex.
+     */
+    bool owner_is_absent_locked (const std::optional<std::string>& owner_id);
+
+    /**
+     * @brief The two halves of `restore_deleted`, split by what a row can come
+     *        back to: a request needs a live collection and refuses without
+     *        one, a collection re-parents to the tree root instead.
+     *
+     * Named steps rather than one function with both shapes inside it (#1033's
+     * rule, and what `readability-function-cognitive-complexity` reports).
+     * Both take an entry `trash_entry_locked` already proved deleted, and both
+     * require the DB mutex.
+     */
+    std::expected<TrashOutcome, RestoreFailure> restore_request_locked (
+    const TrashEntry& entry);
+    TrashOutcome restore_collection_locked (const TrashEntry& entry);
 
     /**
      * @brief Clear `is_active` on every environment except @p keep_id.

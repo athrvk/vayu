@@ -143,6 +143,7 @@ Stores folder/group hierarchy for requests.
 | `order`              | INTEGER | Sort order within parent; default 0          |
 | `created_at`         | INTEGER | Unix ms                                      |
 | `updated_at`         | INTEGER | Unix ms                                      |
+| `deleted_at`         | INTEGER | Unix ms; NULL while the collection is live (issue #988) |
 
 **data_schema** - which columns this collection's data files are expected to
 carry, so `{{data.column}}` and `pm.iterationData` can be checked before a run
@@ -252,6 +253,7 @@ Stores individual HTTP request definitions.
 | `spec_operation`      | TEXT    | JSON: which spec operation this is; NULL when none   |
 | `created_at`          | INTEGER | Unix ms                                              |
 | `updated_at`          | INTEGER | Unix ms                                              |
+| `deleted_at`          | INTEGER | Unix ms; NULL while the request is live (issue #988) |
 
 **params / headers** - stored as a JSON array of objects:
 ```json

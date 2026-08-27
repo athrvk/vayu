@@ -504,11 +504,19 @@ TEST_F (ExamplesRouteTest, DeletingTheRequestDeletesItsExamples) {
     routes::delete_request_example_response (*db_, "req_1", tombstoned);
     ASSERT_EQ (db_->get_suppressed_request_examples ("req_1").size (), 1u);
 
+    // Deleting a request is soft since issue #988, so the examples go with it in
+    // the sense that matters: every route reaching them checks the owner first,
+    // and the owner is unreadable. They are removed for good by the purge.
     db_->delete_request ("req_1");
+
+    EXPECT_EQ (routes::list_request_examples_response (*db_, "req_1").first, 404);
+    // The sibling request's examples are untouched.
+    EXPECT_TRUE (db_->get_request_example (theirs).has_value ());
+
+    db_->purge_deleted ("req_1");
 
     EXPECT_FALSE (db_->get_request_example (mine).has_value ());
     EXPECT_TRUE (db_->get_suppressed_request_examples ("req_1").empty ());
-    // The sibling request's examples are untouched.
     EXPECT_TRUE (db_->get_request_example (theirs).has_value ());
 }
 
@@ -518,6 +526,13 @@ TEST_F (ExamplesRouteTest, DeletingTheCollectionDeletesEveryDescendantsExamples)
     const std::string b = create_example ("req_2", json{ { "name", "b" } });
 
     db_->delete_collection ("col_1");
+
+    // Unreachable while the collection is in the trash (issue #988) - both
+    // requests answer 404 through the owner check - and gone once it is purged.
+    EXPECT_EQ (routes::list_request_examples_response (*db_, "req_1").first, 404);
+    EXPECT_EQ (routes::list_request_examples_response (*db_, "req_2").first, 404);
+
+    db_->purge_deleted ("col_1");
 
     EXPECT_FALSE (db_->get_request_example (a).has_value ());
     EXPECT_FALSE (db_->get_request_example (b).has_value ());

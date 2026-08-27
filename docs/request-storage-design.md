@@ -127,10 +127,61 @@ a mock server serves the first example of a matched request.
 Reached through `GET /requests/:id/examples`, written today only by import
 (nested on the request item of `POST /import/apply`, so the whole tree lands in
 one transaction), and shown read-only in the request builder's **Examples** tab.
-Deleting the request - or the collection above it - deletes its examples in the
-same transaction.
+Deleting the request - or the collection above it - takes its examples with it,
+in the sense the next section describes: they stay on the row while the request
+is in the trash, unreachable because every read of them checks the owner first,
+and a purge removes them in the same transaction as the request.
 
-### 5. Response Viewer
+### 5. The deletion lifecycle (issue #988)
+
+**Deleting a collection or a request does not remove it.** `DELETE
+/collections/:id` and `DELETE /requests/:id` stamp `deleted_at` on the row - and,
+for a collection, on its whole subtree in one transaction - and every read
+surface filters stamped rows out. To the sidebar, an export, an MCP tool or a
+scenario plan, the row is gone; only `GET /trash` can still see it.
+
+A row leaves that state one of three ways:
+
+| | What happens |
+|---|---|
+| `POST /trash/:id/restore` | The stamp is cleared and the row is back exactly as it was - `order`, `parent_id` and every field untouched. |
+| `DELETE /trash/:id` | The old hard cascade: the subtree, its requests and their examples are removed for good. |
+| Retention | The same purge, run at startup for anything deleted more than `trashRetentionDays` ago (default 30; `0` keeps the trash forever). |
+
+Two rules make a restore mean something precise:
+
+- **The cohort.** One delete stamps its subtree with one timestamp, and a
+  restore clears exactly the rows carrying the timestamp of the row it was
+  given. A request the user deleted separately *before* its collection keeps its
+  own stamp, so restoring the collection leaves it in the trash - as a trash
+  root of its own, now that its collection is live again.
+- **Re-parenting.** A restored collection whose parent is gone or itself deleted
+  comes back at the tree root. A request cannot do this - `collection_id` is
+  required - so restoring one whose collection is in the trash is refused with a
+  `409` that names the collection to restore first.
+
+A purge is deliberately *not* limited to the cohort: it takes the whole subtree,
+because a request left under a removed collection would be reachable by no read
+and restorable by nothing.
+
+One thing a soft delete deliberately does not release: a stamped collection
+still binds its OpenAPI document, so the orphan sweep leaves that document alone
+until the collection is purged. Reclaiming it earlier would restore a binding
+that points at nothing.
+
+**One delete path stays hard, by decision** (issue #1046): the requests a
+`POST /specs/sync` removes because the re-fetched document no longer declares
+their operation. A sync is a reconciliation to a document rather than a person
+removing a request, and it is the one delete whose removals are shown before
+they happen - `POST /specs/diff` reports every one, the app renders them as
+ticks the user can untick, and `policy: "safe"` declines deletions altogether.
+Stamping them instead would fill the Trash with operations a document dropped,
+where restoring one puts back a request the current document cannot explain. A
+caller that wants those rows recoverable leaves them out of the sync payload and
+deletes them with `DELETE /requests/:id`, which is soft like every other delete
+a person makes.
+
+### 6. Response Viewer
 
 The Response Viewer shows the **RESOLVED** request in the "Raw Request" tab:
 - Shows exactly what was sent over the wire
