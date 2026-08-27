@@ -42,7 +42,15 @@ vi.mock("../OAuth2LoadTestGuard", () => ({
 let configEntries: { key: string; value: string }[] = [];
 vi.mock("@/queries", () => ({
 	useConfigQuery: () => ({ data: { entries: configEntries } }),
+	// The data-file picker's column audit resolves the contract in scope from
+	// the collection chain (issue #993); with no collections there is nothing to
+	// audit against, which is what every case here wants except the one that
+	// declares its own.
+	useCollectionsQuery: () => ({ data: collectionRows }),
 }));
+
+/** Collections the contract walk sees. Mutable, like `configEntries` above. */
+let collectionRows: { id: string; name: string; dataSchema?: { columns: string[] } }[] = [];
 
 function open(props: Partial<React.ComponentProps<typeof LoadTestConfigDialog>> = {}) {
 	const onStart = vi.fn();
@@ -73,6 +81,7 @@ beforeEach(() => {
 	cleanup();
 	localStorage.clear();
 	configEntries = [];
+	collectionRows = [];
 	// The ceilings store is module-level and persists across tests in this
 	// file; clearing localStorage does not roll it back.
 	useClientSettingsStore.getState().setLoadTestCeilings(DEFAULT_LOAD_TEST_CEILINGS);
@@ -183,6 +192,62 @@ describe("payload", () => {
 		expect(config.success_sample_period).toBeTypeOf("number");
 		expect(config.slow_threshold_ms).toBeTypeOf("number");
 		expect(config.save_timing_breakdown).toBeTypeOf("boolean");
+	});
+});
+
+describe("data rows (issue #993)", () => {
+	/** Pick @p file through the picker's hidden input, as a user would. */
+	const pick = (file: File) => {
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [file] } });
+	};
+
+	it("offers a data file, described as a load run binds one", () => {
+		open();
+		// The load reading - a row per iteration off a cursor every virtual user
+		// shares, wrapping when the set runs out - and not design mode's "one
+		// iteration per row", which would be wrong for every run this dialog
+		// starts.
+		expect(screen.getByText(/cursor every virtual user shares/i)).toBeInTheDocument();
+		expect(screen.queryByText(/one iteration per row/i)).not.toBeInTheDocument();
+	});
+
+	it("sends the parsed rows on the payload", async () => {
+		const { onStart } = open();
+		pick(new File(["id\na\nb"], "rows.csv"));
+		await screen.findByText(/rows\.csv/);
+
+		expect(started(onStart).data).toEqual([{ id: "a" }, { id: "b" }]);
+	});
+
+	it("sends no `data` key at all when no file was picked", () => {
+		// Absent rather than `[]`: the engine refuses a present-but-empty array
+		// rather than running it, so an empty array would turn "no data set"
+		// into a 400.
+		const { onStart } = open();
+		expect(started(onStart)).not.toHaveProperty("data");
+	});
+
+	it("refuses to start while the picked file cannot be read", async () => {
+		const { onStart } = open();
+		// A ragged row is one of the parser's own refusals; it leaves no
+		// selection behind, so starting would send the request with its
+		// `{{data.*}}` tokens written as they stand.
+		pick(new File(["id,name\na"], "ragged.csv"));
+		await screen.findByText(/could not read the data file/i);
+
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+		expect(onStart).not.toHaveBeenCalled();
+	});
+
+	it("audits the file against the contract the collection chain declares", async () => {
+		collectionRows = [{ id: "col_1", name: "Orders", dataSchema: { columns: ["id", "plan"] } }];
+		open({ collectionId: "col_1" });
+		pick(new File(["id\na"], "rows.csv"));
+
+		// A missing column is a warning here and a loud engine-side failure at
+		// bind time - hearing about it before the run is the whole point.
+		expect(await screen.findByText(/plan/)).toBeInTheDocument();
 	});
 });
 

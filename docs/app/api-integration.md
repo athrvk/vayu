@@ -595,6 +595,13 @@ run. The engine resolves the whole plan before answering, so an empty
 collection, a step that will not compose, or a plan over `maxScenarioSteps` is a
 `400` with **no run row created** - a failed start leaves nothing to clean up.
 
+`startLoadTest` takes rows too, as a **top-level `data`** array (issue #993):
+the load dialog's file picker parses the file and sends the same array it
+previewed, and the engine binds one row per request the run sends. Omitted when
+no file was picked - a present-but-empty array is refused engine-side, so
+"no data set" has to be the absent key rather than `[]` - and never sent beside
+a `scenario` block, whose rows are `scenario.data` and bind per iteration.
+
 `failOnSchemaError` rides the design-mode payload beside `environmentId`, from
 the dialog's **Fail steps on schema errors** switch (issue #720), and is
 **omitted when off**: the engine defaults it to false, so absent already says
@@ -1175,7 +1182,10 @@ await apiService.startLoadTest({
   comment: "Stress test",
   // Optional pass/fail budgets. Omitted entirely when none were declared - the
   // engine rejects an empty object rather than starting an unjudged run.
-  thresholds: { latencyP99Ms: 50, maxErrorRatePct: 0.1 }
+  thresholds: { latencyP99Ms: 50, maxErrorRatePct: 0.1 },
+  // Optional data rows, bound one per request sent. Omitted when the dialog's
+  // picker holds no file.
+  data: [{ id: "1" }, { id: "2" }]
 });
 ```
 

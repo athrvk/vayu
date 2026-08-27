@@ -164,7 +164,7 @@ collect_requests (vayu::db::Database& db, const std::string& root_id, bool recur
 }
 
 /**
- * The `data` rows a run binds.
+ * The `data` rows a *scenario* binds, through the shared reader below.
  *
  * They reach the run's worker (as `pm.iterationData`) but never the plan or the
  * snapshot - the app owns parsing the file they came from, and only their count
@@ -175,49 +175,10 @@ std::optional<std::string> read_scenario_data (const nlohmann::json& data,
 const ScenarioLimits& limits,
 ScenarioRequest& out,
 std::vector<nlohmann::json>& rows_out) {
-
-    if (!data.is_array ()) {
-        return "'scenario.data' must be an array of objects (got " +
-        std::string (data.type_name ()) + ")";
+    if (auto reason = read_data_rows (data, limits, "scenario.data", rows_out)) {
+        return reason;
     }
-    if (data.empty ()) {
-        return "'scenario.data' is present but empty. A data set that "
-               "binds "
-               "nothing is a mistake, not an empty run - omit the field to "
-               "run without one.";
-    }
-    if (data.size () > limits.max_data_rows) {
-        return "'scenario.data' has " + std::to_string (data.size ()) +
-        " rows, over the limit of " + std::to_string (limits.max_data_rows) +
-        " (raise the 'maxScenarioDataRows' setting to allow more)";
-    }
-    rows_out.reserve (data.size ());
-    // Accumulated row by row rather than dumping the whole array: an
-    // oversized set is refused as soon as it crosses the bound, so the
-    // check never materializes a second copy of a payload that is already
-    // too big to want one.
-    size_t data_bytes = 0;
-    for (size_t i = 0; i < data.size (); ++i) {
-        if (!data[i].is_object ()) {
-            // A rejected set leaves no rows behind - never the ones before
-            // the bad one, which would be a partial data set.
-            rows_out.clear ();
-            return "'scenario.data' row " + std::to_string (i) +
-            " must be an object of name/value pairs (got " +
-            std::string (data[i].type_name ()) + ")";
-        }
-        data_bytes += data[i].dump ().size ();
-        if (data_bytes > limits.max_data_bytes) {
-            rows_out.clear ();
-            return "'scenario.data' is larger than the limit of " +
-            std::to_string (limits.max_data_bytes) +
-            " bytes (raise the 'maxScenarioDataBytes' setting to allow "
-            "more). The row count is within its own limit - a data set can "
-            "exceed this one with few but large rows.";
-        }
-        rows_out.push_back (data[i]);
-    }
-    out.data_row_count = data.size ();
+    out.data_row_count = rows_out.size ();
     return std::nullopt;
 }
 
@@ -503,6 +464,55 @@ ScenarioPlan& plan) {
 
 } // namespace
 
+std::optional<std::string> read_data_rows (const nlohmann::json& data,
+const ScenarioLimits& limits,
+std::string_view field,
+std::vector<nlohmann::json>& rows_out) {
+    const std::string name = "'" + std::string (field) + "'";
+    if (!data.is_array ()) {
+        return name + " must be an array of objects (got " +
+        std::string (data.type_name ()) + ")";
+    }
+    if (data.empty ()) {
+        return name +
+        " is present but empty. A data set that binds "
+        "nothing is a mistake, not an empty run - omit the field to "
+        "run without one.";
+    }
+    if (data.size () > limits.max_data_rows) {
+        return name + " has " + std::to_string (data.size ()) +
+        " rows, over the limit of " + std::to_string (limits.max_data_rows) +
+        " (raise the 'maxScenarioDataRows' setting to allow more)";
+    }
+    rows_out.reserve (data.size ());
+    // Accumulated row by row rather than dumping the whole array: an
+    // oversized set is refused as soon as it crosses the bound, so the
+    // check never materializes a second copy of a payload that is already
+    // too big to want one.
+    size_t data_bytes = 0;
+    for (size_t i = 0; i < data.size (); ++i) {
+        if (!data[i].is_object ()) {
+            // A rejected set leaves no rows behind - never the ones before
+            // the bad one, which would be a partial data set.
+            rows_out.clear ();
+            return name + " row " + std::to_string (i) +
+            " must be an object of name/value pairs (got " +
+            std::string (data[i].type_name ()) + ")";
+        }
+        data_bytes += data[i].dump ().size ();
+        if (data_bytes > limits.max_data_bytes) {
+            rows_out.clear ();
+            return name + " is larger than the limit of " +
+            std::to_string (limits.max_data_bytes) +
+            " bytes (raise the 'maxScenarioDataBytes' setting to allow "
+            "more). The row count is within its own limit - a data set can "
+            "exceed this one with few but large rows.";
+        }
+        rows_out.push_back (data[i]);
+    }
+    return std::nullopt;
+}
+
 ScenarioResolution resolve_scenario (vayu::db::Database& db,
 const nlohmann::json& scenario,
 const ScenarioResolveOptions& options) {
@@ -561,15 +571,17 @@ CoverageTally make_coverage_tally (const ScenarioExecution& execution) {
     return CoverageTally (execution.spec.declared_operations, step_operations);
 }
 
-DataBindResult bind_step_auth (vayu::Request& request,
+DataBindResult bind_step_row (vayu::Request& request,
 const ScenarioStep& step,
 const nlohmann::json& row,
 size_t row_index) {
-    // The join-then-apply order lives in one place, shared with the single
-    // send that binds credentials once (issue #642); this is the per-iteration
-    // caller of it. The step's auth is copied by the callee, which is what a
-    // plan shared by every virtual user of the run requires.
-    return bind_auth_row (request, step.auth, step.auth_template, row, row_index);
+    // The fields-then-credentials order lives in one place, shared with the
+    // single-request load path that binds its own templates the same way
+    // (issue #993); this is the step-shaped caller of it. The step's auth is
+    // copied by the callee, which is what a plan shared by every virtual user
+    // of the run requires.
+    return bind_iteration_row (
+    request, step.data_template, step.auth, step.auth_template, row, row_index);
 }
 
 nlohmann::json build_scenario_manifest (const ScenarioRequest& request,

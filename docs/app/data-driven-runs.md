@@ -1,14 +1,28 @@
 ---
 description: >-
-  Drive a Vayu collection run from a CSV, TSV, JSON or JSONL file - one row per iteration, exposed as {{data.column}} and pm.iterationData.
+  Drive a Vayu run from a CSV, TSV, JSON or JSONL file - a row per iteration, exposed as {{data.column}} and pm.iterationData, for a collection run or a single request's load test.
 ---
 
 # Data-Driven Runs
 
-A collection run can be driven by a file: one row per iteration, its columns
-readable from the requests themselves and from scripts. Pick the file in the
-**Run collection** dialog, beside Iterations and Load test - or declare it once
-on the collection's **Data** tab and have the dialog pre-fill it.
+A run can be driven by a file: a row per iteration, its columns readable from
+the requests themselves and from scripts.
+
+Two runs take one:
+
+- **A collection run.** Pick the file in the **Run collection** dialog, beside
+  Iterations and Load test - or declare it once on the collection's **Data** tab
+  and have the dialog pre-fill it.
+- **A single request's load test** (issue #993). Pick the file in the **Run a
+  load test** dialog, under the profile fields. The request needs no collection
+  wrapper: `N` users each sending the same request with different data is the
+  canonical load shape, and until this it was expressible only by wrapping the
+  request in a one-step collection.
+
+What differs between them is only *which* row a given request binds - see
+[How many iterations, and which row](#how-many-iterations-and-which-row). The
+file, the refusals, the `{{data.column}}` namespace and `pm.iterationData` are
+the same on both.
 
 This page is the file's contract - what Vayu accepts, what it refuses, and what
 a value becomes once it is bound.
@@ -209,6 +223,14 @@ the rows then repeat for as long as the duration lasts. Once they wrap, users do
 share rows - size the file to the concurrency if that matters. The row count
 says nothing about how long the run is.
 
+**A single request's load test** is that same cursor with one request where a
+collection run has a sequence: one row is claimed per request sent, in turn,
+wrapping when the set runs out. So a 3-row file under a 6-request run sends rows
+0, 1, 2, 0, 1, 2 - the file bounds *which values* the run sends and never how
+many requests it sends, which is the load profile's job. Iterations is not
+defaulted from the row count here, unlike a collection run: a load profile
+already says how long the run is.
+
 ## Declaring the contract: the Data tab
 
 A file picked in the Run dialog is parsed, sent and forgotten, so at the moment
@@ -356,7 +378,7 @@ itself is stored like any other design send, bound values included - see
 ## What is stored
 
 **The row set is not.** The rows ride the run payload and are dropped when the
-dialog closes. They are user data of unknown sensitivity - credentials,
+dialog closes - both dialogs, and both shapes of run. They are user data of unknown sensitivity - credentials,
 customer records - so neither the app nor the engine keeps the set, and the file
 itself is read fresh every time - whether you pick it or the dialog pre-fills it
 from the declared path. Declaring a contract does not change this: what is saved

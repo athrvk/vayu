@@ -803,8 +803,8 @@ TEST_F (ScenarioPlanTest, BasicAuthCredentialsBindPerIterationRatherThanEncoding
     << "auth was applied at plan time, which is what hid the token";
 
     vayu::Request request = step.request;
-    const auto bound      = vayu::core::bind_step_auth (
-    request, step, resolved.data_rows[0], /*row_index=*/0);
+    const auto bound =
+    vayu::core::bind_step_row (request, step, resolved.data_rows[0], /*row_index=*/0);
     ASSERT_TRUE (bound.ok) << bound.error;
     EXPECT_EQ (authorization_of (request),
     "Basic " + vayu::utils::base64_encode ("alice:s3cret"));
@@ -830,7 +830,7 @@ TEST_F (ScenarioPlanTest, EachRowGetsItsOwnCredentialsFromTheSamePlan) {
     for (size_t row = 0; row < resolved.data_rows.size (); ++row) {
         vayu::Request request = step.request;
         const auto bound =
-        vayu::core::bind_step_auth (request, step, resolved.data_rows[row], row);
+        vayu::core::bind_step_row (request, step, resolved.data_rows[row], row);
         ASSERT_TRUE (bound.ok) << bound.error;
         sent.push_back (authorization_of (request));
     }
@@ -857,7 +857,7 @@ TEST_F (ScenarioPlanTest, BearerAndApiKeyCredentialsBindByContract) {
         const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
         EXPECT_TRUE (resolved.ok) << resolved.error;
         vayu::Request request = resolved.plan.steps[0].request;
-        const auto result     = vayu::core::bind_step_auth (
+        const auto result     = vayu::core::bind_step_row (
         request, resolved.plan.steps[0], resolved.data_rows[0], /*row_index=*/0);
         EXPECT_TRUE (result.ok) << result.error;
         return request;
@@ -896,7 +896,7 @@ TEST_F (ScenarioPlanTest, AMissingColumnInACredentialEndsTheStepByName) {
     ASSERT_TRUE (resolved.ok) << resolved.error;
 
     vayu::Request request = resolved.plan.steps[0].request;
-    const auto bound      = vayu::core::bind_step_auth (
+    const auto bound      = vayu::core::bind_step_row (
     request, resolved.plan.steps[0], resolved.data_rows[0], /*row_index=*/0);
     EXPECT_FALSE (bound.ok);
     EXPECT_NE (bound.error.find ("{{data.missing}}"), std::string::npos)
@@ -970,10 +970,10 @@ TEST_F (ScenarioPlanTest, CredentialsWithoutADataTokenAreStillResolvedIntoThePla
     EXPECT_EQ (authorization_of (step.request),
     "Basic " + vayu::utils::base64_encode ("alice:s3cret"));
 
-    // And `bind_step_auth` is the no-op the executors call unconditionally.
+    // And `bind_step_row` is the no-op the executors call unconditionally.
     vayu::Request request = step.request;
-    const auto bound      = vayu::core::bind_step_auth (
-    request, step, resolved.data_rows[0], /*row_index=*/0);
+    const auto bound =
+    vayu::core::bind_step_row (request, step, resolved.data_rows[0], /*row_index=*/0);
     EXPECT_TRUE (bound.ok) << bound.error;
     EXPECT_EQ (authorization_of (request), authorization_of (step.request));
 }
@@ -995,7 +995,7 @@ TEST_F (ScenarioPlanTest, AUserSuppliedAuthorizationHeaderStillWinsOverBoundCred
     ASSERT_TRUE (resolved.ok) << resolved.error;
 
     vayu::Request request = resolved.plan.steps[0].request;
-    const auto bound      = vayu::core::bind_step_auth (
+    const auto bound      = vayu::core::bind_step_row (
     request, resolved.plan.steps[0], resolved.data_rows[0], /*row_index=*/0);
     ASSERT_TRUE (bound.ok) << bound.error;
     EXPECT_EQ (authorization_of (request), "Bearer mine");

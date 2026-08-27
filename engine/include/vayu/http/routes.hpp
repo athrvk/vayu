@@ -958,6 +958,46 @@ struct SendRowAuth {
 SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row);
 
 /**
+ * The outcome of reading `POST /runs`' top-level `data` rows (issue #993).
+ *
+ * `set` is null when the payload carried none - the ordinary load run, which
+ * must stay distinguishable from a run whose rows happen to be empty, since a
+ * present-but-empty array is refused rather than run.
+ *
+ * `ok == false` carries the 400 the route answers with. Every rejection is loud
+ * for the reason the whole `{{data.column}}` namespace exists: a token says the
+ * value came from the file, so a set the engine could not read must never
+ * become a run that sends the token as it stands.
+ */
+struct LoadDataRows {
+    bool ok = true;
+    std::string error;
+    std::unique_ptr<vayu::core::LoadDataSet> set;
+};
+
+/**
+ * Read the `data` rows off a `POST /runs` payload, bounded by @p limits (the
+ * `maxScenarioDataRows` / `maxScenarioDataBytes` settings - the same bounds a
+ * collection run's set is held to).
+ *
+ * Two things at once, because both must happen before any run row exists: the
+ * rows are validated through `core::read_data_rows`, and the credentials are
+ * planned through `plan_send_row_auth` - the build is what would otherwise
+ * base64 a `{{data.column}}` out of reach, so how it resolves auth has to be
+ * decided before it runs.
+ *
+ * @p is_scenario refuses the field by name: a collection run states its rows as
+ * `scenario.data`, where they are bound per iteration and shared by every step,
+ * and a payload carrying both would have one of the two silently dropped.
+ *
+ * Extracted from the handler (execution.cpp) so load_data_test.cpp can
+ * drive it directly, matching the suite's other route-core tests.
+ */
+LoadDataRows read_load_data_set (const nlohmann::json& json,
+const vayu::core::ScenarioLimits& limits,
+bool is_scenario);
+
+/**
  * The stream-only half of a recorded design result (issue #573).
  *
  * Passed to `record_design_result` rather than written by the stream worker

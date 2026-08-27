@@ -578,6 +578,25 @@ export interface StartLoadTestRequest {
 	maxStreamDurationMs?: number;
 	/** Ceiling on events delivered by one stream; omitted takes `sseMaxStreamEvents`. */
 	maxStreamEvents?: number;
+
+	/**
+	 * The data set this run binds, one object per row (issue #993).
+	 *
+	 * The single-request spelling of `scenario.data`, read by the same engine
+	 * validator and bounded by the same `maxScenarioDataRows` /
+	 * `maxScenarioDataBytes` settings - a present-but-empty array is refused
+	 * rather than run. **One row per submission**, claimed off a run-wide cursor
+	 * that wraps, so a run longer than the set repeats it; a scenario run's row
+	 * is per iteration and shared by every step instead, which is why the two
+	 * fields are separate and why sending both is a `400`.
+	 *
+	 * Every `{{data.column}}` in the URL, headers, body and auth credentials
+	 * binds per submission, and the deferred `tests` script reads the row its
+	 * sample carried as `pm.iterationData`. The set is never persisted - the run
+	 * snapshot records `dataRowCount` alone - but a bound cell travels in the
+	 * request that carried it, which the run stores with its retained traces.
+	 */
+	data?: Record<string, unknown>[];
 }
 
 export interface StartLoadTestResponse {

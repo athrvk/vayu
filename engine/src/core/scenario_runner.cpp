@@ -493,21 +493,14 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     std::string data_bind_error;
     if (ctx.data_row_index) {
         inputs.iteration_data = &ctx.data_rows[*ctx.data_row_index];
-        // Through the step's own template rather than re-splitting
-        // the request here: one binder for both executors, so a
-        // step cannot bind differently depending on which one ran
-        // it.
-        auto bound = apply_data_template (inputs.request, step.data_template,
+        // Through the step's own templates rather than re-splitting
+        // the request here, and through the one binder every
+        // executor drives, so a step cannot bind differently
+        // depending on which one ran it - fields first, then the
+        // credentials the plan deliberately left unresolved, which
+        // is the order `apply_auth` makes load-bearing (issue #591).
+        const auto bound = bind_step_row (inputs.request, step,
         ctx.data_rows[*ctx.data_row_index], *ctx.data_row_index);
-        if (bound.ok) {
-            // Then the credentials, for a step whose auth the plan
-            // deliberately left unresolved: they have to carry the
-            // row's values *before* `apply_auth` base64-encodes
-            // them onto the request (issue #591). A no-op for every
-            // other step.
-            bound = bind_step_auth (inputs.request, step,
-            ctx.data_rows[*ctx.data_row_index], *ctx.data_row_index);
-        }
         if (!bound.ok) {
             data_bind_error = std::move (bound.error);
         }

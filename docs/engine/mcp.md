@@ -191,7 +191,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle               |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs` | allowlist + caps + confirm; optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario; the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs` | allowlist + caps + confirm; optional `data` rows (single target) or `scenario.data` (sequence); optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario; the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
@@ -901,8 +901,12 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   template in the authority is still "unknown host" and denied.
   `run_collection_smoke` stays out of it: it runs each request on its own, with
   no sequence to iterate, so there is no row for it to bind. A whole *data set*
-  - many rows, one pass each - is the scenario tools' argument instead
-  (`run_collection` and `start_load_run`'s `scenario.data`, below).
+  is a run's argument instead: `scenario.data` on `run_collection` and on
+  `start_load_run`'s scenario shape (below), or `start_load_run`'s **top-level
+  `data`** for a single target (issue #993) - the same rows, the same refusals,
+  bound one per request the run sends off a cursor that wraps rather than one
+  per iteration of a sequence. The two fields are mutually exclusive: `data`
+  beside a `scenario` block is refused by name rather than dropped.
 - **Protocol** - `run_request` and `start_load_run` both take an optional
   `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
   mirroring the request builder's Settings-tab picker. `run_collection_smoke`

@@ -416,7 +416,8 @@ bool MetricsCollector::should_sample_success () {
     return config_.store_success_traces && counter % config_.success_sample_rate == 0;
 }
 
-void MetricsCollector::record_response_sample (const Response& response) {
+void MetricsCollector::record_response_sample (const Response& response,
+std::optional<size_t> data_row_index) {
     // Only sample based on configured rate
     size_t counter = response_sample_counter_.fetch_add (1, std::memory_order_relaxed);
     if (counter % config_.response_sample_rate != 0) {
@@ -441,6 +442,7 @@ void MetricsCollector::record_response_sample (const Response& response) {
     }
 
     ResponseSample sample (response, now_ms ());
+    sample.data_row_index = data_row_index;
 
     bool displaced = false;
     {

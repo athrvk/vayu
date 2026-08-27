@@ -39,11 +39,13 @@ namespace vayu::http::routes {
 // Both declared in execution.cpp.
 void seed_run_times (vayu::db::Run& run, int64_t started_at);
 std::string scenario_snapshot (const std::string& sanitized, const nlohmann::json& manifest);
+std::string load_data_snapshot (const std::string& sanitized, size_t row_count);
 } // namespace vayu::http::routes
 
 namespace {
 
 using nlohmann::json;
+using vayu::http::routes::load_data_snapshot;
 using vayu::http::routes::scenario_snapshot;
 using vayu::http::routes::seed_run_times;
 
@@ -102,6 +104,33 @@ TEST (ScenarioSnapshot, ReplacesTheSentBlockWithTheManifest) {
 TEST (ScenarioSnapshot, LeavesANonObjectSnapshotAlone) {
     EXPECT_EQ (scenario_snapshot ("not json at all", json::object ()), "not json at all");
     EXPECT_EQ (scenario_snapshot ("[1,2,3]", json::object ()), "[1,2,3]");
+}
+
+// The same rule one field over: a single-request load run's rows (issue #993)
+// are the same user data a scenario's are, so the stored snapshot keeps their
+// count and not the set.
+TEST (LoadDataSnapshot, ReplacesTheRowsWithTheirCount) {
+    const std::string sanitized =
+    json{ { "method", "POST" }, { "url", "https://api.test/login" },
+        { "data", json::array ({ json{ { "password", "hunter2" } },
+        json{ { "password", "hunter3" } } }) },
+        { "environmentId", "env_1" } }
+    .dump ();
+
+    const auto stored = json::parse (load_data_snapshot (sanitized, 2));
+
+    EXPECT_FALSE (stored.contains ("data"));
+    EXPECT_EQ (stored["dataRowCount"], 2);
+    EXPECT_EQ (stored.dump ().find ("hunter2"), std::string::npos)
+    << "a row's cell reached the run store";
+    // Everything else the client sent is left alone.
+    EXPECT_EQ (stored["environmentId"], "env_1");
+    EXPECT_EQ (stored["url"], "https://api.test/login");
+}
+
+TEST (LoadDataSnapshot, LeavesANonObjectSnapshotAlone) {
+    EXPECT_EQ (load_data_snapshot ("not json at all", 1), "not json at all");
+    EXPECT_EQ (load_data_snapshot ("[1,2,3]", 1), "[1,2,3]");
 }
 
 } // namespace

@@ -643,6 +643,11 @@ export default function RequestBuilder() {
 					// same reason - and a run without it behaves exactly as it did
 					// before server monitoring existed.
 					monitor: config.monitor,
+					// The rows the dialog's file picker parsed (issue #993), which
+					// the engine binds one per submission. Undefined when no file
+					// was picked: a present-but-empty array is refused engine-side,
+					// so "no data set" has to be the absent key rather than `[]`.
+					data: config.data,
 				};
 
 				const result = await apiService.startLoadTest(apiRequest);
@@ -789,6 +794,7 @@ export default function RequestBuilder() {
 					hasDynamicVariables={requestUsesDynamicVariables(pendingLoadTestRequest)}
 					oauth2Config={pendingOAuth2Config ?? undefined}
 					isStreamingRequest={!!pendingLoadTestRequest?.stream}
+					collectionId={fetchedRequest?.collectionId}
 				/>
 			)}
 		</>

@@ -742,7 +742,14 @@ int64_t offset) {
 nlohmann::json build_run_report_config (const nlohmann::json& config) {
     nlohmann::json config_obj = nlohmann::json::object ();
     for (const char* key : { "mode", "duration", "concurrency", "startConcurrency",
-         "rampUpDuration", "timeout", "comment", "followRedirects", "maxRedirects" }) {
+         "rampUpDuration", "timeout", "comment", "followRedirects", "maxRedirects",
+         // The size of the data set a run bound (issue #993). The snapshot
+         // carries the count in the rows' place - they are never persisted -
+         // and this is what carries it to the reader: the dashboard's run
+         // metadata prints it, so "this run was data-driven, over N rows" is
+         // recoverable from the report rather than only from the payload the
+         // caller no longer has.
+         "dataRowCount" }) {
         add_if_present (config_obj, config, key);
     }
     add_http_version (config_obj, config);
@@ -938,10 +945,10 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
             metadata["requestMethod"] = config["method"];
         }
 
-        // Ten keys, built by build_run_report_config above - the seven load-test
-        // tuning knobs plus httpVersion/followRedirects/maxRedirects. `rps` is
-        // the one rename (-> targetRps) and stays inline here rather than in
-        // that key list.
+        // Eleven keys, built by build_run_report_config above - the seven
+        // load-test tuning knobs, httpVersion/followRedirects/maxRedirects, and
+        // the bound row count. `rps` is the one rename (-> targetRps) and stays
+        // inline here rather than in that key list.
         nlohmann::json config_obj = build_run_report_config (config);
         if (config.contains ("rps"))
             config_obj["targetRps"] = config["rps"];
