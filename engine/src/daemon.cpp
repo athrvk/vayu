@@ -19,11 +19,10 @@
 #include <cstdlib>
 #include <iostream>
 #include <span>
-#include <string_view>
 #include <thread>
 
 #include "vayu/core/constants.hpp"
-#include "vayu/core/numeric_flag.hpp"
+#include "vayu/core/daemon_args.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
@@ -59,108 +58,51 @@ bool acquire_lock (const std::string& lock_path) {
 
     return true;
 }
-/**
- * Read @p text as @p flag's value onto @p out.
- *
- * The refusal is printed here rather than returned, because both call sites do
- * the same thing with it and the argument loop is at its complexity budget with
- * one branch per flag, not two.
- *
- * @return true to carry on, false when the run is over.
- */
-bool read_numeric_flag (const vayu::core::NumericFlag& flag, std::string_view text, int& out) {
-    const auto parsed = vayu::core::parse_numeric_flag (flag, text);
-    if (!parsed) {
-        std::cerr << "vayu-engine: " << parsed.error () << "\n";
-        return false;
-    }
-    out = *parsed;
-    return true;
-}
 
-/// `-p` / `--port <PORT>`. A flag with nothing after it leaves the default
-/// standing, which is what it has always done.
-bool read_port (std::span<char* const> args, size_t& i, int& port) {
-    if (i + 1 >= args.size ()) {
-        return true;
-    }
-    return read_numeric_flag (vayu::core::PORT_FLAG, args[++i], port);
-}
-
-/// `-v` / `--verbose [LEVEL]`. The level is optional, so a leading digit is
-/// what says the next argument was meant as one at all - `-v run` is verbose
-/// with no level, not a bad level. Once it is meant as one it is held to the
-/// range rather than clamped into it: `-v 5` was silently 2, which told the
-/// user nothing about the levels that exist.
-bool read_verbosity (std::span<char* const> args, size_t& i, int& verbosity) {
-    if (i + 1 < args.size () &&
-    std::isdigit (static_cast<unsigned char> (*args[i + 1])) != 0) {
-        return read_numeric_flag (vayu::core::VERBOSITY_FLAG, args[++i], verbosity);
-    }
-    // No level specified, default to 1 (info level)
-    verbosity = 1;
-    return true;
-}
-
-/**
- * The daemon's own arguments.
- *
- * @return the exit code to stop on - `--help` answers here - or nothing to
- *         carry on with what the pass read.
- */
-std::optional<int>
-read_daemon_args (std::span<char* const> args, int& port, int& verbosity, std::string& data_dir) {
-    for (size_t i = 1; i < args.size (); ++i) {
-        std::string arg = args[i];
-
-        if (arg == vayu::core::constants::cli::ARG_PORT_SHORT ||
-        arg == vayu::core::constants::cli::ARG_PORT_LONG) {
-            if (!read_port (args, i, port)) {
-                return 1;
-            }
-        } else if (arg == "-d" || arg == "--data-dir") {
-            if (i + 1 < args.size ()) {
-                data_dir = args[++i];
-            }
-        } else if (arg == "-v" || arg == "--verbose") {
-            if (!read_verbosity (args, i, verbosity)) {
-                return 1;
-            }
-        } else if (arg == "-h" || arg == "--help") {
-            std::cout << "Vayu Engine " << vayu::Version::string << "\n\n";
-            std::cout << "Usage: vayu-engine [OPTIONS]\n\n";
-            std::cout << "Options:\n";
-            std::cout
-            << "  -p, --port <PORT>        Port to listen on (default: 9876)\n";
-            std::cout << "  -d, --data-dir <DIR>     Data directory for DB, "
-                         "logs, and lock file "
-                         "(default: ../data)\n";
-            std::cout << "  -v, --verbose [LEVEL]    Enable verbose output "
-                         "(0=warn/error, 1=info, "
-                         "2=debug, default: 1)\n";
-            std::cout << "  -h, --help               Show this help message\n";
-            return 0;
-        }
-    }
-    return std::nullopt;
+/// The usage `-h` / `--help` answers with. Printed here rather than by the
+/// parse, which reports the request and owns no output stream (#1031).
+void print_help () {
+    std::cout << "Vayu Engine " << vayu::Version::string << "\n\n";
+    std::cout << "Usage: vayu-engine [OPTIONS]\n\n";
+    std::cout << "Options:\n";
+    std::cout << "  -p, --port <PORT>        Port to listen on (default: 9876, "
+                 "1-65535)\n";
+    std::cout << "  -d, --data-dir <DIR>     Data directory for DB, "
+                 "logs, and lock file "
+                 "(default: ../data)\n";
+    std::cout << "  -v, --verbose [LEVEL]    Enable verbose output "
+                 "(0=warn/error, 1=info, "
+                 "2=debug, default: 1)\n";
+    std::cout << "  -h, --help               Show this help message\n";
 }
 
 } // namespace
 
 int main (int argc, char* argv[]) {
     // Parse arguments first (need data_dir for logging)
-    int port             = vayu::core::constants::defaults::PORT;
-    int verbosity        = 0; // 0=warn/error, 1=info+, 2=debug+
-    std::string data_dir = get_default_data_dir ();
+    vayu::core::DaemonArgs parsed;
+    parsed.data_dir = get_default_data_dir ();
 
     // The argument vector as the bounded range it is: `argv[i]` is arithmetic
     // on a pointer that carries no length, and the count is right there.
     const std::span<char* const> args (argv, static_cast<size_t> (argc));
 
-    if (auto stop = read_daemon_args (args, port, verbosity, data_dir)) {
-        return *stop;
+    const auto request = vayu::core::read_daemon_args (args, parsed);
+    if (!request) {
+        // Refused before anything starts - no logger yet, so stderr is the
+        // whole of the report, and it is the same shape every bad argument
+        // answers with (#1028, #1031).
+        std::cerr << "vayu-engine: " << request.error () << "\n";
+        return 1;
+    }
+    if (*request == vayu::core::DaemonRequest::Help) {
+        print_help ();
+        return 0;
     }
 
+    const int port             = parsed.port;
+    const int verbosity        = parsed.verbosity;
+    const std::string data_dir = parsed.data_dir;
 
     // Ensure data directory exists
     try {
