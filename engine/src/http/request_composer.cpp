@@ -272,7 +272,7 @@ constexpr std::array<DynamicVariable, 39> DYNAMIC_VARIABLES = { {
 [] {
     return std::to_string (std::chrono::duration_cast<std::chrono::seconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
-                           .count ());
+    .count ());
 } },
 { "$isoTimestamp", [] { return iso_timestamp (); } },
 { "$randomInt", [] { return std::to_string (random_int (0, 1000)); } },
@@ -841,7 +841,7 @@ nlohmann::json flatten_stored_headers (const std::string& blob) {
             continue;
         }
         if (auto enabled = row.find ("enabled"); enabled != row.end () &&
-            enabled->is_boolean () && !enabled->get<bool> ()) {
+        enabled->is_boolean () && !enabled->get<bool> ()) {
             continue;
         }
         const auto value = row.find ("value");
@@ -988,7 +988,7 @@ std::optional<std::pair<int, nlohmann::json>> resolve_compose_head (const Variab
 const BoundColumnNames& bound_columns,
 nlohmann::json& payload) {
     if (auto method = payload.find ("method");
-        method != payload.end () && method->is_string ()) {
+    method != payload.end () && method->is_string ()) {
         std::string verb = method->get<std::string> ();
         std::transform (verb.begin (), verb.end (), verb.begin (),
         [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
@@ -1000,7 +1000,7 @@ nlohmann::json& payload) {
     }
 
     if (auto headers = payload.find ("headers");
-        headers != payload.end () && headers->is_object ()) {
+    headers != payload.end () && headers->is_object ()) {
         nlohmann::json resolved = nlohmann::json::object ();
         // A header is the one field composition refuses a payload over, because
         // it is the one whose text has a terminator and no escape for it: a

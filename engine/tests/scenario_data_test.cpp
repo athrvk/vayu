@@ -1003,8 +1003,8 @@ TEST (ScenarioDataScanTest, ThePrefixAloneIsNotSomethingToRefuse) {
     // could ever answer.
     EXPECT_FALSE (vayu::core::tokenize_data_fields (
     request_with_url ("https://api.test/{{data.}}"))
-                  .first_token ()
-                  .has_value ());
+    .first_token ()
+    .has_value ());
 }
 
 // ---------------------------------------------------------------------------
@@ -1096,6 +1096,25 @@ TEST (ScenarioDataBareColumnTest, TheHeaderAndDocumentRulesHoldForABareColumnToo
     vayu::core::tokenize_data_fields (null_cell, { "id" }),
     json::parse (R"({"id":null})"), 0);
     EXPECT_FALSE (refused_null.ok);
+}
+
+TEST (ScenarioDataBareColumnTest, TheHeaderCollisionRefusalCoversTheBareSpellingToo) {
+    // The rule a second substitution path would most quietly have skipped: a
+    // header name a row binds onto a name another header already has leaves a
+    // map with one of the two in it, and a run where only the rows that collide
+    // send a request missing a header. Asserted for the bare spelling rather
+    // than assumed from the shared walk, because "it goes through the same
+    // function" is what a later refactor stops being true.
+    auto request                     = request_with_url ("https://api.test/");
+    request.headers["Authorization"] = "Bearer real";
+    request.headers["{{h}}"]         = "bound";
+
+    const auto result =
+    bind_data_row (request, json::parse (R"({"h":"authorization"})"), 3);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("Authorization"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("row 3"), std::string::npos) << result.error;
 }
 
 TEST (ScenarioDataBareColumnTest, OneRowSaysWhichBareNamesItCanBind) {

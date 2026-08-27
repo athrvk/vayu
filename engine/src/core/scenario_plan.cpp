@@ -41,7 +41,7 @@ ScenarioResolution invalid (std::string reason) {
 std::string compose_error_message (const nlohmann::json& body) {
     if (auto error = body.find ("error"); error != body.end () && error->is_object ()) {
         if (auto message = error->find ("message");
-            message != error->end () && message->is_string ()) {
+        message != error->end () && message->is_string ()) {
             return message->get<std::string> ();
         }
     }
@@ -191,7 +191,7 @@ std::optional<std::string> read_scenario_iterations (const nlohmann::json& scena
 bool has_data,
 ScenarioRequest& out) {
     if (auto iterations = scenario.find ("iterations");
-        iterations != scenario.end () && !iterations->is_null ()) {
+    iterations != scenario.end () && !iterations->is_null ()) {
         constexpr double max_iterations =
         static_cast<double> (std::numeric_limits<int>::max ());
         const bool usable = iterations->is_number () &&
@@ -242,7 +242,7 @@ std::vector<nlohmann::json>& rows_out) {
     out.collection_id = collection_id->get<std::string> ();
 
     if (auto recursive = scenario.find ("recursive");
-        recursive != scenario.end () && !recursive->is_null ()) {
+    recursive != scenario.end () && !recursive->is_null ()) {
         if (!recursive->is_boolean ()) {
             return "'scenario.recursive' must be a boolean (got " +
             std::string (recursive->type_name ()) + ")";

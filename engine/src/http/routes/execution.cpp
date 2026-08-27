@@ -93,7 +93,7 @@ const std::optional<std::string>& request_id) {
     if (request_id && !request_id->empty ()) {
         try {
             if (auto stored = db.get_request (*request_id);
-                stored && !stored->name.empty ()) {
+            stored && !stored->name.empty ()) {
                 resolved.name = stored->name;
             }
         } catch (const std::exception& e) {
@@ -179,7 +179,7 @@ RouteResult normalize_run_http_version (nlohmann::json& json) {
     std::string version;
     if (auto outcome = apply_http_version_field (json, "httpVersion", version,
         vayu::to_string (vayu::DEFAULT_HTTP_VERSION), /*is_create=*/false);
-        !outcome) {
+    !outcome) {
         return outcome;
     }
     json["httpVersion"] = version;

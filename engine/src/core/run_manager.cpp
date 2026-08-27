@@ -208,8 +208,8 @@ std::optional<vayu::db::Request>& linked_request) {
     // Send runs, so it must not read `pm.info.requestId` as undefined here and
     // as a value there. Both fields ride in on the composed payload for a run
     // started from a saved request; resolved once, not per sample.
-    if (auto id = config.find ("requestId"); id != config.end () &&
-        id->is_string () && !id->get<std::string> ().empty ()) {
+    if (auto id = config.find ("requestId");
+    id != config.end () && id->is_string () && !id->get<std::string> ().empty ()) {
         script_request_id = id->get<std::string> ();
     }
     // The linked request row, read once for the two readers below: the
@@ -224,7 +224,7 @@ std::optional<vayu::db::Request>& linked_request) {
     }
 
     if (auto name = config.find ("requestName"); name != config.end () &&
-        name->is_string () && !name->get<std::string> ().empty ()) {
+    name->is_string () && !name->get<std::string> ().empty ()) {
         script_request_name = name->get<std::string> ();
     } else if (linked_request && !linked_request->name.empty ()) {
         script_request_name = linked_request->name;
@@ -408,7 +408,7 @@ bool verbose) {
     // not be reported as "judged and passed".
     std::optional<std::string> environment_id;
     if (auto it = context->config.find ("environmentId"); it != context->config.end () &&
-        it->is_string () && !it->get<std::string> ().empty ()) {
+    it->is_string () && !it->get<std::string> ().empty ()) {
         environment_id = it->get<std::string> ();
     }
 

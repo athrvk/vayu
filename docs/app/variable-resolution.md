@@ -158,6 +158,19 @@ so both spellings reach the same bind-time join and the same refusal rules.
 Nothing about the two rules can drift, because there is only the one path that
 substitutes either of them.
 
+**What the builder's preview does not show yet.** The request builder paints a
+bare `{{name}}` as a bound column only when *no* scope defines that name. Where
+a scope does define it, the token keeps painting as that variable and shows its
+value - which is right for a Send with no row, and wrong for the moment a run
+binds one, since the column outranks it. The preview resolver takes the bound
+columns (`resolveTemplate`'s third argument, pinned against the engine by the
+conformance fixture) but nothing passes them yet: no preview surface knows which
+row a run will bind. So a collision is *stated* rather than painted - the Data
+tab's column audit names any declared column that shares a name with a variable
+in scope, and says the column wins while a row is bound. Painting it in the
+builder is a design question of its own, tracked separately; nothing here reads
+a value the engine cannot send, it just does not yet show the one it will.
+
 ### Which contract answers for a request: nearest declared ancestor
 
 A collection can **declare** the columns its data files carry (the Data tab,

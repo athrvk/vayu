@@ -402,7 +402,7 @@ void advance_xml_closer (char c, std::string_view closer, XmlScanState& state) {
 void advance_xml_state (std::string_view literal, XmlScanState& state) {
     for (const char c : literal) {
         if (const std::string_view closer = xml_closing_delimiter (state.position);
-            !closer.empty ()) {
+        !closer.empty ()) {
             advance_xml_closer (c, closer, state);
             continue;
         }
@@ -596,7 +596,7 @@ std::string escape_xml_cdata (const std::string& text) {
     out.reserve (text.size ());
     size_t cursor = 0;
     for (size_t found = text.find (CLOSER); found != std::string::npos;
-         found        = text.find (CLOSER, cursor)) {
+    found             = text.find (CLOSER, cursor)) {
         out.append (text, cursor, found - cursor);
         out += SPLIT;
         cursor = found + CLOSER.size ();
@@ -809,7 +809,7 @@ const StepDataTemplate& credentials,
 const nlohmann::json& row,
 size_t row_index) {
     if (auto bound = apply_data_template (request, fields, row, row_index);
-        !bound.ok) {
+    !bound.ok) {
         return bound;
     }
     // The credentials second, which is the whole reason this order lives in one
@@ -827,7 +827,7 @@ size_t row_index) {
     }
 
     if (auto bound = apply_auth_data_template (auth, tmpl, row, row_index);
-        !bound.ok) {
+    !bound.ok) {
         return bound;
     }
 

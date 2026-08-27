@@ -532,7 +532,7 @@ TEST_F (ScenarioPlanTest, EmptyIsJudgedAfterRecursiveIsApplied) {
     vayu::core::resolve_scenario (*db_, block ("root"), options ()).ok);
     EXPECT_TRUE (vayu::core::resolve_scenario (
     *db_, block ("root", /*recursive=*/true), options ())
-                 .ok);
+    .ok);
 }
 
 TEST_F (ScenarioPlanTest, AStepThatCannotComposeNamesTheOffendingRequest) {
@@ -603,7 +603,7 @@ TEST_F (ScenarioPlanTest, ARunsColumnsDeferTheirBareTokensAndSplitThem) {
     vayu::Request bound = step.request;
     ASSERT_TRUE (vayu::core::apply_data_template (
     bound, step.data_template, resolved.data_rows[1], 1)
-                 .ok);
+    .ok);
     EXPECT_EQ (bound.url, "https://api.test/u/grace?r=eu");
 }
 
