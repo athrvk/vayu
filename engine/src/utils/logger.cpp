@@ -163,8 +163,18 @@ void Logger::flush () {
 }
 
 Logger::~Logger () {
-    if (log_file_ && log_file_->is_open ()) {
-        log_file_->close ();
+    try {
+        if (log_file_ && log_file_->is_open ()) {
+            log_file_->close ();
+        }
+    } catch (...) {
+        // @deliberate `close` sets `failbit` on a flush failure, and throws it
+        // where the stream carries `exceptions()` - out of a destructor, which
+        // terminates. A full disk or a yanked volume at shutdown is the shape
+        // of it, and there is nothing to recover: the process is going away and
+        // the bytes are already lost. It is not logged either, because the
+        // logger is what is being destroyed - reporting through it here is the
+        // circular path, and any other channel would outlive its own subject.
     }
 }
 

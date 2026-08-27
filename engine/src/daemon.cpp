@@ -17,8 +17,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <span>
+#include <string>
 #include <thread>
 
 #include "vayu/core/constants.hpp"
@@ -76,16 +78,14 @@ void print_help () {
     std::cout << "  -h, --help               Show this help message\n";
 }
 
-} // namespace
-
-int main (int argc, char* argv[]) {
+/// The daemon proper. `main` is the wrapper that keeps a throw from escaping
+/// it - see the note there, and it is where `argc`/`argv` become the bounded
+/// range this takes: `argv[i]` is arithmetic on a pointer carrying no length,
+/// and only `main`'s own signature is exempt from saying so.
+int run_daemon (std::span<char* const> args) {
     // Parse arguments first (need data_dir for logging)
     vayu::core::DaemonArgs parsed;
     parsed.data_dir = get_default_data_dir ();
-
-    // The argument vector as the bounded range it is: `argv[i]` is arithmetic
-    // on a pointer that carries no length, and the count is right there.
-    const std::span<char* const> args (argv, static_cast<size_t> (argc));
 
     const auto request = vayu::core::read_daemon_args (args, parsed);
     if (!request) {
@@ -273,4 +273,33 @@ int main (int argc, char* argv[]) {
     // 1 = the listener never took its port (see the start() check above); 0 =
     // an ordinary shutdown. Documented in docs/engine/cli.md.
     return exit_code;
+}
+} // namespace
+
+int main (int argc, char* argv[]) {
+    try {
+        return run_daemon (std::span<char* const> (argv, static_cast<size_t> (argc)));
+    } catch (const std::exception& e) {
+        // Reported rather than terminated on, for the reason `cli.cpp` gives:
+        // an escape from `main` aborts with no message and a status no caller
+        // can tell from a crash.
+        //
+        // Honest about what this is now worth: #1028 and #1031 closed the
+        // argument-parsing route, which was the one case with a demonstration
+        // behind it (`--port notanumber` used to abort with 134). No input
+        // reaching this handler is known today. It stays because three
+        // constructions in `run_daemon` still throw where nothing catches -
+        // `Logger::init`, the `Database` object itself (the `try` below it
+        // guards the *next* call, not the constructor) and `Server` - and
+        // because `cli.cpp` has held this invariant for far longer than any
+        // one reachable input justified. Defence in depth, said plainly,
+        // rather than a fix advertised by a bug it no longer has.
+        std::cerr << "vayu-engine: " << e.what () << "\n";
+        vayu::utils::log_error (std::string ("vayu-engine: ") + e.what ());
+        return 1;
+    } catch (...) {
+        std::cerr << "vayu-engine: unknown error\n";
+        vayu::utils::log_error ("vayu-engine: unknown error");
+        return 1;
+    }
 }

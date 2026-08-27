@@ -22,6 +22,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/curl_error_buffer.hpp"
+#include "vayu/http/curl_options.hpp"
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
@@ -477,7 +478,7 @@ Result<Response> Client::send (const Request& request) {
     impl_->errors.attach (curl);
 
     // Set URL
-    curl_easy_setopt (curl, CURLOPT_URL, request.url.c_str ());
+    set_opt<CURLOPT_URL> (curl, request.url.c_str ());
 
     // Set method and body (shared with the event loop path so the two cannot
     // disagree about what goes on the wire - see apply_method_and_body)
@@ -488,17 +489,17 @@ Result<Response> Client::send (const Request& request) {
     request, impl_->config.user_agent, &response.request_headers);
 
     if (headers_list) {
-        curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers_list);
+        set_opt<CURLOPT_HTTPHEADER> (curl, headers_list);
     }
 
     // rawRequest is read off the wire, so it can only be built after the
     // transfer completes - see below, just before the error-path early return.
 
     // Set callbacks
-    curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt (curl, CURLOPT_WRITEDATA, &sink);
-    curl_easy_setopt (curl, CURLOPT_HEADERFUNCTION, header_callback);
-    curl_easy_setopt (curl, CURLOPT_HEADERDATA, &response);
+    set_opt<CURLOPT_WRITEFUNCTION> (curl, write_callback);
+    set_opt<CURLOPT_WRITEDATA> (curl, &sink);
+    set_opt<CURLOPT_HEADERFUNCTION> (curl, header_callback);
+    set_opt<CURLOPT_HEADERDATA> (curl, &response);
 
     // Set timeout
     if (impl_->config.stall_timeout_ms > 0) {
@@ -506,18 +507,18 @@ Result<Response> Client::send (const Request& request) {
         // would leave the total deciding whenever it fired first, which is the
         // behaviour this exists to replace - so the total is left unset and
         // `max_response_bytes` is what bounds a transfer that never ends.
-        curl_easy_setopt (curl, CURLOPT_LOW_SPEED_LIMIT,
+        set_opt<CURLOPT_LOW_SPEED_LIMIT> (curl,
         static_cast<long> (vayu::core::constants::import_fetch::STALL_FLOOR_BYTES_PER_SEC));
-        curl_easy_setopt (curl, CURLOPT_LOW_SPEED_TIME,
-        static_cast<long> ((impl_->config.stall_timeout_ms + 999) / 1000));
+        set_opt<CURLOPT_LOW_SPEED_TIME> (
+        curl, static_cast<long> ((impl_->config.stall_timeout_ms + 999) / 1000));
     } else {
-        curl_easy_setopt (curl, CURLOPT_TIMEOUT_MS, static_cast<long> (request.timeout_ms));
+        set_opt<CURLOPT_TIMEOUT_MS> (curl, static_cast<long> (request.timeout_ms));
     }
 
     // Set redirect options
     if (request.follow_redirects) {
-        curl_easy_setopt (curl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt (curl, CURLOPT_MAXREDIRS, static_cast<long> (request.max_redirects));
+        set_opt<CURLOPT_FOLLOWLOCATION> (curl, 1L);
+        set_opt<CURLOPT_MAXREDIRS> (curl, static_cast<long> (request.max_redirects));
     }
 
     // TLS verification, the proxy and this target's client certificate, all
@@ -535,8 +536,8 @@ Result<Response> Client::send (const Request& request) {
     // request's field, so a Send and a load test of the same request had no
     // structural guarantee of agreeing. Both drivers now go through the one
     // shared mapping.
-    curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
-    vayu::http::to_curl_http_version (request.http_version));
+    set_opt<CURLOPT_HTTP_VERSION> (
+    curl, vayu::http::to_curl_http_version (request.http_version));
 
     // The debug stream is always on, verbose or not: the raw-request view is
     // built from the outbound header frame it carries, which is the only place
@@ -544,9 +545,9 @@ Result<Response> Client::send (const Request& request) {
     // config flag decides whether the frames are also logged - see TransferDebug.
     TransferDebug transfer_debug;
     transfer_debug.verbose = impl_->config.verbose;
-    curl_easy_setopt (curl, CURLOPT_VERBOSE, 1L);
-    curl_easy_setopt (curl, CURLOPT_DEBUGFUNCTION, debug_callback);
-    curl_easy_setopt (curl, CURLOPT_DEBUGDATA, &transfer_debug);
+    set_opt<CURLOPT_VERBOSE> (curl, 1L);
+    set_opt<CURLOPT_DEBUGFUNCTION> (curl, debug_callback);
+    set_opt<CURLOPT_DEBUGDATA> (curl, &transfer_debug);
 
     // Cookie jar (issue #301) - only when a caller opted in; see
     // ClientConfig::cookie_jar.
@@ -600,7 +601,7 @@ Result<Response> Client::send (const Request& request) {
     // what it negotiated). Empty when nothing was negotiated at all, e.g. a
     // connection that never reached a server - see http_version_from_curl.
     long negotiated_version = 0;
-    curl_easy_getinfo (curl, CURLINFO_HTTP_VERSION, &negotiated_version);
+    get_info<CURLINFO_HTTP_VERSION> (curl, &negotiated_version);
     response.http_version = vayu::http::http_version_from_curl (negotiated_version);
     response.http_version_downgraded =
     vayu::http::http_version_downgraded (request.http_version, response.http_version);
@@ -658,7 +659,7 @@ Result<Response> Client::send (const Request& request) {
 
     // Get response info for successful requests
     long http_code = 0;
-    curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &http_code);
+    get_info<CURLINFO_RESPONSE_CODE> (curl, &http_code);
     response.status_code = static_cast<int> (http_code);
     // Prefer the wire reason phrase captured by header_callback. Only fall
     // back to the code→phrase lookup when the server (or HTTP/2+ stack)

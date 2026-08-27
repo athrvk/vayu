@@ -1,0 +1,420 @@
+# The whole-tree clang-tidy measurement, on demand (issue #1023).
+#
+# The pull-request gate in `pr-tests.yml` lints the files a change touches. That
+# is the right unit for a gate and the wrong one for a *denominator*: it can
+# never say what an untouched tree holds, so "zero findings tree-wide" is a
+# claim only a whole-tree scan can make - and #928 made it on the Linux
+# toolchain alone, because that is the only one anybody could run. The first
+# whole-file lint on Windows (#1022's run, clang-tidy 20.1.8 over MSVC compile
+# commands) then reported ~85 findings in one pull request's touched files, none
+# on a line the diff wrote: a backlog of a leg that had never been measured.
+#
+# This workflow is how that leg gets measured, and re-measured. It is
+# `workflow_dispatch` only - a whole-tree scan parses every translation unit and
+# has no business on the pull-request path, where the gate already lints what
+# changed. Run it when the tidy config changes, when a runner image moves its
+# clang-tidy, or to re-establish the zero after a paydown.
+#
+# It fails when the scan is not zero, so a run is a proof and not just a report;
+# the deduplicated finding list is uploaded either way.
+name: Engine tidy scan
+
+on:
+  # Three triggers, on `sanitizers.yml`'s model, and for its reasons.
+  #
+  # **The cron is the one that matters.** The per-change gate holds every file
+  # a pull request *touches* at zero, so drift into the rest of the tree cannot
+  # arrive through a diff - it arrives when the ground moves underneath: a
+  # runner image bumping clang-tidy (the Windows leg takes whatever LLVM its
+  # image ships, currently 20.1.8, and a new minor can add checks), or a new
+  # `.clang-tidy` reading differently than it did. A weekly whole-tree run is
+  # how that is noticed in a week rather than by whichever pull request happens
+  # to touch a stale file next.
+  #
+  # 11:00 Monday, deliberately clear of the 06:00 that codeql.yml and
+  # cache-warm.yml already use and of the 09:00 that sanitizers.yml takes: this
+  # is a two-hour job on a Windows runner and has no reason to compete with a
+  # five-leg matrix for the same pool.
+  #
+  # `workflow_dispatch` is the on-demand spelling - after a paydown, or to
+  # re-establish the zero on a runner you pick.
+  #
+  # The `pull_request` trigger fires only for the three files that can
+  # *invalidate* the measurement: the check list the scan reads, and the two
+  # files that are the scan. A pull request that edits `engine/.clang-tidy`
+  # changes what "zero findings" means, and the promotion in `pr-tests.yml`
+  # rests on that zero - so it is re-established in the same pull request that
+  # moves it, rather than discovered to be stale later. It also carries
+  # `sanitizers.yml`'s caveat: a new workflow cannot be dispatched before it
+  # exists on the default branch, so without this the first evidence that this
+  # one configures, builds and scans at all would arrive after merge, on a
+  # cron, as a red master. Nothing else in the tree reaches it; an engine
+  # change is the gate's business, not the scan's.
+  schedule:
+    - cron: '0 11 * * 1'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'engine/.clang-tidy'
+      - '.github/workflows/engine-tidy-scan.yml'
+      - '.github/dedupe-tidy-findings.py'
+  workflow_dispatch:
+    inputs:
+      os:
+        description: 'Runner to scan on'
+        type: choice
+        default: windows-latest
+        options:
+          - windows-latest
+          - ubuntu-latest
+
+# One scan at a time per ref: this is the longest job in the repository and
+# re-running it against a newer commit makes the older answer worthless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # For the failure issue below. `sanitizers.yml` needs it for the same reason
+  # and for the same kind of run: nobody is watching a cron.
+  issues: write
+
+jobs:
+  scan:
+    # **Both legs the gate lints, not just the one that had a backlog.** The
+    # Windows leg is why this workflow exists (#1023), but the coverage hole a
+    # whole-tree scan fills is not Windows-specific: the gate lints translation
+    # units, never a header (#940), so a **header-only pull request is linted
+    # by no CI job at all** - it relies on the contributor's pre-commit hook.
+    # A header that introduces findings across the sources including it can
+    # therefore reach master unlinted on either platform, and only a whole-tree
+    # run finds it afterwards. Linux drifts too, more slowly: it pins
+    # clang-tidy 19 from apt where Windows takes whatever its image ships.
+    #
+    # `workflow_dispatch` still scans the single runner you pick, which is what
+    # makes a targeted re-measure cheap. Schedule and pull request take both -
+    # the latter for `sanitizers.yml`'s stated reason, that a leg first
+    # exercised by the cron is a leg whose first evidence is a red master.
+    #
+    # macOS is absent because the *gate* is: clang-tidy 19 and 20 both trap on
+    # that runner's AppleClang SDK (#940). A scan of a platform nothing gates
+    # would measure a standard nothing holds.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: >-
+          ${{ fromJSON(
+            github.event_name == 'workflow_dispatch'
+              && format('["{0}"]', github.event.inputs.os)
+              || '["ubuntu-latest", "windows-latest"]'
+          ) }}
+    name: Whole-tree clang-tidy on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # Measured, not guessed, and the first value was wrong. 120 was chosen by
+    # analogy with the engine job's 90; the first Windows run that actually
+    # linted spent **101 minutes still going** on the scan step alone and died
+    # on the deadline with nothing uploaded - a whole run's cost for no answer.
+    # 206 translation units of MSVC headers at four workers is simply slower
+    # than a per-change gate, which is the whole reason this is a separate
+    # workflow. 240 leaves room for a cold vcpkg cache on top of that; the
+    # ceiling for a hosted runner is 360.
+    timeout-minutes: 240
+    env:
+      VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+      SCCACHE_GHA_ENABLED: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            build-essential \
+            pkg-config \
+            ca-certificates \
+            autoconf \
+            autoconf-archive \
+            automake \
+            libtool
+
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
+          vcpkgJsonGlob: 'engine/vcpkg.json'
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Configure sccache compiler launcher
+        shell: bash
+        run: |
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+
+      # Built, not merely configured: the tests link against generated sources,
+      # and a compilation database whose inputs do not exist yet lints as a wall
+      # of missing-include errors rather than as the tree.
+      - name: Build engine
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          configurePreset: ${{ runner.os == 'Windows' && 'windows-prod' || 'linux-prod' }}
+          buildPreset: ${{ runner.os == 'Windows' && 'windows-prod' || 'linux-prod' }}
+          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      - name: Scan the whole tree
+        id: scan
+        shell: bash
+        run: |
+          set -o pipefail
+
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get install -y --no-install-recommends clang-tidy-19
+              tidy=clang-tidy-19
+              ;;
+            Windows)
+              tidy="/c/Program Files/LLVM/bin/clang-tidy.exe"
+              ;;
+            *)
+              echo "::error::No clang-tidy recipe for $RUNNER_OS"
+              exit 1
+              ;;
+          esac
+          "$tidy" --version
+
+          # The same floor and the same reason as the gate: `engine/.clang-tidy`
+          # uses `ExcludeHeaderFilterRegex`, which an older binary rejects
+          # outright, and two of the legs take whatever their image ships.
+          major="$("$tidy" --version | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p' | head -1)"
+          if [[ -z "$major" ]] || [[ "$major" -lt 19 ]]; then
+            echo "::error::clang-tidy ${major:-(version unreadable)} is below the 19 that engine/.clang-tidy requires"
+            exit 1
+          fi
+
+          # clang-tidy replays the compile command, precompiled header and all,
+          # and that PCH was written by the build's compiler rather than by
+          # clang-tidy's clang. Regenerating the database without it is the fix
+          # that needs no per-compiler flag spelling; `VCPKG_MANIFEST_INSTALL=OFF`
+          # keeps the reconfigure at seconds rather than re-running the manifest
+          # install. Both are the gate's reasoning, one job over.
+          cmake -S engine -B engine/build-release \
+            -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
+            -DVCPKG_MANIFEST_INSTALL=OFF
+          if grep -q cmake_pch engine/build-release/compile_commands.json; then
+            echo "::error::compile_commands.json still references a precompiled header"
+            exit 1
+          fi
+
+          # Every non-vendor translation unit the database knows, which is the
+          # honest denominator - `engine/vendor/` is excluded here as it is
+          # everywhere else.
+          python - <<'PY' > tidy-units.txt
+          import json
+          seen = []
+          for entry in json.load(open("engine/build-release/compile_commands.json")):
+              if "/vendor/" in entry["file"].replace("\\", "/"):
+                  continue
+              if entry["file"] not in seen:
+                  seen.append(entry["file"])
+          print("\n".join(sorted(seen)))
+          PY
+          units="$(grep -c . tidy-units.txt)"
+          echo "units=$units" >> "$GITHUB_OUTPUT"
+          if [[ "$units" -lt 100 ]]; then
+            echo "::error::only $units translation units found - the database is not the tree"
+            exit 1
+          fi
+
+          # `-header-filter` on the command line, not from the config: a
+          # `run-clang-tidy`-shaped invocation that omits it reports nothing
+          # found in a header, which is how 50 findings went uncounted through
+          # four #928 measurement rounds (#1013).
+          #
+          # Findings are the output, so the exit status is deliberately not the
+          # verdict here - the report step below is.
+          #
+          # `nproc` rather than a literal, now that this runs on two runner
+          # kinds: it is coreutils and ships with Git for Windows, so it
+          # answers on both, and a hosted image that changes its core count
+          # gets used rather than ignored. The gate one workflow over spells it
+          # the same way.
+          # `tr -d '\r'` first, and it is not defensive noise: the unit list is
+          # written by a Python whose stdout is a Windows text stream, so every
+          # path arrives CRLF-terminated. Without this each path reaches
+          # clang-tidy with a trailing carriage return and every one of the 206
+          # translation units answers `no such file or directory` - a whole-tree
+          # scan that lints nothing in five seconds.
+          tr -d '\r' < tidy-units.txt | tr '\n' '\0' \
+            | xargs -0 -n 1 -P "$(nproc)" \
+                "$tidy" -p engine/build-release --quiet --allow-no-checks \
+                  --header-filter='.*[/\\]engine[/\\](src|include|tests)[/\\].*' \
+            > tidy-scan.log 2>&1 || true
+          echo "wrote $(grep -c . tidy-scan.log) lines of clang-tidy output"
+
+      - name: Report the deduplicated findings
+        shell: bash
+        run: |
+          python .github/dedupe-tidy-findings.py tidy-scan.log \
+            --root "$GITHUB_WORKSPACE" \
+            --scanned "${{ steps.scan.outputs.units }}" \
+            --label "Whole-tree clang-tidy on ${{ matrix.os }}" \
+            | tee tidy-scan-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the scan
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: engine-tidy-scan-${{ matrix.os }}
+          path: |
+            tidy-scan.log
+            tidy-scan-report.md
+            tidy-units.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      # Where a weekly run reports, which is the question a cron has to answer
+      # before it is worth having. The step summary above and the artifact
+      # beside it are read by whoever opens the run - and on a Monday morning
+      # nobody opens the run. GitHub's own notification for a failed schedule
+      # goes to whoever last edited the cron line and to nobody else, which is
+      # an accident of git history rather than a way to reach a maintainer.
+      #
+      # So: the same auto-filing `sanitizers.yml` uses, for the same reason and
+      # by the same plain GitHub API - no model, no tokens. Keyed on the runner
+      # so a leg that stays red accumulates comments on one issue instead of
+      # filing a fresh one every Monday. Closing it is a human act after the
+      # fix; the next failure comments again, or files anew if it was closed.
+      #
+      # **Not on a pull request**, exactly as #970 decided for the sanitizers:
+      # this step exists because nobody is watching the cron, and a pull
+      # request already has a reviewer watching its checks. Filing there would
+      # write a tracker entry about a ref that is not master and code that may
+      # never reach it. The artifact and summary stay ungated - they are what
+      # that reviewer needs, and they file nothing.
+      #
+      # The body is the report itself rather than a log excerpt: unlike a
+      # sanitizer log, this scan's output is already the deduplicated finding
+      # table, which is the whole of what a reader needs.
+      - name: File or update the tidy-scan-failure issue
+        if: ${{ failure() && github.event_name != 'pull_request' }}
+        uses: actions/github-script@v8
+        env:
+          RUNNER_PICKED: ${{ matrix.os }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { RUNNER_PICKED } = process.env;
+            const { owner, repo } = context.repo;
+            const label = 'tidy-scan-failure';
+            const title = `tidy: whole-tree scan failure on ${RUNNER_PICKED}`;
+            const runUrl =
+              `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            // The report is Markdown already. Falling back to the log's tail
+            // covers the job dying before the report step - a build failure, or
+            // the deadline.
+            let report = '';
+            let reportKind = 'the deduplicated finding table';
+            try {
+              report = fs.readFileSync('tidy-scan-report.md', 'utf8');
+            } catch {
+              reportKind = 'the end of the clang-tidy log';
+              try {
+                report = '```\n' +
+                  fs.readFileSync('tidy-scan.log', 'utf8').split('\n').slice(-80).join('\n') +
+                  '\n```';
+              } catch {
+                reportKind = 'nothing';
+                report = '(no report and no log - the job failed before or during the build,' +
+                  ' or hit its deadline; the scan step alone runs well over an hour)';
+              }
+            }
+            // Issue bodies cap at 65536 characters; leave room for the prose.
+            const MAX = 12000;
+            if (report.length > MAX) {
+              report = `${report.slice(0, MAX)}\n... truncated, full report in the run artifact`;
+            }
+
+            const body = [
+              '**The whole-tree clang-tidy scan is not zero.**',
+              '',
+              `- run: ${runUrl}`,
+              `- ref: \`${context.ref}\` (event \`${context.eventName}\`, commit \`${context.sha}\`)`,
+              `- runner: \`${RUNNER_PICKED}\``,
+              '',
+              reportKind === 'nothing'
+                ? 'The job produced neither a report nor a log - read the run itself.'
+                : `Below is ${reportKind}; the full log, report and unit list are` +
+                  ` attached to the run as the \`engine-tidy-scan-${RUNNER_PICKED}\` artifact.`,
+              '',
+              report,
+              '',
+              'This scan is the denominator the per-change gate cannot give, so a',
+              'finding here is in a file no recent change touched: read it as the',
+              'ground having moved (a runner image bumping clang-tidy, or an',
+              '`engine/.clang-tidy` edit) rather than as someone having broken',
+              'something. Fix it, or decline the check in the config with a written',
+              'reason - see `docs/engine/building.md`.',
+            ].join('\n');
+
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: label });
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: label,
+                color: 'b60205',
+                description: 'A scheduled whole-tree clang-tidy scan went red',
+              });
+            }
+
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              labels: label,
+              per_page: 100,
+            });
+            const existing = open.find((i) => i.title === title);
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+              core.notice(`Commented on #${existing.number}: ${title}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                labels: [label, 'component:engine', 'component:ci'],
+              });
+              core.notice(`Filed #${created.data.number}: ${title}`);
+            }

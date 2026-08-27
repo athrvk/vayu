@@ -91,7 +91,7 @@ bool acquire_file_lock (const std::string& path, LockHandle& handle) {
 
     // Try to lock the file (non-blocking)
     // Lock the first byte of the file to prevent other processes from acquiring it
-    OVERLAPPED overlapped = { 0 };
+    OVERLAPPED overlapped = {};
     if (!LockFileEx (handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
         0, 1, 0, &overlapped)) {
         CloseHandle (handle);
@@ -147,7 +147,7 @@ bool read_pid_from_lock (const std::string& path, int& pid) {
 void release_file_lock (LockHandle& handle) {
     if (handle != INVALID_LOCK_HANDLE) {
         // Unlock the file
-        OVERLAPPED overlapped = { 0 };
+        OVERLAPPED overlapped = {};
         UnlockFileEx (handle, 0, 1, 0, &overlapped);
         CloseHandle (handle);
         handle = INVALID_LOCK_HANDLE;
@@ -172,10 +172,7 @@ bool create_directory (const std::string& path) {
     }
     // Check if it already exists as a directory
     DWORD error = GetLastError ();
-    if (error == ERROR_ALREADY_EXISTS && is_directory (path)) {
-        return true;
-    }
-    return false;
+    return error == ERROR_ALREADY_EXISTS && is_directory (path);
 }
 
 void ensure_directory (const std::string& path) {
@@ -274,7 +271,11 @@ void enable_high_resolution_timer () {
 }
 
 void disable_high_resolution_timer () {
-    if (g_timer_resolution_refcount > 0 && --g_timer_resolution_refcount == 0) {
+    if (g_timer_resolution_refcount <= 0) {
+        return;
+    }
+    --g_timer_resolution_refcount;
+    if (g_timer_resolution_refcount == 0) {
         (void)timeEndPeriod (1);
     }
 }

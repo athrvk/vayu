@@ -35,6 +35,7 @@
 #include <charconv>
 #include <cmath>
 #include <format>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
@@ -134,7 +135,7 @@ inline std::string js_number_text (const json& value) {
     }
     std::array<char, 64> buffer{};
     const auto result =
-    std::to_chars (buffer.data (), buffer.data () + buffer.size (), real);
+    std::to_chars (buffer.data (), std::to_address (buffer.end ()), real);
     std::string text (buffer.data (), result.ptr);
     // `to_chars` writes `1e+21` / `1e-07`; JavaScript writes `1e+21` / `1e-7`.
     const size_t exponent = text.find ('e');

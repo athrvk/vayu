@@ -22,6 +22,7 @@
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/http/curl_error_buffer.hpp"
+#include "vayu/http/curl_options.hpp"
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/form_body.hpp"
@@ -249,9 +250,9 @@ bool body_complete) {
     // The wire count, not the parsed one: a body cut by the capture budget
     // still delivered every event the counter saw, and reporting the shorter
     // number would make a truncated capture read as a shorter stream.
-    node["totalEvents"]     = total_events;
-    node["eventsTruncated"] = !body_complete ||
-    total_events > static_cast<int64_t> (node["items"].size ());
+    node["totalEvents"] = total_events;
+    node["eventsTruncated"] =
+    !body_complete || std::cmp_greater (total_events, node["items"].size ());
     return node;
 }
 
@@ -263,8 +264,7 @@ nlohmann::json stream_trace_node (const SseStreamContext& context) {
     // Truthful rather than derived from the cap: a stream that ended under the
     // cap and one whose tail was dropped must be distinguishable without the
     // reader knowing what the cap was when the run happened.
-    node["eventsTruncated"] =
-    context.total_events () > static_cast<int64_t> (stored.size ());
+    node["eventsTruncated"] = std::cmp_greater (context.total_events (), stored.size ());
     node["endReason"] = to_string (context.end_reason ());
     return node;
 }
@@ -429,22 +429,22 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     state.started_at = std::chrono::steady_clock::now ();
 
     errors.attach (curl);
-    curl_easy_setopt (curl, CURLOPT_URL, request.request.url.c_str ());
+    set_opt<CURLOPT_URL> (curl, request.request.url.c_str ());
     curl_mime* mime = detail::apply_method_and_body (curl, request.request);
 
     struct curl_slist* headers_list = detail::build_request_header_list (
     request.request, request.user_agent, &response.request_headers);
     if (headers_list) {
-        curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers_list);
+        set_opt<CURLOPT_HTTPHEADER> (curl, headers_list);
     }
 
-    curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, stream_write_callback);
-    curl_easy_setopt (curl, CURLOPT_WRITEDATA, &state);
-    curl_easy_setopt (curl, CURLOPT_HEADERFUNCTION, stream_header_callback);
-    curl_easy_setopt (curl, CURLOPT_HEADERDATA, &state);
-    curl_easy_setopt (curl, CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt (curl, CURLOPT_XFERINFOFUNCTION, stream_progress_callback);
-    curl_easy_setopt (curl, CURLOPT_XFERINFODATA, &state);
+    set_opt<CURLOPT_WRITEFUNCTION> (curl, stream_write_callback);
+    set_opt<CURLOPT_WRITEDATA> (curl, &state);
+    set_opt<CURLOPT_HEADERFUNCTION> (curl, stream_header_callback);
+    set_opt<CURLOPT_HEADERDATA> (curl, &state);
+    set_opt<CURLOPT_NOPROGRESS> (curl, 0L);
+    set_opt<CURLOPT_XFERINFOFUNCTION> (curl, stream_progress_callback);
+    set_opt<CURLOPT_XFERINFODATA> (curl, &state);
 
     // **No `CURLOPT_TIMEOUT_MS`.** A whole-transfer deadline is exactly what
     // made a stream unusable before this path existed: it kills a healthy
@@ -453,14 +453,13 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     // `CURLOPT_LOW_SPEED_LIMIT`/`_TIME`, the first use of the pair in this
     // codebase - and the duration cap above ends a stream that is talking
     // forever, by a rule that can say its own name.
-    curl_easy_setopt (curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
-    curl_easy_setopt (curl, CURLOPT_LOW_SPEED_TIME,
-    idle_timeout_seconds (request.limits.idle_timeout_ms));
+    set_opt<CURLOPT_LOW_SPEED_LIMIT> (curl, 1L);
+    set_opt<CURLOPT_LOW_SPEED_TIME> (
+    curl, idle_timeout_seconds (request.limits.idle_timeout_ms));
 
     if (request.request.follow_redirects) {
-        curl_easy_setopt (curl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt (curl, CURLOPT_MAXREDIRS,
-        static_cast<long> (request.request.max_redirects));
+        set_opt<CURLOPT_FOLLOWLOCATION> (curl, 1L);
+        set_opt<CURLOPT_MAXREDIRS> (curl, static_cast<long> (request.request.max_redirects));
     }
     // Until #705 this path set no proxy option at all, so a configured proxy
     // covered every send and every load run and silently skipped streams. The
@@ -469,8 +468,8 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         request.transport, request.request.verify_ssl, request.request.url)) {
         response.client_certificate = client_cert_label (*certificate);
     }
-    curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
-    vayu::http::to_curl_http_version (request.request.http_version));
+    set_opt<CURLOPT_HTTP_VERSION> (
+    curl, vayu::http::to_curl_http_version (request.request.http_version));
     if (request.cookie_jar) {
         detail::apply_jar_cookies (
         curl, *request.cookie_jar, request.cookie_scope, request.cookie_writes);
@@ -506,11 +505,11 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     detail::apply_phase_timings (response.timing, phase_times);
 
     long negotiated_version = 0;
-    curl_easy_getinfo (curl, CURLINFO_HTTP_VERSION, &negotiated_version);
+    get_info<CURLINFO_HTTP_VERSION> (curl, &negotiated_version);
     response.http_version = vayu::http::http_version_from_curl (negotiated_version);
 
     long http_code = 0;
-    curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &http_code);
+    get_info<CURLINFO_RESPONSE_CODE> (curl, &http_code);
     if (http_code > 0) {
         response.status_code = static_cast<int> (http_code);
         if (response.status_text.empty ()) {
@@ -554,10 +553,46 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
 // SseStreamManager
 // ---------------------------------------------------------------------------
 
+namespace {
+
+/**
+ * @brief Report a failure from a frame that must not let one escape.
+ *
+ * The `noexcept` is the point, not decoration. Both callers are frames where an
+ * escaping exception ends the process rather than being handled - a destructor,
+ * and a `std::thread` entry function - so their handlers cannot themselves be
+ * allowed to throw, and building a log message allocates. Routing the report
+ * through a function that cannot throw is what makes those handlers total.
+ */
+void log_unrecoverable (std::string_view what, std::string_view detail) noexcept {
+    try {
+        vayu::utils::log_error (std::string (what) + ": " + std::string (detail));
+    } catch (...) {
+        // @deliberate the logger failed while reporting a failure in a frame
+        // that terminates if anything escapes it. There is nowhere left to
+        // report to, and dropping the message is this handler's whole job.
+    }
+}
+
+} // namespace
+
 SseStreamManager::SseStreamManager () = default;
 
 SseStreamManager::~SseStreamManager () {
-    shutdown ();
+    // `shutdown` takes the manager's lock and joins every worker, and both of
+    // those throw `std::system_error` when the OS refuses. A destructor that
+    // lets one out calls `std::terminate`, so this frame turns a teardown
+    // failure into a log line - which a process already on its way down can
+    // still use, unlike a crash. Only the Windows leg's clang-tidy reports it
+    // (`bugprone-exception-escape`, #1023): MSVC's STL marks these surfaces
+    // differently from libstdc++, and the defect is real on both.
+    try {
+        shutdown ();
+    } catch (const std::exception& e) {
+        log_unrecoverable ("SSE stream manager shutdown failed", e.what ());
+    } catch (...) {
+        log_unrecoverable ("SSE stream manager shutdown failed", "unknown exception");
+    }
 }
 
 void SseStreamManager::shutdown () {
@@ -597,29 +632,48 @@ std::shared_ptr<SseStreamContext> SseStreamManager::start (SseStreamRequest requ
     }
     auto& stream   = streams_[run_id];
     stream.context = context;
+    // The `try` below is a real fix and does not depend on a linter asking for
+    // it. `bugprone-exception-escape` used to report this lambda on the Windows
+    // leg alone, for a path that is not in the body: MSVC's `<thread>` invokes
+    // the callable from `_Invoke(void*) noexcept`, whose own operations it can
+    // see throw, so the diagnostic landed on the lambda that invoker wraps.
+    // That reading is what took the check out of `engine/.clang-tidy` (#1023,
+    // 33 findings on Windows against 0 on Linux over the same commit); the
+    // reasoning is recorded there and the handler stays here regardless.
     stream.worker = std::thread ([context, spec = std::move (request)] () mutable {
-        vayu::Response response;
+        // The outermost frame this thread has: `std::thread` calls
+        // `std::terminate` if its entry function throws. The inner handlers
+        // below recover the *stream*, and each of them allocates while doing
+        // so, so a second failure raised inside one of them would escape by
+        // exactly the route they exist to close. This stays whether or not the
+        // linter asks for it.
         try {
-            response = consume_sse_stream (spec, *context);
-        } catch (const std::exception& e) {
-            // A worker thread has no handler above it, and a stream that threw
-            // must still reach a terminal state or its run is stranded running
-            // forever.
-            vayu::utils::log_error (
-            "SSE stream failed: " + context->run_id + ": " + e.what ());
-            response.status_code   = 0;
-            response.status_text   = vayu::http::status_text (0);
-            response.error_code    = vayu::ErrorCode::InternalError;
-            response.error_message = e.what ();
-            context->close (SseEndReason::Error);
-        }
-        if (spec.on_complete) {
+            vayu::Response response;
             try {
-                spec.on_complete (spec.request, response, *context);
+                response = consume_sse_stream (spec, *context);
             } catch (const std::exception& e) {
-                vayu::utils::log_error ("Failed to record SSE stream result: " +
-                context->run_id + ": " + e.what ());
+                // A worker thread has no handler above it, and a stream that
+                // threw must still reach a terminal state or its run is
+                // stranded running forever.
+                vayu::utils::log_error (
+                "SSE stream failed: " + context->run_id + ": " + e.what ());
+                response.status_code   = 0;
+                response.status_text   = vayu::http::status_text (0);
+                response.error_code    = vayu::ErrorCode::InternalError;
+                response.error_message = e.what ();
+                context->close (SseEndReason::Error);
             }
+            if (spec.on_complete) {
+                try {
+                    spec.on_complete (spec.request, response, *context);
+                } catch (const std::exception& e) {
+                    vayu::utils::log_error (
+                    "Failed to record SSE stream result: " + context->run_id +
+                    ": " + e.what ());
+                }
+            }
+        } catch (...) {
+            log_unrecoverable ("SSE stream worker failed unrecoverably", context->run_id);
         }
     });
     return context;

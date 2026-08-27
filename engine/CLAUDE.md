@@ -175,6 +175,23 @@ engine/
   The rest of the family is a subscript, which is not a token - there the gate
   is the whole of the guard, decided rather than omitted, and since #946 the
   gate re-checks the whole of every file an edit opens.
+- **libcurl's variadic calls go through `set_opt` / `get_info`** (#1023,
+  `cppcoreguidelines-pro-type-vararg`). `curl_easy_setopt`,
+  `curl_multi_setopt` and `curl_easy_getinfo` read their third argument back as
+  whatever the constant says, and nothing checks that the caller passed that -
+  an `int` for a `long` option is read out of the wrong promotion slot, and an
+  `int*` where `CURLINFO_RESPONSE_CODE` writes a `long` is a write past the
+  object. **`vayu::http::set_opt<CURLOPT_...>` and
+  `vayu::http::get_info<CURLINFO_...>`** (`http/curl_options.hpp`) take the
+  constant as a template argument, decode the argument category libcurl encodes
+  in it, and `static_assert` the value against it; the three vararg calls left
+  in the engine are the ones inside those wrappers, holding the one `NOLINT`
+  between them. Only the Windows leg ever reported this: libcurl's
+  type-checking macros are `#if !defined(__cplusplus)`, so what C++ gets is
+  `curl_exactly_three_arguments`, defined only under `__STDC__` - which GCC and
+  Clang define and MSVC does not, so the call is inside a system-header macro
+  on Linux and a plain call on Windows. `clang-tidy --extra-arg=-U__STDC__`
+  reproduces the Windows reading anywhere.
 - **A row struct's scalars all carry a default** (#1013,
   `cppcoreguidelines-pro-type-member-init`). The `vayu::db` structs in
   `types.hpp` are aggregates an insert site fills field by field, so one it
@@ -249,15 +266,40 @@ engine/
   the zero was measured* - the Linux toolchain: a finding anywhere in a file a
   commit stages or a Linux-visible pull request change is that change's to
   fix, or to NOLINT with the reason at the site; the `VAYU_TIDY_FULL` opt-in
-  and the hook's line-filter machinery are gone. **CI's Windows leg stays at
-  changed lines** (#1023): its clang-tidy 20 over MSVC sees a backlog no
-  Linux scan could (`pro-type-vararg` on every `curl_easy_setopt`, 20-only
-  checks, Windows-only code), measured at ~85 findings by the promotion's own
-  PR - it promotes when #1023 zeroes that. Nothing
-  lints at *build*
-  time: the commented-out `CMAKE_CXX_CLANG_TIDY` block went with #885, because a
+  and the hook's line-filter machinery are gone. **CI's Windows leg followed**
+  (#1023): its clang-tidy 20 over MSVC saw a backlog no Linux scan could
+  (`pro-type-vararg` on every libcurl option call, 20-only checks, Windows-only
+  code), measured at ~85 findings by #946's own PR, and it gates whole files
+  now that that backlog is paid down - `clang-tidy-diff.py` went with the
+  promotion. The whole-tree scan is what says the payment landed, per leg and
+  by number rather than by assertion. `.github/workflows/engine-tidy-scan.yml` is how either leg is
+  re-measured, weekly on both plus `workflow_dispatch`.
+  **The scan is the only thing that reads a header**, which is why its zero is
+  not the gate's zero restated: the gate lints translation units and never a
+  header (#940), so a header-only change is linted by no CI job at all. Two
+  false greens came out of building it, both the same shape - a real diagnostic
+  in a form the report's regex did not anticipate, counted as nothing - and the
+  second one (a Windows drive letter, `D:\a\...`, against a file pattern that
+  forbade colons) reported `0 findings` for a log holding 679. So the report now
+  fails when it parses no finding out of a log that holds diagnostic-shaped
+  lines: a zero is reported only where a zero was measured.
+
+  Nothing lints at *build* time: the commented-out `CMAKE_CXX_CLANG_TIDY` block went with #885, because a
   lint that runs when someone uncomments it never runs. See
   `docs/engine/building.md`.
+- **A destructor and a `main` are total, and no linter is what says so**
+  (#1023). `bugprone-exception-escape` is declined in `engine/.clang-tidy` -
+  it fires only on a `throw` it can *see*, so it answers about the standard
+  library being read rather than about this code: 33 findings on the Windows
+  leg against 0 on Linux, same commit, landing on the implicit destructors of
+  ordinary aggregates, and reporting `cli.cpp`'s `main` even though it already
+  catches `...`. The rule it was reporting is real and stays: a throw out of a
+  destructor terminates, and so does one out of a thread entry function or
+  `main`. `~SseStreamManager` and `~Logger` are the shape - a `try` around the
+  whole body, `catch (...)` at the end, and where it can report at all it goes
+  through a `noexcept` helper (`log_unrecoverable`) so the reporting cannot
+  throw either. `~Logger` is the exception that proves it: it reports nothing,
+  because the logger is what is being destroyed.
 - **An empty `catch` opens with `@deliberate` and then says why** (#944).
   `bugprone-empty-catch` is enabled and a plain comment does not satisfy it - the
   check reads only the keywords in `IgnoreCatchWithKeywords`, which

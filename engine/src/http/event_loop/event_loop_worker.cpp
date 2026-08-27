@@ -22,6 +22,7 @@
 #include <utility>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/curl_options.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 
@@ -252,21 +253,20 @@ EventLoopWorker::EventLoopWorker (const EventLoopConfig& cfg)
     }
 
     // Set multi handle options for high-performance
-    curl_multi_setopt (multi_handle, CURLMOPT_MAXCONNECTS,
-    static_cast<long> (config.max_concurrent));
-    curl_multi_setopt (multi_handle, CURLMOPT_MAX_HOST_CONNECTIONS,
-    static_cast<long> (config.max_per_host));
+    set_opt<CURLMOPT_MAXCONNECTS> (multi_handle, static_cast<long> (config.max_concurrent));
+    set_opt<CURLMOPT_MAX_HOST_CONNECTIONS> (
+    multi_handle, static_cast<long> (config.max_per_host));
 
     // Allow HTTP/2 multiplexing on any transfer whose request opted into
     // HTTP/2 (curl_utils.cpp sets CURLOPT_HTTP_VERSION per request from
     // request.http_version). This setting itself is inert on an HTTP/1.1
     // transfer, so it is left unconditional here rather than gated per-run.
-    curl_multi_setopt (multi_handle, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
+    set_opt<CURLMOPT_PIPELINING> (multi_handle, CURLPIPE_MULTIPLEX);
 
     // Set max total connections (connection pool size)
     // Higher value = more reusable connections available
-    curl_multi_setopt (multi_handle, CURLMOPT_MAX_TOTAL_CONNECTIONS,
-    static_cast<long> (config.max_concurrent * 2U));
+    set_opt<CURLMOPT_MAX_TOTAL_CONNECTIONS> (
+    multi_handle, static_cast<long> (config.max_concurrent * 2U));
 }
 
 EventLoopWorker::~EventLoopWorker () {
