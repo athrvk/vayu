@@ -367,7 +367,7 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
-		 * Postman's cookie jar object - the write half, plus a URL-scoped read. get(url, name), set(url, cookie), unset(url, name) and clear() all take the URL the cookie belongs to rather than assuming this request's.
+		 * Postman's cookie jar object - the write half, plus a URL-scoped read. get(url, name), set(url, cookie), unset(url, name) and clear(url) all take the URL the cookie belongs to rather than assuming this request's; clear() with no URL empties this environment's jar.
 		 * 
 		 * A write is applied after the transfer it was made before, so the request that follows carries it and the jar keeps it.
 		 * 
@@ -376,9 +376,9 @@ declare const pm: {
 		 */
 		jar(): {
 			/**
-			 * Empty this environment's jar - a session reset, and nothing wider: other environments' jars are untouched. Nothing is on disk, so this costs a re-login and no more.
+			 * clear(url) removes every cookie that URL would have carried - unset without a name to narrow it. clear() with no URL empties this environment's jar: a session reset, and nothing wider, since other environments' jars are untouched. Nothing is on disk either way, so this costs a re-login and no more.
 			 */
-			clear(callback?: Function): void;
+			clear(url?: string, callback?: Function): void;
 			/**
 			 * The value of a stored cookie that would be sent to that URL, or undefined. Same matching as pm.cookies.get, against the URL you pass instead of this request's; a cookie this script has just set is included. The value is returned and also handed to the optional callback as (null, value).
 			 */

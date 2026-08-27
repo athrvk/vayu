@@ -4766,6 +4766,34 @@ read_jar_cookie_arg (JSContext* ctx, JSValueConst arg, vayu::http::JarCookie& ou
     return std::nullopt;
 }
 
+// A jar method's optional trailing callback, classified without invoking it.
+enum class JarCallbackArg : std::uint8_t {
+    /// None given - absent, `undefined` or `null`. The call is complete.
+    Absent,
+    /// A function, ready to be invoked inline.
+    Present,
+    /// Something else entirely; a TypeError is pending on @p ctx.
+    Invalid,
+};
+
+// Split out of finish_jar_call so that a method which *stages* a write can
+// check the callback slot before staging. **Every jar method validates all of
+// its arguments before it stages anything** - jar().clear used to push a
+// whole-jar wipe and only then discover the URL sitting where it expected a
+// callback, so the script got a TypeError pointing away from a wipe that
+// stayed staged and rode the next transfer regardless (issue #997).
+JarCallbackArg classify_jar_callback (JSContext* ctx, int argc, JSValueConst* argv, int index) {
+    if (index >= argc || JS_IsUndefined (argv[index]) || JS_IsNull (argv[index])) {
+        return JarCallbackArg::Absent;
+    }
+    if (!JS_IsFunction (ctx, argv[index])) {
+        JS_ThrowTypeError (ctx, "pm.cookies.jar()'s callback must be a function, got %s",
+        js_type_name (ctx, argv[index]));
+        return JarCallbackArg::Invalid;
+    }
+    return JarCallbackArg::Present;
+}
+
 // Postman's callback, honoured the way pm.sendRequest honours its own: the
 // work already happened synchronously, so it is invoked inline with
 // `(null, result)`. Optional, because the call is complete without it - and
@@ -4774,14 +4802,13 @@ read_jar_cookie_arg (JSContext* ctx, JSValueConst arg, vayu::http::JarCookie& ou
 //
 // Takes ownership of @p result either way.
 JSValue finish_jar_call (JSContext* ctx, int argc, JSValueConst* argv, int callback_index, JSValue result) {
-    if (callback_index >= argc || JS_IsUndefined (argv[callback_index]) ||
-    JS_IsNull (argv[callback_index])) {
+    const auto callback = classify_jar_callback (ctx, argc, argv, callback_index);
+    if (callback == JarCallbackArg::Absent) {
         return result;
     }
-    if (!JS_IsFunction (ctx, argv[callback_index])) {
+    if (callback == JarCallbackArg::Invalid) {
         JS_FreeValue (ctx, result);
-        return JS_ThrowTypeError (ctx, "pm.cookies.jar()'s callback must be a function, got %s",
-        js_type_name (ctx, argv[callback_index]));
+        return JS_EXCEPTION;
     }
 
     JSValue args[2] = { JS_NULL, JS_DupValue (ctx, result) };
@@ -4848,6 +4875,10 @@ JSValue js_jar_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
         return JS_ThrowTypeError (ctx, "%s", reason->c_str ());
     }
 
+    if (classify_jar_callback (ctx, argc, argv, callback_index) == JarCallbackArg::Invalid) {
+        return JS_EXCEPTION;
+    }
+
     auto* writes = jar_writes (ctx, "jar().set");
     if (!writes) {
         return JS_EXCEPTION;
@@ -4879,6 +4910,9 @@ JSValue js_jar_unset (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     if (!name) {
         return JS_EXCEPTION;
     }
+    if (classify_jar_callback (ctx, argc, argv, 2) == JarCallbackArg::Invalid) {
+        return JS_EXCEPTION;
+    }
     auto* writes = jar_writes (ctx, "jar().unset");
     if (!writes) {
         return JS_EXCEPTION;
@@ -4890,15 +4924,50 @@ JSValue js_jar_unset (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
 
 JSValue js_jar_clear (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
+    // Two forms, told apart by the first argument. Postman's is
+    // `clear(url, cb?)`, scoped to one URL; Vayu's own `clear(cb?)` empties
+    // the scope and is what this method shipped as. A string in that position
+    // is unambiguously the URL - the only other thing it takes is a function.
+    std::optional<std::string> url;
+    int callback_index = 0;
+    if (argc > 0 && JS_IsString (argv[0])) {
+        url = read_jar_string_arg (ctx, "clear", "URL", 0, argc, argv);
+        if (!url) {
+            return JS_EXCEPTION;
+        }
+        // Refused rather than staged as a wipe that matches nothing: a clear
+        // is destructive, so "cleared no cookies" and "was handed something
+        // that is not a URL" must not read the same to the script.
+        if (!vayu::http::url_can_scope_cookies (*url)) {
+            return JS_ThrowTypeError (ctx,
+            "pm.cookies.jar().clear could not scope to \"%s\": the URL must be "
+            "absolute and parseable. Call clear() with no URL to empty this "
+            "environment's jar.",
+            url->c_str ());
+        }
+        callback_index = 1;
+    }
+    if (classify_jar_callback (ctx, argc, argv, callback_index) == JarCallbackArg::Invalid) {
+        return JS_EXCEPTION;
+    }
+
     auto* writes = jar_writes (ctx, "jar().clear");
     if (!writes) {
         return JS_EXCEPTION;
     }
-    // The current environment's jar, and no other - decision 2 of #337. The
-    // blast radius is a session reset, which Settings shows and a script can
-    // legitimately want; it is not the whole process's cookies.
-    writes->push_back ({ vayu::http::CookieWrite::Kind::Clear, {}, {}, {} });
-    return finish_jar_call (ctx, argc, argv, 0, JS_UNDEFINED);
+    if (url) {
+        // Scoped exactly as unset is - the cookies a request to this URL would
+        // have carried - so the two spellings cannot disagree about what "this
+        // URL's cookies" are.
+        writes->push_back (
+        { vayu::http::CookieWrite::Kind::ClearUrl, {}, std::move (*url), {} });
+    } else {
+        // The current environment's jar, and no other - decision 2 of #337. The
+        // blast radius is a session reset, which Settings shows and a script can
+        // legitimately want; it is not the whole process's cookies.
+        writes->push_back ({ vayu::http::CookieWrite::Kind::Clear, {}, {}, {} });
+    }
+    return finish_jar_call (ctx, argc, argv, callback_index, JS_UNDEFINED);
 }
 
 // pm.cookies.jar() - Postman's jar object, built per call as Postman's is.
@@ -4913,7 +4982,7 @@ JSValue js_cookies_jar (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     JS_SetPropertyStr (ctx, jar, "get", JS_NewCFunction (ctx, js_jar_get, "get", 3));
     JS_SetPropertyStr (ctx, jar, "set", JS_NewCFunction (ctx, js_jar_set, "set", 4));
     JS_SetPropertyStr (ctx, jar, "unset", JS_NewCFunction (ctx, js_jar_unset, "unset", 3));
-    JS_SetPropertyStr (ctx, jar, "clear", JS_NewCFunction (ctx, js_jar_clear, "clear", 1));
+    JS_SetPropertyStr (ctx, jar, "clear", JS_NewCFunction (ctx, js_jar_clear, "clear", 2));
     return jar;
 }
 

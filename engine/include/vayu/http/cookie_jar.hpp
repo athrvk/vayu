@@ -170,6 +170,19 @@ int64_t now_seconds);
 cookie_for_url (const std::string& url, JarCookie cookie);
 
 /**
+ * @brief Can @p url scope a jar operation - does libcurl read a host and a
+ *        path out of it?
+ *
+ * The question `matching_in` cannot answer, because it returns an empty list
+ * both for a URL that matched nothing and for one it could not parse. A
+ * *destructive* call needs the two kept apart: `pm.cookies.jar().clear(url)`
+ * on an unparseable URL would otherwise report success for a wipe that never
+ * happened, which is the same false success `jar_writes` refuses a jarless
+ * execution over (issue #997).
+ */
+[[nodiscard]] bool url_can_scope_cookies (const std::string& url);
+
+/**
  * @brief One staged jar mutation from a script (issue #337).
  *
  * Staged rather than applied - see the file comment for why the write cannot
@@ -183,12 +196,16 @@ struct CookieWrite {
         Unset,
         /// Empty the scope.
         Clear,
+        /// Drop every cookie that would be sent to `url` - `Unset` without the
+        /// name filter, which is Postman's `jar.clear(url)` (issue #997).
+        ClearUrl,
     };
 
     Kind kind = Kind::Set;
     /// `Set` only: the line to merge, from `format_cookie_line`.
     std::string line;
-    /// `Unset` only: the URL the removal is scoped to, and the cookie name.
+    /// `Unset` and `ClearUrl`: the URL the removal is scoped to. `Unset` also
+    /// carries the cookie name; `ClearUrl` leaves it empty and takes them all.
     std::string url;
     std::string name;
 };
