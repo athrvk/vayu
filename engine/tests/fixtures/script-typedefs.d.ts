@@ -720,7 +720,7 @@ declare const pm: {
 				/**
 				 * Every parameter as { key, value }, in wire order, duplicates kept - the view a canonical query string is built from. A parameter with no value has value null.
 				 */
-				all(): object[];
+				all(): { key: string, value: string | null }[];
 				/**
 				 * How many parameters the query carries, counting duplicates separately.
 				 */
@@ -736,7 +736,7 @@ declare const pm: {
 				/**
 				 * The query as a plain { name: value } object, last wins on a repeated name. Use all() when duplicates matter.
 				 */
-				toObject(): object;
+				toObject(): { [key: string]: string | null };
 			};
 			/**
 			 * The whole URL as a string, which is why JSON.stringify embeds the URL rather than an object dump.
