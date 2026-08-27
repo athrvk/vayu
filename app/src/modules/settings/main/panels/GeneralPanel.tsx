@@ -37,6 +37,7 @@ import { appSetting } from "../app-settings";
 import { OptionButtons, ToggleRow } from "./SettingControls";
 import { UpdatesCard } from "./UpdatesCard";
 import { CookiesCard } from "./CookiesCard";
+import { WorkspaceBackupCard } from "./WorkspaceBackupCard";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import type { EngineSettingsCategory } from "@/types";
 
@@ -225,6 +226,12 @@ export default function GeneralPanel() {
 					</p>
 				</CardContent>
 			</Card>
+
+			{/* A copy of the whole workspace the user controls (#987). Beside
+			    Data management because it answers the question that card
+			    raises - what happens to all this if the file is lost - and
+			    above Storage paths, which prints the database it copies. */}
+			<WorkspaceBackupCard />
 
 			{/* The engine's cookie jar - engine-held state the user never typed,
 			    which is why it sits beside run history rather than in a panel

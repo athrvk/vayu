@@ -1081,6 +1081,7 @@ struct RouteContext {
 // Route registration functions (implemented in separate files)
 void register_health_routes (RouteContext& ctx);
 void register_config_routes (RouteContext& ctx);
+void register_workspace_routes (RouteContext& ctx);
 void register_collection_routes (RouteContext& ctx);
 void register_request_routes (RouteContext& ctx);
 void register_request_example_routes (RouteContext& ctx);

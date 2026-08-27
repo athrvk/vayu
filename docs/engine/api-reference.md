@@ -834,6 +834,52 @@ range, nothing is applied and the response is `400` with the specific reason(s):
 **Success response:** `200` - the full updated entries array (same shape as
 `GET /config`) plus `"success": true`.
 
+## Workspace
+
+### POST /workspace/backup
+
+Write one complete, compacted snapshot of the workspace database into
+`backups/` beside it, then prune older snapshots to `maxBackupsRetained`
+(issue #987). Takes no body.
+
+```json
+{
+  "path": "/home/someone/.local/share/vayu/db/backups/vayu-20260827-124932-118.db",
+  "sizeBytes": 2097152,
+  "createdAt": 1787745600000,
+  "pruned": 1
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `path` | The snapshot written. The whole point of the response: restoring is a file copy you perform yourself |
+| `sizeBytes` | Its size on disk. A compacted copy, so smaller than the live database |
+| `createdAt` | When it was taken, epoch milliseconds - the stamp its file name carries |
+| `pruned` | How many older snapshots retention removed in the same call |
+
+**It runs SQLite's `VACUUM INTO`, which is why it is safe while the engine is
+working.** Copying `vayu.db` by hand is not: the `-wal` beside it holds
+committed transactions the main file does not, so a hand copy is a database
+missing its most recent writes. `VACUUM INTO` reads one consistent snapshot and
+writes a defragmented database complete on its own, and is read-only with
+respect to the workspace.
+
+**A second backup while one is running is a `409`.** Two concurrent copies would
+each write a whole second database - unbounded disk for a button someone
+double-clicked - and the second would race the first's retention pass. Anything
+else that goes wrong is a `500` naming what SQLite or the filesystem refused;
+there is no success response with an empty path.
+
+**Retention only removes files this endpoint wrote** (`vayu-<stamp>.db`), so a
+copy you put in that directory yourself is left where it is. `0` keeps every
+snapshot.
+
+**There is deliberately no restore endpoint.** A running engine overwriting the
+database file it holds open is the failure this feature exists to prevent.
+Restore by hand with the engine stopped - see
+[architecture.md](architecture.md#restoring).
+
 ## Collections
 
 Collections are folders that organize requests in a hierarchy.
