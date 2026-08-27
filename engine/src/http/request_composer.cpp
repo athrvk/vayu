@@ -106,10 +106,136 @@ constexpr std::array<const char*, 5> COMPANY_SUFFIXES = { "Inc", "LLC", "Group",
 constexpr std::array<const char*, 4> DOMAINS = { "example.com", "example.org",
     "example.net", "test.dev" };
 
+// The alphabets the #1010 tier draws from, spelled out for the reason
+// PASSWORD_CHARS is: a `substr` of another constant is dynamic initialisation
+// at namespace scope, so the relationship is pinned by an assertion instead.
+constexpr std::string_view DIGITS = "0123456789";
+static_assert (ALPHANUMERIC.substr (ALPHANUMERIC.size () - DIGITS.size ()) == DIGITS,
+"the digit alphabet is the tail of the alphanumeric one");
+constexpr std::string_view HEX_DIGITS = "0123456789abcdef";
+static_assert (HEX_DIGITS.substr (0, DIGITS.size ()) == DIGITS,
+"the hex alphabet opens with the decimal digits");
+
+// The corpora behind the generators #1010 added. Curated lists, not a faker
+// port: what the two sides have to agree on is the *shape* of a value - which
+// is what the tests pin on each - and never the words behind it.
+constexpr auto CITIES = std::to_array<const char*> (
+{ "Spinkahaven", "North Berenice", "Lake Gerardo", "East Jessyca", "Port Rico",
+"New Halle", "South Rylan", "West Kaley", "Fort Amir", "Port Adrien" });
+// Two words each, which is the shape the address test reads.
+constexpr auto STREET_NAMES = std::to_array<const char*> ({ "Harvey Streets",
+"Kuhlman Junction", "Rippin Field", "Bahringer Turnpike", "Lockman Isle", "Konopelski Mount",
+"Schuppe Village", "Reilly Circle", "Torphy Fords", "Larson Union" });
+constexpr auto COUNTRIES =
+std::to_array<const char*> ({ "Bahamas", "Norway", "Lao People's Democratic Republic",
+"Guinea-Bissau", "Chile", "Iceland", "Nepal", "Uruguay", "Slovenia", "Rwanda" });
+constexpr auto COUNTRY_CODES = std::to_array<const char*> (
+{ "CV", "NO", "LA", "GW", "CL", "IS", "NP", "UY", "SI", "RW" });
+constexpr auto WORDS = std::to_array<const char*> ({ "withdrawal", "synergistic", "sticky",
+"copying", "grocery", "bandwidth", "override", "haptic", "protocol", "matrix" });
+constexpr auto LOREM_WORDS = std::to_array<const char*> ({ "lorem", "ipsum",
+"dolor", "sit", "amet", "consectetur", "adipisicing", "elit", "sed", "eiusmod",
+"tempor", "incidunt", "labore", "dolore", "magna", "aliqua", "vel", "repellat",
+"nobis", "voluptas", "molestias", "consequuntur", "quod", "perspiciatis" });
+constexpr auto COLORS = std::to_array<const char*> ({ "red", "fuchsia", "grey",
+"cyan", "maroon", "olive", "teal", "azure", "lime", "plum" });
+constexpr auto USER_AGENTS = std::to_array<const char*> (
+{ "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, "
+  "like Gecko) Chrome/120.0.0.0 Safari/537.36",
+"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 "
+"Firefox/121.0",
+"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+"Chrome/119.0.0.0 Safari/537.36",
+"Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 "
+"(KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
+"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, "
+"like Gecko) Version/17.2 Safari/605.1.15" });
+constexpr auto ABBREVIATIONS = std::to_array<const char*> (
+{ "SQL", "PCI", "JSON", "HTTP", "XML", "API", "TCP", "SSL", "JBOD", "AGP" });
+constexpr auto CURRENCY_CODES = std::to_array<const char*> (
+{ "CDF", "USD", "EUR", "GBP", "JPY", "INR", "BRL", "ZAR", "AUD", "SEK" });
+constexpr auto PRODUCT_ADJECTIVES = std::to_array<const char*> ({ "Handmade",
+"Refined", "Rustic", "Ergonomic", "Intelligent", "Practical", "Sleek", "Generic" });
+constexpr auto PRODUCT_MATERIALS  = std::to_array<const char*> (
+{ "Concrete", "Steel", "Wooden", "Cotton", "Granite", "Rubber" });
+constexpr auto PRODUCT_NOUNS = std::to_array<const char*> (
+{ "Tuna", "Chair", "Table", "Keyboard", "Shirt", "Bike", "Ball", "Soap" });
+constexpr auto JOB_DESCRIPTORS = std::to_array<const char*> ({ "International",
+"Regional", "Global", "Central", "National", "District", "Corporate", "Dynamic" });
+constexpr auto JOB_AREAS = std::to_array<const char*> ({ "Creative", "Operations",
+"Marketing", "Applications", "Accounts", "Data", "Research", "Infrastructure" });
+constexpr auto JOB_TYPES = std::to_array<const char*> ({ "Liaison", "Manager",
+"Engineer", "Analyst", "Architect", "Consultant", "Coordinator", "Strategist" });
+
+constexpr int SECONDS_PER_DAY = 24 * 60 * 60;
+
 std::string lower (std::string s) {
     std::transform (s.begin (), s.end (), s.begin (),
     [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
     return s;
+}
+
+std::string zero_padded (long long value, size_t width) {
+    std::string out = std::to_string (value);
+    if (out.size () < width) {
+        out.insert (0, width - out.size (), '0');
+    }
+    return out;
+}
+
+/// @p count words drawn independently from @p items, joined by single spaces.
+template <size_t N>
+std::string join_words (const std::array<const char*, N>& items, int count) {
+    std::string out;
+    for (int i = 0; i < count; ++i) {
+        if (i > 0) {
+            out += ' ';
+        }
+        out += pick (items);
+    }
+    return out;
+}
+
+std::string lorem_sentence () {
+    // Never empty: the count is at least one, so the capitalisation below reads
+    // a character that is there.
+    std::string sentence = join_words (LOREM_WORDS, random_int (4, 9));
+    sentence.at (0) =
+    static_cast<char> (std::toupper (static_cast<unsigned char> (sentence.at (0))));
+    return sentence + ".";
+}
+
+std::string lorem_sentences (int count) {
+    std::string out;
+    for (int i = 0; i < count; ++i) {
+        if (i > 0) {
+            out += ' ';
+        }
+        out += lorem_sentence ();
+    }
+    return out;
+}
+
+/**
+ * @p time written the way JavaScript's `Date.prototype.toString` writes it,
+ * which is the shape Postman documents its three date generators in.
+ *
+ * In UTC on both sides rather than in a local zone: the renderer twin has to
+ * spell the same thing, and a daemon has no user's zone to read. Same
+ * empty-on-refusal contract as {@link iso_timestamp}.
+ */
+std::string js_date_string (std::time_t time) {
+    const std::string parts = vayu::utils::format_utc_time (time, "%a %b %d %Y %H:%M:%S");
+    if (parts.empty ()) {
+        return {};
+    }
+    return parts + " GMT+0000 (Coordinated Universal Time)";
+}
+
+std::time_t shifted_now (int offset_seconds) {
+    const auto now =
+    std::chrono::system_clock::to_time_t (std::chrono::system_clock::now ());
+    return now + offset_seconds;
 }
 
 std::string iso_timestamp () {
@@ -128,9 +254,7 @@ std::string iso_timestamp () {
     }
     // The milliseconds, which no `std::strftime` specifier covers. Always three
     // digits, because the renderer's `toISOString` always writes three.
-    std::string millis = std::to_string (ms.count ());
-    millis.insert (0, 3 - millis.size (), '0');
-    return seconds + "." + millis + "Z";
+    return seconds + "." + zero_padded (ms.count (), 3) + "Z";
 }
 
 struct DynamicVariable {
@@ -141,7 +265,7 @@ struct DynamicVariable {
 // Same names, same order as the renderer table. `constexpr`, so the table is
 // built by the compiler rather than before `main` - every entry is a literal
 // and a captureless lambda, both of which are constant expressions.
-constexpr std::array<DynamicVariable, 15> DYNAMIC_VARIABLES = { {
+constexpr std::array<DynamicVariable, 39> DYNAMIC_VARIABLES = { {
 { "$guid", [] { return vayu::utils::generate_id (""); } },
 { "$randomUUID", [] { return vayu::utils::generate_id (""); } },
 { "$timestamp",
@@ -175,6 +299,66 @@ constexpr std::array<DynamicVariable, 15> DYNAMIC_VARIABLES = { {
     std::to_string (random_int (0, 255)) + "." + std::to_string (random_int (0, 255));
 } },
 { "$randomPassword", [] { return random_string (15, PASSWORD_CHARS); } },
+// The #1010 tier: the Postman generators an imported collection actually
+// reaches for. Every shape below is Postman's documented example read as the
+// contract - `700-008-5275`, `5742 Harvey Streets`, `#47594a`, `531.55` - and
+// each is pinned by a regex on both sides.
+{ "$randomPhoneNumber",
+[] {
+    return std::to_string (random_int (200, 999)) + "-" +
+    random_string (3, DIGITS) + "-" + random_string (4, DIGITS);
+} },
+{ "$randomCity", [] { return std::string (pick (CITIES)); } },
+{ "$randomStreetAddress",
+[] {
+    return std::to_string (random_int (100, 9999)) + " " + pick (STREET_NAMES);
+} },
+{ "$randomCountry", [] { return std::string (pick (COUNTRIES)); } },
+{ "$randomCountryCode", [] { return std::string (pick (COUNTRY_CODES)); } },
+{ "$randomDatePast",
+[] {
+    return js_date_string (shifted_now (-random_int (1, 365 * SECONDS_PER_DAY)));
+} },
+{ "$randomDateFuture",
+[] {
+    return js_date_string (shifted_now (random_int (1, 365 * SECONDS_PER_DAY)));
+} },
+{ "$randomDateRecent",
+[] {
+    return js_date_string (shifted_now (-random_int (1, 7 * SECONDS_PER_DAY)));
+} },
+{ "$randomWord", [] { return std::string (pick (WORDS)); } },
+{ "$randomWords", [] { return join_words (WORDS, random_int (3, 5)); } },
+{ "$randomLoremWord", [] { return std::string (pick (LOREM_WORDS)); } },
+{ "$randomLoremWords", [] { return join_words (LOREM_WORDS, 3); } },
+{ "$randomLoremSentence", [] { return lorem_sentence (); } },
+{ "$randomLoremSentences", [] { return lorem_sentences (random_int (2, 6)); } },
+{ "$randomLoremParagraph", [] { return lorem_sentences (random_int (3, 5)); } },
+{ "$randomColor", [] { return std::string (pick (COLORS)); } },
+{ "$randomHexColor", [] { return "#" + random_string (6, HEX_DIGITS); } },
+{ "$randomUserAgent", [] { return std::string (pick (USER_AGENTS)); } },
+// The reserved example space (RFC 2606) the file's other host-shaped
+// generators already draw from, rather than Postman's live-looking `gracie.biz`
+// - a generated hostname reaches DNS the moment someone writes it into a URL.
+{ "$randomDomainName",
+[] { return lower (pick (FIRST_NAMES)) + "." + pick (DOMAINS); } },
+{ "$randomAbbreviation", [] { return std::string (pick (ABBREVIATIONS)); } },
+{ "$randomPrice",
+[] {
+    const int cents                                         = random_int (0, 100000);
+    return std::to_string (cents / 100) + "." + zero_padded (cents % 100, 2);
+} },
+{ "$randomCurrencyCode", [] { return std::string (pick (CURRENCY_CODES)); } },
+{ "$randomProductName",
+[] {
+    return std::string (pick (PRODUCT_ADJECTIVES)) + " " +
+    pick (PRODUCT_MATERIALS) + " " + pick (PRODUCT_NOUNS);
+} },
+{ "$randomJobTitle",
+[] {
+    return std::string (pick (JOB_DESCRIPTORS)) + " " + pick (JOB_AREAS) + " " +
+    pick (JOB_TYPES);
+} },
 } };
 
 std::string trim (const std::string& s) {

@@ -26,10 +26,11 @@
  *
  * **This is app-side, at interpolation time** (see `docs/app/variable-resolution.md`).
  * `pm.variables.get("$guid")` inside a script is *not* covered - scripts run
- * engine-side, and the engine does no `{{…}}` interpolation. This copy is
- * mirrored in `app/electron/mcp/resolve.ts` for the MCP client, which cannot
- * import from `app/src/`; the two must change together (CLAUDE.md), and
- * `resolve.test.ts` compares the two name sets.
+ * engine-side, and the engine does no `{{…}}` interpolation. This table is a
+ * genuine second implementation of `engine/src/http/request_composer.cpp`'s
+ * C++ table, held in parity with it only by the shared conformance fixture
+ * (`engine/tests/fixtures/variable-resolution-conformance.json`) and by
+ * matching value shapes - there is no shared source.
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
@@ -111,6 +112,210 @@ const COMPANY_WORDS = ["Northwind", "Acme", "Umbra", "Lumen", "Kestrel", "Basalt
 const COMPANY_SUFFIXES = ["Inc", "LLC", "Group", "Labs", "Systems"] as const;
 const DOMAINS = ["example.com", "example.org", "example.net", "test.dev"] as const;
 
+const DIGITS = "0123456789";
+const HEX_DIGITS = "0123456789abcdef";
+
+const CITIES = [
+	"Spinkahaven",
+	"North Berenice",
+	"Lake Gerardo",
+	"East Jessyca",
+	"Port Rico",
+	"New Halle",
+	"South Rylan",
+	"West Kaley",
+	"Fort Amir",
+	"Port Adrien",
+] as const;
+
+const STREET_NAMES = [
+	"Harvey Streets",
+	"Kuhlman Junction",
+	"Rippin Field",
+	"Bahringer Turnpike",
+	"Lockman Isle",
+	"Konopelski Mount",
+	"Schuppe Village",
+	"Reilly Circle",
+	"Torphy Fords",
+	"Larson Union",
+] as const;
+
+const COUNTRIES = [
+	"Bahamas",
+	"Norway",
+	"Lao People's Democratic Republic",
+	"Guinea-Bissau",
+	"Chile",
+	"Iceland",
+	"Nepal",
+	"Uruguay",
+	"Slovenia",
+	"Rwanda",
+] as const;
+
+const COUNTRY_CODES = ["CV", "NO", "LA", "GW", "CL", "IS", "NP", "UY", "SI", "RW"] as const;
+
+const WORDS = [
+	"withdrawal",
+	"synergistic",
+	"sticky",
+	"copying",
+	"grocery",
+	"bandwidth",
+	"override",
+	"haptic",
+	"protocol",
+	"matrix",
+] as const;
+
+const LOREM_WORDS = [
+	"lorem",
+	"ipsum",
+	"dolor",
+	"sit",
+	"amet",
+	"consectetur",
+	"adipisicing",
+	"elit",
+	"sed",
+	"eiusmod",
+	"tempor",
+	"incidunt",
+	"labore",
+	"dolore",
+	"magna",
+	"aliqua",
+	"vel",
+	"repellat",
+	"nobis",
+	"voluptas",
+	"molestias",
+	"consequuntur",
+	"quod",
+	"perspiciatis",
+] as const;
+
+const COLORS = [
+	"red",
+	"fuchsia",
+	"grey",
+	"cyan",
+	"maroon",
+	"olive",
+	"teal",
+	"azure",
+	"lime",
+	"plum",
+] as const;
+
+const USER_AGENTS = [
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+] as const;
+
+const ABBREVIATIONS = [
+	"SQL",
+	"PCI",
+	"JSON",
+	"HTTP",
+	"XML",
+	"API",
+	"TCP",
+	"SSL",
+	"JBOD",
+	"AGP",
+] as const;
+
+const CURRENCY_CODES = [
+	"CDF",
+	"USD",
+	"EUR",
+	"GBP",
+	"JPY",
+	"INR",
+	"BRL",
+	"ZAR",
+	"AUD",
+	"SEK",
+] as const;
+
+const PRODUCT_ADJECTIVES = [
+	"Handmade",
+	"Refined",
+	"Rustic",
+	"Ergonomic",
+	"Intelligent",
+	"Practical",
+	"Sleek",
+	"Generic",
+] as const;
+
+const PRODUCT_MATERIALS = ["Concrete", "Steel", "Wooden", "Cotton", "Granite", "Rubber"] as const;
+
+const PRODUCT_NOUNS = [
+	"Tuna",
+	"Chair",
+	"Table",
+	"Keyboard",
+	"Shirt",
+	"Bike",
+	"Ball",
+	"Soap",
+] as const;
+
+const JOB_DESCRIPTORS = [
+	"International",
+	"Regional",
+	"Global",
+	"Central",
+	"National",
+	"District",
+	"Corporate",
+	"Dynamic",
+] as const;
+
+const JOB_AREAS = [
+	"Creative",
+	"Operations",
+	"Marketing",
+	"Applications",
+	"Accounts",
+	"Data",
+	"Research",
+	"Infrastructure",
+] as const;
+
+const JOB_TYPES = [
+	"Liaison",
+	"Manager",
+	"Engineer",
+	"Analyst",
+	"Architect",
+	"Consultant",
+	"Coordinator",
+	"Strategist",
+] as const;
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const MONTHS = [
+	"Jan",
+	"Feb",
+	"Mar",
+	"Apr",
+	"May",
+	"Jun",
+	"Jul",
+	"Aug",
+	"Sep",
+	"Oct",
+	"Nov",
+	"Dec",
+] as const;
+
 function randomString(length: number, alphabet: string): string {
 	let out = "";
 	for (let i = 0; i < length; i++) out += alphabet[randomInt(0, alphabet.length - 1)];
@@ -123,6 +328,40 @@ function firstName(): string {
 
 function lastName(): string {
 	return pick(LAST_NAMES);
+}
+
+function joinWords(items: readonly string[], count: number): string {
+	return Array.from({ length: count }, () => pick(items)).join(" ");
+}
+
+function loremSentence(): string {
+	const sentence = joinWords(LOREM_WORDS, randomInt(4, 9));
+	return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
+}
+
+function loremSentences(count: number): string {
+	return Array.from({ length: count }, () => loremSentence()).join(" ");
+}
+
+function pad2(value: number): string {
+	return String(value).padStart(2, "0");
+}
+
+/**
+ * `Date.prototype.toString`'s exact format, but pinned to UTC: the engine twin
+ * has no user's zone, so both sides must spell the same string regardless of
+ * where this runs. Neither `toString`, `toUTCString` nor `toLocaleString`
+ * produces it - hence building it field by field off the UTC getters.
+ */
+function jsDateString(date: Date): string {
+	const weekday = WEEKDAYS[date.getUTCDay()];
+	const month = MONTHS[date.getUTCMonth()];
+	const day = pad2(date.getUTCDate());
+	const year = date.getUTCFullYear();
+	const hours = pad2(date.getUTCHours());
+	const minutes = pad2(date.getUTCMinutes());
+	const seconds = pad2(date.getUTCSeconds());
+	return `${weekday} ${month} ${day} ${year} ${hours}:${minutes}:${seconds} GMT+0000 (Coordinated Universal Time)`;
 }
 
 /**
@@ -210,6 +449,131 @@ export const DYNAMIC_VARIABLES: readonly DynamicVariable[] = [
 		name: "$randomPassword",
 		description: "15-character password",
 		generate: () => randomString(15, PASSWORD_CHARS),
+	},
+	{
+		name: "$randomPhoneNumber",
+		description: "Ten-digit phone number",
+		generate: () =>
+			`${randomInt(200, 999)}-${randomString(3, DIGITS)}-${randomString(4, DIGITS)}`,
+	},
+	{
+		name: "$randomCity",
+		description: "City name",
+		generate: () => pick(CITIES),
+	},
+	{
+		name: "$randomStreetAddress",
+		description: "Street address",
+		generate: () => `${randomInt(100, 9999)} ${pick(STREET_NAMES)}`,
+	},
+	{
+		name: "$randomCountry",
+		description: "Country name",
+		generate: () => pick(COUNTRIES),
+	},
+	{
+		name: "$randomCountryCode",
+		description: "ISO 3166-1 alpha-2 country code",
+		generate: () => pick(COUNTRY_CODES),
+	},
+	{
+		name: "$randomDatePast",
+		description: "Datetime within the past year",
+		generate: () => jsDateString(new Date(Date.now() - randomInt(1, 365 * 86400) * 1000)),
+	},
+	{
+		name: "$randomDateFuture",
+		description: "Datetime within the next year",
+		generate: () => jsDateString(new Date(Date.now() + randomInt(1, 365 * 86400) * 1000)),
+	},
+	{
+		name: "$randomDateRecent",
+		description: "Datetime within the past week",
+		generate: () => jsDateString(new Date(Date.now() - randomInt(1, 7 * 86400) * 1000)),
+	},
+	{
+		name: "$randomWord",
+		description: "One word",
+		generate: () => pick(WORDS),
+	},
+	{
+		name: "$randomWords",
+		description: "Three to five words",
+		generate: () => joinWords(WORDS, randomInt(3, 5)),
+	},
+	{
+		name: "$randomLoremWord",
+		description: "One lorem ipsum word",
+		generate: () => pick(LOREM_WORDS),
+	},
+	{
+		name: "$randomLoremWords",
+		description: "Three lorem ipsum words",
+		generate: () => joinWords(LOREM_WORDS, 3),
+	},
+	{
+		name: "$randomLoremSentence",
+		description: "One lorem ipsum sentence",
+		generate: loremSentence,
+	},
+	{
+		name: "$randomLoremSentences",
+		description: "Two to six lorem ipsum sentences",
+		generate: () => loremSentences(randomInt(2, 6)),
+	},
+	{
+		name: "$randomLoremParagraph",
+		description: "A lorem ipsum paragraph",
+		generate: () => loremSentences(randomInt(3, 5)),
+	},
+	{
+		name: "$randomColor",
+		description: "Color name",
+		generate: () => pick(COLORS),
+	},
+	{
+		name: "$randomHexColor",
+		description: "Hex color, e.g. #47594a",
+		generate: () => `#${randomString(6, HEX_DIGITS)}`,
+	},
+	{
+		name: "$randomUserAgent",
+		description: "Browser user-agent string",
+		generate: () => pick(USER_AGENTS),
+	},
+	{
+		name: "$randomDomainName",
+		description: "Domain under a reserved example domain",
+		generate: () => `${pick(FIRST_NAMES).toLowerCase()}.${pick(DOMAINS)}`,
+	},
+	{
+		name: "$randomAbbreviation",
+		description: "Abbreviation, e.g. SQL",
+		generate: () => pick(ABBREVIATIONS),
+	},
+	{
+		name: "$randomPrice",
+		description: "Price between 0.00 and 1000.00",
+		generate: () => {
+			const cents = randomInt(0, 100000);
+			return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
+		},
+	},
+	{
+		name: "$randomCurrencyCode",
+		description: "ISO 4217 currency code",
+		generate: () => pick(CURRENCY_CODES),
+	},
+	{
+		name: "$randomProductName",
+		description: "Product name",
+		generate: () =>
+			`${pick(PRODUCT_ADJECTIVES)} ${pick(PRODUCT_MATERIALS)} ${pick(PRODUCT_NOUNS)}`,
+	},
+	{
+		name: "$randomJobTitle",
+		description: "Job title",
+		generate: () => `${pick(JOB_DESCRIPTORS)} ${pick(JOB_AREAS)} ${pick(JOB_TYPES)}`,
 	},
 ] as const;
 
