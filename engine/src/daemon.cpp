@@ -19,9 +19,11 @@
 #include <cstdlib>
 #include <iostream>
 #include <span>
+#include <string_view>
 #include <thread>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/numeric_flag.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
@@ -58,6 +60,49 @@ bool acquire_lock (const std::string& lock_path) {
     return true;
 }
 /**
+ * Read @p text as @p flag's value onto @p out.
+ *
+ * The refusal is printed here rather than returned, because both call sites do
+ * the same thing with it and the argument loop is at its complexity budget with
+ * one branch per flag, not two.
+ *
+ * @return true to carry on, false when the run is over.
+ */
+bool read_numeric_flag (const vayu::core::NumericFlag& flag, std::string_view text, int& out) {
+    const auto parsed = vayu::core::parse_numeric_flag (flag, text);
+    if (!parsed) {
+        std::cerr << "vayu-engine: " << parsed.error () << "\n";
+        return false;
+    }
+    out = *parsed;
+    return true;
+}
+
+/// `-p` / `--port <PORT>`. A flag with nothing after it leaves the default
+/// standing, which is what it has always done.
+bool read_port (std::span<char* const> args, size_t& i, int& port) {
+    if (i + 1 >= args.size ()) {
+        return true;
+    }
+    return read_numeric_flag (vayu::core::PORT_FLAG, args[++i], port);
+}
+
+/// `-v` / `--verbose [LEVEL]`. The level is optional, so a leading digit is
+/// what says the next argument was meant as one at all - `-v run` is verbose
+/// with no level, not a bad level. Once it is meant as one it is held to the
+/// range rather than clamped into it: `-v 5` was silently 2, which told the
+/// user nothing about the levels that exist.
+bool read_verbosity (std::span<char* const> args, size_t& i, int& verbosity) {
+    if (i + 1 < args.size () &&
+    std::isdigit (static_cast<unsigned char> (*args[i + 1])) != 0) {
+        return read_numeric_flag (vayu::core::VERBOSITY_FLAG, args[++i], verbosity);
+    }
+    // No level specified, default to 1 (info level)
+    verbosity = 1;
+    return true;
+}
+
+/**
  * The daemon's own arguments.
  *
  * @return the exit code to stop on - `--help` answers here - or nothing to
@@ -70,23 +115,16 @@ read_daemon_args (std::span<char* const> args, int& port, int& verbosity, std::s
 
         if (arg == vayu::core::constants::cli::ARG_PORT_SHORT ||
         arg == vayu::core::constants::cli::ARG_PORT_LONG) {
-            if (i + 1 < args.size ()) {
-                port = std::stoi (args[++i]);
+            if (!read_port (args, i, port)) {
+                return 1;
             }
         } else if (arg == "-d" || arg == "--data-dir") {
             if (i + 1 < args.size ()) {
                 data_dir = args[++i];
             }
         } else if (arg == "-v" || arg == "--verbose") {
-            // Check if next arg is a number (verbosity level)
-            if (i + 1 < args.size () &&
-            std::isdigit (static_cast<unsigned char> (*args[i + 1])) != 0) {
-                verbosity = std::stoi (args[++i]);
-                // Clamp to valid range [0, 2]
-                verbosity = std::max (0, std::min (2, verbosity));
-            } else {
-                // No level specified, default to 1 (info level)
-                verbosity = 1;
+            if (!read_verbosity (args, i, verbosity)) {
+                return 1;
             }
         } else if (arg == "-h" || arg == "--help") {
             std::cout << "Vayu Engine " << vayu::Version::string << "\n\n";

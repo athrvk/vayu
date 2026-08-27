@@ -44,7 +44,7 @@ vayu-cli run request.json --daemon http://localhost:9999
 |--------|-------------|
 | `-h, --help` | Show help message |
 | `-v, --version` | Show version information |
-| `--verbose [LEVEL]` | Enable verbose output (0=warn/error, 1=info, 2=debug, default: 1) |
+| `--verbose [LEVEL]` | Enable verbose output. LEVEL is 0 (warn/error), 1 (info) or 2 (debug); `--verbose` on its own means 1. A level outside 0-2, or one that is not a whole number, is refused with exit code 1 |
 | `--no-color` | Disable colored output |
 | `--daemon <url>` | Vayu Engine URL (default: http://127.0.0.1:9876) |
 
@@ -162,6 +162,20 @@ vayu-cli run request.json
 The daemon exits **1** if it cannot take its port, naming the address on
 stderr - another process is listening there. Use `--port` to pick a different
 one, and `--daemon` to point the CLI at it. An ordinary shutdown exits **0**.
+
+Its numeric flags are checked before anything starts, and a value that is not
+one of the numbers the flag takes is refused on stderr with exit code **1**
+rather than clamped or read as its numeric prefix:
+
+| Daemon flag | Accepts |
+|-------------|---------|
+| `-p, --port <PORT>` | A whole number from 1 to 65535 |
+| `-v, --verbose [LEVEL]` | 0 (warn/error), 1 (info) or 2 (debug); `-v` on its own means 1 |
+
+```
+$ vayu-engine --port notanumber
+vayu-engine: --port expects a number between 1 and 65535, got "notanumber"
+```
 
 ## Error Handling
 
