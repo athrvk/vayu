@@ -2643,6 +2643,13 @@ JSValue js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, 
     // RegExp here and satisfies it, and a matcher object a script built itself
     // is run rather than silently deep-equalled against the body.
     JSValue test_fn = JS_GetPropertyStr (ctx, argv[0], "test");
+    // Reading `test` runs a getter if the script defined one, and a getter that
+    // throws leaves the exception pending. Falling through to the deep-equal
+    // branch there would report a mismatch and drop the script's own error -
+    // the shape of silent wrongness this assertion was fixed for.
+    if (JS_IsException (test_fn)) {
+        return JS_EXCEPTION;
+    }
     if (JS_IsFunction (ctx, test_fn)) {
         JSValue subject = JS_NewString (ctx, body.c_str ());
         JSValue result  = JS_Call (ctx, test_fn, argv[0], 1, &subject);

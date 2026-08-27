@@ -245,6 +245,7 @@ TEST_F (AssertionErrorTest, AMisusedMatcherIsStillATypeError) {
         R"(pm.expect(1).to.throw())",
         R"(pm.response.to.have.status())",
         R"(pm.response.to.have.body(5))",
+        R"(pm.response.to.have.body(null))",
     };
 
     for (const auto& usage_error : usage_errors) {

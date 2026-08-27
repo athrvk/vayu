@@ -1034,6 +1034,31 @@ TEST_F (ScriptEngineTest, ResponseBodyRefusesAnArgumentItCannotCompare) {
     << result.tests[0].error_message;
 }
 
+// Reading the pattern's `test` runs a getter the script may have written, and
+// one that throws must reach the report as the script's own error - not as a
+// deep-equal mismatch against a body it never got to look at.
+TEST_F (ScriptEngineTest, ResponseBodyPropagatesAThrowFromTheArgumentItReads) {
+    response.body = R"({"id": 1})";
+
+    auto result = engine.execute_test (R"(
+        pm.test("throwing getter", function() {
+            pm.response.to.have.body({ get test () { throw new Error("from the getter"); } });
+        });
+        pm.test("throwing pattern", function() {
+            pm.response.to.have.body({ test: function () { throw new Error("from the pattern"); } });
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2u);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("from the getter"), std::string::npos)
+    << result.tests[0].error_message;
+    EXPECT_FALSE (result.tests[1].passed);
+    EXPECT_NE (result.tests[1].error_message.find ("from the pattern"), std::string::npos)
+    << result.tests[1].error_message;
+}
+
 TEST_F (ScriptEngineTest, ResponseStatusTakesAReasonPhrase) {
     auto result = engine.execute_test (R"(
         pm.test("reason", function() { pm.response.to.have.status("OK"); });
