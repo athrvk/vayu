@@ -866,6 +866,28 @@ export interface ConnectionTestResult {
 	detail?: string;
 }
 
+// Workspace backup (issue #987)
+
+/**
+ * What `POST /workspace/backup` answers with.
+ *
+ * `path` is the whole point of the shape: restoring is a file copy the user
+ * performs themselves, with the engine stopped, so the one thing they need back
+ * is where the snapshot went. There is deliberately no restore call to pair
+ * with this - a live engine overwriting its own open database is the footgun
+ * the feature avoids.
+ */
+export interface WorkspaceBackupResult {
+	/** Absolute path of the snapshot written. */
+	path: string;
+	/** Its size on disk - a compacted copy, so smaller than the live database. */
+	sizeBytes: number;
+	/** When it was taken, in Unix ms. */
+	createdAt: number;
+	/** How many older snapshots `maxBackupsRetained` removed in the same call. */
+	pruned: number;
+}
+
 // Webhook inbox API (issue #480). An inbox is engine-hosted listener state, so
 // none of these shapes is stored client-side - the surface reads them back.
 

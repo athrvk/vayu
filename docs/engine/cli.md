@@ -38,6 +38,33 @@ vayu-cli run load-test.json
 vayu-cli run request.json --daemon http://localhost:9999
 ```
 
+### backup
+
+Take one snapshot of the workspace database and print where it was written.
+
+```bash
+vayu-cli backup
+```
+
+The snapshot is a complete, compacted copy of everything the engine stores -
+collections, environments, credentials and run history - written into
+`backups/` beside the database. It is taken through the running daemon on
+purpose: the engine holds the database open, and copying that file by hand is
+not safe under WAL, because the `-wal` beside it holds committed transactions
+the main file does not.
+
+The path is the only thing printed on stdout, so a script can capture it:
+
+```bash
+SNAPSHOT=$(vayu-cli backup)
+```
+
+Exit code 1 with the engine's message on stderr if the daemon is unreachable or
+refuses - including while another backup is still running, which answers `409`.
+How many snapshots are kept is the `maxBackupsRetained` setting; restoring one
+is a manual copy with the engine stopped, described in
+[Architecture](architecture.md#workspace-backups).
+
 ## Options
 
 | Option | Description |

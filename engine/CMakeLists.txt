@@ -621,6 +621,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/managed_listener.cpp
         src/http/routes/health.cpp
         src/http/routes/config.cpp
+        src/http/routes/workspace.cpp
         src/http/routes/collections.cpp
         src/http/routes/requests.cpp
         src/http/routes/examples.cpp

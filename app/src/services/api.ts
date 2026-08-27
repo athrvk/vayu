@@ -59,6 +59,7 @@ import type {
 	ClientCertificate,
 	ClientCertificateInput,
 	ConnectionTestResult,
+	WorkspaceBackupResult,
 	GetConfigResponse,
 	UpdateConfigRequest,
 	GlobalsResponse,
@@ -485,6 +486,17 @@ export const apiService = {
 		return await httpClient.post<ConnectionTestResult>(API_ENDPOINTS.DIAGNOSTICS_CONNECTION, {
 			url,
 		});
+	},
+
+	/**
+	 * Take one workspace snapshot (issue #987).
+	 *
+	 * Rejects on 409 - another backup is already running - which is a state the
+	 * caller shows rather than a failure: the file the user asked for is still
+	 * being written by their earlier request.
+	 */
+	async backupWorkspace(): Promise<WorkspaceBackupResult> {
+		return await httpClient.post<WorkspaceBackupResult>(API_ENDPOINTS.WORKSPACE_BACKUP, {});
 	},
 
 	// Client-certificate registry (issue #707)

@@ -991,12 +991,49 @@ Default configuration values (from `constants.hpp`):
 ```
 data/
 ├── db/
-│   └── vayu.db          # SQLite database
+│   ├── vayu.db          # SQLite database
+│   ├── vayu.db.bak      # Rewritten on every clean start - crash recovery, not a user backup
+│   └── backups/
+│       └── vayu-<stamp>.db  # On-demand snapshots (UTC, %Y%m%d-%H%M%S-mmm)
 ├── logs/
 │   ├── vayu_<stamp>.log # One file per process start (local time, %Y%m%d_%H%M%S)
 │   └── vayu_<stamp>.log.1  # The rotated half of a file that reached the size cap
 └── vayu.lock            # Single-instance lock file
 ```
+
+### Workspace backups
+
+`vayu.db` holds everything a person has built - collections, environments,
+stored credentials and run history - and until issue #987 there was no copy of
+it the user controlled. The `.bak` beside it is **not** one: it is rewritten on
+every clean start, so it exists to give a corrupt file something to restore
+from, not to let anyone go back to last week.
+
+`POST /workspace/backup` (or `vayu-cli backup`) writes one snapshot into
+`db/backups/`. It runs SQLite's `VACUUM INTO`, which is why it is safe while
+the engine is working: copying `vayu.db` by hand is not, because the `-wal`
+beside it holds committed transactions the main file does not, so the copy is a
+database missing its most recent writes. `VACUUM INTO` reads one consistent
+snapshot and writes a defragmented database that is complete on its own.
+
+Names are UTC and fixed-width so they sort chronologically as text. After each
+backup the newest `maxBackupsRetained` snapshots are kept (default 5, `0` =
+unlimited) and older ones removed - **only files matching `vayu-<stamp>.db`**,
+so a copy you put in that directory yourself is left alone. A second backup
+requested while one is running is refused with `409` rather than queued.
+
+#### Restoring
+
+There is deliberately no restore endpoint: a running engine overwriting the
+database file it holds open is the failure this feature exists to spare you.
+Restore by hand, with the engine stopped.
+
+1. Quit Vayu (or stop `vayu-engine`).
+2. Copy the snapshot over `db/vayu.db`.
+3. Delete `db/vayu.db-wal` and `db/vayu.db-shm` if they are present - they
+   belong to the database you just replaced, and leaving them behind reapplies
+   its writes on top of the snapshot.
+4. Start Vayu again.
 
 ### Log retention, level and size
 

@@ -8,6 +8,7 @@
  */
 
 #include <chrono>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -144,6 +145,40 @@ struct SpecSyncBatch {
     /// The imported example rows @ref examples replaces. Ids, because the row
     /// they name is stored and only its identity matters here.
     std::vector<std::string> deleted_examples;
+};
+
+/**
+ * @brief One workspace snapshot, as `POST /workspace/backup` reports it
+ *        (issue #987).
+ *
+ * The path is absolute wherever the engine's own database path is, which is
+ * every real start - the daemon is given a data directory - and it is what the
+ * user needs, because restoring is a file copy they perform themselves.
+ */
+struct BackupRecord {
+    /// The snapshot written, as a path the user can act on.
+    std::string path;
+    /// Its size on disk. A compacted copy, so smaller than the live file.
+    int64_t size_bytes = 0;
+    /// The stamp its file name carries - the caller's clock, in Unix ms.
+    int64_t created_at = 0;
+    /// How many older snapshots retention removed in the same call.
+    int64_t pruned = 0;
+};
+
+/**
+ * @brief Why a workspace backup did not happen (issue #987).
+ *
+ * The two cases answer with different statuses and read differently to a user,
+ * so they are one type with a flag rather than a message a route has to parse:
+ * a refused *concurrent* backup is a 409 and nothing is wrong, while anything
+ * else is a 500 naming what SQLite or the filesystem refused.
+ */
+struct BackupFailure {
+    /// Another backup holds the slot; nothing was written.
+    bool already_running = false;
+    /// What went wrong, in the words the caller prints.
+    std::string message;
 };
 
 class Database {
@@ -584,6 +619,78 @@ class Database {
      * process's leftovers are reconciled before anything can read them.
      */
     int64_t clear_inbox_requests_all ();
+
+    // Workspace backup (issue #987)
+
+    /**
+     * @brief Where snapshots are written - `backups/` beside the database file.
+     *
+     * Derived from @ref path rather than threaded through as a second
+     * parameter, on the rule that directory already carries (the CA bundle
+     * `resolve_transport_policy` materializes is a sibling for the same
+     * reason): a caller holding a `Database` knows where the workspace lives.
+     */
+    [[nodiscard]] std::string backups_directory () const;
+
+    /**
+     * @brief Write one consistent, compacted snapshot of this workspace and
+     *        prune older ones to `maxBackupsRetained`.
+     *
+     * SQLite's `VACUUM INTO` rather than a file copy: copying the database file
+     * out from under a running engine is not safe under WAL - the `-wal` holds
+     * committed transactions the main file does not - while `VACUUM INTO` reads
+     * one snapshot and writes a defragmented database that is complete on its
+     * own. It is read-only with respect to the workspace, so nothing here can
+     * cost the user the data it is copying.
+     *
+     * @param now The caller's clock, in Unix ms. It names the file, so a test
+     *        can state which snapshot it is asking for; a stamp already taken
+     *        is stepped over rather than written through, exactly as the
+     *        corruption quarantine does.
+     *
+     * @return the snapshot, or why there is none. Never throws: every failure
+     *         is a @ref BackupFailure the route turns into a status.
+     */
+    std::expected<BackupRecord, BackupFailure> backup_workspace (int64_t now);
+
+    /**
+     * @brief The single-backup slot, held for as long as one snapshot is being
+     *        written (issue #987).
+     *
+     * Two concurrent `VACUUM INTO`s would each write a whole second copy of the
+     * database - unbounded disk for a button someone double-clicked - and the
+     * later one would race the retention pass of the earlier for the files it
+     * is pruning. So a second caller is refused rather than queued: a backup is
+     * a thing the user asked for *now*, and "one is already running" is a
+     * better answer than a copy they did not ask for arriving later.
+     *
+     * `backup_workspace` takes the slot for its own duration. The type is
+     * public because "a backup is already running" is a state a caller can be
+     * in deliberately, and a test that cannot enter it can only assert the
+     * refusal by racing.
+     */
+    class BackupSlot {
+        public:
+        explicit BackupSlot (Database& db);
+        ~BackupSlot ();
+
+        // Neither copyable nor movable: this is a lock, and every one of the
+        // four would produce a second object claiming to hold the one slot.
+        BackupSlot (const BackupSlot&)            = delete;
+        BackupSlot& operator= (const BackupSlot&) = delete;
+        BackupSlot (BackupSlot&&)                 = delete;
+        BackupSlot& operator= (BackupSlot&&)      = delete;
+
+        /// False when another backup already had the slot - nothing was taken,
+        /// and the destructor releases nothing.
+        [[nodiscard]] bool held () const {
+            return held_;
+        }
+
+        private:
+        Database& db_;
+        bool held_;
+    };
 
     // Config Entries - Structured configuration with metadata
     void save_config_entry (const ConfigEntry& entry);
