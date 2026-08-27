@@ -110,14 +110,20 @@ TEST (ScenarioSnapshot, LeavesANonObjectSnapshotAlone) {
 // are the same user data a scenario's are, so the stored snapshot keeps their
 // count and not the set.
 TEST (LoadDataSnapshot, ReplacesTheRowsWithTheirCount) {
-    const json rows = json::array (
-    { json{ { "password", "hunter2" } }, json{ { "password", "hunter3" } } });
-    const std::string sanitized =
-    json{ { "method", "POST" }, { "url", "https://api.test/login" },
-        { "data", rows }, { "environmentId", "env_1" } }
-    .dump ();
+    // Built field by field rather than as one brace-init: the payload a load
+    // run sends is flat, and a nested literal here formats differently under
+    // the two clang-format majors this repo has seen.
+    json rows = json::array ();
+    rows.push_back (json{ { "password", "hunter2" } });
+    rows.push_back (json{ { "password", "hunter3" } });
 
-    const auto stored = json::parse (load_data_snapshot (sanitized, 2));
+    json payload;
+    payload["method"]        = "POST";
+    payload["url"]           = "https://api.test/login";
+    payload["data"]          = rows;
+    payload["environmentId"] = "env_1";
+
+    const auto stored = json::parse (load_data_snapshot (payload.dump (), 2));
 
     EXPECT_FALSE (stored.contains ("data"));
     EXPECT_EQ (stored["dataRowCount"], 2);

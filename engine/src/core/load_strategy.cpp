@@ -374,13 +374,17 @@ SubmissionRequest& live) {
         handle_result (context, db,
         vayu::Result<vayu::Response> (
         vayu::Error{ vayu::ErrorCode::DataBindingFailed, bound.error }),
-        ResultAnnotations{ row });
+        // Every member named: a single-request run has no step and no
+        // iteration to report, and `-Wmissing-field-initializers` is an error
+        // in the release build rather than a suggestion.
+        ResultAnnotations{ row, std::nullopt, std::nullopt });
         return;
     }
 
     context->event_loop->submit (request,
     [context, &db, row] (size_t, const vayu::Result<vayu::Response>& result) {
-        handle_result (context, db, result, ResultAnnotations{ row });
+        handle_result (context, db, result,
+        ResultAnnotations{ row, std::nullopt, std::nullopt });
     });
     context->requests_sent++;
 }
