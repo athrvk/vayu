@@ -320,6 +320,14 @@ export function useDeleteCollectionMutation() {
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
 			/*
+			 * The delete is soft (issue #988): the row left the tree for the
+			 * trash rather than the void, so the list that shows the trash is
+			 * stale from this moment. Without this the Trash view - open in the
+			 * drawer beside the tree the row just left - keeps its cached answer
+			 * and does not show what was deleted.
+			 */
+			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
+			/*
 			 * The remembered data-file path goes with the collection (issue #599)
 			 * - a path kept for a collection that no longer exists is a filesystem
 			 * location persisted for nothing.
@@ -643,6 +651,9 @@ export function useDeleteRequestMutation() {
 			queryClient.removeQueries({
 				queryKey: queryKeys.requests.detail(deletedId),
 			});
+			// The row went to the trash rather than the void (issue #988), so the
+			// list that shows the trash is stale - see the collection delete above.
+			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 			// The response map is keyed by request id and nothing else evicts from
 			// it, so a deleted request would otherwise hold its body (plus the raw
 			// copy) for the rest of the session. Here rather than only at the tab
