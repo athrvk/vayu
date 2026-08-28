@@ -980,7 +980,8 @@ const nlohmann::json& config,
 vayu::db::Database& db,
 bool verbose,
 std::shared_ptr<const ScenarioExecution> scenario,
-std::unique_ptr<LoadDataSet> data) {
+std::unique_ptr<LoadDataSet> data,
+LoadAuthPlan auth_plan) {
     return spawn_run (run_id, config, db, [&] (const std::shared_ptr<RunContext>& context) {
         // Set before either thread starts: the worker reads it to choose an
         // executor, and a later write would race the run it is meant to shape.
@@ -988,6 +989,9 @@ std::unique_ptr<LoadDataSet> data) {
         // Same rule, same moment: the worker splits this set's request template
         // before its first submission and every strategy reads it after.
         context->load_data = std::move (data);
+        // And the credential plan beside it, which `build_load_request` reads
+        // to decide whether the build resolves this run's auth at all.
+        context->load_auth = std::move (auth_plan);
         // Spawn metrics collection thread first - it is NOT detached and is
         // joined by the worker thread below.
         context->metrics_thread =
@@ -1118,15 +1122,18 @@ vayu::Request& request) {
     if (context->scenario) {
         return true;
     }
-    // Credentials carrying a `{{data.column}}` are the one case the build
-    // leaves alone: the row has to reach them before `apply_auth` base64s them
-    // out of reach (issue #591), so a run with rows tells the build to defer
-    // and `bind_iteration` applies them per submission. Every other run
+    // Credentials carrying a token are the one case the build leaves alone: the
+    // value has to reach them before `apply_auth` base64s them out of reach
+    // (issue #591), so a run whose credentials carry one tells the build to
+    // defer and `bind_iteration` applies them per submission. Every other run
     // resolves its auth here exactly as it always did.
-    const auto auth_resolution = context->load_data ?
-    context->load_data->auth_resolution () :
-    vayu::http::AuthResolution::Apply;
-    auto built = vayu::http::build_request (config, db_ptr, timeout_ms, auth_resolution);
+    //
+    // Asked of the credentials rather than of the run's rows (issue #1055):
+    // `{{$vu}}` binds off the iteration, so a run sent without `data` at all
+    // defers for it too. Keying this on whether the run had rows is what used
+    // to send an identity token in a credential base64-encoded as written.
+    auto built = vayu::http::build_request (
+    config, db_ptr, timeout_ms, context->load_auth.auth_resolution ());
     if (!built.ok) {
         vayu::utils::log_error (built.parse_failed ?
         std::string ("Load test: invalid request format") :

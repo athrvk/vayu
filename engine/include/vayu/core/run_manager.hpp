@@ -332,6 +332,23 @@ struct RunContext {
      */
     StepDataTemplate load_template;
 
+    /**
+     * How a *single-request* load run's credentials resolve (issue #1055) - the
+     * parsed auth and its split, read once off the payload before the run
+     * starts.
+     *
+     * **Empty credentials for every run whose auth the build resolved**, which
+     * is the same structural guard @ref load_template is: the strategies test
+     * `empty()` and otherwise submit the shared request they always did.
+     *
+     * Beside @ref load_data rather than inside it, because a credential
+     * carrying the identity defers on a run that has no rows at all - the set
+     * exists only where rows do, so a set is the wrong place to keep what every
+     * run shape can carry. Written once by `start_run`, read on the run's
+     * worker thread afterwards.
+     */
+    LoadAuthPlan load_auth;
+
     // Real-time counters (also tracked by MetricsCollector, but kept for backward compat)
     std::atomic<size_t> requests_sent{ 0 }; // Number of requests submitted to event loop
     std::atomic<size_t> requests_expected{ 0 }; // Total expected requests for this run
@@ -927,13 +944,20 @@ class RunManager {
      *             a run started with the raw payload alone would be trusting a
      *             check nobody ran. Null for a scenario run, whose rows travel
      *             on @p scenario.
+     * @param auth_plan How this run's credentials resolve (issue #1055), read
+     *             off the same payload by the same route. Passed beside @p data
+     *             rather than inside it because a credential carrying the
+     *             identity defers on a run that has no rows at all; default for
+     *             a run whose credentials carry no token, which is the build
+     *             resolving its auth once exactly as it always did.
      */
     bool start_run (const std::string& run_id,
     const nlohmann::json& config,
     vayu::db::Database& db,
     bool verbose,
     std::shared_ptr<const ScenarioExecution> scenario = nullptr,
-    std::unique_ptr<LoadDataSet> data                 = nullptr);
+    std::unique_ptr<LoadDataSet> data                 = nullptr,
+    LoadAuthPlan auth_plan                            = {});
 
     /**
      * @brief Start a scenario run: the same lifecycle, a different executor.

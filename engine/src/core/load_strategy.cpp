@@ -351,10 +351,10 @@ const ResultAnnotations& annotations) {
 
 /**
  * Bind this submission's row - where the run has one - and its identity into
- * @p request, through the one binder both load paths drive.
+ * @p request and its credentials, through the one binder both load paths drive.
  *
- * Reached only for a run whose request carries a reserved token: the caller
- * keeps the token-free path clear of all of this.
+ * Reached only for a run carrying a reserved token in its request or its
+ * credentials: the caller keeps the token-free path clear of all of this.
  */
 DataBindResult bind_submission (vayu::Request& request,
 const RunContext& context,
@@ -368,14 +368,11 @@ const ResultAnnotations& annotations) {
         "a run carrying rows claims one per submission")),
         annotations.data_row_index.value_or (0),
         IterationIdentity{ SOLE_VIRTUAL_USER, iteration } };
-    // The auth halves are the data set's, and empty for a run without one: a
-    // credential deliberately does not carry the identity, which is the rule
-    // `tokenize_auth_fields` records.
-    static const vayu::http::Auth NO_AUTH{};
-    static const StepDataTemplate NO_CREDENTIALS{};
+    // The auth halves are the run's own, not the data set's: a credential
+    // carrying the identity defers on a run that has no set at all (issue
+    // #1055), and both are empty for a run whose auth the build resolved.
     return bind_iteration (request, context.load_template,
-    data == nullptr ? NO_AUTH : data->auth,
-    data == nullptr ? NO_CREDENTIALS : data->credentials, binding);
+    context.load_auth.auth, context.load_auth.credentials, binding);
 }
 
 /**
@@ -388,10 +385,10 @@ const ResultAnnotations& annotations) {
  * instead of the one whose lambda remembered them - and so does the
  * mid-run credential swap, which two of the four used to miss.
  *
- * **A run carrying neither takes the path it always did**: one null test and
- * one `empty()` test, then the same submit of the same shared request. No copy
- * and no bind - the throughput guard #992 states, kept structurally rather than
- * by measurement alone. What it does pay is the cursor increment below, which is
+ * **A run carrying none of them takes the path it always did**: one null test
+ * and two `empty()` tests, then the same submit of the same shared request. No
+ * copy and no bind - the throughput guard #992 states, kept structurally rather
+ * than by measurement alone. What it does pay is the cursor increment below, which is
  * one unsynchronised `size_t` on the sole producer thread and is what lets
  * every load run - not only the ones spelling a token - tell a deferred script
  * which iteration a sampled response was sent in.
@@ -409,7 +406,12 @@ SubmissionRequest& live) {
         std::optional<size_t> (iteration % data->rows.size ()),
         std::nullopt, iteration, SOLE_VIRTUAL_USER };
 
-    if (data == nullptr && context->load_template.empty ()) {
+    // The credentials are tested beside the request's own template because they
+    // are a third thing a submission can have to bind (issue #1055) - a run
+    // whose *only* token sits in a credential has no rows and an empty request
+    // template, and skipping the bind here would send it unauthenticated.
+    if (data == nullptr && context->load_template.empty () &&
+    context->load_auth.credentials.empty ()) {
         submit_to_loop (context, db, live.current (), annotations);
         return;
     }

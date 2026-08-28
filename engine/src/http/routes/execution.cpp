@@ -385,26 +385,28 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
  * contract and for why the ordinary send is untouched.
  */
 SendRowAuth plan_send_row_auth (const nlohmann::json& json,
-bool has_row,
 const vayu::http::BoundColumnNames& bound_columns) {
     SendRowAuth out;
-    if (!has_row) {
-        // Not merely the same answer as an unbindable payload's - deliberately
-        // not parsing at all. `parse_auth` warns on an unresolved `inherit`,
-        // and on this path the build is about to parse the very same block; a
-        // second parse would double every such warning on the ordinary send.
+    const auto auth_json = json.value ("auth", nlohmann::json ());
+    // Asked of the payload's own JSON before anything is parsed, and this is
+    // why: `parse_auth` warns on an unresolved `inherit`, and the build is
+    // about to parse the very same block, so a second parse would double every
+    // such warning on the ordinary send. A block spelling no token at all -
+    // which is every ordinary send - is answered here, unparsed, exactly as the
+    // `has_row` test used to answer it (issue #1055).
+    if (!vayu::core::first_deferrable_token_in (auth_json, bound_columns)) {
         return out;
     }
-    out.auth = vayu::http::parse_auth (json.value ("auth", nlohmann::json ()));
+    out.auth = vayu::http::parse_auth (auth_json);
 
-    if (auto token = vayu::core::first_oauth2_data_token (out.auth, bound_columns)) {
+    if (auto token = vayu::core::first_oauth2_deferrable_token (out.auth, bound_columns)) {
         out.ok    = false;
         out.error = "Auth credentials carry " + *token +
-        " in an OAuth 2.0 configuration, and no row can reach it: the token is "
-        "acquired against the token endpoint before the request is sent, not "
-        "written into the request the way every other credential is. Use a "
-        "static credential there, or move the data token into the request "
-        "itself.";
+        " in an OAuth 2.0 configuration, and nothing can reach it: the "
+        "token is acquired against the token endpoint before the request "
+        "is sent, not written into the request the way every other "
+        "credential is. Use a static credential there, or move the token "
+        "into the request itself.";
         return out;
     }
 
@@ -425,17 +427,15 @@ LoadDataRows read_load_data_set (const nlohmann::json& json,
 const vayu::core::ScenarioLimits& limits,
 bool is_scenario) {
     LoadDataRows out;
-    const auto field = json.find ("data");
-    if (field == json.end () || field->is_null ()) {
-        return out;
-    }
+    const auto field       = json.find ("data");
+    const bool carries_set = field != json.end () && !field->is_null ();
 
     // A collection run states its rows inside the block that names the
     // collection, and the two are bound differently - one row per iteration
     // shared by every step there, one per submission here. Refused rather than
     // silently ignored: a caller that sent rows and had them dropped would read
     // a run of literal `{{data.*}}` tokens as the feature working.
-    if (is_scenario) {
+    if (carries_set && is_scenario) {
         out.ok    = false;
         out.error = "'data' is the single-request form of a data set. A "
                     "collection run states its rows as 'scenario.data', where "
@@ -444,30 +444,49 @@ bool is_scenario) {
         return out;
     }
 
-    auto set = std::make_unique<vayu::core::LoadDataSet> ();
-    // The same reader the scenario block goes through, so the two shapes cannot
-    // come to disagree about what a row is or which limit refuses it.
-    if (auto reason = vayu::core::read_data_rows (*field, limits, "data", set->rows)) {
-        out.ok    = false;
-        out.error = *reason;
+    std::unique_ptr<vayu::core::LoadDataSet> set;
+    if (carries_set) {
+        set = std::make_unique<vayu::core::LoadDataSet> ();
+        // The same reader the scenario block goes through, so the two shapes
+        // cannot come to disagree about what a row is or which limit refuses
+        // it.
+        if (auto reason =
+            vayu::core::read_data_rows (*field, limits, "data", set->rows)) {
+            out.ok    = false;
+            out.error = *reason;
+            return out;
+        }
+        set->bound_columns = vayu::core::bound_columns_of (set->rows);
+    }
+
+    // A scenario load run's credentials are its steps', resolved when the plan
+    // was: there is no single request here whose build could defer, and asking
+    // would refuse a top-level oauth2 block no step uses.
+    if (is_scenario) {
+        out.set = std::move (set);
         return out;
     }
 
     // How the credentials resolve, decided here because it is the *build* that
     // would otherwise encode them out of reach - the same call, and the same
     // reasoning, as a send that carries one row (issue #642). The refusal it
-    // can carry is an oauth2 config with a data token, which no deferral can
-    // serve.
-    set->bound_columns = vayu::core::bound_columns_of (set->rows);
-    auto row_auth = plan_send_row_auth (json, /*has_row=*/true, set->bound_columns);
+    // can carry is an oauth2 config carrying a token deferral would bind, which
+    // no deferral can serve.
+    //
+    // Asked of every run rather than only of one carrying rows (issue #1055):
+    // a credential spelling `{{$vu}}` defers without a set behind it, and it is
+    // this call that finds out. A run whose credentials spell no token parses
+    // nothing here and resolves its auth in the build, as it always did.
+    auto row_auth = plan_send_row_auth (
+    json, set ? set->bound_columns : vayu::http::BoundColumnNames{});
     if (!row_auth.ok) {
         out.ok    = false;
         out.error = std::move (row_auth.error);
         return out;
     }
-    set->auth        = std::move (row_auth.auth);
-    set->credentials = std::move (row_auth.credentials);
-    out.set          = std::move (set);
+    out.auth.auth        = std::move (row_auth.auth);
+    out.auth.credentials = std::move (row_auth.credentials);
+    out.set              = std::move (set);
     return out;
 }
 
@@ -1072,7 +1091,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     const auto row_columns = data_row.value ?
     vayu::core::bound_columns_of (*data_row.value) :
     vayu::http::BoundColumnNames{};
-    auto row_auth = plan_send_row_auth (json, data_row.value.has_value (), row_columns);
+    auto row_auth          = plan_send_row_auth (json, row_columns);
     if (!row_auth.ok) {
         vayu::utils::log_warning ("POST /execute - " + row_auth.error);
         return row_auth.error;
@@ -1108,16 +1127,15 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // load run's.
     const vayu::core::IterationBinding binding{ data_row.value ? &*data_row.value : nullptr,
         /*row_index=*/0, vayu::core::IterationIdentity{} };
-    auto bound = vayu::core::apply_iteration_template (built.request,
-    vayu::core::tokenize_bindable_fields (built.request), binding);
-    if (bound.ok && data_row.value) {
-        // Then the credentials the build deferred, in the order the
-        // scenario executors bind theirs: the row reaches them before
-        // `apply_auth` encodes them onto the request. A no-op for the
-        // ordinary send, whose auth the build already applied.
-        bound = vayu::core::bind_auth_row (
-        built.request, row_auth.auth, row_auth.credentials, *data_row.value, 0);
-    }
+    // Both halves through the one binder both load paths drive, rather than the
+    // two calls and the row test this used to spell itself: the order is the
+    // whole of what makes a deferred credential correct, and a second copy of
+    // it here would be a copy that stops receiving that one's fixes. The
+    // credentials half is a no-op for the ordinary send, whose auth the build
+    // already applied.
+    auto bound = vayu::core::bind_iteration (built.request,
+    vayu::core::tokenize_bindable_fields (built.request), row_auth.auth,
+    row_auth.credentials, binding);
     if (!bound.ok) {
         vayu::utils::log_warning ("POST /execute - " + bound.error);
         return bound.error;
@@ -1872,7 +1890,8 @@ httplib::Response& res) {
     ctx.run_manager.start_scenario_run (
     run_id, json, scenario_execution, ctx.db, ctx.cookie_jar, ctx.verbose) :
     ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose,
-    is_scenario_load ? scenario_execution : nullptr, std::move (load_data.set));
+    is_scenario_load ? scenario_execution : nullptr, std::move (load_data.set),
+    std::move (load_data.auth));
     if (!started) {
         send_error (res, 503, "Engine is shutting down");
         return;

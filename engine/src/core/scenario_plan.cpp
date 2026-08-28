@@ -406,12 +406,12 @@ ScenarioPlan& plan) {
     // mean a network round trip per virtual user per iteration. Refused by
     // name in both directions, with or without a data set, rather than sent
     // to the token endpoint as the literal token text.
-    if (auto token = first_oauth2_data_token (parsed_auth, bound_columns)) {
+    if (auto token = first_oauth2_deferrable_token (parsed_auth, bound_columns)) {
         return (describe_step (index, row) + " carries " + *token +
         " in its OAuth 2.0 configuration. That token is acquired once, "
-        "when the run is planned, so a data column can never reach it - "
-        "use a static credential there, or move the data token into the "
-        "request itself.");
+        "when the run is planned, so neither a data column nor the "
+        "iteration identity can ever reach it - use a static credential "
+        "there, or move the token into the request itself.");
     }
 
     // Deferred through the builder's own option rather than by hiding the

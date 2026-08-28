@@ -159,13 +159,17 @@ same counter the data-row cursor claims from, so iteration *i* binds row
 *i % rows* and a script cannot be told it is on iteration 3 while holding row
 1's values.
 
-**Credentials are the one place they do not bind.** A `{{$vu}}` in a basic-auth
-username or a bearer token goes out written as it stands: a credential is
-encoded when the request is built, and the deferral that lets a *row* reach one
-first happens only in a run that has rows - so binding the identity there would
-work in a data-driven run and silently not in every other. #1055 tracks lifting
-that. Everywhere else binds: the URL, header names and values, the body and
-both halves of every form field, each escaped for the document it lands in.
+**Every bindable field binds, credentials included** (issue #1055): the URL,
+header names and values, the body and both halves of every form field, each
+escaped for the document it lands in - and a basic-auth username, a bearer
+token or an api key. A credential is encoded when the request is built, so one
+carrying either name defers that build and is bound before `apply_auth`
+encodes it, which is the same order a `{{data.*}}` credential has always taken.
+A run does not need a data set for it: the identity comes from the iteration
+rather than from a row, so `user-{{$vu}}` binds on a plain load run exactly as
+it does on a data-driven one. OAuth 2.0 is the exception, and it is refused by
+name rather than sent wrong - its token is acquired once, before any iteration
+exists.
 
 ### D18 - a bound row's bare column names outrank the environment (issue #1007)
 
@@ -672,8 +676,11 @@ still generates at composition - `POST /compose` defers only when the caller
 asks. And a generator inside an **auth credential** is still generated once, at
 composition: `apply_auth` encodes a credential when the request is built - basic
 auth collapses into one base64 value - so a token left for the bind would go out
-as base64 of its own text. That exception is the deferral issue #1055 carries,
-and it is the same reason a credential does not carry `{{$vu}}` either.
+as base64 of its own text. A `{{$vu}}` in a credential is no longer the same
+case: a credential carrying one defers the build and binds before `apply_auth`
+runs (issue #1055), where a generator has nothing to wait for - its value is
+knowable at composition, so deferring it would buy a different id per iteration
+rather than a correct one.
 
 ### The engine copy of the table
 

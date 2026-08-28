@@ -926,7 +926,8 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes);
  * build, byte for byte as it did before this existed.
  *
  * `ok == false` carries the 400 the route answers with. There is one: an
- * OAuth 2.0 config carrying a data token, which no deferral can serve.
+ * OAuth 2.0 config carrying a token deferral would otherwise bind, which no
+ * deferral can serve.
  */
 struct SendRowAuth {
     bool ok = true;
@@ -947,10 +948,12 @@ struct SendRowAuth {
  * `vayu::core::bind_auth_row` is the half that happens after, and the two are
  * split exactly there because `build_request` sits between them.
  *
- * @p has_row is false for an ordinary send, which returns `Apply` with an empty
- * template and no refusal: without a row there is nothing to bind a token
- * against, so a `{{data.*}}` in a credential keeps today's goes-out-literal
- * behaviour rather than becoming a new refusal this endpoint never had.
+ * An ordinary send - a credential spelling no token at all - returns `Apply`
+ * with an empty template and no refusal, having parsed nothing. Whether the
+ * send carries a *row* is deliberately not asked (issue #1055): a credential
+ * carrying only the `{{$vu}}` / `{{$iteration}}` identity is bindable without
+ * one, and a `{{data.*}}` that does need a row is refused by name at the bind,
+ * the way the same token in the URL already was.
  *
  * @p bound_columns are the bare names the row can bind (issue #1007), so a
  * credential written `{{username}}` is deferred and joined against the row the
@@ -962,7 +965,6 @@ struct SendRowAuth {
  * drive it directly, matching the suite's other route-core tests.
  */
 SendRowAuth plan_send_row_auth (const nlohmann::json& json,
-bool has_row,
 const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**
@@ -981,6 +983,12 @@ struct LoadDataRows {
     bool ok = true;
     std::string error;
     std::unique_ptr<vayu::core::LoadDataSet> set;
+    /// How this run's credentials resolve (issue #1055), read off the same
+    /// payload. Carried beside @ref set rather than inside it because a
+    /// credential spelling `{{$vu}}` defers on a run that has no rows at all;
+    /// default - and so `Apply` - for a scenario run, whose steps resolved
+    /// their own auth when the plan did.
+    vayu::core::LoadAuthPlan auth;
 };
 
 /**
