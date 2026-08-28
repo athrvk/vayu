@@ -1208,8 +1208,8 @@ bit a buffered send's are (issue #653). Pressing Send with the **Event stream**
 setting on and off gives `pm.sendRequest` the same answer.
 
 **`{{variables}}` resolve as the call is made** (#1001). The URL, each header
-value, a raw body and each credential of an `auth` block are resolved once,
-against the three scopes and the bound data row exactly as
+name and value, a raw body and each credential of an `auth` block are resolved
+once, against the three scopes and the bound data row exactly as
 `pm.variables.replaceIn` reads them - so a value this same script set two lines
 earlier is visible, which is Postman's rule and what makes an imported
 token-refresh script work. It is not a second pass over the composed request:
@@ -1217,9 +1217,15 @@ that payload was resolved before the script ran and nothing here revisits it.
 A name nothing defines keeps its braces (#1009), and a `{{data.column}}` the
 bound row lacks throws naming the column, the same way `replaceIn` does.
 
-Header **names** are sent as written. Two names that resolve to one name are a
-collision rule composition owns (#1051); answering it a second way here is how
-the two would drift.
+Header **names** resolve too (#1067), under the collision rule composition owns
+rather than a second one written here (#1051, `http/header_names.hpp`): two
+names that resolve to one name would send the request a header short, so the
+call throws naming both spellings and the name they produced, and nothing goes
+out. Names are compared without case, the way the header map keys them. A name
+that resolves to nothing at all is refused the same way, and it is the one thing
+resolution can produce that nothing further down the send would catch: the
+pre-send gate reads header text for the bytes that break a line, and what is
+left of an empty name is the line `: value`, which libcurl sends.
 
 ```javascript
 pm.environment.set("tenant", "acme");
