@@ -85,6 +85,12 @@ constexpr std::string_view GRAPHQL_DOCUMENT = "query User { user { name } }";
 /// Envelope-shaped, and not readable: the `{{token}}` that went unresolved.
 constexpr std::string_view GRAPHQL_UNRESOLVED = R"({"query":"{{savedQuery}},)";
 
+/// The same envelope behind a UTF-8 byte-order mark, which an editor or a
+/// PowerShell redirect can leave on a saved document. The classifier reads it
+/// and the send carries it, so the pair has to answer about it too.
+constexpr std::string_view GRAPHQL_BOM_ENVELOPE = "\xEF\xBB\xBF"
+                                                  R"({"query":"query Ping { ping }"})";
+
 Body graphql_body (std::string_view content) {
     Body body;
     body.mode    = BodyMode::GraphQL;
@@ -224,13 +230,20 @@ TEST_F (ScriptRequestBodyTest, ABareGraphqlDocumentReadsAsTheQueryItWouldBeSentA
 
 /**
  * The pin the member exists to keep: whatever `.graphql.query` answers is the
- * query `graphql_wire_body` would put on the wire, for both readable shapes.
+ * query `graphql_wire_body` would put on the wire, for every readable shape.
  * Reverting the classifier reuse - deriving the pair from a second local rule -
  * is what this fails on, since only the shared classifier decides the same way
  * the send does.
+ *
+ * The byte-order-marked envelope is here because it is the shape where reading
+ * the body *twice* stops being harmless: nlohmann skips a BOM and `JSON.parse`
+ * rejects one, so a version of this member that parsed the raw bytes with
+ * QuickJS answered `undefined` for a body the send carries intact. Handing
+ * QuickJS what nlohmann read is what this case fails without.
  */
 TEST_F (ScriptRequestBodyTest, TheQueryIsTheOneTheSendWouldCarry) {
-    for (const std::string_view content : { GRAPHQL_ENVELOPE, GRAPHQL_DOCUMENT }) {
+    for (const std::string_view content :
+    { GRAPHQL_ENVELOPE, GRAPHQL_DOCUMENT, GRAPHQL_BOM_ENVELOPE }) {
         request.body = graphql_body (content);
         expect_script_passes (
         "pm.expect(pm.request.body.graphql.query).to.equal(" +
@@ -307,6 +320,7 @@ TEST_F (ScriptRequestBodyTest, AUrlencodedBodyReadsAsItsPairsWithTheDisabledRowF
         pm.expect(pairs[2].key).to.equal('legacy');
         pm.expect(pairs[2].disabled).to.equal(true);
         pm.expect(pm.request.body.formdata).to.equal(undefined);
+        pm.expect(pm.request.body.graphql).to.equal(undefined);
     )JS");
 }
 
@@ -338,6 +352,7 @@ TEST_F (ScriptRequestBodyTest, AFormDataBodyNamesItsFilePartAndNeverItsPath) {
         pm.expect(parts[1].value).to.equal(undefined);
         pm.expect(JSON.stringify(parts[1])).to.not.include('/home/ada');
         pm.expect(pm.request.body.urlencoded).to.equal(undefined);
+        pm.expect(pm.request.body.graphql).to.equal(undefined);
     )JS");
 }
 

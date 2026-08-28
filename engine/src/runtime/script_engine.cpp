@@ -5594,14 +5594,11 @@ JSValue body_field_list (JSContext* ctx, const std::vector<FormField>& fields, b
  * An empty body answers `undefined` for the reason the header gives: empty in,
  * empty out, and `{query: ""}` would give a bodiless request a query.
  *
- * The members are read with QuickJS's own JSON parser rather than converted
- * from a second one, so `.graphql.variables` is exactly what a script writing
- * `JSON.parse(pm.request.body.raw).variables` would get. It is therefore the
- * JSON value the envelope carries, where Postman's is the *text* of its
- * variables editor - a divergence rather than an oversight: Vayu never stored
- * that text, and serializing one here would invent whitespace and key order the
- * user never wrote, which is the thing `graphql_wire_body` refuses to do at the
- * wire. `docs/app/pm-api-compatibility.md` states it.
+ * `variables` is the JSON value the envelope carries, where Postman's is the
+ * *text* of its variables editor - a divergence rather than an oversight: Vayu
+ * never stored that text, and serializing one here would invent whitespace and
+ * key order the user never wrote, which is the thing `graphql_wire_body`
+ * refuses to do at the wire. `docs/app/pm-api-compatibility.md` states it.
  */
 JSValue body_graphql_view (JSContext* ctx, const std::string& text) {
     if (text.empty ()) {
@@ -5619,12 +5616,28 @@ JSValue body_graphql_view (JSContext* ctx, const std::string& text) {
         define (document, "query", JS_NewStringLen (ctx, text.data (), text.size ()));
         return frozen (document);
     }
-    JSValue envelope =
-    JS_ParseJSON (ctx, text.c_str (), text.size (), "<pm.request.body.graphql>");
+    const auto document =
+    nlohmann::json::parse (text, nullptr, /*allow_exceptions=*/false);
+    if (document.is_discarded ()) {
+        // The classifier's object-shaped-but-unreadable case: it said envelope
+        // on the shape alone, and there is nothing under the shape to read.
+        return JS_UNDEFINED;
+    }
+    // QuickJS is handed what nlohmann *read*, never the bytes it read them from.
+    // The two are not the same grammar - a leading byte-order mark is nlohmann's
+    // to skip and `JSON.parse`'s to reject - so parsing the body twice lets the
+    // send carry a query this member answers `undefined` about. Only one reader
+    // of a body may have an opinion, and it is the one the send asks; the dump
+    // is a transport between them, not a second reading.
+    const std::string canonical =
+    document.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    JSValue envelope = JS_ParseJSON (
+    ctx, canonical.c_str (), canonical.size (), "<pm.request.body.graphql>");
     if (JS_IsException (envelope)) {
-        // The classifier's object-shaped-but-unreadable case. Clear the parse
-        // error rather than letting it escape a getter: the body is not an error
-        // to read, it is one this object has no answer about.
+        // Not reachable through any body: `canonical` is what nlohmann just
+        // serialized, and `replace` leaves it valid JSON even for a lone UTF-8
+        // continuation byte. Handled rather than assumed, because the
+        // alternative is a parse error escaping a getter.
         JS_FreeValue (ctx, envelope);
         JSValue pending = JS_GetException (ctx);
         JS_FreeValue (ctx, pending);
@@ -5632,9 +5645,10 @@ JSValue body_graphql_view (JSContext* ctx, const std::string& text) {
     }
     JSValue query = JS_GetPropertyStr (ctx, envelope, "query");
     if (!JS_IsString (query)) {
-        // Reachable only where the two parsers read the same bytes differently
-        // - the classifier saw a string `query` and this one did not. Two
-        // readings is exactly the state that must not be guessed at.
+        // Also not reachable: the classifier returned true on a parse that was
+        // not discarded, which is exactly its "object with a string `query`"
+        // case, and the round trip above preserves the type. Restated as a
+        // guard rather than assumed, so the function stays total.
         JS_FreeValue (ctx, query);
         JS_FreeValue (ctx, envelope);
         return JS_UNDEFINED;
