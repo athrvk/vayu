@@ -137,7 +137,10 @@ TEST (ScriptTypesTest, ChainContinuationsReturnTheChain) {
     const std::string dts = generate_script_typedefs ();
     // `expect` opens the chain, `.and` continues it, `.not` re-enters the `to`
     // node it sits in - none of which the table says.
-    EXPECT_TRUE (contains (dts, "expect(value: any, message?: string): VayuExpectation;"));
+    // `pm.expect` carries `fail`, so it is declared as a call signature beside
+    // its members rather than as a plain method - see
+    // AFunctionsOwnMembersSitBesideItsCallSignature.
+    EXPECT_TRUE (contains (dts, "(value: any, message?: string): VayuExpectation;"));
     EXPECT_TRUE (contains (dts, "and: VayuExpectation;"));
     EXPECT_TRUE (contains (dts, "not: VayuExpectTo;"));
     EXPECT_TRUE (contains (dts, "interface VayuExpectTo {"));
@@ -145,6 +148,26 @@ TEST (ScriptTypesTest, ChainContinuationsReturnTheChain) {
     // An assertion that documents no return continues the chain when it is in
     // one, so a chain call stays chainable.
     EXPECT_TRUE (contains (dts, "equal(expected: any): VayuExpectation;"));
+}
+
+// The `()` in a label is what says whose members its children are. Read the
+// `pm.cookies.jar()` way, `pm.expect.fail` would make `pm.expect(x)` return
+// `{ fail }` - and every documented `pm.expect(x).to...` would stop compiling,
+// which is the mutation this guards: restore the single
+// `node.kind == KIND_FUNCTION || node.called` branch and the chain assertions
+// below redden.
+TEST (ScriptTypesTest, AFunctionsOwnMembersSitBesideItsCallSignature) {
+    const std::string dts = generate_script_typedefs ();
+    // `pm.expect.fail` - no `()` in the label, so `fail` is the function
+    // object's own member and calling `pm.expect` still opens the chain.
+    EXPECT_TRUE (contains (dts, "expect: {"));
+    EXPECT_TRUE (contains (dts, "(value: any, message?: string): VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "fail(message?: string): never;"));
+    EXPECT_FALSE (contains (dts, "expect(value: any, message?: string): {"));
+
+    // `pm.cookies.jar().set` - the `()` says these are the members of what the
+    // call returns, which is unchanged.
+    EXPECT_TRUE (contains (dts, "jar(): {"));
 }
 
 // A getter that performs an assertion yields nothing. It looks identical to a
