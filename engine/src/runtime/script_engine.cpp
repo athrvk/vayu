@@ -2461,7 +2461,22 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     // quantifier for `.keys`, so it changes nothing - `.any` is deliberately
     // absent rather than aliased to `all`, which would silently assert more
     // than the script asked.
-    const char* passthrough_chainers[] = { "and", "all" };
+    //
+    // The rest are chai's language chains (issue #1053): they assert nothing at
+    // all and exist so a chain reads as English - `expect(rows).to.be.an
+    // ('array').that.is.not.empty`. Without them an imported collection written
+    // in the fluent style fails on the *language* rather than on the API under
+    // test, since #999 armed the unknown-member hook and every one of these
+    // words now throws by name. Each hands the same expectation back, so the
+    // flags a chain has set - `not` included - carry across exactly as they do
+    // for `and`.
+    //
+    // `.own` and `.itself` are deliberately not here and are not passthroughs:
+    // they change what `.property` looks at rather than reading as prose, so
+    // aliasing them would assert something other than what the script wrote.
+    // `.own.property` is listed as unsupported in docs/app/pm-api-compatibility.md.
+    const char* passthrough_chainers[] = { "and", "all", "also", "been", "but",
+        "does", "has", "is", "of", "same", "still", "that", "which", "with" };
     for (const char* name : passthrough_chainers) {
         JSAtom atom = JS_NewAtom (ctx, name);
         JS_DefinePropertyGetSet (ctx, obj, atom,

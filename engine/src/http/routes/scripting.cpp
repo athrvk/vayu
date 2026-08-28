@@ -1846,6 +1846,43 @@ nlohmann::json get_script_completions () {
     "over.\n\nExample:\npm.expect(n).to.be.above(0).and.to.be.below(10);" },
     { "sortText", "2_and" }, { "filterText", ".and" } });
 
+    // chai's language chains (issue #1053) - words that assert nothing and
+    // exist so a chain reads as English. Offered as fields, paren-less like
+    // `.and`, because each is a getter handing the same expectation back; a
+    // written pair of parentheses would call the chain's result. Every name the
+    // runtime binds has to be offered here or
+    // `ScriptCompletions.EveryExpectMemberTheRuntimeBindsIsOffered` fails by
+    // name, and the generated declarations are derived from this table.
+    struct LanguageChainCompletion {
+        const char* name;
+        const char* example;
+    };
+    constexpr auto language_chains = std::to_array<LanguageChainCompletion> ({
+    { "also", "pm.expect(n).to.be.above(0).and.also.be.below(10);" },
+    { "been", "pm.expect(body.name).to.have.been.a('string');" },
+    { "but", "pm.expect(rows).to.be.an('array').but.not.empty;" },
+    { "does", "pm.expect(name).to.be.a('string').and.does.include('vayu');" },
+    { "has", "pm.expect(json).to.be.an('object').which.has.property('id');" },
+    { "is", "pm.expect(rows).to.be.an('array').that.is.not.empty;" },
+    { "of", "pm.expect(items).to.be.an('array').of.length(3);" },
+    { "same", "pm.expect(ids).to.have.same.members([3, 1, 2]);" },
+    { "still", "pm.expect(n).to.be.above(0).and.still.be.below(10);" },
+    { "that", "pm.expect(rows).to.be.an('array').that.is.not.empty;" },
+    { "which", "pm.expect(json).to.have.property('id').which.is.a('number');" },
+    { "with", "pm.expect(json).to.be.an('object').with.property('id');" },
+    });
+
+    for (const auto& chain : language_chains) {
+        const std::string name (chain.name);
+        completions.push_back ({ { "label", name }, { "kind", KIND_FIELD },
+        { "insertText", name }, { "detail", "." + name },
+        { "documentation",
+        "Reads as English and asserts nothing - one of chai's language chains. "
+        "Flags already set (including `not`) carry over.\n\nExample:\n" +
+        std::string (chain.example) },
+        { "sortText", "2_" + name }, { "filterText", "." + name } });
+    }
+
     // ========================================
     // Common snippets / templates
     // ========================================
