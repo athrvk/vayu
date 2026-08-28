@@ -91,6 +91,14 @@ does not ship that module. The same name comes off the
 no argument, a name nothing implements - because nothing was asserted: the call
 itself was wrong.
 
+**Anything the chain does not implement throws, called or not** (issue #999).
+`pm.expect(x).to.be.NaN` is an expression statement, so before the chain was
+armed a member nothing implemented evaluated to `undefined` and the test
+reported PASS whatever the value was - a typo (`.to.be.trueish`) and a chai
+matcher Vayu does not have (`.finite`, `.sealed`, `.frozen`, `.extensible`)
+were equally silent. Every unimplemented name now raises a `TypeError` naming
+itself, the way `pm.response.to` has since #487.
+
 **`equal` is strict, `eql` is deep.** `equal` is `===`, so two objects with the
 same contents are *not* equal - only the same reference is. `eql` (and its alias
 `deep.equal`) compares contents recursively and does not care about key order.
@@ -121,8 +129,9 @@ pm.expect(value).to.be.undefined;
 pm.expect(value).to.be.ok;
 pm.expect(value).to.be.empty;
 pm.expect(value).to.exist;
+pm.expect(value).to.be.NaN;
 
-// Numbers
+// Numbers (a number or a Date on both sides - nothing is coerced)
 pm.expect(value).to.be.above(n);
 pm.expect(value).to.be.below(n);
 pm.expect(value).to.be.at.least(n);
@@ -135,6 +144,7 @@ pm.expect(value).to.be.instanceOf(Array);
 
 // Strings, collections and objects
 pm.expect(value).to.include(item);           // alias .contain
+pm.expect(value).to.include({ a: 1 });       // an object target: subset match
 pm.expect(value).to.have.string(substring);  // string target only
 pm.expect(value).to.match(/regex/);
 pm.expect(value).to.have.length(n);          // alias .lengthOf
@@ -146,8 +156,10 @@ pm.expect(value).to.have.members([1, 2, 3]); // same members, any order
 
 // Functions
 pm.expect(fn).to.throw();                    // alias .throws
-pm.expect(fn).to.throw('message substring');
+pm.expect(fn).to.throw('message substring'); // matched against err.message
 pm.expect(fn).to.throw(/pattern/);
+pm.expect(fn).to.throw(TypeError);
+pm.expect(fn).to.throw(TypeError, 'substring');
 pm.expect(value).to.satisfy(function (v) { return v > 0; });
 
 // Chainers
@@ -177,6 +189,52 @@ Notes on the edges:
   `RegExp` by pattern.
 - **A cycle fails loudly.** Deep equality gives up after 64 levels with a
   `RangeError` naming the cause.
+- **`eql` separates `+0` from `-0`; `equal` does not.** That is chai: `equal`
+  is `===`, under which the two zeros are one value, while `eql` is deep-eql,
+  whose number rule is `x === y && (x !== 0 || 1/x === 1/y)`. The
+  [response assertions](#response-assertions) keep the other rule, because
+  chai-postman compares them with lodash `_.isEqual` and lodash says equal.
+- **`NaN` is chai's `value !== value`**, so only the number `NaN` satisfies it -
+  `expect('foo').to.be.NaN` fails rather than reading the string as a number.
+- **`include` on an object target is subset matching**, as in chai: every key of
+  the argument must be present on the target holding an equal value, strictly
+  unless the chain says `deep`. Any target other than a string or an array takes
+  an *object* argument, so `expect({a:1}).to.include('a')` and
+  `expect(5).to.include('x')` are both a `TypeError` - a combination chai
+  refuses rather than a verdict. Three edges are Vayu's own:
+    - **An expectation with no own enumerable keys is refused**, where chai
+      passes it in both directions. `expect(body).to.include({})` compares
+      nothing, so a computed subset that came out empty would report green
+      having asserted nothing; a `Date`, a `RegExp` and a function carry no key
+      either and read as assertions. Each names itself instead.
+    - **A getter that throws is reported, not compared.** The exception reaches
+      the test rather than being read as "these differ", which under `.not`
+      would have been a pass.
+    - **A `Map`, a `Set` or a boxed `String` target is refused** rather than
+      answered: chai has membership rules for the first two that deep equality
+      here deliberately does not (see the `eql` note above), and a quiet
+      `false` was the previous answer.
+- **The failure message names the argument.** `.to.throw(TypeError)` that caught
+  a `RangeError` says so, rather than reporting that a function which threw did
+  not throw.
+- **The ordering matchers type-assert both sides.** `above`, `below`,
+  `at.least` and `at.most` take a number or a `Date` and refuse anything else,
+  which is chai's rule: `expect('5').to.be.above(3)` used to pass here through
+  `ToNumber`, and now names what it was given. They compare like with like too -
+  a `Date` read as milliseconds against a number is a comparison neither side
+  wrote, so the mixed pair is refused.
+- **`throw` reads the error's `message`.** A string or a regular expression is
+  matched against `err.message` alone, never `String(err)` - so
+  `.to.throw('Error')` no longer passes for every `Error` thrown. A constructor
+  is accepted as the first argument (`instanceof`), with an optional message
+  matcher after it. A thrown string is its own message and anything else has
+  none, which is chai's rule: `.to.throw('4')` does not pass on `throw 42`.
+- **A wrong-typed value is a `TypeError` here where chai raises an
+  `AssertionError`** - `expect('5').to.be.above(3)`, `expect(5).to.include('x')`.
+  Deliberate: this file's rule is that a mistake in the script text stays a
+  `TypeError` because nothing was asserted, and the response assertions refuse
+  a wrong-typed argument the same way (#998). Both throw, so a test fails
+  either way; what differs is `e.name`.
 - **`.and` carries the chain's flags**, `not` included, exactly as in chai.
 
 ## Response Object (`pm.response`)
@@ -336,16 +394,53 @@ pm.response.headers.has('X-Request-Id');   // name present, boolean
 pm.response.headers.has('Content-Type', 'application/json');
                                            // present and holding that exact value
 pm.response.headers['content-type'];       // indexing: exact key only
+pm.response.headers.all();                 // [{key, value}, ...] in map order
+pm.response.headers.count();               // how many headers there are
+pm.response.headers.one('Content-Type');   // {key, value}, or undefined
+pm.response.headers.toObject();            // {'content-type': 'application/json', ...}
+pm.response.headers.toObject(false, true); // same, keys keep the stored spelling
+pm.response.headers.indexOf('Content-Type');
+                                           // position in all(), or -1
+pm.response.headers.each(function (header, index, all) {
+  console.log(header.key, header.value, index, all.length);
+});
 ```
 
 `has()`'s optional second argument is compared strictly against the header's
 wire value - a number never matches, since the wire value is always a string.
 
-`headers` is a plain object, not Postman's `HeaderList`, but `get()` and `has()`
-are on it and behave the way HTTP header names do - case-insensitively. Indexing
-does not: the engine lower-cases every response header name as it parses it, so
-`headers['Content-Type']` is `undefined` while `headers.get('Content-Type')`
-works. Prefer the methods unless you know the exact key.
+`headers` is a plain object, not Postman's `HeaderList`, but the read half of a
+Postman `PropertyList` is on it: `get()`, `has()`, `each()`, `all()`, `count()`,
+`toObject()`, `one()` and `indexOf()`. Every one of them that takes a header
+name matches it the way HTTP header names work - case-insensitively, and
+`toObject()`'s keys come back lower-cased for the same reason. Indexing does
+not: the engine lower-cases
+every response header name as it parses it, so `headers['Content-Type']` is
+`undefined` while `headers.get('Content-Type')` works. Prefer the methods
+unless you know the exact key.
+
+The six beyond `get`/`has`:
+
+- `all()` - every header as `{ key, value }`, in the object's own key order.
+- `count()` - how many headers there are, i.e. `all().length`.
+- `toObject(excludeDisabled?, caseSensitive?)` - a plain `{name: value}` object.
+  **Keys are lower-cased by default**; pass a truthy second argument to keep
+  the stored spelling instead. Postman's `toObject()` lower-cases whenever the
+  list it is called on is indexed case-insensitively, which a header list
+  always is.
+- `one(name)` - the `{ key, value }` member rather than its value,
+  case-insensitive, `undefined` when absent. `get` is the value half of the
+  same lookup.
+- `indexOf(name)` - the header's position in `all()`, case-insensitive, `-1`
+  when absent. It also accepts a `{ key }` member (what `all()` / `one()` hand
+  back) in place of a name.
+- `each(fn, thisArg?)` - calls `fn(header, index, all)` for every header, the
+  same three arguments Postman's iterator receives; `thisArg` becomes the
+  callback's `this`. The member list is built once before the walk starts, so
+  a callback that removes the header it was just handed does not shorten it.
+
+All six are non-enumerable, exactly like `get()` and `has()`, so none of them
+ever appear in `Object.keys()` or `JSON.stringify()`.
 
 The response object has **no** `add`/`upsert`/`remove` - the response has
 already arrived, so a mutator there would only appear to change something.
@@ -359,6 +454,12 @@ the RFC 7230 §3.2.2 equivalence for comma-list headers; before it, only the
 on `", "` - but not for `Set-Cookie`, whose values contain commas of their own
 (`Expires=Wed, 21 Oct ...`). Read `pm.response.cookies` instead: it is that
 header already parsed, boundaries and all.
+
+**`all()` reports the object's key order, not wire order, and can never report
+a duplicate.** Postman's `HeaderList` keeps both; this object cannot, because
+it is built from a single-valued case-insensitive map and a name sent twice has
+already been folded into the one entry above by the time any script sees
+it - there is only ever one member to report for it.
 
 ### Reading response cookies
 
@@ -593,6 +694,15 @@ pm.request.headers.upsert({ key: 'X-Trace', value: id }); // add or replace
 pm.request.headers.upsert('X-Trace', id);                 // same, two-arg form
 pm.request.headers.add({ key: 'X-New', value: '1' });     // add; throws if present
 pm.request.headers.remove('Authorization');               // case-insensitive
+pm.request.headers.all();                                 // [{key, value}, ...]
+pm.request.headers.count();                               // how many there are
+pm.request.headers.one('Content-Type');                   // {key, value} or undefined
+pm.request.headers.toObject();                            // lower-cased keys
+pm.request.headers.toObject(false, true);                 // keys kept as typed
+pm.request.headers.indexOf('Content-Type');               // position in all(), or -1
+pm.request.headers.each(function (header, index, all) {
+  console.log(header.key, header.value, index, all.length);
+});
 ```
 
 These act on the **same object** as indexing and `delete`, so the two styles
@@ -600,7 +710,7 @@ mix freely and the write-back sees one header set either way. They are
 non-enumerable properties of it, so they never appear in `Object.keys()`,
 `JSON.stringify()` or on the wire.
 
-Three behaviours worth knowing:
+Behaviours worth knowing:
 
 - **The methods are case-insensitive; indexing is not.** `upsert('authorization', v)`
   replaces an existing `Authorization` rather than adding a second spelling -
@@ -614,11 +724,28 @@ Three behaviours worth knowing:
 - **`has`'s optional value argument is a strict string compare**, the same rule
   `pm.response.headers.has` follows - a number never matches, since the
   outgoing header is always a string.
+- **`toObject()` lower-cases its keys by default.** `pm.request.headers` keeps
+  whatever casing the request holds - which can be whatever the user typed -
+  so copying its own keys would have answered `undefined` for
+  `toObject()['content-type']` on a request carrying `Content-Type`. Pass a
+  truthy second argument (`toObject(false, true)`) to keep the stored spelling
+  instead.
+- **`all()` reports this object's key order, not wire order, and can never
+  report a duplicate** - unlike Postman's `HeaderList`, which keeps both. A
+  name assigned twice already collapsed into one entry (the second write
+  replaced the first), so there is only ever one member for `all()` to report.
+- **`indexOf` matches a `{ key }` member by its `key`, not by identity.**
+  Postman finds a member by identity in its own list; the members here are
+  built fresh on every call, so identity would answer `-1` for a member of the
+  very list it came from. Matching the key answers what Postman answers for
+  that case, and `-1` for an object naming a header this list does not hold.
 
 A bad argument fails loudly: a name must be a non-empty string and a value a
-string, number or boolean - the same set plain assignment accepts. Detaching a
-method from its object (`const get = pm.request.headers.get`) throws rather than
-answering as though the header were missing.
+string, number or boolean - the same set plain assignment accepts. `each`
+throws if its first argument is not a function. Detaching a method from its
+object (`const get = pm.request.headers.get`) throws rather than answering as
+though the header were missing. A throw out of an `each` callback propagates as
+the script's own error.
 
 ### URL parts (`pm.request.url`)
 
@@ -743,7 +870,7 @@ worse than a break you can see.
 
 ## Script Identity (`pm.info`)
 
-What the script is attached to, and which hook is running it. Five fields,
+What the script is attached to, and which hook is running it. Six fields,
 each **optional** - `pm.info` is always an object, but a field with no truthful
 value is absent rather than `""`, so `typeof` is how a script tests for one:
 
@@ -751,7 +878,8 @@ value is absent rather than `""`, so `typeof` is how a script tests for one:
 pm.info.requestId      // string | undefined - the saved request this send is filed under
 pm.info.requestName    // string | undefined - its name, as the client sent it
 pm.info.eventName      // 'prerequest' in a pre-request script, 'test' in a test script
-pm.info.iteration      // number | undefined - 0-based, in a collection run only
+pm.info.iteration      // number | undefined - 0-based, in a run of any shape
+pm.info.vu             // number | undefined - 1-based, the virtual user that sent it
 pm.info.iterationCount // number | undefined - the run's iteration total
 ```
 
@@ -777,11 +905,21 @@ deferred per-step script reads it too: each sampled response carries the virtual
 user's iteration it was actually sent in, so the number is a fact about that
 response rather than its position in a reservoir.
 
-A single-request load run's `tests` script gets `undefined`, which is the honest
-answer rather than an omission: it runs once per *sampled* response after the
-run has finished, and the sample is a reservoir over the whole run rather than
-the first N iterations, so an index reported there would not be an iteration
-number. A binding that cannot fail is worse than a missing one.
+**A single-request load run reports one too, since issue #994.** It used to read
+`undefined` there, on the rule that a *reservoir position* is not an iteration -
+and that rule is intact, because this is not one: each submission claims its
+index before it is sent, and the index travels with the response into the
+sample, exactly as `dataRowIndex` does. It is the same counter the run's data
+rows are claimed from, so a script grading a sampled response can say which
+iteration produced it and which row it carried, and the two agree. An ordinary
+Send still reads `undefined`: one request is not a pass of anything.
+
+**`vu` is the virtual user that sent the request, 1-based.** It spans the run's
+concurrency in a scenario load run, where each user walks the sequence with its
+own cookies and its own iteration counter. Everywhere else it is `1`, and that
+is a statement rather than a placeholder: a single request repeated under load
+is one user's iterations however many are in flight, and so is a collection run
+in design mode. `undefined` on an ordinary Send, beside `iteration`.
 
 **`iterationCount` is set by the collection runner and by nothing else.** A
 duration-bounded load run has no iteration total to report, and a field readable
@@ -916,10 +1054,21 @@ deliberately does not: `resolve_template` leaves `{{data.column}}` written as it
 stands because a plan is composed once, before any row is bound, while this runs
 per step with the iteration's row in hand. A column the row does not carry is a
 `TypeError` naming the token and the row's columns - the bind-time rule
-(`apply_data_template`) in a shape a script can catch - and with no row bound at
+(`apply_iteration_template`) in a shape a script can catch - and with no row bound at
 all the token keeps its braces. It stops at `replaceIn`: `pm.variables.get` and
 `.has` read the variable *scopes*, and `data.` is disjoint from them by design
 (`core/scenario_data.hpp`), with `pm.iterationData` as its accessor.
+
+**The identity namespace is not readable from `replaceIn`, and that is
+deliberate** (issue #994). `{{$vu}}` and `{{$iteration}}` keep their braces
+here, unlike `{{data.column}}` above: the identity belongs to the *send*, which
+binds it into the request before the pre-request script runs and long before a
+deferred test script grades the response - so a script asking `replaceIn` to
+resolve it would be asking the resolver for a fact the resolver does not hold.
+What a script reads instead is `pm.info.vu` and `pm.info.iteration`, which carry
+exactly the numbers the request beside them was bound with. #1057 is the record
+of the alternative - teaching `replaceIn` the identity so the two agree by
+construction rather than by a script reaching for the right one of two APIs.
 
 **Dynamic variables are otherwise not readable from a script.** `{{$guid}}`,
 `{{$timestamp}}` and the rest of the set in
@@ -958,10 +1107,11 @@ and must be a function.
 
 | Option | Shape |
 | ------ | ----- |
-| `url` | string, required. Postman's URL-object form is not accepted |
+| `url` | string, required, or `pm.request.url` - the Url object, so `pm.sendRequest(pm.request.url, cb)` reads as "send this again". A hand-built `{ host, path }` object is still not accepted |
 | `method` | string, default `GET`; case-insensitive, an unknown verb throws |
 | `header` / `headers` | `{ name: value }` or Postman's `[{ key, value }]`. Both names read; sending both at once throws |
 | `body` | a string, or `{ mode: 'raw', raw }`. Only `raw` - other modes throw |
+| `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
 | `timeout` | milliseconds, clamped to the script's remaining budget (below) |
 
 **Synchronous, and callback-shaped for that reason.** The send blocks and the
@@ -977,8 +1127,10 @@ script's own mistakes throw out of the call instead: an unusable argument, an
 unsupported body mode, exceeding the request cap, and the capability being off.
 
 `res` carries `code`, `status` (the numeric code, as on `pm.response`),
-`responseTime`, `headers` with `get()`/`has()`, `json()` and `text()`. It is a
-subset of `pm.response` and has no `to.*` assertion chain.
+`responseTime`, `headers` with `get()`/`has()`/`each()`/`all()`/`count()`/
+`toObject()`/`one()`/`indexOf()` - the same read methods documented under
+[Reading response headers](#reading-response-headers) - `json()` and `text()`.
+It is a subset of `pm.response` and has no `to.*` assertion chain.
 
 **Two bounds, both hard.**
 
@@ -1008,11 +1160,51 @@ so a streaming send's pre- and post-request scripts are governed by exactly the
 bit a buffered send's are (issue #653). Pressing Send with the **Event stream**
 setting on and off gives `pm.sendRequest` the same answer.
 
-**No `{{variable}}` resolution.** A script-supplied URL is sent as written.
-This request was never composed - it is a URL the script spelled, not a field
-of the request the engine resolved - so there is nothing here to have left a
-token behind, and the residual pass the main send makes (#1008) does not run
-over it. Use `pm.variables.replaceIn(template)`.
+**`{{variables}}` resolve as the call is made** (#1001). The URL, each header
+value, a raw body and each credential of an `auth` block are resolved once,
+against the three scopes and the bound data row exactly as
+`pm.variables.replaceIn` reads them - so a value this same script set two lines
+earlier is visible, which is Postman's rule and what makes an imported
+token-refresh script work. It is not a second pass over the composed request:
+that payload was resolved before the script ran and nothing here revisits it.
+A name nothing defines keeps its braces (#1009), and a `{{data.column}}` the
+bound row lacks throws naming the column, the same way `replaceIn` does.
+
+Header **names** are sent as written. Two names that resolve to one name are a
+collision rule composition owns (#1051); answering it a second way here is how
+the two would drift.
+
+```javascript
+pm.environment.set("tenant", "acme");
+pm.sendRequest(
+  {
+    url: "{{baseUrl}}/{{tenant}}/token",
+    method: "POST",
+    auth: { type: "basic", basic: { username: "{{id}}", password: "{{secret}}" } },
+  },
+  function (err, res) {
+    if (err) {
+      return;
+    }
+    pm.environment.set("token", res.json().access_token);
+  }
+);
+```
+
+**`auth` is composed, or refused by name.** The block takes Postman's
+`{ type, <type>: params }` shape, with the parameters in either spelling Postman
+writes - the exported `[{ key, value }]` array, or a plain object. `basic`,
+`bearer` and `apikey` (`in: 'header'` by default, `'query'` for a parameter) go
+through `vayu::http::apply_auth`, the engine's one auth composer, so the header
+or the percent-encoded query parameter is the one every other send would have
+written, and an `Authorization` header the script set itself still wins. Every
+other type throws naming it - `oauth2` included, because acquiring its token
+needs the database this path deliberately does not carry. So does a type whose
+block is not there: `{ type: 'basic' }` with no `basic` beside it, or the key
+misspelled, is refused rather than composed as the empty credential `basic`'s two
+optional halves would otherwise make of it. Dropping the option would send an
+unauthenticated request that looks like the script's own mistake, which is the
+reason the body modes are refused too.
 
 ## The cookie jar (`pm.cookies`)
 
@@ -1020,12 +1212,41 @@ over it. Use `pm.variables.replaceIn(template)`.
 pm.cookies.get('session');      // value, or undefined
 pm.cookies.has('session');      // boolean
 pm.cookies.toObject();          // { session: 'abc' }
+pm.cookies.each(function (cookie) { console.log(cookie.name); });
+pm.cookies.all();               // array of cookie objects
+pm.cookies.count();             // number
 ```
 
 `pm.cookies` is what the engine is holding *for this request's URL* - matched on
 domain, path, `Secure` and expiry, exactly as it will be sent. It is what makes
 "log in once, reuse the session" work: a `Set-Cookie` on one request is carried
 to the next one automatically, with no header to set by hand.
+
+**`each`, `all()` and `count()`** are Postman's CookieList reads, over the same
+matched set `get`/`has`/`toObject` answer over - what this request's URL would
+carry. Each call reads the jar afresh, so a `jar().set` earlier in the script is
+visible by the time one of these runs. `each(fn, context?)` calls `fn` once per
+cookie with the whole cookie object (below), `context` becoming the iterator's
+`this`; a throw from `fn` - a failed `pm.expect` inside it, most likely - ends
+the walk and is the script's error rather than being swallowed. `all()` returns
+an array of cookie objects, `count()` the number of them.
+
+A cookie object - what `each`, `all()`, `jar().getAll()` (below) and
+`jar().set`'s callback all hand back - carries:
+
+| Field | Value |
+|-------|-------|
+| `name`, `key` | the cookie's name, under both spellings. Postman's `Cookie` calls it `key`; both are present, same value |
+| `value` | the cookie's value |
+| `domain`, `path` | where it is scoped |
+| `secure`, `httpOnly` | booleans |
+| `hostOnly` | `true` when the cookie answers for that host only, `false` when it answers for subdomains too |
+| `session` | `true` for a session cookie |
+| `expires` | a `Date`, or `null` for a session cookie |
+
+Postman's `maxAge` and its unmodelled `extensions` are deliberately absent: the
+jar does not keep them, and a field with nothing behind it is a value a script
+would read and act on.
 
 - **One jar per environment**, plus one for requests sent with no environment
   selected. A staging session therefore cannot ride along on a production call
@@ -1037,10 +1258,11 @@ to the next one automatically, with no header to set by hand.
 - **`pm.sendRequest` shares the jar** of the request it runs inside. A
   pre-request script that logs in through it leaves the session where the real
   request will find it.
-- **Load runs have no jar.** These three throw there rather than answering
-  `undefined`, which would read as "the cookie is gone". The jar is deliberately
-  off the load path: sharing one across the event loop's workers would put a
-  lock on the hot path, and a load run repeats a single request anyway.
+- **Load runs have no jar.** Every one of these reads throws there rather than
+  answering `undefined`, which would read as "the cookie is gone". The jar is
+  deliberately off the load path: sharing one across the event loop's workers
+  would put a lock on the hot path, and a load run repeats a single request
+  anyway.
 - **Writing goes through `jar()`**, below. There is deliberately no flat
   `pm.cookies.set(name, value)`: a written cookie needs a URL to take its
   domain and path from, which is exactly why Postman's write half hangs off
@@ -1057,18 +1279,32 @@ const jar = pm.cookies.jar();
 jar.set(pm.request.url, { name: 'session', value: token });
 jar.set(pm.request.url, 'session', token);            // the same, flat
 jar.get('https://api.example.com/', 'session');        // value, or undefined
+jar.getAll('https://api.example.com/');                 // every cookie that URL would carry
 jar.unset('https://api.example.com/', 'session');
 jar.clear('https://api.example.com/');                 // that URL's cookies
 jar.clear();                                           // this environment's jar
 ```
 
-Postman's jar object, whole. Every method is **URL-scoped** - it takes the URL
-the cookie belongs to rather than assuming this request's (`clear`'s URL is
-optional; see below) - and each accepts an
-optional trailing `callback(err, value)`, invoked inline the way
-[`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest)'s is,
-since the work has already happened by the time it is called. `get` also
-*returns* the value, which a synchronous implementation can do honestly.
+Postman's jar object, whole - **`getAll`** is new, Postman's "dump the session"
+read: every cookie a request to that URL would carry, as an array, whole. It is
+exactly what `get(url, name)` matches, without a name to narrow it - the same
+domain/path/`Secure`/expiry rules, the same per-environment jar, and a cookie
+this script has already staged with `set` is included. Every method is
+**URL-scoped** - it takes the URL the cookie belongs to rather than assuming
+this request's (`clear`'s URL is optional; see below) - and each accepts an
+optional trailing callback, invoked inline the way
+[`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest)'s is, since
+the work has already happened by the time it is called. What the callback
+carries, and what the call itself returns, is what that call did - there is no
+longer one shape for all five:
+
+| Method | Callback / return |
+|--------|--------------------|
+| `get(url, name)` | the value, or `undefined` |
+| `getAll(url)` | every matching cookie, as an array of cookie objects |
+| `set(url, cookie)` | the **stored** cookie object - the one thing this call knows and the script does not, since it carries the domain and path derived from the URL where `cookie` left them out |
+| `unset(url, name)` | the removed name |
+| `clear(url?)` | `undefined` - there is nothing left to describe |
 
 The cookie object needs `name` and `value`; everything else is optional and
 defaults from the URL:
@@ -1078,14 +1314,27 @@ defaults from the URL:
 | `domain` | the URL's host, host-only. A leading dot (`.example.com`) means subdomains too |
 | `path` | RFC 6265 default-path - the URL's path with its last segment removed, so `/v1/orders/42` gives `/v1/orders` |
 | `secure`, `httpOnly` | `false` |
-| `expires` | `0`, a session cookie. Otherwise **seconds since the epoch** - `Math.floor(date.getTime() / 1000)` |
+| `expires` | `0`, a session cookie. Otherwise a `Date`, a date string, or a whole number of seconds since the epoch |
+
+**`expires` takes three spellings**, matching Postman: a `Date`; a date string -
+anything JavaScript's own `Date.parse` accepts, an ISO 8601 or an HTTP date; or
+a whole number of seconds since the epoch, `0` still meaning a session cookie.
+The Date and the string are read by asking QuickJS's own `Date` (`getTime` and
+`Date.parse`) rather than a date parser written into the engine, so the answer
+here is the one the same script's own `new Date(s)` would give. Because a
+stored cookie reads back with `expires` as a `Date` (above), and `set` now
+takes a `Date`, a cookie can be read and written back with nothing to convert.
 
 Anything else is refused with an error rather than guessed at: a non-string
-`value`, a `secure: "yes"`, a date string in `expires`, a field carrying a tab
-or newline (the separators of the format the jar stores), or a URL that cannot
-be parsed. A cookie stored under the wrong domain reads as "the session did not
-stick" three requests later, which is a much worse afternoon than a thrown
-error.
+`value`, a `secure: "yes"`, a field carrying a tab or newline (the separators
+of the format the jar stores), or a URL that cannot be parsed. `expires` has
+its own refusals, loud ones: an Invalid Date, a string `Date.parse` cannot
+read, a **fractional** number of seconds - `date.getTime() / 1000` without the
+floor, which the message names both cures for (pass the `Date` itself, or keep
+the `Math.floor`) - a value before the epoch, and one further in the future than
+the jar can store. A cookie stored under the
+wrong domain reads as "the session did not stick" three requests later, which
+is a much worse afternoon than a thrown error.
 
 **A written cookie is matched by the same rules a received one is.** Setting it
 for one host does not send it to another, `/admin` does not reach `/`, and the
@@ -1249,10 +1498,10 @@ See [api-reference.md](api-reference.md#post-execute).
 and any run started without a data set. Where a run *was* given rows, its
 deferred script reads one whichever shape the run took: a sampled response
 carries the row the submission or iteration that produced it was bound to, so
-the row is a fact about that response rather than a guess. (`pm.info.iteration`
-is narrower and stays so: a scenario step carries the virtual user's real
-iteration index, while a single-request run has none to report - a reservoir
-position is not an iteration.) That is deliberate, and it is the opposite treatment to `pm.execution`
+the row is a fact about that response rather than a guess. (`pm.info.iteration` and
+`pm.info.vu` travel the same way and are populated on both shapes since issue
+#994 - what a sample carries is the identity its submission claimed before it
+was sent, never its position in a reservoir.) That is deliberate, and it is the opposite treatment to `pm.execution`
 above: flow control is a *capability*, and one that silently does nothing is a
 false success, so it is always bound and explains itself. A data row is *data*,
 and "this run is not data-driven" is a fact a script may legitimately branch on:
@@ -1695,9 +1944,10 @@ The **language** is current; what is missing is the **host environment**:
   says how many responses the bound thinned away
 - Results are aggregated and reported in the final report
 - `pm.info` reports the same identity a Send does: `eventName` is `"test"`, and
-  `requestId` / `requestName` are the run's linked request when it has one. There
-  is no `iteration` - the script runs per sampled response, not per iteration
-  (a collection run does report one; see [`pm.info`](#script-identity-pminfo))
+  `requestId` / `requestName` are the run's linked request when it has one. It
+  also reports `iteration` - the index the sampled submission claimed before it
+  was sent - and `vu`, which is `1` here because a single request repeated is
+  one user's iterations (issue #994; see [`pm.info`](#script-identity-pminfo))
 - `POST /runs`'s `tests` field carries the collection chain's test scripts as
   well as the request's own, composed the same way as `POST /execute` (see
   [Script Parts](#script-parts) below) - a collection-level assertion is now
@@ -1731,9 +1981,10 @@ shape:
 
 - `pm.request` is the step's own request, and `pm.info.requestId` /
   `requestName` are that step's, not a run-level one.
-- `pm.info.iteration` is bound - the sample carries the virtual user's real
-  iteration index - beside the `pm.iterationData` a single-request run's rows
-  also provide, so a script asserting on `{{data.*}}`-driven behaviour grades the
+- `pm.info.iteration` is the virtual user's own iteration index and
+  `pm.info.vu` is that user's number, so a script can tell two users' responses
+  apart - beside the `pm.iterationData` a single-request run's rows also
+  provide, so a script asserting on `{{data.*}}`-driven behaviour grades the
   right row either way.
 - The sample budget is split across the steps that carry a script rather than
   spent run-wide, so the last step of a long plan is validated instead of being

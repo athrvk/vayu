@@ -12,11 +12,13 @@
 #include <cctype>
 #include <chrono>
 #include <ctime>
+#include <map>
 #include <random>
 #include <regex>
 #include <string_view>
 #include <unordered_set>
 
+#include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
@@ -384,6 +386,10 @@ bool is_data_variable_name (const std::string& name) {
     name.compare (0, DATA_NAMESPACE_PREFIX.size (), DATA_NAMESPACE_PREFIX) == 0;
 }
 
+bool is_identity_variable_name (const std::string& name) {
+    return name == IDENTITY_VU_NAME || name == IDENTITY_ITERATION_NAME;
+}
+
 std::optional<std::string> resolve_dynamic_variable (const std::string& name) {
     for (const auto& v : DYNAMIC_VARIABLES) {
         if (name == v.name) {
@@ -550,6 +556,13 @@ lookup_variable (const std::string& name, const VariableValues& vars) {
     if (is_data_variable_name (name)) {
         return std::nullopt; // bound per iteration, or not at all (#402)
     }
+    // Ahead of the scopes for the same reason, and it is what makes the name
+    // bindable at all: a variable someone named `$vu` answering here would
+    // substitute one value into the composed request and leave every iteration
+    // of the run sending it (issue #994).
+    if (is_identity_variable_name (name)) {
+        return std::nullopt; // bound per iteration by the executor
+    }
     if (auto defined = vars.find (name); defined != vars.end ()) {
         return defined->second;
     }
@@ -600,7 +613,7 @@ std::optional<std::string>& missing_column) {
         }
         // Recorded rather than resolved to "": the token says the value came
         // from the file, so a name no column answers is a mistake about the
-        // column and the quiet answer hides it (the rule `apply_data_template`
+        // column and the quiet answer hides it (the rule `apply_iteration_template`
         // enforces at bind time). Only the first is kept - the caller reports
         // one and the rest are the same mistake.
         if (!missing_column) {
@@ -937,14 +950,65 @@ std::string& environment_id) {
     return vars;
 }
 
+/// A resolved header block, or the first refusal that stopped it - the two
+/// reasons composition rejects a payload over a header rather than over its
+/// shape, gathered so the caller answers them in one place.
+struct ResolvedHeaders {
+    nlohmann::json headers = nlohmann::json::object ();
+    /// A variable whose value cannot be written into a header line (#738).
+    std::optional<HeaderTextRefusal> unspellable;
+    /// Two names that resolved to one (#1051).
+    std::optional<vayu::http::HeaderNameCollision> collision;
+};
+
+/**
+ * Resolve every header name and value in @p headers.
+ *
+ * Rebuilt rather than edited in place, because a resolved name is a different
+ * key - and a name a variable produced can land on a name another header
+ * already holds, which is the collision `http/header_names.hpp` refuses.
+ *
+ * Names are tracked the way `Headers` compares them rather than the way this
+ * JSON object keys them, because that is what the payload becomes: two names
+ * differing only in case are two keys here and one header in the map
+ * `POST /execute` parses this into, so a collision only that map can see would
+ * otherwise be composed happily and drop a header one layer further on, with
+ * the variable that caused it already forgotten.
+ */
+ResolvedHeaders resolve_header_block (const nlohmann::json& headers,
+const VariableValues& vars) {
+    ResolvedHeaders out;
+    // Each resolved name, against the name as written that produced it. The
+    // second half is what separates a collision resolution *made* from two
+    // names the author typed themselves: those are two lines they can see side
+    // by side, and composition has always let the later one win. This refusal
+    // is for the one that is invisible until the request comes back wrong.
+    std::map<std::string, std::string, vayu::CaseInsensitiveLess> produced;
+    for (const auto& [key, value] : headers.items ()) {
+        const std::string name = resolve_header_template (key, vars, out.unspellable);
+        const auto [taken, was_free] = produced.emplace (name, key);
+        const bool resolution_made_it = name != key || taken->second != taken->first;
+        if (!was_free && resolution_made_it && !out.collision) {
+            out.collision =
+            vayu::http::HeaderNameCollision{ key, taken->second, taken->first };
+        }
+        out.headers[name] = value.is_string () ?
+        nlohmann::json (
+        resolve_header_template (value.get<std::string> (), vars, out.unspellable)) :
+        value;
+    }
+    return out;
+}
+
 /**
  * The method, the URL and the headers.
  *
  * A header is the one field composition refuses a payload over, because it is
- * the one whose text has a terminator and no escape for it: a substituted CR or
- * LF does not sit in the header, it ends the line and makes the remainder a
- * header nobody wrote. See `http/header_text.hpp` for the rule and for the
- * pre-send gate that catches every other origin.
+ * the one the author cannot see the result of: its text has a terminator and no
+ * escape for it, so a substituted CR or LF ends the line rather than sitting in
+ * it (`http/header_text.hpp`), and its name is a map key, so a substituted name
+ * can quietly take another header's place (`http/header_names.hpp`). Both files
+ * carry the rule and the layers that share it.
  *
  * @return the refusal, or nothing.
  */
@@ -964,24 +1028,16 @@ resolve_compose_head (const VariableValues& vars, nlohmann::json& payload) {
 
     if (auto headers = payload.find ("headers");
     headers != payload.end () && headers->is_object ()) {
-        nlohmann::json resolved = nlohmann::json::object ();
-        // A header is the one field composition refuses a payload over, because
-        // it is the one whose text has a terminator and no escape for it: a
-        // substituted CR or LF does not sit in the header, it ends the line and
-        // makes the remainder a header nobody wrote. See `http/header_text.hpp`
-        // for the rule and for the pre-send gate that catches every other origin.
-        std::optional<HeaderTextRefusal> refusal;
-        for (const auto& [key, value] : headers->items ()) {
-            resolved[resolve_header_template (key, vars, refusal)] = value.is_string () ?
-            nlohmann::json (
-            resolve_header_template (value.get<std::string> (), vars, refusal)) :
-            value;
+        auto resolved = resolve_header_block (*headers, vars);
+        if (resolved.unspellable) {
+            return compose_error (400, "unsendable_header",
+            describe_header_text_refusal (*resolved.unspellable));
         }
-        if (refusal) {
-            return compose_error (
-            400, "unsendable_header", describe_header_text_refusal (*refusal));
+        if (resolved.collision) {
+            return compose_error (400, "colliding_header_names",
+            vayu::http::describe_header_name_collision (*resolved.collision));
         }
-        *headers = resolved;
+        *headers = std::move (resolved.headers);
     }
     return std::nullopt;
 }

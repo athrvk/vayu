@@ -213,7 +213,13 @@ engine/
   translation unit. `docs/engine/building.md` carries the command.
 - Formatter: clang-format, **19 exactly** (`.clang-format` at repo root; the
   version is pinned because 39 of the 285 engine sources format differently
-  under 18). **A difference is a failure now** (#886): the `Engine formatting`
+  under 18). **A patch-level difference inside 19 is enough to matter**: Ubuntu
+  24.04's 19.1.1 and the CI runner's later 19.1.x disagree about three
+  continuation lines in `script_engine.cpp`, so `clang-format -i` over a whole
+  file rewrites regions the change never touched and the gate fails on them.
+  Format, then read `git diff` for reindentation you did not intend and put it
+  back - the tree as committed is what CI's binary accepts.
+  **A difference is a failure now** (#886): the `Engine formatting`
   job in `pr-tests.yml` runs `--dry-run -Werror` over the whole of
   `engine/{src,include,tests}` - whole tree, unlike the clang-tidy gate, because
   the bulk-format commit left no backlog to grandfather. `scripts/pre-commit`
@@ -863,7 +869,11 @@ execute is not silent past that point either: a name compose could not answer
 script and before the send (`resolve_residual_tokens`,
 `engine/src/http/request_exchange.cpp`) - a value compose already substituted
 is finished text and this pass does not revisit it, so nothing is resolved
-twice. Two entry shapes: `requestId` (stored request; MCP uses
+twice. **That pass can refuse** (#1051): a header name it resolves onto a name
+the request already carries would erase that header, so it returns a
+`vayu::Error` and the send does not happen - composition refuses the same
+collision with a `400`, in the same words, and `http/header_names.hpp` holds
+the rule. Two entry shapes: `requestId` (stored request; MCP uses
 this, and gates its allowlist on the *composed* URL) and an inline `request`
 (+ `collectionId` scope; the renderer uses this because Send/replay execute
 *editor state*, which may be unsaved or detached). Inline over stored = the

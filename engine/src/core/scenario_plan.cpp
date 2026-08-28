@@ -411,7 +411,7 @@ ScenarioPlan& plan) {
     // Split once, here, so no executor re-scans this step per iteration -
     // the load-mode one binds a row per iteration per virtual user, which
     // is a scan of every field of every step at the run's full rate.
-    auto data_template = tokenize_data_fields (built.request);
+    auto data_template = tokenize_bindable_fields (built.request);
 
     // A `{{data.*}}` token with no data set behind it can never bind. The
     // namespace is reserved, so composition deliberately left the token
@@ -422,13 +422,13 @@ ScenarioPlan& plan) {
     // exists, rather than rediscovered per step per iteration once it has
     // started (issue #415).
     if (!has_data) {
-        auto token = data_template.first_token ();
+        auto token = data_template.first_data_token ();
         if (!token) {
             // The credentials are scanned too, and for the same reason: a
             // data token in a basic-auth field is exactly as unbindable as
             // one in the URL, and until it was kept out of the base64 above
             // this refusal could not see it at all.
-            token = auth_template.first_token ();
+            token = auth_template.first_data_token ();
         }
         if (token) {
             return (describe_step (index, row) + " carries " + *token +
@@ -571,17 +571,23 @@ CoverageTally make_coverage_tally (const ScenarioExecution& execution) {
     return CoverageTally (execution.spec.declared_operations, step_operations);
 }
 
-DataBindResult bind_step_row (vayu::Request& request,
+DataBindResult bind_step_iteration (vayu::Request& request,
 const ScenarioStep& step,
-const nlohmann::json& row,
-size_t row_index) {
+const std::vector<nlohmann::json>& rows,
+std::optional<size_t> row_index,
+IterationIdentity identity) {
+    // `.at()` rather than a subscript: the index was claimed off a cursor taken
+    // modulo this vector's own size, so a mismatch is a broken invariant and a
+    // throw names it instead of reading past the end.
+    const IterationBinding binding{ row_index ? &rows.at (*row_index) : nullptr,
+        row_index.value_or (0), identity };
     // The fields-then-credentials order lives in one place, shared with the
     // single-request load path that binds its own templates the same way
     // (issue #993); this is the step-shaped caller of it. The step's auth is
     // copied by the callee, which is what a plan shared by every virtual user
     // of the run requires.
-    return bind_iteration_row (
-    request, step.data_template, step.auth, step.auth_template, row, row_index);
+    return bind_iteration (
+    request, step.data_template, step.auth, step.auth_template, binding);
 }
 
 nlohmann::json build_scenario_manifest (const ScenarioRequest& request,

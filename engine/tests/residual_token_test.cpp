@@ -36,6 +36,7 @@
 #include <string>
 
 #include "echo_server.hpp"
+#include "optional_assert.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/request_composer.hpp"
@@ -80,7 +81,7 @@ TEST (ResidualTokens, ResolvesEveryFieldCompositionResolves) {
     scopes.environment["token"]       = value_of ("t-123");
     scopes.environment["header_name"] = value_of ("X-Tenant");
 
-    resolve_residual_tokens (request, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
 
     EXPECT_EQ (request.url, "https://api.example.com/users/7");
     EXPECT_EQ (request.headers["Authorization"], "Bearer t-123");
@@ -110,7 +111,7 @@ TEST (ResidualTokens, ResolvesEveryStringAFormFieldCarries) {
     scopes.environment["name"]     = value_of ("ada");
     scopes.environment["format"]   = value_of ("png");
 
-    resolve_residual_tokens (request, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
 
     const auto& resolved = request.body.fields.front ();
     EXPECT_EQ (resolved.key, "avatar");
@@ -131,19 +132,19 @@ TEST (ResidualTokens, ReadsTheScopesInCompositionsOrder) {
 
     vayu::Request request;
     request.url = "https://{{host}}/x";
-    resolve_residual_tokens (request, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
     EXPECT_EQ (request.url, "https://env.test/x");
 
     scopes.environment.clear ();
     vayu::Request without_environment;
     without_environment.url = "https://{{host}}/x";
-    resolve_residual_tokens (without_environment, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (without_environment, scopes));
     EXPECT_EQ (without_environment.url, "https://leaf.test/x"); // leaf over root
 
     scopes.collection.clear ();
     vayu::Request chain_only;
     chain_only.url = "https://{{host}}/x";
-    resolve_residual_tokens (chain_only, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (chain_only, scopes));
     EXPECT_EQ (chain_only.url, "https://root.test/x"); // root over globals
 }
 
@@ -156,7 +157,7 @@ TEST (ResidualTokens, ADisabledVariableAnswersForNothing) {
 
     vayu::Request request;
     request.url = "https://{{host}}/x";
-    resolve_residual_tokens (request, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
 
     EXPECT_EQ (request.url, "https://{{host}}/x");
 }
@@ -169,7 +170,7 @@ TEST (ResidualTokens, ANameNothingAnswersStaysLiteral) {
     request.headers["Authorization"] = "Bearer {{token}}";
 
     ScriptVariableScopes scopes; // nothing was set
-    resolve_residual_tokens (request, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
 
     EXPECT_EQ (request.url, "https://{{host}}/x");
     EXPECT_EQ (request.headers["Authorization"], "Bearer {{token}}");
@@ -183,7 +184,7 @@ TEST (ResidualTokens, TheDataNamespaceIsLeftToItsOwnBinding) {
     request.url = "https://example.test/users/{{data.id}}";
 
     auto scopes = environment_with ("data.id", "9");
-    resolve_residual_tokens (request, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
 
     EXPECT_EQ (request.url, "https://example.test/users/{{data.id}}");
 }
@@ -198,7 +199,7 @@ TEST (ResidualTokens, InheritsTheNestedResolutionAndItsCycleBound) {
 
     vayu::Request request;
     request.url = "{{base}}/users";
-    resolve_residual_tokens (request, layered);
+    EXPECT_FALSE (resolve_residual_tokens (request, layered));
     EXPECT_EQ (request.url, "https://api.example.com/users");
 
     ScriptVariableScopes cyclic;
@@ -207,7 +208,7 @@ TEST (ResidualTokens, InheritsTheNestedResolutionAndItsCycleBound) {
 
     vayu::Request cycled;
     cycled.url = "https://example.test/{{a}}";
-    resolve_residual_tokens (cycled, cyclic);
+    EXPECT_FALSE (resolve_residual_tokens (cycled, cyclic));
     EXPECT_EQ (cycled.url, "https://example.test/{{a}}");
 }
 
@@ -235,7 +236,7 @@ TEST (ResidualTokens, ARedefinedNameDoesNotRewriteWhatCompositionSubstituted) {
     scopes.environment["greeting"] = value_of ("should never appear");
     scopes.environment["name"]     = value_of ("world");
 
-    resolve_residual_tokens (request, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
 
     // The two composition answered keep the answers it gave.
     EXPECT_EQ (request.headers["Authorization"], "Bearer secret-v1");
@@ -257,9 +258,9 @@ TEST (ResidualTokens, ResolvingTwiceChangesNothingTheFirstPassAnswered) {
     scopes.environment["host"]     = value_of ("api.example.com");
     scopes.environment["greeting"] = value_of ("hello {{name}}");
 
-    resolve_residual_tokens (request, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
     const vayu::Request once = request;
-    resolve_residual_tokens (request, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
 
     EXPECT_EQ (request.url, once.url);
     EXPECT_EQ (request.body.content, once.body.content);
@@ -275,11 +276,84 @@ TEST (ResidualTokens, ARequestWithNoTokenIsUntouched) {
     const vayu::Request before       = request;
 
     auto scopes = environment_with ("host", "elsewhere.test");
-    resolve_residual_tokens (request, scopes);
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
 
     EXPECT_EQ (request.url, before.url);
     EXPECT_EQ (request.headers, before.headers);
     EXPECT_EQ (request.body.content, before.body.content);
+}
+
+// --- a resolved name landing on a name already there (#1051) -----------------
+//
+// The sibling of the composition-side block in `request_composer_test.cpp`:
+// this pass rebuilds the same map for the same reason, so it inherits the same
+// collision and answers it with the same words. A script defining the name is
+// what makes it reachable here at all - composition refused what it could see,
+// and this is the name it could not.
+//
+// Mutation-check for both: return `std::nullopt` instead of the collision and
+// the first fails on the refusal it no longer gets, the second on the header
+// that quietly vanishes.
+
+TEST (ResidualTokens, ANameResolvingOntoAHeaderAlreadyThereIsRefused) {
+    vayu::Request request;
+    request.url                        = "https://api.example.com/x";
+    request.headers["{{header_name}}"] = "acme";
+    request.headers["X-Tenant"]        = "legacy";
+
+    auto scopes        = environment_with ("header_name", "X-Tenant");
+    const auto refusal = resolve_residual_tokens (request, scopes);
+
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_EQ (refusal->code, vayu::ErrorCode::InternalError);
+    EXPECT_NE (refusal->message.find ("{{header_name}}"), std::string::npos)
+    << refusal->message;
+    EXPECT_NE (refusal->message.find ("X-Tenant"), std::string::npos) << refusal->message;
+}
+
+/// Refused with the request as it was found: the caller stops the send, and a
+/// half-rebuilt map is one nothing should go on to read - not the trace, not
+/// the raw-request view, not a retry.
+TEST (ResidualTokens, ARefusedCollisionLeavesTheHeadersAlone) {
+    vayu::Request request;
+    request.url                        = "https://api.example.com/x";
+    request.headers["{{header_name}}"] = "acme";
+    request.headers["X-Tenant"]        = "legacy";
+    const vayu::Request before         = request;
+
+    auto scopes = environment_with ("header_name", "X-Tenant");
+    EXPECT_TRUE (resolve_residual_tokens (request, scopes));
+
+    EXPECT_EQ (request.headers, before.headers);
+}
+
+/// Case is what the map compares by, so a name that arrives in another casing
+/// is the same header - and erases it just as surely.
+TEST (ResidualTokens, TheCollisionIsJudgedWithoutCase) {
+    vayu::Request request;
+    request.url                      = "https://api.example.com/x";
+    request.headers["{{h}}"]         = "Bearer new";
+    request.headers["Authorization"] = "Bearer old";
+
+    auto scopes = environment_with ("h", "authorization");
+
+    EXPECT_TRUE (resolve_residual_tokens (request, scopes));
+}
+
+/// A name that resolves to one nothing else holds is the ordinary case, and
+/// stays one: the refusal is for the collision, not for resolving a name.
+TEST (ResidualTokens, ANameResolvingToItsOwnHeaderIsNotACollision) {
+    vayu::Request request;
+    request.url                        = "https://api.example.com/x";
+    request.headers["{{header_name}}"] = "acme";
+    request.headers["X-Other"]         = "kept";
+
+    auto scopes = environment_with ("header_name", "X-Tenant");
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
+
+    EXPECT_EQ (request.headers["X-Tenant"], "acme");
+    EXPECT_EQ (request.headers["X-Other"], "kept");
+    EXPECT_EQ (request.headers.count ("{{header_name}}"), 0u);
 }
 
 // --- the exchange, on the wire -----------------------------------------------

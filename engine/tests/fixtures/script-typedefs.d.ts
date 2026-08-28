@@ -4,6 +4,10 @@
 interface VayuExpectTo {
 	be: {
 		/**
+		 * Assert the value is NaN. chai's rule is `value !== value`, so only the number NaN passes - a string that would read as NaN does not.
+		 */
+		NaN: void;
+		/**
 		 * Assert the value is of a specific type.
 		 * 
 		 * Example:
@@ -12,12 +16,12 @@ interface VayuExpectTo {
 		 */
 		a(type: string): VayuExpectation;
 		/**
-		 * Assert the number is greater than n.
+		 * Assert the number is greater than n. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 		 * 
 		 * Example:
 		 * pm.expect(responseTime).to.be.above(0);
 		 */
-		above(n: number): VayuExpectation;
+		above(n: number | Date): VayuExpectation;
 		/**
 		 * Assert the value is of a specific type (use with vowels).
 		 * 
@@ -28,21 +32,21 @@ interface VayuExpectTo {
 		an(type: string): VayuExpectation;
 		at: {
 			/**
-			 * Assert the number is greater than or equal to n.
+			 * Assert the number is greater than or equal to n. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 			 */
-			least(n: number): VayuExpectation;
+			least(n: number | Date): VayuExpectation;
 			/**
-			 * Assert the number is less than or equal to n.
+			 * Assert the number is less than or equal to n. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 			 */
-			most(n: number): VayuExpectation;
+			most(n: number | Date): VayuExpectation;
 		};
 		/**
-		 * Assert the number is less than n.
+		 * Assert the number is less than n. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 		 * 
 		 * Example:
 		 * pm.expect(pm.response.responseTime).to.be.below(1000);
 		 */
-		below(n: number): VayuExpectation;
+		below(n: number | Date): VayuExpectation;
 		/**
 		 * Assert the number is within delta of expected. The delta is required.
 		 * 
@@ -218,10 +222,11 @@ interface VayuExpectTo {
 		string(substring: string): VayuExpectation;
 	};
 	/**
-	 * Assert array includes value or string contains substring.
+	 * Assert an array includes the value, a string contains the substring, or - given an object - that the target holds every one of its keys with an equal value.
 	 * 
 	 * Example:
 	 * pm.expect(tags).to.include('featured');
+	 * pm.expect(body).to.include({status: 'ok'});
 	 */
 	include(value: any): VayuExpectation;
 	/**
@@ -246,16 +251,17 @@ interface VayuExpectTo {
 	 */
 	satisfy(predicate: (value: any) => boolean): VayuExpectation;
 	/**
-	 * Assert the function throws, optionally matching the message.
+	 * Assert the function throws. A string or regular expression is matched against the error's message, and an error constructor against what was thrown - with an optional message matcher after it.
 	 * 
 	 * Example:
 	 * pm.expect(function() { JSON.parse("{"); }).to.throw();
+	 * pm.expect(parse).to.throw(SyntaxError, "unexpected");
 	 */
-	throw(message?: string | RegExp): VayuExpectation;
+	throw(error?: ErrorConstructor | string | RegExp, message?: string | RegExp): VayuExpectation;
 	/**
 	 * Assert the function throws (alias for .to.throw).
 	 */
-	throws(message?: string | RegExp): VayuExpectation;
+	throws(error?: ErrorConstructor | string | RegExp, message?: string | RegExp): VayuExpectation;
 }
 
 interface VayuExpectation {
@@ -356,6 +362,21 @@ declare const pm: {
 	 */
 	cookies: {
 		/**
+		 * Every stored cookie that would be sent to this URL, whole, as an array. Where toObject() answers with names and values alone, these carry the domain, path, secure, httpOnly, hostOnly, session and expires the jar holds.
+		 */
+		all(): object[];
+		/**
+		 * How many stored cookies would be sent to this URL.
+		 */
+		count(): number;
+		/**
+		 * Call fn once per stored cookie that would be sent to this URL, with the whole cookie: { name, key, value, domain, path, secure, httpOnly, hostOnly, session, expires }. A throw from fn ends the walk and is the script's error.
+		 * 
+		 * Example:
+		 * pm.cookies.each(c => console.log(c.name, c.domain));
+		 */
+		each(fn: Function, context?: any): void;
+		/**
 		 * The value of a stored cookie that would be sent to this URL, or undefined when the jar holds none of that name for it. Cookie names are case-sensitive. When the jar holds the name on more than one path, the longest matching path answers - the value the server reads first.
 		 * 
 		 * Example:
@@ -367,7 +388,7 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
-		 * Postman's cookie jar object - the write half, plus a URL-scoped read. get(url, name), set(url, cookie), unset(url, name) and clear(url) all take the URL the cookie belongs to rather than assuming this request's; clear() with no URL empties this environment's jar.
+		 * Postman's cookie jar object - the write half, plus two URL-scoped reads. get(url, name), getAll(url), set(url, cookie), unset(url, name) and clear(url) all take the URL the cookie belongs to rather than assuming this request's; clear() with no URL empties this environment's jar.
 		 * 
 		 * A write is applied after the transfer it was made before, so the request that follows carries it and the jar keeps it.
 		 * 
@@ -384,15 +405,25 @@ declare const pm: {
 			 */
 			get(url: string, name: string, callback?: Function): string | undefined;
 			/**
-			 * Store a cookie for that URL. The cookie object needs name and value; domain, path, secure, httpOnly and expires (seconds since the epoch, 0 for a session cookie) are optional and default from the URL. set(url, name, value) is accepted too.
+			 * Every stored cookie that would be sent to that URL, whole - the same matching get() makes, without a name to narrow it, and cookies this script has just set are included. Each carries { name, key, value, domain, path, secure, httpOnly, hostOnly, session, expires }. The array is returned and also handed to the optional callback as (null, cookies).
+			 * 
+			 * Example:
+			 * const jar = pm.cookies.jar();
+			 * for (const c of jar.getAll(pm.request.url)) console.log(c.name, c.path);
+			 */
+			getAll(url: string, callback?: Function): object[];
+			/**
+			 * Store a cookie for that URL. The cookie object needs name and value; domain, path, secure, httpOnly and expires are optional and default from the URL. expires takes a Date, a date string Date.parse accepts, or a whole number of seconds since the epoch - 0 for a session cookie. set(url, name, value) is accepted too.
+			 * 
+			 * The stored cookie is returned and handed to the optional callback as (null, cookie), carrying the domain and path it took from the URL.
 			 * 
 			 * The cookie is matched by the same rules a received one is, so setting it for one host does not send it to another.
 			 */
-			set(url: string, cookie: object | string, value?: string | Function, callback?: Function): void;
+			set(url: string, cookie: object | string, value?: string | Function, callback?: Function): object;
 			/**
-			 * Remove the cookies of that name the URL would have carried. Cookies of the same name stored for another host or path are left alone.
+			 * Remove the cookies of that name the URL would have carried. Cookies of the same name stored for another host or path are left alone. The removed name is returned and handed to the optional callback as (null, name).
 			 */
-			unset(url: string, name: string, callback?: Function): void;
+			unset(url: string, name: string, callback?: Function): string;
 		};
 		/**
 		 * Every stored cookie that would be sent to this URL, as a name-to-value object.
@@ -565,7 +596,7 @@ declare const pm: {
 		 */
 		eventName: 'prerequest' | 'test';
 		/**
-		 * Which pass of a collection run this step belongs to, 0-based. undefined everywhere else - a single Send and a load run's Tests script have no iteration to report.
+		 * Which pass this response belongs to, 0-based: a collection run's pass, or the iteration a load run's sampled response was sent in. undefined on a single Send, which is one request rather than a pass of anything.
 		 * 
 		 * Example:
 		 * if (pm.info.iteration === 0) { /* first pass only *\/ }
@@ -589,6 +620,13 @@ declare const pm: {
 		 * console.log('running ' + (pm.info.requestName || 'an unnamed request'));
 		 */
 		requestName: string | undefined;
+		/**
+		 * Which virtual user sent this request, 1-based. Spans the run's concurrency in a collection load run, where each user walks the sequence on its own; 1 for a single request repeated under load, which is one user's iterations however many are in flight. undefined on a single Send.
+		 * 
+		 * Example:
+		 * console.log('user ' + pm.info.vu + ' iteration ' + pm.info.iteration);
+		 */
+		vu: number | undefined;
 	};
 	/**
 	 * The row a data-driven collection run bound to this iteration - row i % rows for iteration i - read through get(), has() and toObject().
@@ -651,6 +689,21 @@ declare const pm: {
 			 */
 			add(...args: any[]): void;
 			/**
+			 * Every outgoing header as a { key, value }, in the object's own key order. A snapshot: adding a header afterwards does not change the array.
+			 */
+			all(): { key: string; value: string }[];
+			/**
+			 * How many headers the request will send - all().length without building the array.
+			 */
+			count(): number;
+			/**
+			 * Call fn for each outgoing header, with { key, value } as Postman does. The list is taken once, so removing a header from inside the callback does not shorten the walk.
+			 * 
+			 * Example:
+			 * pm.request.headers.each(h => console.log(h.key, h.value));
+			 */
+			each(fn: (header: { key: string; value: string }, index: number, all: { key: string; value: string }[]) => void, thisArg?: any): void;
+			/**
 			 * Read an outgoing header by name, case-insensitively - unlike indexing, which is case-sensitive. Returns undefined when it is absent.
 			 */
 			get(name: string): string | undefined;
@@ -659,9 +712,21 @@ declare const pm: {
 			 */
 			has(name: string, value?: string): boolean;
 			/**
+			 * Where the header sits in all(), case-insensitively, or -1 when it is absent. A { key } member from all() or one() is accepted in place of the name.
+			 */
+			indexOf(name: string): number;
+			/**
+			 * The header itself rather than its value, case-insensitively - undefined when it is absent. Its key is the spelling the request holds, which is what upsert() writes through.
+			 */
+			one(name: string): { key: string; value: string } | undefined;
+			/**
 			 * Remove a header from the outgoing request, including one the Auth tab applied. Case-insensitive, and removing an absent header is a no-op.
 			 */
 			remove(name: string): void;
+			/**
+			 * A plain { name: value } copy. Keys are lower-cased, as Postman's case-insensitive list does it, so toObject()['content-type'] reads the header whatever casing it was set with; pass a truthy second argument to keep the spelling. The copy is not the header set - writing to it sends nothing.
+			 */
+			toObject(excludeDisabled?: boolean, caseSensitive?: boolean): Record<string, string>;
 			/**
 			 * Add the header, replacing any existing one of that name whatever its casing. The pre-request equivalent of assigning to pm.request.headers[name], and the safe choice when you do not know whether the header is already there.
 			 */
@@ -835,10 +900,25 @@ declare const pm: {
 		 */
 		eventsTruncated: boolean | undefined;
 		/**
-		 * Response headers as key-value pairs, keyed by the lower-cased name the HTTP client parsed. Index it (pm.response.headers['content-type']) or use the case-insensitive get()/has() over it.
+		 * Response headers as key-value pairs, keyed by the lower-cased name the HTTP client parsed. Index it (pm.response.headers['content-type']), use the case-insensitive get()/has() over it, or walk it with each()/all()/toObject().
 		 */
 		headers: {
 			[key: string]: any;
+			/**
+			 * Every response header as a { key, value }, in the object's own key order. A name the server sent twice is one entry here, its values already folded with ', ' - the wire order and the duplicate are gone before a script sees them.
+			 */
+			all(): { key: string; value: string }[];
+			/**
+			 * How many headers the response carries - all().length without building the array.
+			 */
+			count(): number;
+			/**
+			 * Call fn for each response header, with { key, value } as Postman does. The list is taken once, so it is the set the call started with.
+			 * 
+			 * Example:
+			 * pm.response.headers.each(h => console.log(h.key, h.value));
+			 */
+			each(fn: (header: { key: string; value: string }, index: number, all: { key: string; value: string }[]) => void, thisArg?: any): void;
 			/**
 			 * Read a response header by name, case-insensitively. Returns undefined when the header is absent.
 			 * 
@@ -850,6 +930,18 @@ declare const pm: {
 			 * Whether the response carries a header of that name, case-insensitively. With a second argument, whether it also carries that exact value - the comparison is strict, so a number never matches the wire's string.
 			 */
 			has(name: string, value?: string): boolean;
+			/**
+			 * Where the header sits in all(), case-insensitively, or -1 when it is absent. A { key } member from all() or one() is accepted in place of the name.
+			 */
+			indexOf(name: string): number;
+			/**
+			 * The header itself rather than its value, case-insensitively - undefined when it is absent. get() is the value half of the same lookup.
+			 */
+			one(name: string): { key: string; value: string } | undefined;
+			/**
+			 * A plain { name: value } object. Keys are lower-cased, as Postman's case-insensitive list does it; pass a truthy second argument to keep the stored spelling. Postman's other two switches decide nothing here - these headers hold no duplicate and no empty name.
+			 */
+			toObject(excludeDisabled?: boolean, caseSensitive?: boolean): Record<string, string>;
 		};
 		/**
 		 * Parse and return the response body as JSON.
@@ -1074,6 +1166,10 @@ declare const pm: {
 	 * 
 	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status, responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
 	 * 
+	 * The url may be a string or pm.request.url, and {{variables}} in it, in header values, in a raw body and in auth credentials resolve as the call is made - so a value this script set two lines earlier is visible. Header names are sent as written.
+	 * 
+	 * auth takes Postman's { type, <type>: params } shape in either spelling, and composes basic, bearer and apikey. Any other type - oauth2 included - is refused by name rather than dropped, and an Authorization header the script set itself wins.
+	 * 
 	 * Bounded on purpose: the request's timeout is capped at whatever is left of the script's own time budget, and one script may issue at most 10 requests. Both throw when exceeded.
 	 * 
 	 * **Not available to agents.** Vayu's MCP target allowlist is checked before the engine is called, so a request sent from inside a script would bypass it. When a run comes from the MCP server this throws instead of sending.
@@ -1084,7 +1180,7 @@ declare const pm: {
 	 *   pm.environment.set('token', res.json().access_token);
 	 * });
 	 */
-	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; body?: string | { mode: 'raw'; raw: string }; timeout?: number }, callback: (err: Error | null, res: any) => void): void;
+	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; headers?: object; body?: string | { mode: 'raw'; raw: string }; auth?: { type: string; basic?: object; bearer?: object; apikey?: object }; timeout?: number }, callback: (err: Error | null, res: any) => void): void;
 	/**
 	 * Define a test with assertions. The test name appears in results.
 	 * 
