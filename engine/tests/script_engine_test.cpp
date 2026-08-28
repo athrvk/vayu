@@ -160,7 +160,10 @@ TEST_F (ScriptEngineTest, PmTestMultiple) {
 // Mutation check for this block: call the callback with zero arguments again
 // (`JS_Call (ctx, argv[1], JS_UNDEFINED, 0, nullptr)`) and every done-style
 // case below reddens - `done` is `undefined`, calling it is a TypeError, and
-// the test that should pass fails with "not a function".
+// the test that should pass fails with "not a function". The one exception is
+// AThrowBeatsTheNeverCalledRule, which never reaches `done` and so passes on
+// that code too; it guards an ordering the reversion does not disturb, and
+// names its own mutation.
 
 TEST_F (ScriptEngineTest, DoneCallbackPassesWhenItIsCalled) {
     auto result = engine.execute_test (R"(
@@ -231,7 +234,10 @@ TEST_F (ScriptEngineTest, DoneCallbackNeverCalledFailsSayingAsyncIsUnsupported) 
 
 // A throw is already the verdict: a callback that threw before reaching its
 // done() is not also an asynchronous-completion mistake, and the reader needs
-// the error that actually happened.
+// the error that actually happened. Its own mutation check is the branch, not
+// the call: consult the done verdict unconditionally rather than in the
+// `else if` that the exception arm precedes, and the never-called message
+// replaces the error the script actually threw.
 TEST_F (ScriptEngineTest, AThrowBeatsTheNeverCalledRule) {
     auto result = engine.execute_test (R"(
         pm.test("throws first", function (done) {
