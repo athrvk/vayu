@@ -416,7 +416,8 @@ TEST_F (ScenarioPlanTest, AStepWithoutAGeneratorCarriesAnEmptyTemplate) {
 
 TEST_F (ScenarioPlanTest, StepsResolveAgainstTheRunsEnvironment) {
     // Without the run's environmentId reaching composition, every {{env var}}
-    // in the plan silently resolves to "" - the failure this guards.
+    // in the plan silently keeps its braces (issue #1009) instead of
+    // resolving - the failure this guards.
     seed_collection ("col", "");
     seed_request ("req", "col", 0, "https://{{host}}/ping");
     seed_environment ("env", R"({"host":{"value":"api.example.test"}})");

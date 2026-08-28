@@ -68,11 +68,11 @@ TEST (ScenarioDataNamespaceTest, ComposingLeavesADataTokenWrittenAsItStands) {
 TEST (ScenarioDataNamespaceTest, ADataTokenWrittenIntoAVariableValueStillBinds) {
     // The data pass scans the *composed* text, not the authored text, so a
     // token that arrived as a variable's value is bound like any other. It
-    // follows from two rules that are each pinned elsewhere - composition is
-    // one pass, so `{{host}}`'s value is never rescanned for variables, and the
-    // data pass runs afterwards over what composition produced - but the
-    // combination is what a user relies on and nothing asserted it (issue #595,
-    // item 3).
+    // follows from two rules that are each pinned elsewhere - composition does
+    // rescan `{{endpoint}}`'s value (issue #1009) but defers the `data.`
+    // namespace, so the token survives it, and the data pass runs afterwards
+    // over what composition produced - but the combination is what a user
+    // relies on and nothing asserted it (issue #595, item 3).
     vayu::http::VariableValues vars{ { "endpoint", "/u/{{data.id}}" } };
     const auto composed =
     vayu::http::resolve_template ("https://api.test{{endpoint}}", vars);
@@ -463,8 +463,10 @@ TEST (ScenarioDataBindTest, ARequestWithNoTokensIsUnchanged) {
 }
 
 TEST (ScenarioDataBindTest, ASubstitutedValueIsNeverRescanned) {
-    // One pass, exactly as `resolve_template` promises: a cell whose text looks
-    // like a token is data, not an instruction.
+    // One pass, as the data pass promises: it joins the parts a row was split
+    // into and never re-reads what it wrote, where `resolve_template` has
+    // followed a substituted value's own tokens since issue #1009. A cell
+    // whose text looks like a token is data, not an instruction.
     auto request = request_with_url ("https://api.test/{{data.a}}");
     const auto result =
     bind_data_row (request, json::parse (R"({"a":"{{data.b}}","b":"no"})"), 0);
