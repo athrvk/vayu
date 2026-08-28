@@ -2702,6 +2702,104 @@ TEST_F (ScriptEngineTest, FastScriptUnderTimeoutStillPasses) {
 #endif
 }
 
+// #1056. The deadline is enforced by raising an exception into the running
+// call, so an assertion that calls back into the script sees the engine's abort
+// and a value the script threw as the same thing. `.to.throw()` read that as
+// "the function threw" and reported a green verdict about a function that never
+// returned - the silent-false-pass quadrant #996 exists to close.
+//
+// Mutation check: restore the "any pending exception is a throw" reading in
+// expect_throw (drop the script_deadline_expired guard) and this reddens - the
+// script runs to completion with the assertion satisfied.
+TEST_F (ScriptEngineTest, ThrowMatcherAbortsWhenTheTargetOutlivesTheDeadline) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 300;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (
+    R"(pm.expect(function () { while (true) {} }).to.throw();)", request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("timed out"), std::string::npos)
+    << "error was: " << result.error_message;
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// The same target inside a pm.test, which is how the issue reproduced it:
+// pm.test records any exception from its callback as a failure, so the abort
+// arrives as a FAIL rather than as the PASS today's code reports. This is the
+// verdict half of the criterion and does not depend on whether the interrupt
+// re-fires before the script ends.
+TEST_F (ScriptEngineTest, ThrowMatcherReportsFailForATargetPastTheDeadline) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 300;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (R"(
+        pm.test("a function that never returns", function () {
+            pm.expect(function () { while (true) {} }).to.throw();
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed)
+    << "a spinning target reported a pass: " << result.tests[0].error_message;
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// The other side of the fix: an ordinary throw under the same short timeout
+// still satisfies `.to.throw()`, in both the bare and the constructor form. A
+// guard that turned every throw into an abort would pass the two tests above.
+TEST_F (ScriptEngineTest, OrdinaryThrowStillSatisfiesThrowUnderAShortTimeout) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 300;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (R"(
+        pm.test("throws", function () {
+            pm.expect(function () { throw new Error("boom"); }).to.throw();
+            pm.expect(function () { throw new TypeError("bad"); }).to.throw(TypeError, "bad");
+            pm.expect(function () { return 1; }).to.not.throw();
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success) << "error was: " << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// `.satisfy` is the other matcher that calls back into the script. It already
+// propagated the exception rather than reading it as a verdict; this pins that
+// it stays so, since the audit that established it is otherwise unrecorded.
+TEST_F (ScriptEngineTest, SatisfyPredicatePastTheDeadlineAbortsTheScript) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 300;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (
+    R"(pm.expect(1).to.satisfy(function () { while (true) {} });)", request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("timed out"), std::string::npos)
+    << "error was: " << result.error_message;
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
 // timeout_ms == 0 disables the wall-clock limit (escape hatch); a bounded loop
 // still completes normally with no false timeout.
 TEST_F (ScriptEngineTest, ZeroTimeoutDisablesLimit) {

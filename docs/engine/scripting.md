@@ -1944,7 +1944,12 @@ The **language** is current; what is missing is the **host environment**:
   engine. Configurable via the `scriptTimeout` setting (milliseconds); `0` disables
   the limit. The deadline is checked *between bytecode operations*, so it cannot
   interrupt a blocking call - which is why `pm.sendRequest` clamps its own
-  timeout to the budget that is left rather than relying on it.
+  timeout to the budget that is left rather than relying on it. A function an
+  assertion calls - `pm.expect(fn).to.throw()`, `.to.satisfy(fn)` - is stopped
+  by the same deadline, and that **aborts the script** rather than satisfying
+  the assertion: the engine stopped `fn`, `fn` did not throw. A stack overflow
+  inside such a function is a `RangeError` the script could have caught, so it
+  still counts as a throw.
 
 ## Script Execution Context
 

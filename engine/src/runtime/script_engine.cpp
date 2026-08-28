@@ -89,6 +89,12 @@ namespace vayu::runtime {
 struct RuntimeState {
     bool enabled = false; // false => no wall-clock limit (timeout_ms == 0)
     std::chrono::steady_clock::time_point deadline{};
+    /// Set by the interrupt handler when it stops a call, cleared before each
+    /// execution. The handler is the only thing that knows *why* a call ended,
+    /// and an assertion that calls back into the script cannot tell the
+    /// engine's abort from a value the script threw: both arrive as a pending
+    /// exception at the call site. See `script_deadline_expired`.
+    bool interrupted = false;
 };
 
 // ============================================================================
@@ -176,6 +182,18 @@ std::optional<int64_t> remaining_script_budget_ms (JSContext* ctx) {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
     state->deadline - std::chrono::steady_clock::now ())
     .count ();
+}
+
+// Whether the wall-clock deadline has already stopped this execution. Asked by
+// the assertions that call back into the script: the interrupt stops the call
+// by raising an exception into it, which at the call site is indistinguishable
+// from one the script threw, so reading a pending exception as "the function
+// threw" reports a pass about a function that never returned. The handler's own
+// flag is the only honest answer - comparing the clock here would also call a
+// script's ordinary throw a timeout when it happened to land past the deadline.
+bool script_deadline_expired (JSContext* ctx) {
+    auto* state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
+    return state != nullptr && state->enabled && state->interrupted;
 }
 
 // Frees a borrowed JSValue on every exit. QuickJS ships no such helper, and the
@@ -2106,6 +2124,13 @@ JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     JSValue result   = JS_Call (ctx, state->actual, JS_UNDEFINED, 0, nullptr);
     const bool threw = JS_IsException (result);
     JS_FreeValue (ctx, result);
+    // A target that ran past the script's deadline did not throw - the engine
+    // stopped it, and the exception it left pending is the abort. Propagate it
+    // as every other surface does; reading it as a satisfied `.throw()` reports
+    // a green verdict about a function that never returned.
+    if (threw && script_deadline_expired (ctx)) {
+        return JS_EXCEPTION;
+    }
     ScopedValue thrown (ctx, threw ? JS_GetException (ctx) : JS_UNDEFINED);
     const std::string message =
     threw ? thrown_message (ctx, thrown.get ()) : std::string ();
@@ -7586,7 +7611,10 @@ extern "C" int script_interrupt_handler (JSRuntime* /*rt*/, void* opaque) {
     auto* state = static_cast<RuntimeState*> (opaque);
     if (!state || !state->enabled)
         return 0;
-    return std::chrono::steady_clock::now () > state->deadline ? 1 : 0;
+    if (std::chrono::steady_clock::now () <= state->deadline)
+        return 0;
+    state->interrupted = true;
+    return 1;
 }
 
 class ScriptEngine::Impl {
@@ -7700,7 +7728,8 @@ class ScriptEngine::Impl {
         // Refresh the per-execution deadline. A pooled context reused for the next
         // script gets a fresh budget; timeout_ms == 0 disables the wall-clock limit.
         if (auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt))) {
-            rt_state->enabled = config.timeout_ms != 0;
+            rt_state->enabled     = config.timeout_ms != 0;
+            rt_state->interrupted = false;
             if (rt_state->enabled) {
                 rt_state->deadline = std::chrono::steady_clock::now () +
                 std::chrono::milliseconds (config.timeout_ms);
