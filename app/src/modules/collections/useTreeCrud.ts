@@ -7,7 +7,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { Plus, Trash2, Edit2, FileJson, FolderPlus, Play } from "lucide-react";
-import { useTabsStore, useSaveStore } from "@/stores";
+import { useTabsStore, useSaveStore, useToastStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
 	useCreateCollectionMutation,
@@ -16,6 +16,7 @@ import {
 	useCreateRequestMutation,
 	useDeleteRequestMutation,
 	useUpdateRequestMutation,
+	useRestoreTrashMutation,
 } from "@/queries";
 import { collectDescendantEntityIds } from "./tree-utils";
 import type { CollectionTreeCrudSlice } from "./context/CollectionTreeContext";
@@ -100,6 +101,8 @@ export function useTreeCrud({
 	const createRequestMutation = useCreateRequestMutation();
 	const deleteRequestMutation = useDeleteRequestMutation();
 	const updateRequestMutation = useUpdateRequestMutation();
+	const restoreTrashMutation = useRestoreTrashMutation();
+	const showToast = useToastStore((s) => s.showToast);
 
 	const [creatingCollection, setCreatingCollection] = useState(false);
 	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID
@@ -420,8 +423,68 @@ export function useTreeCrud({
 		setDeleteConfirm({ type: "request", id: requestId, name: requestName });
 	}, []);
 
+	/**
+	 * Take the delete back.
+	 *
+	 * The engine's delete is soft (issue #988), so this is a restore of the row
+	 * that was just stamped - not a re-creation - and the whole subtree a
+	 * collection's delete took comes back with it.
+	 *
+	 * The failure path is the reason this is not a bare `mutateAsync`. Undo can
+	 * genuinely fail: the toast outlives its own click by design, and by then
+	 * the item's parent collection may itself have been deleted (a 409 naming
+	 * it) or the retention purge may have swept it (a 404). The engine's message
+	 * says which and what to do next, so it is surfaced as it stands - an undo
+	 * that silently does nothing is the one outcome worse than no undo.
+	 */
+	const undoDelete = useCallback(
+		async (entityId: string, name: string) => {
+			try {
+				await restoreTrashMutation.mutateAsync(entityId);
+			} catch (error) {
+				showToast(
+					error instanceof Error ? error.message : `Couldn't restore "${name}"`,
+					"error"
+				);
+			}
+		},
+		[restoreTrashMutation, showToast]
+	);
+
+	/**
+	 * Say where it went, and offer it straight back.
+	 *
+	 * No explicit duration: the toast takes the `info` default, scaled by the
+	 * user's own notification setting, exactly as the drag-and-drop undo beside
+	 * it does. A longer hardcoded window would override a preference the user
+	 * set - including "never", which means "wait for me" - and it would be
+	 * buying something the feature already has: this toast is the fast path, and
+	 * the Trash view is the same undo with the retention window behind it, so a
+	 * missed toast costs a click rather than the data.
+	 *
+	 * The undo itself is offered no undo. Deleting it again is one click away in
+	 * the tree it just came back to.
+	 */
+	const offerUndo = useCallback(
+		(entityId: string, name: string, kind: "collection" | "request") => {
+			showToast({
+				message: `Moved "${name}" to the Trash`,
+				variant: "info",
+				action: {
+					label: "Undo",
+					altText: `Undo deleting the ${kind} ${name}`,
+					onClick: () => void undoDelete(entityId, name),
+				},
+			});
+		},
+		[showToast, undoDelete]
+	);
+
+	// `name` comes from the confirm dialog's own target rather than a lookup: by
+	// the time the undo toast is raised the delete has already invalidated the
+	// collections cache, so the row it would have been read from is gone.
 	const handleDeleteCollection = useCallback(
-		async (collectionId: string) => {
+		async (collectionId: string, name: string) => {
 			setDeletingCollectionId(collectionId);
 			// Gather the collection, its descendant folders, and every request they
 			// contain: deleting a collection cascades, so all their tabs go stale.
@@ -431,6 +494,7 @@ export function useTreeCrud({
 			try {
 				await deleteCollectionMutation.mutateAsync(collectionId);
 				closeTabsForEntities(affected);
+				offerUndo(collectionId, name, "collection");
 			} catch (error) {
 				reportFailure(error, "Failed to delete collection");
 			} finally {
@@ -445,17 +509,19 @@ export function useTreeCrud({
 			closeTabsForEntities,
 			collections,
 			getRequestsByCollection,
+			offerUndo,
 			reportFailure,
 		]
 	);
 
 	const handleDeleteRequest = useCallback(
-		async (requestId: string) => {
+		async (requestId: string, name: string) => {
 			setDeletingRequestId(requestId);
 			try {
 				await deleteRequestMutation.mutateAsync(requestId);
 				// Close any open tab pointing at the now-deleted request.
 				closeTabsForEntities([requestId]);
+				offerUndo(requestId, name, "request");
 			} catch (error) {
 				reportFailure(error, "Failed to delete request");
 			} finally {
@@ -463,7 +529,7 @@ export function useTreeCrud({
 				setDeletingRequestId(null);
 			}
 		},
-		[deleteRequestMutation, closeTabsForEntities, reportFailure]
+		[deleteRequestMutation, closeTabsForEntities, offerUndo, reportFailure]
 	);
 
 	const handleConfirmDelete = useCallback(() => {
@@ -473,9 +539,9 @@ export function useTreeCrud({
 		// the next render on; this covers the frame before that.
 		if (deletingCollectionId || deletingRequestId) return;
 		if (deleteConfirm.type === "collection") {
-			void handleDeleteCollection(deleteConfirm.id);
+			void handleDeleteCollection(deleteConfirm.id, deleteConfirm.name);
 		} else {
-			void handleDeleteRequest(deleteConfirm.id);
+			void handleDeleteRequest(deleteConfirm.id, deleteConfirm.name);
 		}
 	}, [
 		deleteConfirm,

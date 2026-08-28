@@ -18,24 +18,8 @@ import {
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
 import { DeleteConfirmDialog } from "@/components/ui";
 import TrashItem from "./TrashItem";
+import { retentionCopy, retentionDaysFrom } from "../retention";
 import type { TrashEntry } from "@/types";
-
-/**
- * The retention sentence, read from the engine's own `trashRetentionDays`
- * rather than written here.
- *
- * The number is a user-editable setting, so a hardcoded "kept 30 days" becomes
- * a false promise the moment anyone changes it - and `0` does not mean "deleted
- * immediately", it means the startup purge is off entirely. Returns null while
- * the config is still loading: a retention window is the kind of claim that is
- * better absent for a second than wrong.
- */
-export function retentionCopy(retentionDays: number | null): string | null {
-	if (retentionDays === null) return null;
-	if (retentionDays <= 0) return "Items are kept here until you delete them.";
-	if (retentionDays === 1) return "Items are deleted for good a day after they land here.";
-	return `Items are deleted for good ${retentionDays} days after they land here.`;
-}
 
 export default function TrashList() {
 	const showToast = useToastStore((s) => s.showToast);
@@ -51,11 +35,7 @@ export default function TrashList() {
 	 * writes that same cache.
 	 */
 	const { data: config } = useConfigQuery();
-	const retentionEntry = config?.entries.find((e) => e.key === "trashRetentionDays");
-	const retentionDays = retentionEntry ? Number.parseInt(retentionEntry.value, 10) : null;
-	const retention = retentionCopy(
-		retentionDays === null || Number.isNaN(retentionDays) ? null : retentionDays
-	);
+	const retention = retentionCopy(retentionDaysFrom(config?.entries));
 
 	const [restoringId, setRestoringId] = useState<string | null>(null);
 	const [purgingId, setPurgingId] = useState<string | null>(null);

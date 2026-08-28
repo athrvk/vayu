@@ -24,3 +24,4 @@
  */
 
 export * from "./sidebar";
+export { retentionCopy, retentionDaysFrom, TRASH_RETENTION_KEY } from "./retention";
