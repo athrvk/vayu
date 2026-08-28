@@ -1516,6 +1516,114 @@ TEST_F (DatabaseTest, PruneRunsZeroLimitsDisableEachCap) {
 }
 
 // ============================================================================
+// Startup reclamation - freed pages return to the filesystem (issue #990)
+// ============================================================================
+
+namespace {
+
+// A run whose one result carries `body_bytes` of trace, so deleting it frees a
+// known and substantial number of pages rather than a handful.
+void seed_bulky_run (Database& db, const std::string& id, int64_t start_time, size_t body_bytes) {
+    vayu::db::Run run;
+    run.id              = id;
+    run.type            = vayu::RunType::Design;
+    run.status          = vayu::RunStatus::Completed;
+    run.start_time      = start_time;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+
+    vayu::db::Result r;
+    r.run_id      = id;
+    r.timestamp   = start_time;
+    r.status_code = 200;
+    r.status_text = "OK";
+    r.latency_ms  = 1.0;
+    r.trace_data  = R"({"body":")" + std::string (body_bytes, 'x') + R"("})";
+    db.add_result (r);
+}
+
+constexpr size_t MIB = 1024 * 1024;
+
+int64_t database_file_size () {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size (TEST_DB_PATH, ec);
+    return ec ? -1 : static_cast<int64_t> (size);
+}
+
+// Grow the database to `total_mib` one-MiB runs, then prune it down to `keep`
+// of them, and answer with the size the file reached. What the caller gets is a
+// database whose freelist holds `total_mib - keep` MiB.
+//
+// The runs are stamped from the wall clock rather than from a counter: the
+// startup prune this file's reclamation follows reads `runRetentionDays`, so
+// runs stamped in 1970 are all deleted by the *next* start and every case below
+// would be measuring an empty database.
+int64_t grow_then_prune (int total_mib, int keep) {
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                        .count ();
+    Database db (TEST_DB_PATH);
+    db.init ();
+    for (int i = 1; i <= total_mib; ++i) {
+        seed_bulky_run (db, "bulk_" + std::to_string (i), now - int64_t{ i } * 1000, MIB);
+    }
+    db.prune_runs (keep, 0);
+    return database_file_size ();
+}
+
+// What a second start leaves the file at. The reclamation runs in `init`, so
+// every case below opens the database again rather than calling anything: what
+// is under test is what a start does.
+int64_t size_after_a_restart () {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    return database_file_size ();
+}
+
+} // namespace
+
+TEST_F (DatabaseTest, StartupReclaimsAHeavilyPrunedDatabase) {
+    // 24 MiB down to one: past both thresholds, and by a wide enough margin
+    // that neither the page size nor the schema's own pages matter.
+    const int64_t grown = grow_then_prune (24, 1);
+    ASSERT_GT (grown, 12 * static_cast<int64_t> (MIB))
+    << "the seeded bodies never reached the file, so this proves nothing";
+
+    const int64_t reclaimed = size_after_a_restart ();
+    // Mutation check: take the reclamation back out of `init` and the file is
+    // still `grown` here.
+    EXPECT_LT (reclaimed, grown / 2)
+    << "the freed pages were not returned to the filesystem (" << grown
+    << " -> " << reclaimed << ")";
+}
+
+TEST_F (DatabaseTest, StartupLeavesADatabaseBelowTheByteFloorAlone) {
+    // 4 MiB down to one: nearly all freelist, so the *fraction* is crossed
+    // several times over and only the 10 MiB floor declines it.
+    const int64_t grown = grow_then_prune (4, 1);
+    ASSERT_GT (grown, 2 * static_cast<int64_t> (MIB));
+
+    // Never smaller - a rewrite would give back three of these four megabytes.
+    // Not byte-equal, because a start writes a page of its own.
+    // Mutation check: drop VACUUM_MIN_RECLAIMABLE_BYTES to zero and this reddens.
+    EXPECT_GE (size_after_a_restart (), grown)
+    << "a database holding less than the byte floor was rewritten anyway";
+}
+
+TEST_F (DatabaseTest, StartupLeavesADatabaseBelowTheFreelistFractionAlone) {
+    // 60 MiB down to 48: twelve of them freed, which is past the 10 MiB floor
+    // and a fifth of the file - so only the fraction declines it.
+    const int64_t grown = grow_then_prune (60, 48);
+    ASSERT_GT (grown, 55 * static_cast<int64_t> (MIB));
+
+    // Mutation check: drop VACUUM_MIN_FREELIST_PERCENT to zero and this reddens.
+    EXPECT_GE (size_after_a_restart (), grown)
+    << "a database whose freelist is under the fraction was rewritten anyway";
+}
+
+// ============================================================================
 // Metric ticks + the stored run summary (the wide-row time series)
 // ============================================================================
 
