@@ -283,8 +283,19 @@ struct ExchangeOutcome {
  *
  * A request holding no `{{` at all - nearly all of them, composition having
  * resolved what it could - pays one search per field and nothing else.
+ *
+ * @return why this request must not be sent, if a resolved header name landed
+ *         on one the request already carried (`http/header_names.hpp`, issue
+ *         #1051) - the one thing this pass can produce that a send cannot
+ *         survive, because the map holds one value per name and the header it
+ *         replaced is simply gone. `std::nullopt` is the ordinary answer, the
+ *         request resolved in place. The refusal is a `vayu::Error` rather than
+ *         a status because this pass serves two callers with two different
+ *         answers to give: the shape is the pre-send gate's, and each caller
+ *         renders it the way it renders that one.
  */
-void resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& scopes);
+[[nodiscard]] std::optional<vayu::Error>
+resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& scopes);
 
 /**
  * Run one exchange: pre-request script, send, test script.

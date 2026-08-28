@@ -908,6 +908,118 @@ TEST_F (RequestComposerTest, TheComposerRuleIsTheOneSharedHeaderTextRule) {
     }
 }
 
+// --- Two header names that resolve to one (#1051) ----------------------------
+//
+// The sibling of the block above, and the other half of what a substituted
+// header name can do: there a value *forges* a header, here a name *erases*
+// one. The map the payload becomes holds one value per name, so the second of
+// two names that resolve alike takes the first's place and the request goes out
+// a header short - which nothing downstream can notice, the pre-send gate
+// included. See `http/header_names.hpp`.
+//
+// Mutation-check for the four below: drop the `collision` check in
+// `resolve_header_block` and the first three fail on the status, while the
+// fourth must keep passing - it is the case the refusal deliberately leaves
+// alone.
+
+TEST_F (RequestComposerTest, TwoTemplatedHeaderNamesResolvingAlikeAreRefused) {
+    seed_environment ("env_1",
+    R"({"a":{"value":"X-Tenant","enabled":true},"b":{"value":"X-Tenant","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", { { "{{a}}", "acme" }, { "{{b}}", "legacy" } } } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "colliding_header_names");
+    const auto message = payload["error"]["message"].get<std::string> ();
+    // Both spellings as written, because either is the one the author may have
+    // meant - composition names them and repairs neither.
+    EXPECT_NE (message.find ("{{a}}"), std::string::npos) << message;
+    EXPECT_NE (message.find ("{{b}}"), std::string::npos) << message;
+    EXPECT_NE (message.find ("X-Tenant"), std::string::npos) << message;
+}
+
+TEST_F (RequestComposerTest, ATemplatedNameCollidingWithALiteralHeaderIsRefused) {
+    seed_environment ("env_1", R"({"tenant_header":{"value":"X-Tenant","enabled":true}})");
+    const json body = {
+        { "request",
+        { { "method", "GET" }, { "url", "https://x.test/" },
+        { "headers", { { "{{tenant_header}}", "acme" }, { "X-Tenant", "legacy" } } } } },
+        { "environmentId", "env_1" }
+    };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "colliding_header_names");
+    const auto message = payload["error"]["message"].get<std::string> ();
+    EXPECT_NE (message.find ("{{tenant_header}}"), std::string::npos) << message;
+    EXPECT_NE (message.find ("X-Tenant"), std::string::npos) << message;
+}
+
+// `Headers` compares names without case, so a name that differs from another
+// only in case is not a second header - it is the same one, arriving instead of
+// it. This is the case composition alone can catch: the payload it would answer
+// 200 with carries both names as distinct JSON keys, and the header is lost
+// later, where `deserialize_request` parses them into the map.
+TEST_F (RequestComposerTest, TheHeaderNameCollisionIsJudgedWithoutCase) {
+    seed_environment ("env_1", R"({"h":{"value":"authorization","enabled":true}})");
+    const json body = {
+        { "request",
+        { { "method", "GET" }, { "url", "https://x.test/" },
+        { "headers", { { "{{h}}", "Bearer new" }, { "Authorization", "Bearer old" } } } } },
+        { "environmentId", "env_1" }
+    };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "colliding_header_names");
+}
+
+// Which of two colliding names is walked first is not the author's to choose:
+// a `nlohmann::json` object is keyed in sorted order, so the walk follows the
+// *unresolved* text. A template almost always sorts last - `{` is above every
+// character a header name ordinarily holds - which is why reproducing the
+// other order at all takes a literal name reaching past it, and `~` is an
+// ordinary header-name character. The rule is symmetric and this is the half
+// the cases above cannot reach: the templated name got there first, and a
+// literal collided into it.
+TEST_F (RequestComposerTest, TheCollisionIsRefusedWhicheverNameResolvedFirst) {
+    seed_environment ("env_1", R"({"suffix":{"value":"~Tenant","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", { { "X{{suffix}}", "acme" }, { "X~Tenant", "legacy" } } } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "colliding_header_names");
+    const auto message = payload["error"]["message"].get<std::string> ();
+    EXPECT_NE (message.find ("X{{suffix}}"), std::string::npos) << message;
+    EXPECT_NE (message.find ("X~Tenant"), std::string::npos) << message;
+}
+
+// Two names the author typed are two lines they can see side by side, and the
+// later one has always won - a rule that is visible in the editor and is not
+// this refusal's to change. Only a collision resolution *made* is invisible,
+// which is the whole distinction (the same one the bind-time rule draws in
+// `docs/engine/api-reference.md`).
+TEST_F (RequestComposerTest, TwoNamesTheAuthorTypedAreNotThisRefusal) {
+    seed_environment ("env_1", R"({"ok":{"value":"fine","enabled":true}})");
+    const json body = {
+        { "request",
+        { { "method", "GET" }, { "url", "https://x.test/" },
+        { "headers", { { "Authorization", "Bearer {{ok}}" }, { "authorization", "Bearer other" } } } } },
+        { "environmentId", "env_1" }
+    };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["headers"]["Authorization"], "Bearer fine");
+    EXPECT_EQ (payload["headers"]["authorization"], "Bearer other");
+}
+
 TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {
     const json body = { { "request", { { "method", "GET" }, { "url", "https://x.test/{{missing}}" } } },
         { "collectionId", "col_missing" }, { "environmentId", "env_missing" } };

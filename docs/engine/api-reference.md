@@ -3816,6 +3816,26 @@ with specific codes:
   per-part content type, which libcurl writes into that part's own header block.
   A bound `{{data.column}}` is refused earlier still, at bind time, naming the
   column and the row (see [Scenario runs](#scenario-runs)).
+- `400` `{"error": {"code": "colliding_header_names", "message": "..."}}` - two
+  header names resolved to one, so one of the two headers would be gone. A
+  header map holds one value per name, so `{{tenant_header}}: acme` beside a
+  literal `X-Tenant: legacy` is not two headers once the variable answers
+  `X-Tenant` - it is one, and which one arrives is an ordering detail rather
+  than a rule. Names are compared **without case**, as `Headers` compares them,
+  so a `{{h}}` resolving to `authorization` refuses beside an `Authorization`
+  the caller typed. The message names both spellings as written and the name
+  they produced; nothing is repaired, for the reason a forged header is refused
+  rather than stripped.
+
+  Only a collision **resolution produced** is refused. Two names the caller
+  typed are two entries they can see, and the stored flattening's later-wins
+  rule (above) still decides those - the same distinction the bind-time refusal
+  draws (see [Scenario runs](#scenario-runs)). The execute-time residual pass
+  refuses the same collision in the same words, since it rebuilds the same map:
+  a buffered send answers `statusCode: 0` with an `errorCode` of
+  `INTERNAL_ERROR` carrying the message, exactly as the pre-send gate does,
+  while a streaming send - which has not answered yet - is a `400` with this
+  same code and fails its run row.
 
 ### POST /execute
 
