@@ -233,14 +233,30 @@ on screen saying the column will win once a row binds. Reconciling the paint,
 and giving the popover a "bound data row" origin to explain it, is issue
 #1064's work, not done here.
 
-**What the tab strip still does not show.** A tab's title still resolves
-through one list-wide `useVariableResolver()` in
-`app/src/components/layout/tab-descriptors.ts`, shared by every open tab and
-carrying no row - a picked row is per-request builder state, and the list has
-no single request to bind it to. So the tab label keeps previewing
-composition alone even for the request whose own builder pane, open right
-beside it, is now showing the bind. Giving each tab its own row is issue
-#1074.
+**What the tab strip shows, and how the row reaches it (issue #1074).** A tab's
+title resolves through one list-wide `useVariableResolver()` in
+`app/src/components/layout/tab-descriptors.ts` - the strip has to know each
+label before it can decide how many fit, and a hook inside a map is a variable
+number of hooks - so the strip is the one preview surface that is not below the
+builder's provider and cannot take the row off its context. Left alone it
+labelled a tab from the environment while the bar one row beneath it showed the
+file's value, which is the same one-bind-two-answers split as above wearing a
+different coat.
+
+The row crosses that boundary through `bound-row-store.ts`: one slot, holding
+the row the open builder is bound to **and the id of the request it is bound
+for**. One slot rather than a map because the builder binds a row for the
+request it is showing, so that is the only request an on-screen preview can be
+bound for; publishing a row per remembered index would be publishing rows out of
+a file that is no longer the one loaded. The id is what makes a reader check
+rather than assume, so a slot left standing cannot relabel the next tab. It is
+never persisted and is cleared when the builder unmounts, on the rule the rows
+have carried since #601: they must not outlive the send that uses them.
+
+`resolveString` takes the row as an optional second argument for this one
+caller. Every other caller names its row once, as `useVariableResolver`'s
+`boundRow` option, because it resolves for a single request; the strip resolves
+for all of them at once and so has to say which row per call.
 
 ### Which contract answers for a request: nearest declared ancestor
 

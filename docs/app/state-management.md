@@ -347,6 +347,46 @@ main process - the renderer names no directory of its own, the same posture
 `dataFile:read` holds. It is normalized through **both** `migrate` and
 `merge`, for the reason spelled out for `data-file-store` above.
 
+#### `bound-row-store.ts` - The Row The Open Builder Is Bound To
+
+One slot: the data row a Send-with-row has picked, and the id of the request it
+was picked for (issue #1074).
+
+**State:**
+```typescript
+{
+  bound: { requestId: string; row: Record<string, unknown> } | null
+}
+```
+
+**Key Methods:**
+```typescript
+const setBoundRow = useBoundRowStore((s) => s.setBoundRow);
+setBoundRow({ requestId, row }); // or null for "bound to none"
+```
+
+**Persistence:** none, deliberately - see below.
+
+**Why a store at all.** `RequestBuilderProvider` already gives the picked row to
+its own resolver, which covers every preview inside the builder (issue #1062).
+The tab strip is the one that is not below it: `useTabDescriptors` labels every
+open tab from a single list-wide resolver, so it cannot take the row off the
+builder's context and, left alone, labelled a tab from the environment while the
+bar one row beneath it showed the file's value.
+
+**One slot, not a map, and it names its request.** The builder binds a row for
+the request it is showing, so that is the only request an on-screen preview can
+be bound for; a row per remembered index would be a row out of a file that is no
+longer the one loaded. Carrying the request id is what lets a reader check
+rather than assume, so a slot left standing cannot relabel the next tab -
+`boundRowFor(bound, requestId)` is that check, named once rather than repeated
+at each call site.
+
+**Never persisted, and cleared with the builder.** Rows are user data of unknown
+sensitivity and are persisted nowhere in Vayu, the same law `data-file-store`
+states above; the builder also clears the slot when it unmounts, so a row cannot
+outlive the send that justified it.
+
 #### `recovery-notice-store.ts` - Which Data-Loss Notice Was Already Seen
 
 One timestamp: the `at` of the startup-recovery record the user has already been
@@ -1578,6 +1618,10 @@ const {
   getAllVariables: () => Record<string, ResolvedVariable>
   getVariableOrigins: (name: string) => VariableOrigin[]
 } = useVariableResolver({ collectionId?: string; boundRow?: DataFileRow });
+
+// resolveString takes an optional per-call row (issue #1074), for the one
+// caller that resolves for several requests at once - the tab strip.
+resolveString(input: string, row?: DataFileRow): string
 ```
 
 **Resolution Priority (highest to lowest):**
@@ -1599,6 +1643,12 @@ column and `{{data.column}}` deferred). With it, they resolve through
 both read the row - the request builder's provider is the one caller that
 passes it, deriving it from the picked-row index. See
 `docs/app/variable-resolution.md` for the tier and its rules.
+
+`resolveString`'s second argument is the same row named per call instead of per
+hook. It exists for `useTabDescriptors`, which labels every open tab from a
+single resolver and therefore cannot name one row for the whole of it; it reads
+the row out of `useBoundRowStore` for the tab it is labelling. Both spellings
+render a row's cells through the same helper, so the two cannot disagree.
 
 **The environment is the one scope no option names.** It is *not* passed in: the
 hook reads `useSessionStore().activeEnvironmentId` itself, so every caller
