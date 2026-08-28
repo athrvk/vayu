@@ -154,6 +154,226 @@ TEST_F (ScriptEngineTest, PmTestMultiple) {
 }
 
 // ============================================================================
+// pm.test() done-callbacks, chainability, pm.expect.fail (issue #1004)
+// ============================================================================
+
+// Mutation check for this block: call the callback with zero arguments again
+// (`JS_Call (ctx, argv[1], JS_UNDEFINED, 0, nullptr)`) and every done-style
+// case below reddens - `done` is `undefined`, calling it is a TypeError, and
+// the test that should pass fails with "not a function".
+
+TEST_F (ScriptEngineTest, DoneCallbackPassesWhenItIsCalled) {
+    auto result = engine.execute_test (R"(
+        pm.test("done passes", function (done) {
+            pm.expect(1).to.equal(1);
+            done();
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (ScriptEngineTest, DoneCallbackFailsWithTheErrorItIsGiven) {
+    auto result = engine.execute_test (R"(
+        pm.test("done fails", function (done) {
+            done(new Error("the token was empty"));
+        });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("the token was empty"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// Mocha's rule, which postman-sandbox follows: the argument is a failure when
+// it is truthy, not when it is an Error. A falsy one completes the test, which
+// is what `done(err)` in a callback-style helper does on success.
+TEST_F (ScriptEngineTest, DoneCallbackTreatsAnyTruthyArgumentAsTheFailure) {
+    auto result = engine.execute_test (R"(
+        pm.test("truthy fails", function (done) { done("plain string"); });
+        pm.test("falsy passes", function (done) { done(null); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("plain string"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+}
+
+// The divergence from Postman, made loud. Postman genuinely waits for a later
+// done(); this sandbox is synchronous and drains no job queue, so the test is
+// failed with the reason rather than reported on a verdict nothing gave.
+TEST_F (ScriptEngineTest, DoneCallbackNeverCalledFailsSayingAsyncIsUnsupported) {
+    auto result = engine.execute_test (R"(
+        pm.test("never completes", function (done) {
+            pm.expect(1).to.equal(1);
+        });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("done() was never called"),
+    std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+    EXPECT_NE (result.tests[0].error_message.find ("synchronous"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// A throw is already the verdict: a callback that threw before reaching its
+// done() is not also an asynchronous-completion mistake, and the reader needs
+// the error that actually happened.
+TEST_F (ScriptEngineTest, AThrowBeatsTheNeverCalledRule) {
+    auto result = engine.execute_test (R"(
+        pm.test("throws first", function (done) {
+            throw new Error("the real failure");
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("the real failure"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+    EXPECT_EQ (result.tests[0].error_message.find ("done() was never called"),
+    std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+TEST_F (ScriptEngineTest, DoneCalledTwiceFailsNamingIt) {
+    auto result = engine.execute_test (R"(
+        pm.test("done twice", function (done) {
+            done();
+            done();
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("already called"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// The reason `done` reports through a JS object rather than through a pointer
+// to `js_pm_test`'s frame: nothing stops a script keeping it and calling it
+// after pm.test returned. There is no job queue to resume such a script, but
+// the call itself still runs - against a stack frame that is gone. Here it is
+// an ordinary refused second call, and the recorded verdict is untouched.
+TEST_F (ScriptEngineTest, DoneOutlivesTheCallThatHandedItOut) {
+    auto result = engine.execute_test (R"(
+        var saved;
+        pm.test("completes", function (done) {
+            saved = done;
+            done();
+        });
+        try {
+            saved();
+        } catch (e) {
+            console.log("late call: " + e.message);
+        }
+        pm.test("still running", function () {});
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_EQ (result.tests.size (), 2);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+}
+
+// Mutation check: return JS_UNDEFINED again and the chained call is a
+// TypeError on `undefined`, which aborts the script - no test is recorded at
+// all, so the size assertion is what reddens.
+TEST_F (ScriptEngineTest, PmTestIsChainable) {
+    auto result = engine.execute_test (R"(
+        pm.test("first", function () {
+            pm.expect(1).to.equal(1);
+        }).test("second", function () {
+            pm.expect(2).to.equal(2);
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_EQ (result.tests.size (), 2);
+    EXPECT_EQ (result.tests[0].name, "first");
+    EXPECT_EQ (result.tests[1].name, "second");
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+}
+
+TEST_F (ScriptEngineTest, PmExpectFailRecordsAnAssertionFailureInsideATest) {
+    auto result = engine.execute_test (R"(
+        pm.test("gives up", function () {
+            pm.expect.fail("no branch should reach here");
+        });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("AssertionError"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+    EXPECT_NE (
+    result.tests[0].error_message.find ("no branch should reach here"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// Outside a test it aborts the script the way any uncaught throw does - but as
+// an AssertionError, which is the difference from today's TypeError.
+TEST_F (ScriptEngineTest, PmExpectFailOutsideATestIsAnAssertionError) {
+    auto result = engine.execute_test (R"(
+        pm.expect.fail("stopping here");
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("AssertionError"), std::string::npos)
+    << "error was: " << result.error_message;
+    EXPECT_NE (result.error_message.find ("stopping here"), std::string::npos)
+    << "error was: " << result.error_message;
+}
+
+TEST_F (ScriptEngineTest, PmExpectFailDefaultsToChaisOwnMessage) {
+    auto result = engine.execute_test (R"(
+        pm.test("bare fail", function () { pm.expect.fail(); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("expect.fail()"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// chai's four-argument form carries the two compared values on the
+// AssertionError; this one has nowhere to put them, so it is refused by name
+// rather than reporting `actual` as the failure text.
+TEST_F (ScriptEngineTest, PmExpectFailRefusesChaisFourArgumentForm) {
+    auto result = engine.execute_test (R"(
+        pm.test("wrong form", function () { pm.expect.fail(1, 2); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("TypeError"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+    EXPECT_NE (result.tests[0].error_message.find ("not supported"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// ============================================================================
 // pm.expect() Assertion Tests
 // ============================================================================
 

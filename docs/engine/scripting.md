@@ -45,6 +45,42 @@ body's and the stored trace's `testResults` carries a `source` of `"pre"` or
 groups the list under the script's name (issue #810). A failing assertion fails
 its collection-run step from either script.
 
+**`pm.test` returns `pm`, so calls chain** - Postman's contract, and what an
+imported script written as one `pm.test(...).test(...)` expression relies on:
+
+```javascript
+pm.test('status', function() {
+  pm.response.to.have.status(200);
+}).test('body', function() {
+  pm.expect(pm.response.json().id).to.equal(1);
+});
+```
+
+**A callback that declares a parameter is handed `done`** (issue #1004).
+postman-sandbox reads the callback's arity to decide this and so does Vayu, so
+the zero-argument form above is untouched: `done()` completes the test, and
+`done(err)` fails it with `err` - any truthy argument, an `Error` being the
+documented one.
+
+```javascript
+pm.test('the token came back', function(done) {
+  pm.sendRequest(tokenRequest, function(err, res) {
+    if (err) { return done(err); }
+    pm.expect(res.json().access_token).to.be.a('string');
+    done();
+  });
+});
+```
+
+**`done()` must be called before the callback returns, and this is a
+divergence: Postman genuinely waits.** The sandbox is synchronous and drains no
+job queue (see [Limitations](#limitations)), so a `done()` left for later would
+never run at all. A callback that declares `done` and returns without calling
+it therefore **fails**, saying so - rather than being reported on a verdict
+nothing ever gave. Calling `done()` twice is refused for the same reason the
+first verdict is kept: the second call throws, and the throw fails the test
+naming what happened.
+
 ### pm.expect()
 
 Create Chai-style expectations for assertions.
@@ -81,6 +117,27 @@ try {
   e instanceof Error;              // true
 }
 ```
+
+**`pm.expect.fail([message])` fails on the spot**, as an assertion rather than
+as an error (issue #1004). It is chai's `expect.fail`, and the distinction is
+what it does *outside* a `pm.test`: a thrown `Error` there aborts the script,
+while this reports the same `AssertionError` every matcher reports.
+
+```javascript
+pm.test('no branch reached the response', function() {
+  if (!pm.response.json().items) {
+    pm.expect.fail('the list was absent');   // AssertionError: the list was absent
+  }
+});
+
+pm.expect.fail();                            // AssertionError: expect.fail()
+```
+
+chai's four-argument form (`fail(actual, expected, message, operator)`) is
+**not** supported: its `AssertionError` carries the two values it compared and
+this one has nowhere to put them, so more than one argument is refused by name
+rather than read as the message - which would report `actual` as the failure
+text.
 
 QuickJS has no `AssertionError` class, so this is an `Error` with that `name`
 and the stack a native throw carries; no `AssertionError` global is exposed,
