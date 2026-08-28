@@ -1542,7 +1542,7 @@ void seed_bulky_run (Database& db, const std::string& id, int64_t start_time, si
     db.add_result (r);
 }
 
-constexpr size_t MIB = 1024 * 1024;
+constexpr size_t MIB = size_t{ 1024 } * 1024;
 
 int64_t database_file_size () {
     std::error_code ec;
@@ -1565,7 +1565,7 @@ int64_t grow_then_prune (int total_mib, int keep) {
     Database db (TEST_DB_PATH);
     db.init ();
     for (int i = 1; i <= total_mib; ++i) {
-        seed_bulky_run (db, "bulk_" + std::to_string (i), now - int64_t{ i } * 1000, MIB);
+        seed_bulky_run (db, "bulk_" + std::to_string (i), now - (int64_t{ i } * 1000), MIB);
     }
     db.prune_runs (keep, 0);
     return database_file_size ();
