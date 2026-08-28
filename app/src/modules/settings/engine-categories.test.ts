@@ -15,13 +15,15 @@
  */
 
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { ENGINE_SETTINGS_CATEGORIES, getEngineCategory } from "./engine-categories";
 import { ENGINE_SETTINGS_EDITED_IN_APP } from "./engine-settings-edited-in-app";
 import { APP_SETTINGS_PANELS } from "./main/app-panels";
 import { APP_SETTINGS } from "./main/app-settings";
+
+/** Held in the testkit, so CI routes an edit to the seed back to this suite. */
+const [DATABASE_CPP] = ENGINE_READING_GUARDS.settingsShelves.paths.map(fromRepoRoot);
 
 describe("the engine category registry", () => {
 	it("lists the categories the engine seeds, in visit order", () => {
@@ -96,20 +98,7 @@ describe("the engine category registry", () => {
  * the only copy neither test can restate wrongly.
  */
 describe("the seed and the registry agree on the shelves", () => {
-	const seed = readFileSync(
-		join(
-			dirname(fileURLToPath(import.meta.url)),
-			"..",
-			"..",
-			"..",
-			"..",
-			"engine",
-			"src",
-			"db",
-			"database.cpp"
-		),
-		"utf8"
-	);
+	const seed = readFileSync(DATABASE_CPP, "utf8");
 
 	const registered = new Set<string>(ENGINE_SETTINGS_CATEGORIES.map((c) => c.id));
 

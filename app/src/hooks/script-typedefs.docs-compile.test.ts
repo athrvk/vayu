@@ -35,20 +35,25 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import ts from "typescript";
-import { DOC_READING_GUARDS, fromRepoRoot, repoRoot } from "@/lib/routed-docs.testkit";
+import {
+	DOC_READING_GUARDS,
+	ENGINE_READING_GUARDS,
+	fromRepoRoot,
+	repoRoot,
+} from "@/lib/routed-inputs.testkit";
 import { SCRIPT_COMPILER_OPTIONS, SUPPRESSED_DIAGNOSTICS } from "./useScriptTypeDefinitions";
 
-const DECLARATIONS_PATH = join(repoRoot, "engine", "tests", "fixtures", "script-typedefs.d.ts");
+/** Held in the testkit for the same reason the pages below are: CI routes it. */
+const [DECLARATIONS_PATH] = ENGINE_READING_GUARDS.scriptTypedefs.paths.map(fromRepoRoot);
 
 /**
  * The two pages whose `pm.*` blocks are the contract. They are held in the
  * testkit with the other guards' pages, because the workflow filter that routes
  * an edit to them back to this suite is compared against the union of all four
- * (`routed-docs.test.ts`).
+ * (`routed-inputs.test.ts`).
  */
-const DOC_PATHS = DOC_READING_GUARDS.scriptTypedefs.pages.map(fromRepoRoot);
+const DOC_PATHS = DOC_READING_GUARDS.scriptTypedefs.paths.map(fromRepoRoot);
 
 interface DocBlock {
 	doc: string;

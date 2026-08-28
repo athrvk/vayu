@@ -24,26 +24,16 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import {
 	buildVariableValues,
 	resolveTemplate,
 	type StoredVariableBag,
 } from "./variable-resolution";
 import { DYNAMIC_VARIABLES } from "./dynamic-variables";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const fixturePath = join(
-	here,
-	"..",
-	"..",
-	"..",
-	"engine",
-	"tests",
-	"fixtures",
-	"variable-resolution-conformance.json"
-);
+/** Held in the testkit, so CI routes an edit to the fixture back to this suite. */
+const [fixturePath] = ENGINE_READING_GUARDS.variableResolution.paths.map(fromRepoRoot);
 
 interface ConformanceCase {
 	name: string;

@@ -22,14 +22,14 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DOC_READING_GUARDS, fromRepoRoot, repoRoot } from "@/lib/routed-docs.testkit";
+import { DOC_READING_GUARDS, fromRepoRoot, repoRoot } from "@/lib/routed-inputs.testkit";
 
 /*
  * The two doc pages are named through the testkit so CI routes an edit to them
  * back to this suite. They stay literal keys below - the keys are what `RETIRED`
  * points at, and a typo there should still be a type error.
  */
-const [DATA_DRIVEN_RUNS_DOC, COMPONENTS_DOC] = DOC_READING_GUARDS.rowPersistence.pages;
+const [DATA_DRIVEN_RUNS_DOC, COMPONENTS_DOC] = DOC_READING_GUARDS.rowPersistence.paths;
 
 /** Every surface that told a user what happens to their data rows. */
 const SURFACES = {

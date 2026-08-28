@@ -25,13 +25,14 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { assignTempIds } from "./assign-ids";
 import { ImportOrchestrator, type ImportApi } from "./orchestrator";
 import type { ImportResult } from "./types";
 import type { ImportApplyRequest } from "@/types";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
-const FIXTURE = join(__dirname, "../../../../engine/tests/fixtures/import-conformance.json");
+/** Held in the testkit, so CI routes an edit to the fixture back to this suite. */
+const [FIXTURE] = ENGINE_READING_GUARDS.importPayloads.paths.map(fromRepoRoot);
 
 interface Case {
 	name: string;

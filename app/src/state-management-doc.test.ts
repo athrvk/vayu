@@ -34,25 +34,26 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { DOC_READING_GUARDS, repoRoot } from "@/lib/routed-docs.testkit";
+import { DOC_READING_GUARDS, ENGINE_READING_GUARDS, repoRoot } from "@/lib/routed-inputs.testkit";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 /** The docs whose identifiers this guards, held where CI can route them. */
-const DOCS = DOC_READING_GUARDS.rendererState.pages;
+const DOCS = DOC_READING_GUARDS.rendererState.paths;
 
 /**
  * Identifiers the docs name that are declared outside `app/src`, with the file
  * that owns each. Kept short on purpose: a doc under `docs/app/` reaching into
  * the engine is a claim about a shared contract, not a convenience.
  */
+const [ENGINE_CONSTANTS, CURL_VERSION_MAP] = ENGINE_READING_GUARDS.rendererStateOwners.paths;
 const OWNED_ELSEWHERE: Record<string, string> = {
 	// The renderer's DEFAULT_MAX_RETAINED_TICKS and this are one number in two
 	// places, and state-management.md says so - so it has to still be there.
-	DEFAULT_MAX_LIVE_TICKS: "engine/include/vayu/core/constants.hpp",
+	DEFAULT_MAX_LIVE_TICKS: ENGINE_CONSTANTS,
 	// api-integration.md explains which libcurl constant `httpVersion: "http2"`
 	// becomes; the mapping is the engine's.
-	CURL_HTTP_VERSION_2TLS: "engine/include/vayu/http/curl_version_map.hpp",
+	CURL_HTTP_VERSION_2TLS: CURL_VERSION_MAP,
 };
 
 /**

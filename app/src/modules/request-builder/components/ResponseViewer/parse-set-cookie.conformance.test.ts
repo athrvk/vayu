@@ -21,24 +21,11 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { parseSetCookie, type ParsedCookie } from "./parse-set-cookie";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const fixturePath = join(
-	here,
-	"..",
-	"..",
-	"..",
-	"..",
-	"..",
-	"..",
-	"engine",
-	"tests",
-	"fixtures",
-	"set-cookie-conformance.json"
-);
+/** Held in the testkit, so CI routes an edit to the fixture back to this suite. */
+const [fixturePath] = ENGINE_READING_GUARDS.setCookie.paths.map(fromRepoRoot);
 
 interface ConformanceCase {
 	name: string;
