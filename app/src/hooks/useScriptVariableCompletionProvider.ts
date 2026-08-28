@@ -58,6 +58,7 @@ import { useActiveCollectionId } from "./useActiveCollectionId";
 import { useDataContract } from "./useDataContract";
 import { scriptVariableCompletionContext } from "@/lib/script-variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
+import { ITERATION_VARIABLES } from "@/lib/iteration-variables";
 import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
 
 /** Script editors mount with language="javascript". */
@@ -67,6 +68,14 @@ const CLOSE_BRACES = "}}";
 
 /** The resolver's own precedence, so the winning definition sorts first. */
 const SCOPE_ORDER: Record<string, number> = { environment: 0, collection: 1, global: 2 };
+
+/**
+ * Between the scopes and the data columns, the same slot
+ * `useVariableCompletionProvider.ts` gives it: `$vu` / `$iteration` are a
+ * reserved namespace like `data.*`, not a generator, so they sort with the
+ * other reserved things rather than among the `$random*` table.
+ */
+const ITERATION_SORT_GROUP = 6;
 
 /**
  * Columns sort after every scope and before the generators, the same grouping
@@ -241,19 +250,40 @@ export function useScriptVariableCompletionProvider() {
 				}
 
 				/*
+				 * The reserved identity namespace (issue #1057). `replaceIn` resolves
+				 * `{{$vu}}` / `{{$iteration}}` against the identity the request beside
+				 * the script was bound with - the run's own numbers inside a load run,
+				 * `1` / `0` outside one, since `POST /execute` binds those into every
+				 * send that carries no row (a single send is a run of one). That is a
+				 * different question from `pm.info.vu` / `pm.info.iteration`, which
+				 * stay `undefined` on that same plain Send: `pm.info` answers which
+				 * iteration of which run this is, and there is no run, while a token
+				 * answers what it resolves to here, and here it resolves to what the
+				 * request beside it carried. Never withheld for a same-named scope
+				 * variable, unlike the generators below: the engine resolves these two
+				 * names ahead of every scope, so a variable called `$vu` shadows
+				 * nothing and offering the name is still offering what resolves.
+				 */
+				if (template) {
+					for (const identity of ITERATION_VARIABLES) {
+						suggestions.push({
+							label: identity.name,
+							kind: monaco.languages.CompletionItemKind.Constant,
+							insertText: wrap(identity.name),
+							detail: identity.description,
+							documentation:
+								"Resolves to what the request beside the script was bound with - 1 / 0 outside a load run, not generated here",
+							sortText: `${ITERATION_SORT_GROUP}${identity.name}`,
+							filterText: wrap(identity.name),
+							range,
+						});
+					}
+				}
+
+				/*
 				 * Generators only exist during interpolation, so they belong to
 				 * `replaceIn` and nowhere else here: `pm.variables.get("$guid")` is
 				 * not a lookup that resolves, it returns `undefined`.
-				 *
-				 * `{{$vu}}` / `{{$iteration}}` are deliberately absent from this
-				 * list, unlike the `{{`-completion in the URL and body editors
-				 * (issue #994). They are bound into the *request* by the send, and
-				 * `replaceIn` runs inside the script: the engine's resolver leaves
-				 * them written as they stand there, so offering them here would
-				 * offer a token that cannot resolve where it was offered. A script
-				 * reads `pm.info.vu` / `pm.info.iteration` instead. #1057 is the
-				 * record of teaching `replaceIn` the identity, which is what would
-				 * make this list right to extend.
 				 */
 				if (template) {
 					for (const dynamic of DYNAMIC_VARIABLES) {

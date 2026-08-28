@@ -145,6 +145,23 @@ request binding already follows:
   `replaceIn("{{userId}}")` and `pm.variables.get("userId")` agree with each
   other the same way `replaceIn("{{data.userId}}")` and `pm.iterationData` do.
 
+**`{{$vu}}` and `{{$iteration}}` resolve here too** (issue #1057), to the
+numbers the request beside the script was bound with - the same numbers
+[`pm.info.vu` / `pm.info.iteration`](#script-identity-pminfo---six-fields-all-optional)
+carry inside a run, and `1` / `0` on a single Send, because `POST /execute`
+binds exactly those two into every send that carries no row of its own (a
+single send is a run of one, issue #994 - the same rule the table below states
+for `pm.info`). `pm.info` reading `undefined` for both on that same Send is not
+a disagreement with what `replaceIn` renders: the two answer different
+questions. `pm.info` reports which iteration of which run this script is
+running in, and there is no run to report; a token in a template reports what
+it resolves to *here*, and here it resolves to what the request beside it
+carried.
+
+```javascript
+pm.variables.replaceIn("user-{{$vu}}"); // "user-1" on a single Send
+```
+
 This is the **only** way `{{...}}` works inside a script, and that is
 deliberate (issue #226, decision D16): script *source* is never interpolated,
 because a rewrite cannot tell code from a string literal and splicing variable
