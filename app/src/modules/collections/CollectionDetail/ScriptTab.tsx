@@ -102,6 +102,10 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 	 */
 	const dataColumns = useDataContract(collection.id);
 	const { getAllVariables } = useVariableResolver({ collectionId: collection.id });
+	// Once per render, not once per chip: `getAllVariables` spreads a fresh map
+	// on every call, so asking it inside the row would rebuild the scopes for
+	// each name in it.
+	const allVariables = getAllVariables();
 
 	// Takes the text rather than reading the draft, so Clear can write the empty
 	// script on the same tick it sets it - `setScript` has not landed yet when
@@ -195,7 +199,7 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 						const data = isDataVariableName(name)
 							? describeDataToken(name, dataColumns)
 							: describeColumnReference(reference, dataColumns, (candidate) =>
-									Boolean(getAllVariables()[candidate])
+									Boolean(allVariables[candidate])
 								);
 						if (data) {
 							return (
