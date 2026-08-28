@@ -10,7 +10,10 @@
  *  - **State between steps.** Variables mutate in memory and are persisted
  *    **once, at run end** (asserted from inside the run, not just after it);
  *    cookies carry through the environment jar.
- *  - **`pm.info.iteration`.** Set by this runner and by nothing else.
+ *  - **`pm.info.iteration`.** Set by this runner for every step of every pass.
+ *    Not by it alone - a load run's sampled response and a send that bound a
+ *    row report one too (issues #994 and #601) - so what is pinned here is
+ *    this runner's own numbering, not the field's whole surface.
  *  - **Bounded step results.** Failures are kept first, successes are thinned,
  *    and what was thinned is disclosed rather than presented as complete.
  *

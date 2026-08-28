@@ -5104,12 +5104,17 @@ TEST_F (ScriptEngineTest, PmInfoDoesNotSurviveIntoTheNextExecution) {
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
-// Bound by the scenario runner and by nothing else (#353). A context that
-// declares no iteration - a POST /execute send, and the load path's deferred
-// `validate_scripts`, which builds exactly this `for_test` shape - leaves both
-// undefined. That is #300's ruling intact: a reservoir sample index reported as
-// an iteration number would be a plausible-looking lie, so the load path still
-// reports none.
+// What a context that declares neither reports (#353): a bare `for_test` shape,
+// which is what an ordinary `POST /execute` send - one carrying no `data` row -
+// reaches the engine with. Both read undefined, and that is #300's ruling
+// intact: an invented index would be a binding that cannot fail.
+//
+// The pair does not belong to the scenario runner alone, and this test does not
+// say it does. A load run's deferred `validate_scripts` sets `iteration` and
+// `vu` from the sample the response was actually sent in (#994,
+// `run_manager.cpp`), and a send that bound a row reports iteration 0 of 1
+// (#601). `iterationCount` is the one that stays absent under load - a
+// duration-bounded run has no total.
 TEST_F (ScriptEngineTest, PmInfoOmitsTheIterationPairOutsideAScenarioRun) {
     auto result = engine.execute_test (R"JS(
         pm.test("no iteration", function() {

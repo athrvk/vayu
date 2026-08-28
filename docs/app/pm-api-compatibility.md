@@ -186,8 +186,8 @@ truthful value for it, so a script tests with `typeof` rather than assuming:
 | `requestId` | The saved request the send is filed under | An ad-hoc request (MCP's `run_request` with no `requestId`, a load run started from a URL) |
 | `requestName` | The request's name **as the client sent it** - the name in the editor, which for an unsaved edit differs from the stored row | A request with no name, and an ad-hoc one |
 | `eventName` | `"prerequest"` in the Pre-request tab, `"test"` in the Tests tab | Never, for a script Vayu runs - both hooks set it |
-| `iteration` | The 0-based pass this response was sent in - a collection run's pass, or the iteration a load run's sampled response carried | A single Send, which is one request rather than a pass of anything |
-| `vu` | The 1-based virtual user that sent it. Spans the concurrency in a collection load run; `1` everywhere else, because one request repeated is one user's iterations | A single Send |
+| `iteration` | The 0-based pass this response was sent in - a collection run's pass, the iteration a load run's sampled response carried, or `0` for a send that bound a row, which is row 0 of 1 | An ordinary Send, which is one request rather than a pass of anything |
+| `vu` | The 1-based virtual user that sent it. Spans the concurrency in a collection load run; `1` everywhere else, because one request repeated is one user's iterations, and `1` for a send that bound a row, beside its iteration `0` | An ordinary Send |
 | `iterationCount` | How many passes that run will make - a collection run's total, and `1` for a send that bound a row, which is row 0 of 1 | An ordinary Send, and a load run |
 
 ```javascript
@@ -210,8 +210,9 @@ That is not a reversal of issue #300's ruling but the case it excluded: what
 #300 refused was reporting a *reservoir position* as an iteration number, and
 neither of these is one - a load run's submission claims its iteration and its
 virtual user before it is sent, and both travel with the response into the
-sample, exactly as the bound data row does. A single Send reads `undefined` for
-both.
+sample, exactly as the bound data row does. An **ordinary** Send reads
+`undefined` for both; a send that bound a row reports iteration `0` of `1`, the
+same exception `iterationCount` makes above.
 
 ### `pm.sendRequest` is synchronous, callback-only, and not available to agents
 
