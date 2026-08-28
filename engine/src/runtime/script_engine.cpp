@@ -6556,11 +6556,16 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
 // This is the sanctioned way to `{{...}}` inside a script. Script *text* is
 // never interpolated (issue #226, D16: a rewrite cannot tell code from a
 // string literal, and splicing variable values into source is an injection);
-// replaceIn keeps values as data - the same single-pass resolver the engine's
-// POST /compose uses (`resolve_template`), so the semantics are identical:
-// a bound row's column wins over the scopes (issue #1007), scopes win over
-// generators, a dynamic `{{$guid}}` generates per occurrence, an unknown
-// `$name` keeps its braces, an ordinary unknown name becomes "".
+// replaceIn keeps values as data - the same resolver the engine's POST
+// /compose uses (`resolve_template`), so the semantics are identical: the
+// `{{$vu}}`/`{{$iteration}}` identity answers ahead of every scope (issue
+// #1088), a bound row's column wins over the scopes (issue #1007), scopes
+// win over generators, a dynamic `{{$guid}}` generates per occurrence, and
+// a name nothing answers keeps its braces - an unknown `$name` and an
+// ordinary unknown name alike (issue #1009). A substituted value that
+// carries tokens of its own is resolved through them in turn, bounded by
+// `MAX_NESTED_RESOLUTIONS` (`request_composer.cpp`) and by a cycle rule
+// that leaves a name already being expanded written as it stands.
 //
 // Two deliberate differences from compose-time resolution, both consequences
 // of *when* this runs:
