@@ -6732,7 +6732,7 @@ method's signature emptied by the `()` inside its own label, `pm.info.eventName`
 read as prose and typed `void`, and two `pm.expect` chains shorter than the
 documentation beside them.
 
-So the durable guard compiles the **54 `pm.*` code blocks** in
+So the durable guard compiles **every ` ```javascript ` block mentioning `pm.`** in
 [`scripting.md`](scripting.md) and
 [`pm-api-compatibility.md`](../app/pm-api-compatibility.md) against the real
 declarations and requires zero errors, with the app's own compiler options and

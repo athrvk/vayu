@@ -22,10 +22,10 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Group               | API                                                                              |
 | ------------------- | -------------------------------------------------------------------------------- |
 | Core                | `pm`, `pm.test(name, fn)` - in either script, each result naming the one that made it, returning `pm` so calls chain, and handing a `done` to a callback that declares one (see below), `pm.expect(value[, message])` - the message prefixes the failure, as in chai, `pm.expect.fail([message])` |
-| Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
+| Response            | `pm.response.code`, `.status`, `.responseTime`, `.responseTimeWire`, `.responseTimeQueueWait`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()`, plus `.errorCode` / `.errorMessage` on a transport failure - see [Response timings](#response-timings-and-the-two-error-fields) |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
-| Streamed events     | `pm.response.events` (array of `{ event, id, data }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
+| Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated? }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)`, see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.header(name[, value])`, `.body(expected)`, `.jsonBody(path?[, value])`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`), `.method`, `.headers`, `.body` |
@@ -188,7 +188,7 @@ truthful value for it, so a script tests with `typeof` rather than assuming:
 | `eventName` | `"prerequest"` in the Pre-request tab, `"test"` in the Tests tab | Never, for a script Vayu runs - both hooks set it |
 | `iteration` | The 0-based pass this response was sent in - a collection run's pass, or the iteration a load run's sampled response carried | A single Send, which is one request rather than a pass of anything |
 | `vu` | The 1-based virtual user that sent it. Spans the concurrency in a collection load run; `1` everywhere else, because one request repeated is one user's iterations | A single Send |
-| `iterationCount` | How many passes that run will make | Anywhere but a collection run |
+| `iterationCount` | How many passes that run will make - a collection run's total, and `1` for a send that bound a row, which is row 0 of 1 | An ordinary Send, and a load run |
 
 ```javascript
 if (pm.info.eventName === "prerequest") {
@@ -197,9 +197,13 @@ if (pm.info.eventName === "prerequest") {
 console.log("running " + (pm.info.requestName || "an unnamed request"));
 ```
 
-`iterationCount` is set by the **collection runner and by nothing else**: a
-duration-bounded load run has no total to report, and a field readable from one
-mode and not another is worse than one that is never readable at all.
+`iterationCount` is set by the **collection runner, and by a send that bound a
+row**: the runner reports the run's total, and a send-with-row reports `1`,
+because that send is row 0 of 1 and it has said so about `iteration` already
+(`POST /execute`, on both the buffered and the streaming path). A **load run**
+is the mode that leaves it `undefined` - a duration-bounded run has no total to
+report, and a field readable from one load run and not another is worse than
+one that is never readable there at all.
 
 `iteration` and `vu` are reported by every run, load runs included (issue #994).
 That is not a reversal of issue #300's ruling but the case it excluded: what
@@ -293,9 +297,11 @@ in either spelling - the exported `[{ key, value }]` array or a plain object.
 `basic`, `bearer` and `apikey` are composed by the engine's own auth resolver,
 the same one `POST /execute` sends through, so an api key sent as a query
 parameter is percent-encoded onto the URL exactly as it would be on the main
-request and an `Authorization` header the script set itself still wins. Every
-other type - `oauth2` included, whose token acquisition needs a database this
-path deliberately does not carry - is refused by name rather than dropped, and so
+request and an `Authorization` header the script set itself still wins.
+`noauth` (spelled `none` too) is accepted and composes nothing, so a script can
+say this one request carries no credential rather than omitting the option.
+Every other type - `oauth2` included, whose token acquisition needs a database
+this path deliberately does not carry - is refused by name rather than dropped, and so
 is a type whose parameter block is absent or misspelled, since `basic` requires
 neither of its halves and would otherwise compose an empty credential and send
 it. A request that goes out unauthenticated because the sandbox skipped an option
@@ -477,8 +483,11 @@ text.
 
 `have.keys` asserts *exactly* those keys. `Map` / `Set` / typed arrays are
 reported unequal by `eql` rather than compared (their contents are not
-properties); `Date` compares by instant, `RegExp` by pattern; a cyclic value
-raises a `RangeError` after 64 levels rather than hanging. **A throw the
+properties); `Date` compares by instant, `RegExp` by pattern; a cycle
+raises a `RangeError` **at the depth it closes** (#959), naming the pair of
+objects the walk met twice, and a merely very deep structure raises a different
+`RangeError` after 64 levels - a backstop with its own message, not the same
+finding reported late. **A throw the
 comparison runs into is the verdict** (#1048) - a key, an array element or an
 array `length` behind a getter that throws, an overridden `toJSON` / `toString`
 on the `Date` and `RegExp` sides, and the values `include`, `oneOf`, `members`,
@@ -486,6 +495,29 @@ on the `Date` and `RegExp` sides, and the values `include`, `oneOf`, `members`,
 test as the script's own error rather than as a difference. Chai reports a
 difference for some of these, which under `.not` is a pass; a test that cannot
 read its subject has not passed.
+
+### Response timings, and the two error fields
+
+Postman reports one duration; Vayu's response carries three numbers and, when
+the transfer failed, two fields naming why:
+
+| Property | What it is |
+|---|---|
+| `responseTime` | What the caller waited - submission to completion, queue wait included. The one a ported Postman script reads, since it is the one carrying Postman's name |
+| `responseTimeWire` | `CURLINFO_TOTAL_TIME`: DNS, connect, TLS, send and receive. What the server and the network cost, with none of Vayu's own queue in it |
+| `responseTimeQueueWait` | `responseTime` minus `responseTimeWire`, clamped at zero - the generator-side overhead. Near zero on a single send, which has no generator queue to wait in |
+| `errorCode` | The transport failure's code (`TIMEOUT`, `CONNECTION_FAILED`, …), as `pm.sendRequest`'s `err.code` spells it |
+| `errorMessage` | That failure's message |
+
+The two error fields are **absent** on a transfer that completed, rather than
+empty or `null` - the same absent-not-empty rule `pm.response.events` follows -
+so `if (pm.response.errorCode)` is the test, and reading `errorMessage` without
+it is a guess about a sibling field.
+
+The two extra timings are there because a load run's latency and the engine's
+own overhead are different questions: `responseTimeWire` is libcurl's view of
+the transfer, and the gap between the two is what the generator's queue cost.
+An assertion on `responseTime` under load is an assertion on both.
 
 ### Response status classes (`pm.response.to.be`)
 
@@ -512,6 +544,11 @@ match by reason phrase as well as by code; Vayu's stay code-only.
 **`have.body`'s substring form is gone (#998).** A string argument now has to
 equal the body exactly, not merely appear in it - `.to.have.body(sub)` written
 for "the body contains `sub`" should become `.to.have.body(new RegExp(sub))`.
+It takes chai-postman's three argument forms and no others: a string compares
+equal, a regular expression is run against the body with its own `test`, and a
+plain object is deep-equalled against the **parsed** body - which reports
+`Response body is not valid JSON` when the body does not parse. A number or a
+boolean is a `TypeError` naming what was passed, and the argument is required.
 `.have.jsonBody(path, value)` also started comparing `value`, which it used to
 accept and ignore - a script relying on the old no-op should not pass an
 argument it does not want checked.
@@ -552,6 +589,16 @@ a per-event callback to run in. A script sees the retained list, once.
 list is bounded by the engine's `sseMaxStoredEvents`, so a script that means to
 assert over the *whole* stream has to check `eventsTruncated` first; counting a
 prefix would otherwise report a wrong number with complete confidence.
+
+**A load run's deferred `tests` script reads the same three.** `POST /runs`
+with `"stream": true` samples its streaming responses the way it samples any
+other, and the deferred script replays against those samples - so the three
+properties mean there what they mean in design mode, with two differences. The
+list is rebuilt by reparsing the sample's stored body and is bounded by
+`sseMaxStoredEvents`, while `totalEvents` is the count taken off the wire, so
+it stays right about a stream the stored body is only a prefix of. And there is
+no per-sample end reason: whether a stream ended by a cap is a run-level fact,
+reported once as `stream.capped`.
 
 All three are **absent** on an ordinary response rather than empty, so
 `typeof pm.response.events === 'undefined'` distinguishes "not a stream" from "a
@@ -713,9 +760,10 @@ pm.iterationData.has('coupon');    // whether the row carries that column
 pm.iterationData.toObject();       // the whole row
 ```
 
-A collection run can be given rows - the app parses the CSV or JSON file and
-sends them inline on the run payload; the engine never opens a file. Row
-`i % rows` binds to iteration `i`, so `iterations` above the row count wraps.
+A collection run can be given rows - the app parses the CSV, TSV, JSON or
+JSONL file and sends them inline on the run payload; the engine never opens a
+file. Row `i % rows` binds to iteration `i`, so `iterations` above the row
+count wraps.
 
 A **single send** can bind one row as well: the request builder's Send-with-row
 caret and MCP's `run_request` both take one row on `POST /execute`, which is
@@ -996,7 +1044,8 @@ going unreported in exchange for not crying wolf on correct code.
 
 #### Every `pm.*` example on this page is compiled against those declarations
 
-`script-typedefs.docs-compile.test.ts` takes the 54 `pm.*` blocks in this page and
+`script-typedefs.docs-compile.test.ts` takes **every** ` ```javascript ` block that mentions
+`pm.` in this page and
 [`docs/engine/scripting.md`](../engine/scripting.md), compiles each against the generated
 `.d.ts`, and requires zero errors - with `SCRIPT_COMPILER_OPTIONS` and
 `SUPPRESSED_DIAGNOSTICS` read from `useScriptTypeDefinitions.ts` rather than restated, so
@@ -1012,6 +1061,13 @@ for the regeneration command.
 
 A consequence worth knowing before editing either page: a `pm.*` example here is now
 **checked**, so an example that is wrong fails CI rather than misleading a reader.
+The corpus is whatever the two pages currently hold, and the guard beside the
+compile asserts a **floor** rather than a count, deliberately - an added or
+deleted example is an ordinary docs edit and must not fail an assertion in a
+`.test.ts`. Which is also why this page no longer states how large that corpus
+currently is: a count written into prose is a fact with nothing holding it
+true, and the one that used to sit here had drifted by a third. The figures in
+the `strictNullChecks` note below are dated for the same reason.
 
 #### Optional members, and why the editor states them without enforcing them
 
@@ -1032,10 +1088,10 @@ type system enforces.
 That is a decision (#443), not an oversight, and `useScriptTypeDefinitions` now sets
 `strictNullChecks: false` explicitly rather than relying on the default, so a `strict:
 true` arriving through the spread of Monaco's existing options cannot turn it on as a side
-effect. It was taken on a count. Compiling **57 scripts** against the real generated
-declarations - the 54 `pm.*` examples in this page and
-[`docs/engine/scripting.md`](../engine/scripting.md), plus three realistic ones - turning
-the flag on adds **13 diagnostics**:
+effect. It was taken on a count, and the count is a **measurement from when the
+decision was made** rather than a live property of the corpus: compiling the
+**57 scripts** the two pages then held - 54 `pm.*` examples plus three realistic
+ones - with the flag on added **13 diagnostics**:
 
 | What | Count | Verdict |
 |------|------:|---------|
@@ -1090,4 +1146,4 @@ reference had drifted into claiming "No crypto, base64 or `URL` in the sandbox" 
 | Completion fetch + cache        | `app/src/queries/script-completions.ts`                                                                                                                 |
 | Monaco completion provider      | `app/src/hooks/useScriptCompletionProvider.ts`                                                                                                          |
 | Shared editor wrapper           | `app/src/components/ui/code-editor.tsx`                                                                                                                 |
-| Script editor panels            | `app/src/modules/request-builder/components/RequestTabs/panels/{Pre,Test}ScriptPanel.tsx`, `app/src/modules/collections/CollectionDetail/ScriptTab.tsx` |
+| Script editor panels            | `app/src/modules/request-builder/components/RequestTabs/panels/script/ScriptPanel.tsx` + `script-variants.tsx`, `app/src/modules/collections/CollectionDetail/ScriptTab.tsx` |
