@@ -353,6 +353,7 @@ std::optional<std::string> resolve_step (vayu::db::Database& db,
 const ScenarioResolveOptions& options,
 const vayu::db::Collection& collection,
 bool has_data,
+const vayu::http::BoundColumnNames& bound_columns,
 size_t index,
 const vayu::db::Request& row,
 ScenarioPlan& plan) {
@@ -362,6 +363,23 @@ ScenarioPlan& plan) {
     if (!options.environment_id.empty ()) {
         compose_body["environmentId"] = options.environment_id;
     }
+    // The dataset's columns travel into composition rather than being applied
+    // after it (issue #1007): a bare `{{username}}` this run's rows answer must
+    // survive composition to be bound per iteration, and a same-named
+    // environment variable must not answer it first. Names only - the row is
+    // per iteration and composition happens once.
+    if (!bound_columns.empty ()) {
+        compose_body["dataColumns"] = bound_columns;
+    }
+    // A plan step is composed once and *sent* per iteration, so the generator
+    // family belongs to the send rather than to this composition (issue #995):
+    // resolved here, `{{$randomUUID}}` would be one id repeated by every
+    // iteration of every virtual user. Unconditionally, not only for a load
+    // run - both executors join this step's template before every send, and a
+    // rule that depended on which one was running is one nobody could hold in
+    // their head. A step spelling no generator is unaffected: nothing survives
+    // composition, so nothing is split and nothing is joined.
+    compose_body["deferDynamicVariables"] = true;
     auto [status, payload] = vayu::http::compose_request_core (db, compose_body);
     if (status != 200) {
         return ("Cannot compose " + describe_step (index, row) + ": " +
@@ -380,7 +398,7 @@ ScenarioPlan& plan) {
     // iteration, and only for the steps that need it.
     const vayu::http::Auth parsed_auth =
     vayu::http::parse_auth (payload.value ("auth", nlohmann::json ()));
-    StepDataTemplate auth_template = tokenize_auth_fields (parsed_auth);
+    StepDataTemplate auth_template = tokenize_auth_fields (parsed_auth, bound_columns);
 
     // OAuth 2.0 is the one mode deferral cannot serve: its token is
     // acquired right here, once, against the token endpoint, so there is no
@@ -388,7 +406,7 @@ ScenarioPlan& plan) {
     // mean a network round trip per virtual user per iteration. Refused by
     // name in both directions, with or without a data set, rather than sent
     // to the token endpoint as the literal token text.
-    if (auto token = first_oauth2_data_token (parsed_auth)) {
+    if (auto token = first_oauth2_data_token (parsed_auth, bound_columns)) {
         return (describe_step (index, row) + " carries " + *token +
         " in its OAuth 2.0 configuration. That token is acquired once, "
         "when the run is planned, so a data column can never reach it - "
@@ -411,7 +429,7 @@ ScenarioPlan& plan) {
     // Split once, here, so no executor re-scans this step per iteration -
     // the load-mode one binds a row per iteration per virtual user, which
     // is a scan of every field of every step at the run's full rate.
-    auto data_template = tokenize_data_fields (built.request);
+    auto data_template = tokenize_bindable_fields (built.request, bound_columns);
 
     // A `{{data.*}}` token with no data set behind it can never bind. The
     // namespace is reserved, so composition deliberately left the token
@@ -422,13 +440,13 @@ ScenarioPlan& plan) {
     // exists, rather than rediscovered per step per iteration once it has
     // started (issue #415).
     if (!has_data) {
-        auto token = data_template.first_token ();
+        auto token = data_template.first_data_token ();
         if (!token) {
             // The credentials are scanned too, and for the same reason: a
             // data token in a basic-auth field is exactly as unbindable as
             // one in the URL, and until it was kept out of the base64 above
             // this refusal could not see it at all.
-            token = auth_template.first_token ();
+            token = auth_template.first_data_token ();
         }
         if (token) {
             return (describe_step (index, row) + " carries " + *token +
@@ -547,13 +565,17 @@ const ScenarioResolveOptions& options) {
     }
 
     // A `data` array that is present and empty was already refused above, so an
-    // empty `data_rows` here means the payload carried no `data` block at all.
+    // empty `data_rows` here means the payload carried no `data` block at all -
+    // and so an empty column set is exactly "this run binds no rows", which is
+    // what every step below composes and splits against (issue #1007).
     const bool has_data = !resolution.data_rows.empty ();
+    const vayu::http::BoundColumnNames bound_columns =
+    bound_columns_of (resolution.data_rows);
 
     resolution.plan.steps.reserve (rows.size ());
     for (size_t index = 0; index < rows.size (); ++index) {
         if (auto reason = resolve_step (db, options, *collection, has_data,
-            index, rows[index], resolution.plan)) {
+            bound_columns, index, rows[index], resolution.plan)) {
             return invalid (*reason);
         }
     }
@@ -571,17 +593,23 @@ CoverageTally make_coverage_tally (const ScenarioExecution& execution) {
     return CoverageTally (execution.spec.declared_operations, step_operations);
 }
 
-DataBindResult bind_step_row (vayu::Request& request,
+DataBindResult bind_step_iteration (vayu::Request& request,
 const ScenarioStep& step,
-const nlohmann::json& row,
-size_t row_index) {
+const std::vector<nlohmann::json>& rows,
+std::optional<size_t> row_index,
+IterationIdentity identity) {
+    // `.at()` rather than a subscript: the index was claimed off a cursor taken
+    // modulo this vector's own size, so a mismatch is a broken invariant and a
+    // throw names it instead of reading past the end.
+    const IterationBinding binding{ row_index ? &rows.at (*row_index) : nullptr,
+        row_index.value_or (0), identity };
     // The fields-then-credentials order lives in one place, shared with the
     // single-request load path that binds its own templates the same way
     // (issue #993); this is the step-shaped caller of it. The step's auth is
     // copied by the callee, which is what a plan shared by every virtual user
     // of the run requires.
-    return bind_iteration_row (
-    request, step.data_template, step.auth, step.auth_template, row, row_index);
+    return bind_iteration (
+    request, step.data_template, step.auth, step.auth_template, binding);
 }
 
 nlohmann::json build_scenario_manifest (const ScenarioRequest& request,

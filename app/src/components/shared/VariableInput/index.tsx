@@ -18,6 +18,11 @@
  * - Displays an overlay with clickable variable tokens
  * - Autocomplete dropdown when typing {{
  * - Click variables to open edit popover with current value
+ *
+ * A bare `{{name}}` that names a declared data column and that no scope
+ * defines paints as a bound-column runtime token rather than an undefined
+ * variable (issue #1007) - see the `boundColumn` check in
+ * `renderOverlayContent` and `describeBareColumnToken`.
  */
 
 import {
@@ -38,7 +43,7 @@ import { VARIABLE_PATTERN } from "@/constants/variables";
 import { variableCompletionContext } from "@/lib/variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 import { isDataVariableName } from "@/lib/variable-resolution";
-import { describeDataToken } from "@/lib/data-contract";
+import { describeDataToken, describeBareColumnToken } from "@/lib/data-contract";
 
 interface VariableInputProps {
 	value: string;
@@ -431,6 +436,38 @@ export default function VariableInput({
 					);
 				}
 				const varInfo = allVariables[seg.varName];
+				/*
+				 * A bare token whose name is a declared column, and which no scope
+				 * defines, is bound by a run's row exactly as `{{data.name}}` is
+				 * (issue #1007) - painting it as an undefined variable would offer
+				 * to create one that a bind will never consult (`EditableVariable`'s
+				 * `resolved={false}` treatment, below). A scope that DOES define the
+				 * name is left alone: it keeps painting as that variable, unchanged
+				 * - shadowing the column in the paint is a separate design question.
+				 */
+				const boundColumn =
+					!varInfo && variables?.dataColumns?.columns.includes(seg.varName)
+						? variables.dataColumns
+						: undefined;
+				if (boundColumn) {
+					const data = describeBareColumnToken(boundColumn);
+					return (
+						<span
+							key={`${i}-${seg.varName}`}
+							data-variable-token
+							data-runtime-token
+							{...tokenBounds}
+							style={{ pointerEvents: "auto" }} // See the data.* token above.
+						>
+							<RuntimeToken
+								name={seg.varName}
+								description={data.description}
+								note={data.note}
+								tone={data.tone}
+							/>
+						</span>
+					);
+				}
 				// A generator only shows through when nothing defines the name -
 				// the same order the resolver uses, so the token cannot describe a
 				// value the request will not carry.

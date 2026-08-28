@@ -3571,8 +3571,17 @@ Header names are matched case-insensitively.
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
 deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
 username-if-password-grant`). Expiry uses a 45s skew; a missing `expires_in`
-means non-expiring. There is **no mid-run refresh** - a token is fetched at run
-start and reused for the whole run.
+means non-expiring. A load run also refreshes its token **during** the run: a
+watchdog re-acquires a header-placed, expiring token `oauth2RefreshLeadMs`
+(default 60s) before it expires and writes the new one into this same cache row
+(see [Load Test Mode](architecture.md#load-test-mode)). It is skipped - the
+token is fetched once and reused for the whole run - for a query-placed token,
+`autoRefreshToken: false`, a non-expiring token, an `authorization_code` grant
+with no refresh token, a token that lost to a user-supplied `Authorization`
+header, and scenario runs, whose steps each resolve auth at plan time. That
+list is `plan_auth_refresh`'s (`engine/src/http/auth_resolver.cpp`); the app's
+`isMidRunRefreshable` mirrors all of it but the header case - change one,
+change both.
 
 #### POST /oauth2/token
 
@@ -3754,9 +3763,47 @@ and is never re-resolved - see [POST /execute](#post-execute) and
     "postRequestScripts": []
   },
   "collectionId": "col_1234567890", // Optional: chain scope for an inline request
-  "environmentId": "env_1234567890" // Optional: environment scope
+  "environmentId": "env_1234567890", // Optional: environment scope
+  "dataColumns": ["username", "city"], // Optional: bare names a bound row will substitute
+  "deferDynamicVariables": true      // Optional: this payload is for a run that repeats it
 }
 ```
+
+- **`dataColumns`** (issue #1007) names the columns of the data file a caller
+  will bind a row from **after** this compose call - an array of column names,
+  never values, since a plan is composed once and a row is bound per iteration.
+  Every name it lists is left written as it stands, exactly as the reserved
+  `{{data.*}}` namespace already is, for a later per-row bind to join -
+  `{{username}}` behaves as `{{data.username}}` always has, deferred rather
+  than resolved from a same-named variable. **Absent or `null` means no
+  dataset: composition resolves exactly as it did before this field existed.**
+  Refused with `400` `invalid_compose_request` when the field is present and
+  not an array, or holds an entry that is not a string or is the empty string.
+  A `data.`-prefixed entry is accepted but redundant - the reserved namespace
+  answers that spelling first regardless of whether it is also listed here, so
+  either way it is deferred. See [`{{data.*}}` puts the row into the request
+  itself](#scenario-runs) and
+  [D18](../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007)
+  for the precedence this buys.
+
+- **`deferDynamicVariables`** (issue #995) says this payload is being composed
+  for a **run**, which will send it many times. A generator resolved here would
+  be one value repeated by every iteration of every virtual user - the
+  uniqueness `{{$randomUUID}}` is written for, lost exactly where concurrency
+  makes collisions matter - so with the field true every name the dynamic table
+  generates is left written as it stands, the way `{{data.*}}` and the identity
+  names already are, and the run's executor generates a fresh value per
+  occurrence immediately before each send. **Absent, `null` or `false` composes
+  exactly as it did before this field existed**, which is what a Send, a preview
+  and a script's `replaceIn` want: composed once, sent once. Refused with `400`
+  `invalid_compose_request` when present and not a boolean. Two limits worth
+  knowing: an unknown `{{$typo}}` is unaffected (nothing would generate it
+  either way, so it keeps its braces - issue #186), and a generator inside the
+  **auth block** is generated here even when the field is true, because
+  `apply_auth` encodes a credential when the request is built and a token left
+  for the bind would go out as base64 of its own text (the deferral issue #1055
+  carries). A scenario plan's steps are composed with it internally, so a
+  collection run needs no field at all.
 
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
   headers (later duplicates win), body, auth (absent auth defaults to
@@ -3816,6 +3863,26 @@ with specific codes:
   per-part content type, which libcurl writes into that part's own header block.
   A bound `{{data.column}}` is refused earlier still, at bind time, naming the
   column and the row (see [Scenario runs](#scenario-runs)).
+- `400` `{"error": {"code": "colliding_header_names", "message": "..."}}` - two
+  header names resolved to one, so one of the two headers would be gone. A
+  header map holds one value per name, so `{{tenant_header}}: acme` beside a
+  literal `X-Tenant: legacy` is not two headers once the variable answers
+  `X-Tenant` - it is one, and which one arrives is an ordering detail rather
+  than a rule. Names are compared **without case**, as `Headers` compares them,
+  so a `{{h}}` resolving to `authorization` refuses beside an `Authorization`
+  the caller typed. The message names both spellings as written and the name
+  they produced; nothing is repaired, for the reason a forged header is refused
+  rather than stripped.
+
+  Only a collision **resolution produced** is refused. Two names the caller
+  typed are two entries they can see, and the stored flattening's later-wins
+  rule (above) still decides those - the same distinction the bind-time refusal
+  draws (see [Scenario runs](#scenario-runs)). The execute-time residual pass
+  refuses the same collision in the same words, since it rebuilds the same map:
+  a buffered send answers `statusCode: 0` with an `errorCode` of
+  `INTERNAL_ERROR` carrying the message, exactly as the pre-send gate does,
+  while a streaming send - which has not answered yet - is a `400` with this
+  same code and fails its run row.
 
 ### POST /execute
 
@@ -3980,6 +4047,15 @@ it, and both scripts read it as `pm.iterationData` with `pm.info.iteration` `0`
 and `pm.info.iterationCount` `1` - the send *is* row 0 of 1. Without the field
 nothing changes: `{{data.*}}` goes out written as it stands and
 `pm.iterationData` is `undefined`.
+
+**The row's own keys are also its bound bare names** (issue #1007): the send
+derives its `dataColumns` set from `data`'s keys itself, so a bare
+`{{username}}` binds from the row exactly as `{{data.username}}` does, at the
+same precedence [D18](../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007)
+gives it. A bare name the row does not carry is not deferred in the first
+place - it is an ordinary `{{name}}`, resolved from the scopes at compose time
+or, if nothing there answers either, by the residual pass after the
+pre-request script (issue #1008).
 
 An **object** of name/value pairs, never the array a run sends - one row. The
 row is bounded by `maxScenarioDataBytes` (the same setting a run's whole set is
@@ -4738,13 +4814,20 @@ the same request does, and the two cannot drift apart.
 > field, and a plan where every name was already defined at run start pays that
 > and nothing else.
 >
-> The one exception is the reserved `{{data.*}}` namespace below, which neither
-> pass touches - composition leaves it alone so the runner can bind it per
-> iteration, and it is not a name any script scope answers either.
+> The exceptions are the two reserved namespaces below, which neither pass
+> touches: `{{data.*}}` and the `{{$vu}}` / `{{$iteration}}` identity (issue
+> #994). Composition leaves both alone so the runner can bind them per
+> iteration, and neither is a name any script scope answers either. **A bare
+> name the run's `dataColumns` names travels the same way** (issue #1007):
+> composition defers it exactly as it defers `{{data.*}}`, and the per-row bind
+> substitutes it before the step's pre-request script ever runs - so neither
+> pass sees it unresolved, and neither can answer it from a same-named
+> environment variable instead of the row.
 
-**Scripts** additionally read `pm.info.iteration` (0-based) and
-`pm.info.iterationCount`. No other caller sets them - see
-[scripting.md](scripting.md#script-identity-pminfo).
+**Scripts** additionally read `pm.info.iteration` (0-based), `pm.info.vu`
+(1-based) and `pm.info.iterationCount`. See
+[scripting.md](scripting.md#script-identity-pminfo) for which run shapes report
+which.
 
 **A run with `data` binds one row per iteration.** Row `i % rows` binds to
 iteration `i`, and the run's scripts read it as `pm.iterationData` -
@@ -4761,23 +4844,43 @@ request goes; the `data.*` namespace can. A step whose URL, header or body
 carries `{{data.email}}` has it substituted with that iteration's row, per
 iteration, immediately before the send.
 
-The namespace is **reserved and disjoint from the variable tiers** - not a
-fourth, higher tier. `{{data.id}}` and `{{id}}` are different names, so a data
-set can neither shadow nor be shadowed by a global, collection or environment
-variable, and adding a data file to an existing collection cannot change what
-its other tokens resolve to. Composition (`POST /compose`, and the plan
-resolution that shares it) leaves a `data.*` token written exactly as it stands
-for that reason; `{{data.}}` with no column after it names nothing and follows
-the ordinary unknown-name rule instead.
+The `{{data.column}}` spelling is **reserved and disjoint from the variable
+tiers** - not a fourth, higher tier. `{{data.id}}` and `{{id}}` are different
+names, so a data set can neither shadow nor be shadowed by a global, collection
+or environment variable through that spelling, and adding a data file to an
+existing collection cannot change what its other tokens resolve to. Composition
+(`POST /compose`, and the plan resolution that shares it) leaves a `data.*`
+token written exactly as it stands for that reason; `{{data.}}` with no column
+after it names nothing and follows the ordinary unknown-name rule instead.
 
-**Where a token participates.** Exhaustively: the **URL** (path and query
-string alike, so a token in a stored request's params reaches it once they are
-joined into the URL), every **header name** and **header value**, the **raw
-body**, **both halves of every form field** (`x-www-form-urlencoded` and
-`form-data`), and the **credential fields** of the request's auth - the bearer
-**token**, basic auth's **username** and **password**, and an api key's **name**
-and **value**. Script text is never interpolated at all (a script reads its row
-through `pm.iterationData`).
+**A bare column name is a second, different rule and it *is* a tier** (issue
+#1007). Postman binds a dataset's columns to bare names, so an imported
+data-driven collection is written `{{username}}` rather than
+`{{data.username}}`, and while a row is bound that row's own bare column
+names answer **above the active environment** - see [D18 in variable
+resolution](../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007)
+for the full ladder and the tradeoff it makes against #402's guarantee above.
+Which bare names a bind owns is not global - it is stated per composition, as
+the [`dataColumns`](#post-compose) field, or filled by the engine itself where
+it already knows the dataset (a scenario plan's steps, a single-request load
+run, a send carrying one row). A bare name **not** in that set resolves as an
+ordinary variable, exactly as it did before this rule existed; only a name the
+set names is deferred by composition the way `data.*` always was, for the
+run's per-row bind (`core::apply_data_template`) to join through the identical
+walk - the same escaping, the same missing-column and null-cell refusals, the
+same header rules, for either spelling. There is no second, looser
+substitution path for the bare one.
+
+**Where a token participates.** Exhaustively, and identically for both
+spellings: the **URL** (path and query string alike, so a token in a stored
+request's params reaches it once they are joined into the URL), every
+**header name** and **header value**, the **raw body**, **both halves of
+every form field** (`x-www-form-urlencoded` and `form-data`), and the
+**credential fields** of the request's auth - the bearer **token**, basic
+auth's **username** and **password**, and an api key's **name** and
+**value**. Script text is never interpolated at all (a script reads its row
+through `pm.iterationData`, or through `pm.variables` for a bare name - see
+[scripting.md](scripting.md#variables-pmvariables)).
 
 The pass runs over the **composed** text, not the text as it was authored, so a
 token that arrived as a *variable's value* binds like any other: a variable
@@ -4786,6 +4889,20 @@ composition (resolution is one pass and never rescans a substituted value), and
 the data pass then binds it. That is usable, and it is also why the
 no-data refusal below says "or from the variable value it was written into" -
 the token it names may not appear anywhere in the request as you wrote it.
+
+**`{{$vu}}` and `{{$iteration}}` are the second reserved namespace** (issue
+#994), and they bind at the same moment out of the same walk - a field carrying
+one of each is one string, so both are split once and joined together. They need
+no rows behind them: `{{$vu}}` is the virtual user's own 1-based number in a
+scenario run and `1` in every other shape (one request repeated is one user's
+iterations, whatever the concurrency), and `{{$iteration}}` is that user's
+0-based iteration, the submission index on a single-request run, and `0` on a
+plain `POST /execute`. A variable named `$vu` does not answer for the identity,
+for the reason a variable named `data.id` does not answer for the column, and
+`{{$vus}}` is an ordinary unknown `$name` that keeps its braces. They bind
+everywhere a `data.*` token does **except the credential fields**: a credential
+is encoded at build time and the deferral that lets a row reach one first
+happens only in a run that has rows (issue #1055).
 
 **A run binds only what it was given rows for.** A `POST /runs` carrying
 `scenario.data` binds per iteration, one carrying the top-level

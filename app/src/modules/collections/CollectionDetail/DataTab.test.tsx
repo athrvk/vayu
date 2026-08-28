@@ -65,6 +65,12 @@ vi.mock("@/queries", () => ({
 		requestsByCollection: new Map(),
 		isLoading: false,
 	}),
+	// Read by `useVariableResolver`, which the panel's collision note (issue
+	// #1007) calls with no collection variables and no environment - empty is
+	// enough to render; the note's own behaviour is `ColumnAudit.test.tsx`'s
+	// business, not this suite's.
+	useGlobalsQuery: () => ({ data: { variables: {} } }),
+	useEnvironmentsQuery: () => ({ data: [] }),
 }));
 
 const { default: DataTab } = await import("./DataTab");

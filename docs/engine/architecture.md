@@ -446,7 +446,10 @@ ids, and returns the execute-ready payload that `POST /execute` and `POST
   the URL, header keys/values, body content/fields, and the auth block -
   single-pass, raw stored strings, unknown plain names to `""`, unknown
   `$names` kept braced, dynamic variables (`{{$guid}}`, …) generated per
-  occurrence;
+  occurrence - unless the caller asked for them to be deferred
+  (`deferDynamicVariables`), which a composition made for a *run* does, so the
+  run generates a fresh value per iteration instead of repeating one (issue
+  #995);
 - resolves `inherit` auth by walking the collection ancestor chain leaf→root
   (an explicit `noauth` terminates the walk, `none` is stepped over), and
   resolves variables inside the winning block **before** any OAuth 2.0 cache
@@ -474,7 +477,12 @@ of every value that had an answer. The one thing this costs: an ad-hoc payload
 posted straight to `/execute` with a literal `{{...}}` in it is no longer
 inert - if the run's scopes define that name, the send now carries its value.
 A name nothing defines still goes out written as it stands, and the load path
-does not run this pass at all. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+does not run this pass at all. The one thing the pass can *refuse* is a
+resolved header name landing on a name the request already carries (#1051):
+the map holds one value per name, so the send would go out a header short, and
+it is stopped instead - in composition's words, as a `statusCode: 0` response
+carrying the reason (a `400` on the streaming path, which has not answered
+yet). An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 
@@ -930,12 +938,31 @@ row exists - and the executor is the only thing that differs.
   *submission* off the same kind of run-wide cursor, wrapping the same way - a
   single request has no sequence for an iteration to span, so the unit of a claim
   is the request. The templates are split once, when the run's one request is
-  built (`LoadDataSet::fields`), the credentials defer exactly as a step's do,
+  built (`RunContext::load_template`), the credentials defer exactly as a step's do,
   and every retained result carries its `dataRowIndex`. **A run without rows
   carries no set at all**, which is the throughput guard stated structurally: the
   strategies test one pointer and otherwise submit the shared request they always
   did. The validation, the binder and the escaping are the scenario path's own
-  functions rather than copies - `read_data_rows` and `bind_iteration_row`.
+  functions rather than copies - `read_data_rows` and `bind_iteration`.
+- **The iteration's identity binds beside its row** (issue #994). `{{$vu}}` and
+  `{{$iteration}}` are a second reserved namespace, and they are bound at the
+  same point, out of the same template: a field carrying one of each is one
+  string, so the split keeps both and the join resolves each where its value
+  lives - the identity from the iteration, everything else from the row. On the
+  scenario path the values are the virtual user's own number (1-based) and its
+  iteration; on the single-request path they are `1` and the submission index,
+  which is the same counter the row cursor claims from, so the two cannot
+  disagree about which submission this was. A design-mode collection run is user
+  1 walking its passes, and a single send is a run of one.
+  This is **template substitution, not a script hook**: two integers written into
+  fields a compose-time scan already located, which is why it sits here rather
+  than reopening the recorded non-goal above (inline scripts on the load path).
+  A request that spells neither token has an empty template and is walked for
+  nothing - the executor tests `empty()` and submits the shared request it
+  always did. What every run does now pay is one unsynchronised increment per
+  submission on the producer thread, which is what lets any load run tell a
+  deferred script the iteration and the user a sampled response was sent as
+  (`pm.info.iteration` / `pm.info.vu`).
 - **Scripts stay deferred, keyed per step.** Nothing runs inline; after the run
   drains, each step's own `post_script` is replayed against the responses *that
   step* produced, and the tallies land on that step's entry in the breakdown
@@ -1091,8 +1118,12 @@ Three bounds, all applied by the engine itself (issue #985):
   are stored in **plaintext** in SQLite; `runs.config_snapshot` redacts its
   `auth` object to `{mode}` before persistence; and curl verbose logs redact the
   values of sensitive headers (`Authorization`, cookies, etc.). Token request
-  bodies/responses are never logged. On-disk encryption (`safeStorage`) and
-  mid-run token refresh are deferred.
+  bodies/responses are never logged. On-disk encryption (`safeStorage`) is
+  still deferred, and so is OS-keychain storage (out of scope for the transport
+  epic, #704 decision 6; the app runs Chromium with `use-mock-keychain`).
+  Mid-run token refresh
+  is **not** deferred: the [refresh watchdog](#load-test-mode) ships, and
+  re-acquires a load run's OAuth 2.0 token before it expires.
 - **Where the redaction line falls, and why it is not one line.** Two columns of
   a run row answer two different questions, and the split is deliberate:
   `runs.config_snapshot` records the request **as authored**, so

@@ -27,6 +27,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -413,6 +414,51 @@ class ScenarioRunnerTest : public ::testing::Test {
 // Sequence semantics
 // ============================================================================
 
+// A collection run in design mode is one user walking the sequence, so
+// `{{$vu}}` is 1 there and `{{$iteration}}` counts the passes (issue #994).
+// Through the real resolver, so the split this depends on is the one plan
+// resolution performs rather than one the test arranged.
+TEST_F (ScenarioRunnerTest, TheIterationIdentityBindsOnEveryPassOfADesignRun) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok?u={{$vu}}&i={{$iteration}}");
+
+    const auto run_id = start (/*iterations=*/3);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    EXPECT_EQ (seen[0].target, "/ok?u=1&i=0");
+    EXPECT_EQ (seen[1].target, "/ok?u=1&i=1");
+    EXPECT_EQ (seen[2].target, "/ok?u=1&i=2")
+    << "the identity must advance with the pass rather than freezing at "
+       "composition";
+}
+
+// Issue #995 moved the generator family out of plan composition, and a design
+// run walks the same plan a load run does - so this is the case where deferring
+// and never binding would put the literal `{{$randomUUID}}` on the wire. Three
+// passes, three different ids: the deferral and the runner's bind, both.
+TEST_F (ScenarioRunnerTest, AGeneratorBindsPerPassOfADesignRunRatherThanFreezing) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok?id={{$randomUUID}}");
+
+    const auto run_id = start (/*iterations=*/3);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    std::set<std::string> targets;
+    for (const auto& request : seen) {
+        EXPECT_NE (request.target, "/ok?id={{$randomUUID}}")
+        << "the deferred token reached the wire as it stands - nothing bound "
+           "it";
+        targets.insert (request.target);
+    }
+    EXPECT_EQ (targets.size (), seen.size ())
+    << "the three passes shared one generated id, which is the freeze this "
+       "issue removed";
+}
+
 TEST_F (ScenarioRunnerTest, RunsEveryStepOfEveryIterationInPlanOrder) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/ok");
@@ -535,6 +581,27 @@ TEST_F (ScenarioRunnerTest, TheIterationIndexAndCountReachTheStepsScripts) {
     EXPECT_EQ (seen[0].marker, "0/3");
     EXPECT_EQ (seen[1].marker, "1/3");
     EXPECT_EQ (seen[2].marker, "2/3");
+}
+
+// A collection run in design mode is one user walking the sequence, and its
+// scripts must be able to say so: `pm.info.vu` reads `1` here rather than
+// `undefined` (issue #994), which is what makes the number a script reads agree
+// with the one `{{$vu}}` binds into the request beside it.
+TEST_F (ScenarioRunnerTest, TheVirtualUserReachesTheStepsScriptsBesideTheIteration) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok",
+    R"(pm.request.headers.add({key: "X-Marker",
+       value: (typeof pm.info.vu) + ":" + pm.info.vu + "/" + pm.info.iteration});)");
+
+    const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    // The `typeof` half is the mutation check: drop the plumbing and the
+    // marker reads `undefined:undefined/0` rather than failing to compare.
+    EXPECT_EQ (seen[0].marker, "number:1/0");
+    EXPECT_EQ (seen[1].marker, "number:1/1");
 }
 
 // ============================================================================

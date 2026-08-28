@@ -36,6 +36,19 @@ export const queryKeys = {
 		examples: (id: string) => [...queryKeys.requests.detail(id), "examples"] as const,
 	},
 
+	// Deleted collections and requests (issue #988). One key: the engine reports
+	// every deleted root in one call and there is no per-entry read - restoring
+	// or purging one changes that same list.
+	//
+	// A sibling of `collections`/`requests` rather than a branch of them, because
+	// it is the complement of both: what those two list is exactly what this one
+	// does not, so a delete invalidates across the boundary in one direction and
+	// a restore in the other.
+	trash: {
+		all: ["trash"] as const,
+		list: () => [...queryKeys.trash.all, "list"] as const,
+	},
+
 	// Runs (history)
 	runs: {
 		all: ["runs"] as const,

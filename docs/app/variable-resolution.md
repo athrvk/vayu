@@ -39,11 +39,15 @@ fixture varies both fields so a divergence cannot hide.
 ## Priority order (lowest → highest)
 
 ```
-Globals  <  Collection chain (root → leaf)  <  Active environment
+Globals  <  Collection chain (root → leaf)  <  Active environment  <  Bound data row (bare column names)
 ```
 
 A variable set in the active environment always wins over a collection variable, which
-always wins over a global.
+always wins over a global. The fourth tier exists only **while a data row is
+bound** - a data-driven collection run, a load run given rows, or a single send
+bound to one row (issue #1007). With no dataset the ladder is the three-tier
+one it has always been; a bare name resolves exactly as it did before this
+tier existed.
 
 ### `data.*` is reserved, and sits outside this order
 
@@ -52,11 +56,44 @@ always wins over a global.
 namespace, disjoint from them: `{{data.id}}` and `{{id}}` are different names,
 so a data set can neither shadow nor be shadowed by a variable, and attaching a
 data file to a collection cannot change what its other tokens resolve to. That
-is what dissolves the precedence question rather than answering it.
+is what dissolves the precedence question rather than answering it, and
+nothing about it changed.
 
-Nothing in the tables above resolves such a token. Both resolvers - the
-engine's `resolve_template` and the renderer's `resolveTemplate` - leave it
-written exactly as it stands, because only a scenario run's iteration knows
+**A bound row's bare column names are a different rule, and they *are* a
+tier** (issue #1007). Postman binds a dataset's columns to bare names -
+`{{username}}`, not `{{data.username}}` - so an imported data-driven
+collection is written that way, and Vayu answering `{{username}}` from the
+scopes (or from nowhere) sent a request the file's author never wrote. While a
+row is bound, that row's own column names answer a bare `{{username}}` **above
+the active environment** - the ladder in the section above. A column the row
+does not carry is not a bind failure: the name falls through to the scopes
+exactly as it would with no dataset at all, which is what lets one script or
+one request work both with and without a data file.
+
+**Mechanically, neither spelling is substituted by composition.** A plan is
+composed once, before any row exists to bind - so composition can no more
+substitute a bare bound column than it can substitute `{{data.username}}`. It
+**defers** the token instead, leaving it written exactly as it stands, and the
+per-row bind (`core::apply_data_template`) is what joins *both* spellings
+against the row, through the same walk. That is what makes the two rules cost
+nothing extra to keep consistent: a bare column gets the identical JSON/XML
+escaping, the identical missing-column refusal, the identical null-cell
+refusal, and the identical header CRLF/NUL and header-collision refusals that
+`{{data.column}}` has always had. There is no second, looser substitution path
+for the bare spelling - see [Data-Driven Runs](data-driven-runs.md) for what
+those refusals say.
+
+**Which bare names a bind owns travels as a set of names, never values** - the
+engine fills it wherever a dataset is known (a collection or scenario run's
+plan, a single-request load run, a single send carrying one row), and a client
+composing ahead of a run of its own states it explicitly as the `dataColumns`
+field of [`POST /compose`](../engine/api-reference.md#post-compose): an array
+of the data file's column names, absent or `null` meaning no dataset and
+composition exactly as before.
+
+Nothing in the tables above resolves a `{{data.column}}` token. Both resolvers
+- the engine's `resolve_template` and the renderer's `resolveTemplate` - leave
+it written exactly as it stands, because only a scenario run's iteration knows
 which row is bound; the run's worker substitutes it immediately before each
 send. A `data.*` token in an ordinary Send therefore reaches the wire as
 written: there is no row. `{{data.}}` with nothing after the dot names no column
@@ -85,6 +122,163 @@ drift on them. See
 [api-reference.md](../engine/api-reference.md#scenario-runs) for what the
 engine does with the token once a row exists.
 
+### `$vu` and `$iteration` are reserved too, for the same reason
+
+`{{$vu}}` and `{{$iteration}}` name the run that is executing - which virtual
+user this request belongs to, and which of that user's iterations it is (issue
+#994). They are spelled like a dynamic variable and behave like `data.*`: both
+resolvers leave them written exactly as they stand, and the executor
+substitutes them immediately before each send, because the value belongs to the
+iteration rather than to the request.
+
+Being reserved is what makes them bindable at all. A variable someone happens
+to name `$vu` does **not** answer for the identity - unlike `$guid`, where a
+scope of that name wins (rule 1 below) - because a scope that could answer would
+substitute one value at composition and leave every iteration of the run sending
+it. That is the one thing these names exist to prevent. The two names are
+matched exactly, so `{{$vus}}` is an ordinary unknown `$name` and keeps its
+braces.
+
+What they resolve to depends on the shape of the run, and every shape has an
+answer:
+
+| Where | `{{$vu}}` | `{{$iteration}}` |
+|---|---|---|
+| A collection load run | the virtual user's own number, 1-based | that user's iteration, 0-based |
+| A single request under load | `1` | the submission's index, 0-based |
+| A collection run in design mode | `1` | the pass, 0-based |
+| A single Send | `1` | `0` |
+
+**A single request repeated is one user's iterations**, however many are in
+flight: `concurrency` says how many of them overlap, which is a different
+question from how many users there are. Virtual users that differ from one
+another are a collection load run's shape, and that is the run where `{{$vu}}`
+spans more than `1`. A run that needs distinct values per request without a
+collection uses `{{$iteration}}`, which is unique per submission - and is the
+same counter the data-row cursor claims from, so iteration *i* binds row
+*i % rows* and a script cannot be told it is on iteration 3 while holding row
+1's values.
+
+**Credentials are the one place they do not bind.** A `{{$vu}}` in a basic-auth
+username or a bearer token goes out written as it stands: a credential is
+encoded when the request is built, and the deferral that lets a *row* reach one
+first happens only in a run that has rows - so binding the identity there would
+work in a data-driven run and silently not in every other. #1055 tracks lifting
+that. Everywhere else binds: the URL, header names and values, the body and
+both halves of every form field, each escaped for the document it lands in.
+
+### D18 - a bound row's bare column names outrank the environment (issue #1007)
+
+This repo labels the decisions #226 recorded D1, D2, D16, D17. This one is
+new, and it is not from #226: recorded here as **D18**.
+
+**What it costs.** #402 deliberately bought the property that attaching a data
+file to a collection cannot change what any existing token resolves to -
+`{{id}}` and `{{data.id}}` were guaranteed different names, full stop. D18
+trades part of that away: a collection whose data file happens to have a
+column sharing a variable's name now resolves that name differently while a
+row is bound than it does on a plain Send. That is a real, deliberate
+narrowing of #402's guarantee.
+
+**Why it is worth it anyway.** The owner's standing direction prefers Postman
+compatibility here: Postman binds a dataset's columns bare, so every imported
+data-driven collection is already written `{{username}}`, and #402's guarantee
+was making every one of those requests send the literal token instead of the
+row's value (see [`{{data.*}}` puts the row into the request
+itself](../engine/api-reference.md#scenario-runs)). A collection that never
+attaches a data file, or whose columns share no variable's name, pays nothing.
+
+**Why the reserved `data.*` spelling is kept too.** `{{data.username}}` still
+addresses the column even where no row is bound, still refuses a header a
+value would forge with the same message, and can never collide with a
+same-named variable - it is the collision-proof spelling for a request written
+by hand, or shared with people who are not relying on Postman muscle memory.
+D18 does not replace it; it adds the bare spelling beside it, at Postman's
+position in the ladder.
+
+**Why the deferral is what makes both work at once.** Composition already had
+to leave `{{data.*}}` unresolved, because a plan is composed once and a row is
+bound per iteration - D18 gives a bare bound column the identical treatment,
+so both spellings reach the same bind-time join and the same refusal rules.
+Nothing about the two rules can drift, because there is only the one path that
+substitutes either of them.
+
+**What the builder's preview shows now (issue #1062).** With a row picked, a
+Send previews the bind as well as the composition: a bare `{{username}}` and
+the reserved `{{data.username}}` both show the row's own cell - the URL bar's
+preview line, the params and body previews, every key-value row, and resolved
+auth - above the environment, the tier this section names. That is what the
+send is about to put on the wire, not composition's guess at it.
+
+**A pick lasts until a Send that does not carry it.** Send and the send chord
+both send *without* a row, so the pick is cleared by one: a row left standing
+across a plain Send would put the file's value in every preview beside a request
+that had just gone out with the environment's, which is this same disagreement
+arrived at from the other side. Nothing else clears it - the picker's memory
+still survives a tab switch and a return (issue #659), because neither of those
+is a send.
+
+**Why the renderer can show this and composition cannot.** A plan is composed
+once, before any row exists to bind, so composition still defers both
+spellings exactly as above. The preview goes further only because it holds
+something composition never does: the picked row itself, threaded from
+`RequestBuilderProvider`'s per-request row memory into
+`useVariableResolver({ boundRow })`. With it, `resolveString` reads
+`resolveTemplateWithRow` (`app/src/lib/variable-resolution.ts`) instead of
+`resolveTemplate` - a restatement of the engine's own
+`resolve_template_with_data`, the function `pm.variables.replaceIn` reaches
+for the same reason (issue #890), not a second rule invented for the preview.
+A collection run, a load run and a scenario step still bind their row during
+the run itself, so nothing about them changes: this is the one caller, a
+single Send, that now happens to hold the row before the request goes out.
+
+**The paint stays the accent; the popover now says why (issue #1064).** The
+token *state* `VariableInput` paints is unchanged: a bare name still paints as
+a bound column only where no scope defines it, and a shadowed bare name still
+paints as the variable, in the same accent it always has. That was the open
+question this section used to leave for later, and it has been decided rather
+than merely left open: the accent stays, and the explanation is what moves.
+Opening `VariablePopover` on a shadowed name while a row is picked now names
+the row as the origin - unstruck, above the definitions it beat, which render
+struck beneath it exactly as any other shadowed definition does - so the
+popover states plainly that the row's cell, not the environment's value, is
+what the send will use. The hover tooltip reads the same way, from the same
+origins list, because hovering and clicking are two readings of one token and a
+token that answers them differently is worse than one that answers both
+wrongly.
+
+A name that **no** scope defines but the row does is the same claim in the
+other direction, and it stops being reported as undefined: the destructive red
+states a token that reaches the server with its braces still on, and this one
+does not. The chip reads `row`, the popover names the column, and a create
+offer - still worth making, since the variable answers every row-less send -
+says what the row already answers rather than implying the token is unanswered.
+
+**What the tab strip shows, and how the row reaches it (issue #1074).** A tab's
+title resolves through one list-wide `useVariableResolver()` in
+`app/src/components/layout/tab-descriptors.ts` - the strip has to know each
+label before it can decide how many fit, and a hook inside a map is a variable
+number of hooks - so the strip is the one preview surface that is not below the
+builder's provider and cannot take the row off its context. Left alone it
+labelled a tab from the environment while the bar one row beneath it showed the
+file's value, which is the same one-bind-two-answers split as above wearing a
+different coat.
+
+The row crosses that boundary through `bound-row-store.ts`: one slot, holding
+the row the open builder is bound to **and the id of the request it is bound
+for**. One slot rather than a map because the builder binds a row for the
+request it is showing, so that is the only request an on-screen preview can be
+bound for; publishing a row per remembered index would be publishing rows out of
+a file that is no longer the one loaded. The id is what makes a reader check
+rather than assume, so a slot left standing cannot relabel the next tab. It is
+never persisted and is cleared when the builder unmounts, on the rule the rows
+have carried since #601: they must not outlive the send that uses them.
+
+`resolveString` takes the row as an optional second argument for this one
+caller. Every other caller names its row once, as `useVariableResolver`'s
+`boundRow` option, because it resolves for a single request; the strip resolves
+for all of them at once and so has to say which row per call.
+
 ### Which contract answers for a request: nearest declared ancestor
 
 A collection can **declare** the columns its data files carry (the Data tab,
@@ -110,10 +304,16 @@ run with a mismatched file is still the user's to start. Declared columns are
 also completed: `{{data.` offers them in the request fields and the body editors,
 and `pm.iterationData.get("` offers them in the script editors (see below).
 
-The script panel's **"Referenced:" chips** read the same three states (issue
-#604). They used to paint a name red whenever no scope defined it, which for a
-`data.*` name is always - the reading that made a working column look broken in
-a row whose whole job is to say whether a name resolves.
+The script panel's **"Names mentioned:" chips** read the same three states
+(issue #604). They used to paint a name red whenever no scope defined it, which
+for a `data.*` name is always - the reading that made a working column look
+broken in a row whose whole job is to say whether a name resolves. A column
+reached by its **bare** name gets that same paint (issue #1063): a script reads
+one through `pm.iterationData.get("email")`, or through `pm.variables.get("email")`
+while no scope defines `email`, and both are the column `{{data.email}}` names.
+The accessor is what decides, not the spelling - `pm.environment.get("email")`
+cannot see the row whatever the collection declares, so it stays an ordinary
+variable chip.
 
 The **audit** in the Data tab is the same comparison in the other direction -
 the declared columns against the tokens the collection's requests actually
@@ -220,6 +420,16 @@ The variable popover renders this as its "also defined" list. `VariableOrigin`
 carries `enabled` and an explicit `winner` flag - once disabled definitions are
 in the list, "last" and "wins" are different things.
 
+**Since issue #1064, the bound row is layered on top of this list, not into
+the scope ladder it is built from.** While a row is picked and its column
+answers the name, `getVariableOrigins` appends a `{ scope: "row" }` origin
+after the scope-derived ones and takes `winner` away from whichever of them
+had it - the row is what the send will use, so only it may claim the flag. The
+layering happens in this accessor alone: `originsByName`, the ladder
+`variableMap` and therefore `getVariable` / `getAllVariables` resolve from, is
+untouched, so a picked row still cannot make `ResolvedVariable.scope` report
+anything but a scope someone could actually write to.
+
 `ResolvedVariable.sourceId` / `sourceName` name the specific environment or
 collection the winning value came from (absent for `global`), so the popover can
 say *which* environment rather than just "Environment".
@@ -307,6 +517,38 @@ assigning to `pm.request.headers`, an auth credential, an import, a payload
 posted straight to `POST /execute` - is refused before the transfer starts,
 naming the header instead of a variable.
 
+### The other one: a header a variable would erase (#1051)
+
+A header *name* is substituted like anything else, and the map it lands in holds
+one value per name. So two names that resolve alike do not both go out:
+`{{tenant_header}}: acme` beside a literal `X-Tenant: legacy` is one header once
+the variable answers `X-Tenant`, and the other is gone. Names are compared
+without case, so a `{{h}}` resolving to `authorization` takes the place of an
+`Authorization` typed beside it.
+
+That is the same quiet wrong request as the one above with the fault reversed -
+there a value forges a header, here a name erases one - so it gets the same
+answer: a `400` with code `colliding_header_names`, naming both spellings as
+written and the name they produced. Repair is not on offer for the reason it is
+not offered above: the two names are equally the author's, so choosing one is
+inventing an intention, and "whichever the map reached last" is an
+implementation detail rather than a rule.
+
+**Only a collision resolution made is refused.** Two names typed into one
+request are two lines visible side by side, and the later one has always won;
+what this refuses is the collision that is invisible until the request comes
+back wrong. The distinction is the one [data-driven
+runs](./data-driven-runs.md) already draw for a bound row.
+
+The rule has three layers too, one definition
+(`engine/include/vayu/http/header_names.hpp`): the bind-time one naming the
+column and the row, composition's `400`, and the execute-time residual pass -
+which rebuilds the same map after a pre-request script has run, and so can meet
+a collision composition never saw. It refuses in the same words, as a failed
+send rather than a rejected payload. The pre-send gate is deliberately *not* the
+backstop here, and cannot be: by the time it sees a request the erased header is
+already missing, with nothing left to notice.
+
 ---
 
 ## Dynamic variables
@@ -368,7 +610,10 @@ Three rules decide what happens at a token:
    this table cannot change what an existing request sends.
 2. **One value per occurrence.** Two `{{$guid}}` in one body are two different
    ids, which is the reason to write them. The table holds functions, not
-   precomputed values.
+   precomputed values. The two reserved identity names above are the deliberate
+   exception and are not in this table: two `{{$iteration}}` in one request are
+   one iteration, because they name a fact about the send rather than generate a
+   value for it.
 3. **An unknown `$name` keeps its braces.** `{{$randomInteger}}` (not a name
    Vayu has) is sent as that literal text rather than resolving to `""`. The `$`
    is a declaration of intent, and a typo that silently emptied a field is the
@@ -404,12 +649,31 @@ value per occurrence. `pm.variables.get("$guid")` (getter fall-through to the
 generators) is deliberately not wired. See
 [pm API compatibility](./pm-api-compatibility.md).
 
-**Load runs generate once, not per iteration.** A run's request half is
-composed once (`POST /compose`) and then handed to the engine, which repeats
-it - so every request in the run carries the *same* `{{$guid}}`. The load-test
-dialog says so when the request contains one. Per-iteration values would mean
-interpolating on the load generator's hot path (which targets 60k+ RPS), and
-were deliberately kept out of #226's scope.
+**Load runs generate per iteration, not once** (issue #995). A run's request
+half is composed once (`POST /compose`) and then handed to the engine, which
+repeats it - so a value generated at composition would be the *same* `{{$guid}}`
+on every request of every virtual user, which is the opposite of what a
+unique-id token is written for. A composition made for a run therefore says so
+(`deferDynamicVariables`), and the family is left written as it stands, exactly
+as `{{data.column}}` and the two identity names are: the run's executor
+generates a fresh value per occurrence, immediately before each send.
+
+The hot path is what shaped the fix rather than what blocked it. A generator has
+to *run* per occurrence per iteration, where `{{$vu}}` and `{{$iteration}}`
+(issue #994) substitute two integers the executor is already holding - so the
+cost is not made free, it is made *conditional*: a request spelling no generator
+has nothing left for the compose-time scan to find, its template is empty, and
+the executor tests that before doing anything. A run that does not use the
+family pays what it always did. What a run that uses it pays is one table call
+per token per iteration, on the same walk that binds a data row.
+
+Two things this does not change. A **Send** composes once and sends once, so it
+still generates at composition - `POST /compose` defers only when the caller
+asks. And a generator inside an **auth credential** is still generated once, at
+composition: `apply_auth` encodes a credential when the request is built - basic
+auth collapses into one base64 value - so a token left for the bind would go out
+as base64 of its own text. That exception is the deferral issue #1055 carries,
+and it is the same reason a credential does not carry `{{$vu}}` either.
 
 ### The engine copy of the table
 
@@ -419,6 +683,12 @@ autocomplete and preview. **The two must list the same names**: the
 conformance fixture pins the name set, and both suites compare their table
 against it, so a name added to one side fails the other side's suite. (MCP's
 `dynamic-variables.ts` copy is deleted - MCP composes via the engine.)
+
+`$vu` and `$iteration` are deliberately in neither table - they generate
+nothing, and a renderer entry that produced a value would make the preview show
+a number the engine will not send. They are reserved names on both sides
+instead, and the fixture pins that too: a case asserts each stays written as it
+stands, and another that a variable of the same name does not answer for it.
 
 ---
 
@@ -505,7 +775,11 @@ A script reads a scope by name (`pm.environment.get`,
 `pm.collectionVariables.get`, `pm.globals.get`) or reads across all three with
 `pm.variables.get`, which walks **environment → collection → global** and stops
 at the first scope that has the name enabled - this page's priority order, read
-from the top down.
+from the top down. While a row is bound, `pm.variables.get` (and `.has` and
+`.toObject`) checks that row's bare column names **first**, above all three
+scopes - the same D18 tier the ladder above adds, reached from a script. See
+[scripting.md](../engine/scripting.md#variables-pmvariables) and
+[pm API compatibility](./pm-api-compatibility.md) for the details.
 
 The collection scope a script reads is the **whole chain**, the same one
 `{{name}}` merges (issue #234; `load_script_variable_scopes` in
@@ -545,12 +819,13 @@ list is deliberately *not* registered for `javascript`: braces are not the
 syntax in a script, so offering them there would teach the wrong thing. The
 names are the same names; only the place you type them differs.
 
-Three rules make the offered set match what the call can actually read:
+These rules make the offered set match what the call can actually read:
 
 - **The accessor picks the scope.** `pm.environment.get` lists environment
   variables only, because that is the one scope it reads - a collection
   variable offered there would be a name that returns `undefined`. Only the
-  merged `pm.variables.get` lists all three.
+  merged `pm.variables.get` lists all three, and it alone also lists the
+  declared columns (below), because it alone reads both.
 - **Collection variables come from the active tab.** Collection scope is
   explicit-only (see *Collection scope is explicit only* above) and a Monaco
   completion provider is registered once per *language*, not per editor, so it
@@ -574,6 +849,23 @@ Three rules make the offered set match what the call can actually read:
   surface is `undefined` outside a data-driven run or a send-with-row, and its own documentation
   tells scripts to guard before calling. Nothing is offered when the chain
   declares no contract.
+- **`pm.variables` completes both, because it reads both.** A bound row answers
+  bare column names through the merged accessor, above every scope (issue
+  #1007), so the declared columns are blended into its list beside the
+  variables (issue #1063) - as bare names inside `get("…")` / `has("…")`, and
+  as `{{column}}` tokens inside `replaceIn`, which resolves them from the same
+  row. They carry the field icon and name their declaring collection, so a
+  column is distinguishable from a variable at a glance, and a name that is
+  both is offered twice on purpose: the row wins while one is bound and the
+  scope answers when none is. The single-scope accessors never see the row, so
+  no column is offered there. **The prefixed `{{data.column}}` spelling is
+  offered to `replaceIn` and to nothing else** (issue #1077): `replaceIn`
+  resolves both spellings from the same row, so withholding one of two that
+  work would be the same gap, while `pm.variables.get("data.email")` reads no
+  column at all - the namespace is disjoint from the scopes there - and
+  offering it in a name argument would teach a call that returns `undefined`.
+  The bare entry says `(bare)` only where the prefixed one sits beside it,
+  since that word exists to tell two adjacent spellings apart.
 - **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a
   template and interpolates it, so it gets brace-style completion including
   `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no
@@ -594,3 +886,8 @@ the two lists never appear together.
 | `"global"`    | Came from globals              |
 | `"collection"`| Came from any collection layer |
 | `"environment"`| Came from the active environment |
+
+`VariableOrigin.scope` is wider - a `VariableOriginScope` (`VariableScope |
+"row"`) - because the origins list can also carry a bound row. It has no row in
+this table: nobody wrote a row's cell and nothing can edit it, so it is never a
+value `ResolvedVariable.scope` reports or a target `updateVariable` writes to.

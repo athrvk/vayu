@@ -13,6 +13,7 @@ import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
 import { SettingsCategoryTree } from "@/modules/settings";
 import { ServicesPanel } from "@/modules/services";
+import { TrashList } from "@/modules/trash";
 
 export function Drawer() {
 	const { drawerOpen, drawerView, drawerWidth, setDrawerWidth } = useLayoutStore();
@@ -24,7 +25,7 @@ export function Drawer() {
 	return (
 		/* <aside>, so the sidebar is a landmark a screen reader can jump to
 		   instead of an anonymous div. Labelled by the active view because the
-		   drawer hosts five different panels - "Complementary" alone would not
+		   drawer hosts six different panels - "Complementary" alone would not
 		   say which one is showing. */
 		<aside
 			className="relative flex shrink-0 bg-panel"
@@ -44,6 +45,7 @@ export function Drawer() {
 				{drawerView === "history" && <HistoryList />}
 				{drawerView === "variables" && <VariablesCategoryTree />}
 				{drawerView === "services" && <ServicesPanel />}
+				{drawerView === "trash" && <TrashList />}
 				{drawerView === "settings" && <SettingsCategoryTree />}
 			</div>
 

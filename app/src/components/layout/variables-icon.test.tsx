@@ -109,14 +109,14 @@ describe("the variables icon", () => {
 		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
 		const buttons = Array.from(nav.querySelectorAll("button"));
 
-		// Five since Services joined the strip (issue #502).
-		expect(buttons).toHaveLength(5);
+		// Six since Trash joined the strip (issue #989).
+		expect(buttons).toHaveLength(6);
 		const perButton = buttons.map((b) => iconNames(b).join("+"));
 		expect(new Set(perButton).size).toBe(perButton.length);
 	});
 
 	it("keeps the bolt out of the drawer switchers entirely", () => {
-		// `Zap` means "load test" in this app. Any of the five wearing it would
+		// `Zap` means "load test" in this app. Any of the six wearing it would
 		// re-introduce the same misreading in a different slot.
 		renderDock();
 		const nav = screen.getByRole("navigation", { name: "Sidebar views" });

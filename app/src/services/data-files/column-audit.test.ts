@@ -209,4 +209,66 @@ describe("auditDataColumns", () => {
 		expect(audit.undeclared).toEqual([]);
 		expect(audit.referenced).toEqual(["id"]);
 	});
+
+	/*
+	 * Bare column names (issue #1007): Postman binds a dataset's columns bare,
+	 * and a bound row now substitutes `{{column}}` exactly as it substitutes
+	 * `{{data.column}}` - so a scan that recognised only the prefixed spelling
+	 * would call a working, bound `{{username}}` "declared but not referenced",
+	 * which is the false negative that gets a working column deleted.
+	 */
+	describe("bare column names (issue #1007)", () => {
+		it("counts a bare {{column}} as a reference when it names a declared column", () => {
+			// Revert to the pre-#1007 scan (`dataColumnName` only) and this column
+			// falls to `unreferenced` instead - the exact false negative the fix
+			// exists to close.
+			const audit = auditDataColumns(
+				["username"],
+				[request({ url: "https://x/{{username}}" })]
+			);
+			expect(audit.referenced).toEqual(["username"]);
+			expect(audit.unreferenced).toEqual([]);
+		});
+
+		it("does not treat a bare name outside the contract as any kind of column reference", () => {
+			// `baseUrl` is an ordinary variable token here, not a column typo - it
+			// must land in neither `undeclared` (that bucket is for a `data.*` typo)
+			// nor `referenced`. Widening the bare match to "every name" would flood
+			// `undeclared` with every ordinary variable a request ever uses.
+			const audit = auditDataColumns(
+				["username"],
+				[request({ url: "https://x/{{baseUrl}}/{{username}}" })]
+			);
+			expect(audit.undeclared).toEqual([]);
+			expect(audit.referenced).toEqual(["username"]);
+		});
+
+		it("collapses both spellings of the same column into one reference", () => {
+			const audit = auditDataColumns(
+				["id"],
+				[request({ url: "https://x/{{id}}/{{data.id}}" })]
+			);
+			expect(audit.referenced).toEqual(["id"]);
+		});
+
+		it("counts a bare column bound into a credential the request configures", () => {
+			// The #729 walk (auth) has to see the bare spelling too, not just URL
+			// and headers - a basic-auth pair written Postman-style is exactly the
+			// #1007 flagship case.
+			const audit = auditDataColumns(
+				["user", "password"],
+				[
+					request({
+						resolvedAuth: {
+							mode: "basic",
+							username: "{{user}}",
+							password: "{{password}}",
+						},
+					}),
+				]
+			);
+			expect(audit.referenced).toEqual(["user", "password"]);
+			expect(audit.unreferenced).toEqual([]);
+		});
+	});
 });

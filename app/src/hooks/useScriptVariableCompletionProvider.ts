@@ -40,6 +40,11 @@
  * tokens are validated against, so what an editor offers and what the builder
  * paints green cannot disagree.
  *
+ * **`pm.variables` completes both** (issue #1063). It is the one accessor that
+ * reads a bound row's bare column names *and* the three scopes (issue #1007),
+ * so its list is the union - a column offered there is a name the call really
+ * can return, which is the rule every other list here already follows.
+ *
  * Call once (in App). A completion provider is global per language, so a single
  * registration covers every script editor instance. The same shape as
  * `useScriptCompletionProvider` and `useVariableCompletionProvider` beside it.
@@ -53,6 +58,7 @@ import { useActiveCollectionId } from "./useActiveCollectionId";
 import { useDataContract } from "./useDataContract";
 import { scriptVariableCompletionContext } from "@/lib/script-variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
+import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
 
 /** Script editors mount with language="javascript". */
 const SCRIPT_LANGUAGE = "javascript";
@@ -61,6 +67,13 @@ const CLOSE_BRACES = "}}";
 
 /** The resolver's own precedence, so the winning definition sorts first. */
 const SCOPE_ORDER: Record<string, number> = { environment: 0, collection: 1, global: 2 };
+
+/**
+ * Columns sort after every scope and before the generators, the same grouping
+ * the body editor's list uses - so a column never displaces a name the call
+ * resolves today, and the two lists order the same things the same way.
+ */
+const DATA_SORT_GROUP = 7;
 
 /** Sorts after every scope above, so a generator never outranks a real variable. */
 const DYNAMIC_SORT_GROUP = 8;
@@ -154,9 +167,93 @@ export function useScriptVariableCompletionProvider() {
 					}));
 
 				/*
+				 * Declared columns, blended into the merged accessor and nowhere
+				 * else (issue #1063). A bound row answers bare column names
+				 * through `pm.variables` above every scope (issue #1007), so a
+				 * column is one of the names that call can return - and it was
+				 * the one such name the list never offered, which makes it a
+				 * column you have to already know to use.
+				 *
+				 * The single-scope accessors never see the row, and
+				 * `pm.iterationData` answered from the branch above, so neither
+				 * reaches here. `replaceIn` does, and belongs:
+				 * `resolve_template_with_data` resolves a bare `{{email}}` from
+				 * the row for it too, so leaving it out would take a condition
+				 * written only to preserve the gap.
+				 *
+				 * The columns come from the contract rather than from `variables`
+				 * because the namespace is disjoint from the scopes - no variable
+				 * can carry one. A name that is both a column and a variable is
+				 * offered twice on purpose: the row wins while one is bound and
+				 * the scope answers when none is, and a single entry would have
+				 * to hide one of those.
+				 *
+				 * **Only `replaceIn` gets the prefixed spelling** (issue #1077), and
+				 * the asymmetry is the rule rather than an oversight: `replaceIn`
+				 * resolves `{{data.email}}` and `{{email}}` from the same row, so
+				 * withholding one of two spellings that work would be the same gap
+				 * this fixes; `pm.variables.get("data.email")` reads no column at
+				 * all, the namespace being disjoint from the scopes there, so
+				 * offering it in a name argument would teach a call that returns
+				 * `undefined`.
+				 */
+				if (context.scope === "all") {
+					for (const column of dataColumns?.columns ?? []) {
+						if (template) {
+							const prefixed = `${DATA_NAMESPACE_PREFIX}${column}`;
+							suggestions.push({
+								label: prefixed,
+								kind: monaco.languages.CompletionItemKind.Field,
+								insertText: wrap(prefixed),
+								detail: `Data column - ${dataColumns?.collectionName}`,
+								documentation:
+									"Bound per iteration by a collection run's data file. The prefixed spelling can never collide with a variable.",
+								// The same group as the bare spelling below, so one column's
+								// two entries sit together rather than scattering.
+								sortText: `${DATA_SORT_GROUP}${column}`,
+								filterText: wrap(prefixed),
+								range,
+							});
+						}
+						suggestions.push({
+							label: column,
+							// `Field`, not `Variable`: the icon is the only thing in
+							// the list saying this is a column of a run's row rather
+							// than a name some scope defines.
+							kind: monaco.languages.CompletionItemKind.Field,
+							insertText: wrap(column),
+							/*
+							 * `(bare)` only where the prefixed entry is beside it: the
+							 * word exists to tell two adjacent spellings apart, and in
+							 * the `get` / `has` list - which offers one - it would draw
+							 * a contrast that list does not contain.
+							 */
+							detail: template
+								? `Data column (bare) - ${dataColumns?.collectionName}`
+								: `Data column - ${dataColumns?.collectionName}`,
+							documentation:
+								"Bound per iteration by a collection run's data file. A bound row answers this name above every scope; with no row bound, the scopes answer it.",
+							sortText: `${DATA_SORT_GROUP}${column}`,
+							filterText: wrap(column),
+							range,
+						});
+					}
+				}
+
+				/*
 				 * Generators only exist during interpolation, so they belong to
 				 * `replaceIn` and nowhere else here: `pm.variables.get("$guid")` is
 				 * not a lookup that resolves, it returns `undefined`.
+				 *
+				 * `{{$vu}}` / `{{$iteration}}` are deliberately absent from this
+				 * list, unlike the `{{`-completion in the URL and body editors
+				 * (issue #994). They are bound into the *request* by the send, and
+				 * `replaceIn` runs inside the script: the engine's resolver leaves
+				 * them written as they stand there, so offering them here would
+				 * offer a token that cannot resolve where it was offered. A script
+				 * reads `pm.info.vu` / `pm.info.iteration` instead. #1057 is the
+				 * record of teaching `replaceIn` the identity, which is what would
+				 * make this list right to extend.
 				 */
 				if (template) {
 					for (const dynamic of DYNAMIC_VARIABLES) {

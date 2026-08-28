@@ -99,7 +99,6 @@ function open(props: Partial<React.ComponentProps<typeof LoadTestConfigDialog>> 
 			onStart={onStart}
 			isStarting={false}
 			hasPreRequestScript={false}
-			hasDynamicVariables={false}
 			isStreamingRequest={false}
 			{...props}
 		/>
@@ -251,12 +250,17 @@ describe("data rows (issue #993)", () => {
 		expect(screen.queryByText(/one iteration per row/i)).not.toBeInTheDocument();
 	});
 
-	it("sends the parsed rows on the payload", async () => {
+	it("sends the parsed rows and their column names on the payload", async () => {
 		const { onStart } = open();
 		pick(new File(["id\na\nb"], "rows.csv"));
 		await screen.findByText(/rows\.csv/);
 
-		expect(started(onStart).data).toEqual([{ id: "a" }, { id: "b" }]);
+		const config = started(onStart);
+		expect(config.data).toEqual([{ id: "a" }, { id: "b" }]);
+		// The names travel with the rows because the run composes before it
+		// starts, and composition has to leave a bare `{{id}}` for the per-row
+		// bind instead of resolving it from the variable scopes (issue #1007).
+		expect(config.dataColumns).toEqual(["id"]);
 	});
 
 	it("sends no `data` key at all when no file was picked", () => {
@@ -264,7 +268,9 @@ describe("data rows (issue #993)", () => {
 		// rather than running it, so an empty array would turn "no data set"
 		// into a 400.
 		const { onStart } = open();
-		expect(started(onStart)).not.toHaveProperty("data");
+		const config = started(onStart);
+		expect(config).not.toHaveProperty("data");
+		expect(config).not.toHaveProperty("dataColumns");
 	});
 
 	it("refuses to start while the picked file cannot be read", async () => {
@@ -479,23 +485,24 @@ describe("notices", () => {
 	});
 
 	/*
-	 * Interpolation happens once, app-side, before the run payload is sent, so a
-	 * `{{$guid}}` is the *same* id on every iteration. That is the least visible
-	 * way to get a load test wrong - the run succeeds and the data is quietly
-	 * degenerate - so the dialog has to say it out loud.
+	 * The dialog used to warn that `{{$guid}}` resolved once and repeated on
+	 * every iteration - true when this test last named a prop, false since
+	 * issue #995: the load path composes with `deferDynamicVariables`, so the
+	 * engine generates a fresh value per iteration instead. Nothing about the
+	 * request's own dynamic variables belongs in this dialog any more.
 	 */
-	it("warns that a run generates a dynamic variable only once", () => {
-		open({ hasDynamicVariables: true });
-		expect(screen.getByText(/Dynamic variables are generated once/)).toBeInTheDocument();
+	it("says nothing about dynamic variables while still rendering its notices", () => {
+		// Opened with a notice that *is* still real, so the absence below is
+		// this dialog having nothing to say about generators rather than the
+		// notice list being empty - an assertion that scanned nothing would
+		// pass whatever the callout did.
+		open({ hasPreRequestScript: true });
+		expect(screen.getByText("Pre-request script will not run")).toBeInTheDocument();
+		expect(screen.queryByText(/dynamic variable/i)).toBeNull();
 	});
 
-	it("says nothing when the request has no dynamic variable", () => {
-		open();
-		expect(screen.queryByText(/Dynamic variables are generated once/)).toBeNull();
-	});
-
-	it("keeps the warning advisory - it does not gate Start", () => {
-		open({ hasDynamicVariables: true });
+	it("keeps an advisory notice from gating Start", () => {
+		open({ hasPreRequestScript: true });
 		expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled();
 	});
 

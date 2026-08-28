@@ -35,6 +35,12 @@
  * resolver's map, and they are a group of their own between the variables and
  * the generators.
  *
+ * **Each declared column offers both spellings a bound row answers** (issue
+ * #1007): `{{data.email}}`, the collision-proof one that a scope can never
+ * shadow, and bare `{{email}}`, the one an imported Postman collection is
+ * already written with. Each carries its own `detail` naming which is which,
+ * so picking one from the list is a deliberate choice rather than a guess.
+ *
  * Called once, in App - a completion provider is global per language, so one
  * registration covers every editor instance. The same shape as
  * `useScriptCompletionProvider` beside it.
@@ -48,6 +54,7 @@ import { useActiveCollectionId } from "./useActiveCollectionId";
 import { useDataContract } from "./useDataContract";
 import { variableCompletionContext } from "@/lib/variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
+import { ITERATION_VARIABLES } from "@/lib/iteration-variables";
 import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
 
 const CLOSE_BRACES = "}}";
@@ -64,6 +71,13 @@ export const BODY_LANGUAGES = ["json", "plaintext", "graphql"];
 
 /** The resolver's own precedence, so the winning definition sorts first. */
 const SCOPE_ORDER: Record<string, number> = { environment: 0, collection: 1, global: 2 };
+
+/**
+ * Between the scopes and the data columns: `$vu` / `$iteration` are a
+ * reserved namespace like `data.*`, not a generator, so they sort with the
+ * other reserved things rather than among the `$random*` table.
+ */
+const ITERATION_SORT_GROUP = 6;
 
 /**
  * Between the scopes and the generators: a declared column is workspace data
@@ -139,6 +153,25 @@ export function useVariableCompletionProvider() {
 				}));
 
 				/*
+				 * The reserved identity namespace (issue #994). Offered unconditionally
+				 * - unlike the generators below, a same-named scope variable never wins
+				 * here (`variable-resolution.ts` reserves the names ahead of the scope
+				 * lookup), so there is no shadow check to make.
+				 */
+				for (const identity of ITERATION_VARIABLES) {
+					suggestions.push({
+						label: identity.name,
+						kind: monaco.languages.CompletionItemKind.Constant,
+						insertText: `{{${identity.name}${closing}`,
+						detail: identity.description,
+						documentation: "Bound per iteration by the run, not generated here",
+						sortText: `${ITERATION_SORT_GROUP}${identity.name}`,
+						filterText: `{{${identity.name}`,
+						range,
+					});
+				}
+
+				/*
 				 * Dynamic variables sort after every user variable: they are offered
 				 * in every workspace, whatever it holds, so interleaving them would
 				 * push a collection's own names down the list. `Function`, not
@@ -177,6 +210,21 @@ export function useVariableCompletionProvider() {
 						documentation: "Bound per iteration by a collection run's data file",
 						sortText: `${DATA_SORT_GROUP}${name}`,
 						filterText: `{{${name}`,
+						range,
+					});
+					// The bare spelling a bound row answers too (issue #1007) - Postman's
+					// own spelling, and what an imported collection is already written
+					// with. Same sort group as the prefixed form above so the two sit
+					// together instead of scattering.
+					suggestions.push({
+						label: column,
+						kind: monaco.languages.CompletionItemKind.Field,
+						insertText: `{{${column}${closing}`,
+						detail: `Data column (bare) - ${dataColumns?.collectionName}`,
+						documentation:
+							"Postman-style: a bound row answers this name directly, above the environment. Collides with a same-named variable while a row is bound - data.* never does.",
+						sortText: `${DATA_SORT_GROUP}${name}`,
+						filterText: `{{${column}`,
 						range,
 					});
 				}

@@ -202,6 +202,104 @@ that. `phaseHistograms` (engine config) and `phase_histograms` (per run) turn it
 off for anyone whose target proves otherwise; off leaves the bank unallocated,
 so the completion path pays one null check.
 
+### The iteration identity: unresolvable against this host's noise (2026-08-27, engine 0.23.0)
+
+`{{$vu}}` / `{{$iteration}}` (issue #994) bind per submission on the load path,
+which is the kind of change #992's throughput guard exists for. Two questions,
+measured separately, and neither answer is a number this host can pin down as
+tightly as the `phaseHistograms` measurement above pinned its own.
+
+**The bind, when a run uses it.** One daemon, three arms interleaved and rotated
+per round so drift lands on all three - a plain URL (`off`), the same URL with
+the query the tokens would produce written out (`?u=1&i=0`), and the same URL
+with the tokens in it. `constant_concurrency`, c=32, 6 s per arm, 12 rounds,
+retention effectively off (a sampling period of 100000).
+
+| Arm | Median req/s | Mean | Min | Max |
+|---|---|---|---|---|
+| off (no query, no tokens) | 33 160 | 32 816 | 28 609 | 35 876 |
+| literal (`?u=1&i=0`) | 32 367 | 32 611 | 29 322 | 35 627 |
+| on (`?u={{$vu}}&i={{$iteration}}`) | 32 145 | 32 386 | 29 179 | 35 071 |
+
+**The bind alone is `on` against `literal`** - identical bytes on the wire and
+identical work at the target, differing only in the join: **-0.68%** on medians.
+The two arms' own min-max spans are ~20% wide, so that figure bounds the cost
+rather than measuring it.
+
+**The feature-off path, against master.** The same payload with no reserved
+token at all, run against `master`'s binary and this branch's, one daemon at a
+time, alternating every round (12 rounds, 5 s, c=32): a paired median of
+**-2.48%**. That is not a result on its own, and the null test is why - the same
+harness with **this branch's binary in both arms** reports **-1.39%**, so
+roughly that much of it is the harness rather than the code. What is left is
+inside a per-round spread running from -12% to +6%.
+
+**Verdict: no change is resolvable here, and the structural claim is what the
+guard rests on.** A request spelling no reserved token has an empty template,
+which the submission path tests before doing anything: no copy, no bind, the
+same submit of the same shared request
+(`LoadIdentityTest.ARunWithoutTheTokensCarriesAnEmptyTemplate` asserts the empty
+template rather than the throughput). What every load run does now pay is one
+unsynchronised `size_t` increment per submission on the sole producer thread -
+the counter that lets any run tell a deferred script which iteration a sampled
+response was sent in. Anyone re-measuring should do it on a quiet host: this one
+is a 4-core container running the Go mock server beside the engine, and a single
+arm's own runs vary by more than either effect being looked for.
+
+### Per-iteration generators: also inside this host's noise (2026-08-28, engine 0.23.0)
+
+The `{{$guid}}` family generates per iteration on the load path since issue
+#995, where it used to be resolved once at composition and repeated for the
+whole run. It is the same shape of change the identity was, one step more
+expensive: a generator has to *run* per occurrence per iteration, where the
+identity substitutes two integers the executor is already holding.
+
+**The generation, when a run uses it.** One daemon, four arms interleaved and
+rotated per round so drift lands on all four - a plain URL (`off`), the same URL
+with a uuid written out (`literal`), the same URL with `{{$iteration}}` in it
+(`identity` - the bind path #994 already put every bound run on, generating
+nothing), and the same URL with `{{$randomUUID}}` in it (`on`).
+`constant_concurrency`, c=32, 5 s per arm, 8 rounds, retention effectively off
+(a sampling period of 100000).
+
+| Arm | Median req/s | Mean | Min | Max |
+|---|---|---|---|---|
+| off (no query, no token) | 20 007 | 20 358 | 19 183 | 21 846 |
+| literal (`?u=<a uuid>`) | 21 367 | 20 806 | 16 078 | 23 473 |
+| identity (`?u={{$iteration}}`) | 21 990 | 21 766 | 19 583 | 23 493 |
+| on (`?u={{$randomUUID}}`) | 20 854 | 21 051 | 19 614 | 22 678 |
+
+**Nothing is resolvable.** `on` lands *above* `off` and below `identity`; the
+arms' own min-max spans are 12-46% wide, which is wider than any distance
+between them. The one number worth keeping is what the arms say together: three
+of the four bind per submission - `identity` and `on` copy the request and
+rebuild a field, `on` also runs the table - and they do not separate from the
+two that do not.
+
+An unrotated first pass had `on` 26% below `off`, which is the whole reason the
+method rotates: that reading came from one round in a fixed order, and it did
+not survive eight rounds of rotation. A single ordered pair on this host is not
+evidence.
+
+**The feature-off path, against master.** The same payload with no token at all,
+run against `master`'s binary and this branch's, one daemon at a time,
+alternating every round (10 rounds, 5 s, c=32): a paired median of **-0.01%**
+(master 25 279, branch 25 276). The null test says how much of that to believe -
+the same harness with **this branch's binary in both arms** reports **-1.51%**,
+so the harness alone moves the number further than the change did. Per-round
+deltas run from -17% to +30%.
+
+**Verdict: no change is resolvable here either, and the guard is structural.** A
+request spelling no generator has nothing left for the compose-time split to
+find, so its template is empty and the submission path takes the branch it
+always did - no copy, no join, the same submit of the same shared request.
+`LoadDataTest.ARunWithoutAGeneratorCarriesAnEmptyTemplate` and
+`ScenarioPlanTest.AStepWithoutAGeneratorCarriesAnEmptyTemplate` assert that
+emptiness rather than a throughput figure, which is the claim that can actually
+be pinned. Same host caveat as the section above: a 4-core container running the
+Go mock server beside the engine, where a single arm's own runs vary by more
+than either effect being looked for.
+
 ### SSE frame counting: not yet measured (issue #576)
 
 Streaming under load puts a second thing on the write callback's hot path: an
@@ -284,7 +382,10 @@ c=64 (56,880, above `wrk`), declining past c=192. A 37,148 vs 56,880 gap at the
 same concurrency is far too large to be run-to-run noise, so one of the two
 measurements is not measuring what it claims. Re-running
 `scripts/test/bench-compare.sh` on a quiet machine is the way to settle it - do
-that before quoting either curve shape.
+that before quoting either curve shape. The public comparison page quotes the
+2026-07-29 figure and carries this caveat beside it, so the two pages agree
+rather than contradict:
+[Vayu vs k6](../compare/vayu-vs-k6.md#the-throughput-is-in-the-same-class).
 
 ## Reading the results
 

@@ -42,10 +42,10 @@ struct RunContext; // Forward declaration
  * otherwise submit the shared request they always did - no copy, no claim, no
  * annotation. Nothing here is per-iteration work a token-free run can pay.
  *
- * Filled in two stages, because the halves are known at different moments: the
- * route validates the rows and decides how the credentials resolve before any
- * run row exists, and `fields` can only be split once the request has been
- * composed and built on the run's own worker thread.
+ * The request's own bindable fields are **not** here: they are split off the
+ * built request onto `RunContext::load_template`, because a run with no rows at
+ * all still binds its `{{$vu}}` / `{{$iteration}}` identity (issue #994). This
+ * carries what only a data set has.
  */
 struct LoadDataSet {
     /// The validated rows, in payload order. Never empty - a present-but-empty
@@ -62,10 +62,12 @@ struct LoadDataSet {
     /// The credentials split around their `{{data.column}}` tokens; empty when
     /// none carries one.
     StepDataTemplate credentials;
-    /// The built request's own tokens, split once so the run does not re-scan
-    /// its fields per submission - the same bargain a plan step makes, at a
-    /// single request's full rate.
-    StepDataTemplate fields;
+    /// The bare column names @ref rows can bind (issue #1007), read off the
+    /// rows once by `core::bound_columns_of`. It is what the run's split is
+    /// told, so a bare `{{username}}` this set answers is bound per iteration
+    /// rather than sent as the literal token - and a run without rows carries
+    /// no set at all, so it is told nothing and splits as it always did.
+    vayu::http::BoundColumnNames bound_columns;
 
     /// What `build_request` must be told: the credentials are bound after the
     /// build, so an auth carrying a token must not be encoded during it.
@@ -123,19 +125,32 @@ duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t
  * a parameter, so a second such fact does not move every call site again.
  */
 struct ResultAnnotations {
-    /// Absent for every single-request run, and for a scenario run sent without
-    /// `data` - the record then carries no `dataRowIndex` at all rather than a
-    /// zero that reads like row 0.
+    /// Absent for a run sent without `data` - the record then carries no
+    /// `dataRowIndex` at all rather than a zero that reads like row 0. Carried
+    /// by either shape since issue #993: a single-request run binds rows too.
     std::optional<size_t> data_row_index;
     /**
-     * The plan step this completion belongs to, and the virtual user's
-     * iteration it ran in. Set by the scenario load executor and by nothing
-     * else, so their presence *is* how `handle_result` tells a scenario
-     * completion from a single-request one - which is what routes the response
-     * to the step's own sample reservoir instead of the run's (issue #450).
+     * The plan step this completion belongs to. Set by the scenario load
+     * executor and by nothing else, so its presence *is* how `handle_result`
+     * tells a scenario completion from a single-request one - which is what
+     * routes the response to the step's own sample reservoir instead of the
+     * run's (issue #450).
      */
     std::optional<size_t> step_index;
+    /**
+     * The iteration this completion ran in, 0-based: a virtual user's own on
+     * the scenario path, and the submission index on the single-request one
+     * (issue #994). Set by both load executors now, which is what lets a
+     * deferred script read `pm.info.iteration` whichever shape the run took.
+     */
     std::optional<size_t> iteration;
+    /**
+     * The virtual user this completion belongs to, **1-based**. `1` for every
+     * submission of a single-request run - one request repeated is one user's
+     * iterations, whatever the concurrency - and the user's own index on the
+     * scenario path.
+     */
+    std::optional<size_t> vu;
 };
 
 /**

@@ -133,6 +133,43 @@ describe("`{{data.` in a request body", () => {
 		contract.current = declared;
 		expect(inBody('{"email": "someone@example.com"')).toEqual([]);
 	});
+
+	/*
+	 * The bare spelling a bound row answers too (issue #1007) - Postman writes
+	 * `{{email}}`, not `{{data.email}}`, so the list has to offer the name that
+	 * spelling, not only the collision-proof one.
+	 */
+	it("offers the declared columns bare too, alongside the prefixed spelling", () => {
+		contract.current = declared;
+		const suggestions = inBody("{{");
+		const bareLabels = suggestions
+			.filter((s) => s.label === "id" || s.label === "email")
+			.map((s) => s.label);
+		expect(bareLabels).toEqual(["id", "email"]);
+	});
+
+	it("inserts the bare column as a bare token, not the prefixed one", () => {
+		contract.current = declared;
+		const bare = inBody("{{").find((s) => s.label === "email");
+		expect(bare!.insertText).toBe("{{email}}");
+		expect(bare!.filterText).toBe("{{email");
+	});
+
+	it("labels the two spellings so picking one is deliberate", () => {
+		contract.current = declared;
+		const suggestions = inBody("{{");
+		const prefixed = suggestions.find((s) => s.label === "data.email")!;
+		const bare = suggestions.find((s) => s.label === "email")!;
+		// Same column, two entries, and the details must not read identically -
+		// that is the whole point of offering both.
+		expect(prefixed.detail).not.toBe(bare.detail);
+		expect(bare.detail).toMatch(/bare/i);
+	});
+
+	it("does not offer a bare column when the chain declares no contract", () => {
+		contract.current = undefined;
+		expect(inBody("{{").some((s) => s.label === "email")).toBe(false);
+	});
 });
 
 describe('`pm.iterationData.get("` in a script', () => {
@@ -154,13 +191,111 @@ describe('`pm.iterationData.get("` in a script', () => {
 		expect(inScript('pm.iterationData.get("')).toEqual([]);
 	});
 
-	it("does not bleed into a variable accessor, whose names are a different set", () => {
+	it("does not bleed into a single-scope accessor, whose names are a different set", () => {
 		contract.current = declared;
 		// `pm.environment.get("email")` reads the environment; a column offered
 		// there is a name that returns `undefined` at run time.
 		expect(inScript('pm.environment.get("')).toEqual([]);
-		// `replaceIn` interpolates variables, and the data pass is a different
-		// pass over the composed request - a column is not one of its names.
-		expect(inScript('pm.variables.replaceIn("{{').map((s) => s.label)).not.toContain("email");
+		expect(inScript("pm.globals.get('")).toEqual([]);
+		expect(inScript('pm.collectionVariables.get("')).toEqual([]);
+	});
+});
+
+/**
+ * The merged accessor's list is the union of both sources (issue #1063).
+ *
+ * `pm.variables` is the one accessor that reads a bound row's bare column names
+ * *and* the three scopes (issue #1007), so a column is genuinely one of the
+ * names it can return - and it was the only such name the list withheld, which
+ * makes a declared column something you have to already know to use.
+ */
+describe('`pm.variables.get("` in a script', () => {
+	it("offers the declared columns, which the call really can return", () => {
+		contract.current = declared;
+		expect(inScript('pm.variables.get("').map((s) => s.label)).toEqual(["id", "email"]);
+	});
+
+	it("offers them to `.has` and to a guarded call too", () => {
+		contract.current = declared;
+		expect(inScript("pm.variables.has('").map((s) => s.label)).toEqual(["id", "email"]);
+		expect(inScript('pm.variables?.get("').map((s) => s.label)).toEqual(["id", "email"]);
+	});
+
+	it("inserts a bare name - the argument is a name, not a template", () => {
+		contract.current = declared;
+		const column = inScript('pm.variables.get("').find((s) => s.label === "email")!;
+		expect(column.insertText).toBe("email");
+		expect(column.detail).toContain("Checkout flow");
+	});
+
+	it("offers nothing extra when the chain declares no contract", () => {
+		contract.current = undefined;
+		expect(inScript('pm.variables.get("')).toEqual([]);
+	});
+
+	/*
+	 * `replaceIn` resolves a bare `{{email}}` from the bound row through the same
+	 * `resolve_template_with_data` the merged `get` reads (issue #1007), so its
+	 * list carries the columns too - as tokens, because that argument is a
+	 * template. This case asserted the opposite until #1063: it was written at
+	 * #600, when the row answered only `{{data.*}}` and a bare column really was
+	 * not one of `replaceIn`'s names.
+	 */
+	it("offers them to replaceIn as tokens, which is what that argument takes", () => {
+		contract.current = declared;
+		const column = inScript('pm.variables.replaceIn("{{').find((s) => s.label === "email");
+		expect(column, "replaceIn resolves a bare column from the bound row").toBeTruthy();
+		// Braces on both, the way every other entry in *this* list spells them -
+		// they share one `wrap`, so a column cannot drift from a variable here.
+		expect(column!.insertText).toBe("{{email}}");
+		expect(column!.filterText).toBe("{{email}}");
+	});
+});
+
+/**
+ * Which spelling each mode offers (issue #1077).
+ *
+ * `replaceIn` resolves `{{data.email}}` and `{{email}}` from the same row, so
+ * offering one of the two would be the gap #1063 closed, one call over. A name
+ * argument is the opposite case: `pm.variables.get("data.email")` reads no
+ * column, so the prefixed spelling there would teach a call that returns
+ * `undefined`.
+ */
+describe("the two column spellings, per accessor mode", () => {
+	it("offers the prefixed spelling to replaceIn, beside the bare one", () => {
+		contract.current = declared;
+		const suggestions = inScript('pm.variables.replaceIn("{{');
+		const prefixed = suggestions.find((s) => s.label === "data.email");
+		expect(prefixed, "replaceIn resolves {{data.email}} from the bound row").toBeTruthy();
+		expect(prefixed!.insertText).toBe("{{data.email}}");
+	});
+
+	it("labels the two spellings so picking one is deliberate", () => {
+		contract.current = declared;
+		const suggestions = inScript('pm.variables.replaceIn("{{');
+		const prefixed = suggestions.find((s) => s.label === "data.email")!;
+		const bare = suggestions.find((s) => s.label === "email")!;
+		expect(prefixed.detail).not.toBe(bare.detail);
+		expect(bare.detail).toMatch(/bare/i);
+	});
+
+	it("withholds the prefixed spelling from a name argument, which cannot read it", () => {
+		/*
+		 * The mutation check for the rule above: applying the fix to both modes
+		 * is the obvious wrong version of it, and this is the only case that
+		 * fails when it is.
+		 */
+		contract.current = declared;
+		expect(inScript('pm.variables.get("').map((s) => s.label)).not.toContain("data.email");
+		expect(inScript("pm.variables.has('").map((s) => s.label)).not.toContain("data.email");
+	});
+
+	it("does not say (bare) where only one spelling is offered", () => {
+		// The word tells two adjacent entries apart; in a list with one entry
+		// per column it names a contrast that list does not contain.
+		contract.current = declared;
+		const bare = inScript('pm.variables.get("').find((s) => s.label === "email")!;
+		expect(bare.detail).not.toMatch(/bare/i);
+		expect(bare.detail).toContain("Checkout flow");
 	});
 });

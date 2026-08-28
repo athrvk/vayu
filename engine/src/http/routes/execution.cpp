@@ -384,7 +384,9 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
  * Non-static: send_with_row_test.cpp drives it directly. See routes.hpp for the
  * contract and for why the ordinary send is untouched.
  */
-SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row) {
+SendRowAuth plan_send_row_auth (const nlohmann::json& json,
+bool has_row,
+const vayu::http::BoundColumnNames& bound_columns) {
     SendRowAuth out;
     if (!has_row) {
         // Not merely the same answer as an unbindable payload's - deliberately
@@ -395,7 +397,7 @@ SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row) {
     }
     out.auth = vayu::http::parse_auth (json.value ("auth", nlohmann::json ()));
 
-    if (auto token = vayu::core::first_oauth2_data_token (out.auth)) {
+    if (auto token = vayu::core::first_oauth2_data_token (out.auth, bound_columns)) {
         out.ok    = false;
         out.error = "Auth credentials carry " + *token +
         " in an OAuth 2.0 configuration, and no row can reach it: the token is "
@@ -406,7 +408,7 @@ SendRowAuth plan_send_row_auth (const nlohmann::json& json, bool has_row) {
         return out;
     }
 
-    out.credentials = vayu::core::tokenize_auth_fields (out.auth);
+    out.credentials = vayu::core::tokenize_auth_fields (out.auth, bound_columns);
     if (!out.credentials.empty ()) {
         out.resolution = vayu::http::AuthResolution::Defer;
     }
@@ -456,7 +458,8 @@ bool is_scenario) {
     // reasoning, as a send that carries one row (issue #642). The refusal it
     // can carry is an oauth2 config with a data token, which no deferral can
     // serve.
-    auto row_auth = plan_send_row_auth (json, /*has_row=*/true);
+    set->bound_columns = vayu::core::bound_columns_of (set->rows);
+    auto row_auth = plan_send_row_auth (json, /*has_row=*/true, set->bound_columns);
     if (!row_auth.ok) {
         out.ok    = false;
         out.error = std::move (row_auth.error);
@@ -1063,7 +1066,13 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // The refusal it can carry - an oauth2 config with a data token - is a
     // 400 here, beside the row's own, and for the same reason: nothing has
     // been recorded or sent yet.
-    auto row_auth = plan_send_row_auth (json, data_row.value.has_value ());
+    // The one row's own columns, exactly as `bind_data_row` reads them below:
+    // a credential spelled `{{username}}` binds from the row for the same
+    // reason one spelled `{{data.username}}` does (issue #1007).
+    const auto row_columns = data_row.value ?
+    vayu::core::bound_columns_of (*data_row.value) :
+    vayu::http::BoundColumnNames{};
+    auto row_auth = plan_send_row_auth (json, data_row.value.has_value (), row_columns);
     if (!row_auth.ok) {
         vayu::utils::log_warning ("POST /execute - " + row_auth.error);
         return row_auth.error;
@@ -1090,20 +1099,28 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // partially bound request is discarded rather than sent
     // (scenario_data.hpp). Nothing runs, so nothing is recorded: the
     // refusal precedes the run row exactly as the flag checks above do.
-    if (data_row.value) {
-        auto bound = vayu::core::bind_data_row (built.request, *data_row.value, 0);
-        if (bound.ok) {
-            // Then the credentials the build deferred, in the order the
-            // scenario executors bind theirs: the row reaches them before
-            // `apply_auth` encodes them onto the request. A no-op for the
-            // ordinary send, whose auth the build already applied.
-            bound = vayu::core::bind_auth_row (built.request, row_auth.auth,
-            row_auth.credentials, *data_row.value, 0);
-        }
-        if (!bound.ok) {
-            vayu::utils::log_warning ("POST /execute - " + bound.error);
-            return bound.error;
-        }
+    // The identity binds here too, and for every send rather than only for one
+    // carrying a row (issue #994): a single send is a run of one, so `{{$vu}}`
+    // and `{{$iteration}}` answer `1` and `0` - the numbers this same request
+    // would carry as the first iteration of a load run - instead of reaching
+    // the wire written as they stand. The scan costs a request that spells
+    // neither one walk of its fields, at the design path's rate rather than a
+    // load run's.
+    const vayu::core::IterationBinding binding{ data_row.value ? &*data_row.value : nullptr,
+        /*row_index=*/0, vayu::core::IterationIdentity{} };
+    auto bound = vayu::core::apply_iteration_template (built.request,
+    vayu::core::tokenize_bindable_fields (built.request), binding);
+    if (bound.ok && data_row.value) {
+        // Then the credentials the build deferred, in the order the
+        // scenario executors bind theirs: the row reaches them before
+        // `apply_auth` encodes them onto the request. A no-op for the
+        // ordinary send, whose auth the build already applied.
+        bound = vayu::core::bind_auth_row (
+        built.request, row_auth.auth, row_auth.credentials, *data_row.value, 0);
+    }
+    if (!bound.ok) {
+        vayu::utils::log_warning ("POST /execute - " + bound.error);
+        return bound.error;
     }
     out.json      = std::move (json);
     out.transient = transient.value;
@@ -1222,6 +1239,36 @@ DesignSend& send) {
 }
 
 /**
+ * Refuse a streaming send before its stream opens, failing the run row behind
+ * it.
+ *
+ * By the time either refusal is reached the row exists and nothing is going to
+ * consume it, so it is failed here rather than left `running` forever - guarded,
+ * because a throw while recording that would cost the caller the answer as well
+ * as the stream.
+ *
+ * One helper for both refusals - the draining daemon's, and the header-name
+ * collision the residual pass reports (#1051) - because they are the same three
+ * statements, and a second copy is one that stops receiving this one's fixes.
+ */
+void refuse_stream_before_it_opens (RouteContext& ctx,
+httplib::Response& res,
+const std::string& run_id,
+int status,
+const std::string& reason,
+std::string_view code = {}) {
+    vayu::utils::log_warning (
+    "POST /execute - Stream refused for run: " + run_id + " - " + reason);
+    try {
+        ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "Failed to fail a refused stream run: " + std::string (e.what ()));
+    }
+    send_error (res, status, reason, code);
+}
+
+/**
  * The streaming half of a design send (issue #573).
  *
  * The same script/send/script ordering a buffered send performs, pulled apart
@@ -1272,17 +1319,12 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         if (send.data_row) {
             pre_ctx.iteration_data  = &*send.data_row;
             pre_ctx.iteration       = 0;
+            pre_ctx.vu              = vayu::core::SOLE_VIRTUAL_USER;
             pre_ctx.iteration_count = 1;
         }
         pre_script_result =
         execute_script (script_engine, send.pre_script, pre_ctx, "Pre-request");
     }
-
-    // The same pass the buffered send makes between its script and its send
-    // (issue #1008), here because this path runs the pre-request script itself
-    // rather than through `execute_exchange`: a `{{token}}` the script has just
-    // defined resolves before the stream opens.
-    resolve_residual_tokens (send.request, scopes);
 
     // `stream` and `transient` are mutually exclusive - `read_stream_flag`
     // refuses the pair with a 400 - so a streaming send always has a run row.
@@ -1290,6 +1332,19 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // `invariant_value` is for.
     const std::string run_id = vayu::utils::invariant_value (
     send.run_id, "a streaming send has a run row: stream and transient are mutually exclusive");
+
+    // The same pass the buffered send makes between its script and its send
+    // (issue #1008), here because this path runs the pre-request script itself
+    // rather than through `execute_exchange`: a `{{token}}` the script has just
+    // defined resolves before the stream opens.
+    if (auto refusal = resolve_residual_tokens (send.request, scopes)) {
+        // The one thing that pass can refuse (issue #1051), in the same words
+        // the buffered send refuses it with; what differs is where the caller
+        // reads it, this route not having answered yet.
+        refuse_stream_before_it_opens (
+        ctx, res, run_id, 400, refusal->message, "colliding_header_names");
+        return;
+    }
 
     vayu::http::SseStreamRequest spec;
     spec.run_id          = run_id;
@@ -1348,8 +1403,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                     post_ctx.request_name = request_name;
                     post_ctx.transport    = transport;
                     if (iteration_data) {
-                        post_ctx.iteration_data  = &*iteration_data;
-                        post_ctx.iteration       = 0;
+                        post_ctx.iteration_data = &*iteration_data;
+                        post_ctx.iteration      = 0;
+                        post_ctx.vu             = vayu::core::SOLE_VIRTUAL_USER;
                         post_ctx.iteration_count = 1;
                     }
                     // The node the trace is about to store, not a copy
@@ -1383,16 +1439,8 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     auto context = ctx.sse_manager.start (std::move (spec));
     if (!context) {
         // The daemon is draining its workers, or - impossibly - the id
-        // collided. The row exists but nothing will consume it, so it
-        // is failed here rather than left `running` forever.
-        vayu::utils::log_warning ("POST /execute - Stream refused for run: " + run_id);
-        try {
-            ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "Failed to fail a refused stream run: " + std::string (e.what ()));
-        }
-        send_error (res, 503, "Engine is shutting down");
+        // collided.
+        refuse_stream_before_it_opens (ctx, res, run_id, 503, "Engine is shutting down");
         return;
     }
 
@@ -1438,6 +1486,7 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
         // has no row and an invented index would be the binding that cannot
         // fail (issue #300).
         inputs.iteration       = 0;
+        inputs.vu              = vayu::core::SOLE_VIRTUAL_USER;
         inputs.iteration_count = 1;
     }
     auto exchange = execute_exchange (script_engine, ctx.cookie_jar,

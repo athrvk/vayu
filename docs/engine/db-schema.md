@@ -107,6 +107,40 @@ endpoint reports it as a `recovery` node, absent on a clean start - see
 dismissible banner naming the database path and, when there is one, the
 quarantined file and the `.recover` command that reads it.
 
+### Reclaiming freed pages
+
+Deleting rows - a prune, a trash purge, the `metrics` drop - moves their pages to SQLite's
+freelist, where the engine reuses them and the filesystem never sees them again, so a workspace
+that once held weeks of heavy runs keeps that high-water mark forever. `Database::init()` ends
+with a guarded `VACUUM` that gives them back (issue #990).
+
+Guarded, because a `VACUUM` rewrites the whole database: it runs only when **both** thresholds are
+crossed - at least **25%** of the file's pages are free **and** they hold at least **10 MiB**
+(`VACUUM_MIN_FREELIST_PERCENT` / `VACUUM_MIN_RECLAIMABLE_BYTES`, compile-time, deliberately not
+configurable). The fraction alone would rewrite a nearly-empty workspace on every start; the byte
+floor alone would rewrite four gigabytes to win back eleven megabytes. Neither threshold crossed
+means the pass reads three PRAGMAs and returns.
+
+Three things worth knowing about where it sits:
+
+- **Last in `init()`**, after the run prune and the trash purge, so it sees the pages every sweep
+  freed rather than only the first one's.
+- **On a connection of its own**, like `POST /workspace/backup`'s `VACUUM INTO` - sqlite_orm
+  exposes no way to run these statements on the connection it holds. Nothing contends for it:
+  `init` runs before the HTTP listener starts, and the lock file has already refused a second
+  engine.
+- **The `VACUUM` is followed by a `wal_checkpoint(TRUNCATE)`.** Under WAL the rewritten image
+  lands in the `-wal` file and the database is not resized until a checkpoint copies it back, so
+  without it the pass would free every page it set out to and leave the file exactly as large as
+  it found it.
+
+The outcome is logged at info level (`Reclaimed N KB of freed database pages`), because the cost
+is paid on the startup path - `db.init()` returns before `/health` answers, and the app gives the
+engine 45 seconds to come up. A rewrite slow enough to matter is one this line explains.
+Best-effort like the sweeps before it: a failure is a warning, never a daemon that will not start.
+`auto_vacuum` was rejected as the alternative - switching an existing database's mode requires a
+full `VACUUM` anyway, and it changes page bookkeeping for every write thereafter.
+
 ---
 
 ## Tables
@@ -842,7 +876,8 @@ backlog cannot stall `/health`, SSE, or the runs poll. The cascade itself lives 
 is wired into both at once. `prune_runs_configured()` reads the two
 knobs (config, `data_retention`, defaults 200 / 30) and runs at **startup** (`Database::init`) and
 after a run reaches a **terminal** status (design mode's `store_result`, and the load-run
-completion/failure paths in `run_manager.cpp`).
+completion/failure paths in `run_manager.cpp`). What a prune frees is disk the file keeps until
+[Reclaiming freed pages](#reclaiming-freed-pages) gives it back.
 
 ---
 
@@ -976,8 +1011,8 @@ along with the `MetricName` enum and `db::Metric`. `sync_schema()` only syncs th
 storage still declares - it never drops one that was removed from it - so `Database::init()`
 issues an explicit `DROP TABLE IF EXISTS metrics`, and an upgraded database sheds the table and
 its rows on first start. The freed pages return to SQLite's freelist for reuse; the file itself
-does not shrink, because a `VACUUM` would rewrite the whole database under a write lock at
-startup.
+shrinks only when the guarded reclamation at the end of `Database::init()` decides they are worth
+a rewrite - see [Reclaiming freed pages](#reclaiming-freed-pages).
 
 ---
 

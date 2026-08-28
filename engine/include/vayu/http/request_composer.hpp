@@ -28,9 +28,13 @@
  * (D12).
  *
  * The behavioural contracts (issue #226, "Behaviour that must not change"):
- *  - unknown plain name resolves to ""; unknown `$name` keeps its braces
+ *  - an unknown plain name keeps its braces, and so does an unknown `$name`
+ *    (#186 for the generators, #1009 for the ordinary names)
  *  - a `data.*` name keeps its braces too: it addresses the reserved data
  *    namespace (issue #402), which only a scenario run's iteration can bind
+ *  - so does a bare name the caller says a bound row will substitute
+ *    (`BoundColumnNames`, issue #1007) - the same deferral for the same
+ *    reason, spelled the way Postman's data variables are
  *  - precedence: environment > collection chain (leaf over root) > globals
  *  - only enabled definitions participate; a definition whose `enabled` is
  *    absent counts as enabled (D17), and a non-string stored `value` reads as
@@ -49,6 +53,7 @@
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -95,6 +100,71 @@ inline constexpr std::string_view DATA_NAMESPACE_PREFIX = "data.";
 bool is_data_variable_name (const std::string& name);
 
 /**
+ * The reserved prefix for the iteration identity: `{{$vu}}` and
+ * `{{$iteration}}` address the run that is executing, never a variable from any
+ * scope (issue #994).
+ */
+inline constexpr std::string_view IDENTITY_NAMESPACE_PREFIX = "$";
+/// The virtual user this request belongs to, 1-based.
+inline constexpr std::string_view IDENTITY_VU_NAME = "$vu";
+/// That virtual user's iteration, 0-based.
+inline constexpr std::string_view IDENTITY_ITERATION_NAME = "$iteration";
+
+/**
+ * True for `$vu` or `$iteration`, the two reserved identity names (issue #994).
+ *
+ * They are spelled like a dynamic variable and behave like `data.*`: the value
+ * is known only to the iteration that is about to send, so composition leaves
+ * the token written as it stands and the executor binds it immediately before
+ * the send (`core::apply_iteration_template`). Being reserved is what makes them
+ * *bindable at all* - a variable someone names `$vu` cannot answer for the
+ * identity, exactly as one named `data.id` cannot answer for a column, because
+ * a scope that could answer would freeze the value at composition for the whole
+ * run.
+ *
+ * The two names are matched exactly rather than by their `$` prefix: every
+ * other `$name` is either a generator from the dynamic table or an unknown that
+ * keeps its braces (#186), and both of those must keep answering as they did.
+ */
+bool is_identity_variable_name (const std::string& name);
+
+/**
+ * The bare column names a bound data row will substitute (issue #1007).
+ *
+ * Postman binds a dataset's columns to bare names - `{{username}}` in a
+ * request reads the current row - and an imported collection is written that
+ * way, so a Vayu run of it has to answer those names from the row or send a
+ * request the file's author never wrote. That is a *precedence* question,
+ * which the reserved `data.*` namespace above deliberately dissolves rather
+ * than answers, so the two rules coexist: `{{data.id}}` is always the column,
+ * and `{{id}}` is the column **only while a row is bound**, at Postman's
+ * position for it - above the environment, and above everything below it.
+ *
+ * Composition holds only the *names*, never a row: a plan is composed once and
+ * a row is bound per iteration, so what composition can do about a bound column
+ * is exactly what it does about `data.*` - leave the token written as it
+ * stands, for `core::apply_iteration_template` to join per row. An empty set is
+ * every composition that has no dataset behind it, and costs one `empty()`
+ * test per token.
+ *
+ * Who fills it: the engine itself where it knows the dataset (a scenario
+ * plan's steps, a single-request load run, a send carrying one row), and the
+ * `dataColumns` field of `POST /compose` for a client that composes ahead of a
+ * run of its own.
+ */
+using BoundColumnNames = std::set<std::string>;
+
+/**
+ * True for a name @p bound_columns says a row will substitute, so composition
+ * leaves it written as it stands.
+ *
+ * Never a `data.*` name: that namespace is answered before this one and is
+ * spelled with its prefix, so a column named `data.id` in a file reaches the
+ * bind as the token `{{data.id}}` either way.
+ */
+bool is_bound_column_name (const std::string& name, const BoundColumnNames& bound_columns);
+
+/**
  * Scan `{{name}}` occurrences left to right over @p input and replace each
  * through @p resolve, which receives the trimmed name.
  *
@@ -138,7 +208,7 @@ struct TokenSplit {
  *
  * This exists for the load path, which cannot re-scan every field of every
  * request per iteration: a field is split once, when the plan is resolved, and
- * only joined per row afterwards (`core::tokenize_data_fields`).
+ * only joined per row afterwards (`core::tokenize_bindable_fields`).
  */
 [[nodiscard]] TokenSplit split_tokens (const std::string& input,
 const std::function<bool (const std::string& name)>& keep);
@@ -159,13 +229,60 @@ std::optional<std::string> resolve_dynamic_variable (const std::string& name);
 const std::vector<std::string>& dynamic_variable_names ();
 
 /**
- * Substitute `{{name}}` occurrences. The reserved `data.*` namespace first
- * (kept verbatim), then scopes, then the dynamic-variable table; a name
- * nothing answers - ordinary or `$name` - keeps its braces (#186, #1009), and
- * a value that itself holds tokens is resolved through them under
- * `substitute_tokens`' bound. Nested braces never match.
+ * True for a name the dynamic table generates, so `{{$guid}}` is one and
+ * `{{$typo}}` is not (issue #995).
+ *
+ * The table is asked rather than the `$` prefix, because the prefix is also
+ * every unknown `$name` that keeps its braces (#186) and both reserved identity
+ * names (#994). Only a name something will actually generate can be deferred to
+ * a later bind - a token nothing answers has to keep reaching the wire as it
+ * stands, which is what makes a typo visible.
  */
-std::string resolve_template (const std::string& input, const VariableValues& vars);
+bool is_generator_variable_name (const std::string& name);
+
+/**
+ * Whether composition generates the dynamic-variable family, or leaves it to
+ * the iteration that is about to send (issue #995).
+ *
+ * A payload is composed once and a *run* sends it many times, so a generator
+ * resolved at composition is one value repeated for the whole run - the same
+ * uniqueness `{{$randomUUID}}` exists to give, lost exactly where concurrency
+ * makes collisions matter. `Defer` is what the run paths compose with: the
+ * token survives composition the way `{{data.column}}` and `{{$vu}}` do, and
+ * `core::apply_iteration_template` generates it per iteration.
+ *
+ * `Generate` is every other caller and the default, so a Send, a preview and a
+ * script's `replaceIn` compose exactly as they always did.
+ */
+enum class DynamicResolution : std::uint8_t {
+    /// Generate at composition. One value, written into the payload.
+    Generate,
+    /// Leave every generator name written as it stands, for the per-iteration
+    /// bind to generate. An unknown `$name` is unaffected - it had no value
+    /// here either way.
+    Defer,
+};
+
+/**
+ * Substitute `{{name}}` occurrences. The reserved `data.*` namespace first
+ * (kept verbatim) and @p bound_columns beside it (kept verbatim too, issue
+ * #1007), then scopes, then the dynamic-variable table; a name nothing answers
+ * - ordinary or `$name` - keeps its braces (#186, #1009), and a value that
+ * itself holds tokens is resolved through them under `substitute_tokens`'
+ * bound. Nested braces never match.
+ *
+ * @p bound_columns defaults to empty, which is composition as it was: every
+ * caller with no dataset behind it resolves exactly the names it always did.
+ *
+ * @p dynamic says whether the generator family is this composition's to resolve
+ * (issue #995). It is read in the table's own position, *after* the scopes, so
+ * a variable someone defined as `$guid` still answers for the token under
+ * either value - one rule for the name, whoever is composing.
+ */
+std::string resolve_template (const std::string& input,
+const VariableValues& vars,
+const BoundColumnNames& bound_columns = {},
+DynamicResolution dynamic             = DynamicResolution::Generate);
 
 /**
  * Render one row value as the text a `{{data.column}}` token substitutes.
@@ -178,7 +295,7 @@ std::string resolve_template (const std::string& input, const VariableValues& va
  *
  * The rendering is what a value *reads* as; whether it is then escaped for the
  * document it lands in is `core::encode_data_value`'s question. **A null cell
- * never reaches a request through the binder** - `apply_data_template` refuses
+ * never reaches a request through the binder** - `apply_iteration_template` refuses
  * it, for the same reason a missing column is refused - so the empty rendering
  * here is the answer to "what does this value say", not a value the wire ever
  * sees.
@@ -208,6 +325,14 @@ std::string resolve_template (const std::string& input, const VariableValues& va
  * cannot decide what that should cost - at bind time it errors the step, and for
  * a script it is a thrown TypeError - so it records the name and lets the caller
  * choose. The returned string is unusable when it is set.
+ *
+ * **A bare column name resolves here too** (issue #1007), at Postman's
+ * precedence: a name the row carries answers from the row *before* the scopes,
+ * so `{{username}}` reads this iteration's cell even where an environment
+ * variable of that name exists. It is only reported through @p missing_column
+ * in its `data.` spelling: a bare name the row does not carry is an ordinary
+ * name and falls through to the scopes, which is what keeps a script that runs
+ * both with and without a row from throwing on the second.
  */
 struct DataRowColumns {
     /// Column name (no `data.` prefix) -> the text it substitutes.
@@ -222,8 +347,15 @@ std::optional<std::string>& missing_column);
 /**
  * Deep-resolve every string *value* inside a JSON value (object keys are left
  * alone), preserving structure. Non-string leaves pass through verbatim.
+ *
+ * @p bound_columns is `resolve_template`'s, for the same reason: an auth block
+ * is where a credential lives, and a credential is the canonical data-driven
+ * field (issue #591), so a bound column named there is left for the per-row
+ * bind rather than resolved from a same-named variable.
  */
-nlohmann::json resolve_json_strings (const nlohmann::json& value, const VariableValues& vars);
+nlohmann::json resolve_json_strings (const nlohmann::json& value,
+const VariableValues& vars,
+const BoundColumnNames& bound_columns = {});
 
 /**
  * Root-first ancestor chain for a collection (inclusive of the collection
@@ -248,6 +380,14 @@ nlohmann::json resolve_inherited_auth (const std::vector<vayu::db::Collection>& 
  * execute-ready payload `POST /execute` and `POST /runs` accept unchanged;
  * errors use the nested `{"error":{"code","message"}}` shape (issue #173's
  * decided format - this endpoint was born after that decision).
+ *
+ * Two optional fields say what this composition must leave to a later bind, and
+ * both are absent for the ordinary Send: `dataColumns` names the bare columns a
+ * row will substitute (issue #1007), and **`deferDynamicVariables`** says the
+ * payload is being composed for a run that will repeat it, so the generator
+ * family belongs to each iteration rather than to this one composition (issue
+ * #995, `DynamicResolution::Defer`). A client that omits both composes exactly
+ * as it always did.
  *
  * Extracted from the route (routes/compose.cpp) so request_composer_test.cpp
  * can drive it against a real database without an in-process HTTP server,

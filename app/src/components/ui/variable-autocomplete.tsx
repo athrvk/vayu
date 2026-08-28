@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import type { DataContractScope, ResolvedVariable } from "@/types";
 import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
+import { ITERATION_VARIABLES } from "@/lib/iteration-variables";
 
 // Re-export ResolvedVariable as VariableInfo for backward compatibility
 export type { ResolvedVariable as VariableInfo };
@@ -39,6 +40,11 @@ export interface VariableAutocompleteProps {
 	 * The data contract in scope, when the collection chain declares one
 	 * (issue #600). Its columns are offered as `data.<column>` names, which is
 	 * how a request field addresses them - the same string the token carries.
+	 *
+	 * Each column is offered a second way too, bare (issue #1007): Postman binds
+	 * a dataset's columns to bare names, so an imported collection is already
+	 * written `{{username}}`, and a bound row answers that spelling exactly as it
+	 * answers `{{data.username}}`.
 	 */
 	dataColumns?: DataContractScope;
 }
@@ -73,22 +79,45 @@ export function VariableAutocomplete({
 	}, [variables, searchQuery]);
 
 	/*
+	 * The reserved identity namespace (issue #994), a group of its own for the
+	 * same reason `data.*` is: it is not a variable a scope could ever define
+	 * (`variable-resolution.ts` reserves the names ahead of the scope lookup),
+	 * so unlike the generators below there is no shadowing check here - both
+	 * names are always offered.
+	 */
+	const filteredIteration = useMemo(() => {
+		const lowerQuery = searchQuery.toLowerCase();
+		return ITERATION_VARIABLES.filter((v) => v.name.toLowerCase().includes(lowerQuery));
+	}, [searchQuery]);
+
+	/*
 	 * Columns are their own group for the same reason generators are: they are
 	 * not variables, and interleaving them would put a name no scope defines
 	 * among the ones the user created. They are offered from the contract rather
 	 * than from `variables` because the namespace is disjoint from the scopes -
 	 * a stored variable named `data.email` cannot shadow the column, so there is
 	 * no shadowing check to make here.
+	 *
+	 * Each column offers both spellings a bound row answers (issue #1007): the
+	 * prefixed one first, then bare - `bare` on the entry is what the row below
+	 * reads to label which is which, since the token text alone does not say it.
 	 */
 	const filteredColumns = useMemo(() => {
 		const lowerQuery = searchQuery.toLowerCase();
-		return (dataColumns?.columns ?? [])
-			.map((column) => `${DATA_NAMESPACE_PREFIX}${column}`)
-			.filter((name) => name.toLowerCase().includes(lowerQuery));
+		const entries: Array<{ name: string; bare: boolean }> = [];
+		for (const column of dataColumns?.columns ?? []) {
+			const prefixed = `${DATA_NAMESPACE_PREFIX}${column}`;
+			if (prefixed.toLowerCase().includes(lowerQuery))
+				entries.push({ name: prefixed, bare: false });
+			if (column.toLowerCase().includes(lowerQuery))
+				entries.push({ name: column, bare: true });
+		}
+		return entries;
 	}, [dataColumns, searchQuery]);
 
 	if (
 		filteredVariables.length === 0 &&
+		filteredIteration.length === 0 &&
 		filteredDynamic.length === 0 &&
 		filteredColumns.length === 0
 	) {
@@ -115,9 +144,26 @@ export function VariableAutocomplete({
 							))}
 						</CommandGroup>
 					)}
+					{filteredIteration.length > 0 && (
+						<CommandGroup heading="Iteration">
+							{filteredIteration.map((identity) => (
+								<CommandItem
+									key={identity.name}
+									value={identity.name}
+									onSelect={() => onSelect(identity.name)}
+									className="flex items-center justify-between cursor-pointer"
+								>
+									<span className="font-mono text-sm">{identity.name}</span>
+									<span className="ml-2 truncate text-[11px] text-muted-foreground">
+										{identity.description}
+									</span>
+								</CommandItem>
+							))}
+						</CommandGroup>
+					)}
 					{filteredColumns.length > 0 && (
 						<CommandGroup heading="Data columns">
-							{filteredColumns.map((name) => (
+							{filteredColumns.map(({ name, bare }) => (
 								<CommandItem
 									key={name}
 									value={name}
@@ -127,6 +173,7 @@ export function VariableAutocomplete({
 									<span className="font-mono text-sm">{name}</span>
 									<span className="ml-2 truncate text-[11px] text-muted-foreground">
 										{dataColumns?.collectionName}
+										{bare ? " \u00b7 bare" : ""}
 									</span>
 								</CommandItem>
 							))}

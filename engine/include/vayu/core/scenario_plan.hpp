@@ -70,7 +70,9 @@ struct ScenarioStep {
     /// `request.url` has `{{vars}}` substituted and may carry an `apikey` auth
     /// with `in: "query"`, i.e. a live key.
     std::string stored_url;
-    /// `request`'s `{{data.column}}` tokens, split once here so no executor has
+    /// `request`'s reserved tokens - `{{data.column}}`, the `{{$vu}}` /
+    /// `{{$iteration}}` identity, and the `{{$guid}}` family this step's
+    /// composition deferred (issue #995) - split once here so no executor has
     /// to re-scan the step per iteration. Empty for a step that carries none,
     /// which is what both executors test before doing any join work at all.
     ///
@@ -368,26 +370,25 @@ const ScenarioResolveOptions& options);
 [[nodiscard]] CoverageTally make_coverage_tally (const ScenarioExecution& execution);
 
 /**
- * Bind @p row into @p step - its request's `{{data.column}}` fields first, then
- * the credentials the plan deliberately left unresolved.
+ * Bind one iteration's whole per-iteration state into @p step's @p request:
+ * @p row where the step has one, then @p identity.
  *
- * The step-shaped spelling of `core::bind_iteration_row`, which is where the
- * order lives and which the single-request load path drives with its own
- * templates (issue #993). Both scenario executors call this rather than the two
- * halves in sequence, so a step cannot bind differently depending on which one
- * ran it, and neither can put the credentials before the fields.
+ * Both executors call this rather than the two binds in sequence, so a step
+ * cannot bind differently depending on which one ran it - fields first, then
+ * the credentials the plan deliberately left unresolved, which is the order
+ * `apply_auth` makes load-bearing (issue #591), and the identity last. The row goes first because the identity cannot fail on
+ * its own account and a row can, so the more specific refusal is the one a
+ * caller reports.
  *
- * A no-op returning success for the ordinary step, whose auth was resolved into
- * the plan and whose templates are therefore both empty - an executor may call
- * it without testing first.
- *
- * Call it before the send: the credentials must be bound before `apply_auth`
- * encodes them, which is the ordering the deferral exists to fix.
+ * `nullopt` @p row is a run sent without `data` - the identity still binds,
+ * which is the whole point of it being independent of the data set. A no-op
+ * returning success for the ordinary step, which carries neither kind of token.
  */
-[[nodiscard]] DataBindResult bind_step_row (vayu::Request& request,
+[[nodiscard]] DataBindResult bind_step_iteration (vayu::Request& request,
 const ScenarioStep& step,
-const nlohmann::json& row,
-size_t row_index);
+const std::vector<nlohmann::json>& rows,
+std::optional<size_t> row_index,
+IterationIdentity identity);
 
 /**
  * The `scenario` object a scenario run stores in `runs.config_snapshot`: the

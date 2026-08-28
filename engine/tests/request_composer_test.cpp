@@ -78,13 +78,26 @@ vayu::http::VariableValues values_from_scopes (const json& scopes) {
     return vayu::http::build_variable_values (globals, chain, environment);
 }
 
+/// The bare names a case says a row will bind (issue #1007) - absent for every
+/// case that predates the field, which is exactly "no dataset is bound".
+vayu::http::BoundColumnNames bound_columns_from_case (const json& c) {
+    vayu::http::BoundColumnNames out;
+    if (const auto field = c.find ("boundColumns"); field != c.end ()) {
+        for (const auto& name : *field) {
+            out.insert (name.get<std::string> ());
+        }
+    }
+    return out;
+}
+
 TEST (VariableResolutionConformance, EveryFixtureCasePasses) {
     const json fixture = load_fixture ();
     ASSERT_FALSE (fixture["cases"].empty ())
     << "conformance fixture scanned nothing";
     for (const auto& c : fixture["cases"]) {
         const auto vars = values_from_scopes (c["scopes"]);
-        EXPECT_EQ (vayu::http::resolve_template (c["input"].get<std::string> (), vars),
+        EXPECT_EQ (vayu::http::resolve_template (c["input"].get<std::string> (),
+                   vars, bound_columns_from_case (c)),
         c["expected"].get<std::string> ())
         << "case: " << c["name"].get<std::string> ();
     }
@@ -123,6 +136,73 @@ TEST (DynamicVariables, GuidIsAUuidV4AndDiffersPerOccurrence) {
     EXPECT_TRUE (std::regex_match (b, uuid_v4)) << b;
     // Once per occurrence: two {{$guid}} in one payload are two different ids.
     EXPECT_NE (a, b);
+}
+
+// Issue #995. A payload a run repeats cannot carry a generated value, so a
+// composition that says so leaves the token for the per-iteration bind. The
+// three cases below are the whole of the rule: what defers, what does not, and
+// where the deferral sits against the scopes.
+TEST (DynamicVariables, DeferLeavesEveryGeneratorNameWrittenAsItStands) {
+    const vayu::http::VariableValues no_vars;
+    ASSERT_FALSE (vayu::http::dynamic_variable_names ().empty ())
+    << "the generator table is empty, so this test asserts nothing";
+    for (const auto& name : vayu::http::dynamic_variable_names ()) {
+        const std::string input = "{{" + name + "}}";
+        EXPECT_EQ (vayu::http::resolve_template (
+                   input, no_vars, {}, vayu::http::DynamicResolution::Defer),
+        input)
+        << name;
+        // The same call without the deferral still generates - the mutation
+        // check for the arm above.
+        EXPECT_NE (vayu::http::resolve_template (
+                   input, no_vars, {}, vayu::http::DynamicResolution::Generate),
+        input)
+        << name;
+    }
+}
+
+TEST (DynamicVariables, DeferIsTheTableOnly) {
+    const vayu::http::VariableValues no_vars;
+    // An unknown `$name` kept its braces before this existed and still does -
+    // nothing would ever generate it, so there is nothing to defer (#186).
+    EXPECT_EQ (vayu::http::resolve_template (
+               "{{$typo}}", no_vars, {}, vayu::http::DynamicResolution::Defer),
+    "{{$typo}}");
+    // The identity names are reserved ahead of the table and are unaffected by
+    // which side of it is running (#994).
+    EXPECT_EQ (vayu::http::resolve_template ("{{$vu}}/{{$iteration}}", no_vars,
+               {}, vayu::http::DynamicResolution::Defer),
+    "{{$vu}}/{{$iteration}}");
+    // An ordinary name is resolved by the scopes either way.
+    const vayu::http::VariableValues vars{ { "host", "example.test" } };
+    EXPECT_EQ (vayu::http::resolve_template (
+               "{{host}}", vars, {}, vayu::http::DynamicResolution::Defer),
+    "example.test");
+}
+
+TEST (DynamicVariables, ADefinedVariableStillOutranksTheGeneratorUnderDefer) {
+    // The deferral sits in the table's own position, after the scopes, so a
+    // variable someone defined as `$guid` answers for the token under either
+    // value. A deferral placed ahead of the scopes would leave this token for a
+    // bind that has no scope to read, and the name would mean two things.
+    const vayu::http::VariableValues vars{ { "$guid", "pinned" } };
+    EXPECT_EQ (vayu::http::resolve_template (
+               "{{$guid}}", vars, {}, vayu::http::DynamicResolution::Defer),
+    "pinned");
+    EXPECT_EQ (vayu::http::resolve_template (
+               "{{$guid}}", vars, {}, vayu::http::DynamicResolution::Generate),
+    "pinned");
+}
+
+TEST (DynamicVariables, IsAGeneratorNameAnswersForTheTableAndNothingElse) {
+    for (const auto& name : vayu::http::dynamic_variable_names ()) {
+        EXPECT_TRUE (vayu::http::is_generator_variable_name (name)) << name;
+    }
+    EXPECT_FALSE (vayu::http::is_generator_variable_name ("$typo"));
+    EXPECT_FALSE (vayu::http::is_generator_variable_name ("$vu"));
+    EXPECT_FALSE (vayu::http::is_generator_variable_name ("$iteration"));
+    EXPECT_FALSE (vayu::http::is_generator_variable_name ("data.id"));
+    EXPECT_FALSE (vayu::http::is_generator_variable_name (""));
 }
 
 TEST (DynamicVariables, IsoTimestampIsTheShapeTheRendererProduces) {
@@ -574,6 +654,47 @@ TEST_F (RequestComposerTest, ComposesAnInlineRequestAgainstAScope) {
     EXPECT_EQ (payload["environmentId"], "env_1");
 }
 
+// Issue #995: `deferDynamicVariables` is what a client composing for a run
+// says, and it reaches every field of the request half.
+TEST_F (RequestComposerTest, DeferDynamicVariablesKeepsTheTokensForTheRunToBind) {
+    seed_collection ("col", "", "", R"({"mode":"basic","username":"u-{{$guid}}","password":"p"})");
+
+    const json request = { { "method", "post" },
+        { "url", "https://example.test/{{$randomUUID}}" },
+        { "headers", { { "X-Key", "{{$guid}}" } } },
+        { "body", { { "mode", "json" }, { "content", R"({"id":"{{$guid}}"})" } } },
+        { "auth", { { "mode", "inherit" } } } };
+
+    auto [status, deferred] = vayu::http::compose_request_core (*db_,
+    json{ { "request", request }, { "collectionId", "col" },
+    { "deferDynamicVariables", true } });
+    ASSERT_EQ (status, 200) << deferred.dump ();
+    EXPECT_EQ (deferred["url"], "https://example.test/{{$randomUUID}}");
+    EXPECT_EQ (deferred["headers"]["X-Key"], "{{$guid}}");
+    EXPECT_EQ (deferred["body"]["content"], R"({"id":"{{$guid}}"})");
+    // A credential is *encoded* when the request is built, so there is no later
+    // moment for a bind to reach it: composition generates it here, once, and
+    // says so (issue #1055 carries the deferral that would lift this).
+    EXPECT_NE (deferred["auth"]["username"], "u-{{$guid}}");
+
+    // Without the field, the same payload composes exactly as it always did -
+    // the mutation check for every assertion above.
+    auto [plain_status, composed] = vayu::http::compose_request_core (
+    *db_, json{ { "request", request }, { "collectionId", "col" } });
+    ASSERT_EQ (plain_status, 200) << composed.dump ();
+    EXPECT_NE (composed["url"], "https://example.test/{{$randomUUID}}");
+    EXPECT_NE (composed["headers"]["X-Key"], "{{$guid}}");
+    EXPECT_NE (composed["body"]["content"], R"({"id":"{{$guid}}"})");
+}
+
+TEST_F (RequestComposerTest, DeferDynamicVariablesMustBeABoolean) {
+    auto [status, payload] = vayu::http::compose_request_core (*db_,
+    json{ { "request", { { "url", "https://example.test" } } },
+    { "deferDynamicVariables", "yes" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (payload["error"]["code"], "invalid_compose_request");
+}
+
 // A form body carries its content as `fields`, so resolution has to reach
 // inside them - the composer's `content` pass alone would leave a form body
 // full of literal `{{...}}` on the wire. The engine only started *sending*
@@ -784,6 +905,87 @@ TEST_F (RequestComposerTest, MalformedBodiesAre400sInTheNestedShape) {
     }
 }
 
+// --- Bound data columns (#1007) ---------------------------------------------
+//
+// Postman binds a dataset's columns to bare names, so an imported data-driven
+// collection spells them `{{username}}`. Composition cannot substitute one - a
+// plan is composed once and a row is bound per iteration - so what it does is
+// the same thing it does for the reserved spelling: leave the token written as
+// it stands, for `core::apply_data_template` to join. The field that says which
+// names those are is `dataColumns`.
+//
+// Mutation-check for the first: drop the `is_bound_column_name` arm of
+// `lookup_variable` and the request goes out carrying the environment's value
+// where this iteration's cell belonged.
+
+TEST_F (RequestComposerTest, ABoundColumnOutranksASameNamedVariableByBeingDeferred) {
+    seed_environment ("env_1", R"({"username":{"value":"from-the-environment","enabled":true},
+                                   "host":{"value":"api.test","enabled":true}})");
+
+    const json request = { { "method", "post" }, { "url", "https://{{host}}/u/{{username}}" },
+        { "headers", { { "X-User", "{{username}}" } } },
+        { "body", { { "mode", "raw" }, { "content", R"({"who":"{{username}}"})" } } },
+        { "auth", { { "mode", "basic" }, { "username", "{{username}}" }, { "password", "s3cret" } } } };
+
+    const json bound = { { "request", request }, { "environmentId", "env_1" },
+        { "dataColumns", json::array ({ "username" }) } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, bound);
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/u/{{username}}");
+    EXPECT_EQ (payload["headers"]["X-User"], "{{username}}");
+    EXPECT_EQ (payload["body"]["content"], R"({"who":"{{username}}"})");
+    EXPECT_EQ (payload["auth"]["username"], "{{username}}");
+
+    // The same payload with no dataset behind it resolves the name from the
+    // environment, exactly as it always did - the rule is "while a row is
+    // bound", and this is the other way round it has to be read.
+    const json unbound = { { "request", request }, { "environmentId", "env_1" } };
+    auto [plain_status, plain_payload] = vayu::http::compose_request_core (*db_, unbound);
+    ASSERT_EQ (plain_status, 200) << plain_payload.dump ();
+    EXPECT_EQ (plain_payload["url"], "https://api.test/u/from-the-environment");
+    EXPECT_EQ (plain_payload["headers"]["X-User"], "from-the-environment");
+    EXPECT_EQ (plain_payload["auth"]["username"], "from-the-environment");
+}
+
+TEST_F (RequestComposerTest, ABoundColumnDefersOnlyItsOwnNameAndNotTheReservedSpelling) {
+    seed_environment ("env_1", R"({"username":{"value":"env","enabled":true},
+                                   "region":{"value":"eu","enabled":true}})");
+    const json body = { { "request",
+                        { { "method", "get" },
+                        { "url", "https://api.test/{{username}}/{{region}}/{{data.id}}" } } },
+        { "environmentId", "env_1" }, { "dataColumns", json::array ({ "username" }) } };
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (status, 200) << payload.dump ();
+    // The bound column deferred, the ordinary variable resolved, and the
+    // reserved spelling still left alone by its own older rule.
+    EXPECT_EQ (payload["url"], "https://api.test/{{username}}/eu/{{data.id}}");
+}
+
+TEST_F (RequestComposerTest, DataColumnsMustBeAListOfNames) {
+    // A malformed field is a refusal rather than a silent empty set: a caller
+    // that meant to bind columns and is quietly composed without them sends the
+    // environment's values for a whole run and is told nothing.
+    for (const json& columns : { json ("username"), json ({ { "username", true } }),
+         json::array ({ 7 }), json::array ({ "" }) }) {
+        const json body = { { "request", { { "method", "get" }, { "url", "https://api.test/" } } },
+            { "dataColumns", columns } };
+        auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+        EXPECT_EQ (status, 400) << body.dump ();
+        EXPECT_EQ (payload["error"]["code"], "invalid_compose_request") << body.dump ();
+    }
+
+    // Absent and null both mean "no dataset", which is what every client that
+    // has never heard of the field sends.
+    for (const json& body :
+    { json{ { "request", { { "method", "get" }, { "url", "https://api.test/" } } } },
+    json{ { "request", { { "method", "get" }, { "url", "https://api.test/" } } },
+    { "dataColumns", nullptr } } }) {
+        auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+        EXPECT_EQ (status, 200) << payload.dump ();
+    }
+}
+
 // --- Header forgery through a substituted variable (#738) --------------------
 //
 // #732 closed the same forgery from a bound `{{data.column}}`; an environment,
@@ -906,6 +1108,118 @@ TEST_F (RequestComposerTest, TheComposerRuleIsTheOneSharedHeaderTextRule) {
         EXPECT_EQ (status, refused ? 400 : 200)
         << "value: " << json (value).dump () << " - " << payload.dump ();
     }
+}
+
+// --- Two header names that resolve to one (#1051) ----------------------------
+//
+// The sibling of the block above, and the other half of what a substituted
+// header name can do: there a value *forges* a header, here a name *erases*
+// one. The map the payload becomes holds one value per name, so the second of
+// two names that resolve alike takes the first's place and the request goes out
+// a header short - which nothing downstream can notice, the pre-send gate
+// included. See `http/header_names.hpp`.
+//
+// Mutation-check for the four below: drop the `collision` check in
+// `resolve_header_block` and the first three fail on the status, while the
+// fourth must keep passing - it is the case the refusal deliberately leaves
+// alone.
+
+TEST_F (RequestComposerTest, TwoTemplatedHeaderNamesResolvingAlikeAreRefused) {
+    seed_environment ("env_1",
+    R"({"a":{"value":"X-Tenant","enabled":true},"b":{"value":"X-Tenant","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", { { "{{a}}", "acme" }, { "{{b}}", "legacy" } } } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "colliding_header_names");
+    const auto message = payload["error"]["message"].get<std::string> ();
+    // Both spellings as written, because either is the one the author may have
+    // meant - composition names them and repairs neither.
+    EXPECT_NE (message.find ("{{a}}"), std::string::npos) << message;
+    EXPECT_NE (message.find ("{{b}}"), std::string::npos) << message;
+    EXPECT_NE (message.find ("X-Tenant"), std::string::npos) << message;
+}
+
+TEST_F (RequestComposerTest, ATemplatedNameCollidingWithALiteralHeaderIsRefused) {
+    seed_environment ("env_1", R"({"tenant_header":{"value":"X-Tenant","enabled":true}})");
+    const json body = {
+        { "request",
+        { { "method", "GET" }, { "url", "https://x.test/" },
+        { "headers", { { "{{tenant_header}}", "acme" }, { "X-Tenant", "legacy" } } } } },
+        { "environmentId", "env_1" }
+    };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "colliding_header_names");
+    const auto message = payload["error"]["message"].get<std::string> ();
+    EXPECT_NE (message.find ("{{tenant_header}}"), std::string::npos) << message;
+    EXPECT_NE (message.find ("X-Tenant"), std::string::npos) << message;
+}
+
+// `Headers` compares names without case, so a name that differs from another
+// only in case is not a second header - it is the same one, arriving instead of
+// it. This is the case composition alone can catch: the payload it would answer
+// 200 with carries both names as distinct JSON keys, and the header is lost
+// later, where `deserialize_request` parses them into the map.
+TEST_F (RequestComposerTest, TheHeaderNameCollisionIsJudgedWithoutCase) {
+    seed_environment ("env_1", R"({"h":{"value":"authorization","enabled":true}})");
+    const json body = {
+        { "request",
+        { { "method", "GET" }, { "url", "https://x.test/" },
+        { "headers", { { "{{h}}", "Bearer new" }, { "Authorization", "Bearer old" } } } } },
+        { "environmentId", "env_1" }
+    };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "colliding_header_names");
+}
+
+// Which of two colliding names is walked first is not the author's to choose:
+// a `nlohmann::json` object is keyed in sorted order, so the walk follows the
+// *unresolved* text. A template almost always sorts last - `{` is above every
+// character a header name ordinarily holds - which is why reproducing the
+// other order at all takes a literal name reaching past it, and `~` is an
+// ordinary header-name character. The rule is symmetric and this is the half
+// the cases above cannot reach: the templated name got there first, and a
+// literal collided into it.
+TEST_F (RequestComposerTest, TheCollisionIsRefusedWhicheverNameResolvedFirst) {
+    seed_environment ("env_1", R"({"suffix":{"value":"~Tenant","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", { { "X{{suffix}}", "acme" }, { "X~Tenant", "legacy" } } } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "colliding_header_names");
+    const auto message = payload["error"]["message"].get<std::string> ();
+    EXPECT_NE (message.find ("X{{suffix}}"), std::string::npos) << message;
+    EXPECT_NE (message.find ("X~Tenant"), std::string::npos) << message;
+}
+
+// Two names the author typed are two lines they can see side by side, and the
+// later one has always won - a rule that is visible in the editor and is not
+// this refusal's to change. Only a collision resolution *made* is invisible,
+// which is the whole distinction (the same one the bind-time rule draws in
+// `docs/engine/api-reference.md`).
+TEST_F (RequestComposerTest, TwoNamesTheAuthorTypedAreNotThisRefusal) {
+    seed_environment ("env_1", R"({"ok":{"value":"fine","enabled":true}})");
+    const json body = {
+        { "request",
+        { { "method", "GET" }, { "url", "https://x.test/" },
+        { "headers", { { "Authorization", "Bearer {{ok}}" }, { "authorization", "Bearer other" } } } } },
+        { "environmentId", "env_1" }
+    };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["headers"]["Authorization"], "Bearer fine");
+    EXPECT_EQ (payload["headers"]["authorization"], "Bearer other");
 }
 
 TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {

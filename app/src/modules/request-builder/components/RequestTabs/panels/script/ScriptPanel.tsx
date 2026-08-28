@@ -25,7 +25,11 @@ import { useRequestBuilderContext } from "../../../../context";
 import InheritedScriptsNotice from "../InheritedScriptsNotice";
 import LegacyScriptNotice from "../LegacyScriptNotice";
 import { SCRIPT_VARIANTS, type ScriptVariant } from "./script-variants";
-import { referencedVariables, TEMPLATE_IN_SCRIPT_NOTE } from "@/lib/referenced-variables";
+import {
+	describeColumnReference,
+	referencedVariables,
+	TEMPLATE_IN_SCRIPT_NOTE,
+} from "@/lib/referenced-variables";
 import { describeDataToken } from "@/lib/data-contract";
 import { DATA_TOKEN_TONE_CLASS } from "@/lib/data-token-tone";
 import { isDataVariableName } from "@/lib/variable-resolution";
@@ -94,7 +98,8 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 			{hasReferencedVars && (
 				<div className="flex flex-wrap items-center gap-2">
 					<span className="text-xs text-muted-foreground">Names mentioned:</span>
-					{usedVars.slice(0, CHIP_LIMIT).map(({ name, via }) => {
+					{usedVars.slice(0, CHIP_LIMIT).map((reference) => {
+						const { name, via } = reference;
 						/*
 						 * A `data.*` name is not a variable and never becomes one
 						 * (issue #604): the namespace is disjoint from the scopes,
@@ -118,7 +123,53 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 										"font-mono text-xs bg-muted",
 										DATA_TOKEN_TONE_CLASS[data.tone]
 									)}
-									title={`${data.description} - ${data.note} ${TEMPLATE_IN_SCRIPT_NOTE}`}
+									/*
+									 * The interpolation note belongs to the spelling
+									 * that is literal characters. A `data.*` name
+									 * read through `pm.*.get()` is a real call, so
+									 * telling its author the text reaches the script
+									 * verbatim describes something else entirely.
+									 */
+									title={
+										via === "template"
+											? `${data.description} - ${data.note} ${TEMPLATE_IN_SCRIPT_NOTE}`
+											: `${data.description} - ${data.note}`
+									}
+								>
+									{name}
+								</Badge>
+							);
+						}
+						/*
+						 * A bare name a bound row answers (issue #1063). The same
+						 * two states as the `data.*` chip above and painted from
+						 * the same table, because `pm.iterationData.get("email")`
+						 * and `{{data.email}}` name one column and read one row -
+						 * a reader who has to learn two paints for that has been
+						 * told the spelling matters, and it does not.
+						 *
+						 * `pm.variables.get("email")` joins them only while the
+						 * name is a declared column no scope defines, which is
+						 * exactly the line `VariableInput` already draws for a
+						 * bare `{{email}}` in the URL bar. The decision itself is
+						 * `describeColumnReference`'s, so the two surfaces cannot
+						 * come to disagree about it.
+						 */
+						const column = describeColumnReference(
+							reference,
+							context.dataColumns,
+							(candidate) => Boolean(allVariables[candidate])
+						);
+						if (column) {
+							return (
+								<Badge
+									key={name}
+									variant="chip"
+									className={cn(
+										"font-mono text-xs bg-muted",
+										DATA_TOKEN_TONE_CLASS[column.tone]
+									)}
+									title={`${column.description} - ${column.note}`}
 								>
 									{name}
 								</Badge>

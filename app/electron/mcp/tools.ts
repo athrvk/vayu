@@ -1422,6 +1422,12 @@ async function composeLoadRunRequest(
 	const composeBody: Record<string, unknown> = {
 		collectionId: str(args, "collectionId"),
 		environmentId: str(args, "environmentId"),
+		// This composed payload is repeated once per iteration, per virtual
+		// user, so the `{{$guid}}` family belongs to each repetition, not to
+		// this one-time composition - leave the tokens written as-is and let
+		// the engine generate a fresh value per iteration at bind time
+		// (issue #995).
+		deferDynamicVariables: true,
 	};
 	if (savedId === undefined) {
 		if (str(args, "url") === undefined) {
@@ -2796,6 +2802,88 @@ function describeCascade(scope: CascadeScope): string {
 	);
 }
 
+// --- Trash (issue #988 / #1071) ----------------------------------------------
+
+/** One `GET /trash` row, as `purge_trash_entry` needs it to name what it destroys. */
+interface TrashRow {
+	kind: "collection" | "request";
+	name: string;
+	/** Sub-collections this row's delete took with it. Always 0 for a request. */
+	collections: number;
+	/** Requests this row's delete took with it. Always 0 for a request. */
+	requests: number;
+}
+
+/**
+ * Read one trash entry by id off `GET /trash` - there is no single-entry route,
+ * the same reason {@link EngineClient.getCollection} scans the collection list.
+ *
+ * Thrown rather than defaulted, on {@link readCascadeScope}'s reasoning: an
+ * entry nobody could read must not become a purge prompt carrying a name and
+ * counts nobody verified.
+ */
+async function readTrashEntry(
+	client: EngineClient,
+	id: string,
+	signal?: AbortSignal
+): Promise<TrashRow> {
+	const payload = await client.listTrash(signal);
+	const items = isRecord(payload) && Array.isArray(payload.items) ? payload.items : [];
+	const row = items.find((item) => isRecord(item) && item.id === id) as
+		| Record<string, unknown>
+		| undefined;
+	if (!row) throw new ToolArgError(`Nothing in the trash with id "${id}".`);
+	return {
+		kind: row.kind === "request" ? "request" : "collection",
+		name: typeof row.name === "string" && row.name !== "" ? row.name : id,
+		collections: typeof row.collections === "number" ? row.collections : 0,
+		requests: typeof row.requests === "number" ? row.requests : 0,
+	};
+}
+
+/** One phrase naming what purging this entry destroys. */
+function describeTrashEntry(entry: TrashRow): string {
+	const subject =
+		entry.kind === "collection"
+			? `the collection "${entry.name}"`
+			: `the saved request "${entry.name}"`;
+	if (entry.collections === 0 && entry.requests === 0) return subject;
+	return (
+		`${subject}, with ${entry.collections} sub-collection(s) and ` +
+		`${entry.requests} saved request(s) inside it`
+	);
+}
+
+/**
+ * The engine's own refusal text off a 404/409 `EngineRequestError` from
+ * `POST /trash/:id/restore`. Both of restore's failure shapes name the fix (a
+ * wrong id, or which collection to restore first, per `trash.cpp`), so this
+ * surfaces that sentence rather than writing a second one that could disagree
+ * with it.
+ *
+ * **The nested shape is the contract.** `error_response` in `routes.hpp` builds
+ * `{"error": {"code", "message"}}` for every refusal these routes produce, and
+ * that is the one shape issue #173 settled on. The flat `{"error": "..."}`
+ * branch is a fallback rather than an alternative, for the same reason the
+ * renderer's `readApiError` keeps one: the app and the engine sidecar are not
+ * updated together, so a newer app can be talking to an older engine, and its
+ * message beats the raw body. Anything else falls back to the body, then the
+ * status line - reading a refusal must never throw.
+ */
+function trashRefusalMessage(err: EngineRequestError): string {
+	try {
+		const parsed = JSON.parse(err.body) as { error?: unknown };
+		const error = parsed.error;
+		if (isRecord(error) && typeof error.message === "string" && error.message) {
+			return error.message;
+		}
+		if (typeof error === "string" && error) return error;
+	} catch {
+		// Not JSON - the raw body is the best we have.
+	}
+	return err.body || err.message;
+}
+
 // --- Mock issuer -------------------------------------------------------------
 
 /**
@@ -4107,7 +4195,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Delete a collection AND EVERYTHING INSIDE IT - every nested sub-collection and every saved request in them. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the number of sub-collections and requests this destroys; otherwise call once to see those counts, then again with `confirmed: true`. It goes to Vayu's Trash, where the user can restore it until the retention window (`trashRetentionDays`, 30 days by default) runs out - not something to undo from here.",
+			"Delete a collection AND EVERYTHING INSIDE IT - every nested sub-collection and every saved request in them. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the number of sub-collections and requests this destroys; otherwise call once to see those counts, then again with `confirmed: true`. It goes to Vayu's Trash rather than disappearing outright - list_trash shows it there, and restore_trash_entry puts it back, until the retention window (`trashRetentionDays`, 30 days by default) runs out.",
 		annotations: {
 			title: "Delete collection",
 			readOnlyHint: false,
@@ -4854,7 +4942,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Delete a saved request. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the request's name and URL; otherwise call once for a preview, then again with `confirmed: true`. It goes to Vayu's Trash, where the user can restore it until the retention window (`trashRetentionDays`, 30 days by default) runs out - not something to undo from here.",
+			"Delete a saved request. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the request's name and URL; otherwise call once for a preview, then again with `confirmed: true`. It goes to Vayu's Trash rather than disappearing outright - list_trash shows it there, and restore_trash_entry puts it back, until the retention window (`trashRetentionDays`, 30 days by default) runs out.",
 		annotations: {
 			title: "Delete saved request",
 			readOnlyHint: false,
@@ -4901,6 +4989,117 @@ export const TOOLS: McpTool[] = [
 			});
 			if (unconfirmed) return unconfirmed;
 			return callEngine(() => ctx.client.deleteRequest(requestId, signal));
+		},
+	},
+	{
+		name: "list_trash",
+		category: "read",
+		invalidates: [],
+		description:
+			"List what delete_collection / delete_request have sent to Vayu's Trash and can still be restored, newest first. Answers ROOTS ONLY - the row a delete actually targeted, never what its cascade took with it: a deleted collection's whole subtree is one entry here, with `collections` and `requests` counting the sub-collections and saved requests that same delete took (always 0 for a request). Each entry also carries `kind` ('collection' | 'request'), `name`, `deletedAt` (Unix ms) and `parentId` (the collection's old parent, or the request's owning collection). Put one back with restore_trash_entry, or destroy it for good with purge_trash_entry. Rows are also purged automatically once older than the `trashRetentionDays` config entry (30 days by default; `0` keeps them forever - see get_engine_config).",
+		annotations: {
+			title: "List trash",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {},
+		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listTrash(signal)),
+	},
+	{
+		name: "restore_trash_entry",
+		category: "write",
+		// Both families: a restore can bring back either kind, and there is no
+		// argument here that says which in advance - the same reasoning
+		// move_item's pair carries.
+		invalidates: ["collection", "request"],
+		description:
+			"Put a deleted collection or saved request back from Vayu's Trash, with everything its delete took along - a restored collection's whole subtree returns too, scoped to that one delete's cohort (see list_trash). GUARDED: requires write access to be enabled in Vayu Settings. This is NOT destructive - it restores data rather than removing it - so there is no confirmation step. A collection whose parent is gone, or is itself still in the trash, comes back at the top level instead of where it was (`reparentedToRoot: true` in the result); a request has no such fallback, so restoring one whose collection is itself deleted or gone is refused with a 409 naming the collection to restore first. An id the trash does not hold - a live row, or one already purged - is a 404.",
+		annotations: {
+			title: "Restore from Trash",
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			id: z.string().describe("Trash entry ID to restore (from list_trash)."),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const id = requireStr(args, "id");
+			let restored: Record<string, unknown>;
+			try {
+				const value = await ctx.client.restoreTrashEntry(id, signal);
+				restored = isRecord(value) ? value : {};
+			} catch (err) {
+				// The engine's own message already names the fix (a wrong id, or
+				// which collection to restore first) - surface it rather than
+				// writing a second sentence that could disagree with it.
+				if (
+					err instanceof EngineRequestError &&
+					(err.status === 404 || err.status === 409)
+				) {
+					return errorResult(trashRefusalMessage(err));
+				}
+				return engineErrorResult(err);
+			}
+			const result = jsonResult(restored);
+			// A moved folder is worth telling the caller about - it is not where it
+			// used to be, even though the restore itself succeeded.
+			return restored.reparentedToRoot === true
+				? withCaveat(
+						result,
+						"\n\nRestored at the top level: its original parent is gone or itself in the trash, so it came back as a tree root rather than where it was."
+					)
+				: result;
+		},
+	},
+	{
+		name: "purge_trash_entry",
+		category: "write",
+		invalidates: ["collection", "request"],
+		description:
+			"Permanently destroy one entry in Vayu's Trash, with its whole subtree - requests, and the examples they own. THERE IS NO UNDO: this is the Trash's own hard delete, on top of the soft delete delete_collection / delete_request already did, and once it runs the row is gone the way a delete used to be before Trash existed. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the entry's name and what it holds; otherwise call once for a preview, then again with `confirmed: true`. An id the trash does not hold is a 404, which also stops a mistyped id from destroying anything live.",
+		annotations: {
+			title: "Purge from Trash",
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			id: z.string().describe("Trash entry ID to destroy for good (from list_trash)."),
+			confirmed: confirmedInput("actually purge this trash entry for good"),
+		},
+		handler: async (args, ctx, signal) => {
+			const refused = writesDisabled(ctx);
+			if (refused) return refused;
+			const id = requireStr(args, "id");
+			// Read what the purge destroys before asking, the same reasoning
+			// delete_collection reads its cascade first: an unreadable entry is a
+			// refusal, never a prompt carrying a name and counts nobody verified.
+			let entry: TrashRow;
+			try {
+				entry = await readTrashEntry(ctx.client, id, signal);
+			} catch (err) {
+				if (err instanceof ToolArgError) return errorResult(err.message);
+				return engineErrorResult(err);
+			}
+			const subject = describeTrashEntry(entry);
+			const unconfirmed = await confirmDestructive(args, ctx, {
+				message: `Permanently destroy ${subject}?\n\nThere is no undo.`,
+				acceptTitle: "Purge from Trash",
+				acceptDescription: "Confirm to destroy it for good.",
+				declined: "Nothing purged - the user declined.",
+				preview:
+					"AWAITING CONFIRMATION - nothing was purged.\n\n" +
+					`This would permanently destroy ${subject}. There is no undo.\n\n` +
+					"This is a preview. To purge it, call purge_trash_entry again with confirmed: true and the same arguments.",
+			});
+			if (unconfirmed) return unconfirmed;
+			return callEngine(() => ctx.client.purgeTrashEntry(id, signal));
 		},
 	},
 	{
@@ -5783,7 +5982,7 @@ export const TOOLS: McpTool[] = [
 		category: "load",
 		invalidates: ["run"],
 		description:
-			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, and `comment` stamps the run with why it exists; all four apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
+			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, and `comment` stamps the run with why it exists; all four apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
 		annotations: {
 			title: "Start load test",
 			readOnlyHint: false,

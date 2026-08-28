@@ -65,6 +65,20 @@ class SendRequestServer {
             echo["body"]   = req.body;
             echo["marker"] = req.get_header_value ("X-Marker");
             echo["type"]   = req.get_header_value ("Content-Type");
+            // The three an auth block can land in: the composed Authorization
+            // line, an api key's own header, and the target with its query,
+            // which is where an api key sent as a parameter shows up.
+            echo["auth"]   = req.get_header_value ("Authorization");
+            echo["apikey"] = req.get_header_value ("X-Api-Key");
+            echo["target"] = req.target;
+            // Every name that arrived, because a header *name* the script
+            // templated is only observable as a name - the four reads above
+            // each need the name spelled here to see anything at all (#1067).
+            auto names = nlohmann::json::array ();
+            for (const auto& header : req.headers) {
+                names.push_back (header.first);
+            }
+            echo["names"] = names;
             res.set_content (echo.dump (), "application/json");
         });
 
@@ -228,6 +242,42 @@ TEST_F (SendRequestTest, DeliversTheResponseToTheCallback) {
     EXPECT_EQ (server.hit_count (), 1);
 }
 
+TEST_F (SendRequestTest, TheCallbackResponseCarriesTheHeaderPropertyListReads) {
+    // The third header object. It is built by the same `install_header_methods`
+    // the two pm.* ones are, so this is the assertion that keeps that true
+    // rather than a second surface drifting behind.
+    SendRequestServer server;
+
+    auto result = run ("var seen = {}; "
+                       "pm.sendRequest('" +
+    server.url ("/token") +
+    "', function (err, res) { "
+    "  seen.count = res.headers.count(); "
+    "  seen.keys = res.headers.all().map(function (h) { return h.key; }); "
+    "  seen.type = res.headers.toObject()['content-type']; "
+    "  seen.one = res.headers.one('CONTENT-TYPE').value; "
+    "  seen.index = res.headers.indexOf('X-Absent'); "
+    "  seen.walked = []; "
+    "  res.headers.each(function (h) { seen.walked.push(h.key); }); "
+    "  seen.enumerated = Object.keys(res.headers).length; "
+    "}); "
+    "pm.test('reads', function () { "
+    "  pm.expect(seen.count > 0).to.equal(true); "
+    "  pm.expect(seen.keys.length).to.equal(seen.count); "
+    "  pm.expect(seen.walked.length).to.equal(seen.count); "
+    // The methods are non-enumerable here too, so enumerating the object sees
+    // the headers and nothing else - the guard the two pm.* objects have.
+    "  pm.expect(seen.enumerated).to.equal(seen.count); "
+    "  pm.expect(seen.type).to.equal('application/json'); "
+    "  pm.expect(seen.one).to.equal('application/json'); "
+    "  pm.expect(seen.index).to.equal(-1); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
 TEST_F (SendRequestTest, OptionsObjectCarriesMethodHeadersAndBody) {
     SendRequestServer server;
 
@@ -270,6 +320,369 @@ TEST_F (SendRequestTest, PostmanArrayHeaderFormIsAccepted) {
     EXPECT_TRUE (result.success) << result.error_message;
     ASSERT_EQ (result.tests.size (), 1u);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// `pm.request.url` is a Url object since #991, and "send this request again" is
+// the idiom that reads it - so the whole-argument form has to take one. Pinned
+// here because nothing asserted it in either direction (issue #1001).
+TEST_F (SendRequestTest, PmRequestUrlIsAcceptedAsTheWholeArgument) {
+    SendRequestServer server;
+    request.url = server.url ("/token");
+
+    auto result = run ("var body = null; "
+                       "pm.sendRequest(pm.request.url, function (err, res) { "
+                       "  body = res.json(); "
+                       "}); "
+                       "pm.test('sent', function () { "
+                       "  pm.expect(body.access_token).to.equal('tok_123'); "
+                       "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (server.hit_count (), 1);
+}
+
+// ============================================================================
+// options.auth - composed by the engine's own resolver, refused by name where
+// it cannot be composed (issue #1001)
+// ============================================================================
+
+TEST_F (SendRequestTest, AuthBasicComposesTheAuthorizationHeader) {
+    SendRequestServer server;
+
+    auto result = run ("var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', "
+    "  auth: { type: 'basic', basic: { username: 'alice', password: 's3cret' } "
+    "} "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.auth).to.equal('Basic YWxpY2U6czNjcmV0'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Postman's array spelling of the parameter block, and the token written as a
+// variable the same script set two lines earlier - the two halves an imported
+// token-refresh script depends on.
+TEST_F (SendRequestTest, AuthBearerReadsTheArrayFormAndResolvesTheToken) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('tok', 'tok_123'); "
+                       "var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', "
+    "  auth: { type: 'bearer', bearer: [{ key: 'token', value: '{{tok}}' }] } "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.auth).to.equal('Bearer tok_123'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (SendRequestTest, AuthApiKeyGoesWhereItsInSays) {
+    SendRequestServer server;
+
+    auto result = run ("var header = null; var query = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', "
+    "  auth: { type: 'apikey', apikey: { key: 'X-Api-Key', value: 'k123' } } "
+    "}, function (err, res) { header = res.json(); }); "
+    "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', "
+    "  auth: { type: 'apikey', apikey: [{ key: 'key', value: 'api_key' }, "
+    "    { key: 'value', value: 'k 1&2' }, { key: 'in', value: 'query' }] } "
+    "}, function (err, res) { query = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(header.apikey).to.equal('k123'); "
+    // Percent-encoded by the same append_query_param every other send writes a
+    // query credential with - a raw '&' here would start a parameter of its own.
+    "  pm.expect(query.target.indexOf('api_key=k%201%262') >= "
+    "0).to.equal(true); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// The engine's rule, reached rather than restated: a header the caller wrote
+// wins over the credential auth would compose into the same line.
+TEST_F (SendRequestTest, AHeaderTheScriptSetWinsOverTheAuthOption) {
+    SendRequestServer server;
+
+    auto result = run ("var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', "
+    "  header: { 'Authorization': 'Token abc' }, "
+    "  auth: { type: 'bearer', bearer: { token: 'tok_123' } } "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.auth).to.equal('Token abc'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// The silent drop this issue exists to close: before #1001 an `auth` block the
+// sandbox could not compose was ignored and the request went out
+// unauthenticated. Restore the drop and this reddens - the send succeeds.
+TEST_F (SendRequestTest, AnAuthTypeTheSandboxCannotComposeIsRefusedByName) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', "
+    "  auth: { type: 'oauth2', oauth2: { accessToken: 'x' } } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("oauth2"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0)
+    << "an auth block the sandbox cannot compose was dropped and the request "
+       "sent unauthenticated";
+}
+
+TEST_F (SendRequestTest, AnAuthBlockMissingItsCredentialIsRefused) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', auth: { type: 'bearer', bearer: {} } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("token"), std::string::npos) << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0);
+}
+
+// Basic is the type with no required parameter - Postman sends an empty half as
+// the empty string - so a block that is not there at all has to be caught by
+// its absence, or a misspelled key composes `Basic Og==` and sends it.
+TEST_F (SendRequestTest, AnAuthTypeWithNoBlockToReadIsRefused) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', auth: { type: 'basic', Basic: { username: 'alice' } } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("no options.auth.basic block"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0)
+    << "a credential the script misspelled was sent as an empty one";
+}
+
+// ============================================================================
+// {{variables}} in script-supplied strings (issue #1001)
+// ============================================================================
+
+TEST_F (SendRequestTest, ScriptSuppliedStringsResolveAsTheCallIsMade) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('base', '" + server.url ("") +
+    "'); "
+    "pm.environment.set('marker', 'from-variable'); "
+    "pm.environment.set('payload', 'body-from-variable'); "
+    "var text = null; var raw = null; "
+    "pm.sendRequest({ url: '{{base}}/echo', method: 'POST', "
+    "  header: { 'X-Marker': '{{marker}}' }, body: '{{payload}}' "
+    "}, function (err, res) { text = res.json(); }); "
+    // The same body under Postman's object spelling, which is the shape an
+    // imported script carries.
+    "pm.sendRequest({ url: '{{base}}/echo', method: 'POST', "
+    "  body: { mode: 'raw', raw: '{{payload}}' } "
+    "}, function (err, res) { raw = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(text.marker).to.equal('from-variable'); "
+    "  pm.expect(text.body).to.equal('body-from-variable'); "
+    "  pm.expect(raw.body).to.equal('body-from-variable'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (server.hit_count (), 2);
+}
+
+// #1009's pass-through rule, which this resolution inherits rather than
+// replaces: a name nothing defines keeps its braces instead of becoming empty.
+TEST_F (SendRequestTest, ANameNothingDefinesKeepsItsBraces) {
+    SendRequestServer server;
+
+    // A defined name beside the undefined one, so this reddens if resolution
+    // stops running at all rather than only when the pass-through rule breaks.
+    auto result = run ("pm.environment.set('type', 'application/json'); "
+                       "var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { 'X-Marker': '{{nothing_defines_this}}', "
+    "  'Content-Type': '{{type}}' } "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.marker).to.equal('{{nothing_defines_this}}'); "
+    "  pm.expect(echo.type).to.equal('application/json'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Resolution makes a variable's bytes header text, so the line-forging refusal
+// has to cover them - it does, because the send goes through the same
+// `validate_transferable` gate every other transfer does.
+TEST_F (SendRequestTest, AResolvedValueThatWouldForgeAHeaderIsRefused) {
+    SendRequestServer server;
+
+    auto result =
+    run ("pm.environment.set('marker', 'ok\\r\\nX-Injected: yes'); "
+         "var seen = ''; "
+         "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { 'X-Marker': '{{marker}}' } "
+    "}, function (err) { seen = err ? err.message : ''; }); "
+    "pm.test('refused', function () { "
+    "  pm.expect(seen.indexOf('forging a header') >= 0).to.equal(true); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (server.hit_count (), 0);
+}
+
+// ============================================================================
+// {{variables}} in header names (issue #1067)
+// ============================================================================
+//
+// The half #1001 left written as it stood, because two names that resolve to
+// one were a rule composition had not yet decided. #1051 decided it - refusal,
+// never repair - so these adopt that rule rather than answer it again here.
+//
+// Mutation-check for the five below: leave the names as written (resolve the
+// values only, as `interpolate_send_request` did before #1067) and the first
+// fails on the name the server never sees, while the three refusals stop
+// refusing - the map silently drops a header instead, which is what the rule
+// exists to prevent. Only the pass-through case keeps passing, since it is
+// #1009's rule, which resolution inherits rather than replaces.
+
+TEST_F (SendRequestTest, AHeaderNameResolvesAsTheCallIsMade) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('marker_header', 'X-Marker'); "
+                       "var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { '{{marker_header}}': 'from-script' } "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.marker).to.equal('from-script'); "
+    "  pm.expect(echo.names.join(',').indexOf('{{') < 0).to.equal(true); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (server.hit_count (), 1);
+}
+
+// #1009's pass-through rule, which name resolution inherits rather than
+// replaces: a name nothing defines keeps its braces instead of becoming empty -
+// and an empty one is refused two tests below, which is what makes the
+// difference observable. The braced name goes out as written and the server
+// answers it however it likes (this one rejects the line, since `{}` are not
+// header-name bytes), so what is asserted is that the call was *sent* and
+// answered rather than refused here.
+TEST_F (SendRequestTest, AHeaderNameNothingDefinesKeepsItsBraces) {
+    SendRequestServer server;
+
+    auto result = run ("var failed = null; var answered = 0; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { '{{nothing_defines_this}}': 'v' } "
+    "}, function (err, res) { failed = err; answered = res ? res.code : 0; }); "
+    "pm.test('sent as written', function () { "
+    "  pm.expect(failed).to.equal(null); "
+    "  pm.expect(answered > 0).to.equal(true); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (SendRequestTest, TwoHeaderNamesResolvingAlikeAreRefused) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('a', 'X-Tenant'); "
+                       "pm.environment.set('b', 'X-Tenant'); "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { '{{a}}': 'acme', '{{b}}': 'legacy' } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    // Both spellings as written and the name they produced, because either is
+    // the one the author may have meant - the call names them and repairs
+    // neither, in composition's words with the call named in front of them.
+    EXPECT_NE (result.error_message.find ("pm.sendRequest:"), std::string::npos)
+    << result.error_message;
+    EXPECT_NE (result.error_message.find ("{{a}}"), std::string::npos) << result.error_message;
+    EXPECT_NE (result.error_message.find ("{{b}}"), std::string::npos) << result.error_message;
+    EXPECT_NE (result.error_message.find ("X-Tenant"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0) << "a request went out a header short";
+}
+
+// `Headers` keys without case, so the collision the map would make is looked
+// for the same way - a name resolving to `x-marker` erases the `X-Marker` the
+// script wrote itself.
+TEST_F (SendRequestTest, TheHeaderNameCollisionIsJudgedWithoutCase) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('h', 'x-marker'); "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { '{{h}}': 'acme', 'X-Marker': 'legacy' } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("compared without case"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0);
+}
+
+// The one thing resolution can produce that nothing further down the send
+// would notice: an empty name is refused at read time when it is written that
+// way, and the pre-send gate reads header text for bytes that break the line,
+// not for a name that is not there.
+TEST_F (SendRequestTest, AHeaderNameResolvingToNothingIsRefused) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('blank', ''); "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { '{{blank}}': 'acme' } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("empty name"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0);
 }
 
 // ============================================================================

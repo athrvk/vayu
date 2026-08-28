@@ -123,24 +123,31 @@ struct ScriptContext {
      * below, so `pm.info.eventName` cannot disagree with the hook that is
      * actually running.
      *
-     * `iteration` / `iterationCount` are set **only where a row was actually
-     * bound**, which is what keeps issue #300's ruling intact rather than
-     * reopening it: a load test's `tests` script runs once per *sampled*
-     * response after the run has finished, so a reservoir sample index reported
-     * as an iteration number would be a binding that cannot fail - worse than
-     * a missing one. `validate_scripts` therefore still sets neither, and a
-     * script that reads `pm.info.iteration` on an ordinary Send reads
-     * `undefined`. A scenario run has a real iteration index, so it reports it;
-     * so does a `POST /execute` naming a `data` row, which is row 0 of 1
-     * (issue #601).
+     * `iteration` / `vu` are set **only where the executor claimed one before
+     * the send**, which is what keeps issue #300's ruling intact rather than
+     * reopening it: what that ruling refuses is reporting a *reservoir
+     * position* as an iteration number, a binding that cannot fail. A load
+     * run's deferred `tests` script runs once per sampled response, and since
+     * issue #994 each sample carries the iteration and the virtual user it was
+     * actually sent as - facts claimed on the submission path - so reporting
+     * them is honest rather than invented. An ordinary Send reads `undefined`
+     * for both, as it always did; a `POST /execute` naming a `data` row reports
+     * iteration 0 of 1 (issue #601).
      *
-     * `iteration` is 0-based (Postman's convention); `iterationCount` is the
-     * total the run will perform.
+     * `iterationCount` stays narrower than either: a duration-bounded run has
+     * no total to report, and a field readable from one mode and not another is
+     * worse than one that is never readable at all. The collection runner sets
+     * it and nothing else does.
+     *
+     * `iteration` is 0-based (Postman's convention); `vu` is 1-based, because
+     * it is a name for a user rather than an index into anything;
+     * `iterationCount` is the total the run will perform.
      */
     std::optional<std::string> request_id;
     std::optional<std::string> request_name;
     std::optional<ScriptEvent> event;
     std::optional<size_t> iteration;
+    std::optional<size_t> vu;
     std::optional<size_t> iteration_count;
 
     /**

@@ -118,15 +118,17 @@ std::vector<std::string>& failure_messages) {
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             script_ctx.request_id   = replay.request_id;
             script_ctx.request_name = replay.request_name;
-            // The iteration this response was actually sent in, for a scenario
-            // step that recorded one. Absent everywhere else, which is issue
-            // #300's ruling kept intact: a reservoir position is not an
-            // iteration, and reporting it as one would be a binding that
-            // cannot fail. `iterationCount` stays absent even here - a
-            // duration-bounded run has no total to report, and a script that
-            // could read it from one mode and not the other is worse than one
-            // that never reads it.
+            // The iteration this response was actually sent in and the virtual
+            // user that sent it, both claimed on the submission path before the
+            // send (issue #994) - which is what keeps issue #300's ruling
+            // intact rather than reopening it: what that ruling refuses is
+            // reporting a *reservoir position* as an iteration number, and
+            // neither of these is one. `iterationCount` stays absent even here
+            // - a duration-bounded run has no total to report, and a script
+            // that could read it from one mode and not the other is worse than
+            // one that never reads it.
             script_ctx.iteration = sample.iteration;
+            script_ctx.vu        = sample.vu;
             if (replay.data_rows != nullptr && sample.data_row_index &&
             *sample.data_row_index < replay.data_rows->size ()) {
                 script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
@@ -1119,7 +1121,7 @@ vayu::Request& request) {
     // Credentials carrying a `{{data.column}}` are the one case the build
     // leaves alone: the row has to reach them before `apply_auth` base64s them
     // out of reach (issue #591), so a run with rows tells the build to defer
-    // and `bind_iteration_row` applies them per submission. Every other run
+    // and `bind_iteration` applies them per submission. Every other run
     // resolves its auth here exactly as it always did.
     const auto auth_resolution = context->load_data ?
     context->load_data->auth_resolution () :
@@ -1137,9 +1139,18 @@ vayu::Request& request) {
     // run binds at its full rate, which is the same reason a plan step is split
     // when the plan resolves (issue #993). The `{}` a row-free run keeps is
     // what makes the join free for it - it has no set at all.
-    if (context->load_data) {
-        context->load_data->fields = tokenize_data_fields (request);
-    }
+    // Unconditionally, and not only for a run that has rows: the identity binds
+    // off the iteration rather than off a row, so a run sent without `data` at
+    // all still carries `{{$vu}}` / `{{$iteration}}` if its request spells them
+    // (issue #994). A request carrying no reserved token leaves this empty, and
+    // an empty template is what makes the per-submission join a single
+    // `empty()` test.
+    //
+    // The run's own columns are what let a bare `{{username}}` be split as a
+    // data token at all (issue #1007); a run with no set names none, so the
+    // scan is the reserved-only one it has always been.
+    context->load_template = tokenize_bindable_fields (request,
+    context->load_data ? context->load_data->bound_columns : vayu::http::BoundColumnNames{});
 
     // A streaming run's caps ride on the request itself, because the
     // event loop is what enforces them and the request is all it sees.

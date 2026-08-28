@@ -65,6 +65,16 @@ time naming how many rows lack it - the iterations bound to those rows would
 fail on a `{{data.*}}` token naming it, but a column nothing references is
 harmless, so it does not block the run.
 
+A header cell is free to name what a global, collection or environment
+variable already names - nothing here refuses that. **While a row is bound,
+the column wins**: `{{username}}` reads that row's `username` cell, above the
+active environment (issue #1007). **With no row bound, the variable answers**
+exactly as it would with no data file attached at all. Only the bare spelling
+collides this way; `{{data.username}}` addresses the column regardless, and
+never a variable. See [Variable
+Resolution](variable-resolution.md#data-is-reserved-and-sits-outside-this-order)
+for the full ladder.
+
 ## Values: strings from CSV, native types from JSON
 
 A CSV or TSV cell is always a string. `007` stays `007` and a 20-digit id
@@ -150,10 +160,22 @@ Both read the same row. They differ in _when_:
   and for values a script derives. See
   [Data rows](../engine/scripting.md#data-rows-pmiterationdata).
 
-`data.*` is a **reserved namespace, not a variable tier**: `{{data.id}}` and
-`{{id}}` are different names, so a data file can neither shadow nor be shadowed
-by a global, collection or environment variable. See
-[Variable Resolution](variable-resolution.md#data-is-reserved-and-sits-outside-this-order).
+`{{data.id}}` is a **reserved namespace, not a variable tier**: it and `{{id}}`
+are different names, so the *prefixed* spelling can neither shadow nor be
+shadowed by a global, collection or environment variable, and that never
+changes whether or not a data file is attached.
+
+A **bare** column name is a different rule (issue #1007): while a row is
+bound, `{{id}}` itself resolves from that row's `id` column - at Postman's
+position, above the active environment - because Postman writes a dataset's
+columns bare and an imported collection is spelled that way. A column name
+*may* equal a variable name; while a row is bound the column wins, and with no
+row bound (a plain Send, or a run with no data file) the variable answers
+exactly as it always did. A bare name the bound row does **not** carry is not
+a failed bind - it is an ordinary variable, and falls through to the same
+scopes it would resolve from with no data file at all. See [Variable
+Resolution](variable-resolution.md#data-is-reserved-and-sits-outside-this-order)
+for the full ladder and the D18 decision behind it.
 
 A `{{data.column}}` naming a column the bound row does not carry **fails the
 step before anything is sent**. Substituting an empty string would send a

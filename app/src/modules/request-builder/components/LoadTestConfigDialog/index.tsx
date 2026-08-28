@@ -214,12 +214,6 @@ export interface LoadTestConfigDialogProps {
 	isStarting: boolean;
 	/** True when the pending request has a non-empty preRequestScript. */
 	hasPreRequestScript: boolean;
-	/**
-	 * True when the request text contains a `{{$dynamic}}` variable. Interpolation
-	 * happens app-side, once, before the payload is sent, so every iteration of
-	 * the run carries the same generated value - see the notice below.
-	 */
-	hasDynamicVariables: boolean;
 	/** Variable-resolved OAuth 2.0 config, when the effective auth is oauth2. */
 	oauth2Config?: OAuth2Config;
 	/**
@@ -250,7 +244,6 @@ export default function LoadTestConfigDialog({
 	onStart,
 	isStarting,
 	hasPreRequestScript,
-	hasDynamicVariables,
 	oauth2Config,
 	isStreamingRequest,
 	collectionId,
@@ -529,20 +522,6 @@ export default function LoadTestConfigDialog({
 			});
 		}
 
-		if (hasDynamicVariables) {
-			list.push({
-				key: "dynamic-variables",
-				severity: "warning",
-				node: (
-					<Callout severity="warning" title="Dynamic variables are generated once">
-						<code>{"{{$guid}}"}</code> and friends are resolved here, before the run
-						starts, so every request in it sends the same value. A single Send generates
-						a fresh one each time.
-					</Callout>
-				),
-			});
-		}
-
 		return list.sort(
 			(a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
 		);
@@ -554,7 +533,6 @@ export default function LoadTestConfigDialog({
 		budgetsError,
 		monitoringError,
 		hasPreRequestScript,
-		hasDynamicVariables,
 	]);
 
 	const handleStart = () => {
@@ -605,7 +583,14 @@ export default function LoadTestConfigDialog({
 		// The parsed rows themselves - the same array the preview showed, never
 		// a re-parse (issue #993). Absent when no file was picked, which is what
 		// keeps a run without data on exactly the path it took before.
-		if (dataFile) config.data = dataFile.parsed.rows;
+		//
+		// Their column names travel with them (issue #1007): the run composes
+		// before it starts, and composition has to be told which bare names a row
+		// will bind or it resolves them from the variable scopes first.
+		if (dataFile) {
+			config.data = dataFile.parsed.rows;
+			config.dataColumns = dataFile.parsed.columns;
+		}
 
 		// Streaming requests only. Always sent when the request streams, never
 		// elided as "the engine has defaults": the engine's default is the

@@ -26,6 +26,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useCallback, useState } from "react";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
 import { RequestBuilderContext } from "../../context";
@@ -35,6 +36,7 @@ import { emptyDrafts } from "../../utils/body-drafts";
 import { TooltipProvider } from "@/components/ui";
 import { useDataFileStore, useTabsStore } from "@/stores";
 import type { DataContractScope } from "@/types";
+import { useSendWithRow } from "../../hooks/useSendWithRow";
 import UrlBar from "./index";
 
 vi.mock("./MethodSelector", () => ({ default: () => null }));
@@ -55,9 +57,11 @@ function csvBytes(text = CSV): { bytes: Uint8Array; fileName: string } {
 
 function ctx(
 	executeRequest: RequestBuilderContextValue["executeRequest"],
-	dataColumns?: DataContractScope,
-	requestId: string | null = null,
-	dataFileMaxRows = 1000
+	dataColumns: DataContractScope | undefined,
+	requestId: string | null,
+	sendWithRow: RequestBuilderContextValue["sendWithRow"],
+	lastRowIndex: number | null,
+	rememberRowIndex: (index: number) => void
 ): RequestBuilderContextValue {
 	return {
 		request: {
@@ -95,12 +99,73 @@ function ctx(
 		updateVariable: vi.fn(),
 		writableScopes: [],
 		dataColumns,
-		dataFileMaxRows,
+		sendWithRow,
+		lastRowIndex,
+		rememberRowIndex,
 		executeRequest,
 		saveRequest: vi.fn(async () => {}),
 		startLoadTest: vi.fn(),
 		canStartLoadTest: true,
 	};
+}
+
+/**
+ * The provider's Send-with-row state, and nothing else it holds.
+ *
+ * The rows and the picked index moved onto the context in issue #1062, so the
+ * bar can no longer read them for itself - but the read they come from is the
+ * half of this file's gating that is worth exercising for real (a contract, a
+ * remembered location, an IPC read that may fail), so the harness drives the
+ * *actual* hook rather than handing the bar a fixed answer. What it restates of
+ * the provider is the two lines of index memory beside it, deliberately kept
+ * that small.
+ */
+function Harness({
+	executeRequest,
+	dataColumns,
+	requestId,
+	dataFileMaxRows = 1000,
+	overrides,
+}: {
+	executeRequest: RequestBuilderContextValue["executeRequest"];
+	dataColumns?: DataContractScope;
+	requestId: string | null;
+	dataFileMaxRows?: number;
+	overrides?: Partial<RequestBuilderContextValue>;
+}) {
+	const sendWithRow = useSendWithRow(dataColumns, dataFileMaxRows);
+	/*
+	 * Keyed by request exactly as the provider keys it (issue #659 item 1), so
+	 * the two cases below that switch request tabs still see what the bar sees.
+	 * The keying *rule* is the provider's and is pinned there, in
+	 * `RequestBuilderProvider.bound-row.test.tsx`; what these cases pin is that
+	 * the bar reads `lastRowIndex` off the context rather than remembering a
+	 * pick of its own.
+	 */
+	const [rowIndexByRequest, setRowIndexByRequest] = useState<Record<string, number>>({});
+	const rowMemoryKey = requestId ?? "__unsaved__";
+	const rememberRowIndex = useCallback(
+		(index: number) =>
+			setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index })),
+		[rowMemoryKey]
+	);
+	return (
+		<RequestBuilderContext.Provider
+			value={{
+				...ctx(
+					executeRequest,
+					dataColumns,
+					requestId,
+					sendWithRow,
+					rowIndexByRequest[rowMemoryKey] ?? null,
+					rememberRowIndex
+				),
+				...overrides,
+			}}
+		>
+			<UrlBar />
+		</RequestBuilderContext.Provider>
+	);
 }
 
 function renderBar(
@@ -111,11 +176,12 @@ function renderBar(
 ) {
 	return render(
 		<TooltipProvider>
-			<RequestBuilderContext.Provider
-				value={ctx(executeRequest, dataColumns, requestId, dataFileMaxRows)}
-			>
-				<UrlBar />
-			</RequestBuilderContext.Provider>
+			<Harness
+				executeRequest={executeRequest}
+				dataColumns={dataColumns}
+				requestId={requestId}
+				dataFileMaxRows={dataFileMaxRows}
+			/>
 		</TooltipProvider>
 	);
 }
@@ -317,17 +383,12 @@ describe("the caret's place in the attached group", () => {
 		rememberFile();
 		render(
 			<TooltipProvider>
-				<RequestBuilderContext.Provider
-					value={{
-						...ctx(
-							vi.fn(async () => {}),
-							CONTRACT
-						),
-						canStartLoadTest: false,
-					}}
-				>
-					<UrlBar />
-				</RequestBuilderContext.Provider>
+				<Harness
+					executeRequest={vi.fn(async () => {})}
+					dataColumns={CONTRACT}
+					requestId={null}
+					overrides={{ canStartLoadTest: false }}
+				/>
 			</TooltipProvider>
 		);
 		expect(caret()!.className).toContain("rounded-r-md");
@@ -344,17 +405,12 @@ describe("the caret's place in the attached group", () => {
 		rememberFile();
 		render(
 			<TooltipProvider>
-				<RequestBuilderContext.Provider
-					value={{
-						...ctx(
-							vi.fn(async () => {}),
-							CONTRACT
-						),
-						isStreaming: true,
-					}}
-				>
-					<UrlBar />
-				</RequestBuilderContext.Provider>
+				<Harness
+					executeRequest={vi.fn(async () => {})}
+					dataColumns={CONTRACT}
+					requestId={null}
+					overrides={{ isStreaming: true }}
+				/>
 			</TooltipProvider>
 		);
 		expect(caret()).toBeNull();
@@ -412,9 +468,7 @@ describe("the remembered row", () => {
 		// The tab switch: same mounted builder, different request.
 		rerender(
 			<TooltipProvider>
-				<RequestBuilderContext.Provider value={ctx(execute, CONTRACT, "req_b")}>
-					<UrlBar />
-				</RequestBuilderContext.Provider>
+				<Harness executeRequest={execute} dataColumns={CONTRACT} requestId="req_b" />
 			</TooltipProvider>
 		);
 
@@ -444,9 +498,11 @@ describe("the remembered row", () => {
 		const switchTo = (requestId: string) =>
 			rerender(
 				<TooltipProvider>
-					<RequestBuilderContext.Provider value={ctx(execute, CONTRACT, requestId)}>
-						<UrlBar />
-					</RequestBuilderContext.Provider>
+					<Harness
+						executeRequest={execute}
+						dataColumns={CONTRACT}
+						requestId={requestId}
+					/>
 				</TooltipProvider>
 			);
 

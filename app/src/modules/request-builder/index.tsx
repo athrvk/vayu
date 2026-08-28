@@ -46,7 +46,6 @@ import { toHeaderItems } from "./utils/system-headers";
 import { toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "@/lib/id";
 import { scriptParts } from "./utils/script-parts";
-import { requestUsesDynamicVariables } from "./utils/dynamic-variable-scan";
 import {
 	buildExecBody,
 	execIdentity,
@@ -195,9 +194,17 @@ export default function RequestBuilder() {
 	 * `collectionAncestors` is the live chain, so a stream's refusal for
 	 * carrying scripts is decided by what the send *would* run, not by what this
 	 * request alone declares.
+	 *
+	 * `dataRow` is Send-with-row's chosen row (issue #601), and composition needs
+	 * it for its *names* alone - see the `dataColumns` field below.
 	 */
 	const composeForSend = useCallback(
-		async (request: RequestState, ownerId: string, ownerCollectionId: string) => {
+		async (
+			request: RequestState,
+			ownerId: string,
+			ownerCollectionId: string,
+			dataRow?: Record<string, unknown>
+		) => {
 			// Flatten enabled headers for execution; inject per-request system headers
 			const headersRecord = toFlatHeaders(request.headers);
 			headersRecord["X-Request-ID"] = generateUUID();
@@ -259,6 +266,14 @@ export default function RequestBuilder() {
 				},
 				collectionId: ownerCollectionId,
 				environmentId: activeEnvironmentId || undefined,
+				// The row's own keys, which is exactly the set the engine's bind
+				// reads back (issue #1007). A Postman-shaped `{{username}}` has to
+				// survive composition to reach that bind, so composition is told the
+				// names *before* it can answer one of them from a same-named
+				// environment variable. Names only: a value here would be this row's
+				// value written into a payload composed once. Absent for an ordinary
+				// Send, which composes exactly as it did.
+				...(dataRow ? { dataColumns: Object.keys(dataRow) } : {}),
 			});
 
 			return { composed, preScriptParts, postScriptParts };
@@ -278,7 +293,8 @@ export default function RequestBuilder() {
 				const { composed, preScriptParts, postScriptParts } = await composeForSend(
 					request,
 					fetchedRequest.id,
-					fetchedRequest.collectionId
+					fetchedRequest.collectionId,
+					dataRow
 				);
 
 				const result = await engineExecuteRequest(
@@ -393,7 +409,8 @@ export default function RequestBuilder() {
 				const { composed } = await composeForSend(
 					request,
 					fetchedRequest.id,
-					fetchedRequest.collectionId
+					fetchedRequest.collectionId,
+					dataRow
 				);
 
 				const started = await apiService.executeStreamRequest({
@@ -587,6 +604,19 @@ export default function RequestBuilder() {
 					},
 					collectionId: fetchedRequest.collectionId,
 					environmentId: activeEnvironmentId || undefined,
+					// The picked file's columns, when the dialog picked one (issue
+					// #1007). This composition happens *before* `POST /runs`, so it is
+					// the only place that can leave a bare `{{username}}` for the
+					// per-iteration bind instead of resolving it from the environment.
+					// Names only, and absent whenever `config.data` is - a run with no
+					// data set composes exactly as it did.
+					...(config.dataColumns ? { dataColumns: config.dataColumns } : {}),
+					// This composed payload is repeated once per iteration, per
+					// virtual user, so the `{{$guid}}` family belongs to each
+					// repetition, not to the one-time composition - leave the tokens
+					// written as-is and let the engine generate a fresh value per
+					// iteration at bind time (issue #995).
+					deferDynamicVariables: true,
 				});
 
 				// Convert LoadTestConfig to StartLoadTestRequest (flat structure)
@@ -791,7 +821,6 @@ export default function RequestBuilder() {
 					onStart={handleConfirmLoadTest}
 					isStarting={isStartingLoadTest}
 					hasPreRequestScript={!!pendingLoadTestRequest?.preRequestScript?.trim()}
-					hasDynamicVariables={requestUsesDynamicVariables(pendingLoadTestRequest)}
 					oauth2Config={pendingOAuth2Config ?? undefined}
 					isStreamingRequest={!!pendingLoadTestRequest?.stream}
 					collectionId={fetchedRequest?.collectionId}

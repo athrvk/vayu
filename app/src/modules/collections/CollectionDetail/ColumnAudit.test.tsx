@@ -26,6 +26,10 @@ import type { Collection, Request } from "@/types";
 
 const collections: Collection[] = [];
 const requestsByCollection = new Map<string, Request[]>();
+// Read by `useVariableResolver` (the collision note) alongside
+// `useCollectionsQuery` above - empty by default, so every existing case here
+// runs with no variable defined anywhere and no collision to report.
+let globalVariables: Record<string, { value: string; enabled?: boolean }> = {};
 
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ data: collections }),
@@ -35,6 +39,8 @@ vi.mock("@/queries", () => ({
 		requestsByCollection: new Map(ids.map((id) => [id, requestsByCollection.get(id) ?? []])),
 		isLoading: false,
 	}),
+	useGlobalsQuery: () => ({ data: { variables: globalVariables } }),
+	useEnvironmentsQuery: () => ({ data: [] }),
 }));
 
 const { default: ColumnAudit } = await import("./ColumnAudit");
@@ -94,6 +100,9 @@ function setTree(rows: Collection[], requests: Record<string, Request[]>) {
 	collections.push(...rows);
 	requestsByCollection.clear();
 	for (const [id, list] of Object.entries(requests)) requestsByCollection.set(id, list);
+	// Reset per test so a collision left set by one case can't bleed into the
+	// next - every existing case wants none.
+	globalVariables = {};
 }
 
 /** The chips under a bucket heading, in order. */
@@ -231,5 +240,51 @@ describe("what the panel says", () => {
 		render(<ColumnAudit collection={collection("root", undefined, ["email"])} />);
 
 		expect(screen.getByText(/best-effort/)).toBeTruthy();
+	});
+
+	it("counts a bare {{column}} the way it counts {{data.column}} (issue #1007)", () => {
+		// Revert the bare-name handling in `columnsIn` and this column falls to
+		// "Declared but not referenced" instead - the false negative #1007 exists
+		// to close, since the engine binds this exact spelling.
+		setTree([collection("root", undefined, ["username"])], {
+			root: [request("https://x/{{username}}")],
+		});
+
+		render(<ColumnAudit collection={collection("root", undefined, ["username"])} />);
+
+		expect(bucket("Declared and referenced")).toEqual(["username"]);
+		expect(bucket("Declared but not referenced")).toEqual([]);
+	});
+
+	it("notes a declared column that shares a name with an in-scope variable", () => {
+		setTree([collection("root", undefined, ["username"])], { root: [] });
+		globalVariables = { username: { value: "alice", enabled: true } };
+
+		render(<ColumnAudit collection={collection("root", undefined, ["username"])} />);
+
+		expect(screen.getByText(/Also a variable name/)).toBeTruthy();
+		expect(screen.getByText(/While a row is bound, the column wins/)).toBeTruthy();
+	});
+
+	it("says nothing about a collision when no scope defines the column's name", () => {
+		// Mutation check for the test above: with no colliding variable, the note
+		// must not render at all - not a lesser one that fires unconditionally.
+		setTree([collection("root", undefined, ["username"])], { root: [] });
+
+		render(<ColumnAudit collection={collection("root", undefined, ["username"])} />);
+
+		expect(screen.queryByText(/Also a variable name/)).toBeNull();
+	});
+
+	it("does not note a collision for a variable a disabled definition leaves undefined", () => {
+		// `getVariable` answers null when every definition of a name is disabled
+		// (`useVariableResolver`'s own rule) - the note must agree, not read the
+		// name as defined regardless of enablement.
+		setTree([collection("root", undefined, ["username"])], { root: [] });
+		globalVariables = { username: { value: "alice", enabled: false } };
+
+		render(<ColumnAudit collection={collection("root", undefined, ["username"])} />);
+
+		expect(screen.queryByText(/Also a variable name/)).toBeNull();
 	});
 });
