@@ -1440,6 +1440,21 @@ never send. The same rule keeps the create offer out of `VariablePopover` for
 these names - a variable of that name can never resolve, so offering to make one
 is a dead end that leaves the token exactly as it was.
 
+**The popover names a bound row as the origin, above what it beat** (issue
+#1064). The token paint above is unchanged - a shadowed bare name still paints
+in the accent - but opening `VariablePopover` on one while a row is picked and
+its column answers the name now lists the row first, unstruck and labelled the
+origin, with the scope definitions it outranks struck beneath it.
+
+Hovering moved with it, and had to: hovering reads and clicking edits are two
+readings of one token, so a tooltip still printing the environment's value
+while the popover named the row would make a single token say two things about
+one send. `EditableVariable` takes the row's answer off the origins it already
+fetches - not a prop of its own, so there is one answer to "what wins" and not
+two - and shows it with a `Bound row` hint. A cell is never a secret, but a
+secret it shadows is still never printed. What did **not** move is the paint:
+the token's colour is decided as it always was.
+
 It sits beside `KeyValueEditor` rather than inside the request builder because
 every row of that table renders one: a shared table reaching into a feature
 module for its cell input is the same inversion one level down (issue #567).

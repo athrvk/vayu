@@ -232,14 +232,27 @@ A collection run, a load run and a scenario step still bind their row during
 the run itself, so nothing about them changes: this is the one caller, a
 single Send, that now happens to hold the row before the request goes out.
 
-**What is still not painted.** The token *state* `VariableInput` paints is
-unchanged: a bare name still paints as a bound column only where no scope
-defines it, and a shadowed bare name still paints - and explains itself in the
-popover - as the variable. So a picked row can now put its cell beside a token
-that still reads, and is still explained, as the environment's, with nothing
-on screen saying the column will win once a row binds. Reconciling the paint,
-and giving the popover a "bound data row" origin to explain it, is issue
-#1064's work, not done here.
+**The paint stays the accent; the popover now says why (issue #1064).** The
+token *state* `VariableInput` paints is unchanged: a bare name still paints as
+a bound column only where no scope defines it, and a shadowed bare name still
+paints as the variable, in the same accent it always has. That was the open
+question this section used to leave for later, and it has been decided rather
+than merely left open: the accent stays, and the explanation is what moves.
+Opening `VariablePopover` on a shadowed name while a row is picked now names
+the row as the origin - unstruck, above the definitions it beat, which render
+struck beneath it exactly as any other shadowed definition does - so the
+popover states plainly that the row's cell, not the environment's value, is
+what the send will use. The hover tooltip reads the same way, from the same
+origins list, because hovering and clicking are two readings of one token and a
+token that answers them differently is worse than one that answers both
+wrongly.
+
+A name that **no** scope defines but the row does is the same claim in the
+other direction, and it stops being reported as undefined: the destructive red
+states a token that reaches the server with its braces still on, and this one
+does not. The chip reads `row`, the popover names the column, and a create
+offer - still worth making, since the variable answers every row-less send -
+says what the row already answers rather than implying the token is unanswered.
 
 **What the tab strip shows, and how the row reaches it (issue #1074).** A tab's
 title resolves through one list-wide `useVariableResolver()` in
@@ -406,6 +419,16 @@ answering are exactly the ones a flat map destroys:
 The variable popover renders this as its "also defined" list. `VariableOrigin`
 carries `enabled` and an explicit `winner` flag - once disabled definitions are
 in the list, "last" and "wins" are different things.
+
+**Since issue #1064, the bound row is layered on top of this list, not into
+the scope ladder it is built from.** While a row is picked and its column
+answers the name, `getVariableOrigins` appends a `{ scope: "row" }` origin
+after the scope-derived ones and takes `winner` away from whichever of them
+had it - the row is what the send will use, so only it may claim the flag. The
+layering happens in this accessor alone: `originsByName`, the ladder
+`variableMap` and therefore `getVariable` / `getAllVariables` resolve from, is
+untouched, so a picked row still cannot make `ResolvedVariable.scope` report
+anything but a scope someone could actually write to.
 
 `ResolvedVariable.sourceId` / `sourceName` name the specific environment or
 collection the winning value came from (absent for `global`), so the popover can
@@ -854,3 +877,8 @@ the two lists never appear together.
 | `"global"`    | Came from globals              |
 | `"collection"`| Came from any collection layer |
 | `"environment"`| Came from the active environment |
+
+`VariableOrigin.scope` is wider - a `VariableOriginScope` (`VariableScope |
+"row"`) - because the origins list can also carry a bound row. It has no row in
+this table: nobody wrote a row's cell and nothing can edit it, so it is never a
+value `ResolvedVariable.scope` reports or a target `updateVariable` writes to.

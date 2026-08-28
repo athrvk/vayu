@@ -15,6 +15,12 @@
  *   undefined  a value field and a scope to create it in
  *   read-only  the value, when there is no way to change it from here
  *
+ * **A bound data row outranks all of them** (D18, issue #1007). While one is
+ * picked its column answers a bare name above every scope, so the popover names
+ * the row as the origin and strikes the definitions beneath it (issue #1064).
+ * Without that it explained, in full detail, a value the send was not going to
+ * use - the one question this popover exists to answer, answered wrongly.
+ *
  * **It used to show the value twice.** A "Current Value" block sat above an
  * "Edit Value" input holding the same string, each with its own label and its
  * own secret-reveal button - about 90px and two labels spent restating what the
@@ -65,6 +71,32 @@ const SCOPE_PREFERENCE: VariableScope[] = ["environment", "collection", "global"
  * inconsistent with the fixed eight-dot box that used to sit above it.
  */
 const SECRET_MASK = "••••••••";
+
+/**
+ * What a `"row"` origin calls itself. A row has no `sourceName` to give - it is
+ * the one row currently picked, not a file or an environment someone named.
+ */
+const BOUND_ROW_LABEL = "Bound row";
+
+/**
+ * The chip beside the name when there is no scope badge to show. Shared rather
+ * than spelled out per state: it was already written twice, and the third copy
+ * is where a shape or radius fix starts reaching only two of them.
+ */
+const NAME_CHIP =
+	"inline-flex h-[18px] items-center rounded-md border px-1.5 text-[10px] leading-none";
+
+/**
+ * The bare spelling's own sentence, and deliberately not the `data.*` one.
+ *
+ * `{{data.email}}` is disjoint from the scopes, so "defining one with this name
+ * would change nothing" is true of it. A bare `{{email}}` is not: defining that
+ * variable does something - it answers every send that carries no row - it just
+ * loses to the row while one is picked. Telling the reader it would change
+ * nothing would be false, which is why the two messages are two messages.
+ */
+const BOUND_ROW_NOTE =
+	"While a row is picked, its column answers this name. The definition above still resolves on a send that carries no row.";
 
 /** The eye that swaps a hidden secret field for an editable one. */
 function RevealButton({ revealed, onToggle }: { revealed: boolean; onToggle: () => void }) {
@@ -163,6 +195,16 @@ export function VariablePopover({
 	 * name as a prop and is reachable from any caller that renders a token.
 	 */
 	const isDataName = isDataVariableName(name);
+
+	/**
+	 * The bound row's answer for this name, if it has one (issue #1064).
+	 *
+	 * Read off `origins` rather than taken as a prop of its own: the resolver
+	 * already ranks the row against the definitions it beats, and a second
+	 * channel carrying the same fact is how the winner here and the winner there
+	 * come to disagree.
+	 */
+	const boundRowOrigin = origins?.find((o) => o.scope === "row");
 
 	// Creating is only offered where a write would land somewhere.
 	const creatableScopes = useMemo(
@@ -333,11 +375,31 @@ export function VariablePopover({
 									className="h-[18px] leading-none"
 								/>
 							) : isDataName ? (
-								<span className="inline-flex h-[18px] items-center rounded-md border border-muted-foreground/40 px-1.5 text-[10px] leading-none text-muted-foreground">
+								<span
+									className={cn(
+										NAME_CHIP,
+										"border-muted-foreground/40 text-muted-foreground"
+									)}
+								>
 									data
 								</span>
+							) : boundRowOrigin ? (
+								/*
+								 * Answered, so not "undefined" - and in the accent rather
+								 * than the destructive red, which states a token that will
+								 * reach the server with its braces still on. This one will
+								 * not: the row carries the column.
+								 */
+								<span className={cn(NAME_CHIP, "border-primary/40 text-primary")}>
+									row
+								</span>
 							) : (
-								<span className="inline-flex h-[18px] items-center rounded-md border border-destructive-text/40 px-1.5 text-[10px] leading-none text-destructive-text">
+								<span
+									className={cn(
+										NAME_CHIP,
+										"border-destructive-text/40 text-destructive-text"
+									)}
+								>
 									undefined
 								</span>
 							)}
@@ -518,11 +580,39 @@ export function VariablePopover({
 									Create
 								</Button>
 							</div>
+							{/*
+							 * A create offer must not imply the token is unanswered. The
+							 * row carries a column the declared contract does not, so the
+							 * painter never diverted this token and the send resolves it
+							 * anyway - creating a variable here is still worth doing, but
+							 * for the sends that carry no row, not for this one.
+							 */}
+							{boundRowOrigin && (
+								<p className="text-[10px] text-muted-foreground">
+									The bound row already answers this name with{" "}
+									<span className="font-mono">
+										{boundRowOrigin.value || "empty"}
+									</span>
+									. A variable created here answers a send that carries no row.
+								</p>
+							)}
 						</>
 					) : isDataName ? (
 						<div className="text-sm text-muted-foreground">
 							Bound per iteration by the run&rsquo;s data file. Not a variable -
 							defining one with this name would change nothing.
+						</div>
+					) : boundRowOrigin ? (
+						/*
+						 * Undefined everywhere, but the picked row carries the column, so
+						 * the send resolves it. "Variable not defined" in destructive red
+						 * is the one thing this must not say: the red states a token that
+						 * will reach the server with its braces on, and this one will not.
+						 */
+						<div className="text-sm text-muted-foreground">
+							Answered by the bound data row&rsquo;s{" "}
+							<span className="font-mono">{name}</span> column, not by a variable.
+							Defining one would answer a send that carries no row.
 						</div>
 					) : (
 						<div className="text-sm text-destructive-text">
@@ -537,53 +627,88 @@ export function VariablePopover({
 }
 
 /**
- * The definitions that did not win.
+ * One line of the "where could this have come from" list.
  *
- * Rendered only when there is more than one, so the ordinary case stays short.
- * Three row states, not two - a definition can lose by precedence *or* by being
- * switched off, and the second is the more common surprise: the value you set
- * is being skipped rather than missing. A list that only showed shadowing would
- * answer the easy question and stay silent on the hard one.
+ * Shared by the winning row and the definitions beneath it so the two cannot
+ * drift apart: the only difference between them is the strike-through, which is
+ * the whole message - a struck value is one the send will not use.
+ */
+function OriginRow({ origin, beaten }: { origin: VariableOrigin; beaten: boolean }) {
+	// A disabled definition is not competing at all, so it does not get a
+	// colour. The row gets the accent rather than a fourth scope colour: it is
+	// not a place a variable lives, it is the answer that is live right now, and
+	// the accent is what this app already paints a live answer in.
+	const dot = !origin.enabled
+		? "bg-subtle-foreground"
+		: origin.scope === "row"
+			? "bg-primary"
+			: VARIABLE_SCOPE_DOT[origin.scope];
+	const label =
+		origin.scope === "row" ? BOUND_ROW_LABEL : VARIABLE_SCOPE_CONFIG[origin.scope].full;
+
+	return (
+		<div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+			<span className={cn("size-[5px] shrink-0 rounded-full", dot)} />
+			<span className="shrink-0">{origin.sourceName ?? label}</span>
+			<span className={cn("truncate font-mono", beaten && "line-through opacity-60")}>
+				{origin.secret ? SECRET_MASK : origin.value || "empty"}
+			</span>
+			{!origin.enabled && (
+				<span className="ml-auto shrink-0 rounded-md border border-rule px-1 not-italic">
+					off
+				</span>
+			)}
+		</div>
+	);
+}
+
+/**
+ * Where the value comes from, and what it beat.
+ *
+ * Rendered only when there is more than one answer, so the ordinary case stays
+ * short. Three row states, not two - a definition can lose by precedence *or* by
+ * being switched off, and the second is the more common surprise: the value you
+ * set is being skipped rather than missing. A list that only showed shadowing
+ * would answer the easy question and stay silent on the hard one.
+ *
+ * A bound row's cell is listed above them all, unstruck (issue #1064). Without
+ * it the popover explained a value the send would not use: the editable field at
+ * the top of the popover is the *variable*, which is still the thing you can
+ * change, while the row is what answers the name until the pick is dropped.
  */
 function ShadowedBy({ origins }: { origins?: VariableOrigin[] }) {
 	if (!origins || origins.length < 2) return null;
 
 	// Highest precedence first: reading down the list is reading the order the
 	// resolver rejected them in.
-	const others = [...origins].reverse().filter((o) => !o.winner);
+	const ranked = [...origins].reverse();
+	const row = ranked.find((o) => o.scope === "row");
+	const others = ranked.filter((o) => !o.winner && o.scope !== "row");
 	if (others.length === 0) return null;
 
 	return (
 		<div className="flex flex-col gap-0.5 border-t border-border pt-1.5">
+			{row && (
+				<>
+					<div className="text-[10px] uppercase tracking-wide text-subtle-foreground">
+						bound data row
+					</div>
+					<OriginRow origin={row} beaten={false} />
+				</>
+			)}
+			{/*
+			 * Still "also defined" with a row above, not "shadowed": the list holds
+			 * definitions that lost by precedence *and* ones that are switched off,
+			 * and an off definition is not shadowed by anything. The row block above
+			 * already says which answer wins.
+			 */}
 			<div className="text-[10px] uppercase tracking-wide text-subtle-foreground">
 				also defined
 			</div>
 			{others.map((o, i) => (
-				<div
-					key={`${o.scope}-${o.sourceId ?? "global"}-${i}`}
-					className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
-				>
-					<span
-						className={cn(
-							"size-[5px] shrink-0 rounded-full",
-							// A disabled definition is not competing at all, so it does
-							// not get the scope's colour.
-							o.enabled ? VARIABLE_SCOPE_DOT[o.scope] : "bg-subtle-foreground"
-						)}
-					/>
-					<span className="shrink-0">
-						{o.sourceName ?? VARIABLE_SCOPE_CONFIG[o.scope].full}
-					</span>
-					<span className="truncate font-mono line-through opacity-60">
-						{o.secret ? "••••••••" : o.value || "empty"}
-					</span>
-					{!o.enabled && (
-						<span className="ml-auto shrink-0 rounded-md border border-rule px-1 not-italic">
-							off
-						</span>
-					)}
-				</div>
+				<OriginRow key={`${o.scope}-${o.sourceId ?? "global"}-${i}`} origin={o} beaten />
 			))}
+			{row && <p className="text-[10px] text-muted-foreground">{BOUND_ROW_NOTE}</p>}
 		</div>
 	);
 }
