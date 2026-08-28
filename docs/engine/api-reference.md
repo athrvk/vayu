@@ -3578,7 +3578,10 @@ watchdog re-acquires a header-placed, expiring token `oauth2RefreshLeadMs`
 token is fetched once and reused for the whole run - for a query-placed token,
 `autoRefreshToken: false`, a non-expiring token, an `authorization_code` grant
 with no refresh token, a token that lost to a user-supplied `Authorization`
-header, and scenario runs, whose steps each resolve auth at plan time.
+header, and scenario runs, whose steps each resolve auth at plan time. That
+list is `plan_auth_refresh`'s (`engine/src/http/auth_resolver.cpp`); the app's
+`isMidRunRefreshable` mirrors all of it but the header case - change one,
+change both.
 
 #### POST /oauth2/token
 

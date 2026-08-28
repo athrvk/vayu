@@ -1117,8 +1117,8 @@ Three bounds, all applied by the engine itself (issue #985):
   values of sensitive headers (`Authorization`, cookies, etc.). Token request
   bodies/responses are never logged. On-disk encryption (`safeStorage`) is
   still deferred, and so is OS-keychain storage (out of scope for the transport
-  epic, #704 decision 6; the app runs Chromium with `use-mock-keychain`, so
-  nothing of Vayu's reaches a real keychain). Mid-run token refresh
+  epic, #704 decision 6; the app runs Chromium with `use-mock-keychain`).
+  Mid-run token refresh
   is **not** deferred: the [refresh watchdog](#load-test-mode) ships, and
   re-acquires a load run's OAuth 2.0 token before it expires.
 - **Where the redaction line falls, and why it is not one line.** Two columns of

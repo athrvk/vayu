@@ -61,7 +61,7 @@ against k6 itself is not published here, because it has not been run on this
 hardware - the [benchmarks page](../engine/benchmarks.md) carries the full
 methodology and a one-command reproduction so you can measure your own.
 
-One caveat, stated here because the benchmarks page states it: an earlier
+One caveat, carried over from the benchmarks page: an earlier
 2026-07 CLI session measured the opposite curve shape - Vayu at **66%** of
 `wrk` at this same concurrency 64 - and the two measurements have not been
 reconciled. The 105% above is the newer of the two, not a settled result; the
