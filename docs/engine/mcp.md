@@ -175,6 +175,9 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, both scripts - minus file body parts |
 | `update_request`       | write    | `PUT /requests/:id` (merge-patch)            | write toggle; same fields, and only the ones named are written |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
+| `list_trash`           | read     | `GET /trash`                                 | -                          |
+| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation) |
+| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm     |
 | `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list) |
 | `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import |
 | `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable |
@@ -470,6 +473,20 @@ Notes:
   subtree - or an id no collection has - is a refusal, never a prompt carrying
   a number nobody verified. `delete_request` reads the row the same way, so the
   prompt names the request and its URL rather than an opaque id.
+- **The Trash tools (issue #1071) close the loop those two deletes open.**
+  `list_trash` answers `GET /trash` unchanged - roots only, with `collections` /
+  `requests` counting what each entry's delete took, exactly as the route
+  documents. `restore_trash_entry` is the one write tool here that is **not**
+  destructive - it puts a row back rather than removing one - so it carries the
+  write toggle alone, with no confirmation step; it surfaces the engine's own
+  404/409 text verbatim instead of writing a second sentence that could
+  disagree with it, and reports `reparentedToRoot` in its result text when a
+  restored collection came back at the top level because its parent is gone or
+  itself in the trash. `purge_trash_entry` is the Trash's own hard delete and is
+  gated exactly like `delete_collection`: it reads the entry off `GET /trash`
+  first, so the confirmation prompt names what a mistyped id would otherwise
+  destroy sight unseen, and an entry the trash does not hold is a refusal before
+  any prompt is shown.
 - **A saved request an agent writes is the one the builder writes** (issues
   #759, #795). `create_request` / `update_request` carry the request's `auth`
   block and the five **Settings** tab fields (`followRedirects`, `maxRedirects`,
@@ -1243,11 +1260,14 @@ configurable in **Settings → MCP** and persisted.
 - **Confirmation** - anti-accident, not anti-adversary: it stops a stray tool
   call from starting load or destroying saved work, but on HTTP it is agent-side
   (the caps/allowlist are the enforcement). Elicitation upgrades it to a human
-  prompt where supported. Seven tools carry it - `start_load_run`,
+  prompt where supported. Eight tools carry it - `start_load_run`,
   `delete_collection`, `delete_request`, `delete_request_example`,
-  `delete_run`, `delete_environment` and `delete_webhook_inbox` - through one
+  `delete_run`, `delete_environment`, `delete_webhook_inbox` and
+  `purge_trash_entry` - through one
   implementation, so the elicitation path cannot drift between them. A preview is a *successful* result
   that deliberately did nothing, so it emits no `mcp:data-changed` event either.
+  `restore_trash_entry` deliberately does **not** carry it: it puts data back
+  rather than destroying it, so the write toggle alone is its gate (below).
 - **Write toggle** (`allowWrites`, default off) - gates every tool in the
   **write** category: `create_collection`, `update_collection`,
   `delete_collection`, `create_request`, `update_request`, `delete_request`,
@@ -1256,13 +1276,16 @@ configurable in **Settings → MCP** and persisted.
   `create_environment`, `update_environment`, `activate_environment`,
   `delete_environment`, `update_globals`, `clear_cookies`,
   `update_engine_config`, `set_run_baseline`,
-  `delete_run`, `delete_webhook_inbox`, `clear_inbox_captures`. Does not gate
+  `delete_run`, `delete_webhook_inbox`, `clear_inbox_captures`,
+  `restore_trash_entry`, `purge_trash_entry`. Does not gate
   `run_request` / `run_collection_smoke` / load runs
-  (allowlist + caps). The six deletes need the toggle **and** confirmation:
-  the toggle is a single session-wide switch a user flips once to let an agent
-  save a request, which is not consent to destroy a subtree or a run's stored
-  history. `clear_cookies` takes the toggle without a confirmation, because
-  what it ends is a session rather than anything saved.
+  (allowlist + caps). Seven of those need the toggle **and** confirmation - the
+  six deletes plus `purge_trash_entry`: the toggle is a single session-wide
+  switch a user flips once to let an agent save a request, which is not consent
+  to destroy a subtree, a run's stored history, or a trashed row for good.
+  `clear_cookies` and `restore_trash_entry` take the toggle without a
+  confirmation, for opposite reasons: one ends a session rather than anything
+  saved, the other puts a row back rather than destroying one.
 - **Loopback services carry no gate of their own** - `start_mock_issuer`,
   `stop_mock_issuer`, `update_mock_issuer`, `start_mock_server`,
   `stop_mock_server`, `start_webhook_inbox`, `stop_webhook_inbox` and

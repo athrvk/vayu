@@ -605,6 +605,42 @@ export class EngineClient {
 		return this.request("DELETE", `/requests/${encodeURIComponent(id)}`, undefined, signal);
 	}
 
+	// --- Trash (issue #988) --------------------------------------------------
+	//
+	// What `deleteCollection` / `deleteRequest` leave recoverable. Mirrors the
+	// renderer's `apiService.listTrash` / `restoreTrashEntry` / `purgeTrashEntry`
+	// (`app/src/services/api.ts`) - same three routes, same shapes.
+
+	/**
+	 * Everything deleted and still restorable: `GET /trash`. Roots only, newest
+	 * first - a deleted collection's subtree is represented by its root, with
+	 * `collections` / `requests` counting what the same delete took.
+	 */
+	listTrash(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/trash", undefined, signal);
+	}
+
+	/**
+	 * Put one deleted root back, with everything its delete took along:
+	 * `POST /trash/:id/restore`. A 404 arrives as an {@link EngineRequestError}
+	 * for an id the trash does not hold; a 409 the same way for a request whose
+	 * collection is itself deleted or gone, with the engine naming the collection
+	 * to restore first - callers surface `EngineRequestError.body` rather than
+	 * inventing wording for either.
+	 */
+	restoreTrashEntry(id: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", `/trash/${encodeURIComponent(id)}/restore`, undefined, signal);
+	}
+
+	/**
+	 * Destroy one deleted root for good, with its whole subtree: `DELETE
+	 * /trash/:id`. There is no undo for this one - it is the undo's counterpart.
+	 * 404 as an {@link EngineRequestError} if the trash does not hold that id.
+	 */
+	purgeTrashEntry(id: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("DELETE", `/trash/${encodeURIComponent(id)}`, undefined, signal);
+	}
+
 	/*
 	 * Saved example responses. Every path is nested under the owning request
 	 * (issue #481) because one request owns them: the engine checks the owner
