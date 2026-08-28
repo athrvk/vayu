@@ -91,7 +91,9 @@ describe("coverageState", () => {
 	});
 });
 
-// Mirrors plan_auth_refresh in the engine; a divergence here either promises a
+// Mirrors the config-and-token cases of the engine's plan_auth_refresh, not its
+// last one - isMidRunRefreshable's docstring holds the exact rule and how far it
+// mirrors the engine's. A divergence within those cases either promises a
 // refresh that never happens or blocks a run the engine could have carried.
 describe("isMidRunRefreshable", () => {
 	const clientCredentials = { grantType: "client_credentials" } as const;
