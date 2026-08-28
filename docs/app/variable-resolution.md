@@ -108,7 +108,7 @@ namespace being disjoint, can never answer for the column. So a `data.*` token
 gets the muted run-time treatment (`RuntimeToken`) and a tooltip naming the run's
 data file, and no surface offers to create one. See
 [COMPONENTS.md](COMPONENTS.md#shared-variable-input-componentssharedvariableinput)
-for the three token states.
+for the four token states.
 
 A **collection run** is the one place that reading is not left to the user: a
 run started without a data file whose plan still carries a `data.*` token is
