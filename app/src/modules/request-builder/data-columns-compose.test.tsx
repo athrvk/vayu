@@ -189,6 +189,22 @@ describe("a Send that binds one row", () => {
 		// composes exactly as it always has.
 		expect(composedBody()).not.toHaveProperty("dataColumns");
 	});
+
+	it("does not defer dynamic variables - a Send composes once and sends once", async () => {
+		renderBuilder();
+		const onExecute = providerProps.onExecute as (
+			request: RequestState,
+			row?: Record<string, unknown>
+		) => Promise<unknown>;
+
+		await act(async () => {
+			await onExecute(REQUEST);
+		});
+
+		// Absent, not `false`: an ordinary Send must keep resolving the
+		// `{{$guid}}` family at composition (issue #995).
+		expect(composedBody()).not.toHaveProperty("deferDynamicVariables");
+	});
 });
 
 describe("a load run started with a data file", () => {
@@ -216,5 +232,15 @@ describe("a load run started with a data file", () => {
 		await startLoadRun(LOAD_CONFIG);
 
 		expect(composedBody()).not.toHaveProperty("dataColumns");
+	});
+
+	it("defers the {{$guid}} family to per-iteration generation (issue #995)", async () => {
+		await startLoadRun(LOAD_CONFIG);
+
+		// A load run repeats this composed payload once per iteration, per
+		// virtual user, so the generator family must not be resolved here -
+		// every case in this describe block starts a run, so this holds
+		// regardless of whether a data file was picked.
+		expect(composedBody().deferDynamicVariables).toBe(true);
 	});
 });

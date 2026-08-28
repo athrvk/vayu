@@ -69,8 +69,20 @@ export default function EditableVariable({
 	variables,
 }: EditableVariableProps) {
 	const { getVariableOrigins, writableScopes } = variables;
+	const origins = getVariableOrigins(name);
 
 	const varInfo = resolved ? { value, scope: scope as VariableScope, secret, sourceName } : null;
+
+	/**
+	 * The bound row's answer, if it has one (issue #1064).
+	 *
+	 * Hovering reads and clicking edits, so the two must not read differently:
+	 * once the popover names the row as the origin, a tooltip still printing the
+	 * environment's value makes the same token say two things about one send.
+	 * Taken off the origins this component already fetches rather than through a
+	 * prop of its own, so there is one answer to "what wins" and not two.
+	 */
+	const boundRowValue = origins.find((o) => o.scope === "row")?.value;
 
 	const handleValueChange = onValueChange
 		? (varName: string, varValue: string, varScope: VariableScope) => {
@@ -108,7 +120,7 @@ export default function EditableVariable({
 			onValueChange={handleValueChange}
 			saveMode="auto"
 			disabled={disabled}
-			origins={getVariableOrigins(name)}
+			origins={origins}
 			writableScopes={writableScopes}
 			trigger={
 				/*
@@ -138,7 +150,21 @@ export default function EditableVariable({
 					 * already red when unresolved; the tooltip only has to say so.
 					 */}
 					<TooltipContent side="bottom" className="max-w-xs">
-						{!resolved ? (
+						{boundRowValue !== undefined ? (
+							/*
+							 * The row outranks every scope, so it is the answer whether or
+							 * not one of them also defines the name - which makes this the
+							 * first branch rather than a case inside the resolved one. A
+							 * cell is never a secret: it came from the picked file, not
+							 * from a stored variable someone marked.
+							 */
+							<span className="flex items-baseline gap-2">
+								<span className="break-all font-mono">
+									{boundRowValue || "empty"}
+								</span>
+								<TooltipHint className="shrink-0">Bound row</TooltipHint>
+							</span>
+						) : !resolved ? (
 							<span className="italic opacity-90">not defined</span>
 						) : (
 							<span className="flex items-baseline gap-2">

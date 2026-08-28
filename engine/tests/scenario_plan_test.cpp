@@ -381,6 +381,39 @@ TEST_F (ScenarioPlanTest, StepMatchesWhatComposeReturnsForTheSameRequest) {
     EXPECT_EQ (step.stored_url, "https://{{host}}/orders/{{id}}");
 }
 
+// Issue #995. A plan step is composed once and sent per iteration, so its
+// composition defers the generator family: the token survives into the step's
+// request and is split into the template every executor joins before a send.
+TEST_F (ScenarioPlanTest, AStepKeepsItsGeneratorTokensForThePerIterationBind) {
+    seed_collection ("col", "");
+    seed_request ("req", "col", 0, "https://api.example.test/{{$randomUUID}}");
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.plan.steps.size (), 1u);
+    const auto& step = resolved.plan.steps[0];
+
+    EXPECT_EQ (step.request.url, "https://api.example.test/{{$randomUUID}}")
+    << "the plan resolved the generator, so every iteration would send one id";
+    EXPECT_FALSE (step.data_template.empty ())
+    << "the deferred token was not split, so nothing would ever bind it";
+    // Not a data token: a run carrying only these needs no data set behind it,
+    // and the refusal that guards `{{data.*}}` must not claim this one.
+    EXPECT_FALSE (step.data_template.first_data_token ().has_value ());
+}
+
+// The other half of the same rule, and the reason a token-free plan pays
+// nothing: a step spelling no generator has nothing left to split.
+TEST_F (ScenarioPlanTest, AStepWithoutAGeneratorCarriesAnEmptyTemplate) {
+    seed_collection ("col", "");
+    seed_request ("req", "col", 0, "https://api.example.test/ping");
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.plan.steps.size (), 1u);
+    EXPECT_TRUE (resolved.plan.steps[0].data_template.empty ());
+}
+
 TEST_F (ScenarioPlanTest, StepsResolveAgainstTheRunsEnvironment) {
     // Without the run's environmentId reaching composition, every {{env var}}
     // in the plan silently resolves to "" - the failure this guards.

@@ -33,8 +33,6 @@
  * matching value shapes - there is no shared source.
  */
 
-import { VARIABLE_PATTERN } from "@/constants/variables";
-
 /** One generator: the name as written (with `$`), what it makes, and how. */
 export interface DynamicVariable {
 	/** Name including the leading `$`, e.g. `"$guid"`. */
@@ -604,20 +602,4 @@ export function isKnownDynamicVariable(name: string): boolean {
  */
 export function resolveDynamicVariable(name: string): string | null {
 	return BY_NAME.get(name)?.generate() ?? null;
-}
-
-/**
- * Does this string contain at least one *known* dynamic variable?
- *
- * Used by the load-test dialog: interpolation happens once, app-side, before the
- * run payload is sent, so every iteration of a run carries the same generated
- * value. That is a caveat the user has to be told rather than a bug to hide -
- * see `docs/app/variable-resolution.md`.
- */
-export function containsDynamicVariable(input: string | undefined | null): boolean {
-	if (!input) return false;
-	for (const match of input.matchAll(VARIABLE_PATTERN)) {
-		if (isKnownDynamicVariable(match[1].trim())) return true;
-	}
-	return false;
 }

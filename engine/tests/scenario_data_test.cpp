@@ -715,6 +715,40 @@ TEST (ScenarioDataXmlBodyTest, ATokenInsideACommentIsRefusedRatherThanEncoded) {
     EXPECT_NE (result.error.find ("comment"), std::string::npos) << result.error;
 }
 
+// Issue #995: a deferred generator is written for the document it lands in on
+// exactly the same rules a cell is - the encoding is decided by the token's
+// position at split time and never by which namespace answers it. Both
+// directions here, because the interesting half of that claim is the refusal:
+// a generator placed where no encoding is right must be refused rather than
+// quietly written, the way a data token already is.
+TEST (ScenarioDataXmlBodyTest, AGeneratorInCharacterDataIsEscapedLikeACell) {
+    auto request = xml_request ("<o><id>{{$guid}}</id></o>");
+
+    const auto result = vayu::core::apply_iteration_template (request,
+    vayu::core::tokenize_bindable_fields (request), vayu::core::IterationBinding{});
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.body.content.find ("{{$guid}}"), std::string::npos)
+    << request.body.content;
+    // A uuid carries nothing XML escapes, so the assertion that means something
+    // is the shape: the value landed between the tags it was written between.
+    EXPECT_NE (request.body.content.find ("<o><id>"), std::string::npos)
+    << request.body.content;
+    EXPECT_NE (request.body.content.find ("</id></o>"), std::string::npos)
+    << request.body.content;
+}
+
+TEST (ScenarioDataXmlBodyTest, AGeneratorInsideACommentIsRefusedLikeACell) {
+    auto request = xml_request ("<o><!-- {{$guid}} --><n>1</n></o>");
+
+    const auto result = vayu::core::apply_iteration_template (request,
+    vayu::core::tokenize_bindable_fields (request), vayu::core::IterationBinding{});
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("{{$guid}}"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("comment"), std::string::npos) << result.error;
+}
+
 TEST (ScenarioDataXmlBodyTest, ATokenInsideAProcessingInstructionIsRefusedToo) {
     auto request = xml_request (R"(<?render style="{{data.v}}"?><o>1</o>)");
 

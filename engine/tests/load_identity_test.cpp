@@ -230,15 +230,34 @@ class LoadIdentityTest : public ::testing::Test {
 // ============================================================================
 
 // The guard, stated structurally: a request naming no reserved token splits no
-// fields at all, so the per-iteration join is one `empty()` test. A generator
-// and an ordinary variable are deliberately in it - both are composition's, and
-// neither survives to the bind.
+// fields at all, so the per-iteration join is one `empty()` test. An ordinary
+// variable is deliberately in it - it is composition's, and does not survive to
+// the bind.
 TEST (IdentitySplit, ARequestCarryingNoReservedTokenSplitsNothing) {
-    auto request = request_to ("https://api.test/users?g={{$guid}}");
+    auto request               = request_to ("https://api.test/users");
     request.headers["X-Trace"] = "{{traceId}}";
     EXPECT_TRUE (tokenize_bindable_fields (request).empty ())
     << "a request with no reserved token must cost the executor nothing per "
        "iteration - a non-empty template here is walked for every submission";
+}
+
+// A generator used to be in the test above, on the rule that composition had
+// always resolved it. Issue #995 moved it: a composition for a run *defers* the
+// family, so one that reaches the split is one nothing has generated yet, and
+// leaving it out of the template would send the token to the wire as it stands.
+// The two halves of the guard still hold - a run that spells none of these
+// splits nothing (above), and a Send's composition leaves none of them to find.
+TEST (IdentitySplit, ADeferredGeneratorIsSplitBesideTheIdentity) {
+    auto request = request_to ("https://api.test/users?g={{$guid}}");
+    request.headers["X-Iteration"] = "{{$iteration}}";
+
+    const auto tmpl = tokenize_bindable_fields (request);
+    ASSERT_EQ (tmpl.fields.size (), 2u)
+    << "the URL and the header value each carry one";
+    EXPECT_EQ (tmpl.fields.front ().tokens, (std::vector<std::string>{ "$guid" }));
+    // Not a data token: this run needs no data set behind it, and the refusal
+    // that guards `{{data.*}}` must not claim a generator.
+    EXPECT_FALSE (tmpl.first_data_token ().has_value ());
 }
 
 TEST (IdentitySplit, BothNamesAreKeptOutOfEveryBindableField) {

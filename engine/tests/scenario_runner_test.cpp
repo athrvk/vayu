@@ -27,6 +27,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -431,6 +432,31 @@ TEST_F (ScenarioRunnerTest, TheIterationIdentityBindsOnEveryPassOfADesignRun) {
     EXPECT_EQ (seen[2].target, "/ok?u=1&i=2")
     << "the identity must advance with the pass rather than freezing at "
        "composition";
+}
+
+// Issue #995 moved the generator family out of plan composition, and a design
+// run walks the same plan a load run does - so this is the case where deferring
+// and never binding would put the literal `{{$randomUUID}}` on the wire. Three
+// passes, three different ids: the deferral and the runner's bind, both.
+TEST_F (ScenarioRunnerTest, AGeneratorBindsPerPassOfADesignRunRatherThanFreezing) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok?id={{$randomUUID}}");
+
+    const auto run_id = start (/*iterations=*/3);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    std::set<std::string> targets;
+    for (const auto& request : seen) {
+        EXPECT_NE (request.target, "/ok?id={{$randomUUID}}")
+        << "the deferred token reached the wire as it stands - nothing bound "
+           "it";
+        targets.insert (request.target);
+    }
+    EXPECT_EQ (targets.size (), seen.size ())
+    << "the three passes shared one generated id, which is the freeze this "
+       "issue removed";
 }
 
 TEST_F (ScenarioRunnerTest, RunsEveryStepOfEveryIterationInPlanOrder) {

@@ -1422,6 +1422,12 @@ async function composeLoadRunRequest(
 	const composeBody: Record<string, unknown> = {
 		collectionId: str(args, "collectionId"),
 		environmentId: str(args, "environmentId"),
+		// This composed payload is repeated once per iteration, per virtual
+		// user, so the `{{$guid}}` family belongs to each repetition, not to
+		// this one-time composition - leave the tokens written as-is and let
+		// the engine generate a fresh value per iteration at bind time
+		// (issue #995).
+		deferDynamicVariables: true,
 	};
 	if (savedId === undefined) {
 		if (str(args, "url") === undefined) {

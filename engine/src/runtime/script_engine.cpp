@@ -39,6 +39,7 @@
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/form_body.hpp"
+#include "vayu/http/header_names.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
@@ -5948,7 +5949,13 @@ std::string& missing_column) {
         // stands - what composition does, and what lets one script run in both
         // a data-driven run and a plain send. The identity is not that case:
         // it needs no row behind it, so it answers here too.
-        return vayu::http::resolve_template (input, values, {}, identity);
+        //
+        // `Generate` said rather than defaulted: a script renders its own
+        // `{{$guid}}` here and now (issue #995 defers the family only for a
+        // payload a *run* will repeat), and it does that while resolving the
+        // identity it was sent as - the two questions compose.
+        return vayu::http::resolve_template (
+        input, values, {}, vayu::http::DynamicResolution::Generate, identity);
     }
 
     vayu::http::DataRowColumns row;
@@ -6306,40 +6313,94 @@ read_send_request_auth (JSContext* ctx, JSValueConst value, vayu::http::Auth& ou
     return std::nullopt;
 }
 
-// Every string pm.sendRequest was handed, resolved once against the scopes the
-// script can see: the URL, each header value, a raw body, and each credential
-// of an auth block. Postman resolves these, and until #1001 Vayu sent them as
-// written - so `pm.sendRequest("{{baseUrl}}/token", cb)` was a wrong request
-// sent silently rather than a refusal. Resolving here rather than at parse time
-// is what gives it Postman's mid-script visibility: a value the same script set
-// two lines earlier is in the scopes this reads.
-//
-// Header *names* are deliberately left as written. Two names that resolve to
-// one are a collision rule composition owns (#1051), and a second answer to it
-// invented here is how the two drift.
+// One string pm.sendRequest was handed, resolved against the scopes the script
+// can see. @p what names the field a refusal is about.
 std::optional<std::string>
-interpolate_send_request (JSContext* ctx, Request& request, vayu::http::Auth& auth) {
-    const auto resolve = [ctx] (std::string& text,
-                         const std::string& what) -> std::optional<std::string> {
-        std::string missing;
-        auto resolved = resolve_script_template (ctx, text, missing);
-        if (!resolved) {
-            return missing_column_message (ctx, "pm.sendRequest " + what, missing);
-        }
-        text = std::move (*resolved);
-        return std::nullopt;
-    };
-
-    if (auto reason = resolve (request.url, "options.url")) {
-        return reason;
+resolve_send_request_text (JSContext* ctx, std::string& text, const std::string& what) {
+    std::string missing;
+    auto resolved = resolve_script_template (ctx, text, missing);
+    if (!resolved) {
+        return missing_column_message (ctx, "pm.sendRequest " + what, missing);
     }
-    for (auto& [name, value] : request.headers) {
-        if (auto reason = resolve (value, "header '" + name + "'")) {
+    text = std::move (*resolved);
+    return std::nullopt;
+}
+
+/**
+ * Every header of the call, name and value both resolved, into a map rebuilt
+ * rather than edited in place - a resolved name is a different key.
+ *
+ * The collision that rebuild can produce is `http/header_names.hpp`'s, refused
+ * in its words rather than in words of this layer's own: composition and the
+ * residual pass both answer a resolved name landing on a name the request
+ * already carries by refusing the send, and a third answer invented here is how
+ * the three would drift. Composition's "was this collision one resolution made"
+ * test has nothing to do here: `Headers` compares without case, so two names
+ * the script wrote itself are already one key by the time this reads them, and
+ * every collision left is one resolution produced. That comparison is also why
+ * the refusal has to be made here - `{{h}}` resolving to `authorization` lands
+ * on an `Authorization` the script wrote, and the map cannot report the header
+ * it drops.
+ *
+ * Nothing is written back until every name is in, so a refused call leaves the
+ * request as the script wrote it rather than half rebuilt.
+ */
+std::optional<std::string> resolve_send_request_headers (JSContext* ctx, Headers& headers) {
+    Headers resolved;
+    // Each resolved name against the name as written that produced it, so a
+    // refusal can name both spellings - `resolved` alone remembers only the one
+    // that got there first.
+    std::map<std::string, std::string, vayu::CaseInsensitiveLess> produced;
+    for (const auto& [name, value] : headers) {
+        std::string resolved_name = name;
+        if (auto reason = resolve_send_request_text (
+            ctx, resolved_name, "header name '" + name + "'")) {
             return reason;
         }
+        if (resolved_name.empty ()) {
+            // A name written empty is refused as the headers are read; one
+            // *resolved* empty reaches nothing that would notice - the pre-send
+            // gate reads header text for the bytes that break a line, and
+            // libcurl writes what is left as `": value"` and sends it.
+            return "pm.sendRequest header '" + name + "' resolves to an empty name";
+        }
+        if (const auto [taken, was_free] = produced.emplace (resolved_name, name); !was_free) {
+            return "pm.sendRequest: " +
+            vayu::http::describe_header_name_collision (
+            vayu::http::HeaderNameCollision{ name, taken->second, taken->first });
+        }
+        std::string resolved_value = value;
+        if (auto reason = resolve_send_request_text (
+            ctx, resolved_value, "header '" + name + "'")) {
+            return reason;
+        }
+        resolved[std::move (resolved_name)] = std::move (resolved_value);
+    }
+    headers = std::move (resolved);
+    return std::nullopt;
+}
+
+// Every string pm.sendRequest was handed, resolved once against the scopes the
+// script can see: the URL, each header name and value, a raw body, and each
+// credential of an auth block. Postman resolves these, and until #1001 Vayu
+// sent them as written - so `pm.sendRequest("{{baseUrl}}/token", cb)` was a
+// wrong request sent silently rather than a refusal. Resolving here rather than
+// at parse time is what gives it Postman's mid-script visibility: a value the
+// same script set two lines earlier is in the scopes this reads.
+//
+// Header names were the half #1001 left written as they stood, because the
+// collision two resolved names can make was undecided; #1051 decided it, so
+// #1067 resolves them under that rule - see `resolve_send_request_headers`.
+std::optional<std::string>
+interpolate_send_request (JSContext* ctx, Request& request, vayu::http::Auth& auth) {
+    if (auto reason = resolve_send_request_text (ctx, request.url, "options.url")) {
+        return reason;
+    }
+    if (auto reason = resolve_send_request_headers (ctx, request.headers)) {
+        return reason;
     }
     if (request.body.mode == BodyMode::Text) {
-        if (auto reason = resolve (request.body.content, "options.body")) {
+        if (auto reason = resolve_send_request_text (ctx, request.body.content, "options.body")) {
             return reason;
         }
     }
@@ -6352,7 +6413,7 @@ interpolate_send_request (JSContext* ctx, Request& request, vayu::http::Auth& au
         if (failure) {
             return;
         }
-        failure = resolve (credential, "options.auth");
+        failure = resolve_send_request_text (ctx, credential, "options.auth");
     });
     return failure;
 }

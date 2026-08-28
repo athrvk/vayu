@@ -446,7 +446,10 @@ ids, and returns the execute-ready payload that `POST /execute` and `POST
   the URL, header keys/values, body content/fields, and the auth block -
   single-pass, raw stored strings, unknown plain names to `""`, unknown
   `$names` kept braced, dynamic variables (`{{$guid}}`, …) generated per
-  occurrence;
+  occurrence - unless the caller asked for them to be deferred
+  (`deferDynamicVariables`), which a composition made for a *run* does, so the
+  run generates a fresh value per iteration instead of repeating one (issue
+  #995);
 - resolves `inherit` auth by walking the collection ancestor chain leaf→root
   (an explicit `noauth` terminates the walk, `none` is stepped over), and
   resolves variables inside the winning block **before** any OAuth 2.0 cache
@@ -1115,8 +1118,12 @@ Three bounds, all applied by the engine itself (issue #985):
   are stored in **plaintext** in SQLite; `runs.config_snapshot` redacts its
   `auth` object to `{mode}` before persistence; and curl verbose logs redact the
   values of sensitive headers (`Authorization`, cookies, etc.). Token request
-  bodies/responses are never logged. On-disk encryption (`safeStorage`) and
-  mid-run token refresh are deferred.
+  bodies/responses are never logged. On-disk encryption (`safeStorage`) is
+  still deferred, and so is OS-keychain storage (out of scope for the transport
+  epic, #704 decision 6; the app runs Chromium with `use-mock-keychain`).
+  Mid-run token refresh
+  is **not** deferred: the [refresh watchdog](#load-test-mode) ships, and
+  re-acquires a load run's OAuth 2.0 token before it expires.
 - **Where the redaction line falls, and why it is not one line.** Two columns of
   a run row answer two different questions, and the split is deliberate:
   `runs.config_snapshot` records the request **as authored**, so

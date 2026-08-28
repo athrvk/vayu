@@ -4569,6 +4569,25 @@ describe("dispatchTool", () => {
 		expect(payload.postRequestScript).toBeUndefined();
 	});
 
+	test("start_load_run defers the {{$guid}} family to per-iteration generation", async () => {
+		// A load run repeats this composed payload once per iteration, per
+		// virtual user, so the generator family must not be resolved at this
+		// one-time composition (issue #995).
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const composeBody = (client.composeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(composeBody.deferDynamicVariables).toBe(true);
+	});
+
 	test("start_load_run forwards thresholds under the engine's own metric keys", async () => {
 		// The keys travel verbatim to POST /runs and come back in the report's
 		// thresholdValidation, so a rename anywhere on this path is a budget
