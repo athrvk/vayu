@@ -50,6 +50,16 @@ const SCRIPT = [
 	'const u = "{{base_url}}/orders";',
 ].join("\n");
 
+/**
+ * The same column, reached through each accessor that can see the bound row
+ * (issue #1063). Separate from `SCRIPT` because these names must not disturb
+ * the three paints above, and because the chip row only chips the first five.
+ */
+const ROW_SCRIPT = [
+	'const a = pm.variables.get("email");',
+	'const b = pm.iterationData.get("city");',
+].join("\n");
+
 const contract: { value: { collectionName: string; columns: string[] } | undefined } = {
 	value: undefined,
 };
@@ -57,13 +67,22 @@ const contract: { value: { collectionName: string; columns: string[] } | undefin
 /** What `getAllVariables()` answers with - empty unless a case says otherwise. */
 const variables: { value: Record<string, { value: string; scope: string }> } = { value: {} };
 
+/** The script under the panel - `SCRIPT` unless a case swaps it. */
+const script = { value: SCRIPT };
+
 vi.mock("../../../context", () => ({
 	useRequestBuilderContext: () => ({
 		// `collectionId: null` keeps the inherited-scripts notice out of the tree,
 		// which would otherwise want a QueryClient. The contract this panel paints
 		// against arrives as `dataColumns`, already resolved by the provider, so
 		// the chain walk is not what these cases are about.
-		request: { preRequestScript: SCRIPT, testScript: SCRIPT, collectionId: null },
+		get request() {
+			return {
+				preRequestScript: script.value,
+				testScript: script.value,
+				collectionId: null,
+			};
+		},
 		updateField: () => {},
 		getAllVariables: () => variables.value,
 		get dataColumns() {
@@ -98,6 +117,7 @@ function chipFor(container: HTMLElement, name: string): HTMLElement {
 beforeEach(() => {
 	contract.value = undefined;
 	variables.value = {};
+	script.value = SCRIPT;
 });
 
 describe("a {{data.*}} name in the chip row", () => {
@@ -167,5 +187,106 @@ describe("a plain {{name}} the script only contains", () => {
 		const chip = chipFor(container, "{{base_url}}");
 		expect(chip.className).toContain("text-muted-foreground");
 		expect(chip.className).not.toContain("bg-secondary");
+	});
+});
+
+/**
+ * A bare column name, read through an accessor that sees the bound row
+ * (issue #1063).
+ *
+ * Both of these were chipped *nowhere at all* before: `referencedVariables`
+ * matched three accessors and neither of these was one, so the names a
+ * data-driven script actually reads were the ones the row stayed silent about.
+ * The paint they get now is the `{{data.*}}` paint, from the same table, because
+ * the spelling is the only thing that differed.
+ */
+describe("a column read through pm, by its bare name", () => {
+	beforeEach(() => {
+		script.value = ROW_SCRIPT;
+	});
+
+	it("chips a pm.variables read like the pm.iterationData read beside it", () => {
+		// The acceptance criterion itself: one column, two accessors, one paint.
+		contract.value = { collectionName: "Orders", columns: ["email", "city"] };
+		const { container } = render(<ScriptPanel variant="pre" />);
+
+		const merged = chipFor(container, "email");
+		const row = chipFor(container, "city");
+		expect(merged.className).toBe(row.className);
+		expect(merged.className).toContain("text-muted-foreground");
+		expect(merged.className).not.toContain("bg-destructive");
+	});
+
+	it("says the row is what answers the name, which is why it is not red", () => {
+		contract.value = { collectionName: "Orders", columns: ["email", "city"] };
+		const { container } = render(<ScriptPanel variant="pre" />);
+
+		expect(chipFor(container, "email").getAttribute("title")).toContain(
+			"bound row's column answers this name"
+		);
+		expect(chipFor(container, "city").getAttribute("title")).toContain("declared in Orders");
+	});
+
+	it("warns - amber, not red - for a pm.iterationData read of an undeclared column", () => {
+		contract.value = { collectionName: "Orders", columns: ["email"] };
+		const { container } = render(<ScriptPanel variant="pre" />);
+
+		const chip = chipFor(container, "city");
+		expect(chip.className).toContain("text-warning-text");
+		expect(chip.className).not.toContain("bg-destructive");
+	});
+
+	it("never calls a pm.iterationData read undefined, with no contract in scope", () => {
+		/*
+		 * The state that has to be handled rather than fall through: a column can
+		 * never be in `allVariables`, so the resolved/unresolved pair answers
+		 * "destructive" for every column read - the #604 defect, arriving by a
+		 * second door.
+		 */
+		const { container } = render(<ScriptPanel variant="pre" />);
+
+		expect(chipFor(container, "city").className).not.toContain("bg-destructive");
+	});
+
+	it("leaves a pm.variables read painted as the variable a scope defines", () => {
+		/*
+		 * The row does win at run time while one is bound (issue #1007), but which
+		 * of the two the builder *paints* is issue #1064's question, and this
+		 * panel draws the line where `VariableInput` already draws it. The
+		 * `pm.iterationData` chip beside it is unaffected: that accessor reads no
+		 * scope, so a variable of the same name says nothing about it.
+		 */
+		contract.value = { collectionName: "Orders", columns: ["email", "city"] };
+		variables.value = { email: { value: "ops@example.com", scope: "environment" } };
+		const { container } = render(<ScriptPanel variant="pre" />);
+
+		expect(chipFor(container, "email").className).toContain("bg-secondary");
+		expect(chipFor(container, "city").className).toContain("text-muted-foreground");
+	});
+
+	it("does not tell a pm read that its characters reach the script verbatim", () => {
+		/*
+		 * A `data.*` name reached through `pm.*.get()` takes the column paint,
+		 * but not the interpolation note beside it: that note belongs to the
+		 * spelling that really is literal characters, and on a call it describes
+		 * something the author did not write. The collection tab draws the same
+		 * line (issue #1075), and the two must not answer this differently.
+		 */
+		script.value = 'const a = pm.variables.get("data.email");';
+		contract.value = { collectionName: "Orders", columns: ["email"] };
+		const { container } = render(<ScriptPanel variant="pre" />);
+
+		const title = chipFor(container, "data.email").getAttribute("title")!;
+		expect(title).toContain("declared in Orders");
+		expect(title).not.toContain("not interpolated");
+	});
+
+	it("keeps the destructive chip for a pm.variables read that names no column", () => {
+		// The merged accessor is still a variable read for every other name, and
+		// this is the case that proves the new branch did not swallow the old one.
+		contract.value = { collectionName: "Orders", columns: ["city"] };
+		const { container } = render(<ScriptPanel variant="pre" />);
+
+		expect(chipFor(container, "email").className).toContain("bg-destructive");
 	});
 });
