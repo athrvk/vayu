@@ -26,6 +26,7 @@
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
 
@@ -378,10 +379,7 @@ void ingest_header_line (std::string_view line, Headers& headers) {
         return;
     }
 
-    std::string key (line.substr (0, colon_pos));
-    for (auto& c : key) {
-        c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
-    }
+    std::string key = vayu::utils::ascii_lower (line.substr (0, colon_pos));
 
     auto value = line.substr (colon_pos + 1);
     while (!value.empty () && value.front () == ' ') {
@@ -700,10 +698,7 @@ bool tls_connection_never_answered (CURL* curl) {
     }
     // curl reports the scheme upper-cased; compared case-insensitively anyway,
     // because that is a presentation detail of one version.
-    std::string lowered (scheme);
-    std::transform (lowered.begin (), lowered.end (), lowered.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-    if (lowered != "https") {
+    if (!vayu::utils::ascii_lower_equal (scheme, "https")) {
         return false;
     }
 

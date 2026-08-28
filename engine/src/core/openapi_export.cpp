@@ -925,7 +925,7 @@ std::string file_slug (const std::string& name) {
                 slug += '-';
             }
             pending_dash = false;
-            slug += static_cast<char> (std::tolower (c));
+            slug += vayu::utils::ascii_lower (raw);
         } else {
             pending_dash = true;
         }
