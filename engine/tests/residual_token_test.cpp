@@ -305,10 +305,15 @@ TEST (ResidualTokens, ANameResolvingOntoAHeaderAlreadyThereIsRefused) {
     const auto refusal = resolve_residual_tokens (request, scopes);
 
     ASSERT_HAS_VALUE (refusal);
-    EXPECT_EQ (refusal->code, vayu::ErrorCode::InternalError);
-    EXPECT_NE (refusal->message.find ("{{header_name}}"), std::string::npos)
-    << refusal->message;
-    EXPECT_NE (refusal->message.find ("X-Tenant"), std::string::npos) << refusal->message;
+    EXPECT_EQ (refusal->error.code, vayu::ErrorCode::InternalError);
+    // The code composition refuses the same rule under, so the streaming send -
+    // which answers a `400` rather than a status-0 response - names one rule the
+    // one way (#1084).
+    EXPECT_EQ (refusal->code, "colliding_header_names");
+    EXPECT_NE (refusal->error.message.find ("{{header_name}}"), std::string::npos)
+    << refusal->error.message;
+    EXPECT_NE (refusal->error.message.find ("X-Tenant"), std::string::npos)
+    << refusal->error.message;
 }
 
 /// Refused with the request as it was found: the caller stops the send, and a
@@ -354,6 +359,50 @@ TEST (ResidualTokens, ANameResolvingToItsOwnHeaderIsNotACollision) {
     EXPECT_EQ (request.headers["X-Tenant"], "acme");
     EXPECT_EQ (request.headers["X-Other"], "kept");
     EXPECT_EQ (request.headers.count ("{{header_name}}"), 0u);
+}
+
+// --- a name that resolves to nothing (#1084) ---------------------------------
+//
+// The second rule `http/header_names.hpp` holds, met here for the reason the
+// collision above is: a name a pre-request script has just emptied is one
+// composition never saw. What a send would carry is the line `": acme"`, under
+// no name at all, and nothing between here and the wire looks at a name that is
+// not there.
+//
+// Mutation-check for the two below: drop the empty check in
+// `resolve_header_names` and the first fails on the refusal it no longer gets,
+// the second on the nameless header the rebuild then leaves behind.
+
+TEST (ResidualTokens, ANameResolvingToNothingIsRefused) {
+    vayu::Request request;
+    request.url                        = "https://api.example.com/x";
+    request.headers["{{header_name}}"] = "acme";
+
+    auto scopes        = environment_with ("header_name", "");
+    const auto refusal = resolve_residual_tokens (request, scopes);
+
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_EQ (refusal->error.code, vayu::ErrorCode::InternalError);
+    EXPECT_EQ (refusal->code, "empty_header_name");
+    EXPECT_NE (refusal->error.message.find ("{{header_name}}"), std::string::npos)
+    << refusal->error.message;
+}
+
+/// Refused with the request as it was found, for the reason a refused collision
+/// is: the caller stops the send, and a half-rebuilt map is one nothing should
+/// go on to read.
+TEST (ResidualTokens, ARefusedEmptyNameLeavesTheHeadersAlone) {
+    vayu::Request request;
+    request.url                        = "https://api.example.com/x";
+    request.headers["{{header_name}}"] = "acme";
+    request.headers["X-Other"]         = "kept";
+    const vayu::Request before         = request;
+
+    auto scopes = environment_with ("header_name", "");
+    EXPECT_TRUE (resolve_residual_tokens (request, scopes));
+
+    EXPECT_EQ (request.headers, before.headers);
+    EXPECT_EQ (request.headers.count (""), 0u);
 }
 
 // --- the exchange, on the wire -----------------------------------------------

@@ -17,4 +17,11 @@ std::string describe_header_name_collision (const HeaderNameCollision& collision
     " sent with a header missing";
 }
 
+std::string describe_empty_header_name (const std::string& written) {
+    return "header \"" + written +
+    "\" resolves to an empty name"
+    " - what would go out is a \": value\" line no name owns, so the request is"
+    " refused rather than sent carrying a header the author cannot see";
+}
+
 } // namespace vayu::http

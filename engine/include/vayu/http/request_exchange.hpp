@@ -262,6 +262,26 @@ struct ExchangeOutcome {
 };
 
 /**
+ * Why a residually-resolved request must not be sent, in the two shapes its two
+ * callers answer in.
+ *
+ * The pass serves a buffered send, which has a response to fill in, and a
+ * streaming one, which has not answered its route yet - so it carries both
+ * rather than making either caller derive the other's half from a message.
+ */
+struct ResidualRefusal {
+    /// The pre-send gate's shape, which every buffered driver already renders:
+    /// an `InternalError` carrying the reason, answered as a status-0 response
+    /// rather than a transfer.
+    vayu::Error error;
+    /// The `POST /compose` code for the same rule, for the streaming send's
+    /// `400`. It comes from the file that holds the rule
+    /// (`http/header_names.hpp`), so composition and this pass cannot name one
+    /// refusal two ways.
+    std::string code;
+};
+
+/**
  * Resolve the `{{tokens}}` composition left behind, against the variable state
  * a pre-request script has just written (issue #1008).
  *
@@ -291,17 +311,15 @@ struct ExchangeOutcome {
  * A request holding no `{{` at all - nearly all of them, composition having
  * resolved what it could - pays one search per field and nothing else.
  *
- * @return why this request must not be sent, if a resolved header name landed
- *         on one the request already carried (`http/header_names.hpp`, issue
- *         #1051) - the one thing this pass can produce that a send cannot
- *         survive, because the map holds one value per name and the header it
- *         replaced is simply gone. `std::nullopt` is the ordinary answer, the
- *         request resolved in place. The refusal is a `vayu::Error` rather than
- *         a status because this pass serves two callers with two different
- *         answers to give: the shape is the pre-send gate's, and each caller
- *         renders it the way it renders that one.
+ * @return why this request must not be sent, if resolving a header name
+ *         produced one the request already carried (`http/header_names.hpp`,
+ *         issue #1051) or no name at all (issue #1084) - the two things this
+ *         pass can produce that a send cannot survive, because the map holds
+ *         one value per name and what is left of an empty one is a `": value"`
+ *         line. `std::nullopt` is the ordinary answer, the request resolved in
+ *         place.
  */
-[[nodiscard]] std::optional<vayu::Error>
+[[nodiscard]] std::optional<ResidualRefusal>
 resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& scopes);
 
 /**

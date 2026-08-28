@@ -1248,7 +1248,7 @@ DesignSend& send) {
  * as the stream.
  *
  * One helper for both refusals - the draining daemon's, and the header-name
- * collision the residual pass reports (#1051) - because they are the same three
+ * ones the residual pass reports (#1051, #1084) - because they are the same three
  * statements, and a second copy is one that stops receiving this one's fixes.
  */
 void refuse_stream_before_it_opens (RouteContext& ctx,
@@ -1338,11 +1338,13 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // rather than through `execute_exchange`: a `{{token}}` the script has just
     // defined resolves before the stream opens.
     if (auto refusal = resolve_residual_tokens (send.request, scopes)) {
-        // The one thing that pass can refuse (issue #1051), in the same words
-        // the buffered send refuses it with; what differs is where the caller
-        // reads it, this route not having answered yet.
+        // What that pass can refuse (issues #1051 and #1084), in the same words
+        // the buffered send refuses it with and under the code composition
+        // refuses it under; what differs is where the caller reads it, this
+        // route not having answered yet. The code rides on the refusal because
+        // naming it here is how it would come to name the wrong rule.
         refuse_stream_before_it_opens (
-        ctx, res, run_id, 400, refusal->message, "colliding_header_names");
+        ctx, res, run_id, 400, refusal->error.message, refusal->code);
         return;
     }
 

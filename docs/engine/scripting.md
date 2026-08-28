@@ -1317,7 +1317,10 @@ out. Names are compared without case, the way the header map keys them. A name
 that resolves to nothing at all is refused the same way, and it is the one thing
 resolution can produce that nothing further down the send would catch: the
 pre-send gate reads header text for the bytes that break a line, and what is
-left of an empty name is the line `: value`, which libcurl sends.
+left of an empty name is the line `: value`, which libcurl sends. This call met
+that rule first, a script writing header names of its own; since #1084
+composition and the execute-time residual pass refuse it in the same words, so
+one wording answers wherever a name is resolved.
 
 ```javascript
 pm.environment.set("tenant", "acme");

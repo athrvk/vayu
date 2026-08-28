@@ -6600,8 +6600,11 @@ std::optional<std::string> resolve_send_request_headers (JSContext* ctx, Headers
             // A name written empty is refused as the headers are read; one
             // *resolved* empty reaches nothing that would notice - the pre-send
             // gate reads header text for the bytes that break a line, and
-            // libcurl writes what is left as `": value"` and sends it.
-            return "pm.sendRequest header '" + name + "' resolves to an empty name";
+            // libcurl writes what is left as `": value"` and sends it. Since
+            // #1084 composition and the residual pass refuse it too, so the
+            // wording is `http/header_names.hpp`'s rather than this layer's -
+            // the same move the collision beside it already made.
+            return "pm.sendRequest: " + vayu::http::describe_empty_header_name (name);
         }
         if (const auto [taken, was_free] = produced.emplace (resolved_name, name); !was_free) {
             return "pm.sendRequest: " +

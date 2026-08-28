@@ -1222,6 +1222,68 @@ TEST_F (RequestComposerTest, TwoNamesTheAuthorTypedAreNotThisRefusal) {
     EXPECT_EQ (payload["headers"]["authorization"], "Bearer other");
 }
 
+// --- A header name that resolves to nothing (#1084) --------------------------
+//
+// The third thing a substituted header name can do, after erasing a header and
+// forging one: leave the line with no name at all. `{{blank}}: acme` with
+// `blank` empty is written into the payload under the key `""`, and nothing
+// further down looks - the pre-send gate reads header text for the bytes that
+// break a line, and an absent name breaks none, so libcurl appends what is left
+// as `": acme"` and sends it. See `http/header_names.hpp`.
+//
+// Mutation-check for the three below: drop the `nameless` check in
+// `resolve_compose_head` and the first two fail - the second on the code it
+// falls back to - while the third must keep passing, a name that resolves to a
+// name being nobody's refusal.
+
+TEST_F (RequestComposerTest, AHeaderNameResolvingToNothingIsRefused) {
+    // An enabled variable with a blank value, which is what the D17 rule stores
+    // for a row the author left empty - an ordinary value, not an exotic one.
+    seed_environment ("env_1", R"({"blank":{"value":"","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", { { "{{blank}}", "acme" } } } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "empty_header_name");
+    // The name as written is the whole of what the message can name: what it
+    // produced is nothing, and `{{blank}}` is what the author has to go to.
+    const auto message = payload["error"]["message"].get<std::string> ();
+    EXPECT_NE (message.find ("{{blank}}"), std::string::npos) << message;
+}
+
+// Two names that both resolve to nothing do collide - on the empty name - and
+// the collision is the further fault: what the author needs to be told is that
+// neither name arrived, not that the two agreed about it.
+TEST_F (RequestComposerTest, TwoNamesResolvingToNothingAreRefusedAsNameless) {
+    seed_environment ("env_1",
+    R"({"a":{"value":"","enabled":true},"b":{"value":"","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", { { "{{a}}", "acme" }, { "{{b}}", "legacy" } } } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "empty_header_name");
+}
+
+// The case the refusal leaves alone, and the reason it cannot be a check on the
+// name holding a token: a name a variable answers is composed as ever.
+TEST_F (RequestComposerTest, ANameThatResolvesToANameIsNotThisRefusal) {
+    seed_environment ("env_1", R"({"tenant_header":{"value":"X-Tenant","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", { { "{{tenant_header}}", "acme" } } } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["headers"]["X-Tenant"], "acme");
+}
+
 TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {
     const json body = { { "request", { { "method", "GET" }, { "url", "https://x.test/{{missing}}" } } },
         { "collectionId", "col_missing" }, { "environmentId", "env_missing" } };

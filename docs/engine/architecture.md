@@ -477,12 +477,17 @@ of every value that had an answer. The one thing this costs: an ad-hoc payload
 posted straight to `/execute` with a literal `{{...}}` in it is no longer
 inert - if the run's scopes define that name, the send now carries its value.
 A name nothing defines still goes out written as it stands, and the load path
-does not run this pass at all. The one thing the pass can *refuse* is a
-resolved header name landing on a name the request already carries (#1051):
-the map holds one value per name, so the send would go out a header short, and
-it is stopped instead - in composition's words, as a `statusCode: 0` response
-carrying the reason (a `400` on the streaming path, which has not answered
-yet). An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+does not run this pass at all. What the pass can *refuse* is what resolving a
+header **name** can produce, both rules held in
+`engine/include/vayu/http/header_names.hpp`: a name landing on one the request
+already carries (#1051), where the map holds one value per name and the send
+would go out a header short; and a name landing on nothing at all (#1084),
+where what would go out is a `": value"` line no name owns. Either is stopped
+rather than sent - in composition's words and under composition's refusal
+code, as a `statusCode: 0` response carrying the reason (a `400` on the
+streaming path, which has not answered yet, which is why the refusal carries
+the code as well as the error). Both rules read a name only where the pass
+reads one: a name that arrives already resolved is composition's to refuse. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 

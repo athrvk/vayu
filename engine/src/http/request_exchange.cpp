@@ -352,6 +352,13 @@ bool a_header_name_holds_a_token (const vayu::Headers& headers) {
     [] (const auto& entry) { return holds_a_token (entry.first); });
 }
 
+/// Both halves of a refusal from one wording: the pre-send gate's shape for the
+/// buffered send, and the rule's own `POST /compose` code for the streaming one.
+ResidualRefusal refusal_of (std::string reason, std::string_view code) {
+    return ResidualRefusal{ vayu::Error{ vayu::ErrorCode::InternalError, std::move (reason) },
+        std::string (code) };
+}
+
 /**
  * Rebuilt rather than edited in place, because a resolved name is a different
  * key. Values are copied rather than moved, so a refusal leaves the request as
@@ -367,11 +374,19 @@ bool a_header_name_holds_a_token (const vayu::Headers& headers) {
  * names without case already, so two names that survive untouched cannot have
  * been equal to begin with.
  *
- * @return the first collision, the headers left as they were; nothing, and the
+ * A name that resolves to *nothing* is refused here too (#1084), in that rule's
+ * one wording: it is the same shape of quiet wrong request with the erased
+ * header replaced by a `": value"` line no name owns, and this pass is the
+ * layer composition cannot stand in for - the name a script has just defined is
+ * one composition never saw. A name that arrives *already* empty holds no token
+ * and so is never walked here at all, which is this pass's reach for both rules
+ * alike: composition refuses that one (see issue #1095).
+ *
+ * @return the first refusal, the headers left as they were; nothing, and the
  *         map rebuilt, when every name is still its own.
  */
-std::optional<vayu::http::HeaderNameCollision>
-resolve_header_names (vayu::Headers& headers, const vayu::http::VariableValues& vars) {
+std::optional<ResidualRefusal> resolve_header_names (vayu::Headers& headers,
+const vayu::http::VariableValues& vars) {
     if (!a_header_name_holds_a_token (headers)) {
         return std::nullopt;
     }
@@ -382,10 +397,17 @@ resolve_header_names (vayu::Headers& headers, const vayu::http::VariableValues& 
     std::map<std::string, std::string, vayu::CaseInsensitiveLess> produced;
     for (const auto& [name, value] : headers) {
         std::string resolved_name = vayu::http::resolve_template (name, vars);
+        // Both refusals are reported with the map untouched: the caller refuses
+        // the send, so a half-rebuilt request is one nothing goes on to read.
+        if (resolved_name.empty ()) {
+            return refusal_of (vayu::http::describe_empty_header_name (name),
+            vayu::http::EMPTY_HEADER_NAME_CODE);
+        }
         if (const auto [taken, was_free] = produced.emplace (resolved_name, name); !was_free) {
-            // Reported with the map untouched: the caller refuses the send, so
-            // a half-rebuilt request is one nothing goes on to read.
-            return vayu::http::HeaderNameCollision{ name, taken->second, taken->first };
+            return refusal_of (
+            vayu::http::describe_header_name_collision (
+            vayu::http::HeaderNameCollision{ name, taken->second, taken->first }),
+            vayu::http::COLLIDING_HEADER_NAMES_CODE);
         }
         resolved[std::move (resolved_name)] = value;
     }
@@ -404,7 +426,7 @@ vayu::http::VariableValues values_from_scopes (const ScriptVariableScopes& scope
 
 } // namespace
 
-std::optional<vayu::Error> resolve_residual_tokens (vayu::Request& request,
+std::optional<ResidualRefusal> resolve_residual_tokens (vayu::Request& request,
 const ScriptVariableScopes& scopes) {
     auto targets             = resolvable_strings (request);
     const bool anything_left = a_header_name_holds_a_token (request.headers) ||
@@ -420,15 +442,15 @@ const ScriptVariableScopes& scopes) {
             *text = vayu::http::resolve_template (*text, vars);
         }
     }
-    // Last: it rebuilds the map the values `targets` points at live in.
-    if (auto collision = resolve_header_names (request.headers, vars)) {
-        // The shape the pre-send gate answers in, because this is a refusal of
-        // the same send and the drivers already render that one: an
-        // `InternalError` carrying the message, which each caller turns into a
-        // status-0 response rather than a transfer (see `validate_transferable`
-        // in `event_loop/curl_utils.cpp`).
-        return vayu::Error{ vayu::ErrorCode::InternalError,
-            vayu::http::describe_header_name_collision (*collision) };
+    // Last: it rebuilds the map the values `targets` points at live in. The
+    // refusal already carries the pre-send gate's shape, because this is a
+    // refusal of the same send and the drivers already render that one: an
+    // `InternalError` a buffered caller turns into a status-0 response rather
+    // than a transfer (see `validate_transferable` in
+    // `event_loop/curl_utils.cpp`), beside the code a streaming caller answers
+    // its still-open route with.
+    if (auto refusal = resolve_header_names (request.headers, vars)) {
+        return refusal;
     }
     return std::nullopt;
 }
@@ -501,7 +523,7 @@ bool verbose) {
         // the send that was to carry them. The test script still runs, and
         // reads a response reporting an error rather than a status - the
         // false-pass rule issue #180 exists for.
-        outcome.response = vayu::http::detail::error_response (*refusal);
+        outcome.response = vayu::http::detail::error_response (refusal->error);
         outcome.response.request_headers = outcome.request.headers;
     } else {
         vayu::http::ClientConfig config;
