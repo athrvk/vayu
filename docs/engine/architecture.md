@@ -486,8 +486,13 @@ where what would go out is a `": value"` line no name owns. Either is stopped
 rather than sent - in composition's words and under composition's refusal
 code, as a `statusCode: 0` response carrying the reason (a `400` on the
 streaming path, which has not answered yet, which is why the refusal carries
-the code as well as the error). Both rules read a name only where the pass
-reads one: a name that arrives already resolved is composition's to refuse. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+the code as well as the error). The two rules read a name over different
+reaches, decided rather than inherited (#1095): the empty-name rule reads
+**every** header name, so a name a script has just emptied and an empty key
+posted straight to `POST /execute` are refused here too, while the collision
+rule reads only the names that still held a token - a request that arrives
+already resolved cannot carry a collision to find, two names that are already
+equal being already one key. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 

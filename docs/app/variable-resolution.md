@@ -577,10 +577,21 @@ feed composition drop such a row first - a stored request's headers, and the
 app's - so what that catches beyond a produced name is a payload built by hand.
 The three layers are the ones above: composition's `400`, the residual pass as a
 failed send, and `pm.sendRequest`, which met this first because a script writes
-header names of its own. The residual pass reads a name only where the name held
-a `{{token}}`, which is its reach for the collision rule too - a request posted
-already-resolved is composition's to refuse - and a name a data row binds is the
-one layer with no empty-name rule yet (#1095).
+header names of its own.
+
+**A fourth binds rather than resolves** (#1095): a data row whose header-name
+column is blank - `{{data.header_name}}: acme` against a row that has nothing in
+that column - is refused at bind time, in the same wording with the row in front
+of it, and the load path needs that layer because it runs no residual pass over
+what it binds. A name a bind only *shortens* is not this rule: `X-{{data.h}}`
+with a blank cell binds to `X-`, which is a name a request can carry.
+
+And the residual pass reads **every** header name for this rule (#1095), not
+only the ones that still held a `{{token}}` - so a name a script has just
+emptied, and an empty key in a payload posted straight to `POST /execute`, are
+refused there rather than sent. The collision rule keeps the narrower reach and
+loses nothing by it: a request that arrives already resolved cannot carry a
+collision to find, since two names that are already equal are already one key.
 
 ---
 

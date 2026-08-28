@@ -239,6 +239,62 @@ TEST (ScenarioDataHeaderCollisionTest, HeadersThatStayDistinctStillBind) {
 }
 
 // ---------------------------------------------------------------------------
+// A header name a row binds to nothing (issue #1095)
+// ---------------------------------------------------------------------------
+//
+// The sibling of the collision above and the more reachable of the two: a blank
+// cell is an ordinary thing for a data file to hold, and this is the layer or
+// nothing - the load path runs no residual pass over what it binds, and the
+// pre-send gate reads a name for the bytes that end a line, which an absent
+// name does not have.
+//
+// Mutation-check for the three below: drop the `bound_name.empty ()` record in
+// `walk_bindable_fields` and the first two read `ok`, with the request carrying
+// the `": acme"` line each of them exists to stop.
+
+TEST (ScenarioDataEmptyHeaderNameTest, ABoundNameEmptiedByTheRowRefusesTheRow) {
+    auto request                  = request_with_url ("https://api.test/");
+    request.headers["{{data.h}}"] = "acme";
+
+    const auto result = bind_data_row (request, json::parse (R"({"h":""})"), 3);
+
+    EXPECT_FALSE (result.ok);
+    // Enough to fix the file without guessing: the header as written - which is
+    // where the column is named - and the row that emptied it.
+    EXPECT_NE (result.error.find ("{{data.h}}"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("row 3"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataEmptyHeaderNameTest, TwoNamesEmptiedByTheRowAreRefusedAsNameless) {
+    // Both bind to the empty name, so they also collide - on a name neither of
+    // them has. The nearer fault is the one the author needs, which is the
+    // order composition answers these two in as well.
+    auto request                  = request_with_url ("https://api.test/");
+    request.headers["{{data.a}}"] = "first";
+    request.headers["{{data.b}}"] = "second";
+
+    const auto result = bind_data_row (request, json::parse (R"({"a":"","b":""})"), 0);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("empty name"), std::string::npos) << result.error;
+    EXPECT_EQ (result.error.find ("already resolves to"), std::string::npos)
+    << result.error;
+}
+
+TEST (ScenarioDataEmptyHeaderNameTest, ABlankCellThatLeavesTheNameANameStillBinds) {
+    // The rule is about the name the bind produced, not about the cell: `X-`
+    // is a header name a request can carry, so this is an ordinary bind and
+    // refusing it would be a rule nobody asked for.
+    auto request                    = request_with_url ("https://api.test/");
+    request.headers["X-{{data.h}}"] = "acme";
+
+    const auto result = bind_data_row (request, json::parse (R"({"h":""})"), 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.headers.at ("X-"), "acme");
+}
+
+// ---------------------------------------------------------------------------
 // A cell that would end the header line it is bound into (issue #732)
 // ---------------------------------------------------------------------------
 
