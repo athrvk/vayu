@@ -129,6 +129,30 @@ inline constexpr std::string_view IDENTITY_ITERATION_NAME = "$iteration";
 bool is_identity_variable_name (const std::string& name);
 
 /**
+ * Which iteration of which virtual user is about to send (issue #994).
+ *
+ * Both numbers already exist wherever a request is sent - a scenario load run's
+ * `VirtualUser` holds them, a single-request run counts its submissions, a
+ * design-mode send is a run of one - so this carries them to the bind rather
+ * than inventing a second source of truth for either.
+ *
+ * Declared here rather than in `core/scenario_data.hpp`, where it started,
+ * because it is the identity namespace's own value and the namespace is
+ * declared just above - and because the script sandbox resolves those two names
+ * from a layer below core (issue #1057), exactly as `render_data_value` moved
+ * down for the data namespace's spelling rule. `core::IterationIdentity` still
+ * names it at every site that binds one, since that is where a bind happens.
+ */
+struct IterationIdentity {
+    /// The virtual user, **1-based**: the first user of a run is `1`, so
+    /// `user-{{$vu}}@example.com` reads as a person would number them.
+    size_t vu = 1;
+    /// That virtual user's iteration, **0-based**, so it indexes the data set
+    /// the same way `{{data.*}}`'s row cursor does.
+    size_t iteration = 0;
+};
+
+/**
  * The bare column names a bound data row will substitute (issue #1007).
  *
  * Postman binds a dataset's columns to bare names - `{{username}}` in a
@@ -238,10 +262,19 @@ const std::vector<std::string>& dynamic_variable_names ();
  *
  * @p bound_columns defaults to empty, which is composition as it was: every
  * caller with no dataset behind it resolves exactly the names it always did.
+ *
+ * @p identity is the one caller-supplied answer for the reserved identity
+ * namespace, and it defaults to absent for the same reason: composition has no
+ * iteration, so `{{$vu}}` and `{{$iteration}}` keep their braces there and the
+ * executor binds them per send. A caller that *is* an iteration - the script
+ * sandbox, which resolves beside a request already bound with these numbers
+ * (issue #1057) - passes them, and they answer ahead of every scope, so a
+ * variable someone names `$vu` still cannot take the name's meaning away.
  */
 std::string resolve_template (const std::string& input,
 const VariableValues& vars,
-const BoundColumnNames& bound_columns = {});
+const BoundColumnNames& bound_columns            = {},
+const std::optional<IterationIdentity>& identity = std::nullopt);
 
 /**
  * Render one row value as the text a `{{data.column}}` token substitutes.
@@ -298,10 +331,19 @@ struct DataRowColumns {
     VariableValues columns;
 };
 
+/**
+ * Resolve @p input against the scopes and the bound row above (see
+ * `DataRowColumns`, which owns that rule).
+ *
+ * @p identity is `resolve_template`'s, defaulted absent for the same reason -
+ * and read *before* the row, so a column a file happens to name `$vu` cannot
+ * answer for the identity any more than it can at composition.
+ */
 std::string resolve_template_with_data (const std::string& input,
 const VariableValues& vars,
 const DataRowColumns& row,
-std::optional<std::string>& missing_column);
+std::optional<std::string>& missing_column,
+const std::optional<IterationIdentity>& identity = std::nullopt);
 
 /**
  * Deep-resolve every string *value* inside a JSON value (object keys are left

@@ -3459,6 +3459,92 @@ TEST_F (ScriptEngineTest, ReplaceInResolvesScopesLikeTheRequestFieldsDo) {
     EXPECT_EQ (globals["cycleStopsLiteral"].value, "{{selfRef}}");
 }
 
+// The identity namespace inside replaceIn (issue #1057). It resolves here for
+// one reason: the request beside this script was already bound with these two
+// numbers, so a token left written would make the script and the wire disagree
+// about one send. Reserved ahead of every scope, exactly as at composition.
+TEST_F (ScriptEngineTest, ReplaceInResolvesTheIdentityTheRequestBesideItWasBoundWith) {
+    Environment globals;
+    Environment environment;
+    // A variable someone named `$vu` cannot answer for the identity - the same
+    // rule composition holds, and what makes the name bindable at all.
+    environment["$vu"] = Variable{ "from-environment", false, true };
+
+    ScriptContext ctx;
+    ctx.request     = &request;
+    ctx.environment = &environment;
+    ctx.globals     = &globals;
+    ctx.vu          = 7;
+    ctx.iteration   = 3;
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('vu', pm.variables.replaceIn('user-{{$vu}}@example.com'));
+        pm.globals.set('iteration', pm.variables.replaceIn('{{$iteration}}'));
+        // A `$name` that only looks like the identity follows the
+        // unknown-$name rule, here as at composition.
+        pm.globals.set('nearMiss', pm.variables.replaceIn('{{$vus}}'));
+        // The two APIs answer one question about one send, so they agree.
+        pm.globals.set('agreesWithInfo',
+            String(pm.variables.replaceIn('{{$vu}}') === String(pm.info.vu)));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["vu"].value, "user-7@example.com");
+    EXPECT_EQ (globals["iteration"].value, "3");
+    EXPECT_EQ (globals["nearMiss"].value, "{{$vus}}");
+    EXPECT_EQ (globals["agreesWithInfo"].value, "true");
+}
+
+// The other direction of the same rule: a send that is nobody's iteration
+// still binds `1` and `0` into its request (`POST /execute`, issue #994), so
+// that is what replaceIn answers. `pm.info` stays absent there, and that is not
+// a disagreement - it answers which iteration of which run this is, and there
+// is no run.
+TEST_F (ScriptEngineTest, ReplaceInAnswersTheRunOfOneWhereNothingSetsTheIdentity) {
+    Environment globals;
+
+    ScriptContext ctx;
+    ctx.request = &request;
+    ctx.globals = &globals;
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('vu', pm.variables.replaceIn('{{$vu}}'));
+        pm.globals.set('iteration', pm.variables.replaceIn('{{$iteration}}'));
+        pm.globals.set('infoIsAbsent', String(typeof pm.info.vu === 'undefined'));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["vu"].value, "1");
+    EXPECT_EQ (globals["iteration"].value, "0");
+    EXPECT_EQ (globals["infoIsAbsent"].value, "true");
+}
+
+// Both reserved namespaces in one resolution, which is the case the shared
+// resolver exists for: a row bound beside the identity, and a column a file
+// happens to name `$vu` losing to the reserved name rather than answering for
+// it.
+TEST_F (ScriptEngineTest, ReplaceInReadsTheIdentityAheadOfABoundRowsColumns) {
+    Environment globals;
+    const nlohmann::json row = { { "$vu", "from-the-row" }, { "id", "42" } };
+
+    ScriptContext ctx;
+    ctx.request        = &request;
+    ctx.globals        = &globals;
+    ctx.iteration_data = &row;
+    ctx.vu             = 2;
+    ctx.iteration      = 5;
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('both', pm.variables.replaceIn('{{$vu}}/{{$iteration}}/{{data.id}}/{{id}}'));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["both"].value, "2/5/42/42");
+}
+
 // ============================================================================
 // The collection chain in a script (issue #234)
 //

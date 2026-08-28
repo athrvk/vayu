@@ -1141,8 +1141,10 @@ nlohmann::json get_script_completions () {
     "Resolve {{name}} placeholders in a string, exactly as the request's own "
     "URL/headers/body are resolved: scopes first (environment > collection > "
     "global), then the dynamic-variable table - {{$guid}}, {{$timestamp}}, "
-    "{{$random*}} generate a fresh value per occurrence. This is the way to "
-    "use {{...}} inside a script: script code itself is never "
+    "{{$random*}} generate a fresh value per occurrence. {{$vu}} and "
+    "{{$iteration}} resolve to the numbers the request beside this script was "
+    "bound with - 1 and 0 outside a load run, which is a run of one. This is "
+    "the way to use {{...}} inside a script: script code itself is never "
     "interpolated.\n\nExample:\nconst id = "
     "pm.variables.replaceIn('{{$guid}}');" },
     { "sortText", "1_pm_variables_replaceIn" } });

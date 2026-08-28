@@ -256,19 +256,13 @@ const std::vector<nlohmann::json>& rows);
 /**
  * Which iteration of which virtual user is about to send (issue #994).
  *
- * Both numbers already exist wherever a request is sent - a scenario load run's
- * `VirtualUser` holds them, a single-request run counts its submissions, a
- * design-mode send is a run of one - so this carries them to the bind rather
- * than inventing a second source of truth for either.
+ * Declared in `http/request_composer.hpp` beside the two names it answers for,
+ * and named here because this is the layer that binds one. It moved down when
+ * the script sandbox needed to resolve the identity from below core (issue
+ * #1057); the type is the same one, so a bind and a script resolution cannot
+ * disagree about what the identity is.
  */
-struct IterationIdentity {
-    /// The virtual user, **1-based**: the first user of a run is `1`, so
-    /// `user-{{$vu}}@example.com` reads as a person would number them.
-    size_t vu = 1;
-    /// That virtual user's iteration, **0-based**, so it indexes the data set
-    /// the same way `{{data.*}}`'s row cursor does.
-    size_t iteration = 0;
-};
+using vayu::http::IterationIdentity;
 
 /**
  * The virtual user every send outside a scenario *load* run belongs to.
