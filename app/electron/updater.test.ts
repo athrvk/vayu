@@ -21,10 +21,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-
-const here = dirname(fileURLToPath(import.meta.url));
+import { ROOT_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
 type Handler = (arg: unknown) => void;
 
@@ -376,7 +373,8 @@ describe("the macOS update instruction", () => {
 	// README. When the installer moved to the docs site the README was updated
 	// and this string was not, because it is assembled from a template literal
 	// that no `raw.githubusercontent.com/athrvk` grep can see.
-	const readme = readFileSync(join(here, "..", "..", "README.md"), "utf8");
+	const [readmePath] = ROOT_READING_GUARDS.macUpdateCommand.paths.map(fromRepoRoot);
+	const readme = readFileSync(readmePath, "utf8");
 	const documented = readme.match(/^bash -c "\$\(curl -fsSL \S+install\.sh\)"$/m)?.[0];
 
 	it("finds a command in the README to compare against", () => {

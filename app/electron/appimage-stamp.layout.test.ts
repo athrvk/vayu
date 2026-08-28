@@ -24,12 +24,11 @@
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { ROOT_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { resolveStampPath } from "./appimage-stamp.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const installer = readFileSync(join(here, "..", "..", "install.sh"), "utf8");
+const [installerPath] = ROOT_READING_GUARDS.appImageLayout.paths.map(fromRepoRoot);
+const installer = readFileSync(installerPath, "utf8");
 
 /** The right-hand side of a top-level assignment in install.sh. */
 function shellValue(name: string): string {
