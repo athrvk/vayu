@@ -250,11 +250,13 @@ on every tab the registry has entries for - request, collection and run. See
 
 ### Variable Resolution Flow
 
-Variables are resolved with priority: **Environment > Collection > Global**
+Variables are resolved with priority: **Bound data row (while one is picked) >
+Environment > Collection > Global**
 
 The **engine** owns resolution for anything that is sent (`POST /compose`). The
 renderer's `useVariableResolver()` is a preview of the same rules - tab titles,
-the variable popover, unresolved-token painting - pinned to the engine's by a
+the variable popover, unresolved-token painting, and, where a caller passes a
+picked row (`boundRow`), the bind itself - pinned to the engine's by a
 cross-language conformance fixture. See `variable-resolution.md`.
 
 1. `useVariableResolver()` fetches globals, collections, and environments

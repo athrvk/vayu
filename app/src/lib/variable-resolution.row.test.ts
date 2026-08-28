@@ -41,7 +41,11 @@ describe("resolveTemplateWithRow", () => {
 	it("answers a bare column from the row, above an environment variable of the same name", () => {
 		const lookup = scopes({ username: "from-the-environment" });
 		expect(
-			resolveTemplateWithRow("https://api.test/u/{{username}}", lookup, row({ username: "ada" }))
+			resolveTemplateWithRow(
+				"https://api.test/u/{{username}}",
+				lookup,
+				row({ username: "ada" })
+			)
 		).toBe("https://api.test/u/ada");
 		// The composition preview beside it, for contrast: no row, so the token
 		// is left for the bind - and without the row it would read the
@@ -70,38 +74,48 @@ describe("resolveTemplateWithRow", () => {
 	it("leaves a data. name the row has no column for written as it stands", () => {
 		// The token says the value came from the file, so a name no column
 		// answers is a mistake about the column and an empty string hides it.
-		expect(resolveTemplateWithRow("{{data.missing}}", scopes({ missing: "x" }), row({ id: "7" }))).toBe(
-			"{{data.missing}}"
-		);
+		expect(
+			resolveTemplateWithRow("{{data.missing}}", scopes({ missing: "x" }), row({ id: "7" }))
+		).toBe("{{data.missing}}");
 	});
 
 	it("keeps an unknown bare name's braces, as resolution without a row does", () => {
-		expect(resolveTemplateWithRow("{{nowhere}}", scopes({}), row({ id: "7" }))).toBe("{{nowhere}}");
+		expect(resolveTemplateWithRow("{{nowhere}}", scopes({}), row({ id: "7" }))).toBe(
+			"{{nowhere}}"
+		);
 	});
 
 	it("resolves a cell that carries tokens of its own through the same lookup", () => {
 		expect(
-			resolveTemplateWithRow("{{path}}", scopes({ host: "api.test" }), row({ path: "https://{{host}}/x" }))
+			resolveTemplateWithRow(
+				"{{path}}",
+				scopes({ host: "api.test" }),
+				row({ path: "https://{{host}}/x" })
+			)
 		).toBe("https://api.test/x");
 	});
 
 	it("lets a column named like a generator answer from the row", () => {
 		// The engine's order: the row is read before the generator table, so a
 		// dataset column spelled `$guid` is the row's, not a fresh id.
-		expect(resolveTemplateWithRow("{{$guid}}", scopes({}), row({ $guid: "from-the-row" }))).toBe(
-			"from-the-row"
-		);
+		expect(
+			resolveTemplateWithRow("{{$guid}}", scopes({}), row({ $guid: "from-the-row" }))
+		).toBe("from-the-row");
 	});
 
 	it("lets a column named like the identity namespace answer from the row", () => {
 		// `$vu` is reserved against a *variable* answering for it, not against a
 		// column: `resolve_template_with_data` reads the row before it reaches
 		// the reserved check, and the preview reads it the same way.
-		expect(resolveTemplateWithRow("{{$vu}}", scopes({ $vu: "9" }), row({ $vu: "3" }))).toBe("3");
+		expect(resolveTemplateWithRow("{{$vu}}", scopes({ $vu: "9" }), row({ $vu: "3" }))).toBe(
+			"3"
+		);
 	});
 
 	it("keeps the identity namespace deferred when the row has no such column", () => {
-		expect(resolveTemplateWithRow("{{$vu}}", scopes({ $vu: "9" }), row({ id: "7" }))).toBe("{{$vu}}");
+		expect(resolveTemplateWithRow("{{$vu}}", scopes({ $vu: "9" }), row({ id: "7" }))).toBe(
+			"{{$vu}}"
+		);
 	});
 
 	it("leaves a cycle in a cell literal rather than expanding forever", () => {

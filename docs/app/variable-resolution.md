@@ -203,18 +203,44 @@ so both spellings reach the same bind-time join and the same refusal rules.
 Nothing about the two rules can drift, because there is only the one path that
 substitutes either of them.
 
-**What the builder's preview does not show yet.** The request builder paints a
-bare `{{name}}` as a bound column only when *no* scope defines that name. Where
-a scope does define it, the token keeps painting as that variable and shows its
-value - which is right for a Send with no row, and wrong for the moment a run
-binds one, since the column outranks it. The preview resolver takes the bound
-columns (`resolveTemplate`'s third argument, pinned against the engine by the
-conformance fixture) but nothing passes them yet: no preview surface knows which
-row a run will bind. So a collision is *stated* rather than painted - the Data
-tab's column audit names any declared column that shares a name with a variable
-in scope, and says the column wins while a row is bound. Painting it in the
-builder is a design question of its own, tracked separately; nothing here reads
-a value the engine cannot send, it just does not yet show the one it will.
+**What the builder's preview shows now (issue #1062).** With a row picked, a
+Send previews the bind as well as the composition: a bare `{{username}}` and
+the reserved `{{data.username}}` both show the row's own cell - the URL bar's
+preview line, the params and body previews, every key-value row, and resolved
+auth - above the environment, the tier this section names. That is what the
+send is about to put on the wire, not composition's guess at it.
+
+**Why the renderer can show this and composition cannot.** A plan is composed
+once, before any row exists to bind, so composition still defers both
+spellings exactly as above. The preview goes further only because it holds
+something composition never does: the picked row itself, threaded from
+`RequestBuilderProvider`'s per-request row memory into
+`useVariableResolver({ boundRow })`. With it, `resolveString` reads
+`resolveTemplateWithRow` (`app/src/lib/variable-resolution.ts`) instead of
+`resolveTemplate` - a restatement of the engine's own
+`resolve_template_with_data`, the function `pm.variables.replaceIn` reaches
+for the same reason (issue #890), not a second rule invented for the preview.
+A collection run, a load run and a scenario step still bind their row during
+the run itself, so nothing about them changes: this is the one caller, a
+single Send, that now happens to hold the row before the request goes out.
+
+**What is still not painted.** The token *state* `VariableInput` paints is
+unchanged: a bare name still paints as a bound column only where no scope
+defines it, and a shadowed bare name still paints - and explains itself in the
+popover - as the variable. So a picked row can now put its cell beside a token
+that still reads, and is still explained, as the environment's, with nothing
+on screen saying the column will win once a row binds. Reconciling the paint,
+and giving the popover a "bound data row" origin to explain it, is issue
+#1064's work, not done here.
+
+**What the tab strip still does not show.** A tab's title still resolves
+through one list-wide `useVariableResolver()` in
+`app/src/components/layout/tab-descriptors.ts`, shared by every open tab and
+carrying no row - a picked row is per-request builder state, and the list has
+no single request to bind it to. So the tab label keeps previewing
+composition alone even for the request whose own builder pane, open right
+beside it, is now showing the bind. Giving each tab its own row is issue
+#1074.
 
 ### Which contract answers for a request: nearest declared ancestor
 

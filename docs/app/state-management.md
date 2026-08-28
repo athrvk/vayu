@@ -1577,20 +1577,30 @@ const {
   getVariable: (name: string) => ResolvedVariable | null
   getAllVariables: () => Record<string, ResolvedVariable>
   getVariableOrigins: (name: string) => VariableOrigin[]
-} = useVariableResolver({ collectionId?: string });
+} = useVariableResolver({ collectionId?: string; boundRow?: DataFileRow });
 ```
 
 **Resolution Priority (highest to lowest):**
-1. Environment variables
-2. Collection variables
-3. Global variables
+1. Bound data row (bare column names) - only while `boundRow` is passed and a
+   row is actually picked (issue #1062)
+2. Environment variables
+3. Collection variables
+4. Global variables
 
 Collection scope comes from the `collectionId` option and nowhere else - a
 caller that passes none resolves against globals + environment. See
 `docs/app/variable-resolution.md` for why the session-store fallback was
 removed.
 
-**`collectionId` is the only option.** The environment is *not* passed in: the
+`boundRow` is optional and additive: without it `resolveString` /
+`resolveObject` resolve exactly as before (composition only, both a bound
+column and `{{data.column}}` deferred). With it, they resolve through
+`resolveTemplateWithRow` instead, so a bare bound column and `{{data.column}}`
+both read the row - the request builder's provider is the one caller that
+passes it, deriving it from the picked-row index. See
+`docs/app/variable-resolution.md` for the tier and its rules.
+
+**The environment is the one scope no option names.** It is *not* passed in: the
 hook reads `useSessionStore().activeEnvironmentId` itself, so every caller
 resolves against the environment the user has actually selected and no caller
 can scope a preview to a different one. This page documented an

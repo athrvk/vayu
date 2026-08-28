@@ -229,7 +229,12 @@ export function useVariableResolver(
 	const rowCells = useMemo<DataRowCells | undefined>(
 		() =>
 			boundRow
-				? new Map(Object.entries(boundRow).map(([column, cell]) => [column, renderDataValue(cell)]))
+				? new Map(
+						Object.entries(boundRow).map(([column, cell]) => [
+							column,
+							renderDataValue(cell),
+						])
+					)
 				: undefined,
 		[boundRow]
 	);

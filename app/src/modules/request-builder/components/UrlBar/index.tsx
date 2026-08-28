@@ -129,10 +129,10 @@ export default function UrlBar() {
 	const canBindRows = rows.available && !isStreaming;
 	useEffect(() => {
 		if (!dataRowTarget || dataRowTarget.requestId !== request.id) return;
+		rememberRowIndex(dataRowTarget.rowIndex);
 		/* eslint-disable-next-line react-hooks/set-state-in-effect -- the target
 		   is state handed over from a navigation, not derived from a prop: it
 		   arrives before this tab renders and is consumed once. */
-		rememberRowIndex(dataRowTarget.rowIndex);
 		if (canBindRows) setRowMenuOpen(true);
 		clearDataRowTarget();
 	}, [dataRowTarget, request.id, canBindRows, clearDataRowTarget, rememberRowIndex]);

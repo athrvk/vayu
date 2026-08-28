@@ -365,7 +365,8 @@ export default function RequestBuilderProvider({
 	const rowMemoryKey = request.id ?? "__unsaved__";
 	const lastRowIndex = rowIndexByRequest[rowMemoryKey] ?? null;
 	const rememberRowIndex = useCallback(
-		(index: number) => setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index })),
+		(index: number) =>
+			setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index })),
 		[rowMemoryKey]
 	);
 
@@ -379,7 +380,10 @@ export default function RequestBuilderProvider({
 	 * previewing the composition.
 	 */
 	const boundRow = useMemo(
-		() => (lastRowIndex === null ? undefined : (sendWithRow.parsed?.rows[lastRowIndex] ?? undefined)),
+		() =>
+			lastRowIndex === null
+				? undefined
+				: (sendWithRow.parsed?.rows[lastRowIndex] ?? undefined),
 		[lastRowIndex, sendWithRow.parsed]
 	);
 

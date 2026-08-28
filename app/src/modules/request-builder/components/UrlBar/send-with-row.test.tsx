@@ -145,7 +145,8 @@ function Harness({
 	const [rowIndexByRequest, setRowIndexByRequest] = useState<Record<string, number>>({});
 	const rowMemoryKey = requestId ?? "__unsaved__";
 	const rememberRowIndex = useCallback(
-		(index: number) => setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index })),
+		(index: number) =>
+			setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index })),
 		[rowMemoryKey]
 	);
 	return (
@@ -497,7 +498,11 @@ describe("the remembered row", () => {
 		const switchTo = (requestId: string) =>
 			rerender(
 				<TooltipProvider>
-					<Harness executeRequest={execute} dataColumns={CONTRACT} requestId={requestId} />
+					<Harness
+						executeRequest={execute}
+						dataColumns={CONTRACT}
+						requestId={requestId}
+					/>
 				</TooltipProvider>
 			);
 
