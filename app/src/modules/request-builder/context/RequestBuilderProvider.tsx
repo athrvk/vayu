@@ -32,7 +32,12 @@ import {
 	useUpdateEnvironmentMutation,
 	useLastDesignRunQuery,
 } from "@/queries";
-import { useSessionStore, useResponseStore, useExecutionEventsStore } from "@/stores";
+import {
+	useSessionStore,
+	useResponseStore,
+	useExecutionEventsStore,
+	useBoundRowStore,
+} from "@/stores";
 import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
 import { apiService } from "@/services";
 import { queryClient } from "@/lib/query-client";
@@ -52,6 +57,7 @@ import { resolveAuthForSend } from "../utils/auth-resolution";
 import { createDefaultRequestState } from "../utils/request-state";
 import { responseFromRunResult } from "../utils/restore-response";
 import { useExecutionEvents } from "../hooks/useExecutionEvents";
+import { useSendWithRow } from "../hooks/useSendWithRow";
 
 interface RequestBuilderProviderProps {
 	children: ReactNode;
@@ -309,6 +315,124 @@ export default function RequestBuilderProvider({
 		autoAcceptRef.current = auto;
 	}, []);
 
+	const { data: collections = [] } = useCollectionsQuery();
+
+	/**
+	 * The data contract in scope (issue #600) - the nearest declared ancestor of
+	 * this request's collection, from the collections already loaded above.
+	 *
+	 * Resolved once here and carried on the context, so `VariableInput` and the
+	 * key/value rows can paint a `{{data.*}}` token against it without reaching
+	 * for the query cache themselves. Undefined is the ordinary state: most
+	 * collections declare nothing.
+	 */
+	const dataColumns = useMemo(
+		() => resolveDataContract(collectionId, collections) ?? undefined,
+		[collectionId, collections]
+	);
+
+	/*
+	 * Send-with-row (issue #601): the rows this request could bind, and the one
+	 * it was last sent with.
+	 *
+	 * Here rather than in `UrlBar`, where it started, because the *preview* needs
+	 * it as much as the picker does (issue #1062). A row reaching the engine
+	 * beside composition and never through it is what left the URL bar, the tab
+	 * title and the token painting previewing an environment value for a name the
+	 * send answers from the row. The provider already owns both of this hook's
+	 * inputs - the contract above and the row cap below - so lifting the state
+	 * here also takes two props off the context rather than adding any.
+	 *
+	 * The index is still session-lived and still not persisted: it is a property
+	 * of *this editing session* - "the row I am iterating on" - and not of the
+	 * request. Persisting it would point a saved number at a file whose rows are
+	 * deliberately not saved, so a later session would bind a different row under
+	 * the same index.
+	 *
+	 * Keyed by request, though (issue #659 item 1). Switching request tabs does
+	 * not remount the builder - `Shell` renders `<RequestBuilder />` at the same
+	 * position for every request tab, so React keeps the instance and its state -
+	 * and a single number therefore followed the user from one request to the
+	 * next.
+	 *
+	 * The row cap the declared file is measured against (issue #751) is read here
+	 * for the same reason the contract is resolved here: the config query is the
+	 * provider's to hold, not the URL bar's.
+	 */
+	const { maxRows: dataFileMaxRows } = useDataFileLimits();
+	const sendWithRow = useSendWithRow(dataColumns, dataFileMaxRows);
+	const [rowIndexByRequest, setRowIndexByRequest] = useState<Record<string, number>>({});
+	/*
+	 * An unsaved request has no id and cannot be switched away from and back to
+	 * as itself, so every one of them shares this key. They can never collide:
+	 * a request tab holds exactly one draft.
+	 */
+	const rowMemoryKey = request.id ?? "__unsaved__";
+	const lastRowIndex = rowIndexByRequest[rowMemoryKey] ?? null;
+	const rememberRowIndex = useCallback(
+		(index: number) =>
+			setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index })),
+		[rowMemoryKey]
+	);
+	/*
+	 * A Send that carries no row leaves the request bound to none (issue #1062).
+	 *
+	 * Picking a row is not a setting, it is the row this request is being sent
+	 * with, and Send and the send chord both send *without* one - so a pick left
+	 * standing across a plain Send would put the row's value in every preview
+	 * beside a request that had just gone out with the environment's. That is the
+	 * disagreement this issue exists to end, arrived at from the other side. The
+	 * picker's own memory is what it always was in every other respect: it
+	 * survives a tab switch and a return (issue #659), because neither of those
+	 * is a send.
+	 */
+	const forgetRowIndex = useCallback(
+		() =>
+			setRowIndexByRequest((previous) => {
+				if (!(rowMemoryKey in previous)) return previous;
+				const { [rowMemoryKey]: _forgotten, ...rest } = previous;
+				return rest;
+			}),
+		[rowMemoryKey]
+	);
+
+	/**
+	 * The row the preview resolves against - the picked one, once the file it
+	 * came from has actually been read.
+	 *
+	 * Null until then, including for an index restored from a "Repro row N"
+	 * navigation before the picker has opened: the index names a row the app has
+	 * not loaded, and previewing against a row nobody has is worse than
+	 * previewing the composition.
+	 */
+	const boundRow = useMemo(
+		() =>
+			lastRowIndex === null
+				? undefined
+				: (sendWithRow.parsed?.rows[lastRowIndex] ?? undefined),
+		[lastRowIndex, sendWithRow.parsed]
+	);
+
+	/*
+	 * Publish the bound row for the one preview surface that is not below this
+	 * provider: the tab strip (issue #1074). `useTabDescriptors` labels every
+	 * open tab from a single list-wide resolver, so it cannot take the row from
+	 * this context the way the bar and the panels do - and a tab labelled from
+	 * the environment while the bar beneath it shows the file's value is the same
+	 * one-bind-two-answers split #1062 closed everywhere else.
+	 *
+	 * Cleared on unmount as well as whenever there is no row, so the slot cannot
+	 * outlive the builder that justified it.
+	 */
+	const setBoundRow = useBoundRowStore((s) => s.setBoundRow);
+	const boundRequestId = request.id ?? null;
+	useEffect(() => {
+		setBoundRow(
+			boundRow && boundRequestId ? { requestId: boundRequestId, row: boundRow } : null
+		);
+		return () => setBoundRow(null);
+	}, [boundRow, boundRequestId, setBoundRow]);
+
 	// Variable resolution
 	const {
 		resolveString,
@@ -316,7 +440,7 @@ export default function RequestBuilderProvider({
 		getVariable: resolverGetVariable,
 		getAllVariables: resolverGetAllVariables,
 		getVariableOrigins,
-	} = useVariableResolver({ collectionId: collectionId || undefined });
+	} = useVariableResolver({ collectionId: collectionId || undefined, boundRow });
 
 	/**
 	 * The auth this request will actually send: `inherit` walked through the
@@ -339,7 +463,6 @@ export default function RequestBuilderProvider({
 	// Variable update mutations
 	const { activeEnvironmentId } = useSessionStore();
 	const { data: globalsData } = useGlobalsQuery();
-	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
 	const updateGlobalsMutation = useUpdateGlobalsMutation();
 	const updateCollectionMutation = useUpdateCollectionMutation();
@@ -597,27 +720,6 @@ export default function RequestBuilderProvider({
 	 * guard changes above, this list is the next thing in the file to change.
 	 * A caller that offers a scope not in here gets a silent no-op.
 	 */
-	/**
-	 * The data contract in scope (issue #600) - the nearest declared ancestor of
-	 * this request's collection, from the collections already loaded above.
-	 *
-	 * Resolved once here and carried on the context, so `VariableInput` and the
-	 * key/value rows can paint a `{{data.*}}` token against it without reaching
-	 * for the query cache themselves. Undefined is the ordinary state: most
-	 * collections declare nothing.
-	 */
-	const dataColumns = useMemo(
-		() => resolveDataContract(collectionId, collections) ?? undefined,
-		[collectionId, collections]
-	);
-
-	/*
-	 * The row cap Send-with-row measures the declared file against (issue #751),
-	 * read here for the same reason the contract is resolved here: the config
-	 * query is the provider's to hold, not the URL bar's.
-	 */
-	const { maxRows: dataFileMaxRows } = useDataFileLimits();
-
 	const writableScopes = useMemo((): VariableScope[] => {
 		const scopes: VariableScope[] = [];
 		if (globalsData?.variables) scopes.push("global");
@@ -726,6 +828,9 @@ export default function RequestBuilderProvider({
 	 */
 	const executeRequest = useCallback(
 		async (dataRow?: Record<string, unknown>) => {
+			// A Send with no row un-binds this request: the previews must describe
+			// the request that is going out, not the one the last pick described.
+			if (!dataRow) forgetRowIndex();
 			// Snapshot the request as it is at Send. If the user switches to another
 			// request before this resolves, the result must land on the request that
 			// actually ran - not on whatever is on screen when it finishes.
@@ -806,7 +911,7 @@ export default function RequestBuilderProvider({
 				}
 			}
 		},
-		[request, onExecute, onExecuteStream, storeSetResponse]
+		[request, onExecute, onExecuteStream, storeSetResponse, forgetRowIndex]
 	);
 
 	// Start load test
@@ -854,7 +959,9 @@ export default function RequestBuilderProvider({
 			updateVariable,
 			writableScopes,
 			dataColumns,
-			dataFileMaxRows,
+			sendWithRow,
+			lastRowIndex,
+			rememberRowIndex,
 			executeRequest,
 			saveRequest,
 			startLoadTest,
@@ -894,7 +1001,9 @@ export default function RequestBuilderProvider({
 			updateVariable,
 			writableScopes,
 			dataColumns,
-			dataFileMaxRows,
+			sendWithRow,
+			lastRowIndex,
+			rememberRowIndex,
 			executeRequest,
 			saveRequest,
 			startLoadTest,

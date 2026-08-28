@@ -1145,7 +1145,7 @@ declare const pm: {
 				 */
 				jsonBody(path?: string, value?: unknown): void;
 				/**
-				 * Assert that the response has a specific HTTP status code, or - given a string - the reason phrase pm.response.reason() answers.
+				 * Assert that the response has a specific HTTP status code, or - given a string - the reason phrase pm.response.reason() answers. A number that is not a whole finite code is refused rather than truncated.
 				 * 
 				 * Example:
 				 * pm.response.to.have.status(200);

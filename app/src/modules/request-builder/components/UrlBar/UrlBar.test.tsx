@@ -77,11 +77,20 @@ function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBu
 		getVariableOrigins: () => [],
 		updateVariable: vi.fn(),
 		writableScopes: [],
-		// Send-with-row's row cap. The bar reads it off the context rather than
-		// the config query precisely so this file can render without a
-		// `QueryClientProvider`; no case here declares a contract, so nothing
-		// measures anything against it.
-		dataFileMaxRows: 1000,
+		// Send-with-row's rows, held by the provider since issue #1062 so the
+		// preview can resolve against the picked one. No case here declares a
+		// contract, so the affordance is absent and nothing reads the rest.
+		sendWithRow: {
+			available: false,
+			contract: undefined,
+			fileName: undefined,
+			status: "idle",
+			parsed: null,
+			error: null,
+			load: vi.fn(),
+		},
+		lastRowIndex: null,
+		rememberRowIndex: vi.fn(),
 		executeRequest: vi.fn(async () => {}),
 		saveRequest: vi.fn(async () => {}),
 		startLoadTest: vi.fn(),

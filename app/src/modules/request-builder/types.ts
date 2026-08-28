@@ -20,6 +20,7 @@
 // Type-only, and therefore safe despite `body-drafts` importing `BodyMode` back
 // from here: `import type` is erased, so no runtime cycle exists.
 import type { BodyDrafts, VariablesDraft } from "./utils/body-drafts";
+import type { SendWithRowState } from "./hooks/useSendWithRow";
 import type {
 	BodyMode,
 	ConsoleLogEntry,
@@ -469,15 +470,22 @@ export interface RequestBuilderContextValue {
 	 */
 	dataColumns?: DataContractScope;
 	/**
-	 * The live `maxScenarioDataRows` a declared data file has to fit inside
-	 * (issue #751), for Send-with-row's re-read of it.
+	 * The rows a single Send can bind, for this request (issue #601).
 	 *
-	 * On the context for the same reason `dataColumns` is: it is the config
-	 * query's answer, and the UrlBar reading that query itself would make the
-	 * bar unrenderable without a `QueryClientProvider`. Never a constant -
-	 * raising the setting has to reach the next read without a restart.
+	 * Held by the provider rather than the URL bar since issue #1062, because the
+	 * preview needs the picked row as much as the picker does: the resolver that
+	 * paints the URL, the params and the body lives here, and a row it never sees
+	 * is a preview of the environment's value for a name the send answers from
+	 * the file. The file behind it is still read only when the picker opens.
 	 */
-	dataFileMaxRows: number;
+	sendWithRow: SendWithRowState;
+	/**
+	 * The row index this request was last sent with, or null - "the row I am
+	 * iterating on", session-lived and keyed per request (issues #601, #659).
+	 */
+	lastRowIndex: number | null;
+	/** Remember the row just picked, for the preview and the next Send. */
+	rememberRowIndex: (index: number) => void;
 
 	// Actions
 	/**
