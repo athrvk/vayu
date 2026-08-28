@@ -914,6 +914,26 @@ constexpr int MAX_BACKUPS_RETAINED = 5;
  * spares is reclaimed by the next one rather than kept.
  */
 constexpr int64_t SPEC_DOCUMENT_SWEEP_GRACE_MS = 600'000;
+/**
+ * Startup reclamation (issue #990): how much of the database must be free pages
+ * before the startup sweep rewrites it to return them to the filesystem.
+ *
+ * Deleting rows only moves their pages to SQLite's freelist, where they are
+ * reused but never given back, so a workspace that once held weeks of heavy
+ * runs keeps that high-water mark forever. A `VACUUM` gives it back and costs a
+ * rewrite of the whole file, which is why it is a threshold and not a policy.
+ */
+constexpr int VACUUM_MIN_FREELIST_PERCENT = 25;
+/**
+ * The second half of that threshold: how many bytes the free pages must hold.
+ *
+ * Both halves must be crossed, and each is what makes the other safe. The
+ * fraction alone rewrites a nearly-empty workspace on every start, since a
+ * database holding one collection is mostly freelist the moment anything is
+ * deleted from it. The byte floor alone rewrites four gigabytes to win back
+ * eleven megabytes.
+ */
+constexpr int64_t VACUUM_MIN_RECLAIMABLE_BYTES = 10LL * 1024 * 1024;
 } // namespace database
 } // namespace vayu::core::constants
 

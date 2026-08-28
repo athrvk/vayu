@@ -814,6 +814,207 @@ const std::function<bool (const std::string&)>& probe) {
     }
 }
 
+/**
+ * Open a second connection on the workspace database at @p path.
+ *
+ * Two statements the engine runs on the workspace - the backup's `VACUUM INTO`
+ * and the startup reclamation's `VACUUM` - cannot go through the connection
+ * every write is serialized on: sqlite_orm exposes no way to run a statement on
+ * the connection it holds. Both take one of these instead, so the flags and the
+ * busy timeout are decided once rather than per caller.
+ *
+ * @return the connection, or `nullptr` with @p error set to what SQLite
+ *         refused. The caller owns what it gets and closes it.
+ */
+sqlite3* open_workspace_connection (const std::string& path, std::string& error) {
+    sqlite3* connection = nullptr;
+    // Read-write rather than read-only: under WAL a reader still writes the
+    // `-shm` index, and a read-only open of a database whose WAL has not been
+    // checkpointed fails outright on a directory it cannot write.
+    if (sqlite3_open_v2 (path.c_str (), &connection, SQLITE_OPEN_READWRITE, nullptr) != SQLITE_OK) {
+        error = connection != nullptr ?
+        std::string (sqlite3_errmsg (connection)) :
+        std::string ("could not open the workspace database");
+        sqlite3_close (connection);
+        return nullptr;
+    }
+    sqlite3_busy_timeout (connection, vayu::core::constants::database::BUSY_TIMEOUT_MS);
+    return connection;
+}
+
+/** @brief What one startup reclamation pass decided and did (issue #990). */
+struct ReclaimOutcome {
+    /// Whether the rewrite ran. False with an empty `error` means the database
+    /// did not hold enough freed pages to be worth one.
+    bool ran = false;
+    /// The size of the database file before the pass, in bytes.
+    int64_t before_bytes = 0;
+    /// Its size after - equal to `before_bytes` when nothing ran, and negative
+    /// when the rewrite ran and the file could not be measured afterwards. The
+    /// three are different facts and the log says which one it is reporting.
+    int64_t after_bytes = 0;
+    /// What SQLite or the filesystem refused, or empty on success.
+    std::string error;
+};
+
+/**
+ * Read a PRAGMA that answers with one integer.
+ *
+ * @return the value, or nothing if SQLite would not answer - which is what
+ *         separates "this database has no free pages" from "we never found out",
+ *         and the two must not both read as zero.
+ *
+ * A refusal is written to @p error *here*, and only if it is still empty, so
+ * the message belongs to the read that failed and to the first one. Read back
+ * at the call site instead, `sqlite3_errmsg` would describe whichever statement
+ * ran last - which, after a later read succeeded, is "not an error".
+ */
+std::optional<int64_t>
+read_pragma_int (sqlite3* connection, const char* pragma, std::string& error) {
+    const auto record_failure = [&] {
+        if (error.empty ()) {
+            error = std::string (pragma) + ": " + sqlite3_errmsg (connection);
+        }
+    };
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2 (connection, pragma, -1, &statement, nullptr) != SQLITE_OK) {
+        record_failure ();
+        return std::nullopt;
+    }
+    std::optional<int64_t> value;
+    if (sqlite3_step (statement) == SQLITE_ROW) {
+        value = sqlite3_column_int64 (statement, 0);
+    } else {
+        record_failure ();
+    }
+    sqlite3_finalize (statement);
+    return value;
+}
+
+/**
+ * Whether a database of @p pages pages of @p page_size bytes, @p freelist of
+ * them free, holds enough dead weight to be worth rewriting.
+ *
+ * Both thresholds must be crossed - see the two constants for why either alone
+ * is the wrong rule.
+ */
+bool worth_reclaiming (int64_t freelist, int64_t pages, int64_t page_size) {
+    if (freelist <= 0 || pages <= 0 || page_size <= 0) {
+        return false;
+    }
+    if (freelist * 100 < pages * vayu::core::constants::database::VACUUM_MIN_FREELIST_PERCENT) {
+        return false;
+    }
+    return freelist * page_size >= vayu::core::constants::database::VACUUM_MIN_RECLAIMABLE_BYTES;
+}
+
+/**
+ * The decision and the rewrite, on an already-open @p connection.
+ *
+ * Split from the function below so the connection is closed on exactly one
+ * path rather than on each of this one's four.
+ */
+ReclaimOutcome
+reclaim_on_connection (sqlite3* connection, const std::string& path, int64_t before_bytes) {
+    ReclaimOutcome outcome;
+    outcome.before_bytes = before_bytes;
+    outcome.after_bytes  = before_bytes;
+
+    std::string failure;
+    const std::optional<int64_t> freelist =
+    read_pragma_int (connection, "PRAGMA freelist_count", failure);
+    const std::optional<int64_t> pages =
+    read_pragma_int (connection, "PRAGMA page_count", failure);
+    const std::optional<int64_t> page_size =
+    read_pragma_int (connection, "PRAGMA page_size", failure);
+    if (!freelist.has_value () || !pages.has_value () || !page_size.has_value ()) {
+        outcome.error = failure;
+        return outcome;
+    }
+    if (!worth_reclaiming (*freelist, *pages, *page_size)) {
+        return outcome;
+    }
+
+    char* err_msg = nullptr;
+    if (sqlite3_exec (connection, "VACUUM", nullptr, nullptr, &err_msg) != SQLITE_OK) {
+        outcome.error = err_msg != nullptr ? std::string (err_msg) :
+                                             std::string (sqlite3_errmsg (connection));
+        sqlite3_free (err_msg);
+        return outcome;
+    }
+
+    // Under WAL the rewritten image lands in the `-wal` file and the database
+    // itself is not resized until a checkpoint copies it back, so without this
+    // the pass would free every page it set out to and leave the file exactly
+    // as large as it found it. Best-effort: a checkpoint that cannot truncate
+    // has still committed the rewrite, and the next one returns the space.
+    sqlite3_exec (connection, "PRAGMA wal_checkpoint(TRUNCATE)", nullptr, nullptr, nullptr);
+
+    outcome.ran = true;
+    std::error_code ec;
+    const auto after    = fs::file_size (path, ec);
+    outcome.after_bytes = ec ? -1 : static_cast<int64_t> (after);
+    return outcome;
+}
+
+/**
+ * Return the database's freed pages to the filesystem, if it holds enough of
+ * them to be worth the rewrite (issue #990).
+ *
+ * On a connection of its own, for the reason `open_workspace_connection` gives:
+ * sqlite_orm exposes no way to run a statement on the connection it holds, and
+ * neither `VACUUM` nor the three PRAGMAs this decides on are among the ones it
+ * wraps. That costs nothing here - the caller runs before the HTTP listener
+ * exists and the lock file has already refused a second engine, so this
+ * connection is the only one doing anything.
+ */
+ReclaimOutcome reclaim_freed_pages (const std::string& path) {
+    ReclaimOutcome outcome;
+    std::error_code ec;
+    const auto size = fs::file_size (path, ec);
+    if (ec) {
+        outcome.error = ec.message ();
+        return outcome;
+    }
+    outcome.before_bytes = static_cast<int64_t> (size);
+    outcome.after_bytes  = outcome.before_bytes;
+
+    sqlite3* connection = open_workspace_connection (path, outcome.error);
+    if (connection == nullptr) {
+        return outcome;
+    }
+
+    outcome = reclaim_on_connection (connection, path, outcome.before_bytes);
+    sqlite3_close (connection);
+    return outcome;
+}
+
+/** Report what the pass above did, at the level its outcome deserves. */
+void log_reclaim_outcome (const ReclaimOutcome& outcome) {
+    if (!outcome.error.empty ()) {
+        vayu::utils::log_warning (
+        "Startup database reclamation failed: " + outcome.error);
+        return;
+    }
+    if (!outcome.ran) {
+        vayu::utils::log_debug ("Database reclamation skipped: too few freed "
+                                "pages to be worth the rewrite");
+        return;
+    }
+    if (outcome.after_bytes < 0) {
+        vayu::utils::log_info ("Reclaimed the freed pages of a " +
+        std::to_string (outcome.before_bytes / 1024) +
+        " KB database; its size afterwards could not be read");
+        return;
+    }
+    const int64_t freed = outcome.after_bytes < outcome.before_bytes ?
+    outcome.before_bytes - outcome.after_bytes :
+    0;
+    vayu::utils::log_info ("Reclaimed " + std::to_string (freed / 1024) +
+    " KB of freed database pages (" + std::to_string (outcome.before_bytes / 1024) +
+    " KB -> " + std::to_string (outcome.after_bytes / 1024) + " KB)");
+}
+
 } // namespace
 
 Database::Database (const std::string& db_path) {
@@ -895,9 +1096,9 @@ void Database::init () {
     // were removed from it - so a database written by an engine before this
     // version keeps the table and its rows (~20/sec of load run) forever
     // otherwise. The pages return to SQLite's freelist for reuse rather than
-    // shrinking the file; a VACUUM to actually shrink it is deliberately not
-    // run here, since it rewrites the whole database while holding a write
-    // lock and startup is the worst possible moment to pay that.
+    // shrinking the file; what returns them to the filesystem is the guarded
+    // reclamation at the end of this function (issue #990), which is where the
+    // cost of a rewrite is decided rather than paid on every start.
     // Idempotent, so this stays rather than needing a one-shot migration flag.
     impl_->storage.drop_table_if_exists ("metrics");
 
@@ -996,6 +1197,29 @@ void Database::init () {
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
         "Startup trash purge failed: " + std::string (e.what ()));
+    }
+
+    // Give the pages the sweeps above freed back to the filesystem (issue
+    // #990). Last of the startup passes, so it sees what every one of them
+    // freed rather than only the run prune's share, and guarded, because a
+    // rewrite of the whole database is not something to do on every start: a
+    // quarter of the file has to be free pages holding at least 10 MiB before
+    // this runs at all.
+    //
+    // The write lock it takes is the one the `metrics` drop above declines to
+    // pay, and what makes it payable here is that there is nothing waiting on
+    // it: `daemon.cpp` runs `init` before it starts the HTTP listener, and the
+    // lock file has already refused a second engine. The DB mutex this function
+    // holds throughout is held over the rewrite too, and for the same reason
+    // that costs nothing - there is no second caller yet to block. What it does
+    // cost is startup latency, which is why the outcome is logged: the app
+    // gives the engine 45 seconds to answer `/health`. Best-effort like the
+    // passes above - reclaiming disk must not be a daemon that will not start.
+    try {
+        log_reclaim_outcome (reclaim_freed_pages (impl_->opened_file));
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "Startup database reclamation failed: " + std::string (e.what ()));
     }
 }
 
@@ -2461,36 +2685,28 @@ bool is_backup_file_name (const std::string& name) {
  * @return an empty string on success, or what SQLite refused.
  *
  * On a connection of its own rather than the one every write is serialized
- * through. Two reasons, and they agree: sqlite_orm exposes no way to run a
- * statement on the connection it holds, and a `VACUUM INTO` of a large
- * workspace occupies its connection for as long as the copy takes - on the
- * shared one that is every other endpoint waiting behind a button someone
- * pressed. Under WAL a second reader sees every committed transaction and
- * blocks no writer, so the snapshot is consistent and costs the running engine
- * nothing but disk bandwidth.
+ * through - `open_workspace_connection` says why, and the startup reclamation
+ * takes one for the same reason. The second half of it is this function's
+ * alone: a `VACUUM INTO` of a large workspace occupies its connection for as
+ * long as the copy takes, and on the shared one that is every other endpoint
+ * waiting behind a button someone pressed. Under WAL a second reader sees every
+ * committed transaction and blocks no writer, so the snapshot is consistent and
+ * costs the running engine nothing but disk bandwidth.
  *
  * The destination is *bound*, not concatenated: a path is user data on every
  * platform and a quote in a directory name would otherwise be a SQL fragment.
  */
 std::string vacuum_into (const std::string& source, const std::string& destination) {
-    sqlite3* connection = nullptr;
-    // Read-write rather than read-only: under WAL a reader still writes the
-    // `-shm` index, and a read-only open of a database whose WAL has not been
-    // checkpointed fails outright on a directory it cannot write.
-    int rc = sqlite3_open_v2 (source.c_str (), &connection, SQLITE_OPEN_READWRITE, nullptr);
-    if (rc != SQLITE_OK) {
-        std::string message = connection != nullptr ?
-        std::string (sqlite3_errmsg (connection)) :
-        std::string ("could not open the workspace database");
-        sqlite3_close (connection);
+    std::string message;
+    sqlite3* connection = open_workspace_connection (source, message);
+    if (connection == nullptr) {
         return message;
     }
-    sqlite3_busy_timeout (connection, vayu::core::constants::database::BUSY_TIMEOUT_MS);
 
     sqlite3_stmt* statement = nullptr;
-    rc = sqlite3_prepare_v2 (connection, "VACUUM INTO ?", -1, &statement, nullptr);
+    int rc = sqlite3_prepare_v2 (connection, "VACUUM INTO ?", -1, &statement, nullptr);
     if (rc != SQLITE_OK) {
-        std::string message = sqlite3_errmsg (connection);
+        message = sqlite3_errmsg (connection);
         sqlite3_close (connection);
         return message;
     }
@@ -2499,7 +2715,6 @@ std::string vacuum_into (const std::string& source, const std::string& destinati
     // cannot quietly make the lifetime load-bearing.
     sqlite3_bind_text (statement, 1, destination.c_str (), -1, SQLITE_TRANSIENT);
 
-    std::string message;
     if (sqlite3_step (statement) != SQLITE_DONE) {
         message = sqlite3_errmsg (connection);
     }
