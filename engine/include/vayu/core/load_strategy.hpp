@@ -44,30 +44,48 @@ struct RunContext; // Forward declaration
  *
  * The request's own bindable fields are **not** here: they are split off the
  * built request onto `RunContext::load_template`, because a run with no rows at
- * all still binds its `{{$vu}}` / `{{$iteration}}` identity (issue #994). This
- * carries what only a data set has.
+ * all still binds its `{{$vu}}` / `{{$iteration}}` identity (issue #994). Nor
+ * are the credentials, for the same reason and since issue #1055 - see
+ * @ref LoadAuthPlan. This carries what only a data set has: the rows, and the
+ * bare names they answer.
  */
 struct LoadDataSet {
     /// The validated rows, in payload order. Never empty - a present-but-empty
     /// `data` array is refused by the route, and a run without rows carries no
     /// set at all.
     std::vector<nlohmann::json> rows;
-    /**
-     * The parsed auth, read only when @ref credentials is non-empty - which is
-     * exactly when the request's build was deferred and carries no credential
-     * until a row reaches it. `NoAuth` for every run whose auth the build
-     * applied.
-     */
-    vayu::http::Auth auth;
-    /// The credentials split around their `{{data.column}}` tokens; empty when
-    /// none carries one.
-    StepDataTemplate credentials;
     /// The bare column names @ref rows can bind (issue #1007), read off the
     /// rows once by `core::bound_columns_of`. It is what the run's split is
     /// told, so a bare `{{username}}` this set answers is bound per iteration
     /// rather than sent as the literal token - and a run without rows carries
     /// no set at all, so it is told nothing and splits as it always did.
     vayu::http::BoundColumnNames bound_columns;
+};
+
+/**
+ * How a *single-request* load run resolves its credentials (issue #1055).
+ *
+ * Beside @ref LoadDataSet rather than inside it, for the reason
+ * `RunContext::load_template` is: a credential carrying `{{$vu}}` defers on a
+ * run that has no rows at all, so a set that only exists when rows do cannot be
+ * where this lives. That was the whole of the old rule - deferral keyed to the
+ * run's shape rather than to what the credentials carry - and it is what made
+ * an identity token in a credential go out written as it stood.
+ *
+ * Empty credentials are the ordinary run, whose auth the build resolves once as
+ * it always did.
+ */
+struct LoadAuthPlan {
+    /**
+     * The parsed auth, read only when @ref credentials is non-empty - which is
+     * exactly when the request's build was deferred and carries no credential
+     * until the bind reaches it. `NoAuth` for every run whose auth the build
+     * applied.
+     */
+    vayu::http::Auth auth;
+    /// The credentials split around their `{{data.column}}` and
+    /// `{{$vu}}` / `{{$iteration}}` tokens; empty when none carries one.
+    StepDataTemplate credentials;
 
     /// What `build_request` must be told: the credentials are bound after the
     /// build, so an auth carrying a token must not be encoded during it.

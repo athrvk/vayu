@@ -27,8 +27,12 @@ namespace vayu::http {
  * *before* they are encoded: a `{{data.column}}` token inside a credential has
  * to carry its row's value before `apply_auth` base64-encodes a username and
  * password into one header, because after that it is unreadable and would go
- * out as base64 of the literal token text (issue #591). Such a caller parses
- * the auth itself, joins it against the row and applies it afterwards -
+ * out as base64 of the literal token text (issue #591). The `{{$vu}}` /
+ * `{{$iteration}}` identity is deferred for the same reason and on the same
+ * rule (issue #1055): what decides a deferral is the token the credentials
+ * carry, never the shape of the run, so a caller with no data set at all still
+ * defers for an identity token and binds it per iteration. Such a caller parses
+ * the auth itself, joins it against the iteration and applies it afterwards -
  * `vayu::core::bind_auth_row` is that step, and it is the only correct way to
  * finish a deferred build. A `Defer` whose auth is never applied sends an
  * unauthenticated request.

@@ -3801,8 +3801,11 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   either way, so it keeps its braces - issue #186), and a generator inside the
   **auth block** is generated here even when the field is true, because
   `apply_auth` encodes a credential when the request is built and a token left
-  for the bind would go out as base64 of its own text (the deferral issue #1055
-  carries). A scenario plan's steps are composed with it internally, so a
+  for the bind would go out as base64 of its own text. That is a generator's
+  case alone: a credential carrying a `{{data.*}}` or a `{{$vu}}` defers the
+  whole build and is bound before the encoding (issue #1055), where a generator
+  has nothing to wait for. A scenario plan's steps are composed with it
+  internally, so a
   collection run needs no field at all.
 
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
@@ -3899,11 +3902,16 @@ with specific codes:
   a stored request's headers and the app's - so what this catches beyond a
   produced name is a payload built by hand. The execute-time residual pass
   refuses it in the same words and under this same code, in each of the two
-  shapes it answers a refusal in (above), and reads a name only where the name
-  held a token - the reach it has for the collision rule too, a request posted
-  already-resolved being composition's to refuse. `pm.sendRequest` has refused
-  it since its own header names began resolving, with the call named in front of
-  the same wording.
+  shapes it answers a refusal in (above), and for this rule it reads **every**
+  header name rather than only the ones still holding a token (issue #1095) - so
+  a name a pre-request script has just emptied and an empty key posted straight
+  to `POST /execute` are refused there as well. The collision rule keeps the
+  narrower reach and loses nothing by it: a request that arrives already
+  resolved cannot carry a collision, two names that are already equal being
+  already one key. `pm.sendRequest` has refused it since its own header names
+  began resolving, with the call named in front of the same wording, and a data
+  row that binds a name away is refused at bind time with the row in front of it
+  (see [Scenario runs](#scenario-runs)).
 
 ### POST /execute
 
@@ -4091,7 +4099,7 @@ Refused with a **400**, before any run row exists and with nothing sent:
 | `data` is not an object | `'data' must be an object of name/value pairs (got array). A single send binds one row; a set of rows is a collection run.` |
 | over the byte cap | `'data' is N bytes, over the limit of M (raise the 'maxScenarioDataBytes' setting to allow more)` |
 | a token names a column the row lacks | the binder's own sentence, naming the token, the row and the row's columns |
-| a `null` cell, a header collision, an unwritable XML placement | the binder's own sentence - identical to a run's, see [Scenario runs](#scenario-runs) |
+| a `null` cell, a header collision, a header name bound to nothing, an unwritable XML placement | the binder's own sentence - identical to a run's, see [Scenario runs](#scenario-runs) |
 | an OAuth 2.0 config carries a `{{data.*}}` token | `Auth credentials carry {{data.client}} in an OAuth 2.0 configuration, and no row can reach it: ...` |
 
 **Credentials bind here too** (issue #642). A `{{data.user}}` in a basic-auth
@@ -4921,9 +4929,12 @@ iterations, whatever the concurrency), and `{{$iteration}}` is that user's
 plain `POST /execute`. A variable named `$vu` does not answer for the identity,
 for the reason a variable named `data.id` does not answer for the column, and
 `{{$vus}}` is an ordinary unknown `$name` that keeps its braces. They bind
-everywhere a `data.*` token does **except the credential fields**: a credential
-is encoded at build time and the deferral that lets a row reach one first
-happens only in a run that has rows (issue #1055).
+everywhere a `data.*` token does, **credential fields included** (issue #1055):
+a credential carrying either name defers its build and is bound before
+`apply_auth` encodes it, on every run shape rather than only on one carrying
+rows, because the identity comes from the iteration rather than from a row. An
+OAuth 2.0 config is the exception and is refused by name - its token is acquired
+before any iteration exists.
 
 **A run binds only what it was given rows for.** A `POST /runs` carrying
 `scenario.data` binds per iteration, one carrying the top-level
@@ -5044,6 +5055,17 @@ row is refused instead, naming the header as it is written, the name it
 produced and the row. Note this is deliberately *not* composition's duplicate
 rule, which is last-wins: a duplicate there is two headers the author typed and
 can see, while this one exists only for the rows that produce it.
+
+**A header name a row binds to nothing** errors the same way (issue #1095), and
+is reported ahead of a collision when a row does both - two names that bind to
+nothing collide on a name neither of them has, which is not what the file's
+author needs to be told. `{{data.header_name}}: acme` whose cell is blank would
+otherwise send the line `": acme"`, under a name nobody wrote and with a value
+they did mean, once per iteration. The message is the one every layer that can
+leave a header nameless shares, with the row in front of it; the column is
+inside the header as written, where that wording names it. A name a bind merely
+*shortens* is not this rule - `X-{{data.h}}` with a blank cell binds to `X-`,
+which is a name a request can carry.
 
 A cell that is present but **`null`** errors the same way, naming the token and
 the row. It is the same failure one type down - the token says the value comes
@@ -5198,8 +5220,8 @@ knob.
   step**: nothing is sent, the step's `errors` count in the breakdown moves, and
   the run's error list carries an entry with `error_type: "data_binding_failed"`
   naming the token, the row and the row's columns. It is never substituted with
-  an empty string. A `null` cell and two headers binding to one name fail the
-  same step the same way.
+  an empty string. A `null` cell, two headers binding to one name, and a header
+  name a row binds to nothing fail the same step the same way.
 
   Every retained result carries **`dataRowIndex`** on its `trace`, which is how
   a failure is attributed to a row when no per-step `results` rows exist. Absent

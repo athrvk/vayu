@@ -396,11 +396,16 @@ applied to the outgoing request rather than being left to the UI. This lives in
 - **`auth_resolver`** (`apply_auth` / `preflight_auth` / `plan_auth_refresh`) - a
   typed `Auth` variant with an exhaustive per-mode handler: bearer/basic/api-key
   are injected inline; `oauth2` delegates to the token client. A user-supplied
-  `Authorization` header always wins. A scenario step whose credentials carry a
-  `{{data.*}}` token is the one case auth is *not* resolved into the plan: the
-  row has to be bound before the credential is encoded, so the step keeps its
-  typed `Auth` and applies it per iteration
+  `Authorization` header always wins. Credentials carrying a `{{data.*}}` or a
+  `{{$vu}}` / `{{$iteration}}` token are the one case auth is *not* resolved
+  into the plan: the value has to be bound before the credential is encoded, so
+  the step keeps its typed `Auth` and applies it per iteration
   (`bind_step_auth`, see [Scenario runs](api-reference.md#scenario-runs)).
+  **What is deferred is decided by the credentials, not by the run's shape**
+  (issue #1055): a build defers because these credentials carry a token, so a
+  run with no data set at all still binds `user-{{$vu}}`. An OAuth 2.0 config
+  carrying either kind is refused by name instead - its token is acquired once,
+  before any iteration exists, so no bind can reach it.
   `plan_auth_refresh` decides afterwards
   whether the credential a *load* run just resolved can be kept current past its
   expiry - see the run lifecycle below.
@@ -486,8 +491,13 @@ where what would go out is a `": value"` line no name owns. Either is stopped
 rather than sent - in composition's words and under composition's refusal
 code, as a `statusCode: 0` response carrying the reason (a `400` on the
 streaming path, which has not answered yet, which is why the refusal carries
-the code as well as the error). Both rules read a name only where the pass
-reads one: a name that arrives already resolved is composition's to refuse. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+the code as well as the error). The two rules read a name over different
+reaches, decided rather than inherited (#1095): the empty-name rule reads
+**every** header name, so a name a script has just emptied and an empty key
+posted straight to `POST /execute` are refused here too, while the collision
+rule reads only the names that still held a token - a request that arrives
+already resolved cannot carry a collision to find, two names that are already
+equal being already one key. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 
@@ -945,9 +955,13 @@ row exists - and the executor is the only thing that differs.
   single request has no sequence for an iteration to span, so the unit of a claim
   is the request. The templates are split once, when the run's one request is
   built (`RunContext::load_template`), the credentials defer exactly as a step's do,
-  and every retained result carries its `dataRowIndex`. **A run without rows
-  carries no set at all**, which is the throughput guard stated structurally: the
-  strategies test one pointer and otherwise submit the shared request they always
+  and every retained result carries its `dataRowIndex`. The credential half is
+  split onto `RunContext::load_auth` rather than onto the row set (issue #1055),
+  for the reason the request's template is: a credential carrying `{{$vu}}`
+  defers on a run that has no rows, so a set that exists only where rows do is
+  the wrong place to keep it. **A run without rows carries no set at all**, which
+  is the throughput guard stated structurally: the strategies test one pointer
+  and two empty templates, and otherwise submit the shared request they always
   did. The validation, the binder and the escaping are the scenario path's own
   functions rather than copies - `read_data_rows` and `bind_iteration`.
 - **The iteration's identity binds beside its row** (issue #994). `{{$vu}}` and

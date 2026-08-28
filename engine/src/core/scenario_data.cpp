@@ -17,6 +17,9 @@
 #include <variant>
 
 #include "vayu/http/graphql_body.hpp"
+// `describe_empty_header_name` - the wording every layer that can leave a
+// header nameless shares, this one included (issue #1095).
+#include "vayu/http/header_names.hpp"
 // `ends_a_header_line` - the same rule the composer and the pre-send gate
 // apply, so a bound cell and a substituted variable cannot drift apart on what
 // a header may hold.
@@ -122,6 +125,27 @@ struct HeaderCollision {
 };
 
 /**
+ * What a bind did to the header map that leaves it not a request.
+ *
+ * Both are the same shape of quiet wrong request - a header the author did not
+ * write, under a name they cannot see - and both are the row's fault rather
+ * than the request's, which is why the walk reports them and the caller, which
+ * holds the row, words them.
+ */
+struct HeaderFaults {
+    /// A name a row bound to *nothing*, as the request carries it (issue
+    /// #1095). Held beside the collision rather than folded into it because it
+    /// is a different sentence, and reported ahead of it: two names that both
+    /// bind to nothing do collide, on a name neither of them has, and "they
+    /// bound alike" is not what the author needs to be told about them - the
+    /// order composition already answers these two in
+    /// (`http/request_composer.cpp`).
+    std::optional<std::string> emptied;
+    /// Two names that became one (issue #732).
+    std::optional<HeaderCollision> collision;
+};
+
+/**
  * The one list of strings a data row binds: URL, header names and values, raw
  * body, and both halves of every form field.
  *
@@ -138,14 +162,16 @@ struct HeaderCollision {
  * Each field is visited with the context it sits in, so the splitter can decide
  * a token's encoding from the same walk that hands out its position.
  *
- * Returns the first header collision the rebuild produced, for the caller to
- * refuse the bind over; `nullopt` for the ordinary walk. Only a *bind* can
- * produce one - `request.headers` is already a case-insensitive map, so its own
- * keys are unique - which is why a split never reports one.
+ * Returns the first fault of each kind the rebuild produced, for the caller to
+ * refuse the bind over; an empty @ref HeaderFaults for the ordinary walk. Only
+ * a *bind* can produce either, and that is why the split ignores what it
+ * reports: `request.headers` compares without case already, so two of its own
+ * keys cannot collide, and a name that is empty before any row is bound into it
+ * is one no row emptied - it is composition's to refuse, and composition does.
  */
 template <typename Visit>
-std::optional<HeaderCollision> walk_bindable_fields (vayu::Request& request, Visit&& visit) {
-    std::optional<HeaderCollision> collision;
+HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
+    HeaderFaults faults;
 
     visit (request.url, FieldContext::Plain);
 
@@ -156,6 +182,14 @@ std::optional<HeaderCollision> walk_bindable_fields (vayu::Request& request, Vis
             std::string bound_value = value;
             visit (bound_name, FieldContext::Header);
             visit (bound_value, FieldContext::Header);
+            // Recorded before the collision below, on the reasoning in
+            // `HeaderFaults`. A name bound to nothing is still emplaced: what
+            // the walk owes its caller is the field count, and refusing here
+            // would make that depend on a row's contents exactly as an early
+            // return would.
+            if (bound_name.empty () && !faults.emptied) {
+                faults.emptied = name;
+            }
             // A plain `emplace` is first-wins and silent, and a dropped header
             // is exactly the quiet wrong request this namespace exists to
             // remove - worse than most, because the collision belongs to the
@@ -169,11 +203,11 @@ std::optional<HeaderCollision> walk_bindable_fields (vayu::Request& request, Vis
             // on a row's contents.
             auto [existing, inserted] =
             rebound.emplace (std::move (bound_name), std::move (bound_value));
-            if (!inserted && !collision) {
+            if (!inserted && !faults.collision) {
                 // `bound_name` was consumed by the failed emplace; the key that
                 // won says what it collided with, and says it in the spelling
                 // that survives.
-                collision = HeaderCollision{ name, existing->first };
+                faults.collision = HeaderCollision{ name, existing->first };
             }
         }
         request.headers = std::move (rebound);
@@ -188,7 +222,28 @@ std::optional<HeaderCollision> walk_bindable_fields (vayu::Request& request, Vis
         visit (field.value, FieldContext::Plain);
     }
 
-    return collision;
+    return faults;
+}
+
+/**
+ * The refusal a header name a row bound to nothing reads as (issue #1095).
+ *
+ * The row goes in front and the rule's own words follow, which is the shape
+ * `http/header_names.hpp` asks every layer that meets this rule for: a caller
+ * refused at composition and again at bind time is being refused over one rule,
+ * and two spellings of it would read as two. What this layer adds is the only
+ * thing the shared wording cannot know - which row bound the name away - and
+ * the column is inside the header as written, where that wording names it.
+ *
+ * The collision beside it words itself instead, and the difference is not an
+ * inconsistency: that message has to name what the bound name *collided with*,
+ * which is a fact about this request's other headers rather than about the
+ * rule.
+ */
+std::string describe_empty_bound_header_name (const std::string& written,
+const IterationBinding& binding) {
+    return "binding against " + bound_subject (binding) + ": " +
+    vayu::http::describe_empty_header_name (written);
 }
 
 /// The refusal a header collision reads as, in the same shape as the missing-
@@ -477,6 +532,20 @@ bool keeps_reserved_namespace (const std::string& name) {
     return vayu::http::is_data_variable_name (name) ||
     vayu::http::is_identity_variable_name (name) ||
     vayu::http::is_generator_variable_name (name);
+}
+
+/// Every kind of token a *credential* is split for (issue #1055): the row's
+/// columns and the iteration identity, which are the two the bind can answer
+/// once the build has been deferred.
+///
+/// A generator is deliberately not here, which is the one way this differs from
+/// `keeps_reserved_namespace`: composition generates a `{{$guid}}` inside the
+/// auth block rather than deferring it (issue #995), so no generator token
+/// survives into a credential for a split to find - and one kept here would
+/// defer a build for a token that is already a value.
+bool keeps_deferrable_credential_namespace (const std::string& name) {
+    return vayu::http::is_data_variable_name (name) ||
+    vayu::http::is_identity_variable_name (name);
 }
 
 /**
@@ -872,8 +941,9 @@ const vayu::http::BoundColumnNames& bound_columns) {
     // trade.
     vayu::Request scratch = request;
     FieldSplitter splitter (keeps_reserved_namespace, bound_columns);
-    // The collision the walk can report is a bind-time fault only: a split
-    // rewrites nothing, so the header map is rebuilt from its own unique keys.
+    // The faults the walk can report are bind-time ones only: a split rewrites
+    // nothing, so the header map is rebuilt from its own keys - which are
+    // unique, and empty only if they already were.
     (void)walk_bindable_fields (
     scratch, [&splitter] (const std::string& field, FieldContext context) {
         splitter (field, context);
@@ -883,11 +953,10 @@ const vayu::http::BoundColumnNames& bound_columns) {
 
 StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth,
 const vayu::http::BoundColumnNames& bound_columns) {
-    // The data namespace alone here - see the header for why a credential does
-    // not carry the identity. A bare column *is* the data namespace in its
-    // other spelling (issue #1007), so it is split here: a credential written
-    // `{{username}}` binds from the row exactly as `{{data.username}}` does.
-    FieldSplitter splitter (vayu::http::is_data_variable_name, bound_columns);
+    // A bare column *is* the data namespace in its other spelling (issue
+    // #1007), so it is split here: a credential written `{{username}}` binds
+    // from the row exactly as `{{data.username}}` does.
+    FieldSplitter splitter (keeps_deferrable_credential_namespace, bound_columns);
     vayu::http::walk_auth_credentials (auth,
     [&splitter] (const std::string& field, vayu::http::CredentialDestination destination) {
         splitter (field, credential_context (destination));
@@ -897,12 +966,10 @@ const vayu::http::BoundColumnNames& bound_columns) {
 
 DataBindResult apply_auth_data_template (vayu::http::Auth& auth,
 const StepDataTemplate& tmpl,
-const nlohmann::json& row,
-size_t row_index) {
+const IterationBinding& binding) {
     if (tmpl.empty ()) {
         return DataBindResult{ true, {} };
     }
-    const IterationBinding binding{ &row, row_index, IterationIdentity{} };
     TemplateJoiner joiner (tmpl, binding);
     // A bearer token and an api key sent in a header are header text, so a line
     // break in the cell behind one forges a header exactly as it would in
@@ -926,31 +993,24 @@ const IterationBinding& binding) {
     if (credentials.empty ()) {
         return DataBindResult{ true, {} };
     }
-    if (binding.row == nullptr) {
-        // Unreachable through either executor - a build is deferred only for a
-        // run that has rows - and a refusal rather than an assumption, because
-        // the alternative is sending base64 of the literal token text, which is
-        // the failure the deferral exists to remove and the one that hides.
-        return DataBindResult{ false,
-            "this request's credentials carry a data token, but the run has no "
-            "data set to bind them from" };
-    }
     // The credentials second, which is the whole reason this order lives in one
-    // place - see the header.
-    return bind_auth_row (request, auth, credentials, *binding.row, binding.row_index);
+    // place - see the header. A run with no set at all reaches this with a null
+    // row and is not refused here: the credentials may carry the identity
+    // alone, which needs no row (issue #1055), and a data token that does need
+    // one is refused by the join itself, naming the token the way it names one
+    // in a request field.
+    return bind_auth_row (request, auth, credentials, binding);
 }
 
 DataBindResult bind_auth_row (vayu::Request& request,
 vayu::http::Auth auth,
 const StepDataTemplate& tmpl,
-const nlohmann::json& row,
-size_t row_index) {
+const IterationBinding& binding) {
     if (tmpl.empty ()) {
         return DataBindResult{ true, {} };
     }
 
-    if (auto bound = apply_auth_data_template (auth, tmpl, row, row_index);
-    !bound.ok) {
+    if (auto bound = apply_auth_data_template (auth, tmpl, binding); !bound.ok) {
         return bound;
     }
 
@@ -962,12 +1022,12 @@ size_t row_index) {
     return DataBindResult{ true, {} };
 }
 
-std::optional<std::string> first_data_token_in (const nlohmann::json& value,
+std::optional<std::string> first_deferrable_token_in (const nlohmann::json& value,
 const vayu::http::BoundColumnNames& bound_columns) {
     if (value.is_string ()) {
         const auto split = vayu::http::split_tokens (
         value.get<std::string> (), [&bound_columns] (const std::string& name) {
-            return vayu::http::is_data_variable_name (name) ||
+            return keeps_deferrable_credential_namespace (name) ||
             vayu::http::is_bound_column_name (name, bound_columns);
         });
         if (split.names.empty ()) {
@@ -977,7 +1037,7 @@ const vayu::http::BoundColumnNames& bound_columns) {
     }
     if (value.is_object () || value.is_array ()) {
         for (const auto& child : value) {
-            if (auto found = first_data_token_in (child, bound_columns)) {
+            if (auto found = first_deferrable_token_in (child, bound_columns)) {
                 return found;
             }
         }
@@ -985,13 +1045,13 @@ const vayu::http::BoundColumnNames& bound_columns) {
     return std::nullopt;
 }
 
-std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth,
+std::optional<std::string> first_oauth2_deferrable_token (const vayu::http::Auth& auth,
 const vayu::http::BoundColumnNames& bound_columns) {
     const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth);
     if (oauth2 == nullptr) {
         return std::nullopt;
     }
-    return first_data_token_in (oauth2->config, bound_columns);
+    return first_deferrable_token_in (oauth2->config, bound_columns);
 }
 
 DataBindResult apply_iteration_template (vayu::Request& request,
@@ -1001,20 +1061,25 @@ const IterationBinding& binding) {
         return DataBindResult{ true, {} };
     }
     TemplateJoiner joiner (tmpl, binding);
-    auto collision = walk_bindable_fields (
+    HeaderFaults faults = walk_bindable_fields (
     request, [&joiner] (std::string& field, FieldContext context) {
         joiner (field, context);
     });
     DataBindResult result = joiner.result ();
     // A join failure is checked first because it is the earlier and more
     // specific fault: the joiner stops rewriting once it records one, so a
-    // collision seen after it is an artefact of a half-bound walk rather than
-    // anything the request actually says.
+    // header fault seen after it is an artefact of a half-bound walk rather
+    // than anything the request actually says.
     if (!result.ok) {
         return result;
     }
-    if (collision) {
-        return DataBindResult{ false, describe_header_collision (*collision, binding) };
+    if (faults.emptied) {
+        return DataBindResult{ false,
+            describe_empty_bound_header_name (*faults.emptied, binding) };
+    }
+    if (faults.collision) {
+        return DataBindResult{ false,
+            describe_header_collision (*faults.collision, binding) };
     }
     return result;
 }

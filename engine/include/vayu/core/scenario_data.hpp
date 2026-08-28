@@ -369,18 +369,22 @@ const StepDataTemplate& tmpl,
 const IterationBinding& binding);
 
 /**
- * Split @p auth's credential strings around their `{{data.column}}` tokens.
+ * Split @p auth's credential strings around their `{{data.column}}` tokens and
+ * their `{{$vu}}` / `{{$iteration}}` identity (issue #1055).
  *
- * **The data namespace only**: a credential carrying `{{$vu}}` - or a
- * `{{$guid}}`, which composition generates into a credential rather than
- * deferring (issue #995) - is deliberately not split here (issue #994).
- * Deferring a build is what lets a row reach a
- * credential before `apply_auth` encodes it, and a build is deferred only for a
- * run that *has* rows - so an identity token in a credential would bind in a
- * data-driven run and go out base64-encoded as written in every other, which is
- * a rule nobody could hold in their head. It goes out written as it stands in
- * both, loudly, and the identity binds the request rather than its credentials
- * (issue #1055 carries the deferral change that would lift this).
+ * **Both namespaces the bind can answer, and only those.** A `{{$guid}}` is not
+ * one of them: composition generates a generator inside the auth block rather
+ * than deferring it (issue #995), so none survives into a credential to be
+ * split, and one kept here would defer a build for a token that is already a
+ * value.
+ *
+ * The identity used to be excluded, because deferring a build was what let a
+ * row reach a credential and a build was deferred only for a run that *had*
+ * rows - so splitting it out would have bound `{{$vu}}` in a data-driven run
+ * and sent it base64-encoded as written in every other, which is a rule nobody
+ * could hold in their head. What changed is the deferral, not this: a build is
+ * deferred for the credentials that carry a token rather than for the runs that
+ * carry rows, so one rule now holds on every run shape.
  *
  * The same splitter the request walk drives, over `walk_auth_credentials`
  * instead of `walk_bindable_fields` - one field list per walk, and the join
@@ -406,19 +410,25 @@ const IterationBinding& binding);
 const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**
- * Join @p tmpl's credentials against @p row, in place on @p auth.
+ * Join @p tmpl's credentials against @p binding, in place on @p auth.
  *
  * @p auth must be the parsed auth @p tmpl was split from, for the same reason
  * `apply_iteration_template` needs the request it was split from: a credential is
  * addressed by its position in the walk.
+ *
+ * The whole @ref IterationBinding rather than a row, and for the reason that
+ * type exists: a credential carrying `{{data.user}}` beside `{{$vu}}` is joined
+ * once, from both sources at once. A null row is not an error here - it is a run
+ * with no set at all, which answers the identity and refuses a data token by
+ * name (issue #1055).
  */
 [[nodiscard]] DataBindResult apply_auth_data_template (vayu::http::Auth& auth,
 const StepDataTemplate& tmpl,
-const nlohmann::json& row,
-size_t row_index);
+const IterationBinding& binding);
 
 /**
- * Bind @p auth's credentials against @p row and apply the result to @p request.
+ * Bind @p auth's credentials against @p binding and apply the result to
+ * @p request.
  *
  * The whole deferred-credential sequence in one place - join, then apply - for
  * every caller that built its request with `http::AuthResolution::Defer`. Both
@@ -438,14 +448,13 @@ size_t row_index);
  * deferred a build must only have done so for a non-empty template.
  *
  * No database handle reaches `apply_auth`: oauth2 is the only mode that needs
- * one, and an oauth2 config carrying a data token is refused before any build
- * is deferred (@ref first_oauth2_data_token).
+ * one, and an oauth2 config carrying a token this would defer for is refused
+ * before any build is deferred (@ref first_oauth2_deferrable_token).
  */
 [[nodiscard]] DataBindResult bind_auth_row (vayu::Request& request,
 vayu::http::Auth auth,
 const StepDataTemplate& tmpl,
-const nlohmann::json& row,
-size_t row_index);
+const IterationBinding& binding);
 
 /**
  * One iteration's whole bind, in the order that makes it correct: @p fields
@@ -464,8 +473,8 @@ size_t row_index);
  * it unconditionally. @p auth is only read when @p credentials is non-empty,
  * which is exactly when the request's build was deferred; a caller whose auth
  * was applied at build time passes its `NoAuth` and pays nothing. The
- * credentials are joined against @p binding's row alone - see
- * `tokenize_auth_fields` for why the identity stops at the request.
+ * credentials are joined against the whole of @p binding - its row where the
+ * run has one, and its identity, which every run has (issue #1055).
  *
  * On failure @p request is left partially bound and must not be sent - see
  * `apply_iteration_template`, whose rule this inherits.
@@ -477,8 +486,14 @@ const StepDataTemplate& credentials,
 const IterationBinding& binding);
 
 /**
- * The first data token in any string of @p value, recursively, written back
- * with its braces - or `nullopt` when it carries none.
+ * The first token a deferred credential could bind - a `{{data.column}}` or a
+ * `{{$vu}}` / `{{$iteration}}` identity - in any string of @p value,
+ * recursively, written back with its braces, or `nullopt` when it carries none.
+ *
+ * The same namespaces `tokenize_auth_fields` splits for, because this is the
+ * refusal that stands where that split cannot be honoured: a block deferral
+ * does not reach must refuse every token deferral would otherwise have bound,
+ * or the two disagree about which tokens mean anything (issue #1055).
  *
  * @p bound_columns extends the scan to the bare spelling (issue #1007), for the
  * same reason the bind reads it: a run's column reaching a block that cannot
@@ -490,26 +505,30 @@ const IterationBinding& binding);
  * is resolved. Object *keys* are not scanned - a column name where a config key
  * belongs is not a placement anyone means.
  */
-[[nodiscard]] std::optional<std::string> first_data_token_in (const nlohmann::json& value,
+[[nodiscard]] std::optional<std::string> first_deferrable_token_in (const nlohmann::json& value,
 const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**
- * The first `{{data.column}}` in @p auth's OAuth 2.0 configuration, or
- * `nullopt` - for any other mode as well as for an oauth2 config carrying none.
+ * The first `{{data.column}}` or `{{$vu}}` / `{{$iteration}}` in @p auth's
+ * OAuth 2.0 configuration, or `nullopt` - for any other mode as well as for an
+ * oauth2 config carrying none.
  *
  * **OAuth 2.0 is the one mode deferral cannot serve**, and this is the check
  * that says so, for both callers that defer. Its token is acquired against the
  * token endpoint once - when a plan is resolved, or before a single send leaves
  * - so there is no later moment at which a row could reach the acquisition, the
  * way binding a credential before `apply_auth` encodes it reaches every other
- * mode. Refused by name rather than sent to the token endpoint as the literal
- * token text.
+ * mode. The identity is refused for the same reason and not a weaker one: it is
+ * known per iteration, and the acquisition happens before any iteration exists
+ * (issue #1055). Refused by name rather than sent to the token endpoint as the
+ * literal token text.
  *
  * Every other mode's credentials are walked by `walk_auth_credentials` and
  * bound; an oauth2 config is deliberately absent from that walk, which is why
  * it needs this second, config-shaped scan.
  */
-[[nodiscard]] std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth,
+[[nodiscard]] std::optional<std::string> first_oauth2_deferrable_token (
+const vayu::http::Auth& auth,
 const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**

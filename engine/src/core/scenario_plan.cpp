@@ -406,12 +406,12 @@ ScenarioPlan& plan) {
     // mean a network round trip per virtual user per iteration. Refused by
     // name in both directions, with or without a data set, rather than sent
     // to the token endpoint as the literal token text.
-    if (auto token = first_oauth2_data_token (parsed_auth, bound_columns)) {
+    if (auto token = first_oauth2_deferrable_token (parsed_auth, bound_columns)) {
         return (describe_step (index, row) + " carries " + *token +
         " in its OAuth 2.0 configuration. That token is acquired once, "
-        "when the run is planned, so a data column can never reach it - "
-        "use a static credential there, or move the data token into the "
-        "request itself.");
+        "when the run is planned, so neither a data column nor the "
+        "iteration identity can ever reach it - use a static credential "
+        "there, or move the token into the request itself.");
     }
 
     // Deferred through the builder's own option rather than by hiding the
@@ -469,9 +469,13 @@ ScenarioPlan& plan) {
     step.stored_url     = row.url;
     step.spec_operation = row.spec_operation.value_or (std::string ());
     step.data_template  = std::move (data_template);
-    // Only ever reached with rows behind it: the refusal above returns for
-    // a credential token in a run that has no data set, so a deferred step
-    // cannot arrive at an executor with no row to bind.
+    // A deferred step reaches an executor with a row behind it whenever it
+    // needs one: the refusal above returns for a credential carrying a *data*
+    // token in a run with no set. It does not for one carrying only the
+    // `{{$vu}}` / `{{$iteration}}` identity (issue #1055), which is deliberate
+    // and is why `first_data_token` is the scan there rather than the whole
+    // template - the identity binds off the iteration, so that step is
+    // perfectly runnable with no rows at all and must not be refused.
     if (!auth_template.empty ()) {
         step.auth          = parsed_auth;
         step.auth_template = std::move (auth_template);
