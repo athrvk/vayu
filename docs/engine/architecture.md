@@ -624,10 +624,11 @@ make the load-mode executor (a per-VU state machine) possible without SQLite on
 its hot path.
 
 **Data rows bind per iteration.** A `scenario.data` array - rows the app parsed
-from a CSV or JSON file, sent inline, because the sandbox has no filesystem and a
-user-supplied path would be a new trust boundary - binds row `i % rows` to
-iteration `i`, read by the run's scripts as `pm.iterationData`. The rows ride the
-`ScenarioExecution` the worker holds and are never persisted: the snapshot keeps
+from a CSV, TSV, JSON or JSONL file, sent inline, because the sandbox has no
+filesystem and a user-supplied path would be a new trust boundary - binds row
+`i % rows` to iteration `i`, read by the run's scripts as `pm.iterationData`.
+The rows ride the `ScenarioExecution` the worker holds and are never
+persisted: the snapshot keeps
 `dataRowCount`, and every step's stored row and `step` event keeps
 `dataRowIndex`, so which row a wrapped pass re-used stays answerable without
 storing the row itself.
