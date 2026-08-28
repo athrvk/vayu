@@ -474,7 +474,12 @@ of every value that had an answer. The one thing this costs: an ad-hoc payload
 posted straight to `/execute` with a literal `{{...}}` in it is no longer
 inert - if the run's scopes define that name, the send now carries its value.
 A name nothing defines still goes out written as it stands, and the load path
-does not run this pass at all. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+does not run this pass at all. The one thing the pass can *refuse* is a
+resolved header name landing on a name the request already carries (#1051):
+the map holds one value per name, so the send would go out a header short, and
+it is stopped instead - in composition's words, as a `statusCode: 0` response
+carrying the reason (a `400` on the streaming path, which has not answered
+yet). An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 
@@ -930,12 +935,31 @@ row exists - and the executor is the only thing that differs.
   *submission* off the same kind of run-wide cursor, wrapping the same way - a
   single request has no sequence for an iteration to span, so the unit of a claim
   is the request. The templates are split once, when the run's one request is
-  built (`LoadDataSet::fields`), the credentials defer exactly as a step's do,
+  built (`RunContext::load_template`), the credentials defer exactly as a step's do,
   and every retained result carries its `dataRowIndex`. **A run without rows
   carries no set at all**, which is the throughput guard stated structurally: the
   strategies test one pointer and otherwise submit the shared request they always
   did. The validation, the binder and the escaping are the scenario path's own
-  functions rather than copies - `read_data_rows` and `bind_iteration_row`.
+  functions rather than copies - `read_data_rows` and `bind_iteration`.
+- **The iteration's identity binds beside its row** (issue #994). `{{$vu}}` and
+  `{{$iteration}}` are a second reserved namespace, and they are bound at the
+  same point, out of the same template: a field carrying one of each is one
+  string, so the split keeps both and the join resolves each where its value
+  lives - the identity from the iteration, everything else from the row. On the
+  scenario path the values are the virtual user's own number (1-based) and its
+  iteration; on the single-request path they are `1` and the submission index,
+  which is the same counter the row cursor claims from, so the two cannot
+  disagree about which submission this was. A design-mode collection run is user
+  1 walking its passes, and a single send is a run of one.
+  This is **template substitution, not a script hook**: two integers written into
+  fields a compose-time scan already located, which is why it sits here rather
+  than reopening the recorded non-goal above (inline scripts on the load path).
+  A request that spells neither token has an empty template and is walked for
+  nothing - the executor tests `empty()` and submits the shared request it
+  always did. What every run does now pay is one unsynchronised increment per
+  submission on the producer thread, which is what lets any load run tell a
+  deferred script the iteration and the user a sampled response was sent as
+  (`pm.info.iteration` / `pm.info.vu`).
 - **Scripts stay deferred, keyed per step.** Nothing runs inline; after the run
   drains, each step's own `post_script` is replayed against the responses *that
   step* produced, and the tallies land on that step's entry in the breakdown

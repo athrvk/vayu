@@ -40,12 +40,28 @@ std::string describe_columns (const nlohmann::json& row) {
     return out.empty () ? "none" : out;
 }
 
-/// The token as the request wrote it, for an error to name - `{{data.id}}` for
-/// the reserved spelling, `{{id}}` for a bare bound column (issue #1007).
-std::string token_for (const DataColumnRef& ref) {
-    return ref.namespaced ?
-    "{{" + std::string (vayu::http::DATA_NAMESPACE_PREFIX) + ref.column + "}}" :
-    "{{" + ref.column + "}}";
+/// `{{data.id}}`, `{{$vu}}` - the token as it was written, for an error to
+/// name. The name is stored whole, so this adds only the braces back.
+std::string token_for (const std::string& name) {
+    return "{{" + name + "}}";
+}
+
+/// The column a token names: the text after `data.` for the reserved spelling,
+/// and the whole name for a bare column a bound row answers (issue #1007).
+/// Never called for an identity token, whose value comes from the binding
+/// rather than from a row.
+std::string column_of (const std::string& name) {
+    return vayu::http::is_data_variable_name (name) ?
+    name.substr (vayu::http::DATA_NAMESPACE_PREFIX.size ()) :
+    name;
+}
+
+/// What a refusal calls the thing being bound: the row, where the run has one,
+/// and otherwise the iteration - which every run has.
+std::string bound_subject (const IterationBinding& binding) {
+    return binding.row != nullptr ?
+    "data row " + std::to_string (binding.row_index) :
+    "iteration " + std::to_string (binding.identity.iteration);
 }
 
 /// What kind of text a visited field is, for the rules that depend on it.
@@ -176,9 +192,10 @@ std::optional<HeaderCollision> walk_bindable_fields (vayu::Request& request, Vis
 
 /// The refusal a header collision reads as, in the same shape as the missing-
 /// column and null-cell errors above: the token's own text, then the row.
-std::string describe_header_collision (const HeaderCollision& collision, size_t row_index) {
-    return "binding header \"" + collision.original + "\" against data row " +
-    std::to_string (row_index) + " produced \"" + collision.taken +
+std::string describe_header_collision (const HeaderCollision& collision,
+const IterationBinding& binding) {
+    return "binding header \"" + collision.original + "\" against " +
+    bound_subject (binding) + " produced \"" + collision.taken +
     "\", which another header of this request already resolves to - one of the "
     "two would be dropped, so the row is refused rather than sent with a "
     "header missing";
@@ -206,9 +223,9 @@ FieldContext credential_context (vayu::http::CredentialDestination destination) 
  * be the quiet wrong request this namespace exists to remove - the header would
  * arrive holding something the file does not say.
  */
-std::string describe_header_line_break (const DataColumnRef& column, size_t row_index) {
-    return token_for (column) + " is bound into a header, and data row " +
-    std::to_string (row_index) +
+std::string describe_header_line_break (const std::string& name,
+const IterationBinding& binding) {
+    return token_for (name) + " is bound into a header, and " + bound_subject (binding) +
     " has a line break in that column - a CR or LF ends the header line rather "
     "than sitting in it, so the rest of the value would be read as headers of "
     "its own; the row is refused rather than sent forging a header";
@@ -446,17 +463,34 @@ DataValueEncoding xml_encoding_at (XmlPosition position) {
     return DataValueEncoding::Verbatim;
 }
 
+/// Both reserved namespaces, which is what the request's own fields are split
+/// for: a field may carry one of each, and they bind together.
+bool keeps_either_namespace (const std::string& name) {
+    return vayu::http::is_data_variable_name (name) ||
+    vayu::http::is_identity_variable_name (name);
+}
+
 /**
- * Split each visited field around its `{{data.*}}` tokens, keeping only the
- * fields that carry one.
+ * Split each visited field around the reserved tokens of one namespace, keeping
+ * only the fields that carry one.
+ *
+ * @p keep says which namespaces this walk is splitting for: the request's own
+ * fields take both, while the credential walk takes the data namespace alone
+ * (see `tokenize_auth_fields`). One splitter rather than one per namespace,
+ * because the split is where a token's encoding is decided and a second
+ * splitter would be a second answer to "is this token inside a JSON string"
+ * for tokens sitting in the same body.
  */
 class FieldSplitter {
     public:
-    /// @p bound_columns are the bare names a row will substitute (issue #1007);
-    /// empty for every run with no dataset behind it, which is what keeps the
-    /// split for those exactly the `data.*`-only scan it always was.
-    explicit FieldSplitter (const vayu::http::BoundColumnNames& bound_columns)
-    : bound_columns_ (bound_columns) {
+    using Keep = bool (*) (const std::string&);
+
+    /// @p keep says which reserved names this walk splits on, and
+    /// @p bound_columns adds the bare names a bound row will substitute (issue
+    /// #1007) - empty for every run with no dataset behind it, which is what
+    /// keeps the split for those exactly the reserved-only scan it always was.
+    FieldSplitter (Keep keep, const vayu::http::BoundColumnNames& bound_columns)
+    : keep_ (keep), bound_columns_ (bound_columns) {
     }
 
     /// Takes its field by const reference: a split rewrites nothing, and the
@@ -467,8 +501,7 @@ class FieldSplitter {
             return;
         }
         auto split = vayu::http::split_tokens (field, [this] (const std::string& name) {
-            return vayu::http::is_data_variable_name (name) ||
-            vayu::http::is_bound_column_name (name, bound_columns_);
+            return keep_ (name) || vayu::http::is_bound_column_name (name, bound_columns_);
         });
         if (split.names.empty ()) {
             return;
@@ -476,12 +509,12 @@ class FieldSplitter {
         DataFieldTemplate entry;
         entry.field    = position;
         entry.literals = std::move (split.literals);
-        entry.columns.reserve (split.names.size ());
+        entry.tokens.reserve (split.names.size ());
         entry.encodings.reserve (split.names.size ());
         bool in_string = false;
         XmlScanState xml_state;
         for (size_t i = 0; i < split.names.size (); ++i) {
-            entry.columns.push_back (column_ref (split.names[i]));
+            entry.tokens.push_back (split.names[i]);
             DataValueEncoding encoding = DataValueEncoding::Verbatim;
             if (context == FieldContext::JsonDocument) {
                 in_string = advance_json_string_state (entry.literals[i], in_string);
@@ -501,17 +534,7 @@ class FieldSplitter {
     }
 
     private:
-    /// Which column a kept token names, and which way it was spelled. The
-    /// reserved namespace is answered first, the way every reader of the two
-    /// rules answers it, so a column literally named `data.x` in a file cannot
-    /// take the prefixed spelling away from column `x`.
-    static DataColumnRef column_ref (const std::string& name) {
-        if (vayu::http::is_data_variable_name (name)) {
-            return DataColumnRef{ name.substr (vayu::http::DATA_NAMESPACE_PREFIX.size ()), true };
-        }
-        return DataColumnRef{ name, false };
-    }
-
+    Keep keep_;
     const vayu::http::BoundColumnNames& bound_columns_;
     StepDataTemplate template_;
     size_t next_field_ = 0;
@@ -637,10 +660,10 @@ std::string encode_data_value (const nlohmann::json& value, DataValueEncoding en
  * into one the author did not write - so the row is refused, in the same shape
  * as the missing-column and null-cell errors: the token's own text first.
  */
-std::optional<std::string> describe_unwritable_placement (const DataColumnRef& column,
+std::optional<std::string> describe_unwritable_placement (const std::string& name,
 DataValueEncoding encoding) {
     if (encoding == DataValueEncoding::XmlInComment) {
-        return token_for (column) +
+        return token_for (name) +
         " sits inside an XML comment, where a bound value is not sent at all - "
         "and one "
         "carrying \"-->\" would end the comment and change the document "
@@ -648,7 +671,7 @@ DataValueEncoding encoding) {
         "row is refused rather than bound somewhere it cannot be read";
     }
     if (encoding == DataValueEncoding::XmlInProcessingInstruction) {
-        return token_for (column) +
+        return token_for (name) +
         " sits inside an XML processing instruction, which is markup addressed "
         "to the "
         "parser rather than content - a bound value carrying \"?>\" would end "
@@ -660,7 +683,8 @@ DataValueEncoding encoding) {
 }
 
 /**
- * Join the templated fields of one step against one row.
+ * Join the templated fields of one step against one iteration's row and
+ * identity.
  *
  * Failure is recorded rather than thrown: the caller is a per-step path in a
  * run worker, and the first bad token is the one worth naming - later ones are
@@ -668,8 +692,9 @@ DataValueEncoding encoding) {
  */
 class TemplateJoiner {
     public:
-    TemplateJoiner (const StepDataTemplate& tmpl, const nlohmann::json& row, size_t row_index)
-    : template_ (tmpl), row_ (row), row_index_ (row_index) {
+    TemplateJoiner (const StepDataTemplate& tmpl, const IterationBinding& binding)
+    : template_ (tmpl), binding_ (binding), vu_ (binding.identity.vu),
+      iteration_ (binding.identity.iteration) {
     }
 
     void operator() (std::string& field, FieldContext context) {
@@ -686,49 +711,12 @@ class TemplateJoiner {
         ++cursor_;
 
         std::string out = entry.literals[0];
-        for (size_t i = 0; i < entry.columns.size (); ++i) {
-            // Checked before the row is consulted: a placement no encoding fits
-            // is the template's fault and fails identically for every row, so
-            // naming a missing column instead would send the reader after the
-            // file when the request is what needs moving.
-            if (auto refusal = describe_unwritable_placement (
-                entry.columns[i], entry.encodings[i])) {
-                result_.ok    = false;
-                result_.error = std::move (*refusal);
-                return;
+        for (size_t i = 0; i < entry.tokens.size (); ++i) {
+            const auto encoded = encode_token (entry, i, context);
+            if (!encoded) {
+                return; // `result_` names what was wrong with it
             }
-            const auto cell = row_.find (entry.columns[i].column);
-            if (cell == row_.end ()) {
-                result_.ok    = false;
-                result_.error = token_for (entry.columns[i]) +
-                " names a column data row " + std::to_string (row_index_) +
-                " does not have (columns: " + describe_columns (row_) + ")";
-                return;
-            }
-            // Same rule as a missing column, one type down: the token says the
-            // value comes from the file, and a null cell has none to give.
-            // Writing "" here is the quiet wrong request the namespace exists
-            // to remove - `{"n": }` for a typed placement, a blank field for a
-            // quoted one (issue #593).
-            if (cell->is_null ()) {
-                result_.ok    = false;
-                result_.error = token_for (entry.columns[i]) +
-                " names a column that is null in data row " +
-                std::to_string (row_index_) + " - a data token substitutes a value, and this row has none for it";
-                return;
-            }
-            std::string encoded = encode_data_value (*cell, entry.encodings[i]);
-            // Checked on the encoded text rather than the cell, because that is
-            // what the field ends up holding - and only in a header, where a
-            // line break is a line terminator. Everywhere else the same bytes
-            // are ordinary content: a JSON body escapes them, and a URL, a form
-            // field or a text body carries them as the cell wrote them.
-            if (context == FieldContext::Header && vayu::http::ends_a_header_line (encoded)) {
-                result_.ok = false;
-                result_.error = describe_header_line_break (entry.columns[i], row_index_);
-                return;
-            }
-            out += encoded;
+            out += *encoded;
             out += entry.literals[i + 1];
         }
         field = std::move (out);
@@ -739,9 +727,97 @@ class TemplateJoiner {
     }
 
     private:
+    /// The text token @p index of @p entry contributes, or `nullopt` with
+    /// @ref result_ carrying the refusal.
+    ///
+    /// Split out of the loop above rather than inlined: it holds the whole
+    /// decision - which namespace answers, what the value is written as, and
+    /// the three ways a data token can have no value to write.
+    std::optional<std::string>
+    encode_token (const DataFieldTemplate& entry, size_t index, FieldContext context) {
+        const std::string& name = entry.tokens[index];
+        // Checked before anything is consulted: a placement no encoding fits is
+        // the template's fault and fails identically for every row, so naming a
+        // missing column instead would send the reader after the file when the
+        // request is what needs moving.
+        if (auto refusal = describe_unwritable_placement (name, entry.encodings[index])) {
+            return refuse (std::move (*refusal));
+        }
+
+        const auto value = value_of (name);
+        if (!value) {
+            return std::nullopt; // `value_of` recorded why
+        }
+        std::string encoded = encode_data_value (*value, entry.encodings[index]);
+        // Checked on the encoded text rather than the value, because that is
+        // what the field ends up holding - and only in a header, where a line
+        // break is a line terminator. Everywhere else the same bytes are
+        // ordinary content: a JSON body escapes them, and a URL, a form field
+        // or a text body carries them as they were written.
+        if (context == FieldContext::Header && vayu::http::ends_a_header_line (encoded)) {
+            return refuse (describe_header_line_break (name, binding_));
+        }
+        return encoded;
+    }
+
+    /// What @p name substitutes, or null with @ref result_ carrying the refusal.
+    ///
+    /// A pointer rather than a value: a cell is the row's own JSON and a copy of
+    /// it per token per iteration is what the split exists to avoid. The two
+    /// identity numbers are held beside it for the same reason - built once per
+    /// join rather than once per token.
+    const nlohmann::json* value_of (const std::string& name) {
+        if (name == vayu::http::IDENTITY_VU_NAME) {
+            return &vu_;
+        }
+        if (name == vayu::http::IDENTITY_ITERATION_NAME) {
+            return &iteration_;
+        }
+        if (binding_.row == nullptr) {
+            // A data token in a run with no set at all. Refused here rather
+            // than resolved to nothing, for the reason every other arm is: the
+            // token says the value came from the file, and there is no file.
+            // Plan resolution refuses this before a run row exists (issue
+            // #415); this is the same rule at the bind, for a caller that
+            // reached it another way.
+            return refuse_value (
+            token_for (name) + " names a data column, but this run has no data set to bind it from");
+        }
+        const auto cell = binding_.row->find (column_of (name));
+        if (cell == binding_.row->end ()) {
+            return refuse_value (token_for (name) + " names a column " +
+            bound_subject (binding_) +
+            " does not have (columns: " + describe_columns (*binding_.row) + ")");
+        }
+        // Same rule as a missing column, one type down: the token says the
+        // value comes from the file, and a null cell has none to give. Writing
+        // "" here is the quiet wrong request the namespace exists to remove -
+        // `{"n": }` for a typed placement, a blank field for a quoted one
+        // (issue #593).
+        if (cell->is_null ()) {
+            return refuse_value (token_for (name) + " names a column that is null in " +
+            bound_subject (binding_) + " - a data token substitutes a value, and this row has none for it");
+        }
+        return &*cell;
+    }
+
+    /// Record @p error, and answer the two shapes the callers above return.
+    std::nullopt_t refuse (std::string error) {
+        result_.ok    = false;
+        result_.error = std::move (error);
+        return std::nullopt;
+    }
+    const nlohmann::json* refuse_value (std::string error) {
+        refuse (std::move (error));
+        return nullptr;
+    }
+
     const StepDataTemplate& template_;
-    const nlohmann::json& row_;
-    size_t row_index_  = 0;
+    const IterationBinding& binding_;
+    /// This iteration's two identity numbers as the values they substitute, so
+    /// the join reads them exactly as it reads a cell.
+    const nlohmann::json vu_;
+    const nlohmann::json iteration_;
     size_t next_field_ = 0;
     size_t cursor_     = 0;
     DataBindResult result_{ true, {} };
@@ -749,21 +825,25 @@ class TemplateJoiner {
 
 } // namespace
 
-std::optional<std::string> StepDataTemplate::first_token () const {
-    if (fields.empty () || fields.front ().columns.empty ()) {
-        return std::nullopt;
+std::optional<std::string> StepDataTemplate::first_data_token () const {
+    for (const auto& field : fields) {
+        for (const auto& name : field.tokens) {
+            if (vayu::http::is_data_variable_name (name)) {
+                return token_for (name);
+            }
+        }
     }
-    return token_for (fields.front ().columns.front ());
+    return std::nullopt;
 }
 
-StepDataTemplate tokenize_data_fields (const vayu::Request& request,
+StepDataTemplate tokenize_bindable_fields (const vayu::Request& request,
 const vayu::http::BoundColumnNames& bound_columns) {
     // Copied because the walk rewrites in place; nothing is actually rewritten
     // here, since a split substitutes no token. Sharing the walk is what the
     // copy buys - see the header for why a second field list would be the wrong
     // trade.
     vayu::Request scratch = request;
-    FieldSplitter splitter (bound_columns);
+    FieldSplitter splitter (keeps_either_namespace, bound_columns);
     // The collision the walk can report is a bind-time fault only: a split
     // rewrites nothing, so the header map is rebuilt from its own unique keys.
     (void)walk_bindable_fields (
@@ -775,7 +855,11 @@ const vayu::http::BoundColumnNames& bound_columns) {
 
 StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth,
 const vayu::http::BoundColumnNames& bound_columns) {
-    FieldSplitter splitter (bound_columns);
+    // The data namespace alone here - see the header for why a credential does
+    // not carry the identity. A bare column *is* the data namespace in its
+    // other spelling (issue #1007), so it is split here: a credential written
+    // `{{username}}` binds from the row exactly as `{{data.username}}` does.
+    FieldSplitter splitter (vayu::http::is_data_variable_name, bound_columns);
     vayu::http::walk_auth_credentials (auth,
     [&splitter] (const std::string& field, vayu::http::CredentialDestination destination) {
         splitter (field, credential_context (destination));
@@ -790,7 +874,8 @@ size_t row_index) {
     if (tmpl.empty ()) {
         return DataBindResult{ true, {} };
     }
-    TemplateJoiner joiner (tmpl, row, row_index);
+    const IterationBinding binding{ &row, row_index, IterationIdentity{} };
+    TemplateJoiner joiner (tmpl, binding);
     // A bearer token and an api key sent in a header are header text, so a line
     // break in the cell behind one forges a header exactly as it would in
     // `request.headers` - the walk says which credential is which so this does
@@ -802,19 +887,29 @@ size_t row_index) {
     return joiner.result ();
 }
 
-DataBindResult bind_iteration_row (vayu::Request& request,
+DataBindResult bind_iteration (vayu::Request& request,
 const StepDataTemplate& fields,
 const vayu::http::Auth& auth,
 const StepDataTemplate& credentials,
-const nlohmann::json& row,
-size_t row_index) {
-    if (auto bound = apply_data_template (request, fields, row, row_index);
-    !bound.ok) {
+const IterationBinding& binding) {
+    if (auto bound = apply_iteration_template (request, fields, binding); !bound.ok) {
         return bound;
+    }
+    if (credentials.empty ()) {
+        return DataBindResult{ true, {} };
+    }
+    if (binding.row == nullptr) {
+        // Unreachable through either executor - a build is deferred only for a
+        // run that has rows - and a refusal rather than an assumption, because
+        // the alternative is sending base64 of the literal token text, which is
+        // the failure the deferral exists to remove and the one that hides.
+        return DataBindResult{ false,
+            "this request's credentials carry a data token, but the run has no "
+            "data set to bind them from" };
     }
     // The credentials second, which is the whole reason this order lives in one
     // place - see the header.
-    return bind_auth_row (request, auth, credentials, row, row_index);
+    return bind_auth_row (request, auth, credentials, *binding.row, binding.row_index);
 }
 
 DataBindResult bind_auth_row (vayu::Request& request,
@@ -871,14 +966,13 @@ const vayu::http::BoundColumnNames& bound_columns) {
     return first_data_token_in (oauth2->config, bound_columns);
 }
 
-DataBindResult apply_data_template (vayu::Request& request,
+DataBindResult apply_iteration_template (vayu::Request& request,
 const StepDataTemplate& tmpl,
-const nlohmann::json& row,
-size_t row_index) {
+const IterationBinding& binding) {
     if (tmpl.empty ()) {
         return DataBindResult{ true, {} };
     }
-    TemplateJoiner joiner (tmpl, row, row_index);
+    TemplateJoiner joiner (tmpl, binding);
     auto collision = walk_bindable_fields (
     request, [&joiner] (std::string& field, FieldContext context) {
         joiner (field, context);
@@ -892,7 +986,7 @@ size_t row_index) {
         return result;
     }
     if (collision) {
-        return DataBindResult{ false, describe_header_collision (*collision, row_index) };
+        return DataBindResult{ false, describe_header_collision (*collision, binding) };
     }
     return result;
 }
@@ -922,8 +1016,9 @@ DataBindResult bind_data_row (vayu::Request& request, const nlohmann::json& row,
     // the whole set for a caller that holds one row: a name it does not carry
     // is an ordinary variable, left for the residual pass to resolve rather
     // than split here only to fail as a column no row has.
-    return apply_data_template (request,
-    tokenize_data_fields (request, bound_columns_of (row)), row, row_index);
+    const IterationBinding binding{ &row, row_index, IterationIdentity{} };
+    return apply_iteration_template (request,
+    tokenize_bindable_fields (request, bound_columns_of (row)), binding);
 }
 
 } // namespace vayu::core

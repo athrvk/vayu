@@ -850,6 +850,311 @@ TEST_F (ScriptEngineTest, ExpectNewMatchersCanFail) {
     }
 }
 
+// ============================================================================
+// Issue #999: the pm.expect chain passed silently where chai fails
+// ============================================================================
+
+// The load-bearing one. A member nothing implements used to evaluate to
+// `undefined` as an expression statement, so the test reported PASS whatever
+// the value was. Un-arm the hook and every case here goes green - which is what
+// makes it a mutation check rather than a restatement of the code.
+TEST_F (ScriptEngineTest, ExpectChainRejectsUnknownMembers) {
+    const auto scripts = std::to_array<const char*> ({
+    R"(pm.test("t", function() { pm.expect(1).to.be.trueish; });)",
+    // chai has these and Vayu does not: they must fail loudly rather than pass.
+    R"(pm.test("t", function() { pm.expect(1).to.be.finite; });)",
+    R"(pm.test("t", function() { pm.expect({}).to.be.frozen; });)",
+    R"(pm.test("t", function() { pm.expect({}).to.be.sealed; });)",
+    // A typo in the middle of a chain names itself too.
+    R"(pm.test("t", function() { pm.expect({a:1}).to.hve.property("a"); });)",
+    // The negated form is a property read like any other, so it throws rather
+    // than negating its way to a pass.
+    R"(pm.test("t", function() { pm.expect(1).to.not.be.finite; });)",
+    });
+
+    for (const char* script : scripts) {
+        auto result = engine.execute_test (script, request, response, env);
+        ASSERT_EQ (result.tests.size (), 1u) << script;
+        EXPECT_FALSE (result.tests[0].passed) << script;
+        EXPECT_NE (
+        result.tests[0].error_message.find ("not a supported assertion"), std::string::npos)
+        << script << " -> " << result.tests[0].error_message;
+    }
+}
+
+// The hook rejects assertion names only: an expectation still has to behave
+// like an object for the plumbing that touches it. Without the prototype the
+// armed class needs, every line here throws.
+TEST_F (ScriptEngineTest, ExpectChainStillBehavesLikeAnObject) {
+    auto result = engine.execute_test (R"(
+        pm.test("printable", function() {
+            var e = pm.expect(1);
+            pm.expect(String(e)).to.include("object");
+            pm.expect(typeof e.equal).to.equal("function");
+            pm.expect(e.hasOwnProperty("equal")).to.equal(true);
+            // console.log serialises whatever it is given, and JSON.stringify
+            // probes `toJSON`: a chain that rejected either would turn an
+            // ordinary debugging line into a throw.
+            pm.expect(typeof JSON.stringify(e)).to.equal("string");
+            console.log(e);
+            pm.expect(Object.keys(e)).to.include("equal");
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// `.NaN` is chai's `value !== value`, so only the number NaN satisfies it. The
+// coercing reading would pass every string that is not a number.
+TEST_F (ScriptEngineTest, ExpectNaN) {
+    auto result = engine.execute_test (R"(
+        pm.test("NaN is NaN", function() { pm.expect(NaN).to.be.NaN; });
+        pm.test("a number is not", function() { pm.expect(1).to.not.be.NaN; });
+        pm.test("a string is not", function() { pm.expect("foo").to.not.be.NaN; });
+        pm.test("0/0", function() { pm.expect(0/0).to.be.NaN; });
+        pm.test("a number fails", function() { pm.expect(1).to.be.NaN; });
+        pm.test("no coercion", function() { pm.expect("foo").to.be.NaN; });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 6u);
+    for (size_t i = 0; i < 4; i++) {
+        EXPECT_TRUE (result.tests[i].passed)
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+    EXPECT_FALSE (result.tests[4].passed);
+    EXPECT_FALSE (result.tests[5].passed);
+}
+
+// An object target left `includes` false, so the positive form always failed
+// and the negated form always passed - a verdict about nothing.
+TEST_F (ScriptEngineTest, ExpectIncludeMatchesObjectSubset) {
+    auto result = engine.execute_test (R"(
+        pm.test("subset", function() { pm.expect({a:1,b:2}).to.include({a:1}); });
+        pm.test("whole", function() { pm.expect({a:1}).to.include({a:1}); });
+        pm.test("wrong value", function() { pm.expect({a:1}).to.not.include({a:2}); });
+        pm.test("missing key", function() { pm.expect({a:1}).to.not.include({b:1}); });
+        pm.test("strict per key", function() { pm.expect({a:{b:1}}).to.not.include({a:{b:1}}); });
+        pm.test("deep per key", function() { pm.expect({a:{b:1}}).to.deep.include({a:{b:1}}); });
+        pm.test("the negated form can fail", function() { pm.expect({a:1}).to.not.include({a:1}); });
+        pm.test("the positive form can fail", function() { pm.expect({a:1}).to.include({a:2}); });
+        pm.test("strings still work", function() { pm.expect("hello").to.include("ell"); });
+        pm.test("arrays still work", function() { pm.expect([1,2]).to.include(2); });
+        pm.test("a number takes an object", function() { pm.expect(5).to.include("x"); });
+        pm.test("an object takes an object", function() { pm.expect({a:1}).to.include("a"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 12u);
+    for (size_t i = 0; i < 6; i++) {
+        EXPECT_TRUE (result.tests[i].passed)
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+    EXPECT_FALSE (result.tests[6].passed);
+    EXPECT_FALSE (result.tests[7].passed);
+    EXPECT_TRUE (result.tests[8].passed) << result.tests[8].error_message;
+    EXPECT_TRUE (result.tests[9].passed) << result.tests[9].error_message;
+    // Both directions of the combination chai refuses: a target that takes an
+    // object argument and did not get one, whichever side is the odd one.
+    for (size_t i = 10; i < 12; i++) {
+        EXPECT_FALSE (result.tests[i].passed) << result.tests[i].name << " passed but should not";
+        EXPECT_NE (
+        result.tests[i].error_message.find ("expects an object argument"), std::string::npos)
+        << result.tests[i].error_message;
+    }
+}
+
+// An expectation with no keys compares nothing. chai walks its keys, finds
+// none, and passes in *both* directions - so a computed subset that came out
+// empty is a green test that asserted nothing, and `.not.include` of one is a
+// green test too. A Date, a RegExp and a function each carry no own enumerable
+// key and read as an assertion, which is the same trap wearing a type.
+TEST_F (ScriptEngineTest, ExpectIncludeRefusesAnExpectationWithNoKeys) {
+    auto result = engine.execute_test (R"(
+        pm.test("empty object", function() { pm.expect({a:1}).to.include({}); });
+        pm.test("empty object negated", function() { pm.expect({a:1}).to.not.include({}); });
+        pm.test("a primitive target", function() { pm.expect(5).to.include({}); });
+        pm.test("a date", function() { pm.expect({a:1}).to.include(new Date()); });
+        pm.test("a regexp", function() { pm.expect({a:1}).to.include(/x/); });
+        pm.test("a function", function() { pm.expect({a:1}).to.include(function(){}); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 6u);
+    for (const auto& test : result.tests) {
+        EXPECT_FALSE (test.passed) << test.name << " passed but should not";
+        EXPECT_NE (test.error_message.find ("no properties to match"), std::string::npos)
+        << test.name << ": " << test.error_message;
+    }
+}
+
+// A getter that throws is a read that did not happen, not a mismatch. Answering
+// "these differ" would make the negated form a pass, which is how a broken
+// object under test reports green.
+TEST_F (ScriptEngineTest, ExpectIncludePropagatesAThrowingGetter) {
+    auto result = engine.execute_test (R"(
+        pm.test("on the target", function() {
+            var target = { get a() { throw new Error("nope"); } };
+            pm.expect(target).to.not.include({a: 1});
+        });
+        pm.test("on the expectation", function() {
+            var wanted = {};
+            Object.defineProperty(wanted, "a", {
+                enumerable: true, get: function() { throw new Error("nope"); }
+            });
+            pm.expect({a: 1}).to.not.include(wanted);
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2u);
+    for (const auto& test : result.tests) {
+        EXPECT_FALSE (test.passed) << test.name << " passed but should not";
+        EXPECT_NE (test.error_message.find ("nope"), std::string::npos)
+        << test.name << ": " << test.error_message;
+    }
+}
+
+// `ToNumber` on both sides made `expect("5").to.be.above(3)` a pass. chai
+// type-asserts, so it is an error there - and the coerced reading is how a
+// string body silently compares as a number.
+TEST_F (ScriptEngineTest, ExpectOrderingMatchersTypeAssert) {
+    auto result = engine.execute_test (R"(
+        pm.test("above", function() { pm.expect(5).to.be.above(3); });
+        pm.test("below", function() { pm.expect(3).to.be.below(5); });
+        pm.test("at least", function() { pm.expect(5).to.be.at.least(5); });
+        pm.test("at most", function() { pm.expect(5).to.be.at.most(5); });
+        pm.test("negated", function() { pm.expect(3).to.not.be.above(5); });
+        pm.test("dates", function() { pm.expect(new Date(5)).to.be.above(new Date(4)); });
+        pm.test("a string target", function() { pm.expect("5").to.be.above(3); });
+        pm.test("a string argument", function() { pm.expect(5).to.be.above("3"); });
+        pm.test("a boolean target", function() { pm.expect(true).to.be.at.least(0); });
+        pm.test("a null argument", function() { pm.expect(5).to.be.at.most(null); });
+        pm.test("a number against a Date", function() { pm.expect(5).to.be.above(new Date(1)); });
+        pm.test("a Date against a number", function() { pm.expect(new Date(5)).to.be.above(1); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 12u);
+    for (size_t i = 0; i < 6; i++) {
+        EXPECT_TRUE (result.tests[i].passed)
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+    for (size_t i = 6; i < 10; i++) {
+        EXPECT_FALSE (result.tests[i].passed) << result.tests[i].name << " passed but should not";
+        EXPECT_NE (result.tests[i].error_message.find ("number or a Date"), std::string::npos)
+        << result.tests[i].error_message;
+    }
+    // chai orders like with like: a Date read as milliseconds against a number
+    // is a comparison neither side wrote.
+    for (size_t i = 10; i < 12; i++) {
+        EXPECT_FALSE (result.tests[i].passed) << result.tests[i].name << " passed but should not";
+        EXPECT_NE (result.tests[i].error_message.find ("a Date with a Date"), std::string::npos)
+        << result.tests[i].error_message;
+    }
+}
+
+// `String(err)` is "Error: boom", so `.to.throw("Error")` passed for every
+// Error thrown, whatever it said. chai matches the message alone, and takes the
+// constructor form this used to refuse outright.
+TEST_F (ScriptEngineTest, ExpectThrowMatchesMessageAndConstructor) {
+    auto result = engine.execute_test (R"(
+        pm.test("message only", function() {
+            pm.expect(function() { throw new Error("boom"); }).to.not.throw("Error");
+        });
+        pm.test("the message itself", function() {
+            pm.expect(function() { throw new Error("boom"); }).to.throw("boom");
+        });
+        pm.test("constructor", function() {
+            pm.expect(function() { throw new TypeError("bad"); }).to.throw(TypeError);
+        });
+        pm.test("wrong constructor", function() {
+            pm.expect(function() { throw new RangeError("bad"); }).to.not.throw(TypeError);
+        });
+        pm.test("constructor and message", function() {
+            pm.expect(function() { throw new SyntaxError("unexpected end"); })
+                .to.throw(SyntaxError, "unexpected");
+        });
+        pm.test("constructor with a wrong message", function() {
+            pm.expect(function() { throw new SyntaxError("unexpected end"); })
+                .to.not.throw(SyntaxError, "nothing like it");
+        });
+        pm.test("a thrown string", function() {
+            pm.expect(function() { throw "boom"; }).to.throw("boom");
+        });
+        pm.test("a pattern reads the message", function() {
+            pm.expect(function() { throw new Error("boom 42"); }).to.throw(/^boom [0-9]+$/);
+        });
+        pm.test("the constructor form can fail", function() {
+            pm.expect(function() { throw new RangeError("bad"); }).to.throw(TypeError);
+        });
+        pm.test("the message form can fail", function() {
+            pm.expect(function() { throw new Error("boom"); }).to.throw("bang");
+        });
+        pm.test("a thrown number has no message", function() {
+            pm.expect(function() { throw 42; }).to.not.throw("4");
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 11u);
+    for (size_t i = 0; i < 8; i++) {
+        EXPECT_TRUE (result.tests[i].passed)
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+    EXPECT_FALSE (result.tests[8].passed);
+    EXPECT_FALSE (result.tests[9].passed);
+    EXPECT_TRUE (result.tests[10].passed) << result.tests[10].error_message;
+
+    // A failure has to say what was expected. "Expected the function to throw,
+    // but it threw RangeError: bad" reads as an engine fault when what failed
+    // was the constructor the script named.
+    EXPECT_NE (result.tests[8].error_message.find ("to throw TypeError"), std::string::npos)
+    << result.tests[8].error_message;
+    EXPECT_NE (
+    result.tests[9].error_message.find ("with a message matching 'bang'"), std::string::npos)
+    << result.tests[9].error_message;
+}
+
+// deep-eql separates the two zeros (`1/x`) and `===` does not, so `.eql` and
+// `.equal` give different answers about the same pair - which is the rule chai
+// implements and the reason the deep compare takes the rule as an argument.
+TEST_F (ScriptEngineTest, ExpectEqlSplitsSignedZeros) {
+    auto result = engine.execute_test (R"(
+        pm.test("eql splits them", function() { pm.expect(-0).to.not.eql(0); });
+        pm.test("eql on the same zero", function() { pm.expect(-0).to.eql(-0); });
+        pm.test("nested", function() { pm.expect({a:-0}).to.not.eql({a:0}); });
+        pm.test("in an array", function() { pm.expect([-0]).to.not.eql([0]); });
+        pm.test("equal is still ===", function() { pm.expect(-0).to.equal(0); });
+        pm.test("other numbers are unaffected", function() { pm.expect(1.5).to.eql(1.5); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+}
+
+// The other half of that rule: the response assertions are chai-postman, which
+// is lodash `_.isEqual` and compares the two zeros equal. One deep compare
+// serves both, so this is what says the caller's rule reached it.
+TEST_F (ScriptEngineTest, ResponseAssertionsKeepSameValueZero) {
+    response.body = R"({"n": -0})";
+    auto result   = engine.execute_test (R"(
+        pm.test("jsonBody", function() { pm.response.to.have.jsonBody("n", 0); });
+        pm.test("body", function() { pm.response.to.have.body({n: 0}); });
+    )",
+      request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2u);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+}
+
 TEST_F (ScriptEngineTest, ExpectNestedProperty) {
     auto result = engine.execute_test (R"(
         pm.test("dotted path", function() { pm.expect({a:{b:{c:1}}}).to.have.nested.property("a.b.c"); });
@@ -3553,6 +3858,192 @@ TEST_F (ScriptEngineTest, ResponseHeadersHaveNoMutators) {
     EXPECT_EQ (env["remove"].value, "undefined");
 }
 
+TEST_F (ScriptEngineTest, HeaderPropertyListReadsWalkTheResponseHeaders) {
+    auto result = engine.execute_test (R"JS(
+        var seen = [];
+        pm.response.headers.each(function (header) { seen.push(header.key + '=' + header.value); });
+        pm.environment.set('each', seen.join('|'));
+        pm.environment.set('all',
+            pm.response.headers.all().map(function (h) { return h.key; }).join(','));
+        pm.environment.set('count', String(pm.response.headers.count()));
+        pm.environment.set('toObject', JSON.stringify(pm.response.headers.toObject()));
+        pm.environment.set('one', JSON.stringify(pm.response.headers.one('CONTENT-TYPE')));
+        pm.environment.set('absent', String(pm.response.headers.one('X-Absent')));
+        pm.environment.set('indexOf', String(pm.response.headers.indexOf('x-request-id')));
+        pm.environment.set('absentIndex', String(pm.response.headers.indexOf('X-Absent')));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["each"].value, "Content-Type=application/json|X-Request-Id=abc123");
+    EXPECT_EQ (env["all"].value, "Content-Type,X-Request-Id");
+    EXPECT_EQ (env["count"].value, "2");
+    EXPECT_EQ (env["toObject"].value,
+    R"({"content-type":"application/json","x-request-id":"abc123"})");
+    // `one` answers with the header, `get` with its value - and both find it
+    // whatever casing they are asked in.
+    EXPECT_EQ (env["one"].value, R"({"key":"Content-Type","value":"application/json"})");
+    EXPECT_EQ (env["absent"].value, "undefined");
+    EXPECT_EQ (env["indexOf"].value, "1");
+    EXPECT_EQ (env["absentIndex"].value, "-1");
+}
+
+TEST_F (ScriptEngineTest, HeaderPropertyListReadsWalkTheRequestHeaders) {
+    // The same six over the object the write-back reads. Asked in the opposite
+    // casing to the response test - stored upper, queried lower - so the two
+    // together pin the match in both directions rather than one.
+    auto result = engine.execute_prerequest (R"JS(
+        var seen = [];
+        pm.request.headers.each(function (header) { seen.push(header.key + '=' + header.value); });
+        pm.environment.set('each', seen.join('|'));
+        pm.environment.set('all',
+            pm.request.headers.all().map(function (h) { return h.key; }).join(','));
+        pm.environment.set('count', String(pm.request.headers.count()));
+        pm.environment.set('toObject', JSON.stringify(pm.request.headers.toObject()));
+        pm.environment.set('one', JSON.stringify(pm.request.headers.one('authorization')));
+        pm.environment.set('absent', String(pm.request.headers.one('X-Absent')));
+        pm.environment.set('indexOf', String(pm.request.headers.indexOf('content-type')));
+        pm.environment.set('absentIndex', String(pm.request.headers.indexOf('X-Absent')));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["each"].value, "Authorization=Bearer token123|Content-Type=application/json");
+    EXPECT_EQ (env["all"].value, "Authorization,Content-Type");
+    EXPECT_EQ (env["count"].value, "2");
+    EXPECT_EQ (env["toObject"].value,
+    R"({"authorization":"Bearer token123","content-type":"application/json"})");
+    // The member's key is the spelling the request holds, which is what
+    // `upsert` writes through - not the spelling it was asked for.
+    EXPECT_EQ (env["one"].value, R"({"key":"Authorization","value":"Bearer token123"})");
+    EXPECT_EQ (env["absent"].value, "undefined");
+    EXPECT_EQ (env["indexOf"].value, "1");
+    EXPECT_EQ (env["absentIndex"].value, "-1");
+}
+
+TEST_F (ScriptEngineTest, HeaderToObjectLowerCasesUnlessAskedNotTo) {
+    // postman-collection indexes a header list case-insensitively, so its
+    // `toObject()` lower-cases every key and only `caseSensitive` keeps the
+    // spelling. Copying this object's own keys instead would read as the
+    // harmless choice: `pm.request.headers` keeps whatever the user typed, so
+    // `toObject()['content-type']` would answer undefined here against a
+    // request carrying `Content-Type`, and the value in Postman.
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('lowered', pm.request.headers.toObject()['content-type']);
+        pm.environment.set('kept',
+            JSON.stringify(Object.keys(pm.request.headers.toObject(false, true))));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["lowered"].value, "application/json");
+    EXPECT_EQ (env["kept"].value, R"(["Authorization","Content-Type"])");
+}
+
+TEST_F (ScriptEngineTest, HeaderEachPassesPostmansArgumentsAndThis) {
+    // postman-collection's `each` is `_.forEach(members, iterator.bind(context))`,
+    // so the callback is handed the member, its index and the whole list, and
+    // the optional second argument becomes its `this`.
+    auto result = engine.execute_test (R"JS(
+        var shape = [];
+        pm.response.headers.each(function (header, index, all) {
+            shape.push([index, header.key, all.length, this.tag].join(':'));
+        }, { tag: 'bound' });
+        pm.environment.set('shape', shape.join('|'));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["shape"].value, "0:Content-Type:2:bound|1:X-Request-Id:2:bound");
+}
+
+TEST_F (ScriptEngineTest, HeaderIndexOfTakesAMemberAsWellAsAName) {
+    // Postman finds a member by identity in its own list; the members here are
+    // built per call, so the object form is matched by its key - which answers
+    // the same for a member of this list, and -1 for anything else.
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('member',
+            String(pm.response.headers.indexOf(pm.response.headers.all()[1])));
+        pm.environment.set('foreign',
+            String(pm.response.headers.indexOf({ key: 'X-Absent', value: '1' })));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["member"].value, "1");
+    EXPECT_EQ (env["foreign"].value, "-1");
+}
+
+TEST_F (ScriptEngineTest, HeaderPropertyListReadsRefuseBadInput) {
+    auto result = engine.execute_test (R"JS(
+        function reason(fn) {
+            try { fn(); return 'no throw'; } catch (e) { return String(e.message || e); }
+        }
+        pm.environment.set('eachNoFn', reason(function () { pm.response.headers.each(); }));
+        pm.environment.set('eachNumber', reason(function () { pm.response.headers.each(42); }));
+        pm.environment.set('oneNumber', reason(function () { pm.response.headers.one(42); }));
+        pm.environment.set('indexNumber', reason(function () { pm.response.headers.indexOf(42); }));
+        pm.environment.set('detached', reason(function () {
+            var all = pm.response.headers.all;
+            all();
+        }));
+        pm.environment.set('fromCallback', reason(function () {
+            pm.response.headers.each(function () { throw new Error('from the callback'); });
+        }));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_NE (env["eachNoFn"].value.find ("needs a function"), std::string::npos)
+    << env["eachNoFn"].value;
+    EXPECT_NE (env["eachNumber"].value.find ("got number"), std::string::npos)
+    << env["eachNumber"].value;
+    EXPECT_NE (env["oneNumber"].value.find ("needs a header name string"), std::string::npos)
+    << env["oneNumber"].value;
+    EXPECT_NE (env["indexNumber"].value.find ("needs a header name string"), std::string::npos)
+    << env["indexNumber"].value;
+    EXPECT_NE (
+    env["detached"].value.find ("must be called on a headers object"), std::string::npos)
+    << env["detached"].value;
+    // A throw out of the callback is the script's own, reported as it stands
+    // rather than wrapped as an `each` failure.
+    EXPECT_EQ (env["fromCallback"].value, "from the callback");
+}
+
+TEST_F (ScriptEngineTest, PreRequestHeaderEachWalksTheSetItStartedWith) {
+    // The member list is built once, so a callback that removes the header it
+    // was handed does not shorten the walk under itself.
+    auto result = engine.execute_prerequest (R"JS(
+        var seen = [];
+        pm.request.headers.each(function (header) {
+            seen.push(header.key);
+            pm.request.headers.remove(header.key);
+        });
+        pm.environment.set('seen', seen.join(','));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["seen"].value, "Authorization,Content-Type");
+    EXPECT_TRUE (request.headers.empty ());
+}
+
+TEST_F (ScriptEngineTest, PreRequestPropertyListReadsStayOffTheWire) {
+    // They are non-enumerable like the first five, so the write-back - which
+    // reads own enumerable string properties as the outgoing header set - never
+    // sees a header whose value is `each`.
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('count', String(pm.request.headers.count()));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["count"].value, "2");
+    ASSERT_EQ (request.headers.size (), 2u);
+    EXPECT_TRUE (request.headers.contains ("Authorization"));
+    EXPECT_TRUE (request.headers.contains ("Content-Type"));
+}
+
 TEST_F (ScriptEngineTest, ResponseReasonReportsTheStatusText) {
     response.status_code = 404;
     response.status_text = "Not Found";
@@ -4326,7 +4817,7 @@ TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
  *
  * Not "" and not the token verbatim: the token says the value came from the
  * file, so a name the file has no column for is a mistake about the column, and
- * both quiet answers hide it. This is the rule `apply_data_template` already
+ * both quiet answers hide it. This is the rule `apply_iteration_template` already
  * enforces on a URL - a script asking the same question gets the same answer.
  */
 TEST_F (ScriptEngineTest, ReplaceInThrowsForAColumnTheRowDoesNotCarry) {

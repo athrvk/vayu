@@ -54,6 +54,7 @@ import { useActiveCollectionId } from "./useActiveCollectionId";
 import { useDataContract } from "./useDataContract";
 import { variableCompletionContext } from "@/lib/variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
+import { ITERATION_VARIABLES } from "@/lib/iteration-variables";
 import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
 
 const CLOSE_BRACES = "}}";
@@ -70,6 +71,13 @@ export const BODY_LANGUAGES = ["json", "plaintext", "graphql"];
 
 /** The resolver's own precedence, so the winning definition sorts first. */
 const SCOPE_ORDER: Record<string, number> = { environment: 0, collection: 1, global: 2 };
+
+/**
+ * Between the scopes and the data columns: `$vu` / `$iteration` are a
+ * reserved namespace like `data.*`, not a generator, so they sort with the
+ * other reserved things rather than among the `$random*` table.
+ */
+const ITERATION_SORT_GROUP = 6;
 
 /**
  * Between the scopes and the generators: a declared column is workspace data
@@ -143,6 +151,25 @@ export function useVariableCompletionProvider() {
 					filterText: `{{${name}`,
 					range,
 				}));
+
+				/*
+				 * The reserved identity namespace (issue #994). Offered unconditionally
+				 * - unlike the generators below, a same-named scope variable never wins
+				 * here (`variable-resolution.ts` reserves the names ahead of the scope
+				 * lookup), so there is no shadow check to make.
+				 */
+				for (const identity of ITERATION_VARIABLES) {
+					suggestions.push({
+						label: identity.name,
+						kind: monaco.languages.CompletionItemKind.Constant,
+						insertText: `{{${identity.name}${closing}`,
+						detail: identity.description,
+						documentation: "Bound per iteration by the run, not generated here",
+						sortText: `${ITERATION_SORT_GROUP}${identity.name}`,
+						filterText: `{{${identity.name}`,
+						range,
+					});
+				}
 
 				/*
 				 * Dynamic variables sort after every user variable: they are offered

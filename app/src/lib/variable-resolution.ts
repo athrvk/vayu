@@ -26,6 +26,9 @@
  *  - a name nothing defines keeps its braces, plain or `$name` (issue #1009)
  *  - a `data.*` name keeps its braces too: it addresses the reserved data
  *    namespace (issue #402), which only a scenario run's iteration can bind
+ *  - `$vu` and `$iteration` keep their braces too: they address the reserved
+ *    identity namespace (issue #994), which only the iteration that sends can
+ *    bind - a variable defined with either name never answers for it
  *  - so does a bare name a bound data row will substitute (issue #1007) - the
  *    same deferral for the same reason, spelled the way Postman's data
  *    variables are
@@ -42,6 +45,7 @@
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { isDynamicVariableName, resolveDynamicVariable } from "./dynamic-variables";
+import { isIterationVariableName } from "./iteration-variables";
 
 /** A stored variable definition as it may actually arrive off disk - loose. */
 export interface StoredVariableLike {
@@ -153,13 +157,13 @@ const NO_BOUND_COLUMNS: BoundColumnNames = new Set<string>();
 const MAX_NESTED_RESOLUTIONS = 8;
 
 /**
- * Substitute `{{name}}` occurrences: the reserved `data.*` namespace first
- * (kept verbatim) and `boundColumns` beside it (kept verbatim too, issue
- * #1007), then scopes, then the dynamic-variable table. A defined name (even
- * one spelled `$guid`) wins over a generator; a name nothing answers keeps its
- * braces, `$name` (issue #186) and ordinary alike (issue #1009) - the token
- * reaching the wire is what makes the miss visible, where an empty string
- * silently changed the request.
+ * Substitute `{{name}}` occurrences: the reserved `data.*` namespace and the
+ * reserved `$vu` / `$iteration` identity namespace first, with `boundColumns`
+ * beside them (all kept verbatim, issue #1007), then scopes, then the
+ * dynamic-variable table. A defined name (even one spelled `$guid`) wins over
+ * a generator; a name nothing answers keeps its braces, `$name` (issue #186)
+ * and ordinary alike (issue #1009) - the token reaching the wire is what makes
+ * the miss visible, where an empty string silently changed the request.
  *
  * A replacement that carries tokens of its own is resolved through the same
  * lookup, to `MAX_NESTED_RESOLUTIONS` levels, so a layered `{{baseUrl}}`
@@ -187,12 +191,19 @@ export function resolveTemplate(
 			// Only a scenario run's iteration can bind one, and the engine's
 			// composer leaves it written as it stands for exactly that reason.
 			if (isDataVariableName(name)) return match;
+			// Same reasoning, same placement: `$vu` / `$iteration` name the
+			// reserved identity namespace (issue #994), not a variable, so a
+			// scope definition of either must not answer here either. Only the
+			// iteration that sends binds them - the engine's composer leaves the
+			// token written as it stands for exactly that reason.
+			if (isIterationVariableName(name)) return match;
 			// Before the lookup for the opposite reason: this name is *not*
 			// disjoint from the scopes, and the row is the one that wins. Postman
 			// puts a data column above the environment, so a scope answering here
 			// would preview the value the row is there to replace - and ahead of
 			// the generator table too, so a column named `$guid` is deferred rather
-			// than generated.
+			// than generated. After the two reserved namespaces, as the engine
+			// orders them.
 			if (boundColumns.has(name)) return match;
 			if (expanding.includes(name)) return match;
 			const defined = lookup(name);

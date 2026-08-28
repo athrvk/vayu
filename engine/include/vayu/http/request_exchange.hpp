@@ -203,11 +203,12 @@ std::vector<vayu::http::CookieWrite>* writes);
  * One exchange's inputs: a composed, auth-resolved request and the scripts
  * that bracket it.
  *
- * `iteration` / `iteration_count` / `iteration_data` belong to a caller that
- * binds a row: the scenario runner, per iteration, and `POST /execute` when the
- * payload names a `data` row (issue #601, where the send is row 0 of 1). Every
- * other caller leaves them unset so `pm.info.iteration` and `pm.iterationData`
- * read `undefined` (issues #300 and #356, and see ScriptContext).
+ * `iteration` / `vu` / `iteration_count` / `iteration_data` belong to a caller
+ * that binds a row: the scenario runner, per iteration, and `POST /execute` when
+ * the payload names a `data` row (issue #601, where the send is row 0 of 1).
+ * Every other caller leaves them unset so `pm.info.iteration` and
+ * `pm.iterationData` read `undefined` (issues #300 and #356, and see
+ * ScriptContext).
  */
 struct ExchangeInputs {
     vayu::Request request;
@@ -216,6 +217,12 @@ struct ExchangeInputs {
     std::optional<std::string> request_id;
     std::optional<std::string> request_name;
     std::optional<size_t> iteration;
+    /// Which virtual user this exchange runs as, 1-based (issue #994). Set
+    /// wherever @ref iteration is and never on its own: an iteration always
+    /// belongs to a user, and neither of these paths has more than one - a
+    /// collection run in design mode walks its sequence once, and a send with a
+    /// row is that one user's row 0.
+    std::optional<size_t> vu;
     std::optional<size_t> iteration_count;
     /// Whether the scripts may redirect the sequence around this exchange -
     /// the scenario runner's alone, exactly as `iteration` is (issue #355).
@@ -283,8 +290,19 @@ struct ExchangeOutcome {
  *
  * A request holding no `{{` at all - nearly all of them, composition having
  * resolved what it could - pays one search per field and nothing else.
+ *
+ * @return why this request must not be sent, if a resolved header name landed
+ *         on one the request already carried (`http/header_names.hpp`, issue
+ *         #1051) - the one thing this pass can produce that a send cannot
+ *         survive, because the map holds one value per name and the header it
+ *         replaced is simply gone. `std::nullopt` is the ordinary answer, the
+ *         request resolved in place. The refusal is a `vayu::Error` rather than
+ *         a status because this pass serves two callers with two different
+ *         answers to give: the shape is the pre-send gate's, and each caller
+ *         renders it the way it renders that one.
  */
-void resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& scopes);
+[[nodiscard]] std::optional<vayu::Error>
+resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& scopes);
 
 /**
  * Run one exchange: pre-request script, send, test script.

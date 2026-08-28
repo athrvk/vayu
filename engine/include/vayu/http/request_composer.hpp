@@ -100,6 +100,35 @@ inline constexpr std::string_view DATA_NAMESPACE_PREFIX = "data.";
 bool is_data_variable_name (const std::string& name);
 
 /**
+ * The reserved prefix for the iteration identity: `{{$vu}}` and
+ * `{{$iteration}}` address the run that is executing, never a variable from any
+ * scope (issue #994).
+ */
+inline constexpr std::string_view IDENTITY_NAMESPACE_PREFIX = "$";
+/// The virtual user this request belongs to, 1-based.
+inline constexpr std::string_view IDENTITY_VU_NAME = "$vu";
+/// That virtual user's iteration, 0-based.
+inline constexpr std::string_view IDENTITY_ITERATION_NAME = "$iteration";
+
+/**
+ * True for `$vu` or `$iteration`, the two reserved identity names (issue #994).
+ *
+ * They are spelled like a dynamic variable and behave like `data.*`: the value
+ * is known only to the iteration that is about to send, so composition leaves
+ * the token written as it stands and the executor binds it immediately before
+ * the send (`core::apply_iteration_template`). Being reserved is what makes them
+ * *bindable at all* - a variable someone names `$vu` cannot answer for the
+ * identity, exactly as one named `data.id` cannot answer for a column, because
+ * a scope that could answer would freeze the value at composition for the whole
+ * run.
+ *
+ * The two names are matched exactly rather than by their `$` prefix: every
+ * other `$name` is either a generator from the dynamic table or an unknown that
+ * keeps its braces (#186), and both of those must keep answering as they did.
+ */
+bool is_identity_variable_name (const std::string& name);
+
+/**
  * The bare column names a bound data row will substitute (issue #1007).
  *
  * Postman binds a dataset's columns to bare names - `{{username}}` in a
@@ -114,7 +143,7 @@ bool is_data_variable_name (const std::string& name);
  * Composition holds only the *names*, never a row: a plan is composed once and
  * a row is bound per iteration, so what composition can do about a bound column
  * is exactly what it does about `data.*` - leave the token written as it
- * stands, for `core::apply_data_template` to join per row. An empty set is
+ * stands, for `core::apply_iteration_template` to join per row. An empty set is
  * every composition that has no dataset behind it, and costs one `empty()`
  * test per token.
  *
@@ -179,7 +208,7 @@ struct TokenSplit {
  *
  * This exists for the load path, which cannot re-scan every field of every
  * request per iteration: a field is split once, when the plan is resolved, and
- * only joined per row afterwards (`core::tokenize_data_fields`).
+ * only joined per row afterwards (`core::tokenize_bindable_fields`).
  */
 [[nodiscard]] TokenSplit split_tokens (const std::string& input,
 const std::function<bool (const std::string& name)>& keep);
@@ -225,7 +254,7 @@ const BoundColumnNames& bound_columns = {});
  *
  * The rendering is what a value *reads* as; whether it is then escaped for the
  * document it lands in is `core::encode_data_value`'s question. **A null cell
- * never reaches a request through the binder** - `apply_data_template` refuses
+ * never reaches a request through the binder** - `apply_iteration_template` refuses
  * it, for the same reason a missing column is refused - so the empty rendering
  * here is the answer to "what does this value say", not a value the wire ever
  * sees.

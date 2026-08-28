@@ -317,15 +317,17 @@ TEST (ScriptTypesTest, ACallInsideALabelDoesNotEmptyTheSignature) {
     EXPECT_TRUE (contains (dts,
     "get(url: string, name: string, callback?: "
     "Function): string | undefined;"));
-    EXPECT_TRUE (contains (dts, "unset(url: string, name: string, callback?: Function): void;"));
+    EXPECT_TRUE (contains (dts, "getAll(url: string, callback?: Function): object[];"));
+    EXPECT_TRUE (contains (dts, "unset(url: string, name: string, callback?: Function): string;"));
     EXPECT_TRUE (contains (dts, "clear(url?: string, callback?: Function): void;"));
     // The flat `set(url, name, value)` form the docs also show has to fit the
     // one signature the table can express.
     EXPECT_TRUE (contains (dts,
     "set(url: string, cookie: object | string, "
-    "value?: string | Function, callback?: Function): void;"));
+    "value?: string | Function, callback?: Function): object;"));
     EXPECT_FALSE (contains (dts, "get(): void;"));
     EXPECT_FALSE (contains (dts, "set(): void;"));
+    EXPECT_FALSE (contains (dts, "getAll(): void;"));
 }
 
 // A closed set of strings is a type, and `field_type` called it prose. So

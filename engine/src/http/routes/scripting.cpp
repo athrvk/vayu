@@ -178,8 +178,9 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.response.headers" }, { "detail", "object" },
     { "documentation",
     "Response headers as key-value pairs, keyed by the lower-cased name the "
-    "HTTP client parsed. Index it (pm.response.headers['content-type']) or use "
-    "the case-insensitive get()/has() over it." },
+    "HTTP client parsed. Index it (pm.response.headers['content-type']), use "
+    "the case-insensitive get()/has() over it, or walk it with "
+    "each()/all()/toObject()." },
     { "sortText", "1_pm_response_headers" } });
 
     completions.push_back ({ { "label", "pm.response.headers.get" }, { "kind", KIND_FUNCTION },
@@ -201,6 +202,72 @@ nlohmann::json get_script_completions () {
     "With a second argument, whether it also carries that exact value - the "
     "comparison is strict, so a number never matches the wire's string." },
     { "sortText", "1_pm_response_headers_has" } });
+
+    // The PropertyList reads, offered on both header objects because
+    // `install_header_methods` installs them on both - the completion table and
+    // the runtime are held to each other by ScriptCompletions.
+    completions.push_back ({ { "label", "pm.response.headers.each" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.headers.each((header) => {\n\t$0\n})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.response.headers.each(fn: (header: { key: string; value: string }, "
+    "index: "
+    "number, all: { key: string; value: string }[]) => void, thisArg?: any): "
+    "void" },
+    { "documentation",
+    "Call fn for each response header, with { key, value } as Postman does. "
+    "The list is taken once, so it is the set the call started "
+    "with.\n\nExample:"
+    "\npm.response.headers.each(h => console.log(h.key, h.value));" },
+    { "sortText", "1_pm_response_headers_each" } });
+
+    completions.push_back ({ { "label", "pm.response.headers.all" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.headers.all()" },
+    { "detail", "pm.response.headers.all(): { key: string; value: string }[]" },
+    { "documentation",
+    "Every response header as a { key, value }, in the object's own key order. "
+    "A name the server sent twice is one entry here, its values already folded "
+    "with ', ' - the wire order and the duplicate are gone before a script "
+    "sees them." },
+    { "sortText", "1_pm_response_headers_all" } });
+
+    completions.push_back ({ { "label", "pm.response.headers.count" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.headers.count()" },
+    { "detail", "pm.response.headers.count(): number" },
+    { "documentation", "How many headers the response carries - all().length without building the array." },
+    { "sortText", "1_pm_response_headers_count" } });
+
+    completions.push_back ({ { "label", "pm.response.headers.toObject" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.headers.toObject()" },
+    { "detail",
+    "pm.response.headers.toObject(excludeDisabled?: boolean, caseSensitive?: "
+    "boolean): Record<string, string>" },
+    { "documentation",
+    "A plain { name: value } object. Keys are lower-cased, as Postman's "
+    "case-insensitive list does it; pass a truthy second argument to keep the "
+    "stored spelling. Postman's other two switches decide nothing here - these "
+    "headers hold no duplicate and no empty name." },
+    { "sortText", "1_pm_response_headers_to_object" } });
+
+    completions.push_back ({ { "label", "pm.response.headers.one" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.headers.one(\"${1:Content-Type}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.headers.one(name: string): { key: string; value: string } | undefined" },
+    { "documentation",
+    "The header itself rather than its value, case-insensitively - undefined "
+    "when it is absent. get() is the value half of the same lookup." },
+    { "sortText", "1_pm_response_headers_one" } });
+
+    completions.push_back (
+    { { "label", "pm.response.headers.indexOf" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.headers.indexOf(\"${1:Content-Type}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.headers.indexOf(name: string): number" },
+    { "documentation",
+    "Where the header sits in all(), case-insensitively, or -1 when it is "
+    "absent. A { key } member from all() or one() is accepted in place of the "
+    "name." },
+    { "sortText", "1_pm_response_headers_index_of" } });
 
     completions.push_back ({ { "label", "pm.response.cookies" }, { "kind", KIND_FIELD },
     { "insertText", "pm.response.cookies" }, { "detail", "object" },
@@ -646,6 +713,72 @@ nlohmann::json get_script_completions () {
     "applied. Case-insensitive, and removing an absent header is a no-op." },
     { "sortText", "1_pm_request_headers_remove" } });
 
+    // The PropertyList reads, the same six the response object carries - they
+    // look rather than write, so the mutator gate does not apply to them.
+    completions.push_back ({ { "label", "pm.request.headers.each" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.headers.each((header) => {\n\t$0\n})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.headers.each(fn: (header: { key: string; value: string }, "
+    "index: "
+    "number, all: { key: string; value: string }[]) => void, thisArg?: any): "
+    "void" },
+    { "documentation",
+    "Call fn for each outgoing header, with { key, value } as Postman does. "
+    "The list is taken once, so removing a header from inside the callback "
+    "does not shorten the walk.\n\nExample:\npm.request.headers.each(h => "
+    "console.log(h.key, h.value));" },
+    { "sortText", "1_pm_request_headers_each" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.all" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.headers.all()" },
+    { "detail", "pm.request.headers.all(): { key: string; value: string }[]" },
+    { "documentation",
+    "Every outgoing header as a { key, value }, in the object's own key order. "
+    "A snapshot: adding a header afterwards does not change the array." },
+    { "sortText", "1_pm_request_headers_all" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.count" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.headers.count()" },
+    { "detail", "pm.request.headers.count(): number" },
+    { "documentation",
+    "How many headers the request will send - all().length without building "
+    "the array." },
+    { "sortText", "1_pm_request_headers_count" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.toObject" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.headers.toObject()" },
+    { "detail",
+    "pm.request.headers.toObject(excludeDisabled?: boolean, caseSensitive?: "
+    "boolean): Record<string, string>" },
+    { "documentation",
+    "A plain { name: value } copy. Keys are lower-cased, as Postman's "
+    "case-insensitive list does it, so toObject()['content-type'] reads the "
+    "header whatever casing it was set with; pass a truthy second argument to "
+    "keep the spelling. The copy is not the header set - writing to it sends "
+    "nothing." },
+    { "sortText", "1_pm_request_headers_to_object" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.one" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.headers.one(\"${1:Authorization}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.headers.one(name: string): { key: string; value: string } | undefined" },
+    { "documentation",
+    "The header itself rather than its value, case-insensitively - undefined "
+    "when it is absent. Its key is the spelling the request holds, which is "
+    "what upsert() writes through." },
+    { "sortText", "1_pm_request_headers_one" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.indexOf" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.headers.indexOf(\"${1:Authorization}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.headers.indexOf(name: string): number" },
+    { "documentation",
+    "Where the header sits in all(), case-insensitively, or -1 when it is "
+    "absent. A { key } member from all() or one() is accepted in place of the "
+    "name." },
+    { "sortText", "1_pm_request_headers_index_of" } });
+
     completions.push_back ({ { "label", "pm.request.body" }, { "kind", KIND_FIELD },
     { "insertText", "pm.request.body" }, { "detail", "string | undefined (writable pre-request)" },
     { "documentation",
@@ -738,11 +871,23 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.info.iteration" }, { "kind", KIND_FIELD },
     { "insertText", "pm.info.iteration" }, { "detail", "number | undefined" },
     { "documentation",
-    "Which pass of a collection run this step belongs to, 0-based. undefined "
-    "everywhere else - a single Send and a load run's Tests script have no "
-    "iteration to report.\n\nExample:\nif (pm.info.iteration === 0) { /* "
+    "Which pass this response belongs to, 0-based: a collection run's pass, or "
+    "the iteration a load run's sampled response was sent in. undefined on a "
+    "single Send, which is one request rather than a pass of "
+    "anything.\n\nExample:\nif (pm.info.iteration === 0) { /* "
     "first pass only */ }" },
     { "sortText", "1_pm_info_iteration" } });
+
+    completions.push_back ({ { "label", "pm.info.vu" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.vu" }, { "detail", "number | undefined" },
+    { "documentation",
+    "Which virtual user sent this request, 1-based. Spans the run's "
+    "concurrency in a collection load run, where each user walks the sequence "
+    "on its own; 1 for a single request repeated under load, which is one "
+    "user's iterations however many are in flight. undefined on a single "
+    "Send.\n\nExample:\nconsole.log('user ' + pm.info.vu + ' iteration ' + "
+    "pm.info.iteration);" },
+    { "sortText", "1_pm_info_vu" } });
 
     completions.push_back ({ { "label", "pm.info.iterationCount" }, { "kind", KIND_FIELD },
     { "insertText", "pm.info.iterationCount" }, { "detail", "number | undefined" },
@@ -1009,7 +1154,10 @@ nlohmann::json get_script_completions () {
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail",
     "pm.sendRequest(urlOrOptions: string | { url: string; method?: string; "
-    "header?: object; body?: string | { mode: 'raw'; raw: string }; timeout?: "
+    "header?: object; headers?: object; body?: string | { mode: 'raw'; raw: "
+    "string }; auth?: { type: string; basic?: object; bearer?: object; "
+    "apikey?: "
+    "object }; timeout?: "
     "number }, callback: (err: Error | null, res: any) => void): void" },
     { "documentation",
     "Send an auxiliary request - fetching a token in a pre-request script is "
@@ -1020,7 +1168,16 @@ nlohmann::json get_script_completions () {
     "Transport failures - refused, DNS, timeout - arrive as err with a .code; "
     "res is null then. res carries code, status, responseTime, headers.get() "
     "and json()/text() - a subset of pm.response, not the assertion "
-    "chain.\n\nBounded on purpose: the request's timeout is capped "
+    "chain.\n\nThe url may be a string or pm.request.url, and {{variables}} in "
+    "it, in header values, in a raw body and in auth credentials resolve as "
+    "the "
+    "call is made - so a value this script set two lines earlier is visible. "
+    "Header names are sent as written.\n\nauth takes Postman's { type, <type>: "
+    "params } shape in either spelling, and composes basic, bearer and apikey. "
+    "Any other type - oauth2 included - is refused by name rather than "
+    "dropped, "
+    "and an Authorization header the script set itself wins.\n\nBounded on "
+    "purpose: the request's timeout is capped "
     "at whatever is left of the script's own time budget, and one script may "
     "issue at most 10 requests. Both throw when exceeded.\n\n**Not available "
     "to agents.** Vayu's MCP target allowlist is checked before the engine is "
@@ -1074,14 +1231,44 @@ nlohmann::json get_script_completions () {
     "object." },
     { "sortText", "1_pm_cookies_to_object" } });
 
+    // Postman's CookieList reads. Where get/has/toObject answer about a name
+    // or a value, these hand back whole cookies - what a script needs to see
+    // the domain, path or expiry it is actually holding.
+    completions.push_back ({ { "label", "pm.cookies.each" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.each((${1:cookie}) => {\n\t$0\n})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.cookies.each(fn: Function, context?: any): void" },
+    { "documentation",
+    "Call fn once per stored cookie that would be sent to this URL, with the "
+    "whole cookie: { name, key, value, domain, path, secure, httpOnly, "
+    "hostOnly, session, expires }. A throw from fn ends the walk and is the "
+    "script's error.\n\nExample:\npm.cookies.each(c => "
+    "console.log(c.name, c.domain));" },
+    { "sortText", "1_pm_cookies_each" } });
+
+    completions.push_back ({ { "label", "pm.cookies.all" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.all()" }, { "detail", "pm.cookies.all(): object[]" },
+    { "documentation",
+    "Every stored cookie that would be sent to this URL, whole, as an array. "
+    "Where toObject() answers with names and values alone, these carry the "
+    "domain, path, secure, httpOnly, hostOnly, session and expires the jar "
+    "holds." },
+    { "sortText", "1_pm_cookies_all" } });
+
+    completions.push_back ({ { "label", "pm.cookies.count" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.count()" }, { "detail", "pm.cookies.count(): number" },
+    { "documentation", "How many stored cookies would be sent to this URL." },
+    { "sortText", "1_pm_cookies_count" } });
+
     // pm.cookies.jar() - the write half (#337). Offered one level deeper than
     // the flat reads because every method is URL-scoped: the URL is what a
     // written cookie's domain and path come from.
     completions.push_back ({ { "label", "pm.cookies.jar" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.cookies.jar()" }, { "detail", "pm.cookies.jar(): object" },
     { "documentation",
-    "Postman's cookie jar object - the write half, plus a URL-scoped read. "
-    "get(url, name), set(url, cookie), unset(url, name) and clear(url) all "
+    "Postman's cookie jar object - the write half, plus two URL-scoped reads. "
+    "get(url, name), getAll(url), set(url, cookie), unset(url, name) and "
+    "clear(url) all "
     "take the URL the cookie belongs to rather than assuming this request's; "
     "clear() with no URL empties this environment's jar.\n\nA "
     "write is applied after the transfer it was made before, so the request "
@@ -1102,15 +1289,32 @@ nlohmann::json get_script_completions () {
     "callback as (null, value)." },
     { "sortText", "1_pm_cookies_jar_get" } });
 
+    completions.push_back ({ { "label", "pm.cookies.jar().getAll" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.jar().getAll(\"${1:https://api.example.com}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.cookies.jar().getAll(url: string, callback?: Function): object[]" },
+    { "documentation",
+    "Every stored cookie that would be sent to that URL, whole - the same "
+    "matching get() makes, without a name to narrow it, and cookies this "
+    "script has just set are included. Each carries { name, key, value, "
+    "domain, path, secure, httpOnly, hostOnly, session, expires }. The array "
+    "is returned and also handed to the optional callback as (null, "
+    "cookies).\n\nExample:\nconst jar = pm.cookies.jar();\nfor (const c of "
+    "jar.getAll(pm.request.url)) console.log(c.name, c.path);" },
+    { "sortText", "1_pm_cookies_jar_get_all" } });
+
     completions.push_back ({ { "label", "pm.cookies.jar().set" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.cookies.jar().set(\"${1:https://api.example.com}\", { name: \"${2:session}\", value: ${3:token} })" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.cookies.jar().set(url: string, cookie: object | string, value?: string | Function, callback?: Function): void" },
+    { "detail", "pm.cookies.jar().set(url: string, cookie: object | string, value?: string | Function, callback?: Function): object" },
     { "documentation",
     "Store a cookie for that URL. The cookie object needs name and value; "
-    "domain, path, secure, httpOnly and expires (seconds since the epoch, 0 "
-    "for a session cookie) are optional and default from the URL. "
-    "set(url, name, value) is accepted too.\n\nThe cookie is matched by the "
+    "domain, path, secure, httpOnly and expires are optional and default from "
+    "the URL. expires takes a Date, a date string Date.parse accepts, or a "
+    "whole number of seconds since the epoch - 0 for a session cookie. "
+    "set(url, name, value) is accepted too.\n\nThe stored cookie is returned "
+    "and handed to the optional callback as (null, cookie), carrying the "
+    "domain and path it took from the URL.\n\nThe cookie is matched by the "
     "same rules a received one is, so setting it for one host does not send "
     "it to another." },
     { "sortText", "1_pm_cookies_jar_set" } });
@@ -1118,10 +1322,11 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.cookies.jar().unset" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.cookies.jar().unset(\"${1:https://api.example.com}\", \"${2:session}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.cookies.jar().unset(url: string, name: string, callback?: Function): void" },
+    { "detail", "pm.cookies.jar().unset(url: string, name: string, callback?: Function): string" },
     { "documentation",
     "Remove the cookies of that name the URL would have carried. Cookies of "
-    "the same name stored for another host or path are left alone." },
+    "the same name stored for another host or path are left alone. The removed "
+    "name is returned and handed to the optional callback as (null, name)." },
     { "sortText", "1_pm_cookies_jar_unset" } });
 
     completions.push_back ({ { "label", "pm.cookies.jar().clear" },
@@ -1375,37 +1580,50 @@ nlohmann::json get_script_completions () {
     { "documentation", "Assert the value is truthy." },
     { "sortText", "2_to_be_ok" }, { "filterText", ".to.be.ok" } });
 
+    completions.push_back ({ { "label", "to.be.NaN" }, { "kind", KIND_FIELD },
+    { "insertText", "to.be.NaN" }, { "detail", ".to.be.NaN" },
+    { "documentation",
+    "Assert the value is NaN. chai's rule is `value !== value`, so only the "
+    "number NaN passes - a string that would read as NaN does not." },
+    { "sortText", "2_to_be_NaN" }, { "filterText", ".to.be.NaN" } });
+
     completions.push_back ({ { "label", "to.exist" }, { "kind", KIND_FIELD },
     { "insertText", "to.exist" }, { "detail", ".to.exist" },
     { "documentation", "Assert the value is not null or undefined." },
     { "sortText", "2_to_exist" }, { "filterText", ".to.exist" } });
 
-    completions.push_back ({ { "label", "to.be.above" },
-    { "kind", KIND_FUNCTION }, { "insertText", "to.be.above(${1:n})" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.above(n: number)" },
+    completions.push_back ({ { "label", "to.be.above" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.be.above(${1:n})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.above(n: number | Date)" },
     { "documentation",
-    "Assert the number is greater than "
-    "n.\n\nExample:\npm.expect(responseTime).to.be.above(0);" },
+    "Assert the number is greater than n. Both sides must be a number or a "
+    "Date, as in chai: a string is refused rather than coerced.\n\nExample:\n"
+    "pm.expect(responseTime).to.be.above(0);" },
     { "sortText", "2_to_be_above" }, { "filterText", ".to.be.above" } });
 
-    completions.push_back ({ { "label", "to.be.below" },
-    { "kind", KIND_FUNCTION }, { "insertText", "to.be.below(${1:n})" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.below(n: number)" },
+    completions.push_back ({ { "label", "to.be.below" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.be.below(${1:n})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.below(n: number | Date)" },
     { "documentation",
-    "Assert the number is less than "
-    "n.\n\nExample:\npm.expect(pm.response.responseTime).to.be.below(1000);" },
+    "Assert the number is less than n. Both sides must be a number or a Date, "
+    "as in chai: a string is refused rather than coerced.\n\nExample:\n"
+    "pm.expect(pm.response.responseTime).to.be.below(1000);" },
     { "sortText", "2_to_be_below" }, { "filterText", ".to.be.below" } });
 
-    completions.push_back ({ { "label", "to.be.at.least" },
-    { "kind", KIND_FUNCTION }, { "insertText", "to.be.at.least(${1:n})" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.at.least(n: number)" },
-    { "documentation", "Assert the number is greater than or equal to n." },
+    completions.push_back ({ { "label", "to.be.at.least" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.be.at.least(${1:n})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.at.least(n: number | Date)" },
+    { "documentation",
+    "Assert the number is greater than or equal to n. Both sides must be a "
+    "number or a Date, as in chai: a string is refused rather than coerced." },
     { "sortText", "2_to_be_at_least" }, { "filterText", ".to.be.at.least" } });
 
-    completions.push_back ({ { "label", "to.be.at.most" },
-    { "kind", KIND_FUNCTION }, { "insertText", "to.be.at.most(${1:n})" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.at.most(n: number)" },
-    { "documentation", "Assert the number is less than or equal to n." },
+    completions.push_back ({ { "label", "to.be.at.most" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.be.at.most(${1:n})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.at.most(n: number | Date)" },
+    { "documentation",
+    "Assert the number is less than or equal to n. Both sides must be a number "
+    "or a Date, as in chai: a string is refused rather than coerced." },
     { "sortText", "2_to_be_at_most" }, { "filterText", ".to.be.at.most" } });
 
     completions.push_back ({ { "label", "to.have.property" },
@@ -1435,8 +1653,10 @@ nlohmann::json get_script_completions () {
     { "kind", KIND_FUNCTION }, { "insertText", "to.include(${1:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.include(value: any)" },
     { "documentation",
-    "Assert array includes value or string contains "
-    "substring.\n\nExample:\npm.expect(tags).to.include('featured');" },
+    "Assert an array includes the value, a string contains the substring, or - "
+    "given an object - that the target holds every one of its keys with an "
+    "equal value.\n\nExample:\npm.expect(tags).to.include('featured');\n"
+    "pm.expect(body).to.include({status: 'ok'});" },
     { "sortText", "2_to_include" }, { "filterText", ".to.include" } });
 
     completions.push_back ({ { "label", "to.contain" },
@@ -1551,14 +1771,19 @@ nlohmann::json get_script_completions () {
     { "sortText", "2_to_have_string" }, { "filterText", ".to.have.string" } });
 
     completions.push_back ({ { "label", "to.throw" }, { "kind", KIND_FUNCTION },
-    { "insertText", "to.throw()" }, { "detail", ".to.throw(message?: string | RegExp)" },
+    { "insertText", "to.throw()" },
+    { "detail", ".to.throw(error?: ErrorConstructor | string | RegExp, message?: string | RegExp)" },
     { "documentation",
-    "Assert the function throws, optionally matching the message.\n\nExample:\n"
-    "pm.expect(function() { JSON.parse(\"{\"); }).to.throw();" },
+    "Assert the function throws. A string or regular expression is matched "
+    "against the error's message, and an error constructor against what was "
+    "thrown - with an optional message matcher after it.\n\nExample:\n"
+    "pm.expect(function() { JSON.parse(\"{\"); }).to.throw();\n"
+    "pm.expect(parse).to.throw(SyntaxError, \"unexpected\");" },
     { "sortText", "2_to_throw" }, { "filterText", ".to.throw" } });
 
-    completions.push_back ({ { "label", "to.throws" }, { "kind", KIND_FUNCTION },
-    { "insertText", "to.throws()" }, { "detail", ".to.throws(message?: string | RegExp)" },
+    completions.push_back ({ { "label", "to.throws" },
+    { "kind", KIND_FUNCTION }, { "insertText", "to.throws()" },
+    { "detail", ".to.throws(error?: ErrorConstructor | string | RegExp, message?: string | RegExp)" },
     { "documentation", "Assert the function throws (alias for .to.throw)." },
     { "sortText", "2_to_throws" }, { "filterText", ".to.throws" } });
 

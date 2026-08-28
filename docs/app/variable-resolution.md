@@ -122,6 +122,51 @@ drift on them. See
 [api-reference.md](../engine/api-reference.md#scenario-runs) for what the
 engine does with the token once a row exists.
 
+### `$vu` and `$iteration` are reserved too, for the same reason
+
+`{{$vu}}` and `{{$iteration}}` name the run that is executing - which virtual
+user this request belongs to, and which of that user's iterations it is (issue
+#994). They are spelled like a dynamic variable and behave like `data.*`: both
+resolvers leave them written exactly as they stand, and the executor
+substitutes them immediately before each send, because the value belongs to the
+iteration rather than to the request.
+
+Being reserved is what makes them bindable at all. A variable someone happens
+to name `$vu` does **not** answer for the identity - unlike `$guid`, where a
+scope of that name wins (rule 1 below) - because a scope that could answer would
+substitute one value at composition and leave every iteration of the run sending
+it. That is the one thing these names exist to prevent. The two names are
+matched exactly, so `{{$vus}}` is an ordinary unknown `$name` and keeps its
+braces.
+
+What they resolve to depends on the shape of the run, and every shape has an
+answer:
+
+| Where | `{{$vu}}` | `{{$iteration}}` |
+|---|---|---|
+| A collection load run | the virtual user's own number, 1-based | that user's iteration, 0-based |
+| A single request under load | `1` | the submission's index, 0-based |
+| A collection run in design mode | `1` | the pass, 0-based |
+| A single Send | `1` | `0` |
+
+**A single request repeated is one user's iterations**, however many are in
+flight: `concurrency` says how many of them overlap, which is a different
+question from how many users there are. Virtual users that differ from one
+another are a collection load run's shape, and that is the run where `{{$vu}}`
+spans more than `1`. A run that needs distinct values per request without a
+collection uses `{{$iteration}}`, which is unique per submission - and is the
+same counter the data-row cursor claims from, so iteration *i* binds row
+*i % rows* and a script cannot be told it is on iteration 3 while holding row
+1's values.
+
+**Credentials are the one place they do not bind.** A `{{$vu}}` in a basic-auth
+username or a bearer token goes out written as it stands: a credential is
+encoded when the request is built, and the deferral that lets a *row* reach one
+first happens only in a run that has rows - so binding the identity there would
+work in a data-driven run and silently not in every other. #1055 tracks lifting
+that. Everywhere else binds: the URL, header names and values, the body and
+both halves of every form field, each escaped for the document it lands in.
+
 ### D18 - a bound row's bare column names outrank the environment (issue #1007)
 
 This repo labels the decisions #226 recorded D1, D2, D16, D17. This one is
@@ -393,6 +438,38 @@ assigning to `pm.request.headers`, an auth credential, an import, a payload
 posted straight to `POST /execute` - is refused before the transfer starts,
 naming the header instead of a variable.
 
+### The other one: a header a variable would erase (#1051)
+
+A header *name* is substituted like anything else, and the map it lands in holds
+one value per name. So two names that resolve alike do not both go out:
+`{{tenant_header}}: acme` beside a literal `X-Tenant: legacy` is one header once
+the variable answers `X-Tenant`, and the other is gone. Names are compared
+without case, so a `{{h}}` resolving to `authorization` takes the place of an
+`Authorization` typed beside it.
+
+That is the same quiet wrong request as the one above with the fault reversed -
+there a value forges a header, here a name erases one - so it gets the same
+answer: a `400` with code `colliding_header_names`, naming both spellings as
+written and the name they produced. Repair is not on offer for the reason it is
+not offered above: the two names are equally the author's, so choosing one is
+inventing an intention, and "whichever the map reached last" is an
+implementation detail rather than a rule.
+
+**Only a collision resolution made is refused.** Two names typed into one
+request are two lines visible side by side, and the later one has always won;
+what this refuses is the collision that is invisible until the request comes
+back wrong. The distinction is the one [data-driven
+runs](./data-driven-runs.md) already draw for a bound row.
+
+The rule has three layers too, one definition
+(`engine/include/vayu/http/header_names.hpp`): the bind-time one naming the
+column and the row, composition's `400`, and the execute-time residual pass -
+which rebuilds the same map after a pre-request script has run, and so can meet
+a collision composition never saw. It refuses in the same words, as a failed
+send rather than a rejected payload. The pre-send gate is deliberately *not* the
+backstop here, and cannot be: by the time it sees a request the erased header is
+already missing, with nothing left to notice.
+
 ---
 
 ## Dynamic variables
@@ -454,7 +531,10 @@ Three rules decide what happens at a token:
    this table cannot change what an existing request sends.
 2. **One value per occurrence.** Two `{{$guid}}` in one body are two different
    ids, which is the reason to write them. The table holds functions, not
-   precomputed values.
+   precomputed values. The two reserved identity names above are the deliberate
+   exception and are not in this table: two `{{$iteration}}` in one request are
+   one iteration, because they name a fact about the send rather than generate a
+   value for it.
 3. **An unknown `$name` keeps its braces.** `{{$randomInteger}}` (not a name
    Vayu has) is sent as that literal text rather than resolving to `""`. The `$`
    is a declaration of intent, and a typo that silently emptied a field is the
@@ -497,6 +577,16 @@ dialog says so when the request contains one. Per-iteration values would mean
 interpolating on the load generator's hot path (which targets 60k+ RPS), and
 were deliberately kept out of #226's scope.
 
+That still holds for this table. It does **not** hold for the two reserved
+identity names (issue #994), and the difference is what makes them cheap enough
+to be the exception: a generator has to run per occurrence per iteration, while
+`{{$vu}}` and `{{$iteration}}` substitute two integers the executor is already
+holding, into fields a compose-time scan has already located. A request that
+spells neither is walked for neither - the template is empty, and the executor
+tests that before doing anything - so the freeze above is lifted for exactly two
+names and for nothing else. `{{$guid}}` per iteration on the load path is #995,
+and is a different measurement.
+
 ### The engine copy of the table
 
 `engine/src/http/request_composer.cpp` carries the C++ generator table that
@@ -505,6 +595,12 @@ autocomplete and preview. **The two must list the same names**: the
 conformance fixture pins the name set, and both suites compare their table
 against it, so a name added to one side fails the other side's suite. (MCP's
 `dynamic-variables.ts` copy is deleted - MCP composes via the engine.)
+
+`$vu` and `$iteration` are deliberately in neither table - they generate
+nothing, and a renderer entry that produced a value would make the preview show
+a number the engine will not send. They are reserved names on both sides
+instead, and the fixture pins that too: a case asserts each stays written as it
+stands, and another that a variable of the same name does not answer for it.
 
 ---
 

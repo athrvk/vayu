@@ -260,21 +260,22 @@ class ScenarioLoadDriver {
         // an iteration boundary, so the callback would report the iteration the
         // VU moved on to instead of the one this step ran in.
         const size_t iteration = vu->iteration;
+        const size_t vu_index  = vu->index;
         vayu::Request request  = step.request;
         request.track_cookies  = true;
         request.cookie_lines   = vu->cookies;
 
-        // The data pass, per iteration and before the send. A step carrying no
-        // `{{data.*}}` token has empty templates and is not walked at all,
-        // which is what makes a token-free plan free per iteration.
-        if (row && !(step.data_template.empty () && step.auth_template.empty ())) {
-            // Both halves through the one binder the single-request load path
-            // also drives (issue #993), so a request carrying a row binds
-            // identically whether it is repeated on its own or walked as a step
-            // - including the credentials-after-fields order the encoding
-            // depends on.
-            const auto bound =
-            bind_step_row (request, step, execution_.data_rows[*row], *row);
+        // The data pass and the identity pass, per iteration and before the
+        // send. A step carrying neither kind of token has empty templates and
+        // is not walked at all, which is what makes a token-free plan free per
+        // iteration.
+        if (!(step.data_template.empty () && step.auth_template.empty ())) {
+            // Every half through the one binder the single-request load path
+            // also drives (issues #993, #994), so a request binds identically
+            // whether it is repeated on its own or walked as a step - including
+            // the credentials-after-fields order the encoding depends on.
+            const auto bound = bind_step_iteration (request, step,
+            execution_.data_rows, row, IterationIdentity{ vu_index, iteration });
             if (!bound.ok) {
                 // Nothing goes on the wire, so nothing will ever complete for
                 // this step: this path owns the whole accounting a completion
@@ -288,7 +289,7 @@ class ScenarioLoadDriver {
                 handle_result (context_, db_,
                 vayu::Result<vayu::Response> (vayu::Error{
                 vayu::ErrorCode::DataBindingFailed, step.name + ": " + bound.error }),
-                ResultAnnotations{ row, step_index, iteration });
+                ResultAnnotations{ row, step_index, iteration, vu_index });
                 return;
             }
         }
@@ -296,7 +297,7 @@ class ScenarioLoadDriver {
         context_->event_loop->submit (request,
         [context = context_, &db = db_, state = state_,
         step_count = execution_.plan.steps.size (), vu, step_index, iteration,
-        row] (size_t, const vayu::Result<vayu::Response>& result) {
+        vu_index, row] (size_t, const vayu::Result<vayu::Response>& result) {
             const bool errored = result.is_error () || result.value ().has_error ();
             if (!errored) {
                 state->steps.record (step_index, result.value ().timing.total_ms);
@@ -312,7 +313,7 @@ class ScenarioLoadDriver {
             finish_step (state, step_count, vu, step_index, errored,
             errored ? nullptr : &result.value ().cookie_lines);
             handle_result (context, db, result,
-            ResultAnnotations{ row, step_index, iteration });
+            ResultAnnotations{ row, step_index, iteration, vu_index });
         });
         context_->requests_sent++;
     }
@@ -466,7 +467,11 @@ const ScenarioExecution& execution) {
     state->data_row_count = execution.data_rows.size ();
     state->vus.reserve (vu_count);
     for (size_t i = 0; i < vu_count; ++i) {
-        state->vus.push_back (std::make_unique<VirtualUser> ());
+        auto user = std::make_unique<VirtualUser> ();
+        // 1-based, so `{{$vu}}` reads as a person numbers users rather than as
+        // an array index (issue #994).
+        user->index = i + 1;
+        state->vus.push_back (std::move (user));
     }
 
     if (max_iterations > 0) {

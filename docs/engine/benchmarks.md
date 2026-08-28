@@ -202,6 +202,50 @@ that. `phaseHistograms` (engine config) and `phase_histograms` (per run) turn it
 off for anyone whose target proves otherwise; off leaves the bank unallocated,
 so the completion path pays one null check.
 
+### The iteration identity: unresolvable against this host's noise (2026-08-27, engine 0.23.0)
+
+`{{$vu}}` / `{{$iteration}}` (issue #994) bind per submission on the load path,
+which is the kind of change #992's throughput guard exists for. Two questions,
+measured separately, and neither answer is a number this host can pin down as
+tightly as the `phaseHistograms` measurement above pinned its own.
+
+**The bind, when a run uses it.** One daemon, three arms interleaved and rotated
+per round so drift lands on all three - a plain URL (`off`), the same URL with
+the query the tokens would produce written out (`?u=1&i=0`), and the same URL
+with the tokens in it. `constant_concurrency`, c=32, 6 s per arm, 12 rounds,
+retention effectively off (a sampling period of 100000).
+
+| Arm | Median req/s | Mean | Min | Max |
+|---|---|---|---|---|
+| off (no query, no tokens) | 33 160 | 32 816 | 28 609 | 35 876 |
+| literal (`?u=1&i=0`) | 32 367 | 32 611 | 29 322 | 35 627 |
+| on (`?u={{$vu}}&i={{$iteration}}`) | 32 145 | 32 386 | 29 179 | 35 071 |
+
+**The bind alone is `on` against `literal`** - identical bytes on the wire and
+identical work at the target, differing only in the join: **-0.68%** on medians.
+The two arms' own min-max spans are ~20% wide, so that figure bounds the cost
+rather than measuring it.
+
+**The feature-off path, against master.** The same payload with no reserved
+token at all, run against `master`'s binary and this branch's, one daemon at a
+time, alternating every round (12 rounds, 5 s, c=32): a paired median of
+**-2.48%**. That is not a result on its own, and the null test is why - the same
+harness with **this branch's binary in both arms** reports **-1.39%**, so
+roughly that much of it is the harness rather than the code. What is left is
+inside a per-round spread running from -12% to +6%.
+
+**Verdict: no change is resolvable here, and the structural claim is what the
+guard rests on.** A request spelling no reserved token has an empty template,
+which the submission path tests before doing anything: no copy, no bind, the
+same submit of the same shared request
+(`LoadIdentityTest.ARunWithoutTheTokensCarriesAnEmptyTemplate` asserts the empty
+template rather than the throughput). What every load run does now pay is one
+unsynchronised `size_t` increment per submission on the sole producer thread -
+the counter that lets any run tell a deferred script which iteration a sampled
+response was sent in. Anyone re-measuring should do it on a quiet host: this one
+is a 4-core container running the Go mock server beside the engine, and a single
+arm's own runs vary by more than either effect being looked for.
+
 ### SSE frame counting: not yet measured (issue #576)
 
 Streaming under load puts a second thing on the write callback's hot path: an

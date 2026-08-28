@@ -464,6 +464,96 @@ TEST (CookieJarScript, PmCookiesReadsTheJarForTheRequestsUrl) {
     EXPECT_EQ (env["absent"].value, "undefined");
 }
 
+TEST (CookieJarScript, PmCookiesReadsWholeCookiesThroughEachAllAndCount) {
+    // get/has/toObject answer about a name or a value; these hand back the
+    // cookie, which is the only way a script sees the domain, path or expiry
+    // it is actually holding. They read the same matched set, so a cookie for
+    // another host stays out of all three.
+    CookieJar jar;
+    jar.store ("env_a",
+    { netscape_line ("example.com", "FALSE", "/", "FALSE",
+      std::to_string (FAR_FUTURE), "session", "abc"),
+    netscape_line ("example.com", "FALSE", "/admin", "FALSE",
+    std::to_string (FAR_FUTURE), "admin", "xyz"),
+    netscape_line ("other.example", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "elsewhere", "no") });
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request = get_request ("http://example.com/admin/users");
+    vayu::Response response;
+    vayu::Environment env;
+
+    vayu::runtime::ScriptContext ctx;
+    ctx.request      = &request;
+    ctx.response     = &response;
+    ctx.environment  = &env;
+    ctx.cookie_jar   = &jar;
+    ctx.cookie_scope = "env_a";
+
+    auto result = engine.execute (
+    "pm.environment.set('count', String(pm.cookies.count()));"
+    "pm.environment.set('all', pm.cookies.all().map(c => "
+    "c.name).sort().join(','));"
+    "const seen = [];"
+    "pm.cookies.each(c => seen.push(c.name + '@' + c.path));"
+    "pm.environment.set('each', seen.sort().join(','));"
+    "const one = pm.cookies.all().find(c => c.name === 'session');"
+    "pm.environment.set('shape', [one.key, one.value, one.domain, one.path, "
+    "one.secure, one.httpOnly, one.hostOnly, one.session, "
+    "one.expires.getTime() / 1000].join('|'));"
+    // The reads arrive; the flat writers deliberately do not, since a written
+    // cookie needs a URL to take its domain and path from. Both docs say so,
+    // and nothing said it here until the reads made this object worth adding
+    // to by hand.
+    "pm.environment.set('writers', ['set', 'unset', 'clear']"
+    "  .filter(m => typeof pm.cookies[m] !== 'undefined').join(','));",
+    ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["count"].value, "2")
+    << "the other host's cookie was counted";
+    EXPECT_EQ (env["all"].value, "admin,session");
+    EXPECT_EQ (env["each"].value, "admin@/admin,session@/");
+    // `key` is Postman's spelling of the name, and `expires` is the Date its
+    // Cookie carries - both read by an imported script, and both silently
+    // undefined before this.
+    EXPECT_EQ (env["shape"].value,
+    "session|abc|example.com|/|false|false|true|false|" + std::to_string (FAR_FUTURE));
+    EXPECT_EQ (env["writers"].value, "")
+    << "a flat writer both docs call absent is reachable from a script";
+}
+
+TEST (CookieJarScript, PmCookiesEachReportsAThrowFromItsIterator) {
+    // A failed pm.expect inside the iterator is the script's verdict. Swallowed
+    // to finish the walk, it would be a test that passed by not being run.
+    CookieJar jar;
+    jar.store ("env_a",
+    { netscape_line ("example.com", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "session", "abc") });
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request = get_request ("http://example.com/users");
+    vayu::Response response;
+    vayu::Environment env;
+
+    vayu::runtime::ScriptContext ctx;
+    ctx.request      = &request;
+    ctx.response     = &response;
+    ctx.environment  = &env;
+    ctx.cookie_jar   = &jar;
+    ctx.cookie_scope = "env_a";
+
+    auto thrown = engine.execute (
+    "pm.cookies.each(() => { throw new Error('from the iterator'); });", ctx);
+    EXPECT_FALSE (thrown.success);
+    EXPECT_NE (thrown.error_message.find ("from the iterator"), std::string::npos)
+    << thrown.error_message;
+
+    auto no_function = engine.execute ("pm.cookies.each('nope');", ctx);
+    EXPECT_FALSE (no_function.success);
+    EXPECT_NE (no_function.error_message.find ("needs a function"), std::string::npos)
+    << no_function.error_message;
+}
+
 TEST (CookieJarScript, PmCookiesSaysWhyWhenThereIsNoJar) {
     // A load run's test scripts land here. An empty answer would read as "the
     // cookie is gone" and send someone hunting the wrong bug.
@@ -627,6 +717,68 @@ TEST (CookieJarWrite, ACookieAScriptSetIsOnTheWireOfTheRequestItWasSetFor) {
     // now makes about the two features meeting.
     EXPECT_NE (sent.raw_request.find ("session=written"), std::string::npos)
     << "the raw-request view did not show the written cookie; got: " << sent.raw_request;
+}
+
+TEST (CookieJarWrite, JarGetAllAnswersEveryCookieTheUrlWouldCarry) {
+    // The same walk get() makes, without a name to narrow it - so it sees a
+    // cookie this script has just staged, and does not see one stored for
+    // another host.
+    CookieJar jar;
+    jar.store ("env_a",
+    { netscape_line ("example.com", "FALSE", "/", "FALSE",
+      std::to_string (FAR_FUTURE), "session", "abc"),
+    netscape_line ("other.example", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "elsewhere", "no") });
+    vayu::Environment env;
+
+    const std::string error = apply_after_script (jar, "env_a",
+    "const jar = pm.cookies.jar();"
+    "jar.set('http://example.com/', { name: 'fresh', value: 'v' });"
+    "const all = jar.getAll('http://example.com/');"
+    "pm.environment.set('names', all.map(c => c.name).sort().join(','));"
+    "jar.getAll('http://example.com/', (err, cookies) => {"
+    "  pm.environment.set('cb', String(err) + ':' + cookies.length);"
+    "});"
+    "pm.environment.set('elsewhere', "
+    "String(jar.getAll('http://other.example/').map(c => c.name).join(',')));",
+    "http://example.com/users", env);
+
+    ASSERT_EQ (error, "");
+    EXPECT_EQ (env["names"].value, "fresh,session")
+    << "getAll did not see the cookie staged two lines above it";
+    EXPECT_EQ (env["cb"].value, "null:2");
+    EXPECT_EQ (env["elsewhere"].value, "elsewhere")
+    << "getAll answered with cookies the URL would not have carried";
+}
+
+TEST (CookieJarWrite, TheWriteCallbacksCarryWhatTheCallStored) {
+    // Postman's (error, cookie). The stored cookie is the one thing the call
+    // knows and the script does not: the domain and path it took from the URL
+    // where the object left them out.
+    CookieJar jar;
+    vayu::Environment env;
+
+    const std::string error = apply_after_script (jar, "env_a",
+    "const jar = pm.cookies.jar();"
+    "const stored = jar.set('http://example.com/v1/orders/42', "
+    "  { name: 'session', value: 'abc' }, (err, cookie) => {"
+    "    pm.environment.set('set_cb', "
+    "      [String(err), cookie.name, cookie.domain, cookie.path].join('|'));"
+    "  });"
+    "pm.environment.set('set_ret', "
+    "  [stored.key, stored.value, String(stored.session)].join('|'));"
+    "const removed = jar.unset('http://example.com/', 'session', (err, name) "
+    "=> {"
+    "  pm.environment.set('unset_cb', String(err) + '|' + name);"
+    "});"
+    "pm.environment.set('unset_ret', removed);",
+    "http://example.com/users", env);
+
+    ASSERT_EQ (error, "");
+    EXPECT_EQ (env["set_cb"].value, "null|session|example.com|/v1/orders");
+    EXPECT_EQ (env["set_ret"].value, "session|abc|true");
+    EXPECT_EQ (env["unset_cb"].value, "null|session");
+    EXPECT_EQ (env["unset_ret"].value, "session");
 }
 
 TEST (CookieJarWrite, TheFlatPostmanSpellingSetsTheSameCookie) {
@@ -954,9 +1106,12 @@ TEST (CookieJarWrite, BadInputIsRefusedLoudlyRatherThanStoredWrong) {
     { "pm.cookies.jar().set('http://example.com/', { name: 'n', value: "
       "'v', secure: 'yes' });",
     "true or false" },
+    // A date string is accepted now (see ExpiresTakesADateADateStringOrWholeSeconds);
+    // one Date.parse cannot read still is not, because the alternative is a
+    // cookie that expires in 1970 and is simply never sent again.
     { "pm.cookies.jar().set('http://example.com/', { name: 'n', value: "
-      "'v', expires: '2030' });",
-    "seconds since the epoch" },
+      "'v', expires: 'the day after tomorrow' });",
+    "not a date this engine can read" },
     // A tab is the Netscape line's own separator: stored, the cookie would
     // be unreadable on the next parse and would simply vanish.
     { "pm.cookies.jar().set('http://example.com/', { name: 'n', value: "
@@ -980,6 +1135,74 @@ TEST (CookieJarWrite, BadInputIsRefusedLoudlyRatherThanStoredWrong) {
     }
     EXPECT_TRUE (jar.snapshot ().empty ())
     << "a refused write was stored anyway";
+}
+
+TEST (CookieJarWriteValue, ExpiresTakesADateADateStringOrWholeSeconds) {
+    // One instant, three spellings. They must agree: a script writing a Date
+    // and a script writing Math.floor(t / 1000) are describing the same
+    // expiry, and a jar that stored them differently would expire one session
+    // and not the other. The Date and the string are read by QuickJS's own
+    // Date, so they answer as the script's own `new Date(s)` would.
+    CookieJar jar;
+    vayu::Environment env;
+
+    const std::string error = apply_after_script (jar, "env_a",
+    "const url = 'http://example.com/';"
+    "const when = new Date(Date.UTC(2100, 0, 1, 0, 0, 0));"
+    "const jar = pm.cookies.jar();"
+    "jar.set(url, { name: 'a', value: '1', expires: when });"
+    "jar.set(url, { name: 'b', value: '1', expires: '2100-01-01T00:00:00Z' });"
+    "jar.set(url, { name: 'c', value: '1', expires: "
+    "  Math.floor(when.getTime() / 1000) });"
+    "const seen = {};"
+    "for (const c of jar.getAll(url)) seen[c.name] = "
+    "String(c.expires.getTime() / 1000);"
+    "pm.environment.set('a', seen.a);"
+    "pm.environment.set('b', seen.b);"
+    "pm.environment.set('c', seen.c);",
+    "http://example.com/users", env);
+
+    ASSERT_EQ (error, "");
+    EXPECT_EQ (env["a"].value, std::to_string (FAR_FUTURE));
+    EXPECT_EQ (env["b"].value, env["a"].value)
+    << "a date string disagreed with the Date";
+    EXPECT_EQ (env["c"].value, env["a"].value)
+    << "seconds disagreed with the Date";
+}
+
+TEST (CookieJarWriteValue, AnExpiresThatNamesNoInstantIsRefusedRatherThanStored) {
+    CookieJar jar;
+    vayu::Environment env;
+
+    struct Case {
+        const char* expires;
+        const char* expected;
+    };
+    const auto cases = std::to_array<Case> ({
+    { "new Date('nope')", "Invalid Date" },
+    { "'the day after tomorrow'", "not a date this engine can read" },
+    // `getTime() / 1000` without the floor. Truncated silently it would be a
+    // whole second off in a surface that otherwise refuses rather than
+    // guesses; the message names both cures.
+    { "new Date(Date.UTC(2100, 0, 1, 0, 0, 0, 500)).getTime() / 1000", "not a whole number of seconds" },
+    { "true", "a Date, or a date string" },
+    { "-1", "before the epoch" },
+    { "1e30", "further in the future than the jar can store" },
+    });
+
+    for (const auto& one : cases) {
+        vayu::Environment scratch = env;
+        const std::string script =
+        std::string ("pm.cookies.jar().set('http://example.com/', { name: 'n', "
+                     "value: 'v', expires: ") +
+        one.expires + " });";
+        const std::string error =
+        apply_after_script (jar, "env_a", script, "http://example.com/users", scratch);
+        EXPECT_NE (error.find (one.expected), std::string::npos)
+        << "script: " << script << "\ngot: " << error;
+    }
+    EXPECT_TRUE (jar.snapshot ().empty ())
+    << "a refused expiry was stored anyway";
 }
 
 TEST (CookieJarWrite, TheWriteHalfSaysWhyWhenThereIsNoJarAndWhenThereIsNowhereToApply) {

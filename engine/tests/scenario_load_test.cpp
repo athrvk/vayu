@@ -237,13 +237,13 @@ class ScenarioLoadTest : public ::testing::Test {
     }
 
     /// Tokenise every step of @p execution the way plan resolution does, and
-    /// give the run @p rows. Going through `tokenize_data_fields` rather than
+    /// give the run @p rows. Going through `tokenize_bindable_fields` rather than
     /// hand-building a template is deliberate: a test that built its own would
     /// pass against a splitter the resolver never uses.
     static void with_data (vayu::core::ScenarioExecution& execution,
     const std::vector<json>& rows) {
         for (auto& step : execution.plan.steps) {
-            step.data_template = vayu::core::tokenize_data_fields (step.request);
+            step.data_template = vayu::core::tokenize_bindable_fields (step.request);
         }
         execution.data_rows = rows;
     }

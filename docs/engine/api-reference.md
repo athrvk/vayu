@@ -3834,6 +3834,26 @@ with specific codes:
   per-part content type, which libcurl writes into that part's own header block.
   A bound `{{data.column}}` is refused earlier still, at bind time, naming the
   column and the row (see [Scenario runs](#scenario-runs)).
+- `400` `{"error": {"code": "colliding_header_names", "message": "..."}}` - two
+  header names resolved to one, so one of the two headers would be gone. A
+  header map holds one value per name, so `{{tenant_header}}: acme` beside a
+  literal `X-Tenant: legacy` is not two headers once the variable answers
+  `X-Tenant` - it is one, and which one arrives is an ordering detail rather
+  than a rule. Names are compared **without case**, as `Headers` compares them,
+  so a `{{h}}` resolving to `authorization` refuses beside an `Authorization`
+  the caller typed. The message names both spellings as written and the name
+  they produced; nothing is repaired, for the reason a forged header is refused
+  rather than stripped.
+
+  Only a collision **resolution produced** is refused. Two names the caller
+  typed are two entries they can see, and the stored flattening's later-wins
+  rule (above) still decides those - the same distinction the bind-time refusal
+  draws (see [Scenario runs](#scenario-runs)). The execute-time residual pass
+  refuses the same collision in the same words, since it rebuilds the same map:
+  a buffered send answers `statusCode: 0` with an `errorCode` of
+  `INTERNAL_ERROR` carrying the message, exactly as the pre-send gate does,
+  while a streaming send - which has not answered yet - is a `400` with this
+  same code and fails its run row.
 
 ### POST /execute
 
@@ -4765,18 +4785,20 @@ the same request does, and the two cannot drift apart.
 > field, and a plan where every name was already defined at run start pays that
 > and nothing else.
 >
-> The one exception is the reserved `{{data.*}}` namespace below, which neither
-> pass touches - composition leaves it alone so the runner can bind it per
-> iteration, and it is not a name any script scope answers either. **A bare
+> The exceptions are the two reserved namespaces below, which neither pass
+> touches: `{{data.*}}` and the `{{$vu}}` / `{{$iteration}}` identity (issue
+> #994). Composition leaves both alone so the runner can bind them per
+> iteration, and neither is a name any script scope answers either. **A bare
 > name the run's `dataColumns` names travels the same way** (issue #1007):
 > composition defers it exactly as it defers `{{data.*}}`, and the per-row bind
 > substitutes it before the step's pre-request script ever runs - so neither
 > pass sees it unresolved, and neither can answer it from a same-named
 > environment variable instead of the row.
 
-**Scripts** additionally read `pm.info.iteration` (0-based) and
-`pm.info.iterationCount`. No other caller sets them - see
-[scripting.md](scripting.md#script-identity-pminfo).
+**Scripts** additionally read `pm.info.iteration` (0-based), `pm.info.vu`
+(1-based) and `pm.info.iterationCount`. See
+[scripting.md](scripting.md#script-identity-pminfo) for which run shapes report
+which.
 
 **A run with `data` binds one row per iteration.** Row `i % rows` binds to
 iteration `i`, and the run's scripts read it as `pm.iterationData` -
@@ -4838,6 +4860,20 @@ composition (resolution is one pass and never rescans a substituted value), and
 the data pass then binds it. That is usable, and it is also why the
 no-data refusal below says "or from the variable value it was written into" -
 the token it names may not appear anywhere in the request as you wrote it.
+
+**`{{$vu}}` and `{{$iteration}}` are the second reserved namespace** (issue
+#994), and they bind at the same moment out of the same walk - a field carrying
+one of each is one string, so both are split once and joined together. They need
+no rows behind them: `{{$vu}}` is the virtual user's own 1-based number in a
+scenario run and `1` in every other shape (one request repeated is one user's
+iterations, whatever the concurrency), and `{{$iteration}}` is that user's
+0-based iteration, the submission index on a single-request run, and `0` on a
+plain `POST /execute`. A variable named `$vu` does not answer for the identity,
+for the reason a variable named `data.id` does not answer for the column, and
+`{{$vus}}` is an ordinary unknown `$name` that keeps its braces. They bind
+everywhere a `data.*` token does **except the credential fields**: a credential
+is encoded at build time and the deferral that lets a row reach one first
+happens only in a run that has rows (issue #1055).
 
 **A run binds only what it was given rows for.** A `POST /runs` carrying
 `scenario.data` binds per iteration, one carrying the top-level
