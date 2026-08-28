@@ -74,8 +74,17 @@ export default function TrashItem({
 
 				<div className="flex-1 min-w-0">
 					<TruncatedText className="text-sm text-foreground">{entry.name}</TruncatedText>
+					{/*
+					 * The kind is written out, not left to the icon. The glyph
+					 * is `aria-hidden` (it is decoration, per the design
+					 * system), so with the icon alone a screen reader gets a
+					 * name and a date and no way to tell a deleted folder from
+					 * a deleted request - and a sighted reader has to already
+					 * know which shape means which.
+					 */}
 					<p className="text-xs text-muted-foreground">
-						Deleted {formatRelativeTime(new Date(entry.deletedAt).toISOString())}
+						{entry.kind === "collection" ? "Collection" : "Request"} · Deleted{" "}
+						{formatRelativeTime(new Date(entry.deletedAt).toISOString())}
 						{cascade ? `, ${cascade}` : ""}
 					</p>
 				</div>

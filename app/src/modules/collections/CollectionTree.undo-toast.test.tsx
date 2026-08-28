@@ -151,6 +151,37 @@ describe("deleting from the tree", () => {
 		await waitFor(() => expect(restoreTrash).toHaveBeenCalledWith("root"));
 	});
 
+	it("says when the undo put the folder back somewhere new", async () => {
+		/*
+		 * The Trash view's Restore explains a re-parent and the undo used to
+		 * drop the same field on the floor, so one restore was self-explanatory
+		 * and the other silent depending on which button did it. Reachable from
+		 * the toast because the "never" duration setting keeps it up until
+		 * dismissed, which is long enough for the parent to go too.
+		 */
+		restoreTrash.mockResolvedValue({
+			id: "root",
+			kind: "collection",
+			name: "Acme",
+			deletedAt: 1,
+			collections: 0,
+			requests: 0,
+			restored: true,
+			reparentedToRoot: true,
+		});
+		renderTree();
+		await askToDeleteCollection("Acme");
+		await waitFor(() => expect(showToast).toHaveBeenCalled());
+
+		lastToast().action.onClick();
+
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith(
+				expect.objectContaining({ message: expect.stringContaining("top level") })
+			)
+		);
+	});
+
 	it("raises the engine's own refusal when the undo cannot be honoured", async () => {
 		// What a 409 says when the item's collection has since been deleted too.
 		// The wording is the engine's, and naming the blocking collection is the

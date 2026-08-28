@@ -126,6 +126,19 @@ describe("the list", () => {
 		expect(screen.getByText(/Deleted 1m ago/)).toBeInTheDocument();
 	});
 
+	it("writes the kind out, rather than leaving it to a decorative icon", () => {
+		// The glyph is aria-hidden, so without this a screen reader gets a name
+		// and a date and no way to tell a deleted folder from a deleted request.
+		state.items = [
+			collectionEntry(),
+			collectionEntry({ id: "r1", kind: "request", name: "Charge" }),
+		];
+		renderTrash();
+
+		expect(screen.getByText(/^Collection · Deleted/)).toBeInTheDocument();
+		expect(screen.getByText(/^Request · Deleted/)).toBeInTheDocument();
+	});
+
 	it("says what the delete took with it, so a restore's size is visible", () => {
 		// A folder in the trash is indistinguishable from an empty one without
 		// this - and restoring it is a very different act at 11 requests.

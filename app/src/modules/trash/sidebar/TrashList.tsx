@@ -19,6 +19,7 @@ import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/
 import { DeleteConfirmDialog } from "@/components/ui";
 import TrashItem from "./TrashItem";
 import { retentionCopy, retentionDaysFrom } from "../retention";
+import { restoreNotice } from "../restore-notice";
 import type { TrashEntry } from "@/types";
 
 export default function TrashList() {
@@ -54,18 +55,10 @@ export default function TrashList() {
 		setRestoringId(entry.id);
 		try {
 			const restored = await restoreMutation.mutateAsync(entry.id);
-			/*
-			 * A collection whose parent is gone comes back at the top level
-			 * instead of where it was. That is the engine moving the user's
-			 * folder, and the only place they could learn it is here - the tree
-			 * will simply show it somewhere new.
-			 */
-			if (restored.reparentedToRoot) {
-				showToast({
-					message: `Restored "${entry.name}" to the top level - the folder it was in is gone.`,
-					variant: "info",
-				});
-			}
+			// Shared with the undo toast's restore, so the same outcome is
+			// explained the same way whichever button performed it.
+			const notice = restoreNotice(restored, entry.name);
+			if (notice) showToast({ message: notice, variant: "info" });
 		} catch (err) {
 			/*
 			 * The engine's refusals are specific and worth repeating verbatim: a
@@ -144,7 +137,10 @@ export default function TrashList() {
 								description={
 									retention
 										? `Deleted collections and requests wait here first. ${retention}`
-										: "Deleted collections and requests wait here before they are removed for good."
+										: // No promise of an eventual purge while the window
+											// is still unknown: at `trashRetentionDays: 0` there
+											// is no automatic removal to promise.
+											"Deleted collections and requests wait here."
 								}
 							/>
 						)}

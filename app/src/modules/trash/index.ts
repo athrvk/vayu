@@ -25,3 +25,6 @@
 
 export * from "./sidebar";
 export { retentionCopy, retentionDaysFrom, TRASH_RETENTION_KEY } from "./retention";
+// Read by the collections tree as well as by the view here - a restore has two
+// callers, and one sentence between them. See the file for why.
+export { restoreNotice } from "./restore-notice";

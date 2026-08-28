@@ -18,6 +18,7 @@ import {
 	useUpdateRequestMutation,
 	useRestoreTrashMutation,
 } from "@/queries";
+import { restoreNotice } from "@/modules/trash";
 import { collectDescendantEntityIds } from "./tree-utils";
 import type { CollectionTreeCrudSlice } from "./context/CollectionTreeContext";
 import type { RowAction } from "@/components/shared";
@@ -440,7 +441,18 @@ export function useTreeCrud({
 	const undoDelete = useCallback(
 		async (entityId: string, name: string) => {
 			try {
-				await restoreTrashMutation.mutateAsync(entityId);
+				const restored = await restoreTrashMutation.mutateAsync(entityId);
+				/*
+				 * An undo can put the folder back somewhere new: if its parent
+				 * went to the trash too while this toast was up - and the
+				 * "never" duration setting keeps a toast up until it is
+				 * dismissed - the engine restores it as a tree root. Same
+				 * sentence the Trash view's Restore raises, from the same
+				 * function, because a field one caller reads and the other
+				 * drops is how the two answers drift apart.
+				 */
+				const notice = restoreNotice(restored, name);
+				if (notice) showToast({ message: notice, variant: "info" });
 			} catch (error) {
 				showToast(
 					error instanceof Error ? error.message : `Couldn't restore "${name}"`,
