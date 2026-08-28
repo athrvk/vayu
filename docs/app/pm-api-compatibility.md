@@ -240,9 +240,11 @@ the same one `POST /execute` sends through, so an api key sent as a query
 parameter is percent-encoded onto the URL exactly as it would be on the main
 request and an `Authorization` header the script set itself still wins. Every
 other type - `oauth2` included, whose token acquisition needs a database this
-path deliberately does not carry - is refused by name rather than dropped: a
-request that goes out unauthenticated because the sandbox skipped an option is
-the same silent wrong request the body modes are refused to prevent.
+path deliberately does not carry - is refused by name rather than dropped, and so
+is a type whose parameter block is absent or misspelled, since `basic` requires
+neither of its halves and would otherwise compose an empty credential and send
+it. A request that goes out unauthenticated because the sandbox skipped an option
+is the same silent wrong request the body modes are refused to prevent.
 
 ### Hashing (`pm.crypto`) is Vayu's own name, and it is synchronous
 

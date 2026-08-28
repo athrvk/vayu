@@ -358,11 +358,14 @@ TEST_F (SendRequestTest, AuthApiKeyGoesWhereItsInSays) {
     server.url ("/echo") +
     "', method: 'POST', "
     "  auth: { type: 'apikey', apikey: [{ key: 'key', value: 'api_key' }, "
-    "    { key: 'value', value: 'k123' }, { key: 'in', value: 'query' }] } "
+    "    { key: 'value', value: 'k 1&2' }, { key: 'in', value: 'query' }] } "
     "}, function (err, res) { query = res.json(); }); "
     "pm.test('sent', function () { "
     "  pm.expect(header.apikey).to.equal('k123'); "
-    "  pm.expect(query.target.indexOf('api_key=k123') >= 0).to.equal(true); "
+    // Percent-encoded by the same append_query_param every other send writes a
+    // query credential with - a raw '&' here would start a parameter of its own.
+    "  pm.expect(query.target.indexOf('api_key=k%201%262') >= "
+    "0).to.equal(true); "
     "});");
 
     EXPECT_TRUE (result.success) << result.error_message;
@@ -422,6 +425,23 @@ TEST_F (SendRequestTest, AnAuthBlockMissingItsCredentialIsRefused) {
     EXPECT_EQ (server.hit_count (), 0);
 }
 
+// Basic is the type with no required parameter - Postman sends an empty half as
+// the empty string - so a block that is not there at all has to be caught by
+// its absence, or a misspelled key composes `Basic Og==` and sends it.
+TEST_F (SendRequestTest, AnAuthTypeWithNoBlockToReadIsRefused) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', auth: { type: 'basic', Basic: { username: 'alice' } } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("no options.auth.basic block"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0)
+    << "a credential the script misspelled was sent as an empty one";
+}
+
 // ============================================================================
 // {{variables}} in script-supplied strings (issue #1001)
 // ============================================================================
@@ -433,19 +453,25 @@ TEST_F (SendRequestTest, ScriptSuppliedStringsResolveAsTheCallIsMade) {
     "'); "
     "pm.environment.set('marker', 'from-variable'); "
     "pm.environment.set('payload', 'body-from-variable'); "
-    "var echo = null; "
+    "var text = null; var raw = null; "
     "pm.sendRequest({ url: '{{base}}/echo', method: 'POST', "
     "  header: { 'X-Marker': '{{marker}}' }, body: '{{payload}}' "
-    "}, function (err, res) { echo = res.json(); }); "
+    "}, function (err, res) { text = res.json(); }); "
+    // The same body under Postman's object spelling, which is the shape an
+    // imported script carries.
+    "pm.sendRequest({ url: '{{base}}/echo', method: 'POST', "
+    "  body: { mode: 'raw', raw: '{{payload}}' } "
+    "}, function (err, res) { raw = res.json(); }); "
     "pm.test('sent', function () { "
-    "  pm.expect(echo.marker).to.equal('from-variable'); "
-    "  pm.expect(echo.body).to.equal('body-from-variable'); "
+    "  pm.expect(text.marker).to.equal('from-variable'); "
+    "  pm.expect(text.body).to.equal('body-from-variable'); "
+    "  pm.expect(raw.body).to.equal('body-from-variable'); "
     "});");
 
     EXPECT_TRUE (result.success) << result.error_message;
     ASSERT_EQ (result.tests.size (), 1u);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
-    EXPECT_EQ (server.hit_count (), 1);
+    EXPECT_EQ (server.hit_count (), 2);
 }
 
 // #1009's pass-through rule, which this resolution inherits rather than
@@ -453,13 +479,18 @@ TEST_F (SendRequestTest, ScriptSuppliedStringsResolveAsTheCallIsMade) {
 TEST_F (SendRequestTest, ANameNothingDefinesKeepsItsBraces) {
     SendRequestServer server;
 
-    auto result = run ("var echo = null; "
+    // A defined name beside the undefined one, so this reddens if resolution
+    // stops running at all rather than only when the pass-through rule breaks.
+    auto result = run ("pm.environment.set('type', 'application/json'); "
+                       "var echo = null; "
                        "pm.sendRequest({ url: '" +
     server.url ("/echo") +
-    "', method: 'POST', header: { 'X-Marker': '{{nothing_defines_this}}' } "
+    "', method: 'POST', header: { 'X-Marker': '{{nothing_defines_this}}', "
+    "  'Content-Type': '{{type}}' } "
     "}, function (err, res) { echo = res.json(); }); "
     "pm.test('sent', function () { "
     "  pm.expect(echo.marker).to.equal('{{nothing_defines_this}}'); "
+    "  pm.expect(echo.type).to.equal('application/json'); "
     "});");
 
     EXPECT_TRUE (result.success) << result.error_message;
