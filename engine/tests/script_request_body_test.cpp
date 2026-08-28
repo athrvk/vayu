@@ -32,7 +32,11 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <string_view>
 
+#include <nlohmann/json.hpp>
+
+#include "vayu/http/graphql_body.hpp"
 #include "vayu/types.hpp"
 
 using namespace vayu;
@@ -68,6 +72,37 @@ Body form_data_body () {
     upload.file_name = "portrait.png";
     body.fields.push_back (upload);
     return body;
+}
+
+/// The envelope the request builder writes, carrying variables and an operation
+/// name a server has agreed with its clients.
+constexpr std::string_view GRAPHQL_ENVELOPE =
+R"({"query":"query User($id: ID!) { user(id: $id) { name } }","operationName":"User","variables":{"id":"42"}})";
+
+/// The bare document an agent or a `curl` caller hands over.
+constexpr std::string_view GRAPHQL_DOCUMENT = "query User { user { name } }";
+
+/// Envelope-shaped, and not readable: the `{{token}}` that went unresolved.
+constexpr std::string_view GRAPHQL_UNRESOLVED = R"({"query":"{{savedQuery}},)";
+
+Body graphql_body (std::string_view content) {
+    Body body;
+    body.mode    = BodyMode::GraphQL;
+    body.content = content;
+    return body;
+}
+
+/// The query the send would carry, read back out of `graphql_wire_body`'s own
+/// answer rather than restated here. That is the whole point of the member: a
+/// `.graphql.query` disagreeing with this describes a request nothing sends.
+std::string wire_query (std::string_view content) {
+    const std::string wire = vayu::http::graphql_wire_body (std::string{ content });
+    return nlohmann::json::parse (wire).at ("query").get<std::string> ();
+}
+
+/// A C++ string as a JavaScript string literal, for a script built around one.
+std::string js_literal (const std::string& text) {
+    return nlohmann::json (text).dump ();
 }
 
 class ScriptRequestBodyTest : public ::testing::Test {
@@ -134,20 +169,124 @@ TEST_F (ScriptRequestBodyTest, JsonParseOfRawIsTheImportedIdiomAndRoundTrips) {
 }
 
 /**
- * Every content mode is `raw`, because each carries its body as one string.
- * Asserted over all of them rather than one, since the mapping is a switch whose
- * default arm is what answers for five of the six.
+ * Every content mode without a Postman name of its own is `raw`, because each
+ * carries its body as one string. Asserted over all of them rather than one,
+ * since the mapping is a switch whose default arm is what answers for them.
+ *
+ * `graphql` left this list in #1111, which is a *break* for a lifted
+ * `body.mode === 'raw'` guard over a GraphQL body - and the compatible answer,
+ * since Postman names that mode too. `binary` stays here: Postman's `file` mode
+ * promises the path `file.src`, and this one carries bytes.
  */
 TEST_F (ScriptRequestBodyTest, EveryContentModeAnswersRaw) {
-    for (const BodyMode mode : { BodyMode::Json, BodyMode::Text, BodyMode::Binary,
-         BodyMode::GraphQL, BodyMode::JsonRpc, BodyMode::Xml }) {
+    for (const BodyMode mode : { BodyMode::Json, BodyMode::Text,
+         BodyMode::Binary, BodyMode::JsonRpc, BodyMode::Xml }) {
         request.body.mode    = mode;
         request.body.content = "payload";
         expect_script_passes (R"JS(
             pm.expect(pm.request.body.mode).to.equal('raw');
             pm.expect(pm.request.body.raw).to.equal('payload');
+            pm.expect(pm.request.body.graphql).to.equal(undefined);
         )JS");
     }
+}
+
+// ---------------------------------------------------------------------------
+// The `graphql` mode and its pair (issue #1111).
+// ---------------------------------------------------------------------------
+
+/// The envelope case: the members are the envelope's own, not a re-derivation.
+TEST_F (ScriptRequestBodyTest, AGraphqlEnvelopeReadsAsItsQueryAndVariables) {
+    request.body = graphql_body (GRAPHQL_ENVELOPE);
+    expect_script_passes (R"JS(
+        pm.expect(pm.request.body.mode).to.equal('graphql');
+        pm.expect(pm.request.body.graphql.query).to.equal(
+            'query User($id: ID!) { user(id: $id) { name } }');
+        pm.expect(pm.request.body.graphql.variables.id).to.equal('42');
+        pm.expect(pm.request.body.urlencoded).to.equal(undefined);
+        pm.expect(pm.request.body.formdata).to.equal(undefined);
+    )JS");
+}
+
+/**
+ * The bare document case. `query` is the document itself, because that is what
+ * the envelope the engine wraps it in carries - the point at which this member
+ * stops being a restatement of `.raw` and starts answering what is *sent*.
+ */
+TEST_F (ScriptRequestBodyTest, ABareGraphqlDocumentReadsAsTheQueryItWouldBeSentAs) {
+    request.body = graphql_body (GRAPHQL_DOCUMENT);
+    expect_script_passes (R"JS(
+        pm.expect(pm.request.body.mode).to.equal('graphql');
+        pm.expect(pm.request.body.graphql.query).to.equal('query User { user { name } }');
+        pm.expect('variables' in pm.request.body.graphql).to.equal(false);
+    )JS");
+}
+
+/**
+ * The pin the member exists to keep: whatever `.graphql.query` answers is the
+ * query `graphql_wire_body` would put on the wire, for both readable shapes.
+ * Reverting the classifier reuse - deriving the pair from a second local rule -
+ * is what this fails on, since only the shared classifier decides the same way
+ * the send does.
+ */
+TEST_F (ScriptRequestBodyTest, TheQueryIsTheOneTheSendWouldCarry) {
+    for (const std::string_view content : { GRAPHQL_ENVELOPE, GRAPHQL_DOCUMENT }) {
+        request.body = graphql_body (content);
+        expect_script_passes (
+        "pm.expect(pm.request.body.graphql.query).to.equal(" +
+        js_literal (wire_query (content)) + ");");
+    }
+}
+
+/**
+ * Envelope-shaped and unreadable: an unresolved `{{token}}`, or a typo.
+ * `graphql_wire_body` passes such a body through untouched rather than wrapping
+ * something it failed to understand, so there is no pair to answer and none is
+ * invented. `.raw` still carries the string, which is what keeps the body
+ * described as unreadable rather than hidden.
+ */
+TEST_F (ScriptRequestBodyTest, AnUnreadableEnvelopeIsNotGuessedAt) {
+    request.body = graphql_body (GRAPHQL_UNRESOLVED);
+    expect_script_passes (R"JS(
+        pm.expect(pm.request.body.mode).to.equal('graphql');
+        pm.expect(pm.request.body.graphql).to.equal(undefined);
+        pm.expect(pm.request.body.raw).to.include('{{savedQuery}}');
+    )JS");
+}
+
+/// An empty body has no query, and inventing one would give a bodiless request
+/// an operation - the rule `graphql_wire_body` states as empty in, empty out.
+TEST_F (ScriptRequestBodyTest, AnEmptyGraphqlBodyAnswersNoPair) {
+    request.body = graphql_body ("");
+    expect_script_passes (R"JS(
+        pm.expect(pm.request.body.mode).to.equal('graphql');
+        pm.expect(pm.request.body.graphql).to.equal(undefined);
+    )JS");
+}
+
+/**
+ * The pair is read off the string `.raw` answers with, so a script that rewrote
+ * the body reads the query it just wrote rather than the one it replaced.
+ */
+TEST_F (ScriptRequestBodyTest, AssigningRawMovesTheGraphqlPairWithIt) {
+    request.body = graphql_body (GRAPHQL_ENVELOPE);
+    expect_script_passes (R"JS(
+        pm.request.body.raw = 'query Rewritten { ping }';
+        pm.expect(pm.request.body.graphql.query).to.equal('query Rewritten { ping }');
+        pm.expect('variables' in pm.request.body.graphql).to.equal(false);
+    )JS");
+}
+
+/// Frozen like the field lists, and for the same reason: a write into the pair
+/// reaches nothing, so accepting one would be a write nothing reads back.
+TEST_F (ScriptRequestBodyTest, TheGraphqlPairIsFrozenLikeTheFieldLists) {
+    request.body = graphql_body (GRAPHQL_ENVELOPE);
+    expect_script_passes (R"JS(
+        var pair = pm.request.body.graphql;
+        try { pair.query = 'query Injected { ping }'; } catch (e) { /* strict mode */ }
+        pm.expect(pm.request.body.graphql.query).to.equal(
+            'query User($id: ID!) { user(id: $id) { name } }');
+    )JS");
 }
 
 TEST_F (ScriptRequestBodyTest, AUrlencodedBodyReadsAsItsPairsWithTheDisabledRowFlagged) {
@@ -403,7 +542,7 @@ TEST_F (ScriptRequestBodyTest, DeletingTheBodyStillSendsNone) {
  * and only the second is the all-or-nothing rule the write-back promises.
  */
 TEST_F (ScriptRequestBodyTest, TheDescribingMembersAreReadOnlyAndSaySo) {
-    for (const char* member : { "mode", "urlencoded", "formdata", "length" }) {
+    for (const char* member : { "mode", "urlencoded", "formdata", "graphql", "length" }) {
         request.body      = urlencoded_body ();
         const Body before = request.body;
 

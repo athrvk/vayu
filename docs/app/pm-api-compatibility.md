@@ -893,8 +893,9 @@ pm.request.body = JSON.stringify({ n: 2 });
   `clear`. A URL nobody edited is sent as the exact bytes it arrived as, because
   the parts are recomposed only when a member actually changed.
 - **`body` is Postman's `RequestBody` object, not a string** (#1003 - the same trade
-  #991 made for the URL). `mode` (`urlencoded` / `formdata` / `raw` - every other content
-  mode reads `raw`), `raw`, and the `urlencoded` / `formdata` field lists, plus `length`,
+  #991 made for the URL). `mode` (`urlencoded` / `formdata` / `graphql` / `raw` - every
+  other content mode reads `raw`), `raw`, the `urlencoded` / `formdata` field lists and the
+  `graphql` pair, plus `length`,
   all read-only; assigning the whole body, or `.raw`, is the one write and is unchanged
   from what shipped. It still behaves as a string in every context JavaScript allows -
   concatenation, template literals, `==`, `String.prototype` methods, `JSON.stringify`,
@@ -903,6 +904,24 @@ pm.request.body = JSON.stringify({ n: 2 });
   migration note are in
   [scripting.md](../engine/scripting.md#request-object-pmrequest). Reading a form body
   never rewrites it: an unchanged value means untouched.
+- **Four of Postman's five body modes are answered; `file` is not** (#1111). A
+  `graphql` body reads `mode === 'graphql'` and answers `body.graphql.query` /
+  `body.graphql.variables`, derived from the stored string by the classifier the
+  send itself uses. Two divergences inside that mode, both deliberate:
+  `variables` is the **JSON value** the envelope carries rather than the text of
+  Postman's variables editor, which Vayu never stored - so a lifted
+  `JSON.parse(pm.request.body.graphql.variables)` becomes a plain read - and a
+  body that is envelope-shaped but does not parse answers `undefined` rather
+  than a guessed pair, matching what the send does with it. `.raw` stays defined
+  here as it is for the form modes.
+
+    Postman's `file` mode is **not** answered, and a `binary` body reads `raw`.
+    That mode promises `file.src`, a path; a binary body here carries bytes, and
+    the only path this model holds belongs to a form-data file part, which is a
+    different mode and is deliberately never disclosed to a script (#411).
+    Reporting a path would be a change to how bodies are *stored*, not to what
+    scripts can read. Postman's `body.file` is therefore `undefined` here, and a
+    lifted `mode === 'file'` guard takes its false branch.
 - **Setting a variable now re-renders whatever composition left unresolved.**
   `{{…}}` placeholders are still resolved at **compose time** (`POST /compose`,
   engine-side since #226) before the pre-request script runs - #226's decision
