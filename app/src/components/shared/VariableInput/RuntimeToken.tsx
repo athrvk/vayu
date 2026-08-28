@@ -7,20 +7,22 @@
 
 /**
  * A `{{token}}` whose value is produced at run time rather than stored in a
- * scope - `{{$guid}}`, which a generator invents per use, and `{{data.email}}`,
- * which a collection run binds from the iteration's row.
+ * scope - `{{$guid}}`, which a generator invents per use; `{{data.email}}`,
+ * which a collection run binds from the iteration's row; and `{{$vu}}` /
+ * `{{$iteration}}`, which the iteration that sends the request binds from the
+ * run itself (issue #1101).
  *
- * The sibling `EditableVariable` cannot serve either. It offers a popover for
- * viewing and editing a stored value, and neither of these has one: there is
+ * The sibling `EditableVariable` cannot serve any of them. It offers a popover for
+ * viewing and editing a stored value, and none of these has one: there is
  * nothing to edit, and any value it showed would be one it had just invented
  * rather than the one the request will carry. What it *would* do is worse -
  * a name no scope defines paints `text-destructive-text` with a "not defined"
  * tooltip, and offers to create the variable. For a generator that is exactly
- * backwards; for a `data.*` name the offer is a trap, since the namespace is
- * disjoint from the scopes and a variable of that name can never answer for the
- * column.
+ * backwards; for a `data.*` or identity name the offer is a trap, since both
+ * namespaces are disjoint from the scopes and a variable of that name can never
+ * answer for the column or the identity.
  *
- * One component for both, rather than one each: they differ only in the words
+ * One component for all three, rather than one each: they differ only in the words
  * of the tooltip, and a hand-rolled copy of a primitive does not receive the
  * primitive's fixes.
  *

@@ -23,6 +23,12 @@
  * defines paints as a bound-column runtime token rather than an undefined
  * variable (issue #1007) - see the `boundColumn` check in
  * `renderOverlayContent` and `describeBareColumnToken`.
+ *
+ * `{{$vu}}` and `{{$iteration}}` paint as run-time tokens too (issue #1101):
+ * they address the reserved identity namespace, which no scope can answer, so
+ * the "not defined, click to create" treatment marked the one case that always
+ * works - and marked it identically to `{{$vus}}`, a typo that reaches the wire
+ * in braces.
  */
 
 import {
@@ -43,6 +49,7 @@ import { VARIABLE_PATTERN } from "@/constants/variables";
 import { variableCompletionContext } from "@/lib/variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 import { isDataVariableName } from "@/lib/variable-resolution";
+import { iterationVariable } from "@/lib/iteration-variables";
 import { describeDataToken, describeBareColumnToken } from "@/lib/data-contract";
 
 interface VariableInputProps {
@@ -431,6 +438,35 @@ export default function VariableInput({
 								description={data.description}
 								note={data.note}
 								tone={data.tone}
+							/>
+						</span>
+					);
+				}
+				/*
+				 * The identity namespace is reserved the same way (issue
+				 * #994), so it is decided in the same tier - before the
+				 * scopes, not beside the generator table below. The
+				 * difference is load-bearing: a scope that defines `$guid`
+				 * wins and takes the editable token, but `lookupVariable`
+				 * answers `$vu` ahead of every scope, so a variable someone
+				 * happens to name `$vu` shadows nothing and must not paint
+				 * as though it had. Nothing binds it until the iteration
+				 * that sends the request, which is what the note says.
+				 */
+				const identity = iterationVariable(seg.varName);
+				if (identity) {
+					return (
+						<span
+							key={`${i}-${seg.varName}`}
+							data-variable-token
+							data-runtime-token
+							{...tokenBounds}
+							style={{ pointerEvents: "auto" }} // See the data.* token above.
+						>
+							<RuntimeToken
+								name={identity.name}
+								description={identity.description}
+								note="not generated here"
 							/>
 						</span>
 					);

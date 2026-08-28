@@ -6,7 +6,11 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { ITERATION_VARIABLES, isIterationVariableName } from "./iteration-variables";
+import {
+	ITERATION_VARIABLES,
+	isIterationVariableName,
+	iterationVariable,
+} from "./iteration-variables";
 
 describe("ITERATION_VARIABLES", () => {
 	test("names exactly $vu and $iteration, with a non-empty description each", () => {
@@ -35,5 +39,20 @@ describe("isIterationVariableName", () => {
 		expect(isIterationVariableName("vu")).toBe(false);
 		expect(isIterationVariableName("$guid")).toBe(false);
 		expect(isIterationVariableName("")).toBe(false);
+	});
+});
+
+describe("iterationVariable", () => {
+	test("answers with the entry a surface can describe the token from", () => {
+		expect(iterationVariable("$vu")).toBe(ITERATION_VARIABLES[0]);
+		expect(iterationVariable("$iteration")).toBe(ITERATION_VARIABLES[1]);
+	});
+
+	test("agrees with isIterationVariableName on every name either is asked", () => {
+		// The two must never disagree: a surface that decides a name is reserved
+		// and then finds nothing to say about it has no token to paint.
+		for (const name of ["$vu", "$iteration", "$vus", "vu", "$guid", ""]) {
+			expect(iterationVariable(name) !== undefined).toBe(isIterationVariableName(name));
+		}
 	});
 });
