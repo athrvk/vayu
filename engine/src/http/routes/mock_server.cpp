@@ -25,6 +25,7 @@
 #include "vayu/core/path_template.hpp"
 #include "vayu/http/managed_listener.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
@@ -37,7 +38,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <deque>
 #include <expected>
 #include <format>
@@ -262,13 +262,7 @@ std::vector<std::pair<std::string, std::string>> example_headers (const std::str
 }
 
 bool header_is (const std::string& name, const char* wanted) {
-    if (name.size () != std::strlen (wanted)) {
-        return false;
-    }
-    return std::equal (name.begin (), name.end (), wanted, [] (char a, char b) {
-        return std::tolower (static_cast<unsigned char> (a)) ==
-        std::tolower (static_cast<unsigned char> (b));
-    });
+    return vayu::utils::ascii_lower_equal (name, wanted);
 }
 
 /// The content type an example is served under: its denormalized column, then
