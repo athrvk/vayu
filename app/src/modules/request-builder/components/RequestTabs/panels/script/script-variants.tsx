@@ -85,7 +85,8 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			'pm.request.url.query.get("page")',
 			'pm.request.url.query.upsert({ key: "page", value: 2 })',
 			'pm.request.url = "https://api.example.com/v2/users"',
-			"pm.request.body = JSON.stringify({ n: 2 })",
+			"pm.request.body.raw = JSON.stringify({ n: 2 })",
+			'pm.request.body.mode === "urlencoded"',
 			"pm.sendRequest(url, (err, res) => { ... })",
 			"pm.info.requestName",
 		],
@@ -111,6 +112,17 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 				<code className={CODE_CLASS}>typeof</code>. Edit a member -{" "}
 				<code className={CODE_CLASS}>path.push</code>,{" "}
 				<code className={CODE_CLASS}>query.add</code> - or assign a whole URL string.
+			</>,
+			<>
+				<code className={CODE_CLASS}>body</code> is Postman&apos;s RequestBody object -{" "}
+				<code className={CODE_CLASS}>mode</code>, <code className={CODE_CLASS}>raw</code>,{" "}
+				<code className={CODE_CLASS}>urlencoded</code> and{" "}
+				<code className={CODE_CLASS}>formdata</code> - and still reads as the body string
+				everywhere except <code className={CODE_CLASS}>===</code>,{" "}
+				<code className={CODE_CLASS}>typeof</code> and a header value, which needs{" "}
+				<code className={CODE_CLASS}>String(pm.request.body)</code>. Assign{" "}
+				<code className={CODE_CLASS}>raw</code> or the whole body; the field lists are
+				read-only.
 			</>,
 			<>
 				Indexing is case-sensitive in JS: use the exact name (

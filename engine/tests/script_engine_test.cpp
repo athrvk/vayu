@@ -2545,7 +2545,7 @@ TEST_F (ScriptEngineTest, ScriptReadsAUrlencodedBodyAsTheStringThatGoesOnTheWire
     request.body = urlencoded_body ();
 
     auto result = engine.execute_prerequest (R"JS(
-        pm.request.headers['X-Seen-Body'] = pm.request.body;
+        pm.request.headers['X-Seen-Body'] = String(pm.request.body);
     )JS",
     request, env);
 
@@ -2559,7 +2559,7 @@ TEST_F (ScriptEngineTest, ScriptReadsAFormDataBodyAsItsFieldsRatherThanEmpty) {
     request.body = form_data_body ();
 
     auto result = engine.execute_prerequest (R"JS(
-        pm.request.headers['X-Seen-Body'] = pm.request.body;
+        pm.request.headers['X-Seen-Body'] = String(pm.request.body);
         pm.request.headers['X-Body-Empty'] = String(pm.request.body === '');
     )JS",
     request, env);
@@ -2576,7 +2576,7 @@ TEST_F (ScriptEngineTest, ScriptReadingAFormBodySeesOnlyTheEnabledFields) {
     request.body.fields = { { "kept", "1", true }, { "off", "2", false } };
 
     auto result = engine.execute_prerequest (R"JS(
-        pm.request.headers['X-Seen-Body'] = pm.request.body;
+        pm.request.headers['X-Seen-Body'] = String(pm.request.body);
     )JS",
     request, env);
 
@@ -2605,7 +2605,7 @@ TEST_F (ScriptEngineTest, ScriptOnlyReadingAFormBodyLeavesItsFieldsAlone) {
     request.body.fields = { { "kept", "1", true }, { "off", "2", false } };
 
     auto result = engine.execute_prerequest (R"JS(
-        pm.request.headers['X-Seen-Body'] = pm.request.body;
+        pm.request.headers['X-Seen-Body'] = String(pm.request.body);
     )JS",
     request, env);
 
@@ -2648,7 +2648,7 @@ TEST_F (ScriptEngineTest, ScriptWritingBackAnUnchangedUrlencodedBodyChangesNothi
     const Body before = request.body;
 
     auto result = engine.execute_prerequest (R"JS(
-        pm.request.body = pm.request.body;
+        pm.request.body = String(pm.request.body);
     )JS",
     request, env);
 
@@ -2708,7 +2708,7 @@ TEST_F (ScriptEngineTest, ScriptTellsAFilePartFromAnEmptyTextField) {
     request.body = form_data_body_with_a_file ("/home/ada/portrait.png");
 
     auto result = engine.execute_prerequest (R"JS(
-        pm.request.headers['X-Seen-Body'] = pm.request.body;
+        pm.request.headers['X-Seen-Body'] = String(pm.request.body);
     )JS",
     request, env);
 
@@ -2723,7 +2723,7 @@ TEST_F (ScriptEngineTest, ScriptTellsAFilePartFromAnEmptyTextField) {
     text_request.body.fields = { { "caption", "my avatar", true }, { "avatar", "", true } };
 
     auto text_result = engine.execute_prerequest (R"JS(
-        pm.request.headers['X-Seen-Body'] = pm.request.body;
+        pm.request.headers['X-Seen-Body'] = String(pm.request.body);
     )JS",
     text_request, env);
 
@@ -2754,7 +2754,7 @@ TEST_F (ScriptEngineTest, ReadingABodyWithAFilePartRewritesNothing) {
     const Body before = request.body;
 
     auto result = engine.execute_prerequest (R"JS(
-        pm.request.headers['X-Seen-Body'] = pm.request.body;
+        pm.request.headers['X-Seen-Body'] = String(pm.request.body);
     )JS",
     request, env);
 
@@ -2806,7 +2806,7 @@ TEST_F (ScriptEngineTest, TestScriptReadsAFormBodyToo) {
 
     auto result = engine.execute_test (R"JS(
         pm.test('body is visible', function () {
-            if (pm.request.body !== 'grant_type=client_credentials&scope=read%20write') {
+            if (String(pm.request.body) !== 'grant_type=client_credentials&scope=read%20write') {
                 throw new Error('got: ' + pm.request.body);
             }
         });
