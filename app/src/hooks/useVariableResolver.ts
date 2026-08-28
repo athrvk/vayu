@@ -68,7 +68,13 @@ interface UseVariableResolverOptions {
 }
 
 interface UseVariableResolverReturn {
-	resolveString: (input: string) => string;
+	/**
+	 * Resolve one string. `row` is for the caller that resolves for *several*
+	 * requests at once and so cannot name one row for the whole hook - the tab
+	 * strip, which labels every open tab from a single resolver (issue #1074).
+	 * It answers for that call only, and defaults to the `boundRow` option.
+	 */
+	resolveString: (input: string, row?: DataFileRow) => string;
 	resolveObject: <T>(obj: T) => T;
 	getVariable: (name: string) => ResolvedVariable | null;
 	getAllVariables: () => Record<string, ResolvedVariable>;
@@ -80,6 +86,14 @@ interface UseVariableResolverReturn {
 	 * `VariableOrigin` for why the losers are worth keeping.
 	 */
 	getVariableOrigins: (name: string) => VariableOrigin[];
+}
+
+/**
+ * A row as the text each of its cells substitutes - the one place a row is
+ * rendered, so the caller-wide row and a per-call one cannot render differently.
+ */
+function cellsOf(row: DataFileRow): DataRowCells {
+	return new Map(Object.entries(row).map(([column, cell]) => [column, renderDataValue(cell)]));
 }
 
 export function useVariableResolver(
@@ -221,21 +235,14 @@ export function useVariableResolver(
 	);
 
 	/**
-	 * The bound row's cells as the text each substitutes, rendered once rather
-	 * than per token. Undefined - not an empty map - when no row is bound, so
-	 * `resolveString` below can tell "no row" from "a row with no columns".
+	 * The caller-wide bound row's cells as the text each substitutes, rendered
+	 * once rather than per token. Undefined - not an empty map - when no row is
+	 * bound, so `resolveString` below can tell "no row" from "a row with no
+	 * columns".
 	 */
 	const boundRow = options?.boundRow;
 	const rowCells = useMemo<DataRowCells | undefined>(
-		() =>
-			boundRow
-				? new Map(
-						Object.entries(boundRow).map(([column, cell]) => [
-							column,
-							renderDataValue(cell),
-						])
-					)
-				: undefined,
+		() => (boundRow ? cellsOf(boundRow) : undefined),
 		[boundRow]
 	);
 
@@ -261,10 +268,13 @@ export function useVariableResolver(
 	 * one bind and the send would be a lie about the other one.
 	 */
 	const resolveString = useCallback(
-		(input: string): string =>
-			rowCells
-				? resolveTemplateWithRow(input, (name) => variableMap[name]?.value, rowCells)
-				: resolveTemplate(input, (name) => variableMap[name]?.value),
+		(input: string, row?: DataFileRow): string => {
+			const lookup = (name: string) => variableMap[name]?.value;
+			const cells = row ? cellsOf(row) : rowCells;
+			return cells
+				? resolveTemplateWithRow(input, lookup, cells)
+				: resolveTemplate(input, lookup);
+		},
 		[variableMap, rowCells]
 	);
 

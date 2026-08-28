@@ -56,7 +56,7 @@ vi.mock("@/hooks", async (importOriginal) => {
 	return { ...actual, useSaveManager: () => ({ saveStatus: "idle", isSaving: false }) };
 });
 
-const { useDataFileStore } = await import("@/stores");
+const { useDataFileStore, useBoundRowStore } = await import("@/stores");
 const { default: RequestBuilderProvider } = await import("./RequestBuilderProvider");
 const { useRequestBuilderContext } = await import("./RequestBuilderContext");
 
@@ -130,6 +130,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	useBoundRowStore.setState({ bound: null });
 	useDataFileStore.setState({ locations: {} });
 	Reflect.deleteProperty(window, "electronAPI");
 });
@@ -179,6 +180,31 @@ describe("the preview while a row is bound", () => {
 		// A name the row does not carry is an ordinary variable, not a mistake
 		// about a column.
 		expect(result.current.resolveString("{{nowhere}}")).toBe("{{nowhere}}");
+	});
+});
+
+describe("publishing the bound row for the tab strip", () => {
+	it("names the request the row is bound for", async () => {
+		// The strip labels every tab from one resolver and cannot reach into this
+		// provider, so the row travels through a store instead (issue #1074) - and
+		// it carries the request id, because a slot that did not could relabel the
+		// wrong tab.
+		const { result } = setup("req_a");
+		expect(useBoundRowStore.getState().bound).toBeNull();
+		await bindRow(result, 0);
+		expect(useBoundRowStore.getState().bound).toEqual({
+			requestId: "req_a",
+			row: { username: "ada", email: "ada@example.test" },
+		});
+	});
+
+	it("clears the slot when the builder goes away", async () => {
+		// The rows must never outlive the send that uses them, so an unmounted
+		// builder leaves nothing behind for the strip to label from.
+		const { result, unmount } = setup("req_a");
+		await bindRow(result, 0);
+		unmount();
+		expect(useBoundRowStore.getState().bound).toBeNull();
 	});
 });
 

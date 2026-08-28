@@ -22,7 +22,7 @@ import { useQueries } from "@tanstack/react-query";
 import { requestDetailOptions, runDetailOptions, useCollectionsQuery } from "@/queries";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
-import type { Tab } from "@/stores";
+import { boundRowFor, useBoundRowStore, type Tab } from "@/stores";
 
 /**
  * Extract a short display path from a request URL. URLs may contain
@@ -126,6 +126,14 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 	});
 	const { data: collections = [] } = useCollectionsQuery();
 	const { resolveString } = useVariableResolver();
+	/*
+	 * The row the open builder is bound to (issue #1074). One resolver serves the
+	 * whole list, so the row cannot be an option on it the way it is inside the
+	 * builder - it is passed per call instead, for the one tab it belongs to.
+	 * Null for every ordinary Send, which is the state this strip has always been
+	 * in.
+	 */
+	const bound = useBoundRowStore((s) => s.bound);
 
 	return tabs.map((tab, i) => {
 		const request = requests[i]?.data;
@@ -149,7 +157,10 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 			}
 			case "request": {
 				if (!request) return { label: "Request", title: "Request" };
-				const name = requestTabTitle(request.name, resolveString(request.url));
+				const name = requestTabTitle(
+					request.name,
+					resolveString(request.url, boundRowFor(bound, tab.entityId))
+				);
 				return {
 					label: name,
 					title: `${request.method} ${name}`,

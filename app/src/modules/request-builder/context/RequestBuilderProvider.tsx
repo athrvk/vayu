@@ -32,7 +32,12 @@ import {
 	useUpdateEnvironmentMutation,
 	useLastDesignRunQuery,
 } from "@/queries";
-import { useSessionStore, useResponseStore, useExecutionEventsStore } from "@/stores";
+import {
+	useSessionStore,
+	useResponseStore,
+	useExecutionEventsStore,
+	useBoundRowStore,
+} from "@/stores";
 import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
 import { apiService } from "@/services";
 import { queryClient } from "@/lib/query-client";
@@ -386,6 +391,26 @@ export default function RequestBuilderProvider({
 				: (sendWithRow.parsed?.rows[lastRowIndex] ?? undefined),
 		[lastRowIndex, sendWithRow.parsed]
 	);
+
+	/*
+	 * Publish the bound row for the one preview surface that is not below this
+	 * provider: the tab strip (issue #1074). `useTabDescriptors` labels every
+	 * open tab from a single list-wide resolver, so it cannot take the row from
+	 * this context the way the bar and the panels do - and a tab labelled from
+	 * the environment while the bar beneath it shows the file's value is the same
+	 * one-bind-two-answers split #1062 closed everywhere else.
+	 *
+	 * Cleared on unmount as well as whenever there is no row, so the slot cannot
+	 * outlive the builder that justified it.
+	 */
+	const setBoundRow = useBoundRowStore((s) => s.setBoundRow);
+	const boundRequestId = request.id ?? null;
+	useEffect(() => {
+		setBoundRow(
+			boundRow && boundRequestId ? { requestId: boundRequestId, row: boundRow } : null
+		);
+		return () => setBoundRow(null);
+	}, [boundRow, boundRequestId, setBoundRow]);
 
 	// Variable resolution
 	const {
