@@ -523,6 +523,25 @@ void append_doc (std::string& out, const TypeNode& node, const std::string& inde
     out += indent + " */\n";
 }
 
+/**
+ * @brief What a listed call returns, in the one place both callable shapes ask.
+ *
+ * `forced_return` is the answer the table cannot write down (`pm.expect` opens
+ * the chain and its own entry does not say so); a documented return type is the
+ * answer it can; and an assertion that documents none continues the chain it
+ * sits in, or yields nothing outside one. Read once here, so a plain function
+ * and a function that carries members cannot come to disagree.
+ */
+std::string function_return_type (const TypeNode& node, const Signature& sig, bool in_chain) {
+    if (!node.forced_return.empty ()) {
+        return node.forced_return;
+    }
+    if (!sig.return_type.empty ()) {
+        return sig.return_type;
+    }
+    return in_chain ? CHAIN : "void";
+}
+
 std::string render_member (const TypeNode& node,
 const std::string& name,
 const std::string& indent,
@@ -559,9 +578,25 @@ bool in_chain) {
         // of the documented jar block was "Property 'set' does not exist on
         // type 'object'". One member, whose return type is the members the
         // labels gave it.
-        if (node.kind == KIND_FUNCTION || node.called) {
+        if (node.called) {
             const Signature sig = parse_signature (node.detail, name);
             out += indent + name + "(" + (sig.parsed ? sig.params : "") + "): {\n";
+            out += render_body (node, indent + "\t", in_chain);
+            out += indent + "};\n";
+            return out;
+        }
+        // A function whose children were reached *without* a call: the label
+        // is `pm.expect.fail`, not `pm.expect().fail`, so `fail` is a member of
+        // the function object rather than of what calling it returns. The `()`
+        // in a label is the whole of that distinction - read as the jar's
+        // shape above, `pm.expect(x)` would return `{ fail }` and every
+        // documented `pm.expect(x).to...` would stop compiling. TypeScript
+        // writes a callable with members as a call signature beside them.
+        if (node.kind == KIND_FUNCTION) {
+            const Signature sig = parse_signature (node.detail, name);
+            out += indent + name + ": {\n";
+            out += indent + "\t(" + (sig.parsed ? sig.params : "...args: any[]") +
+            "): " + function_return_type (node, sig, in_chain) + ";\n";
             out += render_body (node, indent + "\t", in_chain);
             out += indent + "};\n";
             return out;
@@ -586,18 +621,10 @@ bool in_chain) {
     }
 
     if (node.kind == KIND_FUNCTION) {
-        const Signature sig = parse_signature (node.detail, name);
-        std::string params  = sig.parsed ? sig.params : "...args: any[]";
-        std::string ret     = sig.return_type;
-        if (!node.forced_return.empty ()) {
-            ret = node.forced_return;
-        }
-        if (ret.empty ()) {
-            // An assertion that documents no return continues the chain when it
-            // sits in one, and otherwise yields nothing.
-            ret = in_chain ? CHAIN : "void";
-        }
-        out += indent + name + "(" + params + "): " + ret + ";\n";
+        const Signature sig      = parse_signature (node.detail, name);
+        const std::string params = sig.parsed ? sig.params : "...args: any[]";
+        out += indent + name + "(" + params +
+        "): " + function_return_type (node, sig, in_chain) + ";\n";
         return out;
     }
 

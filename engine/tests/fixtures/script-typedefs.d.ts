@@ -537,7 +537,17 @@ declare const pm: {
 	 * - .to.include(value)
 	 * - .and to continue a chain
 	 */
-	expect(value: any, message?: string): VayuExpectation;
+	expect: {
+		(value: any, message?: string): VayuExpectation;
+		/**
+		 * Fail here, as an assertion rather than as an error.
+		 * 
+		 * Inside pm.test it fails that test; outside one it records an assertion failure the way every other matcher does, where a thrown Error would abort the script.
+		 * 
+		 * chai's fail(actual, expected, message, operator) form is not supported - this AssertionError has nowhere to carry the two compared values, so more than one argument is refused rather than read as the message.
+		 */
+		fail(message?: string): never;
+	};
 	/**
 	 * Access and modify global variables. Changes persist to global variables.
 	 */
@@ -1188,8 +1198,12 @@ declare const pm: {
 	 * pm.test('Status code is 200', () => {
 	 *   pm.response.to.have.status(200);
 	 * });
+	 * 
+	 * Returns pm, so calls chain: pm.test(a, fn).test(b, fn).
+	 * 
+	 * A callback that declares a parameter is handed a done callback: call done() to pass, done(err) to fail. It must be called before the callback returns - the sandbox is synchronous and has no job queue, so a test that leaves done() for later fails saying so.
 	 */
-	test(name: string, fn: () => void): void;
+	test(name: string, fn: (done: (error?: unknown) => void) => void): typeof pm;
 	/**
 	 * Read a variable without naming its scope. Resolves environment, then collection, then global - the same order {{name}} uses. Writes must name a scope: pm.variables.set() throws.
 	 */

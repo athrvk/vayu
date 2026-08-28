@@ -53,11 +53,17 @@ nlohmann::json get_script_completions () {
     // ========================================
     completions.push_back ({ { "label", "pm.test" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.test(\"${1:test name}\", function() {\n\t${2:// assertions}\n});" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "pm.test(name: string, fn: () => void)" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.test(name: string, fn: (done: (error?: unknown) => void) => void): typeof pm" },
     { "documentation",
     "Define a test with assertions. The test name appears in "
     "results.\n\nExample:\npm.test('Status code is 200', () => {\n  "
-    "pm.response.to.have.status(200);\n});" },
+    "pm.response.to.have.status(200);\n});\n\nReturns pm, so calls chain: "
+    "pm.test(a, fn).test(b, fn).\n\nA callback that declares a parameter is "
+    "handed a done callback: call done() to pass, done(err) to fail. It must "
+    "be called before the callback returns - the sandbox is synchronous and "
+    "has no job queue, so a test that leaves done() for later fails saying "
+    "so." },
     { "sortText", "0_pm_test" } });
 
     // ========================================
@@ -76,6 +82,19 @@ nlohmann::json get_script_completions () {
     ".to.be.false\n- .to.exist\n- .to.have.property(name)\n- "
     ".to.include(value)\n- .and to continue a chain" },
     { "sortText", "0_pm_expect" } });
+
+    completions.push_back ({ { "label", "pm.expect.fail" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.expect.fail(${1:message})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.expect.fail(message?: string): never" },
+    { "documentation",
+    "Fail here, as an assertion rather than as an error.\n\nInside pm.test it "
+    "fails that test; outside one it records an assertion failure the way "
+    "every other matcher does, where a thrown Error would abort the "
+    "script.\n\nchai's fail(actual, expected, message, operator) form is not "
+    "supported - this AssertionError has nowhere to carry the two compared "
+    "values, so more than one argument is refused rather than read as the "
+    "message." },
+    { "sortText", "0_pm_expect_fail" } });
 
     // ========================================
     // pm.response - Response object

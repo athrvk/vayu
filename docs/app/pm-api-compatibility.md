@@ -21,7 +21,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 
 | Group               | API                                                                              |
 | ------------------- | -------------------------------------------------------------------------------- |
-| Core                | `pm`, `pm.test(name, fn)` - in either script, each result naming the one that made it (see below), `pm.expect(value[, message])` - the message prefixes the failure, as in chai |
+| Core                | `pm`, `pm.test(name, fn)` - in either script, each result naming the one that made it, returning `pm` so calls chain, and handing a `done` to a callback that declares one (see below), `pm.expect(value[, message])` - the message prefixes the failure, as in chai, `pm.expect.fail([message])` |
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
@@ -352,6 +352,23 @@ nothing named. A result restored from a run stored before that carries no
 **A load test runs no pre-request script** (only the `tests` one), so there is
 nothing to assert there before the request.
 
+**It returns `pm`, and a callback that declares a parameter gets a `done`**
+(issue #1004). Both are Postman's contract - postman-sandbox returns `pm` to
+"make it chainable" and reads the callback's `fn.length` to decide the
+done-style form - so `pm.test(a, fn).test(b, fn)` runs both, and `done()` /
+`done(err)` complete or fail the test that asked for one. The zero-argument
+form is untouched: it passes unless it throws.
+
+**The one divergence is what "asynchronous" can mean here.** Postman waits for
+a `done()` that arrives later; this sandbox is synchronous and drains no job
+queue, so one left for later would never run at all - the same reason
+[`pm.crypto` is not `crypto.subtle`](#hashing-pmcrypto-is-vayus-own-name-and-it-is-synchronous).
+A callback that declares `done` and returns without calling it therefore
+**fails, naming the reason** - where the same script used to fail with
+`undefined is not a function`, which said nothing about why. Calling `done()`
+twice throws rather than overwriting the first verdict, and the throw fails the
+test.
+
 ### Assertion chains (`pm.expect`)
 
 Chai-style chains on a `pm.expect(value)` expectation, implemented in the QuickJS
@@ -444,6 +461,15 @@ expression statement, so an unimplemented name used to evaluate to `undefined`
 and report PASS whatever the value was. Every name the chain does not carry -
 a typo, or a chai matcher Vayu lacks (`.finite`, `.sealed`, `.frozen`,
 `.extensible`) - now raises a `TypeError` naming itself.
+
+**`pm.expect.fail([message])` throws that same `AssertionError` on demand**
+(issue #1004), defaulting to chai's own `expect.fail()` text. Inside a
+`pm.test` it fails that test; outside one it is the difference between an
+assertion and an error, since a thrown `Error` there aborts the script.
+chai's `fail(actual, expected, message, operator)` form is **not** supported -
+this `AssertionError` has nowhere to carry the two compared values, so a second
+argument is refused by name rather than `actual` being reported as the failure
+text.
 
 `have.keys` asserts *exactly* those keys. `Map` / `Set` / typed arrays are
 reported unequal by `eql` rather than compared (their contents are not
