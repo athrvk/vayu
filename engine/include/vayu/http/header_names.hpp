@@ -144,9 +144,10 @@ struct HeaderNameCollision {
 /**
  * @brief The refusal a header name that resolved to nothing reads as.
  *
- * One wording for the same three layers, on the reasoning above: a caller
- * meeting this at composition and again at execute time is meeting one rule,
- * and three spellings of it would read as three. A layer may name itself in
+ * One wording for four layers - the three above and the bind, which is one more
+ * than the collision rule reaches - on the same reasoning: a caller meeting this
+ * at composition, again at execute time and again from a data row is meeting one
+ * rule, and four spellings of it would read as four. A layer may name itself in
  * front of the wording, never inside it.
  *
  * @param written the name as the request carries it, before resolution. It is
