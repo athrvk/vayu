@@ -3315,6 +3315,41 @@ TEST_F (ScriptEngineTest, SatisfyPredicatePastTheDeadlineAbortsTheScript) {
 #endif
 }
 
+// #1073. The message half of the same question the three tests above settled
+// for the verdict: `execute` asked the *clock* whether the deadline ended the
+// script, so an error that merely landed past it was relabelled a timeout and
+// the sentence naming the fault was discarded. Here the deadline has provably
+// passed and the handler stopped nothing since - the `arm` before the second
+// `.to.throw()` clears its record, which is what makes the top-level throw
+// below the only thing that ended this script.
+//
+// Mutation check: restore the `steady_clock::now () > deadline` comparison in
+// `Impl::execute` and this reddens on "Script execution timed out after 300ms".
+TEST_F (ScriptEngineTest, AnOwnThrowPastTheDeadlineKeepsItsOwnError) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 300;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (R"(
+        pm.test("spins past the deadline", function () {
+            pm.expect(function () { while (true) {} }).to.throw();
+        });
+        pm.expect(function () { throw new Error("caught by the matcher"); }).to.throw();
+        throw new Error("the script's own error");
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("the script's own error"), std::string::npos)
+    << "error was: " << result.error_message;
+    EXPECT_EQ (result.error_message.find ("timed out"), std::string::npos)
+    << "an ordinary throw was relabelled a timeout: " << result.error_message;
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
 // timeout_ms == 0 disables the wall-clock limit (escape hatch); a bounded loop
 // still completes normally with no false timeout.
 TEST_F (ScriptEngineTest, ZeroTimeoutDisablesLimit) {

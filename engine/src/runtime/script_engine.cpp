@@ -8237,11 +8237,15 @@ class ScriptEngine::Impl {
         if (JS_IsException (eval_result)) {
             JSValue exc    = JS_GetException (js_ctx);
             result.success = false;
-            // If the deadline interrupt fired, report a clear timeout message
-            // rather than QuickJS's raw "interrupted" InternalError.
-            auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt));
-            if (rt_state && rt_state->enabled &&
-            std::chrono::steady_clock::now () > rt_state->deadline) {
+            // Whether the deadline stopped this script is the interrupt
+            // handler's to answer, not the clock's - the same question #1056
+            // settled one layer down. An error that merely *lands* past the
+            // deadline is still that error: a script's own throw at the buzzer,
+            // and `pm.sendRequest` refusing a spent budget from a blocking C
+            // function the handler never gets to interrupt. Comparing the clock
+            // here replaced the sentence naming the fault with a timeout line
+            // the user could not act on.
+            if (script_deadline_expired (js_ctx)) {
                 result.error_message = "Script execution timed out after " +
                 std::to_string (config.timeout_ms) + "ms";
             } else {

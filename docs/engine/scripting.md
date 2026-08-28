@@ -1279,7 +1279,10 @@ It is a subset of `pm.response` and has no `to.*` assertion chain.
   to whatever is left of the script's budget; without that, a 5s script calling
   `pm.sendRequest` at the default 30s request timeout would hold its thread for
   30s with no error and no way to interrupt it. When `scriptTimeout` is `0`
-  there is no budget and nothing to clamp to.
+  there is no budget and nothing to clamp to. A call made with the budget
+  already spent is refused by name - `pm.sendRequest was called with none of
+  the script's time budget left` - and that sentence is what the script's error
+  reports, since the handler never ran and so never stopped anything.
 - *A request cap.* One script execution may issue at most **10** requests, then
   throws. A load run's `tests` script runs once per *sampled* response, serially,
   on the run's worker thread, so an uncapped loop would turn post-run validation
@@ -2066,7 +2069,12 @@ The **language** is current; what is missing is the **host environment**:
   engine. Configurable via the `scriptTimeout` setting (milliseconds); `0` disables
   the limit. The deadline is checked *between bytecode operations*, so it cannot
   interrupt a blocking call - which is why `pm.sendRequest` clamps its own
-  timeout to the budget that is left rather than relying on it. A function an
+  timeout to the budget that is left rather than relying on it. **A script is
+  reported as timed out when the deadline actually stopped it**, not whenever
+  its error happens to land past the deadline: a script that throws its own
+  error at the buzzer reports *that* error, and `pm.sendRequest` refusing a
+  spent budget reports its own sentence rather than a generic timeout line.
+  A function an
   assertion calls - `pm.expect(fn).to.throw()`, `.to.satisfy(fn)` - is stopped
   by the same deadline, and that is **reported as the abort it is**, never as a
   satisfied assertion: the engine stopped `fn`, `fn` did not throw. Inside a
