@@ -40,6 +40,24 @@ vi.mock("@/queries/collections", () => ({
 	useUpdateCollectionMutation: () => mutation,
 }));
 
+/**
+ * The contract in scope and the variables in scope, which the chips now read
+ * (issue #1075). Stubbed at the hook boundary rather than through the query
+ * layer for the reason this file's header gives: what these assert is the
+ * wiring, and standing up a real chain would be testing `useDataContract`
+ * and `useVariableResolver`, which have their own suites.
+ */
+const contract: { value: { collectionName: string; columns: string[] } | undefined } = {
+	value: undefined,
+};
+const variables: { value: Record<string, { value: string; scope: string }> } = { value: {} };
+
+vi.mock("@/hooks", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/hooks")>()),
+	useDataContract: () => contract.value,
+	useVariableResolver: () => ({ getAllVariables: () => variables.value }),
+}));
+
 // Monaco does not run in jsdom, and the editor is not what this guards.
 vi.mock("@/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/components/ui")>()),
@@ -72,6 +90,8 @@ function makeCollection(script: string): Collection {
 
 beforeEach(() => {
 	mutation.mutateAsync.mockClear();
+	contract.value = undefined;
+	variables.value = {};
 });
 
 describe.each(["pre", "post"] as const)("%s-request script tab", (kind) => {
@@ -126,5 +146,93 @@ describe.each(["pre", "post"] as const)("%s-request script tab", (kind) => {
 		render(<ScriptTab collection={makeCollection("console.log(1);")} kind={kind} />);
 
 		expect(screen.queryByText("Names mentioned:")).not.toBeInTheDocument();
+	});
+
+	/**
+	 * The column tones this tab did not have (issue #1075).
+	 *
+	 * The request panel got them at #604 and #1063; this one kept a two-way
+	 * ladder, so the same script pasted into a collection's tab instead of a
+	 * request's lost every column state - a flat accent chip that claims a
+	 * variable answers, for a name only a bound row can answer. The paint below
+	 * comes from `DATA_TOKEN_TONE_CLASS`, the one table both surfaces read, so
+	 * a column this tab calls declared is the one that panel calls declared.
+	 */
+	describe("a data column, by either spelling", () => {
+		const COLUMNS = [
+			'const a = "{{data.email}}";',
+			'const b = pm.variables.get("city");',
+			'const c = pm.iterationData.get("zip");',
+		].join("\n");
+
+		const chipFor = (container: HTMLElement, text: string) =>
+			[...container.querySelectorAll<HTMLElement>('[data-slot="badge"]')].find(
+				(el) => el.textContent === text
+			);
+
+		it("paints all three spellings as columns, never as the accent", () => {
+			contract.value = { collectionName: "Orders", columns: ["email", "city", "zip"] };
+			const { container } = render(
+				<ScriptTab collection={makeCollection(COLUMNS)} kind={kind} />
+			);
+
+			for (const text of ["{{data.email}}", "city", "zip"]) {
+				const chip = chipFor(container, text);
+				expect(chip, `no chip for ${text}`).toBeTruthy();
+				expect(chip!.className).toContain("text-muted-foreground");
+				// The accent is the paint that said a variable answers this name.
+				expect(chip!.className).not.toContain("text-variable");
+			}
+		});
+
+		it("names the declaring collection, which is where the column changes", () => {
+			contract.value = { collectionName: "Orders", columns: ["email", "city", "zip"] };
+			const { container } = render(
+				<ScriptTab collection={makeCollection(COLUMNS)} kind={kind} />
+			);
+
+			expect(chipFor(container, "zip")!.getAttribute("title")).toContain(
+				"declared in Orders"
+			);
+			expect(chipFor(container, "city")!.getAttribute("title")).toContain(
+				"bound row's column answers this name"
+			);
+		});
+
+		it("warns - amber, never destructive - for a column no contract declares", () => {
+			contract.value = { collectionName: "Orders", columns: ["email"] };
+			const { container } = render(
+				<ScriptTab collection={makeCollection(COLUMNS)} kind={kind} />
+			);
+
+			const chip = chipFor(container, "zip")!;
+			expect(chip.className).toContain("text-warning-text");
+			expect(chip.className).not.toContain("bg-destructive");
+		});
+
+		it("leaves a pm.variables read as the variable a scope defines", () => {
+			// The same line the request panel draws, and `VariableInput` before
+			// it: which of the two wins on screen is issue #1064's question.
+			contract.value = { collectionName: "Orders", columns: ["email", "city", "zip"] };
+			variables.value = { city: { value: "Berlin", scope: "environment" } };
+			const { container } = render(
+				<ScriptTab collection={makeCollection(COLUMNS)} kind={kind} />
+			);
+
+			expect(chipFor(container, "city")!.className).toContain("text-variable");
+			// The row's own accessor is unaffected: it reads no scope, so a
+			// variable of that name says nothing about it.
+			expect(chipFor(container, "zip")!.className).not.toContain("text-variable");
+		});
+
+		it("keeps the accent for an ordinary pm read, which is still a variable", () => {
+			// The case that proves the column branch did not swallow the old one.
+			contract.value = { collectionName: "Orders", columns: ["email"] };
+			const { container } = render(
+				<ScriptTab collection={makeCollection(SCRIPT)} kind={kind} />
+			);
+
+			expect(chipFor(container, "auth_token")!.className).toContain("text-variable");
+		});
 	});
 });

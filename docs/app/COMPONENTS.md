@@ -1389,8 +1389,13 @@ as their tooltip; `pm` chips keep the resolved/unresolved pair, except for the
 column reads below. The collection's Pre-request and Post-request tabs
 (`CollectionDetail/ScriptTab`) read the same helper and split `pm` from
 `template` the same way - they had also printed every name as `{{name}}`,
-including the ones the script reads through `pm`. They do **not** paint the
-column tones: that half is the request panel's alone (issue #1075).
+including the ones the script reads through `pm`. They paint the column tones
+too (issue #1075): that tab kept a two-way ladder through #604 and #1063, so
+the same script pasted into a collection's tab rather than a request's lost
+every column state, and a name only a bound row can answer got the accent that
+says a variable does. Both ladders read one `DATA_TOKEN_TONE_CLASS`, so a
+column one calls declared is the one the other calls declared - two consumers
+of one rule, not two copies of it.
 
 **A reference carries what its accessor can see, not only how it was spelled**
 (issue #1063). `referencedVariables` matched three accessors and left
