@@ -252,10 +252,10 @@ export function useScriptVariableCompletionProvider() {
 				/*
 				 * The reserved identity namespace (issue #1057). `replaceIn` resolves
 				 * `{{$vu}}` / `{{$iteration}}` against the identity the request beside
-				 * the script was bound with - the run's own numbers inside a load run,
-				 * `1` / `0` outside one, since `POST /execute` binds those into every
-				 * send that carries no row (a single send is a run of one). That is a
-				 * different question from `pm.info.vu` / `pm.info.iteration`, which
+				 * the script was bound with - whatever the run's shape gives it, down
+				 * to `1` / `0` on a plain Send, since `POST /execute` binds those into
+				 * every send that carries no row (a single send is a run of one). That
+				 * is a different question from `pm.info.vu` / `pm.info.iteration`, which
 				 * stay `undefined` on that same plain Send: `pm.info` answers which
 				 * iteration of which run this is, and there is no run, while a token
 				 * answers what it resolves to here, and here it resolves to what the
@@ -272,7 +272,7 @@ export function useScriptVariableCompletionProvider() {
 							insertText: wrap(identity.name),
 							detail: identity.description,
 							documentation:
-								"Resolves to what the request beside the script was bound with - 1 / 0 outside a load run, not generated here",
+								"Resolves to what the request beside the script was bound with - 1 / 0 on a plain Send, not generated here",
 							sortText: `${ITERATION_SORT_GROUP}${identity.name}`,
 							filterText: wrap(identity.name),
 							range,

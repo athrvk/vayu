@@ -5896,9 +5896,12 @@ vayu::http::VariableValues visible_variable_values (JSContext* ctx) {
 // Which iteration this script is running beside, as the resolver takes it.
 //
 // Always an answer, never absent, because every send is an iteration of a run:
-// a scenario load run's own numbers where the run has them, and the run of one
-// a plain Send is otherwise - `1` and `0`, the numbers `POST /execute` binds
-// into the request this script was handed (issue #994, `execution.cpp`). That
+// the run's own numbers wherever a run set them - a load run's user and pass, a
+// design run's pass - and otherwise the run of one a plain Send is, `1` and `0`.
+// Those two are not a second default chosen here: they are this struct's own,
+// the same ones `POST /execute` binds into the request this script was handed
+// (issue #994, `execution.cpp`), which is what the move of `IterationIdentity`
+// down beside the names bought. That
 // is the whole of why `replaceIn` may resolve what composition may not: it runs
 // beside a request already bound with these two numbers, so leaving the token
 // written would make the script and the wire disagree about one send.

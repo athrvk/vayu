@@ -420,6 +420,28 @@ TEST_F (LoadIdentityTest, TheDeferredScriptReadsTheIterationAndUserItWasSentAs) 
     EXPECT_EQ (validation.run->passed, 3u);
 }
 
+// The same run shape, asked the other way a script can ask (issue #1057): the
+// two APIs answer one question about one submission, so a script that renders
+// the identity gets what the script beside it reports reading.
+TEST_F (LoadIdentityTest, ADeferredScriptResolvesTheIdentityItWasSentAs) {
+    RecordingServer server;
+    json payload     = iterations_payload (server.url ("/plain"), 3);
+    payload["tests"] = R"js(pm.test('identity', function () {
+  var resolved = pm.variables.replaceIn('{{$vu}}/{{$iteration}}');
+  var reported = pm.info.vu + '/' + pm.info.iteration;
+  if (resolved !== reported) {
+    throw new Error(resolved + ' is not the ' + reported + ' it was sent as');
+  }
+});)js";
+
+    run (payload);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->failed, 0u) << replay_failures ();
+    EXPECT_EQ (validation.run->passed, 3u);
+}
+
 // Every pacing mode binds, not only the one whose submit path was written
 // first: the strategies share one submission helper, and this is what says so.
 TEST_F (LoadIdentityTest, EveryPacingModeBindsTheIdentity) {

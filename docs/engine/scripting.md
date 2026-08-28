@@ -1110,10 +1110,15 @@ is a token template syntax has - `get` and `.has` are lookups by name, and
 `{{$vu}}` and `{{$iteration}}` render to numbers, the same way `{{data.column}}`
 does above: the resolver takes the identity the request beside the script was
 bound with, ahead of every scope and ahead of the row, so `replaceIn` and the
-request cannot disagree about one send. Outside a load run - a plain Send, a
-collection design run, or anything else that binds no row - the numbers are `1`
-and `0`, because `POST /execute` binds exactly those into every send that
-carries no row of its own (a single send is a run of one, issue #994).
+request cannot disagree about one send. Which numbers those are is the run's
+own question, answered per shape in
+[the binding table](../app/variable-resolution.md#vu-and-iteration-are-reserved-too-for-the-same-reason):
+a collection run in design mode is one user walking the sequence, so `{{$vu}}`
+renders `1` while `{{$iteration}}` advances with the pass. On a plain Send the
+numbers are `1` and `0`, because `POST /execute` binds exactly those into every
+send that carries no row of its own (a single send is a run of one, issue
+#994) - and it binds them before the pre-request script runs, so they are what
+the request the script is handed already carries.
 
 That is not the same fact [`pm.info.vu` and `pm.info.iteration`](#script-identity-pminfo)
 carry, and the two staying different is not a contradiction to resolve: `pm.info`
