@@ -6044,6 +6044,16 @@ read_send_request_auth (JSContext* ctx, JSValueConst value, vayu::http::Auth& ou
 
     AuthParameters params;
     ScopedValue block (ctx, JS_GetPropertyStr (ctx, value, type.c_str ()));
+    if (JS_IsUndefined (block.get ()) || JS_IsNull (block.get ())) {
+        // A type naming a block that is not there - `{ type: 'basic' }`, or the
+        // key misspelled - is refused rather than read as an empty credential.
+        // Basic is why this is checked here rather than left to the per-type
+        // reads below: neither of its halves is required, so an absent block
+        // would compose `Basic Og==` and send it, which is the silent wrong
+        // request in the one shape the required-field checks cannot see.
+        return "pm.sendRequest options.auth names type \"" + type +
+        "\" but carries no options.auth." + type + " block to read it from";
+    }
     if (auto reason = read_auth_parameters (ctx, block.get (), type, params)) {
         return reason;
     }
@@ -6348,7 +6358,7 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     // null because the three types this path accepts need none - oauth2, the
     // one that would, is refused by name while the options are read.
     if (const auto applied = vayu::http::apply_auth (request, auth, nullptr);
-        !applied.ok) {
+    !applied.ok) {
         return JS_ThrowPlainError (ctx,
         "pm.sendRequest could not apply options.auth: %s", applied.message.c_str ());
     }

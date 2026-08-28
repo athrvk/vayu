@@ -1199,9 +1199,12 @@ through `vayu::http::apply_auth`, the engine's one auth composer, so the header
 or the percent-encoded query parameter is the one every other send would have
 written, and an `Authorization` header the script set itself still wins. Every
 other type throws naming it - `oauth2` included, because acquiring its token
-needs the database this path deliberately does not carry. Dropping the option
-would send an unauthenticated request that looks like the script's own mistake,
-which is the reason the body modes are refused too.
+needs the database this path deliberately does not carry. So does a type whose
+block is not there: `{ type: 'basic' }` with no `basic` beside it, or the key
+misspelled, is refused rather than composed as the empty credential `basic`'s two
+optional halves would otherwise make of it. Dropping the option would send an
+unauthenticated request that looks like the script's own mistake, which is the
+reason the body modes are refused too.
 
 ## The cookie jar (`pm.cookies`)
 
