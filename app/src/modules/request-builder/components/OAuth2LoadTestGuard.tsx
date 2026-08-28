@@ -19,8 +19,8 @@
  *   - stale-but-coverable  → offer Refresh (a fresh token gives a full window)
  *   - longer-than-lifetime → block, with an explicit "start anyway" override
  *
- * Which case applies is `isMidRunRefreshable`, which mirrors the engine's own
- * rule; see oauth2-load-test-coverage.ts.
+ * Which case applies is `isMidRunRefreshable`, whose docstring holds the exact
+ * rule and how far it mirrors the engine's; see oauth2-load-test-coverage.ts.
  *
  * Reports whether the Start button should be gated via onGateChange.
  */
