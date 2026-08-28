@@ -55,11 +55,11 @@ std::string percent_decode (std::string value) {
     return out;
 }
 
-// The filename the server is told this part carries. Mirrors what the transfer
-// setup hands libcurl (`curl_mime_filedata` declares the basename, an explicit
-// `curl_mime_filename` overrides it), so a rendering cannot name one thing while
-// the send names another. Separators for both platforms because the path is
-// whatever the client on this machine wrote.
+} // namespace
+
+// Declared in the header since issue #1003: `pm.request.body.formdata` names a
+// part the same way the rendering does, and a second copy of the rule would not
+// receive this one's fixes.
 std::string declared_file_name (const FormField& field) {
     if (!field.file_name.empty ()) {
         return field.file_name;
@@ -67,8 +67,6 @@ std::string declared_file_name (const FormField& field) {
     const auto slash = field.src.find_last_of ("/\\");
     return slash == std::string::npos ? field.src : field.src.substr (slash + 1);
 }
-
-} // namespace
 
 bool is_form_mode (BodyMode mode) {
     return mode == BodyMode::Form || mode == BodyMode::FormData;
