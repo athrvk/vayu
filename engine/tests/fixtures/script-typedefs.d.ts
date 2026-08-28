@@ -854,7 +854,7 @@ declare const pm: {
 	 */
 	request: {
 		/**
-		 * The request body (if any), as Postman's RequestBody object: mode, raw, and the urlencoded/formdata field lists.
+		 * The request body (if any), as Postman's RequestBody object: mode, raw, the urlencoded/formdata field lists and the graphql pair.
 		 * 
 		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the body - so `===` and `typeof` are two of the three things that changed; the third is that assigning it straight to a header value is refused, like pm.request.url. Assign a string (or body.raw) to replace the body, or delete it to send none. A body set on a request that had none is sent as raw text - set Content-Type yourself. A form body reads as its fields encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire body and an assignment parses back into the fields, while for form-data it is a rendering of the parts (the multipart bytes carry a boundary that does not exist until the send) and an assignment is refused.
 		 */
@@ -866,11 +866,19 @@ declare const pm: {
 			 */
 			formdata: { [key: string]: any }[] | undefined;
 			/**
+			 * { query, variables? } for a graphql body, or undefined in any other mode. The pair is read off the same string body.raw answers with, through the classifier the send itself uses: an enveloped body answers its own query and variables, and a bare document answers as the query it would be sent as.
+			 * 
+			 * Two things Postman spells differently: variables is the JSON value the envelope carries, not the text of Postman's variables editor, which Vayu never stored; and a body that is shaped like an envelope but does not parse - an unresolved {{token}}, a typo - answers undefined rather than a guessed pair, because that is the body the send passes through untouched. body.raw still carries the string.
+			 * 
+			 * Read-only: assign body.raw to change what is sent.
+			 */
+			graphql: { [key: string]: any } | undefined;
+			/**
 			 * The length of the body string - defined on the object rather than inherited, so it is the body's own length and not the 0 that String's prototype would have answered.
 			 */
 			length: number;
 			/**
-			 * Postman's mode name: "urlencoded", "formdata", or "raw" for every content mode - json, text, xml, binary, graphql and jsonrpc all carry their body as one string, which is what raw means. Read-only; the mode follows the request's body type.
+			 * Postman's mode name: "urlencoded", "formdata", "graphql", or "raw" for every other content mode - json, text, xml, binary and jsonrpc all carry their body as one string, which is what raw means. Postman's fifth mode, "file", is never answered: it promises a path, and a binary body here carries bytes. Read-only; the mode follows the request's body type.
 			 */
 			mode: string;
 			/**
