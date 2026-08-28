@@ -379,7 +379,8 @@ const IterationBinding& binding);
  *
  * **The data namespace only**: a credential carrying `{{$vu}}` - or a
  * `{{$guid}}`, which composition generates into a credential rather than
- * deferring (issue #995) - is deliberately not split here (issue #994). Deferring a build is what lets a row reach a
+ * deferring (issue #995) - is deliberately not split here (issue #994).
+ * Deferring a build is what lets a row reach a
  * credential before `apply_auth` encodes it, and a build is deferred only for a
  * run that *has* rows - so an identity token in a credential would bind in a
  * data-driven run and go out base64-encoded as written in every other, which is
