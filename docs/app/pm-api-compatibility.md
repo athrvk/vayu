@@ -480,7 +480,7 @@ the transfer failed, two fields naming why:
 | `errorMessage` | That failure's message |
 
 The two error fields are **absent** on a transfer that completed, rather than
-empty or `null` - the same absent-not-zeros rule `pm.response.events` follows -
+empty or `null` - the same absent-not-empty rule `pm.response.events` follows -
 so `if (pm.response.errorCode)` is the test, and reading `errorMessage` without
 it is a guess about a sibling field.
 
