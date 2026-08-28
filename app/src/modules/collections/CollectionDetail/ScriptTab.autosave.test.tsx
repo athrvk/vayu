@@ -50,6 +50,18 @@ vi.mock("@/queries/collections", () => ({
 }));
 
 /*
+ * The chip row reads the contract and the variables in scope (issue #1075).
+ * Nothing here is about chips - this file is the save behaviour - but the tab
+ * renders the row either way, and these hooks reach the query layer this file
+ * deliberately does not stand up.
+ */
+vi.mock("@/hooks", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/hooks")>()),
+	useDataContract: () => undefined,
+	useVariableResolver: () => ({ getAllVariables: () => ({}) }),
+}));
+
+/*
  * Monaco does not run in jsdom. The stub is a real focusable element inside the
  * editor's container, which is the part under test: the tab listens for
  * `focusout` on the container rather than on Monaco's own blur, so what has to

@@ -342,8 +342,9 @@ nlohmann::json get_script_completions () {
     { "detail", "pm.response.to.have.status(code: number | string)" },
     { "documentation",
     "Assert that the response has a specific HTTP status code, or - given a "
-    "string - the reason phrase pm.response.reason() "
-    "answers.\n\nExample:\npm.response.to.have.status(200);\npm.response.to."
+    "string - the reason phrase pm.response.reason() answers. A number that is "
+    "not a whole finite code is refused rather than truncated."
+    "\n\nExample:\npm.response.to.have.status(200);\npm.response.to."
     "have.status('OK');" },
     { "sortText", "1_pm_response_to_have_status" } });
 
@@ -1169,10 +1170,12 @@ nlohmann::json get_script_completions () {
     "res is null then. res carries code, status, responseTime, headers.get() "
     "and json()/text() - a subset of pm.response, not the assertion "
     "chain.\n\nThe url may be a string or pm.request.url, and {{variables}} in "
-    "it, in header values, in a raw body and in auth credentials resolve as "
-    "the "
+    "it, in header names and values, in a raw body and in auth credentials "
+    "resolve as the "
     "call is made - so a value this script set two lines earlier is visible. "
-    "Header names are sent as written.\n\nauth takes Postman's { type, <type>: "
+    "Two header names that resolve to one name are refused rather than sent a "
+    "header short, and a name resolving to nothing is refused too.\n\nauth "
+    "takes Postman's { type, <type>: "
     "params } shape in either spelling, and composes basic, bearer and apikey. "
     "Any other type - oauth2 included - is refused by name rather than "
     "dropped, "

@@ -3571,8 +3571,17 @@ Header names are matched case-insensitively.
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
 deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
 username-if-password-grant`). Expiry uses a 45s skew; a missing `expires_in`
-means non-expiring. There is **no mid-run refresh** - a token is fetched at run
-start and reused for the whole run.
+means non-expiring. A load run also refreshes its token **during** the run: a
+watchdog re-acquires a header-placed, expiring token `oauth2RefreshLeadMs`
+(default 60s) before it expires and writes the new one into this same cache row
+(see [Load Test Mode](architecture.md#load-test-mode)). It is skipped - the
+token is fetched once and reused for the whole run - for a query-placed token,
+`autoRefreshToken: false`, a non-expiring token, an `authorization_code` grant
+with no refresh token, a token that lost to a user-supplied `Authorization`
+header, and scenario runs, whose steps each resolve auth at plan time. That
+list is `plan_auth_refresh`'s (`engine/src/http/auth_resolver.cpp`); the app's
+`isMidRunRefreshable` mirrors all of it but the header case - change one,
+change both.
 
 #### POST /oauth2/token
 
@@ -3755,7 +3764,8 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   },
   "collectionId": "col_1234567890", // Optional: chain scope for an inline request
   "environmentId": "env_1234567890", // Optional: environment scope
-  "dataColumns": ["username", "city"] // Optional: bare names a bound row will substitute
+  "dataColumns": ["username", "city"], // Optional: bare names a bound row will substitute
+  "deferDynamicVariables": true      // Optional: this payload is for a run that repeats it
 }
 ```
 
@@ -3775,6 +3785,25 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   itself](#scenario-runs) and
   [D18](../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007)
   for the precedence this buys.
+
+- **`deferDynamicVariables`** (issue #995) says this payload is being composed
+  for a **run**, which will send it many times. A generator resolved here would
+  be one value repeated by every iteration of every virtual user - the
+  uniqueness `{{$randomUUID}}` is written for, lost exactly where concurrency
+  makes collisions matter - so with the field true every name the dynamic table
+  generates is left written as it stands, the way `{{data.*}}` and the identity
+  names already are, and the run's executor generates a fresh value per
+  occurrence immediately before each send. **Absent, `null` or `false` composes
+  exactly as it did before this field existed**, which is what a Send, a preview
+  and a script's `replaceIn` want: composed once, sent once. Refused with `400`
+  `invalid_compose_request` when present and not a boolean. Two limits worth
+  knowing: an unknown `{{$typo}}` is unaffected (nothing would generate it
+  either way, so it keeps its braces - issue #186), and a generator inside the
+  **auth block** is generated here even when the field is true, because
+  `apply_auth` encodes a credential when the request is built and a token left
+  for the bind would go out as base64 of its own text (the deferral issue #1055
+  carries). A scenario plan's steps are composed with it internally, so a
+  collection run needs no field at all.
 
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
   headers (later duplicates win), body, auth (absent auth defaults to

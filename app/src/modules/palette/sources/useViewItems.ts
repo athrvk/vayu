@@ -9,8 +9,8 @@
  * The app's own surfaces - drawer views and the tabs that are one of a kind.
  *
  * Two mechanisms behind one group, because the user is not asked to know the
- * difference: Collections/History/Variables/Services/Settings switch the drawer
- * (`activateDrawerView`, the same call the Dock's buttons make), while
+ * difference: Collections/History/Variables/Services/Trash/Settings switch the
+ * drawer (`activateDrawerView`, the same call the Dock's buttons make), while
  * Variables/Settings/Inbox are singleton *tabs*. Variables and Settings are
  * both - the drawer holds the tree, the tab holds the editor - so their entry
  * does what the Dock and the tree together do: open the tab and point the
@@ -22,7 +22,7 @@
  * here reveal it instead (`revealDrawerView`, the store's non-toggling half).
  */
 
-import { Braces, Clock, Folder, Inbox, Radio, Settings } from "lucide-react";
+import { Braces, Clock, Folder, Inbox, Radio, Settings, Trash2 } from "lucide-react";
 import { useLayoutStore, useTabsStore, type DrawerView, type TabType } from "@/stores";
 import type { PaletteItem } from "../types";
 
@@ -60,6 +60,14 @@ const VIEWS: ViewEntry[] = [
 		keywords: ["inbox", "webhook", "oauth", "issuer", "mock", "listener"],
 		icon: Radio,
 		drawerView: "services",
+	},
+	{
+		title: "Trash",
+		// "deleted" and "restore" are what someone types when they are looking
+		// for this: they know what happened, not what the surface is called.
+		keywords: ["deleted", "restore", "undo", "removed", "recover"],
+		icon: Trash2,
+		drawerView: "trash",
 	},
 	{
 		title: "Settings",

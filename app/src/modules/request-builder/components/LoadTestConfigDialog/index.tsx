@@ -214,12 +214,6 @@ export interface LoadTestConfigDialogProps {
 	isStarting: boolean;
 	/** True when the pending request has a non-empty preRequestScript. */
 	hasPreRequestScript: boolean;
-	/**
-	 * True when the request text contains a `{{$dynamic}}` variable. Interpolation
-	 * happens app-side, once, before the payload is sent, so every iteration of
-	 * the run carries the same generated value - see the notice below.
-	 */
-	hasDynamicVariables: boolean;
 	/** Variable-resolved OAuth 2.0 config, when the effective auth is oauth2. */
 	oauth2Config?: OAuth2Config;
 	/**
@@ -250,7 +244,6 @@ export default function LoadTestConfigDialog({
 	onStart,
 	isStarting,
 	hasPreRequestScript,
-	hasDynamicVariables,
 	oauth2Config,
 	isStreamingRequest,
 	collectionId,
@@ -529,20 +522,6 @@ export default function LoadTestConfigDialog({
 			});
 		}
 
-		if (hasDynamicVariables) {
-			list.push({
-				key: "dynamic-variables",
-				severity: "warning",
-				node: (
-					<Callout severity="warning" title="Dynamic variables are generated once">
-						<code>{"{{$guid}}"}</code> and friends are resolved here, before the run
-						starts, so every request in it sends the same value. A single Send generates
-						a fresh one each time.
-					</Callout>
-				),
-			});
-		}
-
 		return list.sort(
 			(a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
 		);
@@ -554,7 +533,6 @@ export default function LoadTestConfigDialog({
 		budgetsError,
 		monitoringError,
 		hasPreRequestScript,
-		hasDynamicVariables,
 	]);
 
 	const handleStart = () => {

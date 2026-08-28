@@ -347,6 +347,46 @@ main process - the renderer names no directory of its own, the same posture
 `dataFile:read` holds. It is normalized through **both** `migrate` and
 `merge`, for the reason spelled out for `data-file-store` above.
 
+#### `bound-row-store.ts` - The Row The Open Builder Is Bound To
+
+One slot: the data row a Send-with-row has picked, and the id of the request it
+was picked for (issue #1074).
+
+**State:**
+```typescript
+{
+  bound: { requestId: string; row: Record<string, unknown> } | null
+}
+```
+
+**Key Methods:**
+```typescript
+const setBoundRow = useBoundRowStore((s) => s.setBoundRow);
+setBoundRow({ requestId, row }); // or null for "bound to none"
+```
+
+**Persistence:** none, deliberately - see below.
+
+**Why a store at all.** `RequestBuilderProvider` already gives the picked row to
+its own resolver, which covers every preview inside the builder (issue #1062).
+The tab strip is the one that is not below it: `useTabDescriptors` labels every
+open tab from a single list-wide resolver, so it cannot take the row off the
+builder's context and, left alone, labelled a tab from the environment while the
+bar one row beneath it showed the file's value.
+
+**One slot, not a map, and it names its request.** The builder binds a row for
+the request it is showing, so that is the only request an on-screen preview can
+be bound for; a row per remembered index would be a row out of a file that is no
+longer the one loaded. Carrying the request id is what lets a reader check
+rather than assume, so a slot left standing cannot relabel the next tab -
+`boundRowFor(bound, requestId)` is that check, named once rather than repeated
+at each call site.
+
+**Never persisted, and cleared with the builder.** Rows are user data of unknown
+sensitivity and are persisted nowhere in Vayu, the same law `data-file-store`
+states above; the builder also clears the slot when it unmounts, so a row cannot
+outlive the send that justified it.
+
 #### `recovery-notice-store.ts` - Which Data-Loss Notice Was Already Seen
 
 One timestamp: the `at` of the startup-recovery record the user has already been
@@ -1078,12 +1118,14 @@ engine's `scenario_plan_test.cpp` (issue #431).
 **Mutations:**
 - **`useCreateCollectionMutation()`** - Create collection
 - **`useUpdateCollectionMutation()`** - Update collection (with cache update)
-- **`useDeleteCollectionMutation()`** - Delete collection (invalidates coarsely,
-  see below)
+- **`useDeleteCollectionMutation()`** - Soft-delete a collection into the trash
+  rather than removing it (issue #988); invalidates coarsely, see below, and
+  also invalidates the trash list so the Trash view picks it up
 - **`useCreateRequestMutation()`** - Create request
 - **`useUpdateRequestMutation()`** - Update request (invalidates only the lists
   that can have changed, see below)
-- **`useDeleteRequestMutation()`** - Delete request (also clears the response)
+- **`useDeleteRequestMutation()`** - Soft-delete a request into the trash (also
+  clears the response, and invalidates the trash list)
 - **`useReorderMutation()`** - Reposition collections and requests through
   `POST /reorder` in one transaction, optimistically (see below)
 - **`useImportMutation()`** (`queries/import.ts`) - Apply a parsed import through
@@ -1115,6 +1157,26 @@ the reveal effect, so an in-place edit would move a row on screen that the tree
 never notices. The plan itself comes from
 `modules/collections/reorder-math.ts` - a pure module, node-tested, that turns
 sibling lists and a drop index into the minimal set of rows to rewrite.
+
+#### Trash
+
+The read side of the same soft delete (issue #989): `useDeleteCollectionMutation`
+and `useDeleteRequestMutation` stamp a row rather than removing it, and these
+are how the app sees what got stamped (`queries/trash.ts`).
+
+- **`useTrashQuery()`** - Every deleted root, newest first (`GET /trash`). No
+  `staleTime`: the list changes only through the two mutations below, the two
+  delete mutations above, and the startup retention purge, so the default is
+  already the cheapest correct answer.
+- **`useRestoreTrashMutation()`** - Put one deleted root back
+  (`POST /trash/:id/restore`). Invalidates `trash.all`, `collections.all`,
+  `requests.all` and `prefetch.allRequests()` - the same coarse invalidation
+  `useDeleteCollectionMutation` does, and for the same reason (see the cascade
+  delete note below).
+- **`usePurgeTrashMutation()`** - Destroy one deleted root for good
+  (`DELETE /trash/:id`). Invalidates only `trash.all`: every other cache
+  already stopped serving these rows when they were stamped, so purging them
+  changes nothing a live read can see.
 
 #### Environments & Variables
 
@@ -1292,6 +1354,10 @@ requests: {
   detail: (id) => ["requests", "detail", id],
   examples: (id) => ["requests", "detail", id, "examples"],  // saved example responses (#481)
 },
+trash: {
+  all: ["trash"],
+  list: () => ["trash", "list"],   // no per-entry detail cache - the list is the only read
+},
 runs: {
   all: ["runs"],
   lists: () => ["runs", "list"],
@@ -1369,7 +1435,12 @@ key rather than a stale entry under this one.
   "descendant". So `useDeleteCollectionMutation` invalidates
   `collections.all` + `requests.all` wholesale. `requests.detail` entries carry
   `staleTime: Infinity`, so without this a deleted request stays fresh forever
-  and keeps feeding restored tabs.
+  and keeps feeding restored tabs. `useRestoreTrashMutation` invalidates the
+  same two families for the same reason, in the other direction: which rows a
+  restore brought back is just as much engine-side knowledge - the cohort is
+  defined by a timestamp the client never sees - so it takes the same wholesale
+  invalidation rather than a client guess at which requests came back with a
+  restored collection.
 - **A single-request update invalidates narrowly, for the same reason.** Which
   lists a request write can affect *is* client-side knowledge: the request's own
   collection, plus the one it left if the write was a move. So
@@ -1546,20 +1617,40 @@ const {
   getVariable: (name: string) => ResolvedVariable | null
   getAllVariables: () => Record<string, ResolvedVariable>
   getVariableOrigins: (name: string) => VariableOrigin[]
-} = useVariableResolver({ collectionId?: string });
+} = useVariableResolver({ collectionId?: string; boundRow?: DataFileRow });
+
+// resolveString takes an optional per-call row (issue #1074), for the one
+// caller that resolves for several requests at once - the tab strip.
+resolveString(input: string, row?: DataFileRow): string
 ```
 
 **Resolution Priority (highest to lowest):**
-1. Environment variables
-2. Collection variables
-3. Global variables
+1. Bound data row (bare column names) - only while `boundRow` is passed and a
+   row is actually picked (issue #1062)
+2. Environment variables
+3. Collection variables
+4. Global variables
 
 Collection scope comes from the `collectionId` option and nowhere else - a
 caller that passes none resolves against globals + environment. See
 `docs/app/variable-resolution.md` for why the session-store fallback was
 removed.
 
-**`collectionId` is the only option.** The environment is *not* passed in: the
+`boundRow` is optional and additive: without it `resolveString` /
+`resolveObject` resolve exactly as before (composition only, both a bound
+column and `{{data.column}}` deferred). With it, they resolve through
+`resolveTemplateWithRow` instead, so a bare bound column and `{{data.column}}`
+both read the row - the request builder's provider is the one caller that
+passes it, deriving it from the picked-row index. See
+`docs/app/variable-resolution.md` for the tier and its rules.
+
+`resolveString`'s second argument is the same row named per call instead of per
+hook. It exists for `useTabDescriptors`, which labels every open tab from a
+single resolver and therefore cannot name one row for the whole of it; it reads
+the row out of `useBoundRowStore` for the tab it is labelling. Both spellings
+render a row's cells through the same helper, so the two cannot disagree.
+
+**The environment is the one scope no option names.** It is *not* passed in: the
 hook reads `useSessionStore().activeEnvironmentId` itself, so every caller
 resolves against the environment the user has actually selected and no caller
 can scope a preview to a different one. This page documented an
@@ -1572,8 +1663,10 @@ or collection the winning value came from (absent for `global`).
 
 `getVariableOrigins` returns **every** definition of a name, lowest precedence
 first, including disabled ones that never resolve. Display-only; the variable
-popover renders it as "also defined". See `docs/app/variable-resolution.md` for
-why the losers are kept and why the MCP copy is not given the same accessor.
+popover renders it as "also defined". Since issue #1064 it also carries the
+bound row on top when one answers the name, taking `winner` from whichever
+scope it beat. See `docs/app/variable-resolution.md` for why the losers are
+kept and why the MCP copy is not given the same accessor.
 
 ### `RequestBuilderContext` - variable members
 

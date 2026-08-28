@@ -35,7 +35,16 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, Button, CodeEditor } from "@/components/ui";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
-import { referencedVariables, TEMPLATE_IN_SCRIPT_NOTE } from "@/lib/referenced-variables";
+import {
+	describeColumnReference,
+	referencedVariables,
+	TEMPLATE_IN_SCRIPT_NOTE,
+} from "@/lib/referenced-variables";
+import { describeDataToken } from "@/lib/data-contract";
+import { DATA_TOKEN_TONE_CLASS } from "@/lib/data-token-tone";
+import { isDataVariableName } from "@/lib/variable-resolution";
+import { useDataContract, useVariableResolver } from "@/hooks";
+import { cn } from "@/lib/utils";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed } from "./shared";
 
@@ -82,6 +91,21 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 	// it - the same two regexes, the same dedupe - so the empty-name filter that
 	// landed in the helper never reached the pre- and post-request tabs here.
 	const usedVars = useMemo(() => referencedVariables(script), [script]);
+
+	/*
+	 * The same two answers the request panel paints its chips from (issue #1075).
+	 * This tab had neither, so a column read here was a flat accent chip while
+	 * the identical script in a request said which contract declares the column
+	 * and whether it does - one script, two readings, decided by which screen it
+	 * was pasted into. The contract is the one in scope for *this* collection's
+	 * chain, which is the chain the engine hands a script running under it.
+	 */
+	const dataColumns = useDataContract(collection.id);
+	const { getAllVariables } = useVariableResolver({ collectionId: collection.id });
+	// Once per render, not once per chip: `getAllVariables` spreads a fresh map
+	// on every call, so asking it inside the row would rebuild the scopes for
+	// each name in it.
+	const allVariables = getAllVariables();
 
 	// Takes the text rather than reading the draft, so Clear can write the empty
 	// script on the same tick it sets it - `setScript` has not landed yet when
@@ -163,20 +187,54 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 			{usedVars.length > 0 && (
 				<div className="flex flex-wrap gap-1.5 items-center">
 					<span className="text-[11px] text-muted-foreground">Names mentioned:</span>
-					{usedVars.slice(0, 8).map(({ name, via }) => (
-						<Badge
-							key={name}
-							variant="chip"
-							className={
-								via === "pm"
-									? "font-mono text-[10px] bg-primary/10 text-variable border-0"
-									: "font-mono text-[10px] bg-muted text-muted-foreground border-0"
-							}
-							title={via === "pm" ? undefined : TEMPLATE_IN_SCRIPT_NOTE}
-						>
-							{via === "pm" ? name : `{{${name}}}`}
-						</Badge>
-					))}
+					{usedVars.slice(0, 8).map((reference) => {
+						const { name, via } = reference;
+						/*
+						 * A column, by either spelling, painted from the one table
+						 * `DATA_TOKEN_TONE_CLASS` - never the accent, which claims a
+						 * variable answers, and never destructive, which #604 removed
+						 * from this reading. The decision is `describeColumnReference`'s
+						 * so this tab reads the rule rather than owning a copy of it.
+						 */
+						const data = isDataVariableName(name)
+							? describeDataToken(name, dataColumns)
+							: describeColumnReference(reference, dataColumns, (candidate) =>
+									Boolean(allVariables[candidate])
+								);
+						if (data) {
+							return (
+								<Badge
+									key={name}
+									variant="chip"
+									className={cn(
+										"font-mono text-[10px] bg-muted border-0",
+										DATA_TOKEN_TONE_CLASS[data.tone]
+									)}
+									title={
+										via === "template"
+											? `${data.description} - ${data.note} ${TEMPLATE_IN_SCRIPT_NOTE}`
+											: `${data.description} - ${data.note}`
+									}
+								>
+									{via === "pm" ? name : `{{${name}}}`}
+								</Badge>
+							);
+						}
+						return (
+							<Badge
+								key={name}
+								variant="chip"
+								className={
+									via === "pm"
+										? "font-mono text-[10px] bg-primary/10 text-variable border-0"
+										: "font-mono text-[10px] bg-muted text-muted-foreground border-0"
+								}
+								title={via === "pm" ? undefined : TEMPLATE_IN_SCRIPT_NOTE}
+							>
+								{via === "pm" ? name : `{{${name}}}`}
+							</Badge>
+						);
+					})}
 					{usedVars.length > 8 && (
 						<span className="text-[10px] text-muted-foreground">
 							+{usedVars.length - 8} more

@@ -22,6 +22,9 @@ import type {
 	Collection,
 	Request,
 	RequestExample,
+	ListTrashResponse,
+	RestoreTrashResponse,
+	PurgeTrashResponse,
 	Environment,
 	GlobalVariables,
 	VariableValue,
@@ -245,6 +248,31 @@ export const apiService = {
 	 */
 	async listRequestExamples(requestId: string): Promise<RequestExample[]> {
 		return await httpClient.get<RequestExample[]>(API_ENDPOINTS.REQUEST_EXAMPLES(requestId));
+	},
+
+	// Trash (issue #988). No transformer on any of the three: a trash entry is
+	// the engine's own summary of a deleted row - a name, a stamp and two counts
+	// - rather than a stored record the app reshapes, so the wire shape is the
+	// only shape.
+
+	async listTrash(): Promise<ListTrashResponse> {
+		return await httpClient.get<ListTrashResponse>(API_ENDPOINTS.TRASH);
+	},
+
+	/**
+	 * Put one deleted root back, with everything its delete took along.
+	 *
+	 * Rejects with a 409 for a request whose collection is itself in the trash -
+	 * the engine names that collection in the message, so callers surface
+	 * `ApiError.message` rather than inventing wording for it.
+	 */
+	async restoreTrashEntry(id: string): Promise<RestoreTrashResponse> {
+		return await httpClient.post<RestoreTrashResponse>(API_ENDPOINTS.TRASH_RESTORE(id));
+	},
+
+	/** Destroy one deleted root for good - the cascade the soft delete deferred. */
+	async purgeTrashEntry(id: string): Promise<PurgeTrashResponse> {
+		return await httpClient.delete<PurgeTrashResponse>(API_ENDPOINTS.TRASH_BY_ID(id));
 	},
 
 	// Specs (issue #637)

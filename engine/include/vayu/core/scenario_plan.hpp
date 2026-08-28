@@ -70,9 +70,10 @@ struct ScenarioStep {
     /// `request.url` has `{{vars}}` substituted and may carry an `apikey` auth
     /// with `in: "query"`, i.e. a live key.
     std::string stored_url;
-    /// `request`'s reserved tokens - `{{data.column}}` and the `{{$vu}}` /
-    /// `{{$iteration}}` identity - split once here so no executor has to
-    /// re-scan the step per iteration. Empty for a step that carries none,
+    /// `request`'s reserved tokens - `{{data.column}}`, the `{{$vu}}` /
+    /// `{{$iteration}}` identity, and the `{{$guid}}` family this step's
+    /// composition deferred (issue #995) - split once here so no executor has
+    /// to re-scan the step per iteration. Empty for a step that carries none,
     /// which is what both executors test before doing any join work at all.
     ///
     /// Every field from here down carries a `{}`: the plan tests build steps by

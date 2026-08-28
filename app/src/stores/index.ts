@@ -15,6 +15,7 @@ export { useExecutionEventsStore } from "./execution-events-store";
 export { useImportModalStore } from "./import-modal-store";
 export { useSessionStore } from "./session-store";
 export { useDataFileStore, type DataFileLocation } from "./data-file-store";
+export { useBoundRowStore, boundRowFor, type BoundDataRow } from "./bound-row-store";
 export { useSpecFileStore, type SpecFileLocation } from "./spec-file-store";
 export { useSaveStore, type SaveStatus } from "./save-store";
 export { useResponseStore, type StoredResponse } from "./response-store";
