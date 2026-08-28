@@ -18,13 +18,13 @@
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include "vayu/core/run_manager.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -145,10 +145,7 @@ const Result<Response>& result) {
     }
     std::string content_type = "application/octet-stream";
     for (const auto& [key, value] : resp.headers) {
-        std::string lower = key;
-        std::transform (lower.begin (), lower.end (), lower.begin (),
-        [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-        if (lower == "content-type") {
+        if (vayu::utils::ascii_lower_equal (key, "content-type")) {
             content_type = value;
             break;
         }

@@ -29,6 +29,7 @@
 #include <curl/curl.h>
 
 #include "vayu/db/database.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::http {
@@ -319,9 +320,7 @@ std::optional<std::string> proxy_url_rejection (std::string_view url) {
     const auto scheme_end      = url.find ("://");
     if (scheme_end != std::string_view::npos) {
         const std::string_view scheme = url.substr (0, scheme_end);
-        std::string lowered (scheme);
-        std::transform (lowered.begin (), lowered.end (), lowered.begin (),
-        [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+        const std::string lowered     = vayu::utils::ascii_lower (scheme);
         if (std::find (PROXY_SCHEMES.begin (), PROXY_SCHEMES.end (), lowered) ==
         PROXY_SCHEMES.end ()) {
             std::string allowed;
@@ -625,9 +624,7 @@ match_client_certificate (const TransportPolicy& policy, std::string_view host, 
         return nullptr;
     }
 
-    std::string wanted (host);
-    std::transform (wanted.begin (), wanted.end (), wanted.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+    std::string wanted = vayu::utils::ascii_lower (host);
 
     const ClientCertRule* best = nullptr;
     ClientCertRank best_rank;

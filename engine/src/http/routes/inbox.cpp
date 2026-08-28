@@ -18,6 +18,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/managed_listener.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/diagnostics.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
@@ -26,7 +27,6 @@
 #include <httplib.h>
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cstddef>
 #include <expected>
@@ -40,12 +40,6 @@ namespace vayu::http {
 namespace constants = vayu::core::constants;
 
 namespace {
-
-std::string lower (std::string value) {
-    std::transform (value.begin (), value.end (), value.begin (),
-    [] (unsigned char ch) { return static_cast<char> (std::tolower (ch)); });
-    return value;
-}
 
 /// The engine's own listener answers on 9876; an inbox must not be told to
 /// fight it for the port, and 0 means "pick one".
@@ -85,7 +79,7 @@ std::string query_of (const std::string& target) {
 /// Read a canned response's content type without assuming the caller's casing.
 std::string content_type_of (const std::map<std::string, std::string>& headers) {
     for (const auto& [name, value] : headers) {
-        if (lower (name) == "content-type") {
+        if (vayu::utils::ascii_lower_equal (name, "content-type")) {
             return value;
         }
     }
@@ -490,7 +484,7 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         res.status                     = canned.status;
         const std::string content_type = content_type_of (canned.headers);
         for (const auto& [name, value] : canned.headers) {
-            if (lower (name) != "content-type") {
+            if (!vayu::utils::ascii_lower_equal (name, "content-type")) {
                 res.set_header (name, value);
             }
         }

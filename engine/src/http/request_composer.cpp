@@ -21,6 +21,7 @@
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/reentrant.hpp"
@@ -171,12 +172,6 @@ constexpr auto JOB_TYPES = std::to_array<const char*> ({ "Liaison", "Manager",
 
 constexpr int SECONDS_PER_DAY = 24 * 60 * 60;
 
-std::string lower (std::string s) {
-    std::transform (s.begin (), s.end (), s.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-    return s;
-}
-
 std::string zero_padded (long long value, size_t width) {
     std::string out = std::to_string (value);
     if (out.size () < width) {
@@ -283,8 +278,8 @@ constexpr std::array<DynamicVariable, 39> DYNAMIC_VARIABLES = { {
 [] { return std::string (random_int (0, 1) == 1 ? "true" : "false"); } },
 { "$randomEmail",
 [] {
-    return lower (pick (FIRST_NAMES)) + "." + lower (pick (LAST_NAMES)) + "@" +
-    pick (DOMAINS);
+    return vayu::utils::ascii_lower (pick (FIRST_NAMES)) + "." +
+    vayu::utils::ascii_lower (pick (LAST_NAMES)) + "@" + pick (DOMAINS);
 } },
 { "$randomFirstName", [] { return std::string (pick (FIRST_NAMES)); } },
 { "$randomLastName", [] { return std::string (pick (LAST_NAMES)); } },
@@ -293,7 +288,10 @@ constexpr std::array<DynamicVariable, 39> DYNAMIC_VARIABLES = { {
 { "$randomCompanyName",
 [] { return std::string (pick (COMPANY_WORDS)) + " " + pick (COMPANY_SUFFIXES); } },
 { "$randomUrl",
-[] { return "https://" + lower (pick (COMPANY_WORDS)) + "." + pick (DOMAINS); } },
+[] {
+    return "https://" + vayu::utils::ascii_lower (pick (COMPANY_WORDS)) + "." +
+    pick (DOMAINS);
+} },
 { "$randomIP",
 [] {
     return std::to_string (random_int (0, 255)) + "." +
@@ -343,7 +341,9 @@ constexpr std::array<DynamicVariable, 39> DYNAMIC_VARIABLES = { {
 // generators already draw from, rather than Postman's live-looking `gracie.biz`
 // - a generated hostname reaches DNS the moment someone writes it into a URL.
 { "$randomDomainName",
-[] { return lower (pick (FIRST_NAMES)) + "." + pick (DOMAINS); } },
+[] {
+    return vayu::utils::ascii_lower (pick (FIRST_NAMES)) + "." + pick (DOMAINS);
+} },
 { "$randomAbbreviation", [] { return std::string (pick (ABBREVIATIONS)); } },
 { "$randomPrice",
 [] {

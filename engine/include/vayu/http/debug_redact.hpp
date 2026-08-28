@@ -16,9 +16,10 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <string>
 #include <string_view>
+
+#include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::http::detail {
 
@@ -48,9 +49,7 @@ inline std::string redact_header_line (const std::string& line) {
     if (first == std::string::npos) {
         return line;
     }
-    name = name.substr (first, last - first + 1);
-    std::transform (name.begin (), name.end (), name.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+    name = vayu::utils::ascii_lower (name.substr (first, last - first + 1));
 
     const bool sensitive = std::any_of (kSensitive.begin (), kSensitive.end (),
     [&name] (std::string_view s) { return name == s; });

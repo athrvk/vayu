@@ -28,6 +28,7 @@
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 #include <curl/curl.h>
 
@@ -203,10 +204,7 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
  */
 std::optional<unsigned long long> declared_content_length (const Headers& headers) {
     for (const auto& [key, value] : headers) {
-        std::string lower = key;
-        std::transform (lower.begin (), lower.end (), lower.begin (),
-        [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-        if (lower != "content-length") {
+        if (!vayu::utils::ascii_lower_equal (key, "content-length")) {
             continue;
         }
         try {

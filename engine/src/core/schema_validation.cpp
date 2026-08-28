@@ -15,6 +15,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/spec_coverage.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
@@ -32,12 +33,6 @@ namespace vayu::core {
 namespace {
 
 namespace limits = vayu::core::constants::schema_validation;
-
-std::string lower (std::string value) {
-    std::transform (value.begin (), value.end (), value.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-    return value;
-}
 
 std::string upper (std::string value) {
     std::transform (value.begin (), value.end (), value.begin (),
@@ -63,7 +58,8 @@ std::string trim (const std::string& value) {
  * rather than one normalised and one as-typed.
  */
 std::string media_type_of (const std::string& content_type) {
-    return lower (trim (content_type.substr (0, content_type.find (';'))));
+    return vayu::utils::ascii_lower (
+    trim (content_type.substr (0, content_type.find (';'))));
 }
 
 /// `METHOD path`, the second identity key - the spelling `OperationIndex` uses,
@@ -512,7 +508,8 @@ IndexedOperation& operation) {
         }
         DeclaredSchema declared;
         declared.status = response.value ("status", std::string ());
-        declared.content_type = lower (response.value ("contentType", std::string ()));
+        declared.content_type =
+        vayu::utils::ascii_lower (response.value ("contentType", std::string ()));
         auto schema = response.find ("schema");
         if (declared.status.empty () || declared.content_type.empty () ||
         schema == response.end ()) {

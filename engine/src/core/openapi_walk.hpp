@@ -59,12 +59,6 @@ inline std::string upper (std::string value) {
     return value;
 }
 
-inline std::string lower (std::string value) {
-    std::transform (value.begin (), value.end (), value.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-    return value;
-}
-
 /// Which of the two formats Vayu imports a document claims to be. `None` is
 /// not an error - the document may be a perfectly good file that simply is not
 /// a contract, which is `NotASpecError` on the renderer side.

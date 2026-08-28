@@ -17,10 +17,10 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <ctime>
 #include <utility>
 
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/parse.hpp"
 
 namespace vayu::http {
@@ -34,10 +34,7 @@ constexpr size_t NETSCAPE_FIELDS            = 7;
 /// case-insensitive (RFC 6265 §5.1.2 lowercases before comparing). Cookie
 /// *names* are not - see find_cookie in script_engine.cpp.
 bool hosts_equal (std::string_view a, std::string_view b) {
-    return a.size () == b.size () &&
-    std::equal (a.begin (), a.end (), b.begin (), [] (unsigned char l, unsigned char r) {
-        return std::tolower (l) == std::tolower (r);
-    });
+    return vayu::utils::ascii_lower_equal (a, b);
 }
 
 /**

@@ -8,7 +8,6 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <ctime>
 #include <iomanip>
@@ -18,6 +17,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/reentrant.hpp"
 
 namespace vayu::utils {
@@ -212,9 +212,7 @@ void Logger::ensure_log_directory () {
 }
 
 std::optional<Logger::Level> parse_log_level (std::string_view name) {
-    std::string lowered (name);
-    std::transform (lowered.begin (), lowered.end (), lowered.begin (),
-    [] (unsigned char ch) { return static_cast<char> (std::tolower (ch)); });
+    std::string lowered = ascii_lower (name);
 
     if (lowered == "debug")
         return Logger::Level::DEBUG;

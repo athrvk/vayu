@@ -32,12 +32,11 @@
 
 #include "vayu/http/routes.hpp"
 #include "vayu/http/transport_policy.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
-#include <algorithm>
-#include <cctype>
 #include <optional>
 #include <string>
 #include <utility>
@@ -74,14 +73,6 @@ RouteResult apply_port_field (const nlohmann::json& json, std::optional<int>& ou
     }
     out = json["port"].get<int> ();
     return {};
-}
-
-/// Hosts are stored lower-cased, so a match is a compare rather than a second
-/// case-folding rule at every read - see `ClientCertRule::host`.
-std::string lowered (std::string value) {
-    std::transform (value.begin (), value.end (), value.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-    return value;
 }
 
 /**
@@ -184,7 +175,9 @@ bool is_create) {
     if (auto outcome = apply_required_string_field (json, "host", c.host, is_create); !outcome) {
         return outcome;
     }
-    c.host = lowered (std::move (c.host));
+    // Hosts are stored lower-cased, so a match is a compare rather than a
+    // second case-folding rule at every read - see `ClientCertRule::host`.
+    c.host = vayu::utils::ascii_lower (c.host);
     if (auto outcome = apply_port_field (json, c.port, is_create); !outcome) {
         return outcome;
     }
