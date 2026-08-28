@@ -1231,14 +1231,44 @@ nlohmann::json get_script_completions () {
     "object." },
     { "sortText", "1_pm_cookies_to_object" } });
 
+    // Postman's CookieList reads. Where get/has/toObject answer about a name
+    // or a value, these hand back whole cookies - what a script needs to see
+    // the domain, path or expiry it is actually holding.
+    completions.push_back ({ { "label", "pm.cookies.each" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.each((${1:cookie}) => {\n\t$0\n})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.cookies.each(fn: Function, context?: any): void" },
+    { "documentation",
+    "Call fn once per stored cookie that would be sent to this URL, with the "
+    "whole cookie: { name, key, value, domain, path, secure, httpOnly, "
+    "hostOnly, session, expires }. A throw from fn ends the walk and is the "
+    "script's error.\n\nExample:\npm.cookies.each(c => "
+    "console.log(c.name, c.domain));" },
+    { "sortText", "1_pm_cookies_each" } });
+
+    completions.push_back ({ { "label", "pm.cookies.all" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.all()" }, { "detail", "pm.cookies.all(): object[]" },
+    { "documentation",
+    "Every stored cookie that would be sent to this URL, whole, as an array. "
+    "Where toObject() answers with names and values alone, these carry the "
+    "domain, path, secure, httpOnly, hostOnly, session and expires the jar "
+    "holds." },
+    { "sortText", "1_pm_cookies_all" } });
+
+    completions.push_back ({ { "label", "pm.cookies.count" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.count()" }, { "detail", "pm.cookies.count(): number" },
+    { "documentation", "How many stored cookies would be sent to this URL." },
+    { "sortText", "1_pm_cookies_count" } });
+
     // pm.cookies.jar() - the write half (#337). Offered one level deeper than
     // the flat reads because every method is URL-scoped: the URL is what a
     // written cookie's domain and path come from.
     completions.push_back ({ { "label", "pm.cookies.jar" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.cookies.jar()" }, { "detail", "pm.cookies.jar(): object" },
     { "documentation",
-    "Postman's cookie jar object - the write half, plus a URL-scoped read. "
-    "get(url, name), set(url, cookie), unset(url, name) and clear(url) all "
+    "Postman's cookie jar object - the write half, plus two URL-scoped reads. "
+    "get(url, name), getAll(url), set(url, cookie), unset(url, name) and "
+    "clear(url) all "
     "take the URL the cookie belongs to rather than assuming this request's; "
     "clear() with no URL empties this environment's jar.\n\nA "
     "write is applied after the transfer it was made before, so the request "
@@ -1259,15 +1289,32 @@ nlohmann::json get_script_completions () {
     "callback as (null, value)." },
     { "sortText", "1_pm_cookies_jar_get" } });
 
+    completions.push_back ({ { "label", "pm.cookies.jar().getAll" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.cookies.jar().getAll(\"${1:https://api.example.com}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.cookies.jar().getAll(url: string, callback?: Function): object[]" },
+    { "documentation",
+    "Every stored cookie that would be sent to that URL, whole - the same "
+    "matching get() makes, without a name to narrow it, and cookies this "
+    "script has just set are included. Each carries { name, key, value, "
+    "domain, path, secure, httpOnly, hostOnly, session, expires }. The array "
+    "is returned and also handed to the optional callback as (null, "
+    "cookies).\n\nExample:\nconst jar = pm.cookies.jar();\nfor (const c of "
+    "jar.getAll(pm.request.url)) console.log(c.name, c.path);" },
+    { "sortText", "1_pm_cookies_jar_get_all" } });
+
     completions.push_back ({ { "label", "pm.cookies.jar().set" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.cookies.jar().set(\"${1:https://api.example.com}\", { name: \"${2:session}\", value: ${3:token} })" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.cookies.jar().set(url: string, cookie: object | string, value?: string | Function, callback?: Function): void" },
+    { "detail", "pm.cookies.jar().set(url: string, cookie: object | string, value?: string | Function, callback?: Function): object" },
     { "documentation",
     "Store a cookie for that URL. The cookie object needs name and value; "
-    "domain, path, secure, httpOnly and expires (seconds since the epoch, 0 "
-    "for a session cookie) are optional and default from the URL. "
-    "set(url, name, value) is accepted too.\n\nThe cookie is matched by the "
+    "domain, path, secure, httpOnly and expires are optional and default from "
+    "the URL. expires takes a Date, a date string Date.parse accepts, or a "
+    "whole number of seconds since the epoch - 0 for a session cookie. "
+    "set(url, name, value) is accepted too.\n\nThe stored cookie is returned "
+    "and handed to the optional callback as (null, cookie), carrying the "
+    "domain and path it took from the URL.\n\nThe cookie is matched by the "
     "same rules a received one is, so setting it for one host does not send "
     "it to another." },
     { "sortText", "1_pm_cookies_jar_set" } });
@@ -1275,10 +1322,11 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.cookies.jar().unset" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.cookies.jar().unset(\"${1:https://api.example.com}\", \"${2:session}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.cookies.jar().unset(url: string, name: string, callback?: Function): void" },
+    { "detail", "pm.cookies.jar().unset(url: string, name: string, callback?: Function): string" },
     { "documentation",
     "Remove the cookies of that name the URL would have carried. Cookies of "
-    "the same name stored for another host or path are left alone." },
+    "the same name stored for another host or path are left alone. The removed "
+    "name is returned and handed to the optional callback as (null, name)." },
     { "sortText", "1_pm_cookies_jar_unset" } });
 
     completions.push_back ({ { "label", "pm.cookies.jar().clear" },

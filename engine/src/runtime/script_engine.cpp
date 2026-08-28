@@ -6502,6 +6502,61 @@ find_jar_cookie (const std::vector<vayu::http::JarCookie>& cookies, const std::s
     return best;
 }
 
+// A stored cookie as the object Postman's Cookie is - everything the jar keeps
+// and nothing it does not. `maxAge` and the unmodelled extensions Postman
+// carries have no field behind them here, and inventing one would hand a script
+// a value it could read and act on.
+JSValue create_jar_cookie_object (JSContext* ctx, const vayu::http::JarCookie& cookie) {
+    JSValue obj = JS_NewObject (ctx);
+    if (JS_IsException (obj)) {
+        return obj;
+    }
+    JS_SetPropertyStr (ctx, obj, "name", JS_NewString (ctx, cookie.name.c_str ()));
+    // Postman's Cookie spells the name `key` and keeps `name` beside it. A
+    // script imported from there reads either, and the one that answered
+    // undefined would do it silently.
+    JS_SetPropertyStr (ctx, obj, "key", JS_NewString (ctx, cookie.name.c_str ()));
+    JS_SetPropertyStr (ctx, obj, "value", JS_NewString (ctx, cookie.value.c_str ()));
+    JS_SetPropertyStr (ctx, obj, "domain", JS_NewString (ctx, cookie.domain.c_str ()));
+    JS_SetPropertyStr (ctx, obj, "path", JS_NewString (ctx, cookie.path.c_str ()));
+    JS_SetPropertyStr (ctx, obj, "secure", JS_NewBool (ctx, cookie.secure));
+    JS_SetPropertyStr (ctx, obj, "httpOnly", JS_NewBool (ctx, cookie.http_only));
+    // The jar stores "does this answer for subdomains too"; Postman states the
+    // same fact the other way round, and a script tests hostOnly.
+    JS_SetPropertyStr (ctx, obj, "hostOnly", JS_NewBool (ctx, !cookie.include_subdomains));
+    // A session cookie has no expiry rather than one at the epoch, so `expires`
+    // is null there and `session` is what says which. Otherwise it is the Date
+    // Postman's Cookie carries - and the Date jar().set now takes, so a cookie
+    // read here can be written back without converting it.
+    const bool session = cookie.expires == 0;
+    JS_SetPropertyStr (ctx, obj, "session", JS_NewBool (ctx, session));
+    JS_SetPropertyStr (ctx, obj, "expires",
+    session ? JS_NULL : JS_NewDate (ctx, static_cast<double> (cookie.expires) * 1000.0));
+    return obj;
+}
+
+// The matched cookies as a plain array. Postman hands back a CookieList, whose
+// reads are the ones pm.cookies itself carries; an array is what both this
+// engine's other cookie surface (pm.response.cookies) and every `for (const c
+// of ...)` in an imported script treat it as.
+JSValue create_jar_cookie_list (JSContext* ctx,
+const std::vector<vayu::http::JarCookie>& cookies) {
+    JSValue list = JS_NewArray (ctx);
+    if (JS_IsException (list)) {
+        return list;
+    }
+    uint32_t index = 0;
+    for (const auto& cookie : cookies) {
+        JSValue entry = create_jar_cookie_object (ctx, cookie);
+        if (JS_IsException (entry)) {
+            JS_FreeValue (ctx, list);
+            return JS_EXCEPTION;
+        }
+        JS_SetPropertyUint32 (ctx, list, index++, entry);
+    }
+    return list;
+}
+
 JSValue js_jar_cookies_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     auto name = read_cookie_name_arg (ctx, "get", argc, argv);
@@ -6547,6 +6602,61 @@ JSValue js_jar_cookies_to_object (JSContext* ctx, JSValueConst this_val, int arg
         JS_NewString (ctx, chosen->value.c_str ()));
     }
     return obj;
+}
+
+// The three PropertyList reads Postman's CookieList carries. They answer over
+// the same matched set get/has/toObject answer over, read afresh per call: the
+// flat pm.cookies is an accessor onto a jar a jar().set can change mid-script,
+// so a list built once and kept would answer with the set as it was.
+JSValue js_jar_cookies_all (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto cookies = jar_cookies_from_context (ctx, "all");
+    if (!cookies) {
+        return JS_EXCEPTION;
+    }
+    return create_jar_cookie_list (ctx, *cookies);
+}
+
+JSValue js_jar_cookies_count (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto cookies = jar_cookies_from_context (ctx, "count");
+    if (!cookies) {
+        return JS_EXCEPTION;
+    }
+    return JS_NewInt64 (ctx, static_cast<int64_t> (cookies->size ()));
+}
+
+JSValue js_jar_cookies_each (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    if (argc < 1 || !JS_IsFunction (ctx, argv[0])) {
+        return JS_ThrowTypeError (ctx, "pm.cookies.each(fn) needs a function, got %s",
+        argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
+    }
+    auto cookies = jar_cookies_from_context (ctx, "each");
+    if (!cookies) {
+        return JS_EXCEPTION;
+    }
+    // PropertyList.each takes the iterator's `this` as its second argument.
+    JSValue receiver = argc > 1 ? argv[1] : JS_UNDEFINED;
+    for (const auto& cookie : *cookies) {
+        ScopedValue entry (ctx, create_jar_cookie_object (ctx, cookie));
+        if (JS_IsException (entry.get ())) {
+            return JS_EXCEPTION;
+        }
+        JSValue args[1] = { entry.get () };
+        // A throw from the iterator - a failed pm.expect inside it, most
+        // likely - is the script's error and ends the walk, rather than being
+        // swallowed to finish iterating.
+        ScopedValue ret (ctx, JS_Call (ctx, argv[0], receiver, 1, args));
+        if (JS_IsException (ret.get ())) {
+            return JS_EXCEPTION;
+        }
+    }
+    return JS_UNDEFINED;
 }
 
 // ----------------------------------------------------------------------------
@@ -6607,6 +6717,102 @@ bool url_arg = false) {
         return std::nullopt;
     }
     return text;
+}
+
+// Milliseconds since the epoch out of a JS value that is either a Date or the
+// result of Date.parse, or nullopt for an Invalid Date. Any pending exception
+// is cleared: this reports its outcome as a refusal reason, which the caller
+// throws, and a second exception left standing behind that one would be the
+// error a script sees.
+std::optional<double> js_epoch_milliseconds (JSContext* ctx, JSValue millis) {
+    ScopedValue held (ctx, millis);
+    if (JS_IsException (held.get ())) {
+        JS_FreeValue (ctx, JS_GetException (ctx));
+        return std::nullopt;
+    }
+    double value = 0;
+    if (JS_ToFloat64 (ctx, &value, held.get ()) < 0) {
+        JS_FreeValue (ctx, JS_GetException (ctx));
+        return std::nullopt;
+    }
+    // An Invalid Date - `new Date("not a date")` - is NaN rather than a throw.
+    return std::isfinite (value) ? std::optional<double> (value) : std::nullopt;
+}
+
+// What a script wrote in `expires`, as the seconds since the epoch the jar
+// stores. Three spellings, because Postman takes all three: a number of
+// seconds, a Date, and a date string.
+//
+// The Date and the string are read by asking QuickJS's own Date - `getTime`
+// and `Date.parse` - rather than parsing text here. A date parser beside the
+// language's own would answer differently from the `new Date(s)` the same
+// script can write two lines up, and the disagreement would show as a cookie
+// that expires in 1970 and is simply never sent again.
+std::optional<std::string>
+read_expires_seconds (JSContext* ctx, JSValueConst value, int64_t& out) {
+    const std::string prefix = "pm.cookies.jar().set cookie.expires ";
+    // Every arm below either returns a reason or sets this, so the checks
+    // after them read a value all three agree on rather than three copies.
+    double seconds = 0;
+
+    if (JS_IsNumber (value)) {
+        double written = 0;
+        if (JS_ToFloat64 (ctx, &written, value) < 0 || !std::isfinite (written)) {
+            JS_FreeValue (ctx, JS_GetException (ctx));
+            return prefix + "must be a finite number of seconds since the epoch";
+        }
+        // A number is seconds exactly as written, and a fractional one is
+        // refused rather than truncated: `getTime() / 1000` without the floor
+        // is the shape it arrives in, and this surface refuses everywhere else
+        // it cannot be sure. The message names both cures.
+        if (written != std::floor (written)) {
+            return prefix +
+            "is not a whole number of seconds; pass a Date, or "
+            "Math.floor(date.getTime() / 1000)";
+        }
+        seconds = written;
+    } else if (JS_IsDate (value)) {
+        // Not JS_ToFloat64 on the Date itself: its @@toPrimitive takes the
+        // default hint as "string", so a Date coerces to NaN rather than to
+        // its time. getTime is what the script would have called.
+        ScopedValue get_time (ctx, JS_GetPropertyStr (ctx, value, "getTime"));
+        const auto millis = js_epoch_milliseconds (
+        ctx, JS_Call (ctx, get_time.get (), value, 0, nullptr));
+        if (!millis) {
+            return prefix + "is an Invalid Date";
+        }
+        seconds = std::floor (*millis / 1000.0);
+    } else if (JS_IsString (value)) {
+        const std::string text = js_to_string (ctx, value);
+        ScopedValue global (ctx, JS_GetGlobalObject (ctx));
+        ScopedValue date (ctx, JS_GetPropertyStr (ctx, global.get (), "Date"));
+        ScopedValue parse (ctx, JS_GetPropertyStr (ctx, date.get (), "parse"));
+        ScopedValue arg (ctx, JS_NewString (ctx, text.c_str ()));
+        JSValue args[1]   = { arg.get () };
+        const auto millis = js_epoch_milliseconds (
+        ctx, JS_Call (ctx, parse.get (), date.get (), 1, args));
+        if (!millis) {
+            return prefix + "is not a date this engine can read: \"" + text +
+            "\". Date.parse must accept it - an ISO 8601 or HTTP date does.";
+        }
+        seconds = std::floor (*millis / 1000.0);
+    } else {
+        return prefix +
+        "must be a number of seconds since the epoch, a Date, "
+        "or a date string, got " +
+        std::string (js_type_name (ctx, value));
+    }
+
+    if (seconds < 0) {
+        return prefix + "must not be before the epoch; 0 means a session cookie";
+    }
+    // The jar stores an int64_t, and a double past its range converts as
+    // undefined behaviour rather than as a large number.
+    if (seconds > static_cast<double> (std::numeric_limits<int64_t>::max ())) {
+        return prefix + "is further in the future than the jar can store";
+    }
+    out = static_cast<int64_t> (seconds);
+    return std::nullopt;
 }
 
 // `set`'s cookie object: `{ name, value, domain?, path?, secure?, httpOnly?,
@@ -6683,26 +6889,9 @@ read_jar_cookie_arg (JSContext* ctx, JSValueConst arg, vayu::http::JarCookie& ou
 
     ScopedValue js_expires (ctx, JS_GetPropertyStr (ctx, arg, "expires"));
     if (!JS_IsUndefined (js_expires.get ()) && !JS_IsNull (js_expires.get ())) {
-        // Seconds since the epoch, which is what the jar stores and what a
-        // Netscape line carries. A Date or a date string is refused with the
-        // conversion rather than guessed at, because guessing wrong writes a
-        // cookie that expires in 1970 and is simply never sent again.
-        if (!JS_IsNumber (js_expires.get ())) {
-            return "pm.cookies.jar().set cookie.expires must be a number of "
-                   "seconds since the epoch (use Math.floor(date.getTime() / "
-                   "1000)), got " +
-            std::string (js_type_name (ctx, js_expires.get ()));
+        if (auto reason = read_expires_seconds (ctx, js_expires.get (), out.expires)) {
+            return reason;
         }
-        int64_t seconds = 0;
-        if (JS_ToInt64 (ctx, &seconds, js_expires.get ()) < 0) {
-            return std::string ("pm.cookies.jar().set cookie.expires is not a "
-                                "whole number of seconds");
-        }
-        if (seconds < 0) {
-            return std::string ("pm.cookies.jar().set cookie.expires must not "
-                                "be negative; 0 means a session cookie");
-        }
-        out.expires = seconds;
     }
     return std::nullopt;
 }
@@ -6788,6 +6977,29 @@ JSValue js_jar_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
     cookie ? JS_NewString (ctx, cookie->value.c_str ()) : JS_UNDEFINED);
 }
 
+// Postman's "dump the session" read: every cookie that URL would carry, rather
+// than the one that answers for a name. The same walk get() makes, without the
+// name to narrow it - so the matching, the staged writes it sees and the jar's
+// per-environment isolation are get()'s, not a second set of rules.
+JSValue js_jar_get_all (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto url = read_jar_string_arg (ctx, "getAll", "URL", 0, argc, argv, /*url_arg=*/true);
+    if (!url) {
+        return JS_EXCEPTION;
+    }
+    auto* data = jar_context (ctx, "jar().getAll");
+    if (!data) {
+        return JS_EXCEPTION;
+    }
+
+    const auto cookies = vayu::http::matching_in (staged_jar_lines (*data), *url);
+    JSValue list = create_jar_cookie_list (ctx, cookies);
+    if (JS_IsException (list)) {
+        return list;
+    }
+    return finish_jar_call (ctx, argc, argv, 1, list);
+}
+
 JSValue js_jar_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     auto url = read_jar_string_arg (ctx, "set", "URL", 0, argc, argv, /*url_arg=*/true);
@@ -6838,7 +7050,11 @@ JSValue js_jar_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
     }
     writes->push_back ({ vayu::http::CookieWrite::Kind::Set,
     vayu::http::format_cookie_line (*stored), {}, {} });
-    return finish_jar_call (ctx, argc, argv, callback_index, JS_UNDEFINED);
+    // Postman hands the callback the cookie it stored, which is the one thing
+    // this call knows and the script does not: the domain and path it took
+    // from the URL, where the object left them out.
+    return finish_jar_call (
+    ctx, argc, argv, callback_index, create_jar_cookie_object (ctx, *stored));
 }
 
 JSValue js_jar_unset (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -6858,9 +7074,12 @@ JSValue js_jar_unset (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     if (!writes) {
         return JS_EXCEPTION;
     }
-    writes->push_back ({ vayu::http::CookieWrite::Kind::Unset, {},
-    std::move (*url), std::move (*name) });
-    return finish_jar_call (ctx, argc, argv, 2, JS_UNDEFINED);
+    writes->push_back (
+    { vayu::http::CookieWrite::Kind::Unset, {}, std::move (*url), *name });
+    // The removed name, where set hands back the stored cookie. There is no
+    // cookie left to describe, and Postman's own callback carries nothing at
+    // all here - a name is the most this can honestly report.
+    return finish_jar_call (ctx, argc, argv, 2, JS_NewString (ctx, name->c_str ()));
 }
 
 JSValue js_jar_clear (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -6922,6 +7141,8 @@ JSValue js_cookies_jar (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     (void)argv;
     JSValue jar = JS_NewObject (ctx);
     JS_SetPropertyStr (ctx, jar, "get", JS_NewCFunction (ctx, js_jar_get, "get", 3));
+    JS_SetPropertyStr (
+    ctx, jar, "getAll", JS_NewCFunction (ctx, js_jar_get_all, "getAll", 2));
     JS_SetPropertyStr (ctx, jar, "set", JS_NewCFunction (ctx, js_jar_set, "set", 4));
     JS_SetPropertyStr (ctx, jar, "unset", JS_NewCFunction (ctx, js_jar_unset, "unset", 3));
     JS_SetPropertyStr (ctx, jar, "clear", JS_NewCFunction (ctx, js_jar_clear, "clear", 2));
@@ -6938,6 +7159,12 @@ void setup_pm_cookies (JSContext* ctx, JSValue pm) {
     ctx, cookies, "has", JS_NewCFunction (ctx, js_jar_cookies_has, "has", 1));
     JS_SetPropertyStr (ctx, cookies, "toObject",
     JS_NewCFunction (ctx, js_jar_cookies_to_object, "toObject", 0));
+    JS_SetPropertyStr (
+    ctx, cookies, "each", JS_NewCFunction (ctx, js_jar_cookies_each, "each", 2));
+    JS_SetPropertyStr (
+    ctx, cookies, "all", JS_NewCFunction (ctx, js_jar_cookies_all, "all", 0));
+    JS_SetPropertyStr (ctx, cookies, "count",
+    JS_NewCFunction (ctx, js_jar_cookies_count, "count", 0));
     JS_SetPropertyStr (
     ctx, cookies, "jar", JS_NewCFunction (ctx, js_cookies_jar, "jar", 0));
     JS_SetPropertyStr (ctx, pm, "cookies", cookies);

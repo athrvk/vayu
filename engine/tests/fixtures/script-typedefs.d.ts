@@ -362,6 +362,21 @@ declare const pm: {
 	 */
 	cookies: {
 		/**
+		 * Every stored cookie that would be sent to this URL, whole, as an array. Where toObject() answers with names and values alone, these carry the domain, path, secure, httpOnly, hostOnly, session and expires the jar holds.
+		 */
+		all(): object[];
+		/**
+		 * How many stored cookies would be sent to this URL.
+		 */
+		count(): number;
+		/**
+		 * Call fn once per stored cookie that would be sent to this URL, with the whole cookie: { name, key, value, domain, path, secure, httpOnly, hostOnly, session, expires }. A throw from fn ends the walk and is the script's error.
+		 * 
+		 * Example:
+		 * pm.cookies.each(c => console.log(c.name, c.domain));
+		 */
+		each(fn: Function, context?: any): void;
+		/**
 		 * The value of a stored cookie that would be sent to this URL, or undefined when the jar holds none of that name for it. Cookie names are case-sensitive. When the jar holds the name on more than one path, the longest matching path answers - the value the server reads first.
 		 * 
 		 * Example:
@@ -373,7 +388,7 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
-		 * Postman's cookie jar object - the write half, plus a URL-scoped read. get(url, name), set(url, cookie), unset(url, name) and clear(url) all take the URL the cookie belongs to rather than assuming this request's; clear() with no URL empties this environment's jar.
+		 * Postman's cookie jar object - the write half, plus two URL-scoped reads. get(url, name), getAll(url), set(url, cookie), unset(url, name) and clear(url) all take the URL the cookie belongs to rather than assuming this request's; clear() with no URL empties this environment's jar.
 		 * 
 		 * A write is applied after the transfer it was made before, so the request that follows carries it and the jar keeps it.
 		 * 
@@ -390,15 +405,25 @@ declare const pm: {
 			 */
 			get(url: string, name: string, callback?: Function): string | undefined;
 			/**
-			 * Store a cookie for that URL. The cookie object needs name and value; domain, path, secure, httpOnly and expires (seconds since the epoch, 0 for a session cookie) are optional and default from the URL. set(url, name, value) is accepted too.
+			 * Every stored cookie that would be sent to that URL, whole - the same matching get() makes, without a name to narrow it, and cookies this script has just set are included. Each carries { name, key, value, domain, path, secure, httpOnly, hostOnly, session, expires }. The array is returned and also handed to the optional callback as (null, cookies).
+			 * 
+			 * Example:
+			 * const jar = pm.cookies.jar();
+			 * for (const c of jar.getAll(pm.request.url)) console.log(c.name, c.path);
+			 */
+			getAll(url: string, callback?: Function): object[];
+			/**
+			 * Store a cookie for that URL. The cookie object needs name and value; domain, path, secure, httpOnly and expires are optional and default from the URL. expires takes a Date, a date string Date.parse accepts, or a whole number of seconds since the epoch - 0 for a session cookie. set(url, name, value) is accepted too.
+			 * 
+			 * The stored cookie is returned and handed to the optional callback as (null, cookie), carrying the domain and path it took from the URL.
 			 * 
 			 * The cookie is matched by the same rules a received one is, so setting it for one host does not send it to another.
 			 */
-			set(url: string, cookie: object | string, value?: string | Function, callback?: Function): void;
+			set(url: string, cookie: object | string, value?: string | Function, callback?: Function): object;
 			/**
-			 * Remove the cookies of that name the URL would have carried. Cookies of the same name stored for another host or path are left alone.
+			 * Remove the cookies of that name the URL would have carried. Cookies of the same name stored for another host or path are left alone. The removed name is returned and handed to the optional callback as (null, name).
 			 */
-			unset(url: string, name: string, callback?: Function): void;
+			unset(url: string, name: string, callback?: Function): string;
 		};
 		/**
 		 * Every stored cookie that would be sent to this URL, as a name-to-value object.

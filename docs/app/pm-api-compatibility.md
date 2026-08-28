@@ -26,7 +26,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Streamed events     | `pm.response.events` (array of `{ event, id, data }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
-| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`set`/`unset`/`clear(url?)`, see below |
+| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)`, see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.header(name[, value])`, `.body(expected)`, `.jsonBody(path?[, value])`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`), `.method`, `.headers`, `.body` |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
@@ -511,13 +511,25 @@ way on screen and another in a script.
 pm.cookies.get('session');   // value, or undefined
 pm.cookies.has('session');   // boolean
 pm.cookies.toObject();       // { session: 'abc' }
+pm.cookies.each(function (cookie) { /* ... */ });  // whole cookie objects
+pm.cookies.all();            // array of cookie objects
+pm.cookies.count();          // number
 ```
 
 The read half of Postman's `pm.cookies`, over a jar the engine keeps for
 design-mode requests: a `Set-Cookie` on one request is sent on the next one
 automatically. What these answer is matched against **this request's URL** -
 domain, path, `Secure` and expiry - so they report what will go on the wire and
-not everything stored.
+not everything stored. `each`, `all()` and `count()` are Postman's CookieList
+reads, over that same matched set, read fresh on every call.
+
+A cookie object - what `each`, `all()`, `jar().getAll()` and `jar().set`'s
+callback all hand back - carries `name` and `key` (same value, both spellings),
+`value`, `domain`, `path`, `secure`, `httpOnly`, `hostOnly`, `session`
+(booleans), and `expires` (a `Date`, or `null` for a session cookie). Postman's
+`maxAge` and its unmodelled `extensions` are not modelled - the jar does not
+keep them. Full field list in
+[scripting.md](../engine/scripting.md#the-cookie-jar-pmcookies).
 
 The write half is `pm.cookies.jar()`, Postman's own jar object:
 
@@ -525,14 +537,18 @@ The write half is `pm.cookies.jar()`, Postman's own jar object:
 const jar = pm.cookies.jar();
 jar.set(pm.request.url, { name: 'session', value: token });  // or (url, name, value)
 jar.get('https://api.example.com/', 'session');              // value, or undefined
+jar.getAll('https://api.example.com/');                      // every cookie that URL would carry
 jar.unset('https://api.example.com/', 'session');
 jar.clear('https://api.example.com/');                       // that URL's cookies
 jar.clear();                                                 // this environment's jar
 ```
 
-Every method is URL-scoped and takes an optional trailing `callback(err, value)`,
-invoked inline. A written cookie's `domain` and `path` default from the URL, and
-it is then matched by exactly the rules a received cookie is.
+Every method is URL-scoped and takes an optional trailing callback, invoked
+inline, that carries what the call did: `get` the value, `getAll` the array,
+`set` the **stored** cookie object (domain/path filled in from the URL), `unset`
+the removed name, `clear` nothing. Each is also the method's return value. A
+written cookie's `domain` and `path` default from the URL, and it is then
+matched by exactly the rules a received cookie is.
 
 Divergences from Postman:
 
@@ -548,14 +564,22 @@ Divergences from Postman:
   with no URL is Vayu's own** and empties this environment's jar, because the
   environment is Vayu's scope unit. A URL the engine cannot parse is refused
   rather than cleared as a wipe matching nothing.
-- **`expires` is seconds since the epoch**, not a date string.
+- **`getAll` and `pm.cookies.all()` return a plain array**, not Postman's
+  `CookieList` - the same divergence `pm.response.cookies` already makes, for
+  the same reason: an array is what every other cookie surface here, and a
+  plain `for (const c of ...)`, treats it as.
+- **`expires` takes a `Date`, a date string, or a whole number of seconds
+  since the epoch** - all three read the way the same script's own
+  `new Date(...)` would, since the Date and the string are parsed by QuickJS's
+  own `Date` rather than a parser written into the engine.
 - **Scope is the environment**, not the domain-with-permission model Postman
   uses. One jar per environment plus one for "no environment", in memory only,
   clearable in Settings → General → Cookies.
 - **`pm.sendRequest` shares the jar** with the request around it, so logging in
   from a pre-request script leaves the session where the real request finds it.
-- **Load runs have no jar**, and these throw there rather than answering
-  `undefined` - see [scripting.md](../engine/scripting.md#the-cookie-jar-pmcookies).
+- **Load runs have no jar**, and every read and write here throws there rather
+  than answering `undefined` - see
+  [scripting.md](../engine/scripting.md#the-cookie-jar-pmcookies).
 
 ---
 
