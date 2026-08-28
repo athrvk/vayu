@@ -3754,9 +3754,27 @@ and is never re-resolved - see [POST /execute](#post-execute) and
     "postRequestScripts": []
   },
   "collectionId": "col_1234567890", // Optional: chain scope for an inline request
-  "environmentId": "env_1234567890" // Optional: environment scope
+  "environmentId": "env_1234567890", // Optional: environment scope
+  "dataColumns": ["username", "city"] // Optional: bare names a bound row will substitute
 }
 ```
+
+- **`dataColumns`** (issue #1007) names the columns of the data file a caller
+  will bind a row from **after** this compose call - an array of column names,
+  never values, since a plan is composed once and a row is bound per iteration.
+  Every name it lists is left written as it stands, exactly as the reserved
+  `{{data.*}}` namespace already is, for a later per-row bind to join -
+  `{{username}}` behaves as `{{data.username}}` always has, deferred rather
+  than resolved from a same-named variable. **Absent or `null` means no
+  dataset: composition resolves exactly as it did before this field existed.**
+  Refused with `400` `invalid_compose_request` when the field is present and
+  not an array, or holds an entry that is not a string or is the empty string.
+  A `data.`-prefixed entry is accepted but redundant - the reserved namespace
+  answers that spelling first regardless of whether it is also listed here, so
+  either way it is deferred. See [`{{data.*}}` puts the row into the request
+  itself](#scenario-runs) and
+  [D18](../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007)
+  for the precedence this buys.
 
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
   headers (later duplicates win), body, auth (absent auth defaults to
@@ -4000,6 +4018,15 @@ it, and both scripts read it as `pm.iterationData` with `pm.info.iteration` `0`
 and `pm.info.iterationCount` `1` - the send *is* row 0 of 1. Without the field
 nothing changes: `{{data.*}}` goes out written as it stands and
 `pm.iterationData` is `undefined`.
+
+**The row's own keys are also its bound bare names** (issue #1007): the send
+derives its `dataColumns` set from `data`'s keys itself, so a bare
+`{{username}}` binds from the row exactly as `{{data.username}}` does, at the
+same precedence [D18](../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007)
+gives it. A bare name the row does not carry is not deferred in the first
+place - it is an ordinary `{{name}}`, resolved from the scopes at compose time
+or, if nothing there answers either, by the residual pass after the
+pre-request script (issue #1008).
 
 An **object** of name/value pairs, never the array a run sends - one row. The
 row is bounded by `maxScenarioDataBytes` (the same setting a run's whole set is
@@ -4761,7 +4788,12 @@ the same request does, and the two cannot drift apart.
 > The exceptions are the two reserved namespaces below, which neither pass
 > touches: `{{data.*}}` and the `{{$vu}}` / `{{$iteration}}` identity (issue
 > #994). Composition leaves both alone so the runner can bind them per
-> iteration, and neither is a name any script scope answers either.
+> iteration, and neither is a name any script scope answers either. **A bare
+> name the run's `dataColumns` names travels the same way** (issue #1007):
+> composition defers it exactly as it defers `{{data.*}}`, and the per-row bind
+> substitutes it before the step's pre-request script ever runs - so neither
+> pass sees it unresolved, and neither can answer it from a same-named
+> environment variable instead of the row.
 
 **Scripts** additionally read `pm.info.iteration` (0-based), `pm.info.vu`
 (1-based) and `pm.info.iterationCount`. See
@@ -4783,23 +4815,43 @@ request goes; the `data.*` namespace can. A step whose URL, header or body
 carries `{{data.email}}` has it substituted with that iteration's row, per
 iteration, immediately before the send.
 
-The namespace is **reserved and disjoint from the variable tiers** - not a
-fourth, higher tier. `{{data.id}}` and `{{id}}` are different names, so a data
-set can neither shadow nor be shadowed by a global, collection or environment
-variable, and adding a data file to an existing collection cannot change what
-its other tokens resolve to. Composition (`POST /compose`, and the plan
-resolution that shares it) leaves a `data.*` token written exactly as it stands
-for that reason; `{{data.}}` with no column after it names nothing and follows
-the ordinary unknown-name rule instead.
+The `{{data.column}}` spelling is **reserved and disjoint from the variable
+tiers** - not a fourth, higher tier. `{{data.id}}` and `{{id}}` are different
+names, so a data set can neither shadow nor be shadowed by a global, collection
+or environment variable through that spelling, and adding a data file to an
+existing collection cannot change what its other tokens resolve to. Composition
+(`POST /compose`, and the plan resolution that shares it) leaves a `data.*`
+token written exactly as it stands for that reason; `{{data.}}` with no column
+after it names nothing and follows the ordinary unknown-name rule instead.
 
-**Where a token participates.** Exhaustively: the **URL** (path and query
-string alike, so a token in a stored request's params reaches it once they are
-joined into the URL), every **header name** and **header value**, the **raw
-body**, **both halves of every form field** (`x-www-form-urlencoded` and
-`form-data`), and the **credential fields** of the request's auth - the bearer
-**token**, basic auth's **username** and **password**, and an api key's **name**
-and **value**. Script text is never interpolated at all (a script reads its row
-through `pm.iterationData`).
+**A bare column name is a second, different rule and it *is* a tier** (issue
+#1007). Postman binds a dataset's columns to bare names, so an imported
+data-driven collection is written `{{username}}` rather than
+`{{data.username}}`, and while a row is bound that row's own bare column
+names answer **above the active environment** - see [D18 in variable
+resolution](../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007)
+for the full ladder and the tradeoff it makes against #402's guarantee above.
+Which bare names a bind owns is not global - it is stated per composition, as
+the [`dataColumns`](#post-compose) field, or filled by the engine itself where
+it already knows the dataset (a scenario plan's steps, a single-request load
+run, a send carrying one row). A bare name **not** in that set resolves as an
+ordinary variable, exactly as it did before this rule existed; only a name the
+set names is deferred by composition the way `data.*` always was, for the
+run's per-row bind (`core::apply_data_template`) to join through the identical
+walk - the same escaping, the same missing-column and null-cell refusals, the
+same header rules, for either spelling. There is no second, looser
+substitution path for the bare one.
+
+**Where a token participates.** Exhaustively, and identically for both
+spellings: the **URL** (path and query string alike, so a token in a stored
+request's params reaches it once they are joined into the URL), every
+**header name** and **header value**, the **raw body**, **both halves of
+every form field** (`x-www-form-urlencoded` and `form-data`), and the
+**credential fields** of the request's auth - the bearer **token**, basic
+auth's **username** and **password**, and an api key's **name** and
+**value**. Script text is never interpolated at all (a script reads its row
+through `pm.iterationData`, or through `pm.variables` for a bare name - see
+[scripting.md](scripting.md#variables-pmvariables)).
 
 The pass runs over the **composed** text, not the text as it was authored, so a
 token that arrived as a *variable's value* binds like any other: a variable

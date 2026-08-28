@@ -28,9 +28,13 @@
  * (D12).
  *
  * The behavioural contracts (issue #226, "Behaviour that must not change"):
- *  - unknown plain name resolves to ""; unknown `$name` keeps its braces
+ *  - an unknown plain name keeps its braces, and so does an unknown `$name`
+ *    (#186 for the generators, #1009 for the ordinary names)
  *  - a `data.*` name keeps its braces too: it addresses the reserved data
  *    namespace (issue #402), which only a scenario run's iteration can bind
+ *  - so does a bare name the caller says a bound row will substitute
+ *    (`BoundColumnNames`, issue #1007) - the same deferral for the same
+ *    reason, spelled the way Postman's data variables are
  *  - precedence: environment > collection chain (leaf over root) > globals
  *  - only enabled definitions participate; a definition whose `enabled` is
  *    absent counts as enabled (D17), and a non-string stored `value` reads as
@@ -49,6 +53,7 @@
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -124,6 +129,42 @@ inline constexpr std::string_view IDENTITY_ITERATION_NAME = "$iteration";
 bool is_identity_variable_name (const std::string& name);
 
 /**
+ * The bare column names a bound data row will substitute (issue #1007).
+ *
+ * Postman binds a dataset's columns to bare names - `{{username}}` in a
+ * request reads the current row - and an imported collection is written that
+ * way, so a Vayu run of it has to answer those names from the row or send a
+ * request the file's author never wrote. That is a *precedence* question,
+ * which the reserved `data.*` namespace above deliberately dissolves rather
+ * than answers, so the two rules coexist: `{{data.id}}` is always the column,
+ * and `{{id}}` is the column **only while a row is bound**, at Postman's
+ * position for it - above the environment, and above everything below it.
+ *
+ * Composition holds only the *names*, never a row: a plan is composed once and
+ * a row is bound per iteration, so what composition can do about a bound column
+ * is exactly what it does about `data.*` - leave the token written as it
+ * stands, for `core::apply_iteration_template` to join per row. An empty set is
+ * every composition that has no dataset behind it, and costs one `empty()`
+ * test per token.
+ *
+ * Who fills it: the engine itself where it knows the dataset (a scenario
+ * plan's steps, a single-request load run, a send carrying one row), and the
+ * `dataColumns` field of `POST /compose` for a client that composes ahead of a
+ * run of its own.
+ */
+using BoundColumnNames = std::set<std::string>;
+
+/**
+ * True for a name @p bound_columns says a row will substitute, so composition
+ * leaves it written as it stands.
+ *
+ * Never a `data.*` name: that namespace is answered before this one and is
+ * spelled with its prefix, so a column named `data.id` in a file reaches the
+ * bind as the token `{{data.id}}` either way.
+ */
+bool is_bound_column_name (const std::string& name, const BoundColumnNames& bound_columns);
+
+/**
  * Scan `{{name}}` occurrences left to right over @p input and replace each
  * through @p resolve, which receives the trimmed name.
  *
@@ -189,12 +230,18 @@ const std::vector<std::string>& dynamic_variable_names ();
 
 /**
  * Substitute `{{name}}` occurrences. The reserved `data.*` namespace first
- * (kept verbatim), then scopes, then the dynamic-variable table; a name
- * nothing answers - ordinary or `$name` - keeps its braces (#186, #1009), and
- * a value that itself holds tokens is resolved through them under
- * `substitute_tokens`' bound. Nested braces never match.
+ * (kept verbatim) and @p bound_columns beside it (kept verbatim too, issue
+ * #1007), then scopes, then the dynamic-variable table; a name nothing answers
+ * - ordinary or `$name` - keeps its braces (#186, #1009), and a value that
+ * itself holds tokens is resolved through them under `substitute_tokens`'
+ * bound. Nested braces never match.
+ *
+ * @p bound_columns defaults to empty, which is composition as it was: every
+ * caller with no dataset behind it resolves exactly the names it always did.
  */
-std::string resolve_template (const std::string& input, const VariableValues& vars);
+std::string resolve_template (const std::string& input,
+const VariableValues& vars,
+const BoundColumnNames& bound_columns = {});
 
 /**
  * Render one row value as the text a `{{data.column}}` token substitutes.
@@ -237,6 +284,14 @@ std::string resolve_template (const std::string& input, const VariableValues& va
  * cannot decide what that should cost - at bind time it errors the step, and for
  * a script it is a thrown TypeError - so it records the name and lets the caller
  * choose. The returned string is unusable when it is set.
+ *
+ * **A bare column name resolves here too** (issue #1007), at Postman's
+ * precedence: a name the row carries answers from the row *before* the scopes,
+ * so `{{username}}` reads this iteration's cell even where an environment
+ * variable of that name exists. It is only reported through @p missing_column
+ * in its `data.` spelling: a bare name the row does not carry is an ordinary
+ * name and falls through to the scopes, which is what keeps a script that runs
+ * both with and without a row from throwing on the second.
  */
 struct DataRowColumns {
     /// Column name (no `data.` prefix) -> the text it substitutes.
@@ -251,8 +306,15 @@ std::optional<std::string>& missing_column);
 /**
  * Deep-resolve every string *value* inside a JSON value (object keys are left
  * alone), preserving structure. Non-string leaves pass through verbatim.
+ *
+ * @p bound_columns is `resolve_template`'s, for the same reason: an auth block
+ * is where a credential lives, and a credential is the canonical data-driven
+ * field (issue #591), so a bound column named there is left for the per-row
+ * bind rather than resolved from a same-named variable.
  */
-nlohmann::json resolve_json_strings (const nlohmann::json& value, const VariableValues& vars);
+nlohmann::json resolve_json_strings (const nlohmann::json& value,
+const VariableValues& vars,
+const BoundColumnNames& bound_columns = {});
 
 /**
  * Root-first ancestor chain for a collection (inclusive of the collection

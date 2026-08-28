@@ -5367,10 +5367,12 @@ constexpr VariableScopeBinding variable_scope_bindings[] = {
 };
 
 // Postman resolves an unqualified name local -> data -> environment ->
-// collection -> global. Vayu has neither a local nor a data scope, so the chain
-// starts at the environment - the same order `{{name}}` resolution already uses
-// app-side (docs/app/variable-resolution.md), which is what keeps a script's
-// reading of a name identical to the URL's.
+// collection -> global. Vayu has no local scope, and its data tier is not a
+// map of variables but the bound row itself, so this is the chain *below* the
+// row: `pm.variables` reads the row first (issue #1007, `iteration_cell`) and
+// then walks these - the same order `{{name}}` resolution uses app-side
+// (docs/app/variable-resolution.md), which is what keeps a script's reading of
+// a name identical to the URL's.
 constexpr VariableScope variables_precedence[] = { SCOPE_ENVIRONMENT,
     SCOPE_COLLECTION_VARIABLES, SCOPE_GLOBALS };
 
@@ -5606,6 +5608,32 @@ void setup_pm_variable_scope (JSContext* ctx, JSValue pm, const VariableScopeBin
 // pm.variables - the merged, read-only accessor
 // ============================================================================
 
+// Defined with `pm.iterationData` below, which is what it was written for: a
+// row's cell reaches a script as the JSON it is, through one converter, so the
+// merged reader here and the row's own accessor cannot type a column
+// differently.
+JSValue js_from_json (JSContext* ctx, const nlohmann::json& value, const char* label);
+
+// The cell a bound row holds for `key`, or null - for a run with no row, a row
+// that is not an object, or a name it does not carry (issue #1007).
+//
+// This is the data tier Postman resolves an unqualified name through, and it
+// sits above every scope below: an imported collection writes its columns bare,
+// so `pm.variables.get("username")` has to read this iteration's row rather
+// than an environment variable that happens to share the name. `pm.iterationData`
+// remains the accessor that reads *only* the row; this one is the merged view,
+// so it answers from the row and falls through to the scopes when the row is
+// silent - which is what lets one script run with and without a data file.
+const nlohmann::json* iteration_cell (JSContext* ctx, const std::string& key) {
+    auto* data = get_context_data (ctx);
+    if (data == nullptr || data->iteration_data == nullptr ||
+    !data->iteration_data->is_object ()) {
+        return nullptr;
+    }
+    const auto found = data->iteration_data->find (key);
+    return found == data->iteration_data->end () ? nullptr : &*found;
+}
+
 JSValue js_pm_variables_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     if (argc < 1) {
@@ -5613,6 +5641,11 @@ JSValue js_pm_variables_get (JSContext* ctx, JSValueConst this_val, int argc, JS
     }
 
     const std::string key = js_to_string (ctx, argv[0]);
+    // The row first, typed exactly as `pm.iterationData.get` hands it back - a
+    // number column reads as a number through either accessor.
+    if (const nlohmann::json* cell = iteration_cell (ctx, key)) {
+        return js_from_json (ctx, *cell, key.c_str ());
+    }
     for (const VariableScope scope : variables_precedence) {
         if (const Variable* found = lookup_variable (ctx, scope, key)) {
             return cast_variable_to_jsvalue (ctx, *found);
@@ -5629,6 +5662,11 @@ JSValue js_pm_variables_has (JSContext* ctx, JSValueConst this_val, int argc, JS
     }
 
     const std::string key = js_to_string (ctx, argv[0]);
+    // A column that is present and null is `true` here, as it is on
+    // `pm.iterationData.has`: the row carries the name (issue #1007).
+    if (iteration_cell (ctx, key) != nullptr) {
+        return JS_NewBool (ctx, 1);
+    }
     for (const VariableScope scope : variables_precedence) {
         if (lookup_variable (ctx, scope, key)) {
             return JS_NewBool (ctx, 1);
@@ -5658,6 +5696,16 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
             cast_variable_to_jsvalue (ctx, variable));
         });
     }
+    // The bound row last, because it is the strongest tier (issue #1007) - the
+    // same reason the loop above runs weakest first.
+    auto* data = get_context_data (ctx);
+    if (data != nullptr && data->iteration_data != nullptr &&
+    data->iteration_data->is_object ()) {
+        for (const auto& [column, cell] : data->iteration_data->items ()) {
+            JS_SetPropertyStr (ctx, snapshot, column.c_str (),
+            js_from_json (ctx, cell, column.c_str ()));
+        }
+    }
 
     return snapshot;
 }
@@ -5670,8 +5718,9 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
 // string literal, and splicing variable values into source is an injection);
 // replaceIn keeps values as data - the same single-pass resolver the engine's
 // POST /compose uses (`resolve_template`), so the semantics are identical:
-// scopes win over generators, a dynamic `{{$guid}}` generates per occurrence,
-// an unknown `$name` keeps its braces, an ordinary unknown name becomes "".
+// a bound row's column wins over the scopes (issue #1007), scopes win over
+// generators, a dynamic `{{$guid}}` generates per occurrence, an unknown
+// `$name` keeps its braces, an ordinary unknown name becomes "".
 //
 // Two deliberate differences from compose-time resolution, both consequences
 // of *when* this runs:

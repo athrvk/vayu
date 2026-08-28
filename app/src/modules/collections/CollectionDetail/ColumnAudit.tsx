@@ -31,6 +31,15 @@
  * since #591, and the collection chain's own scripts run for every step ahead
  * of the request's. Auditing the rows as stored called a column bound into a
  * basic-auth pair "declared but not referenced".
+ *
+ * **A declared column can share a name with a variable** (issue #1007): while a
+ * row is bound, a bare `{{name}}` reads the column, above the active
+ * environment - so a request that resolves one way in this panel's preview
+ * (with no row bound, the variable answers) sends a different value once a run
+ * actually binds a row. The panel cannot tell whether a request means the
+ * column or was written before the collision existed, so it states the fact
+ * rather than picking a side - a calm note, not a warning, listed alongside
+ * whichever bucket the column already fell into.
  */
 
 import { useMemo } from "react";
@@ -41,6 +50,7 @@ import { auditDataColumns, type AuditableRequest } from "@/services/data-files";
 import { collectionsUnderContract } from "@/lib/data-contract";
 import { resolveEffectiveAuth } from "@/modules/request-builder/utils/auth-resolution";
 import { walkAncestors } from "@/modules/collections/tree-utils";
+import { useVariableResolver } from "@/hooks/useVariableResolver";
 import type { Collection } from "@/types";
 import { SectionLabel } from "./shared";
 
@@ -92,6 +102,16 @@ export default function ColumnAudit({ collection }: ColumnAuditProps) {
 	// is one list that can disagree with itself.
 	const declared = useMemo(() => collection.dataSchema?.columns ?? [], [collection.dataSchema]);
 	const { data: collections = [] } = useCollectionsQuery();
+	// The same three-scope answer a plain Send would preview for this
+	// collection - globals, its own chain, the active environment. Not the
+	// resolved *value*, only whether a definition exists: that is all a
+	// collision note needs, and it is what stays true regardless of which row a
+	// run eventually binds.
+	const { getVariable } = useVariableResolver({ collectionId: collection.id });
+	const collidingColumns = useMemo(
+		() => declared.filter((column) => getVariable(column) !== null),
+		[declared, getVariable]
+	);
 	const auditedCollectionIds = useMemo(
 		() => collectionsUnderContract(collection.id, collections),
 		[collection.id, collections]
@@ -149,6 +169,14 @@ export default function ColumnAudit({ collection }: ColumnAuditProps) {
 								A run leaves a token naming an undeclared column written as it
 								stands unless the file happens to carry the column anyway.
 								Re-declare from the file, or fix the token.
+							</Callout>
+						)}
+						{collidingColumns.length > 0 && (
+							<Callout severity="info" title="Also a variable name">
+								{collidingColumns.join(", ")} also name
+								{collidingColumns.length === 1 ? "s" : ""} a global, collection or
+								environment variable. While a row is bound, the column wins; with no
+								row bound, the variable answers as it always did.
 							</Callout>
 						)}
 						<p className="text-[11px] text-muted-foreground">

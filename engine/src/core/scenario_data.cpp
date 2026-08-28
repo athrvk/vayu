@@ -46,10 +46,14 @@ std::string token_for (const std::string& name) {
     return "{{" + name + "}}";
 }
 
-/// The column a `data.` token names. Never called for an identity token, whose
-/// value comes from the binding rather than from a row.
+/// The column a token names: the text after `data.` for the reserved spelling,
+/// and the whole name for a bare column a bound row answers (issue #1007).
+/// Never called for an identity token, whose value comes from the binding
+/// rather than from a row.
 std::string column_of (const std::string& name) {
-    return name.substr (vayu::http::DATA_NAMESPACE_PREFIX.size ());
+    return vayu::http::is_data_variable_name (name) ?
+    name.substr (vayu::http::DATA_NAMESPACE_PREFIX.size ()) :
+    name;
 }
 
 /// What a refusal calls the thing being bound: the row, where the run has one,
@@ -481,7 +485,12 @@ class FieldSplitter {
     public:
     using Keep = bool (*) (const std::string&);
 
-    explicit FieldSplitter (Keep keep) : keep_ (keep) {
+    /// @p keep says which reserved names this walk splits on, and
+    /// @p bound_columns adds the bare names a bound row will substitute (issue
+    /// #1007) - empty for every run with no dataset behind it, which is what
+    /// keeps the split for those exactly the reserved-only scan it always was.
+    FieldSplitter (Keep keep, const vayu::http::BoundColumnNames& bound_columns)
+    : keep_ (keep), bound_columns_ (bound_columns) {
     }
 
     /// Takes its field by const reference: a split rewrites nothing, and the
@@ -491,7 +500,9 @@ class FieldSplitter {
         if (field.empty ()) {
             return;
         }
-        auto split = vayu::http::split_tokens (field, keep_);
+        auto split = vayu::http::split_tokens (field, [this] (const std::string& name) {
+            return keep_ (name) || vayu::http::is_bound_column_name (name, bound_columns_);
+        });
         if (split.names.empty ()) {
             return;
         }
@@ -524,6 +535,7 @@ class FieldSplitter {
 
     private:
     Keep keep_;
+    const vayu::http::BoundColumnNames& bound_columns_;
     StepDataTemplate template_;
     size_t next_field_ = 0;
 };
@@ -824,13 +836,14 @@ std::optional<std::string> StepDataTemplate::first_data_token () const {
     return std::nullopt;
 }
 
-StepDataTemplate tokenize_bindable_fields (const vayu::Request& request) {
+StepDataTemplate tokenize_bindable_fields (const vayu::Request& request,
+const vayu::http::BoundColumnNames& bound_columns) {
     // Copied because the walk rewrites in place; nothing is actually rewritten
     // here, since a split substitutes no token. Sharing the walk is what the
     // copy buys - see the header for why a second field list would be the wrong
     // trade.
     vayu::Request scratch = request;
-    FieldSplitter splitter (keeps_either_namespace);
+    FieldSplitter splitter (keeps_either_namespace, bound_columns);
     // The collision the walk can report is a bind-time fault only: a split
     // rewrites nothing, so the header map is rebuilt from its own unique keys.
     (void)walk_bindable_fields (
@@ -840,10 +853,13 @@ StepDataTemplate tokenize_bindable_fields (const vayu::Request& request) {
     return splitter.take ();
 }
 
-StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth) {
+StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth,
+const vayu::http::BoundColumnNames& bound_columns) {
     // The data namespace alone here - see the header for why a credential does
-    // not carry the identity.
-    FieldSplitter splitter (vayu::http::is_data_variable_name);
+    // not carry the identity. A bare column *is* the data namespace in its
+    // other spelling (issue #1007), so it is split here: a credential written
+    // `{{username}}` binds from the row exactly as `{{data.username}}` does.
+    FieldSplitter splitter (vayu::http::is_data_variable_name, bound_columns);
     vayu::http::walk_auth_credentials (auth,
     [&splitter] (const std::string& field, vayu::http::CredentialDestination destination) {
         splitter (field, credential_context (destination));
@@ -918,10 +934,14 @@ size_t row_index) {
     return DataBindResult{ true, {} };
 }
 
-std::optional<std::string> first_data_token_in (const nlohmann::json& value) {
+std::optional<std::string> first_data_token_in (const nlohmann::json& value,
+const vayu::http::BoundColumnNames& bound_columns) {
     if (value.is_string ()) {
         const auto split = vayu::http::split_tokens (
-        value.get<std::string> (), vayu::http::is_data_variable_name);
+        value.get<std::string> (), [&bound_columns] (const std::string& name) {
+            return vayu::http::is_data_variable_name (name) ||
+            vayu::http::is_bound_column_name (name, bound_columns);
+        });
         if (split.names.empty ()) {
             return std::nullopt;
         }
@@ -929,7 +949,7 @@ std::optional<std::string> first_data_token_in (const nlohmann::json& value) {
     }
     if (value.is_object () || value.is_array ()) {
         for (const auto& child : value) {
-            if (auto found = first_data_token_in (child)) {
+            if (auto found = first_data_token_in (child, bound_columns)) {
                 return found;
             }
         }
@@ -937,12 +957,13 @@ std::optional<std::string> first_data_token_in (const nlohmann::json& value) {
     return std::nullopt;
 }
 
-std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth) {
+std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth,
+const vayu::http::BoundColumnNames& bound_columns) {
     const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth);
     if (oauth2 == nullptr) {
         return std::nullopt;
     }
-    return first_data_token_in (oauth2->config);
+    return first_data_token_in (oauth2->config, bound_columns);
 }
 
 DataBindResult apply_iteration_template (vayu::Request& request,
@@ -970,9 +991,34 @@ const IterationBinding& binding) {
     return result;
 }
 
+vayu::http::BoundColumnNames bound_columns_of (const nlohmann::json& row) {
+    vayu::http::BoundColumnNames out;
+    if (!row.is_object ()) {
+        return out;
+    }
+    for (const auto& [column, cell] : row.items ()) {
+        (void)cell;
+        out.insert (column);
+    }
+    return out;
+}
+
+vayu::http::BoundColumnNames bound_columns_of (const std::vector<nlohmann::json>& rows) {
+    vayu::http::BoundColumnNames out;
+    for (const auto& row : rows) {
+        out.merge (bound_columns_of (row));
+    }
+    return out;
+}
+
 DataBindResult bind_data_row (vayu::Request& request, const nlohmann::json& row, size_t row_index) {
+    // The row itself says which bare names it can bind (issue #1007), which is
+    // the whole set for a caller that holds one row: a name it does not carry
+    // is an ordinary variable, left for the residual pass to resolve rather
+    // than split here only to fail as a column no row has.
     const IterationBinding binding{ &row, row_index, IterationIdentity{} };
-    return apply_iteration_template (request, tokenize_bindable_fields (request), binding);
+    return apply_iteration_template (request,
+    tokenize_bindable_fields (request, bound_columns_of (row)), binding);
 }
 
 } // namespace vayu::core

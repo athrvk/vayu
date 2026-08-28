@@ -567,6 +567,62 @@ TEST_F (ScenarioPlanTest, PlanOverMaxStepsIsRejectedWithCountAndCap) {
     << resolved.error;
 }
 
+/**
+ * The end-to-end shape of #1007 on the path an imported collection takes.
+ *
+ * A step's composition is the engine's own (`compose_request_core` by id), so
+ * the dataset's columns reach it from here rather than from a client - and the
+ * step must come back with the bare token still written as it stands, ready for
+ * the per-iteration bind, even though the environment defines the same name.
+ *
+ * Mutation-check: stop passing `dataColumns` into the compose body and the URL
+ * comes back carrying "from-the-environment"; stop passing the set to
+ * `tokenize_bindable_fields` and the template is empty, so nothing binds.
+ */
+TEST_F (ScenarioPlanTest, ARunsColumnsDeferTheirBareTokensAndSplitThem) {
+    seed_collection ("col", "");
+    seed_request ("req", "col", 0, "https://api.test/u/{{username}}?r={{region}}");
+    seed_environment ("env",
+    R"({"username":{"value":"from-the-environment"},"region":{"value":"eu"}})");
+
+    json scenario = block ("col");
+    scenario["data"] =
+    json::array ({ json{ { "username", "ada" } }, json{ { "username", "grace" } } });
+    auto opts           = options ();
+    opts.environment_id = "env";
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.plan.steps.size (), 1u);
+    const auto& step = resolved.plan.steps[0];
+    // The column deferred, the ordinary variable resolved.
+    EXPECT_EQ (step.request.url, "https://api.test/u/{{username}}?r=eu");
+    // And the step carries the split, so the bind has something to join.
+    ASSERT_FALSE (step.data_template.empty ());
+
+    vayu::Request bound = step.request;
+    ASSERT_TRUE (vayu::core::apply_iteration_template (bound, step.data_template,
+    vayu::core::IterationBinding{ &resolved.data_rows[1], 1, {} })
+    .ok);
+    EXPECT_EQ (bound.url, "https://api.test/u/grace?r=eu");
+}
+
+TEST_F (ScenarioPlanTest, ARunWithoutRowsResolvesABareNameFromTheScopesAsItAlwaysDid) {
+    // The both-ways half of the rule at the plan level: with no data block, the
+    // same collection composes exactly as it did before #1007.
+    seed_collection ("col", "");
+    seed_request ("req", "col", 0, "https://api.test/u/{{username}}");
+    seed_environment ("env", R"({"username":{"value":"from-the-environment"}})");
+
+    auto opts           = options ();
+    opts.environment_id = "env";
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_EQ (resolved.plan.steps[0].request.url, "https://api.test/u/from-the-environment");
+    EXPECT_TRUE (resolved.plan.steps[0].data_template.empty ());
+}
+
 TEST_F (ScenarioPlanTest, PresentButEmptyDataIsRejected) {
     seed_collection ("col", "");
     seed_request ("req", "col");

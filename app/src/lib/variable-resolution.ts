@@ -29,6 +29,9 @@
  *  - `$vu` and `$iteration` keep their braces too: they address the reserved
  *    identity namespace (issue #994), which only the iteration that sends can
  *    bind - a variable defined with either name never answers for it
+ *  - so does a bare name a bound data row will substitute (issue #1007) - the
+ *    same deferral for the same reason, spelled the way Postman's data
+ *    variables are
  *  - a user-defined variable named `$guid` beats the generator; generators run
  *    once per occurrence
  *  - a value that itself holds `{{tokens}}` resolves through them, to a depth
@@ -126,6 +129,26 @@ export function dataColumnName(name: string): string | null {
 }
 
 /**
+ * The bare column names a bound data row will substitute (issue #1007).
+ *
+ * Postman binds a dataset's columns to bare names - `{{username}}` in a request
+ * reads the current row - so a collection imported from it is written that way,
+ * and the engine answers those names from the row at bind time, above the
+ * environment. Composition holds only the *names*: a payload is composed once
+ * and a row is bound per iteration, so what composition does about a bound
+ * column is exactly what it does about `data.*` - leave the token written as it
+ * stands.
+ *
+ * Empty is every resolution with no dataset behind it, which is every preview
+ * this module serves today; the parameter exists so the preview cannot answer
+ * the conformance fixture's cases differently from the engine.
+ */
+export type BoundColumnNames = ReadonlySet<string>;
+
+/** The set a resolution with no dataset behind it reads - shared, not rebuilt. */
+const NO_BOUND_COLUMNS: BoundColumnNames = new Set<string>();
+
+/**
  * How deep a value's own `{{tokens}}` are followed before the rest are left
  * written as they stand (issue #1009). The engine's `MAX_NESTED_RESOLUTIONS`,
  * restated: the two are pinned by the conformance fixture's cycle case, which
@@ -135,21 +158,25 @@ const MAX_NESTED_RESOLUTIONS = 8;
 
 /**
  * Substitute `{{name}}` occurrences: the reserved `data.*` namespace and the
- * reserved `$vu` / `$iteration` identity namespace first (both kept verbatim),
- * then scopes, then the dynamic-variable table. A defined
- * name (even one spelled `$guid`) wins over a generator; a name nothing
- * answers keeps its braces, `$name` (issue #186) and ordinary alike (issue
- * #1009) - the token reaching the wire is what makes the miss visible, where
- * an empty string silently changed the request.
+ * reserved `$vu` / `$iteration` identity namespace first, with `boundColumns`
+ * beside them (all kept verbatim, issue #1007), then scopes, then the
+ * dynamic-variable table. A defined name (even one spelled `$guid`) wins over
+ * a generator; a name nothing answers keeps its braces, `$name` (issue #186)
+ * and ordinary alike (issue #1009) - the token reaching the wire is what makes
+ * the miss visible, where an empty string silently changed the request.
  *
  * A replacement that carries tokens of its own is resolved through the same
  * lookup, to `MAX_NESTED_RESOLUTIONS` levels, so a layered `{{baseUrl}}`
  * previews as the URL it spells. A name already being expanded is a cycle and
  * its token stays literal; the surrounding text is never rescanned.
+ *
+ * `boundColumns` defaults to empty, which is resolution as it was: every caller
+ * with no dataset behind it resolves exactly the names it always did.
  */
 export function resolveTemplate(
 	input: string,
-	lookup: (name: string) => string | undefined
+	lookup: (name: string) => string | undefined,
+	boundColumns: BoundColumnNames = NO_BOUND_COLUMNS
 ): string {
 	if (!input || typeof input !== "string") return input;
 	// The names currently being expanded, innermost last - the chain the cycle
@@ -170,6 +197,14 @@ export function resolveTemplate(
 			// iteration that sends binds them - the engine's composer leaves the
 			// token written as it stands for exactly that reason.
 			if (isIterationVariableName(name)) return match;
+			// Before the lookup for the opposite reason: this name is *not*
+			// disjoint from the scopes, and the row is the one that wins. Postman
+			// puts a data column above the environment, so a scope answering here
+			// would preview the value the row is there to replace - and ahead of
+			// the generator table too, so a column named `$guid` is deferred rather
+			// than generated. After the two reserved namespaces, as the engine
+			// orders them.
+			if (boundColumns.has(name)) return match;
 			if (expanding.includes(name)) return match;
 			const defined = lookup(name);
 			// The generator answers `null` for a name its table does not have,

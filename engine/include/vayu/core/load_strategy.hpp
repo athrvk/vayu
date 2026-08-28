@@ -62,6 +62,12 @@ struct LoadDataSet {
     /// The credentials split around their `{{data.column}}` tokens; empty when
     /// none carries one.
     StepDataTemplate credentials;
+    /// The bare column names @ref rows can bind (issue #1007), read off the
+    /// rows once by `core::bound_columns_of`. It is what the run's split is
+    /// told, so a bare `{{username}}` this set answers is bound per iteration
+    /// rather than sent as the literal token - and a run without rows carries
+    /// no set at all, so it is told nothing and splits as it always did.
+    vayu::http::BoundColumnNames bound_columns;
 
     /// What `build_request` must be told: the credentials are bound after the
     /// build, so an auth carrying a token must not be encoded during it.

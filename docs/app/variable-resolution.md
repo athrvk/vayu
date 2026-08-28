@@ -39,11 +39,15 @@ fixture varies both fields so a divergence cannot hide.
 ## Priority order (lowest → highest)
 
 ```
-Globals  <  Collection chain (root → leaf)  <  Active environment
+Globals  <  Collection chain (root → leaf)  <  Active environment  <  Bound data row (bare column names)
 ```
 
 A variable set in the active environment always wins over a collection variable, which
-always wins over a global.
+always wins over a global. The fourth tier exists only **while a data row is
+bound** - a data-driven collection run, a load run given rows, or a single send
+bound to one row (issue #1007). With no dataset the ladder is the three-tier
+one it has always been; a bare name resolves exactly as it did before this
+tier existed.
 
 ### `data.*` is reserved, and sits outside this order
 
@@ -52,11 +56,44 @@ always wins over a global.
 namespace, disjoint from them: `{{data.id}}` and `{{id}}` are different names,
 so a data set can neither shadow nor be shadowed by a variable, and attaching a
 data file to a collection cannot change what its other tokens resolve to. That
-is what dissolves the precedence question rather than answering it.
+is what dissolves the precedence question rather than answering it, and
+nothing about it changed.
 
-Nothing in the tables above resolves such a token. Both resolvers - the
-engine's `resolve_template` and the renderer's `resolveTemplate` - leave it
-written exactly as it stands, because only a scenario run's iteration knows
+**A bound row's bare column names are a different rule, and they *are* a
+tier** (issue #1007). Postman binds a dataset's columns to bare names -
+`{{username}}`, not `{{data.username}}` - so an imported data-driven
+collection is written that way, and Vayu answering `{{username}}` from the
+scopes (or from nowhere) sent a request the file's author never wrote. While a
+row is bound, that row's own column names answer a bare `{{username}}` **above
+the active environment** - the ladder in the section above. A column the row
+does not carry is not a bind failure: the name falls through to the scopes
+exactly as it would with no dataset at all, which is what lets one script or
+one request work both with and without a data file.
+
+**Mechanically, neither spelling is substituted by composition.** A plan is
+composed once, before any row exists to bind - so composition can no more
+substitute a bare bound column than it can substitute `{{data.username}}`. It
+**defers** the token instead, leaving it written exactly as it stands, and the
+per-row bind (`core::apply_data_template`) is what joins *both* spellings
+against the row, through the same walk. That is what makes the two rules cost
+nothing extra to keep consistent: a bare column gets the identical JSON/XML
+escaping, the identical missing-column refusal, the identical null-cell
+refusal, and the identical header CRLF/NUL and header-collision refusals that
+`{{data.column}}` has always had. There is no second, looser substitution path
+for the bare spelling - see [Data-Driven Runs](data-driven-runs.md) for what
+those refusals say.
+
+**Which bare names a bind owns travels as a set of names, never values** - the
+engine fills it wherever a dataset is known (a collection or scenario run's
+plan, a single-request load run, a single send carrying one row), and a client
+composing ahead of a run of its own states it explicitly as the `dataColumns`
+field of [`POST /compose`](../engine/api-reference.md#post-compose): an array
+of the data file's column names, absent or `null` meaning no dataset and
+composition exactly as before.
+
+Nothing in the tables above resolves a `{{data.column}}` token. Both resolvers
+- the engine's `resolve_template` and the renderer's `resolveTemplate` - leave
+it written exactly as it stands, because only a scenario run's iteration knows
 which row is bound; the run's worker substitutes it immediately before each
 send. A `data.*` token in an ordinary Send therefore reaches the wire as
 written: there is no row. `{{data.}}` with nothing after the dot names no column
@@ -129,6 +166,55 @@ first happens only in a run that has rows - so binding the identity there would
 work in a data-driven run and silently not in every other. #1055 tracks lifting
 that. Everywhere else binds: the URL, header names and values, the body and
 both halves of every form field, each escaped for the document it lands in.
+
+### D18 - a bound row's bare column names outrank the environment (issue #1007)
+
+This repo labels the decisions #226 recorded D1, D2, D16, D17. This one is
+new, and it is not from #226: recorded here as **D18**.
+
+**What it costs.** #402 deliberately bought the property that attaching a data
+file to a collection cannot change what any existing token resolves to -
+`{{id}}` and `{{data.id}}` were guaranteed different names, full stop. D18
+trades part of that away: a collection whose data file happens to have a
+column sharing a variable's name now resolves that name differently while a
+row is bound than it does on a plain Send. That is a real, deliberate
+narrowing of #402's guarantee.
+
+**Why it is worth it anyway.** The owner's standing direction prefers Postman
+compatibility here: Postman binds a dataset's columns bare, so every imported
+data-driven collection is already written `{{username}}`, and #402's guarantee
+was making every one of those requests send the literal token instead of the
+row's value (see [`{{data.*}}` puts the row into the request
+itself](../engine/api-reference.md#scenario-runs)). A collection that never
+attaches a data file, or whose columns share no variable's name, pays nothing.
+
+**Why the reserved `data.*` spelling is kept too.** `{{data.username}}` still
+addresses the column even where no row is bound, still refuses a header a
+value would forge with the same message, and can never collide with a
+same-named variable - it is the collision-proof spelling for a request written
+by hand, or shared with people who are not relying on Postman muscle memory.
+D18 does not replace it; it adds the bare spelling beside it, at Postman's
+position in the ladder.
+
+**Why the deferral is what makes both work at once.** Composition already had
+to leave `{{data.*}}` unresolved, because a plan is composed once and a row is
+bound per iteration - D18 gives a bare bound column the identical treatment,
+so both spellings reach the same bind-time join and the same refusal rules.
+Nothing about the two rules can drift, because there is only the one path that
+substitutes either of them.
+
+**What the builder's preview does not show yet.** The request builder paints a
+bare `{{name}}` as a bound column only when *no* scope defines that name. Where
+a scope does define it, the token keeps painting as that variable and shows its
+value - which is right for a Send with no row, and wrong for the moment a run
+binds one, since the column outranks it. The preview resolver takes the bound
+columns (`resolveTemplate`'s third argument, pinned against the engine by the
+conformance fixture) but nothing passes them yet: no preview surface knows which
+row a run will bind. So a collision is *stated* rather than painted - the Data
+tab's column audit names any declared column that shares a name with a variable
+in scope, and says the column wins while a row is bound. Painting it in the
+builder is a design question of its own, tracked separately; nothing here reads
+a value the engine cannot send, it just does not yet show the one it will.
 
 ### Which contract answers for a request: nearest declared ancestor
 
@@ -601,7 +687,11 @@ A script reads a scope by name (`pm.environment.get`,
 `pm.collectionVariables.get`, `pm.globals.get`) or reads across all three with
 `pm.variables.get`, which walks **environment → collection → global** and stops
 at the first scope that has the name enabled - this page's priority order, read
-from the top down.
+from the top down. While a row is bound, `pm.variables.get` (and `.has` and
+`.toObject`) checks that row's bare column names **first**, above all three
+scopes - the same D18 tier the ladder above adds, reached from a script. See
+[scripting.md](../engine/scripting.md#variables-pmvariables) and
+[pm API compatibility](./pm-api-compatibility.md) for the details.
 
 The collection scope a script reads is the **whole chain**, the same one
 `{{name}}` merges (issue #234; `load_script_variable_scopes` in

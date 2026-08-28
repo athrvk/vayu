@@ -35,6 +35,12 @@
  * resolver's map, and they are a group of their own between the variables and
  * the generators.
  *
+ * **Each declared column offers both spellings a bound row answers** (issue
+ * #1007): `{{data.email}}`, the collision-proof one that a scope can never
+ * shadow, and bare `{{email}}`, the one an imported Postman collection is
+ * already written with. Each carries its own `detail` naming which is which,
+ * so picking one from the list is a deliberate choice rather than a guess.
+ *
  * Called once, in App - a completion provider is global per language, so one
  * registration covers every editor instance. The same shape as
  * `useScriptCompletionProvider` beside it.
@@ -204,6 +210,21 @@ export function useVariableCompletionProvider() {
 						documentation: "Bound per iteration by a collection run's data file",
 						sortText: `${DATA_SORT_GROUP}${name}`,
 						filterText: `{{${name}`,
+						range,
+					});
+					// The bare spelling a bound row answers too (issue #1007) - Postman's
+					// own spelling, and what an imported collection is already written
+					// with. Same sort group as the prefixed form above so the two sit
+					// together instead of scattering.
+					suggestions.push({
+						label: column,
+						kind: monaco.languages.CompletionItemKind.Field,
+						insertText: `{{${column}${closing}`,
+						detail: `Data column (bare) - ${dataColumns?.collectionName}`,
+						documentation:
+							"Postman-style: a bound row answers this name directly, above the environment. Collides with a same-named variable while a row is bound - data.* never does.",
+						sortText: `${DATA_SORT_GROUP}${name}`,
+						filterText: `{{${column}`,
 						range,
 					});
 				}

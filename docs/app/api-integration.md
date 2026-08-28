@@ -671,6 +671,17 @@ streaming - because the engine binds a row on either path, and a row silently
 dropped on one of them is the written-but-never-read defect. An ordinary Send
 passes no argument at all, so its payload is byte-identical to what it was.
 
+The row's **names** do reach composition, though (issue #1007): `composeForSend`
+sends `dataColumns: Object.keys(row)` on `POST /compose`, because a bare
+`{{username}}` is a name the scopes *can* answer and composition has to be told
+to leave it for the bind instead. Names only - a value there would be this row's
+value written into a payload composed once - and absent for an ordinary Send, so
+that path is still byte-identical. `LoadTestConfigDialog` carries the same field
+for a run given a data file (`config.dataColumns`, the picker's parsed column
+list rather than a re-union of the rows' keys), and a **collection** run sends
+none: the engine composes those steps itself and fills the set from the run's
+own rows.
+
 It is the **only** send site that sets `transient: true` (issue #382), because
 it is the only one the user did not initiate. The engine then runs it in full
 and records nothing: no History entry, no result trace holding the credentials

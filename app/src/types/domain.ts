@@ -1446,6 +1446,17 @@ export interface LoadTestConfig {
 	 * {@link RunMonitorConfig} are camelCase here.
 	 */
 	data?: Record<string, unknown>[];
+	/**
+	 * The column names of that same file (issue #1007) - what composition must
+	 * leave for the per-row bind, so a Postman-shaped `{{username}}` is not
+	 * resolved from a same-named environment variable before any row is bound.
+	 *
+	 * Carried beside the rows rather than derived from them at the compose call:
+	 * the picker's parse already names the columns (a JSON row may simply omit
+	 * one), and re-unioning the keys here would be a second answer to a question
+	 * `ParsedDataFile` has already answered. Absent exactly when `data` is.
+	 */
+	dataColumns?: string[];
 }
 
 /**

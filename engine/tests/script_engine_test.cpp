@@ -4710,30 +4710,37 @@ TEST_F (ScriptEngineTest, IterationDataGetOnAnUnknownKeyIsUndefined) {
 }
 
 /**
- * `pm.variables.replaceIn` resolves the data namespace too (issue #890).
+ * `pm.variables.replaceIn` resolves the data namespace too (issue #890), and
+ * every `pm.variables` reader answers a bound row's bare column names (#1007).
  *
- * It did not, and that made it the one template resolver in the product that
- * disagreed with the others about what `{{data.column}}` means. A URL, a header
- * and a body all bind it; handing the same string to replaceIn returned it
- * verbatim, so the script had to know which resolver it was talking to. The
- * token came back with its braces on, which reads as "unresolved variable" -
- * the same output an unknown `$name` gives - so nothing said the row was
- * available and simply not consulted.
+ * replaceIn did not resolve the namespace at first, and that made it the one
+ * template resolver in the product that disagreed with the others about what
+ * `{{data.column}}` means. A URL, a header and a body all bind it; handing the
+ * same string to replaceIn returned it verbatim, so the script had to know
+ * which resolver it was talking to. The token came back with its braces on,
+ * which reads as "unresolved variable" - the same output an unknown `$name`
+ * gives - so nothing said the row was available and simply not consulted.
  *
- * Deliberately not extended to `pm.variables.get` / `has` / `toObject`: those
- * read the variable *scopes*, and `data.` is documented as disjoint from them
- * (`core/scenario_data.hpp`) with `pm.iterationData` as its accessor.
- * `replaceIn` is different in kind - it resolves a template, and this is a
- * token that template syntax has - which is why the fix stops here.
+ * The bare half is #1007's, and it *did* extend `get` / `has` / `toObject`:
+ * Postman binds a dataset's columns to bare names, so an imported collection's
+ * `pm.variables.get("userId")` means this iteration's row, at the tier Postman
+ * puts it - above the environment. The prefixed spelling stays disjoint from
+ * the scopes either way: `data.userId` is template syntax, never a variable
+ * name, so the readers still answer nothing for it and `pm.iterationData`
+ * remains the accessor that reads only the row.
  *
- * Mutation-check: drop the row from the resolver and the first case fails; teach
- * `pm.variables.get` the same namespace and the last one does.
+ * Mutation-check: drop the row from the resolver and the first case fails; take
+ * the row layer out of `pm.variables` and the last two do; let the scopes
+ * answer before the row and the shadowing case does.
  */
 TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
     const nlohmann::json row{ { "userId", "1001" }, { "city", "Portland, OR" },
         { "quantity", 3 }, { "active", true } };
     auto ctx      = data_test (request, response, env, row);
     env["userId"] = { "an-environment-variable", true };
+    // A name no column answers, so the fallback half of the rule has something
+    // to fall back *to*.
+    env["token"] = { "an-environment-token", true };
 
     auto result = engine.execute (R"JS(
         pm.test("a column resolves", function() {
@@ -4749,13 +4756,18 @@ TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
             pm.expect(pm.variables.replaceIn("{{data.active}}")).to.equal("true");
         });
 
-        pm.test("the namespace is reserved, so neither side shadows the other", function() {
-            // `{{userId}}` and `{{data.userId}}` are different names - the whole
-            // reason the namespace exists (issue #402). A row that could shadow
-            // a variable would make the feature unsafe to add to a collection
-            // someone already has.
-            pm.expect(pm.variables.replaceIn("{{userId}}")).to.equal("an-environment-variable");
+        pm.test("a bound row answers the bare name, above the environment", function() {
+            // Postman's precedence, adopted by #1007: while a row is bound, a
+            // column shadows a same-named environment variable, which is what
+            // makes an imported data-driven collection send this iteration's
+            // value instead of a stale one.
+            pm.expect(pm.variables.replaceIn("{{userId}}")).to.equal("1001");
+            // The reserved spelling still names only the column (#402) - the
+            // two rules coexist rather than one replacing the other.
             pm.expect(pm.variables.replaceIn("{{data.userId}}")).to.equal("1001");
+            // And a bare name the row does not carry is an ordinary variable,
+            // which is what lets one script run with and without a data file.
+            pm.expect(pm.variables.replaceIn("{{token}}")).to.equal("an-environment-token");
         });
 
         pm.test("the bare prefix names nothing", function() {
@@ -4767,12 +4779,9 @@ TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
         });
 
         pm.test("the scope readers stay out of the namespace", function() {
-            // The other half of the decision this test's doc comment records:
-            // the fix stops at replaceIn, so `get`/`has`/`toObject` answer about
-            // the variable *scopes* even while a row is bound. Without a case
-            // here, extending them would be a silent change - `pm.iterationData`
-            // is the row's accessor, and a script that reached a column through
-            // both would have two spellings for one value.
+            // `data.userId` is template syntax, not a variable name: the merged
+            // readers answer nothing for it however a row is bound, and
+            // `pm.iterationData` is the accessor that reads only the row.
             pm.expect(typeof pm.variables.get("data.userId")).to.equal("undefined");
             pm.expect(pm.variables.has("data.userId")).to.equal(false);
             pm.expect(typeof pm.variables.toObject()["data.userId"]).to.equal("undefined");
@@ -4780,11 +4789,24 @@ TEST_F (ScriptEngineTest, ReplaceInResolvesTheDataNamespaceAgainstTheBoundRow) {
             // the wrong reason.
             pm.expect(pm.iterationData.get("userId")).to.equal("1001");
         });
+
+        pm.test("the scope readers answer the bare column, typed", function() {
+            // The merged reader's top tier (issue #1007), and typed the way
+            // pm.iterationData types it: a number column is a number through
+            // either accessor, where the template spelling renders text.
+            pm.expect(pm.variables.get("userId")).to.equal("1001");
+            pm.expect(pm.variables.get("quantity")).to.equal(3);
+            pm.expect(pm.variables.has("userId")).to.equal(true);
+            pm.expect(pm.variables.toObject()["userId"]).to.equal("1001");
+            pm.expect(pm.variables.toObject()["quantity"]).to.equal(3);
+            // The fallback, so this is a tier rather than a replacement.
+            pm.expect(pm.variables.get("token")).to.equal("an-environment-token");
+        });
     )JS",
     ctx);
 
     ASSERT_TRUE (result.success) << result.error_message;
-    ASSERT_EQ (result.tests.size (), 5u);
+    ASSERT_EQ (result.tests.size (), 6u);
     for (const auto& test : result.tests) {
         EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
     }

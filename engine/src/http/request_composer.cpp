@@ -390,6 +390,12 @@ bool is_identity_variable_name (const std::string& name) {
     return name == IDENTITY_VU_NAME || name == IDENTITY_ITERATION_NAME;
 }
 
+bool is_bound_column_name (const std::string& name, const BoundColumnNames& bound_columns) {
+    // The `empty()` short-circuit is what every composition with no dataset
+    // behind it pays for this rule, per token: one test, no lookup.
+    return !bound_columns.empty () && bound_columns.count (name) > 0;
+}
+
 std::optional<std::string> resolve_dynamic_variable (const std::string& name) {
     for (const auto& v : DYNAMIC_VARIABLES) {
         if (name == v.name) {
@@ -545,12 +551,21 @@ const std::function<bool (const std::string&)>& keep) {
     return split;
 }
 
+/// The set a resolution with no dataset behind it reads, shared rather than
+/// constructed per call - and function-local because nothing here is built at
+/// namespace scope.
+const BoundColumnNames& no_bound_columns () {
+    static const BoundColumnNames empty;
+    return empty;
+}
+
 /// What `{{name}}` resolves to, or nullopt for a token left written as it
 /// stands. The one lookup rule every resolution in this file substitutes
 /// through, named rather than inlined so the header-aware resolver below sees
 /// exactly the value an ordinary field would have got.
-std::optional<std::string>
-lookup_variable (const std::string& name, const VariableValues& vars) {
+std::optional<std::string> lookup_variable (const std::string& name,
+const VariableValues& vars,
+const BoundColumnNames& bound_columns) {
     // Before the scopes, not after: the namespace is disjoint from them, so
     // a variable someone named `data.id` must not answer for the column.
     if (is_data_variable_name (name)) {
@@ -562,6 +577,15 @@ lookup_variable (const std::string& name, const VariableValues& vars) {
     // of the run sending it (issue #994).
     if (is_identity_variable_name (name)) {
         return std::nullopt; // bound per iteration by the executor
+    }
+    // Before the scopes for the opposite reason (issue #1007): this name is
+    // *not* disjoint from them, and the row is the one that wins. Postman's
+    // precedence puts a data column above the environment, so a scope that
+    // answered here would send the value the row was meant to replace. After
+    // the two reserved namespaces above, so a column that happens to be named
+    // `$vu` or `data.x` cannot take a reserved token's meaning away from it.
+    if (is_bound_column_name (name, bound_columns)) {
+        return std::nullopt; // the bound row substitutes it, per iteration
     }
     if (auto defined = vars.find (name); defined != vars.end ()) {
         return defined->second;
@@ -579,9 +603,12 @@ lookup_variable (const std::string& name, const VariableValues& vars) {
     return std::nullopt;
 }
 
-std::string resolve_template (const std::string& input, const VariableValues& vars) {
-    return substitute_tokens (input,
-    [&vars] (const std::string& name) { return lookup_variable (name, vars); });
+std::string resolve_template (const std::string& input,
+const VariableValues& vars,
+const BoundColumnNames& bound_columns) {
+    return substitute_tokens (input, [&vars, &bound_columns] (const std::string& name) {
+        return lookup_variable (name, vars, bound_columns);
+    });
 }
 
 std::string render_data_value (const nlohmann::json& value) {
@@ -605,7 +632,15 @@ std::optional<std::string>& missing_column) {
         // `data.id` must not answer for the column - and the column must not
         // answer for the variable.
         if (!is_data_variable_name (name)) {
-            return lookup_variable (name, vars);
+            // The bare spelling of the same read (issue #1007), and it is a
+            // *hit* rather than a deferral because this caller holds the row:
+            // above the scopes, because that is where Postman puts a data
+            // variable, and silent when the row does not carry the name -
+            // which is an ordinary variable, not a mistake about a column.
+            if (const auto cell = row.columns.find (name); cell != row.columns.end ()) {
+                return cell->second;
+            }
+            return lookup_variable (name, vars, no_bound_columns ());
         }
         const std::string column = name.substr (DATA_NAMESPACE_PREFIX.size ());
         if (const auto cell = row.columns.find (column); cell != row.columns.end ()) {
@@ -646,10 +681,11 @@ struct HeaderTextRefusal {
  */
 std::string resolve_header_template (const std::string& input,
 const VariableValues& vars,
+const BoundColumnNames& bound_columns,
 std::optional<HeaderTextRefusal>& refusal) {
     return substitute_tokens (input,
-    [&vars, &refusal] (const std::string& name) -> std::optional<std::string> {
-        auto value = lookup_variable (name, vars);
+    [&vars, &bound_columns, &refusal] (const std::string& name) -> std::optional<std::string> {
+        auto value = lookup_variable (name, vars, bound_columns);
         if (!value || refusal) {
             return value; // nothing substituted, or already refused - first wins
         }
@@ -675,21 +711,23 @@ std::string describe_header_text_refusal (const HeaderTextRefusal& refusal) {
     "; the request is refused rather than composed into a forged header";
 }
 
-nlohmann::json resolve_json_strings (const nlohmann::json& value, const VariableValues& vars) {
+nlohmann::json resolve_json_strings (const nlohmann::json& value,
+const VariableValues& vars,
+const BoundColumnNames& bound_columns) {
     if (value.is_string ()) {
-        return resolve_template (value.get<std::string> (), vars);
+        return resolve_template (value.get<std::string> (), vars, bound_columns);
     }
     if (value.is_array ()) {
         nlohmann::json out = nlohmann::json::array ();
         for (const auto& item : value) {
-            out.push_back (resolve_json_strings (item, vars));
+            out.push_back (resolve_json_strings (item, vars, bound_columns));
         }
         return out;
     }
     if (value.is_object ()) {
         nlohmann::json out = nlohmann::json::object ();
         for (const auto& [key, item] : value.items ()) {
-            out[key] = resolve_json_strings (item, vars);
+            out[key] = resolve_json_strings (item, vars, bound_columns);
         }
         return out;
     }
@@ -976,7 +1014,8 @@ struct ResolvedHeaders {
  * the variable that caused it already forgotten.
  */
 ResolvedHeaders resolve_header_block (const nlohmann::json& headers,
-const VariableValues& vars) {
+const VariableValues& vars,
+const BoundColumnNames& bound_columns) {
     ResolvedHeaders out;
     // Each resolved name, against the name as written that produced it. The
     // second half is what separates a collision resolution *made* from two
@@ -985,7 +1024,8 @@ const VariableValues& vars) {
     // is for the one that is invisible until the request comes back wrong.
     std::map<std::string, std::string, vayu::CaseInsensitiveLess> produced;
     for (const auto& [key, value] : headers.items ()) {
-        const std::string name = resolve_header_template (key, vars, out.unspellable);
+        const std::string name =
+        resolve_header_template (key, vars, bound_columns, out.unspellable);
         const auto [taken, was_free] = produced.emplace (name, key);
         const bool resolution_made_it = name != key || taken->second != taken->first;
         if (!was_free && resolution_made_it && !out.collision) {
@@ -993,8 +1033,8 @@ const VariableValues& vars) {
             vayu::http::HeaderNameCollision{ key, taken->second, taken->first };
         }
         out.headers[name] = value.is_string () ?
-        nlohmann::json (
-        resolve_header_template (value.get<std::string> (), vars, out.unspellable)) :
+        nlohmann::json (resolve_header_template (
+        value.get<std::string> (), vars, bound_columns, out.unspellable)) :
         value;
     }
     return out;
@@ -1012,8 +1052,9 @@ const VariableValues& vars) {
  *
  * @return the refusal, or nothing.
  */
-std::optional<std::pair<int, nlohmann::json>>
-resolve_compose_head (const VariableValues& vars, nlohmann::json& payload) {
+std::optional<std::pair<int, nlohmann::json>> resolve_compose_head (const VariableValues& vars,
+const BoundColumnNames& bound_columns,
+nlohmann::json& payload) {
     if (auto method = payload.find ("method");
     method != payload.end () && method->is_string ()) {
         std::string verb = method->get<std::string> ();
@@ -1023,12 +1064,12 @@ resolve_compose_head (const VariableValues& vars, nlohmann::json& payload) {
     }
 
     if (auto url = payload.find ("url"); url != payload.end () && url->is_string ()) {
-        *url = resolve_template (url->get<std::string> (), vars);
+        *url = resolve_template (url->get<std::string> (), vars, bound_columns);
     }
 
     if (auto headers = payload.find ("headers");
     headers != payload.end () && headers->is_object ()) {
-        auto resolved = resolve_header_block (*headers, vars);
+        auto resolved = resolve_header_block (*headers, vars, bound_columns);
         if (resolved.unspellable) {
             return compose_error (400, "unsendable_header",
             describe_header_text_refusal (*resolved.unspellable));
@@ -1049,19 +1090,23 @@ resolve_compose_head (const VariableValues& vars, nlohmann::json& payload) {
  * unresolved `{{...}}` reaching the transfer would be opened as a literal
  * filename.
  */
-void resolve_form_field (const VariableValues& vars, nlohmann::json& field) {
+void resolve_form_field (const VariableValues& vars,
+const BoundColumnNames& bound_columns,
+nlohmann::json& field) {
     if (!field.is_object ()) {
         return;
     }
     for (const char* name : { "key", "value", "src", "fileName", "contentType" }) {
         if (auto entry = field.find (name); entry != field.end () && entry->is_string ()) {
-            *entry = resolve_template (entry->get<std::string> (), vars);
+            *entry = resolve_template (entry->get<std::string> (), vars, bound_columns);
         }
     }
 }
 
 /** The body: its content, and every string its form fields carry. */
-void resolve_compose_body (const VariableValues& vars, nlohmann::json& payload) {
+void resolve_compose_body (const VariableValues& vars,
+const BoundColumnNames& bound_columns,
+nlohmann::json& payload) {
     auto it = payload.find ("body");
     if (it == payload.end ()) {
         return;
@@ -1076,11 +1121,11 @@ void resolve_compose_body (const VariableValues& vars, nlohmann::json& payload) 
         return;
     }
     if (auto content = it->find ("content"); content != it->end () && content->is_string ()) {
-        *content = resolve_template (content->get<std::string> (), vars);
+        *content = resolve_template (content->get<std::string> (), vars, bound_columns);
     }
     if (auto fields = it->find ("fields"); fields != it->end () && fields->is_array ()) {
         for (auto& field : *fields) {
-            resolve_form_field (vars, field);
+            resolve_form_field (vars, bound_columns, field);
         }
     }
 }
@@ -1093,6 +1138,7 @@ void resolve_compose_body (const VariableValues& vars, nlohmann::json& payload) 
  */
 void resolve_compose_auth (const std::vector<vayu::db::Collection>& chain,
 const VariableValues& vars,
+const BoundColumnNames& bound_columns,
 nlohmann::json& payload) {
     // Auth: resolve `inherit` through the chain first, then `{{vars}}` inside
     // whatever concrete block won - strictly before any OAuth 2.0 cache key can
@@ -1106,9 +1152,42 @@ nlohmann::json& payload) {
         if (is_empty_auth (auth) || auth_mode (auth) == "inherit") {
             payload.erase ("auth");
         } else {
-            *it = resolve_json_strings (auth, vars);
+            *it = resolve_json_strings (auth, vars, bound_columns);
         }
     }
+}
+
+/**
+ * The `dataColumns` field: the bare names this composition must leave to a
+ * per-row bind (issue #1007).
+ *
+ * Names only, never values - composition happens once and a row is bound per
+ * iteration, so a value here would be one row's value written into every one of
+ * them. A caller that omits the field composes exactly as it always did, which
+ * is what makes this additive for every client that has no dataset.
+ *
+ * @return the refusal, or nothing (with @p out filled).
+ */
+std::optional<std::pair<int, nlohmann::json>>
+read_bound_columns (const nlohmann::json& body, BoundColumnNames& out) {
+    const auto field = body.find ("dataColumns");
+    if (field == body.end () || field->is_null ()) {
+        return std::nullopt;
+    }
+    if (!field->is_array ()) {
+        return compose_error (400, "invalid_compose_request",
+        "'dataColumns' must be an array of the data file's column names");
+    }
+    for (const auto& entry : *field) {
+        if (!entry.is_string () || entry.get<std::string> ().empty ()) {
+            return compose_error (400, "invalid_compose_request",
+            "'dataColumns' must hold non-empty column names - a row cannot "
+            "bind "
+            "a token with no name in it");
+        }
+        out.insert (entry.get<std::string> ());
+    }
+    return std::nullopt;
 }
 
 } // namespace
@@ -1133,6 +1212,11 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
         return compose_error (400, "invalid_compose_request",
         "Provide 'requestId' (compose a saved request) and/or 'request' (an "
         "inline request to compose)");
+    }
+
+    BoundColumnNames bound_columns;
+    if (auto refusal = read_bound_columns (body, bound_columns)) {
+        return *refusal;
     }
 
     std::optional<vayu::db::Request> stored;
@@ -1162,11 +1246,11 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
         }
     }
 
-    if (auto refusal = resolve_compose_head (vars, payload)) {
+    if (auto refusal = resolve_compose_head (vars, bound_columns, payload)) {
         return *refusal;
     }
-    resolve_compose_body (vars, payload);
-    resolve_compose_auth (chain, vars, payload);
+    resolve_compose_body (vars, bound_columns, payload);
+    resolve_compose_auth (chain, vars, bound_columns, payload);
 
     // Scripts are never interpolated (D16): a `{{...}}` inside script text is
     // user JavaScript, and rewriting it cannot tell a string literal from

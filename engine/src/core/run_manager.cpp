@@ -1145,7 +1145,12 @@ vayu::Request& request) {
     // (issue #994). A request carrying no reserved token leaves this empty, and
     // an empty template is what makes the per-submission join a single
     // `empty()` test.
-    context->load_template = tokenize_bindable_fields (request);
+    //
+    // The run's own columns are what let a bare `{{username}}` be split as a
+    // data token at all (issue #1007); a run with no set names none, so the
+    // scan is the reserved-only one it has always been.
+    context->load_template = tokenize_bindable_fields (request,
+    context->load_data ? context->load_data->bound_columns : vayu::http::BoundColumnNames{});
 
     // A streaming run's caps ride on the request itself, because the
     // event loop is what enforces them and the request is all it sees.

@@ -353,6 +353,7 @@ std::optional<std::string> resolve_step (vayu::db::Database& db,
 const ScenarioResolveOptions& options,
 const vayu::db::Collection& collection,
 bool has_data,
+const vayu::http::BoundColumnNames& bound_columns,
 size_t index,
 const vayu::db::Request& row,
 ScenarioPlan& plan) {
@@ -361,6 +362,14 @@ ScenarioPlan& plan) {
     nlohmann::json compose_body{ { "requestId", row.id } };
     if (!options.environment_id.empty ()) {
         compose_body["environmentId"] = options.environment_id;
+    }
+    // The dataset's columns travel into composition rather than being applied
+    // after it (issue #1007): a bare `{{username}}` this run's rows answer must
+    // survive composition to be bound per iteration, and a same-named
+    // environment variable must not answer it first. Names only - the row is
+    // per iteration and composition happens once.
+    if (!bound_columns.empty ()) {
+        compose_body["dataColumns"] = bound_columns;
     }
     auto [status, payload] = vayu::http::compose_request_core (db, compose_body);
     if (status != 200) {
@@ -380,7 +389,7 @@ ScenarioPlan& plan) {
     // iteration, and only for the steps that need it.
     const vayu::http::Auth parsed_auth =
     vayu::http::parse_auth (payload.value ("auth", nlohmann::json ()));
-    StepDataTemplate auth_template = tokenize_auth_fields (parsed_auth);
+    StepDataTemplate auth_template = tokenize_auth_fields (parsed_auth, bound_columns);
 
     // OAuth 2.0 is the one mode deferral cannot serve: its token is
     // acquired right here, once, against the token endpoint, so there is no
@@ -388,7 +397,7 @@ ScenarioPlan& plan) {
     // mean a network round trip per virtual user per iteration. Refused by
     // name in both directions, with or without a data set, rather than sent
     // to the token endpoint as the literal token text.
-    if (auto token = first_oauth2_data_token (parsed_auth)) {
+    if (auto token = first_oauth2_data_token (parsed_auth, bound_columns)) {
         return (describe_step (index, row) + " carries " + *token +
         " in its OAuth 2.0 configuration. That token is acquired once, "
         "when the run is planned, so a data column can never reach it - "
@@ -411,7 +420,7 @@ ScenarioPlan& plan) {
     // Split once, here, so no executor re-scans this step per iteration -
     // the load-mode one binds a row per iteration per virtual user, which
     // is a scan of every field of every step at the run's full rate.
-    auto data_template = tokenize_bindable_fields (built.request);
+    auto data_template = tokenize_bindable_fields (built.request, bound_columns);
 
     // A `{{data.*}}` token with no data set behind it can never bind. The
     // namespace is reserved, so composition deliberately left the token
@@ -547,13 +556,17 @@ const ScenarioResolveOptions& options) {
     }
 
     // A `data` array that is present and empty was already refused above, so an
-    // empty `data_rows` here means the payload carried no `data` block at all.
+    // empty `data_rows` here means the payload carried no `data` block at all -
+    // and so an empty column set is exactly "this run binds no rows", which is
+    // what every step below composes and splits against (issue #1007).
     const bool has_data = !resolution.data_rows.empty ();
+    const vayu::http::BoundColumnNames bound_columns =
+    bound_columns_of (resolution.data_rows);
 
     resolution.plan.steps.reserve (rows.size ());
     for (size_t index = 0; index < rows.size (); ++index) {
         if (auto reason = resolve_step (db, options, *collection, has_data,
-            index, rows[index], resolution.plan)) {
+            bound_columns, index, rows[index], resolution.plan)) {
             return invalid (*reason);
         }
     }

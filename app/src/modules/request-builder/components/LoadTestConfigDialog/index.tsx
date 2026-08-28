@@ -605,7 +605,14 @@ export default function LoadTestConfigDialog({
 		// The parsed rows themselves - the same array the preview showed, never
 		// a re-parse (issue #993). Absent when no file was picked, which is what
 		// keeps a run without data on exactly the path it took before.
-		if (dataFile) config.data = dataFile.parsed.rows;
+		//
+		// Their column names travel with them (issue #1007): the run composes
+		// before it starts, and composition has to be told which bare names a row
+		// will bind or it resolves them from the variable scopes first.
+		if (dataFile) {
+			config.data = dataFile.parsed.rows;
+			config.dataColumns = dataFile.parsed.columns;
+		}
 
 		// Streaming requests only. Always sent when the request streams, never
 		// elided as "the engine has defaults": the engine's default is the

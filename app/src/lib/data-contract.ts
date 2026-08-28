@@ -27,6 +27,12 @@
  * the same answer - the token painter, the completion providers and the Data
  * tab's audit - and a second copy of the walk is the defect this repo keeps
  * finding.
+ *
+ * **A bare `{{column}}` gets the same "bound column" description** as
+ * `{{data.column}}` (issue #1007), through `describeBareColumnToken` - but
+ * only once the caller has confirmed the name is undefined in every scope,
+ * because a scope that does define it keeps painting as that variable. See
+ * the function's own comment for exactly where that line sits.
  */
 
 import { collectSubtreeIds, walkAncestors, type TreeNode } from "@/modules/collections/tree-utils";
@@ -110,6 +116,15 @@ function columnList(columns: string[]): string {
 	return columns.join(", ");
 }
 
+/** The muted "this is a bound column" description, shared by both spellings. */
+function describeDeclaredColumn(note: string): DataTokenDescription {
+	return {
+		tone: "muted",
+		description: "Data column - bound per iteration",
+		note,
+	};
+}
+
 /**
  * What the token says about itself, given the contract in scope.
  *
@@ -137,15 +152,30 @@ export function describeDataToken(
 		};
 	}
 	if (contract.columns.includes(column)) {
-		return {
-			tone: "muted",
-			description: "Data column - bound per iteration",
-			note: `declared in ${contract.collectionName}`,
-		};
+		return describeDeclaredColumn(`declared in ${contract.collectionName}`);
 	}
 	return {
 		tone: "warning",
 		description: `Not a declared column of ${contract.collectionName}`,
 		note: `declared: ${columnList(contract.columns)}`,
 	};
+}
+
+/**
+ * What a **bare** `{{column}}` says about itself, once the caller has already
+ * established both things this function cannot check on its own: `column` is
+ * a declared column of `contract`, and nothing in the scopes defines a
+ * variable of that name (issue #1007). A bare name a scope *does* define is
+ * not this function's business - the caller keeps painting it as that
+ * variable, unchanged; a bare name that is not a declared column is an
+ * ordinary undefined variable, not a column reference at all.
+ *
+ * Deliberately narrower than `describeDataToken`: there is no "undeclared"
+ * warning state here; a bare name that failed the declared-column check never
+ * reaches this function, so it has nothing to warn about.
+ */
+export function describeBareColumnToken(contract: DataContractScope): DataTokenDescription {
+	return describeDeclaredColumn(
+		`declared in ${contract.collectionName} - a bound row's column answers this name`
+	);
 }

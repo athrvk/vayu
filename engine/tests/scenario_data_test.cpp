@@ -40,6 +40,19 @@ vayu::Request request_with_url (const std::string& url) {
     return request;
 }
 
+/// Split @p request against @p columns and join @p row into it - the whole of
+/// what a bare-column case (issue #1007) does, spelled once because the column
+/// set is the only thing those cases vary, and `bind_data_row` derives it from
+/// the row rather than taking it.
+vayu::core::DataBindResult bind_with_columns (vayu::Request& request,
+const vayu::http::BoundColumnNames& columns,
+const nlohmann::json& row,
+size_t row_index = 0) {
+    return vayu::core::apply_iteration_template (request,
+    vayu::core::tokenize_bindable_fields (request, columns),
+    vayu::core::IterationBinding{ &row, row_index, {} });
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -1014,4 +1027,134 @@ TEST (ScenarioDataScanTest, ThePrefixAloneIsNotSomethingToRefuse) {
     request_with_url ("https://api.test/{{data.}}"))
     .first_data_token ()
     .has_value ());
+}
+
+// ---------------------------------------------------------------------------
+// Bare column names, bound at Postman's precedence (issue #1007)
+// ---------------------------------------------------------------------------
+
+/**
+ * The bare spelling binds through the *same* walk as the reserved one.
+ *
+ * That is the whole safety argument for the feature: an imported collection
+ * writes `{{username}}`, and a second substitution path for it would be a path
+ * without the escaping, the null-cell refusal and the header rules this file
+ * spends 800 lines pinning. The split is told which bare names a row can
+ * answer, and everything after it is unchanged.
+ *
+ * Mutation-check: drop `bound_columns` from the splitter's predicate and the
+ * first case leaves the token written as it stands; strip the spelling off
+ * `DataColumnRef` and the error case names a token the request does not carry.
+ */
+TEST (ScenarioDataBareColumnTest, ABoundColumnBindsWhereTheReservedSpellingWould) {
+    auto request =
+    request_with_url ("https://api.test/u/{{username}}/{{data.id}}");
+    request.headers["X-User"] = "{{username}}";
+
+    const json row    = json::parse (R"({"username":"ada","id":7})");
+    const auto result = bind_with_columns (request, { "username", "id" }, row);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.url, "https://api.test/u/ada/7");
+    EXPECT_EQ (request.headers.at ("X-User"), "ada");
+}
+
+TEST (ScenarioDataBareColumnTest, WithoutTheColumnSetTheBareTokenIsNotADataToken) {
+    // The other half of the rule, and the one that keeps every run with no
+    // dataset behaving exactly as it did: a bare name is an ordinary variable
+    // until something says a row will bind it. A split that found one anyway
+    // would turn every unresolved `{{token}}` into a missing-column failure.
+    auto request    = request_with_url ("https://api.test/u/{{username}}");
+    const auto tmpl = vayu::core::tokenize_bindable_fields (request);
+    EXPECT_TRUE (tmpl.empty ());
+
+    const json row    = json::parse (R"({"username":"ada"})");
+    const auto result = vayu::core::apply_iteration_template (
+    request, tmpl, vayu::core::IterationBinding{ &row, 0, {} });
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.url, "https://api.test/u/{{username}}");
+}
+
+TEST (ScenarioDataBareColumnTest, AMissingColumnIsNamedInTheSpellingTheRequestUses) {
+    // The reader will search their request for the text the error quotes, so a
+    // bare token reported as `{{data.username}}` sends them after something
+    // that is not there.
+    auto request      = request_with_url ("https://api.test/u/{{username}}");
+    const json row    = json::parse (R"({"other":"ada"})");
+    const auto result = bind_with_columns (request, { "username" }, row, 3);
+
+    ASSERT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("{{username}}"), std::string::npos) << result.error;
+    EXPECT_EQ (result.error.find ("{{data.username}}"), std::string::npos)
+    << result.error;
+    EXPECT_NE (result.error.find ("row 3"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataBareColumnTest, TheHeaderAndDocumentRulesHoldForABareColumnToo) {
+    // The rules a second substitution path would have skipped, asserted on the
+    // bare spelling: a cell that would end a header line is refused, and one
+    // that lands inside a JSON string literal is escaped rather than written
+    // through.
+    auto forging               = request_with_url ("https://api.test/");
+    forging.headers["X-Token"] = "{{token}}";
+    const json forging_row = json::parse (R"({"token":"ok\r\nX-Admin: true"})");
+    const auto refused = bind_with_columns (forging, { "token" }, forging_row);
+    EXPECT_FALSE (refused.ok);
+    EXPECT_NE (refused.error.find ("{{token}}"), std::string::npos) << refused.error;
+
+    auto document           = request_with_url ("https://api.test/");
+    document.body.mode      = vayu::BodyMode::Json;
+    document.body.content   = R"({"name":"{{name}}"})";
+    const json document_row = json::parse (R"({"name":"say \"hi\""})");
+    const auto escaped = bind_with_columns (document, { "name" }, document_row);
+    ASSERT_TRUE (escaped.ok) << escaped.error;
+    EXPECT_EQ (document.body.content, R"({"name":"say \"hi\""})");
+
+    auto null_cell          = request_with_url ("https://api.test/u/{{id}}");
+    const json null_row     = json::parse (R"({"id":null})");
+    const auto refused_null = bind_with_columns (null_cell, { "id" }, null_row);
+    EXPECT_FALSE (refused_null.ok);
+}
+
+TEST (ScenarioDataBareColumnTest, TheHeaderCollisionRefusalCoversTheBareSpellingToo) {
+    // The rule a second substitution path would most quietly have skipped: a
+    // header name a row binds onto a name another header already has leaves a
+    // map with one of the two in it, and a run where only the rows that collide
+    // send a request missing a header. Asserted for the bare spelling rather
+    // than assumed from the shared walk, because "it goes through the same
+    // function" is what a later refactor stops being true.
+    auto request                     = request_with_url ("https://api.test/");
+    request.headers["Authorization"] = "Bearer real";
+    request.headers["{{h}}"]         = "bound";
+
+    const auto result =
+    bind_data_row (request, json::parse (R"({"h":"authorization"})"), 3);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("Authorization"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("row 3"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataBareColumnTest, OneRowSaysWhichBareNamesItCanBind) {
+    // `bind_data_row` is the single send's whole binder (issue #642), and it
+    // holds the row rather than a run's column set - so the row's own keys are
+    // the set, and a name it does not carry stays an ordinary variable for the
+    // residual pass rather than failing the send as a missing column.
+    auto request =
+    request_with_url ("https://api.test/u/{{username}}?t={{token}}");
+    const auto result =
+    bind_data_row (request, json::parse (R"({"username":"ada"})"), 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.url, "https://api.test/u/ada?t={{token}}");
+}
+
+TEST (ScenarioDataBareColumnTest, TheColumnSetIsReadOffTheRowsOnce) {
+    // A column only some rows carry is still split - and refused per row by the
+    // missing-column rule, which is the answer the reserved spelling has always
+    // given for the same file.
+    const std::vector<json> rows{ json::parse (R"({"a":"1"})"), json::parse (R"({"b":"2"})") };
+    const auto columns = vayu::core::bound_columns_of (rows);
+    EXPECT_EQ (columns, vayu::http::BoundColumnNames ({ "a", "b" }));
+    EXPECT_TRUE (vayu::core::bound_columns_of (json::parse ("[1,2]")).empty ());
 }

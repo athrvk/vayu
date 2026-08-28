@@ -13,6 +13,13 @@
  * can ask without a file at all. A `{{data.emial}}` typo is invisible until a
  * run reaches that request, binds nothing and sends the braces literally.
  *
+ * **Both spellings a bound row answers count as a reference** (issue #1007):
+ * `{{data.column}}`, always, and bare `{{column}}` when `column` is already a
+ * declared column - the Postman shape, which a bound row substitutes exactly
+ * as it does the prefixed one. A bare name that is *not* a declared column is
+ * an ordinary variable token, not evidence about the contract either way, and
+ * is not counted or reported here at all.
+ *
  * **Request fields are authoritative, scripts are not.** The fields walked here
  * are exactly the ones the engine's binder walks (`scenario_data.cpp`
  * `walk_bindable_fields`: URL, header names and values, body text, form field
@@ -152,13 +159,24 @@ function bindableStrings(request: AuditableRequest): string[] {
 	return strings;
 }
 
-/** The `data.*` columns a string references, in the order they appear. */
-function columnsIn(text: string): string[] {
+/**
+ * The columns a string references, in the order they appear - both spellings
+ * a bound row answers (issue #1007): `{{data.column}}` (always a column, any
+ * name) and bare `{{column}}` (a column reference only when `declared` already
+ * names it - a bare name declared nothing is an ordinary variable token and no
+ * evidence about the contract either way, so it is not returned here at all).
+ */
+function columnsIn(text: string, declared: ReadonlySet<string>): string[] {
 	if (!text) return [];
 	const found: string[] = [];
 	for (const match of text.matchAll(VARIABLE_PATTERN)) {
-		const column = dataColumnName(match[1].trim());
-		if (column) found.push(column);
+		const name = match[1].trim();
+		const dataColumn = dataColumnName(name);
+		if (dataColumn) {
+			found.push(dataColumn);
+		} else if (declared.has(name)) {
+			found.push(name);
+		}
 	}
 	return found;
 }
@@ -196,7 +214,7 @@ export function auditDataColumns(
 
 	for (const request of requests) {
 		for (const text of bindableStrings(request)) {
-			for (const column of columnsIn(text)) {
+			for (const column of columnsIn(text, declaredSet)) {
 				if (declaredSet.has(column)) referencedSet.add(column);
 				else if (!undeclared.includes(column)) undeclared.push(column);
 			}

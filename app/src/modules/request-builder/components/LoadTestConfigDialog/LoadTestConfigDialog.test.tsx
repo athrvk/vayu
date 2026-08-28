@@ -251,12 +251,17 @@ describe("data rows (issue #993)", () => {
 		expect(screen.queryByText(/one iteration per row/i)).not.toBeInTheDocument();
 	});
 
-	it("sends the parsed rows on the payload", async () => {
+	it("sends the parsed rows and their column names on the payload", async () => {
 		const { onStart } = open();
 		pick(new File(["id\na\nb"], "rows.csv"));
 		await screen.findByText(/rows\.csv/);
 
-		expect(started(onStart).data).toEqual([{ id: "a" }, { id: "b" }]);
+		const config = started(onStart);
+		expect(config.data).toEqual([{ id: "a" }, { id: "b" }]);
+		// The names travel with the rows because the run composes before it
+		// starts, and composition has to leave a bare `{{id}}` for the per-row
+		// bind instead of resolving it from the variable scopes (issue #1007).
+		expect(config.dataColumns).toEqual(["id"]);
 	});
 
 	it("sends no `data` key at all when no file was picked", () => {
@@ -264,7 +269,9 @@ describe("data rows (issue #993)", () => {
 		// rather than running it, so an empty array would turn "no data set"
 		// into a 400.
 		const { onStart } = open();
-		expect(started(onStart)).not.toHaveProperty("data");
+		const config = started(onStart);
+		expect(config).not.toHaveProperty("data");
+		expect(config).not.toHaveProperty("dataColumns");
 	});
 
 	it("refuses to start while the picked file cannot be read", async () => {

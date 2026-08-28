@@ -468,6 +468,25 @@ export interface ComposeRequestRequest {
 	request?: Record<string, unknown>;
 	collectionId?: string;
 	environmentId?: string;
+	/**
+	 * The bare column names a data row will bind after this composition (issue
+	 * #1007) - names only, never values.
+	 *
+	 * Postman binds a dataset's columns to bare names, so an imported collection
+	 * writes `{{username}}` where Vayu's reserved namespace would write
+	 * `{{data.username}}`. Composition cannot substitute either one - it happens
+	 * once and a row is bound per iteration - so these names are left written as
+	 * they stand for the bind, *above* the environment: a same-named variable
+	 * answering here would send the value the row exists to replace.
+	 *
+	 * Absent means no dataset is bound, which is composition exactly as it was.
+	 * Sent only by a caller that will actually bind a row (`POST /execute` with
+	 * `data`, `POST /runs` with a data set) - never as "the columns this
+	 * collection declares", which describes no particular run. The engine
+	 * refuses a non-array, and an entry that is not a non-empty string, with a
+	 * `400`.
+	 */
+	dataColumns?: string[];
 }
 
 /**
