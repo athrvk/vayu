@@ -362,6 +362,10 @@ these:
 .nested …         (dotted or indexed path for property)
 .and …            (continues a chain; flags, `not` included, carry over)
 .all …            (accepted before .keys, chai's default, changes nothing)
+.that … .which … .is … .has … .been … .with …
+.does … .but … .also … .of … .same … .still …
+                  (chai's language chains: they assert nothing and read as
+                   English, and carry the chain's flags like .and)
 ```
 
 **`equal` is `===`; `eql` (and `deep.equal`) is deep.** So
@@ -736,7 +740,11 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   `.any.keys`, `.change`/`.increase`/`.decrease`, `.own.property`, `.respondTo`,
   the property-style `.finite` / `.sealed` / `.frozen` / `.extensible`, and the
   `require()`-able libraries (`chai`, `lodash`, `moment`, …). Each throws
-  a `TypeError` rather than reporting a pass
+  a `TypeError` rather than reporting a pass. `.any`, `.own` and `.itself` are
+  deliberately absent from the language chains above for that reason: each
+  changes what the matcher after it asserts - `.any` quantifies `.keys`, and
+  the other two change what `.property` looks at - so accepting one as a no-op
+  would assert something other than what the script wrote
 
 ---
 

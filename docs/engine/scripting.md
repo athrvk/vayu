@@ -167,6 +167,11 @@ pm.expect(value).to.not.equal(expected);     // negates the rest of the chain
 pm.expect(value).to.be.above(0).and.to.be.below(10);
 pm.expect(value).to.deep.include({ a: 1 });  // deep applies to include, property,
                                              // members and oneOf as well
+
+// Language chains - they assert nothing, and make a chain read as English
+pm.expect(value).to.be.an('array').that.include(item);
+pm.expect(value).to.be.an('array').which.have.length(n);
+pm.expect(value).to.be.above(0).and.still.be.below(10);
 ```
 
 Notes on the edges:
@@ -180,6 +185,18 @@ Notes on the edges:
   depended only on how many times the author had written `.not`.
 - **`deep` changes the comparison, it is not a matcher.** `include`, `property`,
   `members` and `oneOf` compare strictly unless a `deep` appears in the chain.
+- **The language chains assert nothing** (issue #1053). `that`, `which`, `is`,
+  `has`, `been`, `with`, `does`, `but`, `also`, `of`, `same` and `still` are
+  chai's words for making a chain read as English, and each hands the same
+  expectation back with the chain's flags - `not` included - intact. They are
+  accepted anywhere in a chain, so an imported collection written in the fluent
+  style fails on the API under test rather than on the language. `any`, `own`
+  and `itself` are **not** among them: each changes what the matcher after it
+  asserts rather than reading as prose, so each still throws by name. One thing
+  the editor cannot follow: the runtime carries every matcher on one object,
+  while the declarations nest them under `be` and `have` as the completion
+  labels spell them, so `.that.be.a('string')` type-checks where chai's
+  `.that.is.a('string')` does not - both run.
 - **`keys` means exactly these keys**, as in chai's `have.keys`. The subset form
   (`include.keys`) is not implemented; `all` is accepted and changes nothing,
   `any` is not.

@@ -906,6 +906,85 @@ TEST_F (ScriptEngineTest, ExpectChainStillBehavesLikeAnObject) {
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
+// ============================================================================
+// Issue #1053: chai's language chains read as English and assert nothing
+// ============================================================================
+
+// One chain per word, each asserting something true, so removing that word from
+// `passthrough_chainers` reddens its own case with "not a supported assertion" -
+// the mutation check. Where a case needs a second word to read at all, the
+// second is one Vayu already had (`and`, `have`, `not`), so exactly one new word
+// is under test in each line.
+TEST_F (ScriptEngineTest, LanguageChainsAreNoOps) {
+    const auto scripts = std::to_array<const char*> ({
+    R"(pm.test("t", function() { pm.expect(3).to.be.above(1).and.also.be.below(5); });)",
+    R"(pm.test("t", function() { pm.expect("a").to.have.been.a("string"); });)",
+    R"(pm.test("t", function() { pm.expect([1]).to.be.an("array").but.not.empty; });)",
+    R"(pm.test("t", function() { pm.expect("vayu").to.be.a("string").and.does.include("va"); });)",
+    R"(pm.test("t", function() { pm.expect({id:1}).to.be.an("object").and.has.property("id"); });)",
+    R"(pm.test("t", function() { pm.expect([1]).to.be.an("array").and.is.not.empty; });)",
+    R"(pm.test("t", function() { pm.expect([1,2,3]).to.be.an("array").of.length(3); });)",
+    R"(pm.test("t", function() { pm.expect([3,1,2]).to.have.same.members([1,2,3]); });)",
+    R"(pm.test("t", function() { pm.expect(3).to.be.above(1).and.still.be.below(5); });)",
+    R"(pm.test("t", function() { pm.expect([1,2]).to.be.an("array").that.include(2); });)",
+    R"(pm.test("t", function() { pm.expect([1,2]).to.be.an("array").which.include(2); });)",
+    R"(pm.test("t", function() { pm.expect({id:1}).to.be.an("object").with.property("id"); });)",
+    });
+
+    for (const char* script : scripts) {
+        auto result = engine.execute_test (script, request, response, env);
+        ASSERT_EQ (result.tests.size (), 1u) << script;
+        EXPECT_TRUE (result.tests[0].passed)
+        << script << " -> " << result.tests[0].error_message;
+    }
+}
+
+// A passthrough hands the same expectation back, so the flags the chain has set
+// survive it. `not` is the one that matters: it is a set rather than a toggle
+// (issue #883), so it still applies after a language word - a passthrough that
+// built a fresh expectation would assert the opposite of what was written and
+// report PASS for it.
+TEST_F (ScriptEngineTest, LanguageChainsCarryTheChainsFlags) {
+    auto result = engine.execute_test (R"(
+        pm.test("not survives", function() {
+            pm.expect("abc").to.not.include("z").and.which.is.include("y");
+        });
+        pm.test("deep survives", function() {
+            pm.expect([{a:1}]).to.have.deep.which.members([{a:1}]);
+        });
+        pm.test("nested survives", function() {
+            pm.expect({a:{b:1}}).to.have.nested.that.property("a.b", 1);
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 3u);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << " -> " << test.error_message;
+    }
+}
+
+// The three chai words that are *not* prose. `.any` quantifies `.keys` and
+// aliasing it to `all` would assert more than the script asked; `.own` and
+// `.itself` change what `.property` looks at. Each stays a throw naming itself,
+// which is the only honest answer while the semantics are unimplemented.
+TEST_F (ScriptEngineTest, LanguageChainsExcludeTheFlagSetters) {
+    const auto scripts = std::to_array<const char*> ({
+    R"(pm.test("t", function() { pm.expect({a:1}).to.have.any.keys("a"); });)",
+    R"(pm.test("t", function() { pm.expect({a:1}).to.have.own.property("a"); });)",
+    R"(pm.test("t", function() { pm.expect({a:1}).to.itself.have.property("a"); });)",
+    });
+
+    for (const char* script : scripts) {
+        auto result = engine.execute_test (script, request, response, env);
+        ASSERT_EQ (result.tests.size (), 1u) << script;
+        EXPECT_FALSE (result.tests[0].passed) << script;
+        EXPECT_NE (
+        result.tests[0].error_message.find ("not a supported assertion"), std::string::npos)
+        << script << " -> " << result.tests[0].error_message;
+    }
+}
+
 // `.NaN` is chai's `value !== value`, so only the number NaN satisfies it. The
 // coercing reading would pass every string that is not a number.
 TEST_F (ScriptEngineTest, ExpectNaN) {
