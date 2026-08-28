@@ -864,6 +864,31 @@ TEST_F (SendRequestTest, ASpentBudgetDoesNotIssueAnUnboundedRequest) {
     << "an exhausted budget still issued an unbounded request";
 }
 
+// #1073. The refusal above is thrown from a *blocking C function*, which the
+// interrupt handler never gets to stop - so the script ends with the deadline
+// passed and nothing interrupted, which is the shape `Impl::execute` used to
+// read off the clock and answer "Script execution timed out after 300ms". The
+// budget fact is already in this sentence; substituting the generic line threw
+// away the only part that tells the user which call refused and why.
+//
+// The first request spends the budget deterministically rather than relying on
+// setup latency: /slow holds its connection for SLOW_MS, the clamp bounds it to
+// what is left, and it returns to the callback as an error with the deadline
+// behind it. Mutation check: restore the clock comparison in `Impl::execute`
+// and this reddens on the timeout line.
+TEST_F (SendRequestTest, ASpentBudgetRefusalReachesTheScriptErrorByName) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest('" + server.url ("/slow") + "', function () {}); " +
+    "pm.sendRequest('" + server.url ("/slow") + "', function () {});",
+    /*timeout_ms=*/300);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (
+    result.error_message.find ("none of the script's time budget left"), std::string::npos)
+    << "the refusal was replaced by a guessed timeout: " << result.error_message;
+}
+
 // Turning the budget off entirely (timeout_ms == 0) must not be read as "no
 // time left" - there is simply nothing to clamp to.
 TEST_F (SendRequestTest, NoConfiguredBudgetMeansNoClamp) {
