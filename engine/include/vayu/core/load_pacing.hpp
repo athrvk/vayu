@@ -27,6 +27,8 @@
 #include <string>
 #include <string_view>
 
+#include "vayu/utils/ascii_case.hpp"
+
 namespace vayu::core {
 
 namespace detail {
@@ -72,10 +74,7 @@ namespace detail {
     while (split > 0 && std::isalpha (static_cast<unsigned char> (text[split - 1])) != 0)
         --split;
 
-    std::string unit;
-    for (char c : text.substr (split))
-        unit.push_back (
-        static_cast<char> (std::tolower (static_cast<unsigned char> (c))));
+    const std::string unit = vayu::utils::ascii_lower (text.substr (split));
 
     double multiplier = 0.0;
     if (unit.empty () || unit == "s")

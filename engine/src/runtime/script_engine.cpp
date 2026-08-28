@@ -45,6 +45,7 @@
 #include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/http/url_parts.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/sha256.hpp"
@@ -274,9 +275,7 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
     }
 
     if (type == "boolean") {
-        std::string lowered = var.value;
-        std::transform (lowered.begin (), lowered.end (), lowered.begin (),
-        [] (unsigned char c) { return std::tolower (c); });
+        std::string lowered = vayu::utils::ascii_lower (var.value);
         // Trim whitespace
         auto isspace_pred = [] (unsigned char c) { return std::isspace (c); };
         while (!lowered.empty () &&
@@ -1997,10 +1996,7 @@ JSValue expect_a (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst*
         type_name = "undefined";
     }
 
-    std::string expected = js_to_string (ctx, argv[0]);
-    for (auto& c : expected) {
-        c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
-    }
+    const std::string expected = vayu::utils::ascii_lower (js_to_string (ctx, argv[0]));
 
     bool matches = (type_name == expected);
     bool pass    = state->negated ? !matches : matches;
@@ -3321,12 +3317,7 @@ JSValue js_response_have_header (JSContext* ctx, JSValueConst this_val, int argc
     bool found = false;
     std::string found_value;
     for (const auto& [key, value] : data->response->headers) {
-        std::string lower_key  = key;
-        std::string lower_name = header_name;
-        std::transform (lower_key.begin (), lower_key.end (), lower_key.begin (), ::tolower);
-        std::transform (
-        lower_name.begin (), lower_name.end (), lower_name.begin (), ::tolower);
-        if (lower_key == lower_name) {
+        if (vayu::utils::ascii_lower_equal (key, header_name)) {
             found       = true;
             found_value = value;
             break;
@@ -3795,24 +3786,6 @@ const std::string& value) {
     JS_NewString (ctx, value.c_str ()), JS_PROP_C_W_E);
 }
 
-/// A header name as a case-insensitive index keys it - which is the spelling
-/// Postman's `toObject()` hands back, and the only place here that needs one.
-/// The engine has no primitive for the fold and hand-rolls it 29 times; that is
-/// filed as #1060 rather than converted from under this one caller.
-std::string header_name_lowered (const std::string& name) {
-    std::string lowered = name;
-    std::transform (lowered.begin (), lowered.end (), lowered.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-    return lowered;
-}
-
-bool header_names_equal (const std::string& a, const std::string& b) {
-    return a.size () == b.size () &&
-    std::equal (a.begin (), a.end (), b.begin (), [] (unsigned char c1, unsigned char c2) {
-        return std::tolower (c1) == std::tolower (c2);
-    });
-}
-
 // The own enumerable key naming `name`, spelled the way the object spells it.
 // HTTP header names are case-insensitive and JS object keys are not, so an
 // exact lookup would miss `Content-Type` on a response (whose keys the HTTP
@@ -3838,7 +3811,7 @@ find_header_key (JSContext* ctx, JSValueConst headers, const std::string& name) 
         return std::nullopt;
     }
     for (auto& key : *keys) {
-        if (header_names_equal (key, name)) {
+        if (vayu::utils::ascii_lower_equal (key, name)) {
             return std::move (key);
         }
     }
@@ -4089,7 +4062,9 @@ JSValue js_headers_to_object (JSContext* ctx, JSValueConst this_val, int argc, J
     JSValue out = JS_NewObject (ctx);
     for (const auto& key : *keys) {
         JSValue value = JS_GetPropertyStr (ctx, this_val, key.c_str ());
-        const std::string prop = case_sensitive ? key : header_name_lowered (key);
+        // A case-insensitive index is keyed by the folded name, which is the
+        // spelling Postman's `toObject()` hands back.
+        const std::string prop = case_sensitive ? key : vayu::utils::ascii_lower (key);
         JS_SetPropertyStr (ctx, out, prop.c_str (), value);
     }
     return out;
@@ -4134,7 +4109,7 @@ JSValue js_headers_index_of (JSContext* ctx, JSValueConst this_val, int argc, JS
         return JS_EXCEPTION;
     }
     for (uint32_t i = 0; i < keys->size (); i++) {
-        if (header_names_equal ((*keys)[i], *name)) {
+        if (vayu::utils::ascii_lower_equal ((*keys)[i], *name)) {
             return JS_NewInt32 (ctx, static_cast<int32_t> (i));
         }
     }
@@ -4339,7 +4314,7 @@ JSValue js_response_size (JSContext* ctx, JSValueConst this_val, int argc, JSVal
 constexpr int COOKIE_METHOD_FLAGS = JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
 
 // Cookie names are case-sensitive (RFC 6265 §4.1.1) - unlike header names, so
-// this is an exact match and not `header_names_equal`.
+// this is an exact match and not the ASCII fold header names compare under.
 //
 // The last definition wins: a response that sets the same name twice leaves the
 // later value in a browser's jar, so that is the one a script asking "what is
