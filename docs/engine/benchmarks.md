@@ -382,7 +382,10 @@ c=64 (56,880, above `wrk`), declining past c=192. A 37,148 vs 56,880 gap at the
 same concurrency is far too large to be run-to-run noise, so one of the two
 measurements is not measuring what it claims. Re-running
 `scripts/test/bench-compare.sh` on a quiet machine is the way to settle it - do
-that before quoting either curve shape.
+that before quoting either curve shape. The public comparison page quotes the
+2026-07-29 figure and carries this caveat beside it, so the two pages agree
+rather than contradict:
+[Vayu vs k6](../compare/vayu-vs-k6.md#the-throughput-is-in-the-same-class).
 
 ## Reading the results
 

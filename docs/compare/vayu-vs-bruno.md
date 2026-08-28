@@ -88,8 +88,9 @@ some teams:
   and agent-driven runs are not on your list, Bruno does the client job well
   without the engine alongside it.
 - **You are standardising on its CLI in CI.** `bru` is mature and widely
-  scripted. Vayu's [command line](../engine/cli.md) drives the engine, and the
-  headless CI gate is still an open issue rather than a shipped feature.
+  scripted. Vayu's [command line](../engine/cli.md) drives the engine, but it
+  has no headless CI gate - a parked decision rather than a pending one, since
+  [#473](https://github.com/athrvk/vayu/issues/473) was closed unimplemented.
 - **You prefer an ES6 scripting model** to a `pm.*`-compatible one, or you are
   not coming from Postman at all.
 

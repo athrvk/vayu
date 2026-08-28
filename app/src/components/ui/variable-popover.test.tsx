@@ -356,6 +356,147 @@ describe("why this value won", () => {
 	});
 });
 
+/**
+ * Issue #1064. #1007 put a bound row's columns above every scope and #1062 made
+ * the *preview* say so, but the popover - the one surface whose entire job is
+ * "why is this the value" - still explained the environment's definition while
+ * the send was about to use the row's cell.
+ *
+ * The row is not a definition: nobody wrote it, nothing can edit it, and it
+ * disappears when the pick is dropped. So it is listed as the origin rather than
+ * replacing the editable field, which still holds the variable, because the
+ * variable is still the thing a reader can act on.
+ */
+describe("a bound data row outranks every definition", () => {
+	/** Lowest precedence first, as the resolver hands them over. */
+	const withRow: VariableOrigin[] = [
+		origin({ scope: "environment", sourceName: "Staging", value: "staging@acme.io" }),
+		origin({ scope: "row", value: "alice@acme.io", winner: true }),
+	];
+
+	it("names the row as the origin and strikes the definition it beat", () => {
+		renderPopover({ origins: withRow });
+		const panel = open();
+
+		expect(within(panel).getByText("bound data row")).toBeInTheDocument();
+		expect(within(panel).getByText("Bound row")).toBeInTheDocument();
+
+		/*
+		 * The mutation check. Drop the row origin from `ShadowedBy` - or let it
+		 * fall through to the ordinary loser list - and the row's cell either
+		 * vanishes or arrives struck through, which is the popover claiming the
+		 * send will not use the one value it will.
+		 */
+		const rowValue = within(panel).getByText("alice@acme.io");
+		expect(rowValue.className).not.toContain("line-through");
+
+		const beaten = within(panel).getByText("staging@acme.io");
+		expect(beaten.className).toContain("line-through");
+	});
+
+	it("says what the shadowed definition is still good for", () => {
+		// Not the `data.*` sentence: that one says defining a variable of this
+		// name would change nothing, which is false for a bare column.
+		renderPopover({ origins: withRow });
+		expect(
+			within(open()).getByText(/still resolves on a send that carries no row/)
+		).toBeInTheDocument();
+	});
+
+	it("reads exactly as it did before when no row is bound", () => {
+		// The tier is opt-in at the resolver, so a popover that never sees a row
+		// origin must be untouched by any of this.
+		renderPopover({
+			origins: [
+				origin({ scope: "environment", sourceName: "Staging", value: "x", winner: true }),
+				origin({ scope: "global", value: "http://localhost:8080" }),
+			],
+		});
+		const panel = open();
+		expect(within(panel).getByText("also defined")).toBeInTheDocument();
+		expect(within(panel).queryByText("bound data row")).not.toBeInTheDocument();
+		expect(within(panel).queryByText("Bound row")).not.toBeInTheDocument();
+	});
+
+	it("does not offer to create a variable as though the name were unanswered", () => {
+		/*
+		 * The realistic prop shape, and the one the first cut of this change
+		 * missed: `EditableVariable` always passes an `onValueChange` and a
+		 * `writableScopes` that has globals in it, so `canCreate` wins the render
+		 * ternary and the create form is what a reader actually sees. Creating is
+		 * still worth offering - the variable answers every row-less send - but a
+		 * form that says nothing about the row implies the token is unanswered,
+		 * which is the same wrong claim in a different shape.
+		 */
+		renderPopover({
+			name: "email",
+			varInfo: null,
+			resolved: false,
+			trigger: <span>{"{{email}}"}</span>,
+			writableScopes: ["global", "environment"],
+			origins: [origin({ scope: "row", value: "alice@acme.io", winner: true })],
+		});
+		const panel = open();
+		expect(within(panel).getByText("Create")).toBeInTheDocument();
+		expect(
+			within(panel).getByText(/The bound row already answers this name/)
+		).toBeInTheDocument();
+		expect(within(panel).getByText("alice@acme.io")).toBeInTheDocument();
+	});
+
+	it("does not chip a row-answered name as undefined", () => {
+		// The chip is a separate claim from the body text, and destructive red
+		// there says the same false thing: that this token reaches the server
+		// with its braces on.
+		renderPopover({
+			name: "email",
+			varInfo: null,
+			resolved: false,
+			trigger: <span>{"{{email}}"}</span>,
+			writableScopes: ["global"],
+			origins: [origin({ scope: "row", value: "alice@acme.io", winner: true })],
+		});
+		const panel = open();
+		expect(within(panel).queryByText("undefined")).not.toBeInTheDocument();
+		expect(within(panel).getByText("row")).toBeInTheDocument();
+	});
+
+	it("still chips a genuinely undefined name as undefined", () => {
+		// The mutation check for the pair above: with no row answering, the red
+		// chip is correct and must survive.
+		renderPopover({
+			name: "email",
+			varInfo: null,
+			resolved: false,
+			trigger: <span>{"{{email}}"}</span>,
+			writableScopes: ["global"],
+		});
+		const panel = open();
+		expect(within(panel).getByText("undefined")).toBeInTheDocument();
+		expect(within(panel).queryByText("row")).not.toBeInTheDocument();
+	});
+
+	it("stops calling a name the row answers an undefined variable", () => {
+		/*
+		 * The destructive red states a token that reaches the server with its
+		 * braces still on. A row carrying this column is precisely the case where
+		 * it does not - the file declared no such column, so the painter never
+		 * diverted it, and the popover was the only thing left saying anything.
+		 */
+		renderPopover({
+			name: "email",
+			varInfo: null,
+			resolved: false,
+			trigger: <span>{"{{email}}"}</span>,
+			origins: [origin({ scope: "row", value: "alice@acme.io", winner: true })],
+		});
+		const panel = open();
+		expect(within(panel).queryByText(/Variable not defined/)).not.toBeInTheDocument();
+		expect(within(panel).getByText(/Answered by the bound data row/)).toBeInTheDocument();
+		expect(within(panel).getByText(/carries no row/)).toBeInTheDocument();
+	});
+});
+
 describe("an Enter that only commits an IME buffer", () => {
 	it("saves on a plain Enter and not on a composition commit", () => {
 		// The keystroke an IME uses to commit its composition reaches the handler

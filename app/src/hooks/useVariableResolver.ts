@@ -11,9 +11,15 @@
  * Provides functions to resolve {{variables}} in strings using the current
  * variable context (globals, collection chain, active environment).
  *
- * Resolution priority (highest wins): Environment > Collection chain (leaf → root) > Global
+ * Resolution priority (highest wins): Bound data row (bare column names, only
+ * while one is picked) > Environment > Collection chain (leaf → root) > Global
  * Within the collection chain, variables closer to the leaf override those closer to the root.
  * Cached per (collectionId, environmentId) via useMemo.
+ *
+ * The row tier is the one a caller opts into with `boundRow` (issue #1062).
+ * Without it the preview is composition's, where a bound column keeps its
+ * braces for the per-row bind; with it the preview is composition *and* that
+ * bind, which is what a Send-with-row actually puts on the wire.
  *
  * A `{{$name}}` nothing defines is generated from the dynamic-variable table
  * (`lib/dynamic-variables.ts`) rather than looked up - see `resolveString`.
@@ -25,13 +31,21 @@
  * and are held to the engine's behaviour by the shared conformance fixture, so
  * the preview cannot quietly drift from what actually gets sent.
  * `getVariableOrigins` keeps the definitions that lost so the UI can explain
- * the winner; execution has no use for losers, so the engine has no analogue.
+ * the winner - and, since issue #1064, the bound row above them, so the answer
+ * it gives is the one the send will use rather than the one the scopes settled
+ * on. Execution has no use for losers, so the engine has no analogue.
  */
 
 import { useMemo, useCallback } from "react";
 import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import { useSessionStore } from "@/stores";
-import type { VariableValue, ResolvedVariable, VariableOrigin } from "@/types";
+import type {
+	VariableValue,
+	ResolvedVariable,
+	VariableOrigin,
+	ScopeVariableOrigin,
+	VariableScope,
+} from "@/types";
 import { castByType } from "@/lib/variable-cast";
 // The chain this hook used to build itself, guard and all - see tree-utils for
 // why every `parentId` walk in the renderer now comes from one place.
@@ -39,15 +53,36 @@ import { walkAncestors } from "@/modules/collections/tree-utils";
 import {
 	coerceVariableValue,
 	isEnabledDefinition,
+	renderDataValue,
 	resolveTemplate,
+	resolveTemplateWithRow,
+	type DataRowCells,
 } from "@/lib/variable-resolution";
+import type { DataFileRow } from "@/services/data-files";
 
 interface UseVariableResolverOptions {
 	collectionId?: string;
+	/**
+	 * The data row this preview is bound to, if one is picked (issue #1062).
+	 *
+	 * Only a Send-with-row has one. Composition never does - a payload is
+	 * composed once and a row is bound per iteration - so a caller without one
+	 * previews exactly what it always did, and the token a run will bind keeps
+	 * its braces. A caller *with* one previews the bind as well as the
+	 * composition, which is the whole difference: the row's cell answers a bare
+	 * column name above the environment, as it will on the wire.
+	 */
+	boundRow?: DataFileRow;
 }
 
 interface UseVariableResolverReturn {
-	resolveString: (input: string) => string;
+	/**
+	 * Resolve one string. `row` is for the caller that resolves for *several*
+	 * requests at once and so cannot name one row for the whole hook - the tab
+	 * strip, which labels every open tab from a single resolver (issue #1074).
+	 * It answers for that call only, and defaults to the `boundRow` option.
+	 */
+	resolveString: (input: string, row?: DataFileRow) => string;
 	resolveObject: <T>(obj: T) => T;
 	getVariable: (name: string) => ResolvedVariable | null;
 	getAllVariables: () => Record<string, ResolvedVariable>;
@@ -59,6 +94,14 @@ interface UseVariableResolverReturn {
 	 * `VariableOrigin` for why the losers are worth keeping.
 	 */
 	getVariableOrigins: (name: string) => VariableOrigin[];
+}
+
+/**
+ * A row as the text each of its cells substitutes - the one place a row is
+ * rendered, so the caller-wide row and a per-call one cannot render differently.
+ */
+function cellsOf(row: DataFileRow): DataRowCells {
+	return new Map(Object.entries(row).map(([column, cell]) => [column, renderDataValue(cell)]));
 }
 
 export function useVariableResolver(
@@ -91,12 +134,12 @@ export function useVariableResolver(
 	 * definitions are in the list, "last" and "wins" are different things.
 	 */
 	const originsByName = useMemo(() => {
-		const result: Record<string, VariableOrigin[]> = {};
+		const result: Record<string, ScopeVariableOrigin[]> = {};
 
 		const push = (
 			name: string,
 			v: VariableValue,
-			scope: VariableOrigin["scope"],
+			scope: VariableScope,
 			source?: { id: string; name: string }
 		) => {
 			(result[name] ??= []).push({
@@ -194,9 +237,51 @@ export function useVariableResolver(
 		[variableMap]
 	);
 
+	/**
+	 * The caller-wide bound row's cells as the text each substitutes, rendered
+	 * once rather than per token. Undefined - not an empty map - when no row is
+	 * bound, so `resolveString` below can tell "no row" from "a row with no
+	 * columns".
+	 */
+	const boundRow = options?.boundRow;
+	const rowCells = useMemo<DataRowCells | undefined>(
+		() => (boundRow ? cellsOf(boundRow) : undefined),
+		[boundRow]
+	);
+
+	/**
+	 * The scope ladder, plus the bound row on top of it (issue #1064).
+	 *
+	 * The row is layered on *here* rather than inside `originsByName`, and the
+	 * split is the point: `originsByName` is what `variableMap` resolves from, so
+	 * a row folded into it would make `getAllVariables` report a row's cell as
+	 * the variable's value and hand `ResolvedVariable` a scope nobody can write.
+	 * This function is display-only - nothing about execution reads it - which is
+	 * exactly the layer where "what will actually be sent" belongs.
+	 *
+	 * The row takes `winner` away from every definition beneath it, rather than
+	 * being appended beside a scope that still claims to have won. Two origins
+	 * flagged as the winner is a list that cannot be rendered honestly, and
+	 * `winner` means "what the send will use" to every reader of it.
+	 *
+	 * A `{{data.column}}` name never lands here: the cells are keyed by bare
+	 * column name, so the reserved spelling finds nothing and keeps the terminal
+	 * explanation it already had - which is correct for it, and wrong for a bare
+	 * name, since defining a variable of *that* name does something.
+	 */
 	const getVariableOrigins = useCallback(
-		(name: string): VariableOrigin[] => originsByName[name] ?? [],
-		[originsByName]
+		(name: string): VariableOrigin[] => {
+			const defined: VariableOrigin[] = originsByName[name] ?? [];
+			// `get`, not a truthiness check: a column whose cell is empty still
+			// answers the name, and answers it with "".
+			const cell = rowCells?.get(name);
+			if (cell === undefined) return defined;
+			return [
+				...defined.map((o) => ({ ...o, winner: false })),
+				{ scope: "row" as const, value: cell, enabled: true, winner: true },
+			];
+		},
+		[originsByName, rowCells]
 	);
 
 	/**
@@ -214,10 +299,21 @@ export function useVariableResolver(
 	 * it visible in the request, and `EditableVariable` keeps painting the token
 	 * as unresolved. Since issue #1009 an ordinary unknown name is the same
 	 * rule - the preview shows the token the engine will send.
+	 *
+	 * With a row bound the preview is the bind as well as the composition
+	 * (issue #1062): the row's cell answers a bare column name above every
+	 * scope, and `{{data.column}}` answers from the same row, because they are
+	 * one bind and the send would be a lie about the other one.
 	 */
 	const resolveString = useCallback(
-		(input: string): string => resolveTemplate(input, (name) => variableMap[name]?.value),
-		[variableMap]
+		(input: string, row?: DataFileRow): string => {
+			const lookup = (name: string) => variableMap[name]?.value;
+			const cells = row ? cellsOf(row) : rowCells;
+			return cells
+				? resolveTemplateWithRow(input, lookup, cells)
+				: resolveTemplate(input, lookup);
+		},
+		[variableMap, rowCells]
 	);
 
 	const resolveObject = useCallback(

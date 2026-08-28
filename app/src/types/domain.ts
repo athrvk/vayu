@@ -735,6 +735,19 @@ export interface ResolvedVariable {
 }
 
 /**
+ * Where an answer for a name came from: one of the three writable scopes, or the
+ * bound data row - the tier above all of them (D18, issue #1007).
+ *
+ * Deliberately a second union rather than a fourth member of `VariableScope`.
+ * Every *write* path is typed on that union - `updateVariable`, the
+ * `writableScopes` a caller advertises, the popover's create picker - and a row
+ * is not somewhere a variable can be written. Widening `VariableScope` would
+ * have offered "Bound row" as a create target that silently no-ops, which is the
+ * defect the writable-scope list exists to prevent.
+ */
+export type VariableOriginScope = VariableScope | "row";
+
+/**
  * One definition of a variable name, at one scope.
  *
  * The resolver flattens every scope into a single winner, which is all execution
@@ -745,9 +758,15 @@ export interface ResolvedVariable {
  * one you expected.
  *
  * Disabled definitions are therefore kept here even though they never resolve.
+ *
+ * A `"row"` origin is not a definition at all - nobody wrote it and nothing can
+ * edit it - but it is an answer for the name, and the one the send will use, so
+ * it belongs in the list the UI reads to explain the winner. It is layered on by
+ * `getVariableOrigins`, never by the scope ladder itself; see
+ * `ScopeVariableOrigin`.
  */
 export interface VariableOrigin {
-	scope: VariableScope;
+	scope: VariableOriginScope;
 	/** Absent for `global`, as on ResolvedVariable. */
 	sourceId?: string;
 	sourceName?: string;
@@ -763,9 +782,22 @@ export interface VariableOrigin {
 	 *
 	 * Explicit rather than "the last one", because precedence order and win order
 	 * are not the same list once disabled definitions are included.
+	 *
+	 * "Winner" means what the send will use, not what the scope ladder settled
+	 * on, so a bound row's cell takes it away from every definition beneath.
 	 */
 	winner: boolean;
 }
+
+/**
+ * An origin that really is a stored definition, in a scope someone could edit.
+ *
+ * The scope ladder is built from these and `ResolvedVariable` is derived from
+ * them, which is what keeps `ResolvedVariable.scope` a `VariableScope`: a row
+ * has no scope to report, and a resolved variable that claimed one would be
+ * offering an uneditable tier to every write path that reads it.
+ */
+export type ScopeVariableOrigin = VariableOrigin & { scope: VariableScope };
 
 /**
  * Extended variable info for autocomplete and quick view.

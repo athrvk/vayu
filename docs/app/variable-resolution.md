@@ -203,18 +203,81 @@ so both spellings reach the same bind-time join and the same refusal rules.
 Nothing about the two rules can drift, because there is only the one path that
 substitutes either of them.
 
-**What the builder's preview does not show yet.** The request builder paints a
-bare `{{name}}` as a bound column only when *no* scope defines that name. Where
-a scope does define it, the token keeps painting as that variable and shows its
-value - which is right for a Send with no row, and wrong for the moment a run
-binds one, since the column outranks it. The preview resolver takes the bound
-columns (`resolveTemplate`'s third argument, pinned against the engine by the
-conformance fixture) but nothing passes them yet: no preview surface knows which
-row a run will bind. So a collision is *stated* rather than painted - the Data
-tab's column audit names any declared column that shares a name with a variable
-in scope, and says the column wins while a row is bound. Painting it in the
-builder is a design question of its own, tracked separately; nothing here reads
-a value the engine cannot send, it just does not yet show the one it will.
+**What the builder's preview shows now (issue #1062).** With a row picked, a
+Send previews the bind as well as the composition: a bare `{{username}}` and
+the reserved `{{data.username}}` both show the row's own cell - the URL bar's
+preview line, the params and body previews, every key-value row, and resolved
+auth - above the environment, the tier this section names. That is what the
+send is about to put on the wire, not composition's guess at it.
+
+**A pick lasts until a Send that does not carry it.** Send and the send chord
+both send *without* a row, so the pick is cleared by one: a row left standing
+across a plain Send would put the file's value in every preview beside a request
+that had just gone out with the environment's, which is this same disagreement
+arrived at from the other side. Nothing else clears it - the picker's memory
+still survives a tab switch and a return (issue #659), because neither of those
+is a send.
+
+**Why the renderer can show this and composition cannot.** A plan is composed
+once, before any row exists to bind, so composition still defers both
+spellings exactly as above. The preview goes further only because it holds
+something composition never does: the picked row itself, threaded from
+`RequestBuilderProvider`'s per-request row memory into
+`useVariableResolver({ boundRow })`. With it, `resolveString` reads
+`resolveTemplateWithRow` (`app/src/lib/variable-resolution.ts`) instead of
+`resolveTemplate` - a restatement of the engine's own
+`resolve_template_with_data`, the function `pm.variables.replaceIn` reaches
+for the same reason (issue #890), not a second rule invented for the preview.
+A collection run, a load run and a scenario step still bind their row during
+the run itself, so nothing about them changes: this is the one caller, a
+single Send, that now happens to hold the row before the request goes out.
+
+**The paint stays the accent; the popover now says why (issue #1064).** The
+token *state* `VariableInput` paints is unchanged: a bare name still paints as
+a bound column only where no scope defines it, and a shadowed bare name still
+paints as the variable, in the same accent it always has. That was the open
+question this section used to leave for later, and it has been decided rather
+than merely left open: the accent stays, and the explanation is what moves.
+Opening `VariablePopover` on a shadowed name while a row is picked now names
+the row as the origin - unstruck, above the definitions it beat, which render
+struck beneath it exactly as any other shadowed definition does - so the
+popover states plainly that the row's cell, not the environment's value, is
+what the send will use. The hover tooltip reads the same way, from the same
+origins list, because hovering and clicking are two readings of one token and a
+token that answers them differently is worse than one that answers both
+wrongly.
+
+A name that **no** scope defines but the row does is the same claim in the
+other direction, and it stops being reported as undefined: the destructive red
+states a token that reaches the server with its braces still on, and this one
+does not. The chip reads `row`, the popover names the column, and a create
+offer - still worth making, since the variable answers every row-less send -
+says what the row already answers rather than implying the token is unanswered.
+
+**What the tab strip shows, and how the row reaches it (issue #1074).** A tab's
+title resolves through one list-wide `useVariableResolver()` in
+`app/src/components/layout/tab-descriptors.ts` - the strip has to know each
+label before it can decide how many fit, and a hook inside a map is a variable
+number of hooks - so the strip is the one preview surface that is not below the
+builder's provider and cannot take the row off its context. Left alone it
+labelled a tab from the environment while the bar one row beneath it showed the
+file's value, which is the same one-bind-two-answers split as above wearing a
+different coat.
+
+The row crosses that boundary through `bound-row-store.ts`: one slot, holding
+the row the open builder is bound to **and the id of the request it is bound
+for**. One slot rather than a map because the builder binds a row for the
+request it is showing, so that is the only request an on-screen preview can be
+bound for; publishing a row per remembered index would be publishing rows out of
+a file that is no longer the one loaded. The id is what makes a reader check
+rather than assume, so a slot left standing cannot relabel the next tab. It is
+never persisted and is cleared when the builder unmounts, on the rule the rows
+have carried since #601: they must not outlive the send that uses them.
+
+`resolveString` takes the row as an optional second argument for this one
+caller. Every other caller names its row once, as `useVariableResolver`'s
+`boundRow` option, because it resolves for a single request; the strip resolves
+for all of them at once and so has to say which row per call.
 
 ### Which contract answers for a request: nearest declared ancestor
 
@@ -241,10 +304,16 @@ run with a mismatched file is still the user's to start. Declared columns are
 also completed: `{{data.` offers them in the request fields and the body editors,
 and `pm.iterationData.get("` offers them in the script editors (see below).
 
-The script panel's **"Referenced:" chips** read the same three states (issue
-#604). They used to paint a name red whenever no scope defined it, which for a
-`data.*` name is always - the reading that made a working column look broken in
-a row whose whole job is to say whether a name resolves.
+The script panel's **"Names mentioned:" chips** read the same three states
+(issue #604). They used to paint a name red whenever no scope defined it, which
+for a `data.*` name is always - the reading that made a working column look
+broken in a row whose whole job is to say whether a name resolves. A column
+reached by its **bare** name gets that same paint (issue #1063): a script reads
+one through `pm.iterationData.get("email")`, or through `pm.variables.get("email")`
+while no scope defines `email`, and both are the column `{{data.email}}` names.
+The accessor is what decides, not the spelling - `pm.environment.get("email")`
+cannot see the row whatever the collection declares, so it stays an ordinary
+variable chip.
 
 The **audit** in the Data tab is the same comparison in the other direction -
 the declared columns against the tokens the collection's requests actually
@@ -350,6 +419,16 @@ answering are exactly the ones a flat map destroys:
 The variable popover renders this as its "also defined" list. `VariableOrigin`
 carries `enabled` and an explicit `winner` flag - once disabled definitions are
 in the list, "last" and "wins" are different things.
+
+**Since issue #1064, the bound row is layered on top of this list, not into
+the scope ladder it is built from.** While a row is picked and its column
+answers the name, `getVariableOrigins` appends a `{ scope: "row" }` origin
+after the scope-derived ones and takes `winner` away from whichever of them
+had it - the row is what the send will use, so only it may claim the flag. The
+layering happens in this accessor alone: `originsByName`, the ladder
+`variableMap` and therefore `getVariable` / `getAllVariables` resolve from, is
+untouched, so a picked row still cannot make `ResolvedVariable.scope` report
+anything but a scope someone could actually write to.
 
 `ResolvedVariable.sourceId` / `sourceName` name the specific environment or
 collection the winning value came from (absent for `global`), so the popover can
@@ -740,12 +819,13 @@ list is deliberately *not* registered for `javascript`: braces are not the
 syntax in a script, so offering them there would teach the wrong thing. The
 names are the same names; only the place you type them differs.
 
-Three rules make the offered set match what the call can actually read:
+These rules make the offered set match what the call can actually read:
 
 - **The accessor picks the scope.** `pm.environment.get` lists environment
   variables only, because that is the one scope it reads - a collection
   variable offered there would be a name that returns `undefined`. Only the
-  merged `pm.variables.get` lists all three.
+  merged `pm.variables.get` lists all three, and it alone also lists the
+  declared columns (below), because it alone reads both.
 - **Collection variables come from the active tab.** Collection scope is
   explicit-only (see *Collection scope is explicit only* above) and a Monaco
   completion provider is registered once per *language*, not per editor, so it
@@ -769,6 +849,23 @@ Three rules make the offered set match what the call can actually read:
   surface is `undefined` outside a data-driven run or a send-with-row, and its own documentation
   tells scripts to guard before calling. Nothing is offered when the chain
   declares no contract.
+- **`pm.variables` completes both, because it reads both.** A bound row answers
+  bare column names through the merged accessor, above every scope (issue
+  #1007), so the declared columns are blended into its list beside the
+  variables (issue #1063) - as bare names inside `get("…")` / `has("…")`, and
+  as `{{column}}` tokens inside `replaceIn`, which resolves them from the same
+  row. They carry the field icon and name their declaring collection, so a
+  column is distinguishable from a variable at a glance, and a name that is
+  both is offered twice on purpose: the row wins while one is bound and the
+  scope answers when none is. The single-scope accessors never see the row, so
+  no column is offered there. **The prefixed `{{data.column}}` spelling is
+  offered to `replaceIn` and to nothing else** (issue #1077): `replaceIn`
+  resolves both spellings from the same row, so withholding one of two that
+  work would be the same gap, while `pm.variables.get("data.email")` reads no
+  column at all - the namespace is disjoint from the scopes there - and
+  offering it in a name argument would teach a call that returns `undefined`.
+  The bare entry says `(bare)` only where the prefixed one sits beside it,
+  since that word exists to tell two adjacent spellings apart.
 - **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a
   template and interpolates it, so it gets brace-style completion including
   `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no
@@ -789,3 +886,8 @@ the two lists never appear together.
 | `"global"`    | Came from globals              |
 | `"collection"`| Came from any collection layer |
 | `"environment"`| Came from the active environment |
+
+`VariableOrigin.scope` is wider - a `VariableOriginScope` (`VariableScope |
+"row"`) - because the origins list can also carry a bound row. It has no row in
+this table: nobody wrote a row's cell and nothing can edit it, so it is never a
+value `ResolvedVariable.scope` reports or a target `updateVariable` writes to.

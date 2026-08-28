@@ -121,3 +121,92 @@ describe("secrets never appear on hover", () => {
 		expect(screen.getAllByText("Production").length).toBeGreaterThan(0);
 	});
 });
+
+/**
+ * Issue #1064. A bound row's column answers a bare name above every scope, and
+ * the popover was taught to say so - but hovering and clicking are two readings
+ * of the same token, and a tooltip still printing the environment's value made
+ * one token say two things about one send.
+ *
+ * The paint is deliberately unchanged (D18): a shadowed bare name keeps the
+ * variable's accent, and the explanation is what moves.
+ */
+describe("a bound row's column answers the token", () => {
+	const withRow = variableSupportStub(
+		{},
+		{
+			getVariableOrigins: () => [
+				{
+					scope: "environment",
+					sourceName: "Staging",
+					value: "staging@acme.io",
+					enabled: true,
+					winner: false,
+				},
+				{ scope: "row", value: "alice@acme.io", enabled: true, winner: true },
+			],
+		}
+	);
+
+	it("reads the row's cell on hover, not the definition it beat", () => {
+		/*
+		 * The mutation check: drop `boundRowValue` and the tooltip falls back to
+		 * the resolved branch, which prints "staging@acme.io" - the value the send
+		 * is not going to use, which is the whole defect.
+		 */
+		renderToken({ name: "email", value: "staging@acme.io", variables: withRow });
+		expect(screen.getAllByText("alice@acme.io").length).toBeGreaterThan(0);
+		expect(screen.queryByText("staging@acme.io")).not.toBeInTheDocument();
+		expect(screen.getAllByText("Bound row").length).toBeGreaterThan(0);
+	});
+
+	it("answers a name no scope defines rather than calling it undefined", () => {
+		const rowOnly = variableSupportStub(
+			{},
+			{
+				getVariableOrigins: () => [
+					{ scope: "row", value: "alice@acme.io", enabled: true, winner: true },
+				],
+			}
+		);
+		renderToken({ name: "email", value: "", resolved: false, variables: rowOnly });
+		expect(screen.queryByText("not defined")).not.toBeInTheDocument();
+		expect(screen.getAllByText("alice@acme.io").length).toBeGreaterThan(0);
+	});
+
+	it("leaves a token no row answers exactly as it was", () => {
+		// With no row origin the tooltip must be the one this file already pins,
+		// value and source name and all.
+		renderToken();
+		expect(screen.getAllByText("mrc_8813").length).toBeGreaterThan(0);
+		expect(screen.queryByText("Bound row")).not.toBeInTheDocument();
+	});
+
+	it("never lets a row's cell reveal a secret variable's value", () => {
+		// A cell is not a secret, but the variable it shadows may be - and the
+		// tooltip must still not print the secret it is standing in front of.
+		const shadowingSecret = variableSupportStub(
+			{},
+			{
+				getVariableOrigins: () => [
+					{
+						scope: "environment",
+						sourceName: "Prod",
+						value: "sk_live_abcdef",
+						secret: true,
+						enabled: true,
+						winner: false,
+					},
+					{ scope: "row", value: "alice@acme.io", enabled: true, winner: true },
+				],
+			}
+		);
+		renderToken({
+			name: "apiKey",
+			value: "sk_live_abcdef",
+			secret: true,
+			variables: shadowingSecret,
+		});
+		expect(document.body.textContent).not.toContain("sk_live_abcdef");
+	});
+});

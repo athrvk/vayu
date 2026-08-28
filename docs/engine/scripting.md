@@ -187,6 +187,16 @@ Notes on the edges:
   keep their contents outside the property list, so two distinct ones report
   *not* equal rather than silently passing. `Date` compares by instant and
   `RegExp` by pattern.
+- **A throw reached through a comparison is the verdict** (#1048). A key, an
+  array element or an array `length` behind a getter that throws is a read that
+  did not happen, so the error reaches the test instead of being reported as
+  "these differ" - which under `.not` would have been a pass. That holds for the
+  reads an assertion makes before comparing, too: `include`, `oneOf`, `members`,
+  `keys`, `property` (its nested walk included), `empty` and `length` stop at the
+  read rather than answering about it. And for the rendering the `Date` and
+  `RegExp` comparisons run: an overridden `toJSON` or `toString` that throws used
+  to leave both sides rendered as the empty string, which compared *equal*. When
+  both sides throw, the first side's error is the one reported.
 - **A cycle fails loudly.** Deep equality gives up after 64 levels with a
   `RangeError` naming the cause.
 - **`eql` separates `+0` from `-0`; `equal` does not.** That is chai: `equal`
@@ -515,7 +525,11 @@ pm.response.to.have.jsonBody('data.id', 42);              // exists and deep-equ
 `have.status` means two different things depending on the argument's type: a
 number is the status code, a string is compared against the reason phrase
 `pm.response.reason()` answers. **`status('200')` fails** - a string is always
-a reason phrase to compare, never a code coerced to one.
+a reason phrase to compare, never a code coerced to one. **A number that is not
+a whole finite code is refused**, not truncated: `status(200.5)` used to compare
+as `200` and pass against a 200, and no response carries a fractional code, so
+the `TypeError` names what was written rather than reporting a verdict about the
+status that did arrive (#1048). `status(NaN)` is refused the same way.
 
 `have.header`'s second argument is compared strictly against the header as it
 arrived on the wire. `header('X-Count', 5)` fails rather than stringifying `5`
