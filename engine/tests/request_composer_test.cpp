@@ -858,7 +858,7 @@ TEST_F (RequestComposerTest, DataColumnsMustBeAListOfNames) {
     // A malformed field is a refusal rather than a silent empty set: a caller
     // that meant to bind columns and is quietly composed without them sends the
     // environment's values for a whole run and is told nothing.
-    for (const json columns : { json ("username"), json ({ { "username", true } }),
+    for (const json& columns : { json ("username"), json ({ { "username", true } }),
          json::array ({ 7 }), json::array ({ "" }) }) {
         const json body = { { "request", { { "method", "get" }, { "url", "https://api.test/" } } },
             { "dataColumns", columns } };
@@ -869,7 +869,7 @@ TEST_F (RequestComposerTest, DataColumnsMustBeAListOfNames) {
 
     // Absent and null both mean "no dataset", which is what every client that
     // has never heard of the field sends.
-    for (const json body :
+    for (const json& body :
     { json{ { "request", { { "method", "get" }, { "url", "https://api.test/" } } } },
     json{ { "request", { { "method", "get" }, { "url", "https://api.test/" } } },
     { "dataColumns", nullptr } } }) {
