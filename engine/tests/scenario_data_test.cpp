@@ -1097,16 +1097,16 @@ TEST (ScenarioDataBareColumnTest, TheHeaderAndDocumentRulesHoldForABareColumnToo
     // through.
     auto forging               = request_with_url ("https://api.test/");
     forging.headers["X-Token"] = "{{token}}";
-    const json forging_row     = json::parse (R"({"token":"ok\r\nX-Admin: true"})");
-    const auto refused         = bind_with_columns (forging, { "token" }, forging_row);
+    const json forging_row = json::parse (R"({"token":"ok\r\nX-Admin: true"})");
+    const auto refused = bind_with_columns (forging, { "token" }, forging_row);
     EXPECT_FALSE (refused.ok);
     EXPECT_NE (refused.error.find ("{{token}}"), std::string::npos) << refused.error;
 
-    auto document         = request_with_url ("https://api.test/");
-    document.body.mode    = vayu::BodyMode::Json;
-    document.body.content = R"({"name":"{{name}}"})";
+    auto document           = request_with_url ("https://api.test/");
+    document.body.mode      = vayu::BodyMode::Json;
+    document.body.content   = R"({"name":"{{name}}"})";
     const json document_row = json::parse (R"({"name":"say \"hi\""})");
-    const auto escaped      = bind_with_columns (document, { "name" }, document_row);
+    const auto escaped = bind_with_columns (document, { "name" }, document_row);
     ASSERT_TRUE (escaped.ok) << escaped.error;
     EXPECT_EQ (document.body.content, R"({"name":"say \"hi\""})");
 
