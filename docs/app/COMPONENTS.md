@@ -1445,9 +1445,12 @@ the identity names are both disjoint from the tiers, so a variable someone
 happens to name `data.email` or `$vu` neither answers for the column or the
 identity nor may paint the token as though it had. Reading
 the scopes first would show a resolved token carrying a value the engine will
-never send. The same rule keeps the create offer out of `VariablePopover` for
-these names - a variable of that name can never resolve, so offering to make one
-is a dead end that leaves the token exactly as it was.
+never send. The create offer is out of reach for both - a variable of either
+name can never resolve, so offering to make one is a dead end that leaves the
+token exactly as it was - but by two different mechanisms: `VariablePopover`
+refuses it for a `data.*` name itself (`isDataVariableName`, `:217`), while an
+identity name never reaches the popover at all, the branch above returning
+before `EditableVariable` is rendered.
 
 **The popover names a bound row as the origin, above what it beat** (issue
 #1064). The token paint above is unchanged - a shadowed bare name still paints
