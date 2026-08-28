@@ -871,9 +871,10 @@ pm.request.body = JSON.stringify({ n: 2 });
   engine applied.
 - **The script wins over engine-applied auth.** `build_request` resolves auth into the
   request before the script runs, so a script-set `Authorization` replaces the resolved one.
-- **A value the engine cannot send is refused, not coerced.** `method`/`body` must be
-  strings (`method` one of the seven verbs); a header value may be a string, number or
-  boolean. Anything else rejects the whole write-back - all or nothing - and surfaces as
+- **A value the engine cannot send is refused, not coerced.** `method` must be a string
+  (one of the seven verbs); `body` must be a string or the `RequestBody` object
+  `pm.request.body` itself holds; a header value may be a string, number or boolean.
+  Anything else rejects the whole write-back - all or nothing - and surfaces as
   `preScriptError`, which the response pane's Console tab shows. `url` is refused a step
   earlier: assigning anything that is not a URL string throws at the assignment, so the
   script author is told which line was wrong rather than reading it off the write-back.
@@ -891,16 +892,17 @@ pm.request.body = JSON.stringify({ n: 2 });
   query carries Postman's `PropertyList` writers - `add`, `upsert`, `remove`,
   `clear`. A URL nobody edited is sent as the exact bytes it arrived as, because
   the parts are recomposed only when a member actually changed.
-- **`body` is a string for every mode, including the two that store fields.** A
-  `x-www-form-urlencoded` or `form-data` body reads as its **enabled** fields encoded
-  `key=value&…` rather than as `""` - the empty string a `content`-only read used to give,
-  which no script could tell apart from a request with no body. For urlencoded that string
-  *is* the wire body and an assignment parses back into the fields; for `form-data` it is a
-  rendering of the parts, because the multipart bytes carry a boundary libcurl generates at
-  transfer time - so an assignment there is **refused with a named error** rather than
-  written to a body the transfer layer would ignore. Full table in
+- **`body` is Postman's `RequestBody` object, not a string** (#1003 - the same trade
+  #991 made for the URL). `mode` (`urlencoded` / `formdata` / `raw` - every other content
+  mode reads `raw`), `raw`, and the `urlencoded` / `formdata` field lists, plus `length`,
+  all read-only; assigning the whole body, or `.raw`, is the one write and is unchanged
+  from what shipped. It still behaves as a string in every context JavaScript allows -
+  concatenation, template literals, `==`, `String.prototype` methods, `JSON.stringify`,
+  `.length` - and three things changed: `===`, `typeof`, and assigning it straight into a
+  header value, refused the same way `pm.request.url` already is. The full surface and the
+  migration note are in
   [scripting.md](../engine/scripting.md#request-object-pmrequest). Reading a form body
-  never rewrites it: an unchanged string means untouched.
+  never rewrites it: an unchanged value means untouched.
 - **Setting a variable now re-renders whatever composition left unresolved.**
   `{{…}}` placeholders are still resolved at **compose time** (`POST /compose`,
   engine-side since #226) before the pre-request script runs - #226's decision
