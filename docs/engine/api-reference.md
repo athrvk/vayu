@@ -3571,8 +3571,14 @@ Header names are matched case-insensitively.
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
 deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
 username-if-password-grant`). Expiry uses a 45s skew; a missing `expires_in`
-means non-expiring. There is **no mid-run refresh** - a token is fetched at run
-start and reused for the whole run.
+means non-expiring. A load run also refreshes its token **during** the run: a
+watchdog re-acquires a header-placed, expiring token `oauth2RefreshLeadMs`
+(default 60s) before it expires and writes the new one into this same cache row
+(see [Load Test Mode](architecture.md#load-test-mode)). It is skipped - the
+token is fetched once and reused for the whole run - for a query-placed token,
+`autoRefreshToken: false`, a non-expiring token, an `authorization_code` grant
+with no refresh token, a token that lost to a user-supplied `Authorization`
+header, and scenario runs, whose steps each resolve auth at plan time.
 
 #### POST /oauth2/token
 
