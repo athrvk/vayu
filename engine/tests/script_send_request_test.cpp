@@ -964,4 +964,40 @@ TEST_F (SendRequestTest, AThrowingCallbackSurfacesAsTheScriptsError) {
     << result.error_message;
 }
 
+// ============================================================================
+// The identity resolves here too (issue #1057)
+// ============================================================================
+
+// `pm.sendRequest` and `pm.variables.replaceIn` resolve through one function,
+// so teaching that function the identity has to reach the wire and not only
+// the string a script renders - read off the listener, because a resolution
+// that happened after the URL was taken would still look right in a script.
+TEST_F (SendRequestTest, TheIdentityReachesTheWireAsTheRequestBesideItCarriesIt) {
+    SendRequestServer server;
+
+    ScriptConfig config;
+    config.timeout_ms         = 30000;
+    config.allow_send_request = true;
+    ScriptEngine engine (config);
+
+    vayu::Environment globals;
+    response.status_code = 200;
+    auto ctx             = ScriptContext::for_test (request, response);
+    ctx.globals          = &globals;
+    ctx.vu               = 4;
+    ctx.iteration        = 6;
+
+    auto result = engine.execute ("var target = '';"
+                                  "pm.sendRequest({ url: '" +
+    server.url ("/echo?vu={{$vu}}&iteration={{$iteration}}") +
+    "', method: 'POST', body: { mode: 'raw', raw: 'vu {{$vu}}' } }, "
+    "function (err, res) { target = res.json().target + '|' + res.json().body; "
+    "});"
+    "pm.globals.set('seen', target);",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["seen"].value, "/echo?vu=4&iteration=6|vu 4");
+}
+
 } // namespace

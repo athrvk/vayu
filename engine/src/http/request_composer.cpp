@@ -622,12 +622,32 @@ DynamicResolution dynamic) {
     return std::nullopt;
 }
 
+/// What `{{$vu}}` / `{{$iteration}}` resolve to for a caller that knows which
+/// iteration is sending, and nullopt for every other name - including for the
+/// callers that pass no identity, which is why `lookup_variable` below still
+/// defers both names rather than answering them a second way.
+///
+/// Ahead of every other rule at both call sites, on `lookup_variable`'s own
+/// reasoning: the namespace is reserved, so neither a scope nor a bound column
+/// that happens to carry the name can answer for the identity.
+std::optional<std::string> identity_value (const std::string& name,
+const std::optional<IterationIdentity>& identity) {
+    if (!identity || !is_identity_variable_name (name)) {
+        return std::nullopt;
+    }
+    return std::to_string (name == IDENTITY_VU_NAME ? identity->vu : identity->iteration);
+}
+
 std::string resolve_template (const std::string& input,
 const VariableValues& vars,
 const BoundColumnNames& bound_columns,
-DynamicResolution dynamic) {
-    return substitute_tokens (
-    input, [&vars, &bound_columns, dynamic] (const std::string& name) {
+DynamicResolution dynamic,
+const std::optional<IterationIdentity>& identity) {
+    return substitute_tokens (input,
+    [&vars, &bound_columns, dynamic, &identity] (const std::string& name) {
+        if (auto bound = identity_value (name, identity)) {
+            return bound;
+        }
         return lookup_variable (name, vars, bound_columns, dynamic);
     });
 }
@@ -645,9 +665,16 @@ std::string render_data_value (const nlohmann::json& value) {
 std::string resolve_template_with_data (const std::string& input,
 const VariableValues& vars,
 const DataRowColumns& row,
-std::optional<std::string>& missing_column) {
+std::optional<std::string>& missing_column,
+const std::optional<IterationIdentity>& identity) {
     return substitute_tokens (
     input, [&] (const std::string& name) -> std::optional<std::string> {
+        // Before the row as well as before the scopes: a file's column named
+        // `$vu` is the case `lookup_variable`'s reserved-namespace order
+        // exists for, and reading the row first would let one answer here.
+        if (auto bound = identity_value (name, identity)) {
+            return bound;
+        }
         // Ahead of the scopes, exactly as `lookup_variable` puts it: the
         // namespace is disjoint from them, so a variable someone named
         // `data.id` must not answer for the column - and the column must not

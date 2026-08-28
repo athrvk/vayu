@@ -583,6 +583,32 @@ TEST_F (ScenarioRunnerTest, TheIterationIndexAndCountReachTheStepsScripts) {
     EXPECT_EQ (seen[2].marker, "2/3");
 }
 
+// The same agreement, read off one request rather than inferred from two tests
+// (issue #1057): the pre-request script renders the identity with `replaceIn`
+// into a header, and the URL beside it carries what the bind wrote - so the
+// wire holds both answers and they have to match, on every pass. A design run
+// is the shape where `{{$iteration}}` advances while `{{$vu}}` does not, so a
+// resolver reading the wrong number shows up here and not on a plain Send.
+TEST_F (ScenarioRunnerTest, AStepScriptRendersTheIdentityItsOwnRequestWasBoundWith) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok?u={{$vu}}&i={{$iteration}}",
+    R"(pm.request.headers.add({key: "X-Marker",
+       value: pm.variables.replaceIn("{{$vu}}/{{$iteration}}")});)");
+
+    const auto run_id = start (/*iterations=*/3);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    for (size_t pass = 0; pass < seen.size (); ++pass) {
+        const std::string i = std::to_string (pass);
+        EXPECT_EQ (seen[pass].target, "/ok?u=1&i=" + i);
+        EXPECT_EQ (seen[pass].marker, "1/" + i)
+        << "the script rendered an identity the request beside it did not "
+           "carry";
+    }
+}
+
 // A collection run in design mode is one user walking the sequence, and its
 // scripts must be able to say so: `pm.info.vu` reads `1` here rather than
 // `undefined` (issue #994), which is what makes the number a script reads agree

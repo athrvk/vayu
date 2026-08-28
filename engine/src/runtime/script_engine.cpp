@@ -5894,9 +5894,42 @@ vayu::http::VariableValues visible_variable_values (JSContext* ctx) {
     return values;
 }
 
+// Which iteration this script is running beside, as the resolver takes it.
+//
+// Always an answer, never absent, because every send is an iteration of a run:
+// the run's own numbers wherever a run set them - a load run's user and pass, a
+// design run's pass - and otherwise the run of one a plain Send is, `1` and `0`.
+// Those two are not a second default chosen here: they are this struct's own,
+// the same ones `POST /execute` binds into the request this script was handed
+// (issue #994, `execution.cpp`), which is what the move of `IterationIdentity`
+// down beside the names bought. That
+// is the whole of why `replaceIn` may resolve what composition may not: it runs
+// beside a request already bound with these two numbers, so leaving the token
+// written would make the script and the wire disagree about one send.
+//
+// It is deliberately *not* `pm.info`, which reads `undefined` on that same
+// plain Send: `pm.info` answers "which iteration of which run am I", and there
+// is no run to be an iteration of, while a token answers "what does this
+// resolve to here" - and here it resolves to what the request beside it carried
+// (issue #1057).
+vayu::http::IterationIdentity script_identity (const ContextData* data) {
+    vayu::http::IterationIdentity identity; // the run of one
+    if (data == nullptr) {
+        return identity;
+    }
+    if (data->vu) {
+        identity.vu = *data->vu;
+    }
+    if (data->iteration) {
+        identity.iteration = *data->iteration;
+    }
+    return identity;
+}
+
 // One resolution of `input` against everything the script can see: the three
-// scopes as they stand now, plus the bound data row's columns when the run has
-// one. `pm.variables.replaceIn` and `pm.sendRequest` both resolve through this,
+// scopes as they stand now, the iteration identity this script is running as,
+// plus the bound data row's columns when the run has one.
+// `pm.variables.replaceIn` and `pm.sendRequest` both resolve through this,
 // so a script cannot get one answer from the template it renders and another
 // from the request it sends.
 //
@@ -5908,13 +5941,21 @@ const std::string& input,
 std::string& missing_column) {
     const vayu::http::VariableValues values = visible_variable_values (ctx);
 
-    auto* data = get_context_data (ctx);
+    auto* data                                   = get_context_data (ctx);
+    const vayu::http::IterationIdentity identity = script_identity (data);
     if (data == nullptr || data->iteration_data == nullptr ||
     !data->iteration_data->is_object ()) {
-        // No row to resolve against, so the namespace stays written as it
+        // No row to resolve against, so *that* namespace stays written as it
         // stands - what composition does, and what lets one script run in both
-        // a data-driven run and a plain send.
-        return vayu::http::resolve_template (input, values);
+        // a data-driven run and a plain send. The identity is not that case:
+        // it needs no row behind it, so it answers here too.
+        //
+        // `Generate` said rather than defaulted: a script renders its own
+        // `{{$guid}}` here and now (issue #995 defers the family only for a
+        // payload a *run* will repeat), and it does that while resolving the
+        // identity it was sent as - the two questions compose.
+        return vayu::http::resolve_template (
+        input, values, {}, vayu::http::DynamicResolution::Generate, identity);
     }
 
     vayu::http::DataRowColumns row;
@@ -5924,7 +5965,7 @@ std::string& missing_column) {
 
     std::optional<std::string> missing;
     std::string resolved =
-    vayu::http::resolve_template_with_data (input, values, row, missing);
+    vayu::http::resolve_template_with_data (input, values, row, missing, identity);
     if (missing) {
         missing_column = *missing;
         return std::nullopt;

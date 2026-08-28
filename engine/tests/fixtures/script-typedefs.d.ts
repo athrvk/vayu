@@ -1206,7 +1206,7 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
-		 * Resolve {{name}} placeholders in a string, exactly as the request's own URL/headers/body are resolved: scopes first (environment > collection > global), then the dynamic-variable table - {{$guid}}, {{$timestamp}}, {{$random*}} generate a fresh value per occurrence. This is the way to use {{...}} inside a script: script code itself is never interpolated.
+		 * Resolve {{name}} placeholders in a string, exactly as the request's own URL/headers/body are resolved: scopes first (environment > collection > global), then the dynamic-variable table - {{$guid}}, {{$timestamp}}, {{$random*}} generate a fresh value per occurrence. {{$vu}} and {{$iteration}} resolve to the numbers the request beside this script was bound with - 1 and 0 outside a load run, which is a run of one. This is the way to use {{...}} inside a script: script code itself is never interpolated.
 		 * 
 		 * Example:
 		 * const id = pm.variables.replaceIn('{{$guid}}');

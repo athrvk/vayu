@@ -127,9 +127,12 @@ engine does with the token once a row exists.
 `{{$vu}}` and `{{$iteration}}` name the run that is executing - which virtual
 user this request belongs to, and which of that user's iterations it is (issue
 #994). They are spelled like a dynamic variable and behave like `data.*`: both
-resolvers leave them written exactly as they stand, and the executor
-substitutes them immediately before each send, because the value belongs to the
-iteration rather than to the request.
+compose-time resolvers leave them written exactly as they stand, and the
+executor substitutes them immediately before each send, because the value
+belongs to the iteration rather than to the request. A *script* resolves them
+(issue #1057): `pm.variables.replaceIn("{{$vu}}")` renders the number the
+request beside it was bound with, since by then the send has one - see
+[the scripting docs](../engine/scripting.md).
 
 Being reserved is what makes them bindable at all. A variable someone happens
 to name `$vu` does **not** answer for the identity - unlike `$guid`, where a
@@ -870,6 +873,14 @@ These rules make the offered set match what the call can actually read:
   template and interpolates it, so it gets brace-style completion including
   `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no
   generator is offered there.
+- **So does the identity** (issue #1057). `{{$vu}}` and `{{$iteration}}` are
+  offered inside `replaceIn`, from the same `ITERATION_VARIABLES` table the URL
+  and body editors read, because that is where they resolve - the script
+  resolver answers them with the numbers the request beside the script was
+  bound with. They are offered in no other script list, since neither is a name
+  any lookup answers. Unlike a generator, the identity is never withheld for a
+  same-named scope variable: the engine resolves these two names ahead of every
+  scope, so a variable called `$vu` shadows nothing.
 
 The dotted `pm.*` completions (served by the engine, see
 [the scripting docs](../engine/scripting.md)) yield inside a string literal so
