@@ -22,6 +22,7 @@
 // a header may hold.
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/utils/invariant.hpp"
 
 namespace vayu::core {
 
@@ -463,11 +464,19 @@ DataValueEncoding xml_encoding_at (XmlPosition position) {
     return DataValueEncoding::Verbatim;
 }
 
-/// Both reserved namespaces, which is what the request's own fields are split
-/// for: a field may carry one of each, and they bind together.
-bool keeps_either_namespace (const std::string& name) {
+/// Every kind of token the request's own fields are split for: a field may
+/// carry one of each, and they bind together.
+///
+/// A generator name is in here (issue #995) and reaches a split only when the
+/// composition that produced this request deferred it
+/// (`http::DynamicResolution::Defer`) - a Send's composition generated it, so
+/// there is no token left to find. That is what keeps the two answers one
+/// answer: this predicate says what a *surviving* `{{$guid}}` means, and
+/// composition says whether one survives.
+bool keeps_reserved_namespace (const std::string& name) {
     return vayu::http::is_data_variable_name (name) ||
-    vayu::http::is_identity_variable_name (name);
+    vayu::http::is_identity_variable_name (name) ||
+    vayu::http::is_generator_variable_name (name);
 }
 
 /**
@@ -773,6 +782,20 @@ class TemplateJoiner {
         if (name == vayu::http::IDENTITY_ITERATION_NAME) {
             return &iteration_;
         }
+        // The one arm that *computes* rather than reads (issue #995), which is
+        // why it needs storage of its own: the two identity numbers and the
+        // row's cells are values this bind already holds, and a generated one
+        // exists only once it is asked for. Fresh per occurrence, matching what
+        // composition does with the same table - two `{{$guid}}` in one field
+        // are two ids, here as there. The previous occurrence's text has
+        // already been copied into the field by the time the next overwrites
+        // this, which is the whole lifetime the caller needs.
+        if (vayu::http::is_generator_variable_name (name)) {
+            generated_ =
+            vayu::utils::invariant_value (vayu::http::resolve_dynamic_variable (name),
+            "a name the split kept as a generator is one the table generates");
+            return &generated_;
+        }
         if (binding_.row == nullptr) {
             // A data token in a run with no set at all. Refused here rather
             // than resolved to nothing, for the reason every other arm is: the
@@ -818,6 +841,11 @@ class TemplateJoiner {
     /// the join reads them exactly as it reads a cell.
     const nlohmann::json vu_;
     const nlohmann::json iteration_;
+    /// The last generated value, alive until the next generator token needs it
+    /// (issue #995). Held here rather than returned by value because
+    /// @ref value_of answers a pointer for the row's cells, which are the
+    /// row's own JSON and must not be copied per token per iteration.
+    nlohmann::json generated_;
     size_t next_field_ = 0;
     size_t cursor_     = 0;
     DataBindResult result_{ true, {} };
@@ -843,7 +871,7 @@ const vayu::http::BoundColumnNames& bound_columns) {
     // copy buys - see the header for why a second field list would be the wrong
     // trade.
     vayu::Request scratch = request;
-    FieldSplitter splitter (keeps_either_namespace, bound_columns);
+    FieldSplitter splitter (keeps_reserved_namespace, bound_columns);
     // The collision the walk can report is a bind-time fault only: a split
     // rewrites nothing, so the header map is rebuilt from its own unique keys.
     (void)walk_bindable_fields (

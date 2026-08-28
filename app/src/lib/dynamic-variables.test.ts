@@ -8,7 +8,6 @@
 import { describe, expect, test } from "vitest";
 import {
 	DYNAMIC_VARIABLES,
-	containsDynamicVariable,
 	isDynamicVariableName,
 	isKnownDynamicVariable,
 	resolveDynamicVariable,
@@ -243,28 +242,5 @@ describe("unknown and non-dynamic names", () => {
 
 	test("resolving a plain name is not this table's job", () => {
 		expect(resolveDynamicVariable("baseUrl")).toBeNull();
-	});
-});
-
-describe("containsDynamicVariable", () => {
-	test("finds a known generator anywhere in the string", () => {
-		expect(containsDynamicVariable("https://x/y?id={{$guid}}")).toBe(true);
-		expect(containsDynamicVariable("{{ $timestamp }}")).toBe(true);
-	});
-
-	test("ignores ordinary variables, unknown generators and empty input", () => {
-		expect(containsDynamicVariable("https://{{baseUrl}}/y")).toBe(false);
-		expect(containsDynamicVariable("{{$randomInteger}}")).toBe(false);
-		expect(containsDynamicVariable("")).toBe(false);
-		expect(containsDynamicVariable(undefined)).toBe(false);
-	});
-
-	test("is not made stateful by the shared global regex", () => {
-		// VARIABLE_PATTERN is module-global and `g`-flagged; matchAll clones it,
-		// but a switch to `.test()` here would carry lastIndex between calls and
-		// make every second call answer wrongly.
-		const input = "{{$guid}}";
-		expect(containsDynamicVariable(input)).toBe(true);
-		expect(containsDynamicVariable(input)).toBe(true);
 	});
 });

@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -520,6 +521,66 @@ TEST_F (LoadDataTest, WithoutRowsTheDeferredScriptSeesNoIterationData) {
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u) << replay_failures ();
     EXPECT_EQ (validation.run->passed, 1u);
+}
+
+// ============================================================================
+// The generator family, per iteration rather than per run (issue #995)
+// ============================================================================
+
+// The headline: a run whose composition deferred `{{$randomUUID}}` sends a
+// different id every time. Read off the listener rather than off the template,
+// because a value generated correctly and then submitted from the *shared*
+// request would still reach the wire as one repeated id - which is what the
+// no-copy fast path in `submit_one_request` does for a run with nothing to
+// bind, and what this asserts it no longer does for this one.
+TEST_F (LoadDataTest, ADeferredGeneratorProducesADistinctValuePerIteration) {
+    RecordingServer server;
+    const json payload =
+    iterations_payload (server.url ("/row/{{$randomUUID}}"), 6);
+
+    run (payload);
+
+    const auto paths = server.paths ();
+    ASSERT_EQ (paths.size (), 6u);
+    const std::set<std::string> distinct (paths.begin (), paths.end ());
+    EXPECT_EQ (distinct.size (), paths.size ())
+    << "the run repeated a generated id across its iterations";
+    for (const auto& path : paths) {
+        EXPECT_NE (path, "/row/{{$randomUUID}}")
+        << "the token reached the wire as it stands";
+    }
+}
+
+// Two occurrences in one field are two values, here as at composition - the
+// join runs the table per token, not per field.
+TEST_F (LoadDataTest, TwoGeneratorsInOneFieldAreTwoValues) {
+    RecordingServer server;
+    const json payload =
+    iterations_payload (server.url ("/row/{{$guid}}_{{$guid}}"), 1);
+
+    run (payload);
+
+    const auto paths = server.paths ();
+    ASSERT_EQ (paths.size (), 1u);
+    // No generated uuid carries an underscore, so the separator is unambiguous.
+    const auto separator = paths[0].find ('_');
+    ASSERT_NE (separator, std::string::npos) << paths[0];
+    EXPECT_NE (paths[0].substr (0, separator), paths[0].substr (separator + 1))
+    << paths[0];
+}
+
+// The cost guard, made structural rather than measured: a request spelling no
+// generator has an empty template, which is the single test every submission
+// makes before doing any bind work at all.
+TEST_F (LoadDataTest, ARunWithoutAGeneratorCarriesAnEmptyTemplate) {
+    RecordingServer server;
+    const json payload = iterations_payload (server.url ("/plain"), 2);
+
+    run (payload);
+
+    EXPECT_TRUE (context_->load_template.empty ())
+    << "a run spelling no reserved token must carry nothing to walk per "
+       "submission";
 }
 
 // Every pacing mode binds, not just the one whose submit path was written

@@ -46,7 +46,6 @@ import { toHeaderItems } from "./utils/system-headers";
 import { toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "@/lib/id";
 import { scriptParts } from "./utils/script-parts";
-import { requestUsesDynamicVariables } from "./utils/dynamic-variable-scan";
 import {
 	buildExecBody,
 	execIdentity,
@@ -612,6 +611,12 @@ export default function RequestBuilder() {
 					// Names only, and absent whenever `config.data` is - a run with no
 					// data set composes exactly as it did.
 					...(config.dataColumns ? { dataColumns: config.dataColumns } : {}),
+					// This composed payload is repeated once per iteration, per
+					// virtual user, so the `{{$guid}}` family belongs to each
+					// repetition, not to the one-time composition - leave the tokens
+					// written as-is and let the engine generate a fresh value per
+					// iteration at bind time (issue #995).
+					deferDynamicVariables: true,
 				});
 
 				// Convert LoadTestConfig to StartLoadTestRequest (flat structure)
@@ -816,7 +821,6 @@ export default function RequestBuilder() {
 					onStart={handleConfirmLoadTest}
 					isStarting={isStartingLoadTest}
 					hasPreRequestScript={!!pendingLoadTestRequest?.preRequestScript?.trim()}
-					hasDynamicVariables={requestUsesDynamicVariables(pendingLoadTestRequest)}
 					oauth2Config={pendingOAuth2Config ?? undefined}
 					isStreamingRequest={!!pendingLoadTestRequest?.stream}
 					collectionId={fetchedRequest?.collectionId}
