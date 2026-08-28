@@ -23,13 +23,13 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | ------------------- | -------------------------------------------------------------------------------- |
 | Core                | `pm`, `pm.test(name, fn)` - in either script, each result naming the one that made it (see below), `pm.expect(value[, message])` - the message prefixes the failure, as in chai |
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
-| Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict |
+| Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Streamed events     | `pm.response.events` (array of `{ event, id, data }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`set`/`unset`/`clear(url?)`, see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.header(name[, value])`, `.body(expected)`, `.jsonBody(path?[, value])`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`), `.method`, `.headers`, `.body` |
-| Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
+| Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
 | Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
@@ -43,8 +43,10 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Console             | `console.log/info/warn/error`                                                    |
 
 `pm.response.headers` is a plain object keyed by the **lower-cased** header name, not
-Postman's `HeaderList` - but it carries `get()` / `has()`, and those are
-case-insensitive the way HTTP header names are. Indexing is not, so
+Postman's `HeaderList` - but it carries `get()` / `has()` plus the read half of a
+Postman `PropertyList`: `each()`, `all()`, `count()`, `toObject()`, `one()` and
+`indexOf()`. Every one of them that takes a header name matches it the way HTTP
+header names work - case-insensitively. Indexing is not, so
 `headers['Content-Type']` reads back `undefined` while
 `headers.get('Content-Type')` works (see [Header methods](#header-methods)).
 
@@ -54,6 +56,11 @@ you two entries. That matters most for `Set-Cookie`, which servers routinely
 send once per cookie: both cookies are there, in one string. Do not split that
 string yourself - an `Expires=` value contains a comma of its own. Read
 `pm.response.cookies`, which is the same header already parsed.
+
+**`all()` reports the object's key order, not wire order, and can never report
+a duplicate** the way Postman's `HeaderList` does - a name sent twice is
+already the one folded entry above by the time any script sees it, so there is
+only ever one member for `all()` to report for it.
 
 Variable writes persist to the scope they target (environment / collection / globals) and
 participate in [variable resolution](./variable-resolution.md). Calling `set(name, value)`
@@ -197,9 +204,11 @@ script's mistake, so it arrives as `err` (an `Error` carrying `.code`, e.g.
 `TIMEOUT`) with `res` null. The script's own mistakes throw instead: an
 unreadable argument, an unsupported body mode, the request cap, and the
 capability being off. `res` carries `code`, `status`, `responseTime`,
-`headers.get()/has()`, `json()` and `text()` - a subset of `pm.response`, with
-no assertion chain. `status` is the numeric code there too, so the two objects
-called a response do not disagree inside one sandbox.
+`headers` with `get()`/`has()`/`each()`/`all()`/`count()`/`toObject()`/`one()`/
+`indexOf()` - the same read methods as `pm.response.headers` - `json()` and
+`text()`, a subset of `pm.response` with no assertion chain. `status` is the
+numeric code there too, so the two objects called a response do not disagree
+inside one sandbox.
 
 **It is bounded, and both bounds throw.** The request's timeout is clamped to
 whatever is left of the script's own time budget (`scriptTimeout`, 5s by
@@ -630,6 +639,11 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
 - `pm.cookies.set(...)` / `.unset(...)` / `.clear()` - the *flat* write half.
   Writing goes through `pm.cookies.jar()`, which ships whole - see
   [above](#the-cookie-jar-pmcookies)
+- The rest of postman-collection's `PropertyList` on a header object - `map`,
+  `filter`, `find`, `idx`, `insert`, the list-level `has(item, value)`,
+  `assimilate`, `populate`, `clear`, `eachParent`, `toString`. Only the read
+  half and the three mutators named under [Header methods](#header-methods)
+  ship
 - `pm.visualizer`
 - The `tests["name"] = bool` legacy assertion style (use `pm.test`)
 - Chai matchers outside the list above: `.include.keys` (the subset form),
@@ -719,13 +733,15 @@ immutable or provide no mutators for.
 
 ### Header methods
 
-Both header objects carry `get(name)` and `has(name)`; `pm.request.headers` also carries
-`upsert`, `add` and `remove`. They are **non-enumerable properties of the header object
-itself**, which is what makes them safe: `apply_pm_request_writeback` reads that object's
-own *enumerable* string properties as the outgoing header set, so an enumerable method
-would be read as a header whose value is a function and would fail the whole write-back.
-Being on the same object is also what makes a method call and a plain assignment agree -
-there is one property set, not two views of one.
+Both header objects carry `get(name)`, `has(name)`, and the read half of a Postman
+`PropertyList` - `each(fn, thisArg?)`, `all()`, `count()`, `toObject(excludeDisabled?,
+caseSensitive?)`, `one(name)` and `indexOf(name)`; `pm.request.headers` also carries the
+three mutators, `upsert`, `add` and `remove`. They are **non-enumerable properties of the
+header object itself**, which is what makes them safe: `apply_pm_request_writeback` reads
+that object's own *enumerable* string properties as the outgoing header set, so an
+enumerable method would be read as a header whose value is a function and would fail the
+whole write-back. Being on the same object is also what makes a method call and a plain
+assignment agree - there is one property set, not two views of one.
 
 ```javascript
 pm.request.headers.get('authorization');                  // case-insensitive
@@ -733,9 +749,25 @@ pm.request.headers.has('Authorization');
 pm.request.headers.upsert({ key: 'X-Trace', value: id }); // or ('X-Trace', id)
 pm.request.headers.add({ key: 'X-New', value: '1' });     // throws if already set
 pm.request.headers.remove('Authorization');               // no-op if absent
+pm.request.headers.all();                                 // [{key, value}, ...]
+pm.request.headers.count();                               // how many there are
+pm.request.headers.one('Content-Type');                   // {key, value}, or undefined
+pm.request.headers.toObject();                            // lower-cased keys
+pm.request.headers.indexOf('Content-Type');               // position in all(), or -1
+pm.request.headers.each(function (header, index, all) {
+  console.log(header.key, header.value, index, all.length);
+});
 ```
 
-Three deliberate divergences from Postman:
+`toObject()` lower-cases every key, which is what Postman does whenever the list
+it is called on is indexed case-insensitively - a header list always is - so
+`toObject()['content-type']` reads the header whatever casing it was set with.
+A truthy second argument (`toObject(false, true)`) keeps the stored spelling.
+The first argument is Postman's `excludeDisabled` and decides nothing here, as
+do the two it does not take: these objects hold no disabled row, no duplicate
+name and no empty one.
+
+Five deliberate divergences from Postman:
 
 - **The methods are case-insensitive, indexing is not.** `upsert('authorization', v)`
   replaces an existing `Authorization` instead of adding a second spelling - which the
@@ -744,13 +776,23 @@ Three deliberate divergences from Postman:
   Postman's `HeaderList` holds duplicates and `add` appends one; a single-valued
   `Headers` map cannot represent that, and silently behaving as `upsert` would hide the
   difference rather than report it.
-- **A header field literally named `get`/`has`/`add`/`upsert`/`remove` wins.** Entries are
+- **A header field literally named after one of the methods wins.** Entries are
   *defined* over the method, attributes included, so the header still reaches the wire
   and the shadowed method throws loudly. A dropped header would be the worse failure.
+- **`all()` reports this object's key order, not wire order, and can never report a
+  duplicate.** Postman's `HeaderList` keeps both; a `Headers` map cannot, because it is
+  single-valued and case-insensitive, so a name set twice already collapsed into one
+  entry before any script runs.
+- **`indexOf` matches a `{ key }` member by its `key`, not by identity.** Postman finds a
+  member by identity in its own list; the members handed out here are built fresh on
+  every call, so identity would answer `-1` for a member of the very list it came from.
+  Matching the key answers what Postman answers for that case, and `-1` for an object
+  naming a header this list does not hold.
 
 Bad input fails loudly: a name must be a non-empty string, a value a string, number or
-boolean (the set plain assignment already accepts), and calling a method detached from
-its object throws rather than answering as though the header were missing.
+boolean (the set plain assignment already accepts), `each` throws if its first argument
+is not a function, and calling a method detached from its object throws rather than
+answering as though the header were missing.
 
 ---
 

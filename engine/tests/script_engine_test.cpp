@@ -3858,6 +3858,192 @@ TEST_F (ScriptEngineTest, ResponseHeadersHaveNoMutators) {
     EXPECT_EQ (env["remove"].value, "undefined");
 }
 
+TEST_F (ScriptEngineTest, HeaderPropertyListReadsWalkTheResponseHeaders) {
+    auto result = engine.execute_test (R"JS(
+        var seen = [];
+        pm.response.headers.each(function (header) { seen.push(header.key + '=' + header.value); });
+        pm.environment.set('each', seen.join('|'));
+        pm.environment.set('all',
+            pm.response.headers.all().map(function (h) { return h.key; }).join(','));
+        pm.environment.set('count', String(pm.response.headers.count()));
+        pm.environment.set('toObject', JSON.stringify(pm.response.headers.toObject()));
+        pm.environment.set('one', JSON.stringify(pm.response.headers.one('CONTENT-TYPE')));
+        pm.environment.set('absent', String(pm.response.headers.one('X-Absent')));
+        pm.environment.set('indexOf', String(pm.response.headers.indexOf('x-request-id')));
+        pm.environment.set('absentIndex', String(pm.response.headers.indexOf('X-Absent')));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["each"].value, "Content-Type=application/json|X-Request-Id=abc123");
+    EXPECT_EQ (env["all"].value, "Content-Type,X-Request-Id");
+    EXPECT_EQ (env["count"].value, "2");
+    EXPECT_EQ (env["toObject"].value,
+    R"({"content-type":"application/json","x-request-id":"abc123"})");
+    // `one` answers with the header, `get` with its value - and both find it
+    // whatever casing they are asked in.
+    EXPECT_EQ (env["one"].value, R"({"key":"Content-Type","value":"application/json"})");
+    EXPECT_EQ (env["absent"].value, "undefined");
+    EXPECT_EQ (env["indexOf"].value, "1");
+    EXPECT_EQ (env["absentIndex"].value, "-1");
+}
+
+TEST_F (ScriptEngineTest, HeaderPropertyListReadsWalkTheRequestHeaders) {
+    // The same six over the object the write-back reads. Asked in the opposite
+    // casing to the response test - stored upper, queried lower - so the two
+    // together pin the match in both directions rather than one.
+    auto result = engine.execute_prerequest (R"JS(
+        var seen = [];
+        pm.request.headers.each(function (header) { seen.push(header.key + '=' + header.value); });
+        pm.environment.set('each', seen.join('|'));
+        pm.environment.set('all',
+            pm.request.headers.all().map(function (h) { return h.key; }).join(','));
+        pm.environment.set('count', String(pm.request.headers.count()));
+        pm.environment.set('toObject', JSON.stringify(pm.request.headers.toObject()));
+        pm.environment.set('one', JSON.stringify(pm.request.headers.one('authorization')));
+        pm.environment.set('absent', String(pm.request.headers.one('X-Absent')));
+        pm.environment.set('indexOf', String(pm.request.headers.indexOf('content-type')));
+        pm.environment.set('absentIndex', String(pm.request.headers.indexOf('X-Absent')));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["each"].value, "Authorization=Bearer token123|Content-Type=application/json");
+    EXPECT_EQ (env["all"].value, "Authorization,Content-Type");
+    EXPECT_EQ (env["count"].value, "2");
+    EXPECT_EQ (env["toObject"].value,
+    R"({"authorization":"Bearer token123","content-type":"application/json"})");
+    // The member's key is the spelling the request holds, which is what
+    // `upsert` writes through - not the spelling it was asked for.
+    EXPECT_EQ (env["one"].value, R"({"key":"Authorization","value":"Bearer token123"})");
+    EXPECT_EQ (env["absent"].value, "undefined");
+    EXPECT_EQ (env["indexOf"].value, "1");
+    EXPECT_EQ (env["absentIndex"].value, "-1");
+}
+
+TEST_F (ScriptEngineTest, HeaderToObjectLowerCasesUnlessAskedNotTo) {
+    // postman-collection indexes a header list case-insensitively, so its
+    // `toObject()` lower-cases every key and only `caseSensitive` keeps the
+    // spelling. Copying this object's own keys instead would read as the
+    // harmless choice: `pm.request.headers` keeps whatever the user typed, so
+    // `toObject()['content-type']` would answer undefined here against a
+    // request carrying `Content-Type`, and the value in Postman.
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('lowered', pm.request.headers.toObject()['content-type']);
+        pm.environment.set('kept',
+            JSON.stringify(Object.keys(pm.request.headers.toObject(false, true))));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["lowered"].value, "application/json");
+    EXPECT_EQ (env["kept"].value, R"(["Authorization","Content-Type"])");
+}
+
+TEST_F (ScriptEngineTest, HeaderEachPassesPostmansArgumentsAndThis) {
+    // postman-collection's `each` is `_.forEach(members, iterator.bind(context))`,
+    // so the callback is handed the member, its index and the whole list, and
+    // the optional second argument becomes its `this`.
+    auto result = engine.execute_test (R"JS(
+        var shape = [];
+        pm.response.headers.each(function (header, index, all) {
+            shape.push([index, header.key, all.length, this.tag].join(':'));
+        }, { tag: 'bound' });
+        pm.environment.set('shape', shape.join('|'));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["shape"].value, "0:Content-Type:2:bound|1:X-Request-Id:2:bound");
+}
+
+TEST_F (ScriptEngineTest, HeaderIndexOfTakesAMemberAsWellAsAName) {
+    // Postman finds a member by identity in its own list; the members here are
+    // built per call, so the object form is matched by its key - which answers
+    // the same for a member of this list, and -1 for anything else.
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('member',
+            String(pm.response.headers.indexOf(pm.response.headers.all()[1])));
+        pm.environment.set('foreign',
+            String(pm.response.headers.indexOf({ key: 'X-Absent', value: '1' })));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["member"].value, "1");
+    EXPECT_EQ (env["foreign"].value, "-1");
+}
+
+TEST_F (ScriptEngineTest, HeaderPropertyListReadsRefuseBadInput) {
+    auto result = engine.execute_test (R"JS(
+        function reason(fn) {
+            try { fn(); return 'no throw'; } catch (e) { return String(e.message || e); }
+        }
+        pm.environment.set('eachNoFn', reason(function () { pm.response.headers.each(); }));
+        pm.environment.set('eachNumber', reason(function () { pm.response.headers.each(42); }));
+        pm.environment.set('oneNumber', reason(function () { pm.response.headers.one(42); }));
+        pm.environment.set('indexNumber', reason(function () { pm.response.headers.indexOf(42); }));
+        pm.environment.set('detached', reason(function () {
+            var all = pm.response.headers.all;
+            all();
+        }));
+        pm.environment.set('fromCallback', reason(function () {
+            pm.response.headers.each(function () { throw new Error('from the callback'); });
+        }));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_NE (env["eachNoFn"].value.find ("needs a function"), std::string::npos)
+    << env["eachNoFn"].value;
+    EXPECT_NE (env["eachNumber"].value.find ("got number"), std::string::npos)
+    << env["eachNumber"].value;
+    EXPECT_NE (env["oneNumber"].value.find ("needs a header name string"), std::string::npos)
+    << env["oneNumber"].value;
+    EXPECT_NE (env["indexNumber"].value.find ("needs a header name string"), std::string::npos)
+    << env["indexNumber"].value;
+    EXPECT_NE (
+    env["detached"].value.find ("must be called on a headers object"), std::string::npos)
+    << env["detached"].value;
+    // A throw out of the callback is the script's own, reported as it stands
+    // rather than wrapped as an `each` failure.
+    EXPECT_EQ (env["fromCallback"].value, "from the callback");
+}
+
+TEST_F (ScriptEngineTest, PreRequestHeaderEachWalksTheSetItStartedWith) {
+    // The member list is built once, so a callback that removes the header it
+    // was handed does not shorten the walk under itself.
+    auto result = engine.execute_prerequest (R"JS(
+        var seen = [];
+        pm.request.headers.each(function (header) {
+            seen.push(header.key);
+            pm.request.headers.remove(header.key);
+        });
+        pm.environment.set('seen', seen.join(','));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["seen"].value, "Authorization,Content-Type");
+    EXPECT_TRUE (request.headers.empty ());
+}
+
+TEST_F (ScriptEngineTest, PreRequestPropertyListReadsStayOffTheWire) {
+    // They are non-enumerable like the first five, so the write-back - which
+    // reads own enumerable string properties as the outgoing header set - never
+    // sees a header whose value is `each`.
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('count', String(pm.request.headers.count()));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["count"].value, "2");
+    ASSERT_EQ (request.headers.size (), 2u);
+    EXPECT_TRUE (request.headers.contains ("Authorization"));
+    EXPECT_TRUE (request.headers.contains ("Content-Type"));
+}
+
 TEST_F (ScriptEngineTest, ResponseReasonReportsTheStatusText) {
     response.status_code = 404;
     response.status_text = "Not Found";

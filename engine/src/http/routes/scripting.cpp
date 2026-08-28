@@ -178,8 +178,9 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.response.headers" }, { "detail", "object" },
     { "documentation",
     "Response headers as key-value pairs, keyed by the lower-cased name the "
-    "HTTP client parsed. Index it (pm.response.headers['content-type']) or use "
-    "the case-insensitive get()/has() over it." },
+    "HTTP client parsed. Index it (pm.response.headers['content-type']), use "
+    "the case-insensitive get()/has() over it, or walk it with "
+    "each()/all()/toObject()." },
     { "sortText", "1_pm_response_headers" } });
 
     completions.push_back ({ { "label", "pm.response.headers.get" }, { "kind", KIND_FUNCTION },
@@ -201,6 +202,72 @@ nlohmann::json get_script_completions () {
     "With a second argument, whether it also carries that exact value - the "
     "comparison is strict, so a number never matches the wire's string." },
     { "sortText", "1_pm_response_headers_has" } });
+
+    // The PropertyList reads, offered on both header objects because
+    // `install_header_methods` installs them on both - the completion table and
+    // the runtime are held to each other by ScriptCompletions.
+    completions.push_back ({ { "label", "pm.response.headers.each" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.headers.each((header) => {\n\t$0\n})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.response.headers.each(fn: (header: { key: string; value: string }, "
+    "index: "
+    "number, all: { key: string; value: string }[]) => void, thisArg?: any): "
+    "void" },
+    { "documentation",
+    "Call fn for each response header, with { key, value } as Postman does. "
+    "The list is taken once, so it is the set the call started "
+    "with.\n\nExample:"
+    "\npm.response.headers.each(h => console.log(h.key, h.value));" },
+    { "sortText", "1_pm_response_headers_each" } });
+
+    completions.push_back ({ { "label", "pm.response.headers.all" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.headers.all()" },
+    { "detail", "pm.response.headers.all(): { key: string; value: string }[]" },
+    { "documentation",
+    "Every response header as a { key, value }, in the object's own key order. "
+    "A name the server sent twice is one entry here, its values already folded "
+    "with ', ' - the wire order and the duplicate are gone before a script "
+    "sees them." },
+    { "sortText", "1_pm_response_headers_all" } });
+
+    completions.push_back ({ { "label", "pm.response.headers.count" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.headers.count()" },
+    { "detail", "pm.response.headers.count(): number" },
+    { "documentation", "How many headers the response carries - all().length without building the array." },
+    { "sortText", "1_pm_response_headers_count" } });
+
+    completions.push_back ({ { "label", "pm.response.headers.toObject" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.headers.toObject()" },
+    { "detail",
+    "pm.response.headers.toObject(excludeDisabled?: boolean, caseSensitive?: "
+    "boolean): Record<string, string>" },
+    { "documentation",
+    "A plain { name: value } object. Keys are lower-cased, as Postman's "
+    "case-insensitive list does it; pass a truthy second argument to keep the "
+    "stored spelling. Postman's other two switches decide nothing here - these "
+    "headers hold no duplicate and no empty name." },
+    { "sortText", "1_pm_response_headers_to_object" } });
+
+    completions.push_back ({ { "label", "pm.response.headers.one" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.headers.one(\"${1:Content-Type}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.headers.one(name: string): { key: string; value: string } | undefined" },
+    { "documentation",
+    "The header itself rather than its value, case-insensitively - undefined "
+    "when it is absent. get() is the value half of the same lookup." },
+    { "sortText", "1_pm_response_headers_one" } });
+
+    completions.push_back (
+    { { "label", "pm.response.headers.indexOf" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.headers.indexOf(\"${1:Content-Type}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.headers.indexOf(name: string): number" },
+    { "documentation",
+    "Where the header sits in all(), case-insensitively, or -1 when it is "
+    "absent. A { key } member from all() or one() is accepted in place of the "
+    "name." },
+    { "sortText", "1_pm_response_headers_index_of" } });
 
     completions.push_back ({ { "label", "pm.response.cookies" }, { "kind", KIND_FIELD },
     { "insertText", "pm.response.cookies" }, { "detail", "object" },
@@ -645,6 +712,72 @@ nlohmann::json get_script_completions () {
     "Remove a header from the outgoing request, including one the Auth tab "
     "applied. Case-insensitive, and removing an absent header is a no-op." },
     { "sortText", "1_pm_request_headers_remove" } });
+
+    // The PropertyList reads, the same six the response object carries - they
+    // look rather than write, so the mutator gate does not apply to them.
+    completions.push_back ({ { "label", "pm.request.headers.each" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.headers.each((header) => {\n\t$0\n})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.headers.each(fn: (header: { key: string; value: string }, "
+    "index: "
+    "number, all: { key: string; value: string }[]) => void, thisArg?: any): "
+    "void" },
+    { "documentation",
+    "Call fn for each outgoing header, with { key, value } as Postman does. "
+    "The list is taken once, so removing a header from inside the callback "
+    "does not shorten the walk.\n\nExample:\npm.request.headers.each(h => "
+    "console.log(h.key, h.value));" },
+    { "sortText", "1_pm_request_headers_each" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.all" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.headers.all()" },
+    { "detail", "pm.request.headers.all(): { key: string; value: string }[]" },
+    { "documentation",
+    "Every outgoing header as a { key, value }, in the object's own key order. "
+    "A snapshot: adding a header afterwards does not change the array." },
+    { "sortText", "1_pm_request_headers_all" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.count" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.headers.count()" },
+    { "detail", "pm.request.headers.count(): number" },
+    { "documentation",
+    "How many headers the request will send - all().length without building "
+    "the array." },
+    { "sortText", "1_pm_request_headers_count" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.toObject" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.headers.toObject()" },
+    { "detail",
+    "pm.request.headers.toObject(excludeDisabled?: boolean, caseSensitive?: "
+    "boolean): Record<string, string>" },
+    { "documentation",
+    "A plain { name: value } copy. Keys are lower-cased, as Postman's "
+    "case-insensitive list does it, so toObject()['content-type'] reads the "
+    "header whatever casing it was set with; pass a truthy second argument to "
+    "keep the spelling. The copy is not the header set - writing to it sends "
+    "nothing." },
+    { "sortText", "1_pm_request_headers_to_object" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.one" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.headers.one(\"${1:Authorization}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.headers.one(name: string): { key: string; value: string } | undefined" },
+    { "documentation",
+    "The header itself rather than its value, case-insensitively - undefined "
+    "when it is absent. Its key is the spelling the request holds, which is "
+    "what upsert() writes through." },
+    { "sortText", "1_pm_request_headers_one" } });
+
+    completions.push_back ({ { "label", "pm.request.headers.indexOf" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.headers.indexOf(\"${1:Authorization}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.headers.indexOf(name: string): number" },
+    { "documentation",
+    "Where the header sits in all(), case-insensitively, or -1 when it is "
+    "absent. A { key } member from all() or one() is accepted in place of the "
+    "name." },
+    { "sortText", "1_pm_request_headers_index_of" } });
 
     completions.push_back ({ { "label", "pm.request.body" }, { "kind", KIND_FIELD },
     { "insertText", "pm.request.body" }, { "detail", "string | undefined (writable pre-request)" },
