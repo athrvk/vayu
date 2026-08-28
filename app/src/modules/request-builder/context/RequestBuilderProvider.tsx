@@ -374,6 +374,27 @@ export default function RequestBuilderProvider({
 			setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index })),
 		[rowMemoryKey]
 	);
+	/*
+	 * A Send that carries no row leaves the request bound to none (issue #1062).
+	 *
+	 * Picking a row is not a setting, it is the row this request is being sent
+	 * with, and Send and the send chord both send *without* one - so a pick left
+	 * standing across a plain Send would put the row's value in every preview
+	 * beside a request that had just gone out with the environment's. That is the
+	 * disagreement this issue exists to end, arrived at from the other side. The
+	 * picker's own memory is what it always was in every other respect: it
+	 * survives a tab switch and a return (issue #659), because neither of those
+	 * is a send.
+	 */
+	const forgetRowIndex = useCallback(
+		() =>
+			setRowIndexByRequest((previous) => {
+				if (!(rowMemoryKey in previous)) return previous;
+				const { [rowMemoryKey]: _forgotten, ...rest } = previous;
+				return rest;
+			}),
+		[rowMemoryKey]
+	);
 
 	/**
 	 * The row the preview resolves against - the picked one, once the file it
@@ -807,6 +828,9 @@ export default function RequestBuilderProvider({
 	 */
 	const executeRequest = useCallback(
 		async (dataRow?: Record<string, unknown>) => {
+			// A Send with no row un-binds this request: the previews must describe
+			// the request that is going out, not the one the last pick described.
+			if (!dataRow) forgetRowIndex();
 			// Snapshot the request as it is at Send. If the user switches to another
 			// request before this resolves, the result must land on the request that
 			// actually ran - not on whatever is on screen when it finishes.
@@ -887,7 +911,7 @@ export default function RequestBuilderProvider({
 				}
 			}
 		},
-		[request, onExecute, onExecuteStream, storeSetResponse]
+		[request, onExecute, onExecuteStream, storeSetResponse, forgetRowIndex]
 	);
 
 	// Start load test

@@ -210,6 +210,14 @@ preview line, the params and body previews, every key-value row, and resolved
 auth - above the environment, the tier this section names. That is what the
 send is about to put on the wire, not composition's guess at it.
 
+**A pick lasts until a Send that does not carry it.** Send and the send chord
+both send *without* a row, so the pick is cleared by one: a row left standing
+across a plain Send would put the file's value in every preview beside a request
+that had just gone out with the environment's, which is this same disagreement
+arrived at from the other side. Nothing else clears it - the picker's memory
+still survives a tab switch and a return (issue #659), because neither of those
+is a send.
+
 **Why the renderer can show this and composition cannot.** A plan is composed
 once, before any row exists to bind, so composition still defers both
 spellings exactly as above. The preview goes further only because it holds

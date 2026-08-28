@@ -174,6 +174,32 @@ describe("the preview while a row is bound", () => {
 		expect(result.current.resolvedAuth).toMatchObject({ token: "ada@example.test" });
 	});
 
+	it("un-binds when a Send carries no row", async () => {
+		// Send and the send chord both send *without* a row, so a pick left
+		// standing across one would put the row's value in every preview beside a
+		// request that had just gone out with the environment's - the same
+		// disagreement, arrived at from the other side.
+		const { result } = setup();
+		await bindRow(result, 0);
+		expect(result.current.resolveString("{{username}}")).toBe("ada");
+
+		await act(async () => {
+			await result.current.executeRequest();
+		});
+
+		expect(result.current.resolveString("{{username}}")).toBe("from-the-environment");
+		expect(useBoundRowStore.getState().bound).toBeNull();
+	});
+
+	it("stays bound when the Send carries the row", async () => {
+		const { result } = setup();
+		await bindRow(result, 0);
+		await act(async () => {
+			await result.current.executeRequest({ username: "ada" });
+		});
+		expect(result.current.resolveString("{{username}}")).toBe("ada");
+	});
+
 	it("leaves every other name resolving exactly as it did", async () => {
 		const { result } = setup();
 		await bindRow(result, 0);
