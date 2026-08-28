@@ -405,6 +405,14 @@ std::optional<std::string> resolve_dynamic_variable (const std::string& name) {
     return std::nullopt;
 }
 
+bool is_generator_variable_name (const std::string& name) {
+    // The table rather than `resolve_dynamic_variable (name).has_value ()`:
+    // asking that question by generating a value would draw from the thread's
+    // RNG for every token a split walks past.
+    return std::any_of (DYNAMIC_VARIABLES.begin (), DYNAMIC_VARIABLES.end (),
+    [&name] (const DynamicVariable& v) { return name == v.name; });
+}
+
 const std::vector<std::string>& dynamic_variable_names () {
     static const std::vector<std::string> names = [] {
         std::vector<std::string> out;
@@ -565,7 +573,8 @@ const BoundColumnNames& no_bound_columns () {
 /// exactly the value an ordinary field would have got.
 std::optional<std::string> lookup_variable (const std::string& name,
 const VariableValues& vars,
-const BoundColumnNames& bound_columns) {
+const BoundColumnNames& bound_columns,
+DynamicResolution dynamic) {
     // Before the scopes, not after: the namespace is disjoint from them, so
     // a variable someone named `data.id` must not answer for the column.
     if (is_data_variable_name (name)) {
@@ -591,6 +600,16 @@ const BoundColumnNames& bound_columns) {
         return defined->second;
     }
     if (is_dynamic_variable_name (name)) {
+        // Deferred in the generator's own position rather than beside the two
+        // reserved namespaces above, and that placement is the rule (issue
+        // #995): a scope that defines `$guid` still answers for the token here,
+        // exactly as it does when this composition generates, so the name means
+        // the same thing whether a Send or a run is composing. What `Defer`
+        // changes is only *when* the table runs - the token survives, and
+        // `core::apply_iteration_template` generates it per iteration.
+        if (dynamic == DynamicResolution::Defer && is_generator_variable_name (name)) {
+            return std::nullopt;
+        }
         return resolve_dynamic_variable (name); // unknown $name keeps its braces (#186)
     }
     // An unknown ordinary name keeps its braces too (#1009), on the rule the
@@ -605,9 +624,11 @@ const BoundColumnNames& bound_columns) {
 
 std::string resolve_template (const std::string& input,
 const VariableValues& vars,
-const BoundColumnNames& bound_columns) {
-    return substitute_tokens (input, [&vars, &bound_columns] (const std::string& name) {
-        return lookup_variable (name, vars, bound_columns);
+const BoundColumnNames& bound_columns,
+DynamicResolution dynamic) {
+    return substitute_tokens (
+    input, [&vars, &bound_columns, dynamic] (const std::string& name) {
+        return lookup_variable (name, vars, bound_columns, dynamic);
     });
 }
 
@@ -640,7 +661,8 @@ std::optional<std::string>& missing_column) {
             if (const auto cell = row.columns.find (name); cell != row.columns.end ()) {
                 return cell->second;
             }
-            return lookup_variable (name, vars, no_bound_columns ());
+            return lookup_variable (
+            name, vars, no_bound_columns (), DynamicResolution::Generate);
         }
         const std::string column = name.substr (DATA_NAMESPACE_PREFIX.size ());
         if (const auto cell = row.columns.find (column); cell != row.columns.end ()) {
@@ -682,10 +704,12 @@ struct HeaderTextRefusal {
 std::string resolve_header_template (const std::string& input,
 const VariableValues& vars,
 const BoundColumnNames& bound_columns,
+DynamicResolution dynamic,
 std::optional<HeaderTextRefusal>& refusal) {
     return substitute_tokens (input,
-    [&vars, &bound_columns, &refusal] (const std::string& name) -> std::optional<std::string> {
-        auto value = lookup_variable (name, vars, bound_columns);
+    [&vars, &bound_columns, dynamic, &refusal] (
+    const std::string& name) -> std::optional<std::string> {
+        auto value = lookup_variable (name, vars, bound_columns, dynamic);
         if (!value || refusal) {
             return value; // nothing substituted, or already refused - first wins
         }
@@ -1015,7 +1039,8 @@ struct ResolvedHeaders {
  */
 ResolvedHeaders resolve_header_block (const nlohmann::json& headers,
 const VariableValues& vars,
-const BoundColumnNames& bound_columns) {
+const BoundColumnNames& bound_columns,
+DynamicResolution dynamic) {
     ResolvedHeaders out;
     // Each resolved name, against the name as written that produced it. The
     // second half is what separates a collision resolution *made* from two
@@ -1025,7 +1050,7 @@ const BoundColumnNames& bound_columns) {
     std::map<std::string, std::string, vayu::CaseInsensitiveLess> produced;
     for (const auto& [key, value] : headers.items ()) {
         const std::string name =
-        resolve_header_template (key, vars, bound_columns, out.unspellable);
+        resolve_header_template (key, vars, bound_columns, dynamic, out.unspellable);
         const auto [taken, was_free] = produced.emplace (name, key);
         const bool resolution_made_it = name != key || taken->second != taken->first;
         if (!was_free && resolution_made_it && !out.collision) {
@@ -1033,8 +1058,8 @@ const BoundColumnNames& bound_columns) {
             vayu::http::HeaderNameCollision{ key, taken->second, taken->first };
         }
         out.headers[name] = value.is_string () ?
-        nlohmann::json (resolve_header_template (
-        value.get<std::string> (), vars, bound_columns, out.unspellable)) :
+        nlohmann::json (resolve_header_template (value.get<std::string> (),
+        vars, bound_columns, dynamic, out.unspellable)) :
         value;
     }
     return out;
@@ -1054,6 +1079,7 @@ const BoundColumnNames& bound_columns) {
  */
 std::optional<std::pair<int, nlohmann::json>> resolve_compose_head (const VariableValues& vars,
 const BoundColumnNames& bound_columns,
+DynamicResolution dynamic,
 nlohmann::json& payload) {
     if (auto method = payload.find ("method");
     method != payload.end () && method->is_string ()) {
@@ -1064,12 +1090,12 @@ nlohmann::json& payload) {
     }
 
     if (auto url = payload.find ("url"); url != payload.end () && url->is_string ()) {
-        *url = resolve_template (url->get<std::string> (), vars, bound_columns);
+        *url = resolve_template (url->get<std::string> (), vars, bound_columns, dynamic);
     }
 
     if (auto headers = payload.find ("headers");
     headers != payload.end () && headers->is_object ()) {
-        auto resolved = resolve_header_block (*headers, vars, bound_columns);
+        auto resolved = resolve_header_block (*headers, vars, bound_columns, dynamic);
         if (resolved.unspellable) {
             return compose_error (400, "unsendable_header",
             describe_header_text_refusal (*resolved.unspellable));
@@ -1092,13 +1118,15 @@ nlohmann::json& payload) {
  */
 void resolve_form_field (const VariableValues& vars,
 const BoundColumnNames& bound_columns,
+DynamicResolution dynamic,
 nlohmann::json& field) {
     if (!field.is_object ()) {
         return;
     }
     for (const char* name : { "key", "value", "src", "fileName", "contentType" }) {
         if (auto entry = field.find (name); entry != field.end () && entry->is_string ()) {
-            *entry = resolve_template (entry->get<std::string> (), vars, bound_columns);
+            *entry = resolve_template (
+            entry->get<std::string> (), vars, bound_columns, dynamic);
         }
     }
 }
@@ -1106,6 +1134,7 @@ nlohmann::json& field) {
 /** The body: its content, and every string its form fields carry. */
 void resolve_compose_body (const VariableValues& vars,
 const BoundColumnNames& bound_columns,
+DynamicResolution dynamic,
 nlohmann::json& payload) {
     auto it = payload.find ("body");
     if (it == payload.end ()) {
@@ -1121,11 +1150,12 @@ nlohmann::json& payload) {
         return;
     }
     if (auto content = it->find ("content"); content != it->end () && content->is_string ()) {
-        *content = resolve_template (content->get<std::string> (), vars, bound_columns);
+        *content =
+        resolve_template (content->get<std::string> (), vars, bound_columns, dynamic);
     }
     if (auto fields = it->find ("fields"); fields != it->end () && fields->is_array ()) {
         for (auto& field : *fields) {
-            resolve_form_field (vars, bound_columns, field);
+            resolve_form_field (vars, bound_columns, dynamic, field);
         }
     }
 }
@@ -1190,6 +1220,33 @@ read_bound_columns (const nlohmann::json& body, BoundColumnNames& out) {
     return std::nullopt;
 }
 
+/**
+ * The `deferDynamicVariables` field: whether this composition is for a payload
+ * a run will repeat (issue #995).
+ *
+ * A boolean rather than a run kind, because that is the whole of what
+ * composition needs to know - "somebody else sends this many times, so a value
+ * generated here would be that many identical values". The run paths set it;
+ * a Send, a preview and every client that omits it compose as they always did.
+ *
+ * @return the refusal, or nothing (with @p out filled).
+ */
+std::optional<std::pair<int, nlohmann::json>>
+read_dynamic_resolution (const nlohmann::json& body, DynamicResolution& out) {
+    const auto field = body.find ("deferDynamicVariables");
+    if (field == body.end () || field->is_null ()) {
+        return std::nullopt;
+    }
+    if (!field->is_boolean ()) {
+        return compose_error (400, "invalid_compose_request",
+        "'deferDynamicVariables' must be a boolean - it says whether this "
+        "payload is composed for a run that will repeat it, so the "
+        "{{$guid}} family is generated per iteration rather than once here");
+    }
+    out = field->get<bool> () ? DynamicResolution::Defer : DynamicResolution::Generate;
+    return std::nullopt;
+}
+
 } // namespace
 
 std::pair<int, nlohmann::json>
@@ -1216,6 +1273,11 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
 
     BoundColumnNames bound_columns;
     if (auto refusal = read_bound_columns (body, bound_columns)) {
+        return *refusal;
+    }
+
+    DynamicResolution dynamic = DynamicResolution::Generate;
+    if (auto refusal = read_dynamic_resolution (body, dynamic)) {
         return *refusal;
     }
 
@@ -1246,10 +1308,17 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
         }
     }
 
-    if (auto refusal = resolve_compose_head (vars, bound_columns, payload)) {
+    if (auto refusal = resolve_compose_head (vars, bound_columns, dynamic, payload)) {
         return *refusal;
     }
-    resolve_compose_body (vars, bound_columns, payload);
+    resolve_compose_body (vars, bound_columns, dynamic, payload);
+    // The request half only: a credential is *encoded* when the request is
+    // built - `apply_auth` collapses basic auth into one base64 value - so a
+    // token left for the bind would go out as base64 of its own text. Deferring
+    // the build is what a `{{data.*}}` credential needs (issue #591) and what
+    // the identity is waiting on (issue #1055); until that is decided by what
+    // the credentials carry rather than by whether the run has rows, a
+    // generator in a credential is generated here, once, exactly as it was.
     resolve_compose_auth (chain, vars, bound_columns, payload);
 
     // Scripts are never interpolated (D16): a `{{...}}` inside script text is

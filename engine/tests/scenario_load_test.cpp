@@ -21,6 +21,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -236,15 +237,24 @@ class ScenarioLoadTest : public ::testing::Test {
         return state;
     }
 
-    /// Tokenise every step of @p execution the way plan resolution does, and
-    /// give the run @p rows. Going through `tokenize_bindable_fields` rather than
-    /// hand-building a template is deliberate: a test that built its own would
-    /// pass against a splitter the resolver never uses.
-    static void with_data (vayu::core::ScenarioExecution& execution,
-    const std::vector<json>& rows) {
+    /// Tokenise every step of @p execution the way plan resolution does.
+    /// Going through `tokenize_bindable_fields` rather than hand-building a
+    /// template is deliberate: a test that built its own would pass against a
+    /// splitter the resolver never uses.
+    ///
+    /// Rows are a separate question - a deferred generator (issue #995) and the
+    /// iteration identity bind off the iteration alone - so a run without a
+    /// data set splits its steps through this and stops here.
+    static void split_steps (vayu::core::ScenarioExecution& execution) {
         for (auto& step : execution.plan.steps) {
             step.data_template = vayu::core::tokenize_bindable_fields (step.request);
         }
+    }
+
+    /// @copydoc split_steps, and give the run @p rows.
+    static void with_data (vayu::core::ScenarioExecution& execution,
+    const std::vector<json>& rows) {
+        split_steps (execution);
         execution.data_rows = rows;
     }
 
@@ -1066,6 +1076,56 @@ TEST_F (ScenarioLoadTest, AQuoteBearingCellReachesTheWireAsValidJson) {
     ASSERT_FALSE (sent.is_discarded ())
     << "a bound body reached the wire unparseable: " << hits[0].body;
     EXPECT_EQ (sent.at ("note").get<std::string> (), R"(has,comma "quoted")");
+}
+
+// Issue #995, on the scenario path and across virtual users: every send
+// generates its own value, and the sends are on the executor's worker threads,
+// so a generator with shared unsynchronised state would show up here as a
+// repeated or torn id rather than as a clean set.
+TEST_F (ScenarioLoadTest, EveryIterationOfEveryUserGeneratesItsOwnValue) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/row/{{$randomUUID}}") });
+    split_steps (execution);
+
+    const json config = { { "mode", "iterations" }, { "iterations", 8 },
+        { "concurrency", 4 } };
+    run (config, execution);
+
+    const auto hits = server.hits ();
+    ASSERT_EQ (hits.size (), 8u);
+    std::set<std::string> distinct;
+    for (const auto& hit : hits) {
+        EXPECT_NE (hit.path, "/row/{{$randomUUID}}")
+        << "the token reached the wire as it stands";
+        distinct.insert (hit.path);
+    }
+    EXPECT_EQ (distinct.size (), hits.size ())
+    << "two sends carried the same generated id";
+}
+
+// A generated value is written for the document it lands in, exactly as a
+// cell is: inside a JSON string literal it is escaped, so the body stays
+// parseable whatever the table produced.
+TEST_F (ScenarioLoadTest, AGeneratedValueBindsIntoAJsonBodyAsAStringsContent) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/body") });
+    execution.plan.steps[0].request.method    = vayu::HttpMethod::POST;
+    execution.plan.steps[0].request.body.mode = vayu::BodyMode::Json;
+    execution.plan.steps[0].request.body.content =
+    R"({"who":"u","id":"{{$guid}}","note":"{{$randomLoremSentence}}"})";
+    split_steps (execution);
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    const auto hits = server.hits_for ("/body");
+    ASSERT_EQ (hits.size (), 1u);
+    const auto sent = json::parse (hits[0].body, nullptr, false);
+    ASSERT_FALSE (sent.is_discarded ())
+    << "a bound body reached the wire unparseable: " << hits[0].body;
+    EXPECT_NE (sent.at ("id").get<std::string> (), "{{$guid}}");
+    EXPECT_FALSE (sent.at ("note").get<std::string> ().empty ());
 }
 
 // A null cell is refused under load the same way a missing column is: nothing
