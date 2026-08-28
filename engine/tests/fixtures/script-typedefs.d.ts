@@ -710,7 +710,7 @@ declare const pm: {
 		/**
 		 * Fail here, as an assertion rather than as an error.
 		 * 
-		 * Inside pm.test it fails that test; outside one it records an assertion failure the way every other matcher does, where a thrown Error would abort the script.
+		 * Inside pm.test it fails that test; outside one it aborts the script as a failed assertion - an AssertionError carrying the message, rather than as the TypeError a misuse reports.
 		 * 
 		 * chai's fail(actual, expected, message, operator) form is not supported - this AssertionError has nowhere to carry the two compared values, so more than one argument is refused rather than read as the message.
 		 */

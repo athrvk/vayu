@@ -3105,10 +3105,10 @@ JSValue js_pm_expect (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
  * @brief chai's `expect.fail([message])` - fail here, with this message.
  *
  * It is the one way a script states a failure *as an assertion* rather than as
- * an error: inside `pm.test` both fail the test, but at script level a thrown
- * `Error` aborts the script while this records what every other matcher
- * records. Reached as a property of the `pm.expect` function itself, which is
- * how chai spells it.
+ * an error: inside `pm.test` both fail the test, and at script level both abort
+ * - what differs is the shape the verdict carries, an `AssertionError` with
+ * this message rather than the `TypeError` a misuse reports. Reached as a
+ * property of the `pm.expect` function itself, which is how chai spells it.
  *
  * chai's four-argument form (`actual, expected, message, operator`) builds an
  * AssertionError carrying the two values it compared; this AssertionError has

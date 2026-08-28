@@ -119,9 +119,12 @@ try {
 ```
 
 **`pm.expect.fail([message])` fails on the spot**, as an assertion rather than
-as an error (issue #1004). It is chai's `expect.fail`, and the distinction is
-what it does *outside* a `pm.test`: a thrown `Error` there aborts the script,
-while this reports the same `AssertionError` every matcher reports.
+as an error (issue #1004). It is chai's `expect.fail`, and it throws the same
+`AssertionError` every matcher does - so *outside* a `pm.test` it aborts the
+script, the way any uncaught throw does. What it changes there is the shape of
+the verdict, not whether the script stops: the run is reported as a failed
+assertion carrying this message, rather than as the `TypeError` a misuse
+reports.
 
 ```javascript
 pm.test('no branch reached the response', function() {
