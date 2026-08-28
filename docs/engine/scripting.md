@@ -1975,7 +1975,14 @@ The **language** is current; what is missing is the **host environment**:
   engine. Configurable via the `scriptTimeout` setting (milliseconds); `0` disables
   the limit. The deadline is checked *between bytecode operations*, so it cannot
   interrupt a blocking call - which is why `pm.sendRequest` clamps its own
-  timeout to the budget that is left rather than relying on it.
+  timeout to the budget that is left rather than relying on it. A function an
+  assertion calls - `pm.expect(fn).to.throw()`, `.to.satisfy(fn)` - is stopped
+  by the same deadline, and that is **reported as the abort it is**, never as a
+  satisfied assertion: the engine stopped `fn`, `fn` did not throw. Inside a
+  `pm.test` that is a failed test, since `pm.test` reports what its callback
+  threw; outside one it ends the script. A later assertion in the same script is
+  still judged on its own, and a stack overflow inside such a function is a
+  `RangeError` the script could have caught, so that still counts as a throw.
 
 ## Script Execution Context
 
