@@ -268,48 +268,49 @@ what they mean beside a bound row.
 user's iterations it is, 0-based. They are reserved names and not variables - a
 variable of either name does not answer for the identity - and they are
 substituted immediately before each send, so every iteration carries its own
-numbers. Neither needs a file: the identity comes from the iteration, so
-`user-{{$vu}}` binds on a load run with no rows at all. What each shape of run
-answers is tabulated under [`$vu` and `$iteration` are reserved
+numbers. Neither needs a file: the identity comes from the iteration rather than
+from a row, so both bind on a load run carrying no data at all. What each shape
+of run answers is tabulated under [`$vu` and `$iteration` are reserved
 too](variable-resolution.md#vu-and-iteration-are-reserved-too-for-the-same-reason);
 the shape to know here is that **a single request's load test is one user's
 iterations**, so `{{$vu}}` is `1` there and `{{$iteration}}` is the counter that
 varies - the same counter the row cursor claims from, so iteration `i` holds row
 `i % rows`. A script renders them with `pm.variables.replaceIn("{{$vu}}")`
 (issue #1057), which reads the identity the request beside it was bound with.
-Only those two spellings are reserved: `{{$vus}}` is an ordinary unknown name
-and is sent with its braces.
 
 **The `{{$guid}}` family generates per iteration** (issue #995). A run's request
-is composed once and then repeated, so a generator resolved at composition would
-put one id on every request of every user - the opposite of what a unique-id
-token is written for. Under a run the family is left written as it stands and a
-fresh value is generated per occurrence, immediately before each send: two
-`{{$guid}}` in one body are two different ids, on every iteration. A plain Send
-still generates once, because it composes once and sends once. The generators
-are listed in [the dynamic variables
-table](variable-resolution.md#dynamic-variables).
+is composed once and then repeated, so the generators are left written as they
+stand and a fresh value is produced per occurrence, immediately before each
+send: two `{{$guid}}` in one body are two different ids, on every iteration. A
+plain Send still generates at composition, because it composes once and sends
+once. Which names generate, and why a run defers them, is [the dynamic
+variables table](variable-resolution.md#dynamic-variables).
 
 **All three at once.** A collection load run of 20 users, driven by a
 `tokens.csv` of `user,token`, sending a request whose bearer token is
 `{{data.token}}`, whose `X-Client` header is `vu-{{$vu}}` and whose body carries
 `"requestId": "{{$guid}}"`:
 
-| Token            | Where its value comes from     | What it varies with                                 |
-| ---------------- | ------------------------------ | --------------------------------------------------- |
-| `{{data.token}}` | the row this iteration claimed | per iteration, off the shared cursor                |
+| Token            | Where its value comes from     | What it varies with                                  |
+| ---------------- | ------------------------------ | ---------------------------------------------------- |
+| `{{data.token}}` | the row this iteration claimed | per iteration, off the shared cursor                 |
 | `{{$vu}}`        | the user sending it            | per virtual user, the same across that user's passes |
-| `{{$guid}}`      | generated at the send          | per occurrence, per iteration                       |
+| `{{$guid}}`      | generated at the send          | per occurrence, per iteration                        |
 
-Credentials bind before they are encoded, so the `Authorization` header carries
-that row's token rather than base64 of the token's text - the rule [Send with a
-row](#send-with-a-row) states, and it holds for `{{$vu}}` and `{{$iteration}}`
-in a credential too (issue #1055). A **generator** in a credential is the
-exception: it is still resolved once, at composition, since a value left for the
-bind would go out as base64 of its own name - so write `{{$guid}}` into the body
-or a header rather than into a bearer token. OAuth 2.0 is outside all of it: its
-token is acquired once, before any iteration exists, so a row or an identity
-token in its config is refused by name rather than sent wrong.
+Write `user-{{$vu}}` into a basic-auth username instead of that header and it
+binds there too (issue #1055), even on a run with no data file at all: what
+defers a credential's build is the token the credential carries, not whether the
+run has rows to bind.
+
+Credentials bind before the request's auth is applied, so a row or an identity
+token reaches the credential itself rather than the header the credential is
+built into - the order [Send with a row](#send-with-a-row) describes. Basic
+auth is where the order shows, since it collapses username and password into one
+base64 value: a token still unbound by then would go out as base64 of its own
+text. That is also why a **generator** in a credential is resolved at
+composition rather than deferred like the rest - write `{{$guid}}` into the body
+or a header instead. OAuth 2.0 takes none of the three, for the reason that same
+section gives.
 
 This is also the answer when the file is smaller than the concurrency. Rows
 repeat once the cursor wraps, while `{{$vu}}` and `{{$iteration}}` together name
