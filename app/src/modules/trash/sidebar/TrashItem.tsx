@@ -66,7 +66,9 @@ export default function TrashItem({
 		// `surface-card` + `border-rule` rather than a border token: `--border` on
 		// `--card` is the same colour in dark, so the row would have no edge. See
 		// RunItem, which carries the same pair for the same reason.
-		<div className="group relative surface-card border border-rule rounded-md overflow-hidden w-full">
+		// No `group`: nothing here reveals on hover, so a group class would be a
+		// hook with nothing hanging off it.
+		<div className="surface-card border border-rule rounded-md overflow-hidden w-full">
 			<div className="flex items-center gap-2 px-3 py-2 min-w-0">
 				<KindIcon className="w-4 h-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 
