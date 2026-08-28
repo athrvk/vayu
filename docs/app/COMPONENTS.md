@@ -1406,8 +1406,10 @@ and the half no colour assertion catches. Each reference now also carries a
 bare column names through `pm.variables`: the same name through
 `pm.environment.get` is a variable read and through `pm.variables.get` may be a
 column one, so the syntax alone can no longer decide what a chip may claim. The
-decision is `describeColumnReference`'s, beside the helper, and it resolves to
-`describeDataToken`'s own tones - a `row` read is a column in every state it can
+decision is `describeColumnReference`'s, beside the helper, and it answers with
+`describeColumnToken` - the same three states `describeDataToken` reaches for a
+`data.*` name, split out of it so the prefixed and bare spellings share one
+rule. A `row` read is a column in every state it can
 be in, including "no contract declared", while a `merged` read is a column only
 while the name is a declared column no scope defines, which is the line
 `VariableInput` already draws for a bare `{{email}}`. Everything else keeps the

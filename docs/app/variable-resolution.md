@@ -737,7 +737,7 @@ list is deliberately *not* registered for `javascript`: braces are not the
 syntax in a script, so offering them there would teach the wrong thing. The
 names are the same names; only the place you type them differs.
 
-Three rules make the offered set match what the call can actually read:
+These rules make the offered set match what the call can actually read:
 
 - **The accessor picks the scope.** `pm.environment.get` lists environment
   variables only, because that is the one scope it reads - a collection

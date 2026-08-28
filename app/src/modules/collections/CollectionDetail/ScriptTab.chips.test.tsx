@@ -210,6 +210,42 @@ describe.each(["pre", "post"] as const)("%s-request script tab", (kind) => {
 			expect(chip.className).not.toContain("bg-destructive");
 		});
 
+		it("stays a column with no contract in scope, not an undefined variable", () => {
+			/*
+			 * The third state, and the one that has to answer rather than fall
+			 * through: a column can never be in the scopes, so handing it the
+			 * ordinary pm paint would call every column read undefined - which is
+			 * the reading #604 removed. The request panel pins this too; both
+			 * surfaces need it, because either could regress alone.
+			 */
+			const { container } = render(
+				<ScriptTab collection={makeCollection(COLUMNS)} kind={kind} />
+			);
+
+			for (const text of ["{{data.email}}", "zip"]) {
+				const chip = chipFor(container, text);
+				expect(chip, `no chip for ${text}`).toBeTruthy();
+				expect(chip!.className).toContain("text-muted-foreground");
+				expect(chip!.className).not.toContain("text-variable");
+			}
+		});
+
+		it("does not tell a pm read that its characters reach the script verbatim", () => {
+			// The tooltip half of parity with the request panel: the interpolation
+			// note belongs to the spelling that is literal characters.
+			contract.value = { collectionName: "Orders", columns: ["email"] };
+			const { container } = render(
+				<ScriptTab
+					collection={makeCollection('pm.variables.get("data.email");')}
+					kind={kind}
+				/>
+			);
+
+			const title = chipFor(container, "data.email")!.getAttribute("title")!;
+			expect(title).toContain("declared in Orders");
+			expect(title).not.toContain("not interpolated");
+		});
+
 		it("leaves a pm.variables read as the variable a scope defines", () => {
 			// The same line the request panel draws, and `VariableInput` before
 			// it: which of the two wins on screen is issue #1064's question.

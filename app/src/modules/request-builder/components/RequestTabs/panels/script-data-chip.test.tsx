@@ -264,6 +264,23 @@ describe("a column read through pm, by its bare name", () => {
 		expect(chipFor(container, "city").className).toContain("text-muted-foreground");
 	});
 
+	it("does not tell a pm read that its characters reach the script verbatim", () => {
+		/*
+		 * A `data.*` name reached through `pm.*.get()` takes the column paint,
+		 * but not the interpolation note beside it: that note belongs to the
+		 * spelling that really is literal characters, and on a call it describes
+		 * something the author did not write. The collection tab draws the same
+		 * line (issue #1075), and the two must not answer this differently.
+		 */
+		script.value = 'const a = pm.variables.get("data.email");';
+		contract.value = { collectionName: "Orders", columns: ["email"] };
+		const { container } = render(<ScriptPanel variant="pre" />);
+
+		const title = chipFor(container, "data.email").getAttribute("title")!;
+		expect(title).toContain("declared in Orders");
+		expect(title).not.toContain("not interpolated");
+	});
+
 	it("keeps the destructive chip for a pm.variables read that names no column", () => {
 		// The merged accessor is still a variable read for every other name, and
 		// this is the case that proves the new branch did not swallow the old one.

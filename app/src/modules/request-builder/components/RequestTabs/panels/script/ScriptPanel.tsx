@@ -123,7 +123,18 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 										"font-mono text-xs bg-muted",
 										DATA_TOKEN_TONE_CLASS[data.tone]
 									)}
-									title={`${data.description} - ${data.note} ${TEMPLATE_IN_SCRIPT_NOTE}`}
+									/*
+									 * The interpolation note belongs to the spelling
+									 * that is literal characters. A `data.*` name
+									 * read through `pm.*.get()` is a real call, so
+									 * telling its author the text reaches the script
+									 * verbatim describes something else entirely.
+									 */
+									title={
+										via === "template"
+											? `${data.description} - ${data.note} ${TEMPLATE_IN_SCRIPT_NOTE}`
+											: `${data.description} - ${data.note}`
+									}
 								>
 									{name}
 								</Badge>
