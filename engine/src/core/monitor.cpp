@@ -14,6 +14,7 @@
 #include <string_view>
 
 #include "vayu/db/database.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::core {
 
@@ -25,10 +26,8 @@ bool starts_with_ci (const std::string& text, std::string_view prefix) {
     if (text.size () < prefix.size ()) {
         return false;
     }
-    return std::equal (prefix.begin (), prefix.end (), text.begin (), [] (char a, char b) {
-        return std::tolower (static_cast<unsigned char> (a)) ==
-        std::tolower (static_cast<unsigned char> (b));
-    });
+    return vayu::utils::ascii_lower_equal (
+    std::string_view (text).substr (0, prefix.size ()), prefix);
 }
 
 /** The scrape cadence, when the block names one of its own. */

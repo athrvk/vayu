@@ -19,6 +19,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/operation_match.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 #include <algorithm>
 #include <array>
@@ -75,13 +76,6 @@ constexpr std::array<std::string_view, 8> PATH_ITEM_METHODS = { "get", "put",
 constexpr std::array<std::string_view, 2> NON_PARAMETER_HEADERS = {
     "authorization", "content-type"
 };
-
-std::string lower (std::string_view text) {
-    std::string out (text);
-    std::transform (out.begin (), out.end (), out.begin (),
-    [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
-    return out;
-}
 
 std::string upper (std::string_view text) {
     std::string out (text);
@@ -440,10 +434,10 @@ void patch_parameters (Json& operation, const ExportRequest& entry, ExportNotes&
         } else {
             continue;
         }
-        const std::string wanted = lower (name);
+        const std::string wanted = vayu::utils::ascii_lower (name);
         const auto row           = std::find_if (
         rows->begin (), rows->end (), [&] (const ExportKeyValue& candidate) {
-            return lower (candidate.key) == wanted;
+            return vayu::utils::ascii_lower (candidate.key) == wanted;
         });
         if (row == rows->end () || row->value.empty ()) {
             continue;
@@ -825,7 +819,7 @@ Json operation_object (const ExportRequest& entry, const std::string& templated,
         }
     }
     for (const ExportKeyValue& row : entry.headers) {
-        const std::string key = lower (row.key);
+        const std::string key = vayu::utils::ascii_lower (row.key);
         if (row.key.empty () ||
         std::find (NON_PARAMETER_HEADERS.begin (), NON_PARAMETER_HEADERS.end (),
         key) != NON_PARAMETER_HEADERS.end ()) {
@@ -872,7 +866,7 @@ const std::vector<ExportRequest>& requests) {
             continue;
         }
         const std::string templated = path_template (*parts.path);
-        const std::string method    = lower (entry.method);
+        const std::string method    = vayu::utils::ascii_lower (entry.method);
         if (!claimed.insert (std::format ("{} {}", method, templated)).second) {
             // Two requests on the same method and path are one operation in a
             // document, and the second would silently replace the first.

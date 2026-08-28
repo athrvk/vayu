@@ -38,6 +38,7 @@
 #include "openapi_walk.hpp"
 
 #include "vayu/core/path_template.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 #include <algorithm>
 #include <array>
@@ -445,7 +446,7 @@ ImportTally* tally) {
 /// Headers a request produces for itself rather than holding as a row: the
 /// `Authorization` its auth writes and the `Content-Type` its body names.
 bool is_self_produced_header (const std::string& name) {
-    const std::string lower = walk::lower (name);
+    const std::string lower = vayu::utils::ascii_lower (name);
     return lower == "authorization" || lower == "content-type";
 }
 
@@ -503,7 +504,7 @@ std::string path_folder_name (const std::string& path) {
         if (templated) {
             continue;
         }
-        if (is_version_segment (segment) || walk::lower (segment) == "api") {
+        if (is_version_segment (segment) || vayu::utils::ascii_lower (segment) == "api") {
             continue;
         }
         return segment;
@@ -886,7 +887,7 @@ std::string media_type (const json& value) {
         return {};
     }
     const size_t end = text.find_last_not_of (" \t\n\r\f\v");
-    return walk::lower (text.substr (begin, end - begin + 1));
+    return vayu::utils::ascii_lower (text.substr (begin, end - begin + 1));
 }
 
 /// The operation's `consumes`, falling back to the document's. Entries that are

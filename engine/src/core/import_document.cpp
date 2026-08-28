@@ -25,6 +25,7 @@
 
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/path_template.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 #include <algorithm>
 #include <array>
@@ -271,7 +272,8 @@ json with_required_content_type (json headers, const json& body) {
         return headers;
     }
     for (const json& header : headers) {
-        const std::string key = walk::lower (header.at ("key").get<std::string> ());
+        const std::string key =
+        vayu::utils::ascii_lower (header.at ("key").get<std::string> ());
         const size_t begin        = key.find_first_not_of (" \t\n\r\f\v");
         const std::string trimmed = begin == std::string::npos ?
         std::string () :
@@ -979,7 +981,7 @@ json pm_examples (const json* item, PostmanCounts& counts) {
         const json* name = prop (saved, "name");
         std::string content_type;
         for (const json& header : headers) {
-            if (walk::lower (header.at ("key").get<std::string> ()) == "content-type") {
+            if (vayu::utils::ascii_lower (header.at ("key").get<std::string> ()) == "content-type") {
                 content_type = header.at ("value").get<std::string> ();
                 break;
             }
@@ -1276,7 +1278,7 @@ json insomnia_bearer (const json* auth) {
     prefix                  = begin == std::string::npos ?
                      std::string () :
                      prefix.substr (begin, prefix.find_last_not_of (" \t\n\r\f\v") - begin + 1);
-    if (!prefix.empty () && walk::lower (prefix) != "bearer") {
+    if (!prefix.empty () && vayu::utils::ascii_lower (prefix) != "bearer") {
         std::string value = prefix + " " + token;
         const size_t last = value.find_last_not_of (" \t\n\r\f\v");
         value = last == std::string::npos ? std::string () : value.substr (0, last + 1);

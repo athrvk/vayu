@@ -12,6 +12,7 @@
 #include <cctype>
 #include <cstdint>
 
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/sha256.hpp"
 
@@ -95,10 +96,7 @@ std::string media_type (std::string_view content_type) {
         head.remove_suffix (1);
     }
 
-    std::string out (head);
-    std::transform (out.begin (), out.end (), out.begin (),
-    [] (unsigned char ch) { return static_cast<char> (std::tolower (ch)); });
-    return out;
+    return vayu::utils::ascii_lower (head);
 }
 
 bool looks_binary (std::string_view body, std::string_view content_type) {

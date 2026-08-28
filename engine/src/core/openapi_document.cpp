@@ -20,6 +20,7 @@
 #include "openapi_walk.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 #include <algorithm>
 #include <array>
@@ -48,7 +49,6 @@ namespace limits = vayu::core::constants::spec_document;
 // live in `openapi_walk.hpp` so `openapi_drafts.cpp` reads the *same* operations
 // this file indexes (issue #865).
 using walk::find_object;
-using walk::lower;
 using walk::resolve_single_hop;
 using walk::walk_operations;
 using walk::WalkedOperation;
@@ -826,8 +826,8 @@ const nlohmann::ordered_json& operation) {
             if (schema == media.value ().end () || !is_schema (*schema)) {
                 continue;
             }
-            declared.push_back (
-            declared_response (entry.key (), lower (media.key ()), *schema));
+            declared.push_back (declared_response (
+            entry.key (), vayu::utils::ascii_lower (media.key ()), *schema));
         }
     }
     return declared;
@@ -854,7 +854,7 @@ const nlohmann::ordered_json& operation) {
     if (produces != nullptr) {
         for (const auto& type : *produces) {
             if (type.is_string () && !type.get<std::string> ().empty ()) {
-                types.push_back (lower (type.get<std::string> ()));
+                types.push_back (vayu::utils::ascii_lower (type.get<std::string> ()));
             }
         }
     }
