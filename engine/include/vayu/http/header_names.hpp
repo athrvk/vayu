@@ -8,10 +8,16 @@
  */
 
 #include <string>
+#include <string_view>
 
 /**
  * @file header_names.hpp
- * @brief When two header names become one - one rule, one place.
+ * @brief What resolution can do to a header *name* - the rules, one place.
+ *
+ * Two of them, both about a name a variable produced rather than a name the
+ * author typed: two names that become one (below), and a name that becomes
+ * nothing at all (`describe_empty_header_name`). Neither is visible from the
+ * response, and neither is caught anywhere further down the send.
  *
  * A header name is substituted like any other field, and the map it lands in
  * holds one value per name. So two names that resolve alike do not both go out:
@@ -69,6 +75,32 @@
  * rule is enforced where the map is rebuilt rather than checked once before the
  * transfer: by the time the gate sees a request, the collision has already
  * happened and the erased header is simply not there to notice.
+ *
+ * ## The name that resolves to nothing
+ *
+ * `describe_empty_header_name` is the second rule, and it is the same argument
+ * one step further: `{{blank}}: acme` with `blank` empty is not a header the
+ * author can see either, and the gate is no backstop for it for the same reason
+ * - it reads header text for the bytes that break a line, and an empty name
+ * breaks nothing. What is left goes out as the line `": acme"`, under no name
+ * at all. The three layers that resolve a name refuse it: composition and the
+ * residual pass (issue #1084) and `pm.sendRequest` (issue #1067), which met it
+ * first because a script writes header names of its own.
+ *
+ * Unlike a collision, composition refuses this one however the name got there.
+ * A collision has to be one resolution produced, because two names the author
+ * typed are two lines they can see; a name that is not there is nothing to see
+ * whoever wrote it. In practice both flattenings that feed composition - the
+ * stored one and the renderer's - drop such a row before it arrives, so what
+ * that catches beyond a produced name is a caller that built the payload
+ * itself.
+ *
+ * The other two layers see less, and neither rule pretends otherwise: the
+ * residual pass reads a name only where the name held a `{{token}}`, so a
+ * payload posted straight to `POST /execute` carrying an already-empty name is
+ * composition's to refuse and this pass never looks at it - the same reach the
+ * collision rule has there - and a name bound from a data row has no rule of
+ * its own yet, where the collision rule does (issue #1095).
  */
 
 namespace vayu::http {
@@ -97,5 +129,27 @@ struct HeaderNameCollision {
  * were three. A layer may name itself in front of the wording, never inside it.
  */
 [[nodiscard]] std::string describe_header_name_collision (const HeaderNameCollision& collision);
+
+/**
+ * @brief The refusal a header name that resolved to nothing reads as.
+ *
+ * One wording for the same three layers, on the reasoning above: a caller
+ * meeting this at composition and again at execute time is meeting one rule,
+ * and three spellings of it would read as three. A layer may name itself in
+ * front of the wording, never inside it.
+ *
+ * @param written the name as the request carries it, before resolution. It is
+ *        the whole of what the message can name - what the name produced is
+ *        nothing, and `{{blank}}` is what the author has to go and look at.
+ */
+[[nodiscard]] std::string describe_empty_header_name (const std::string& written);
+
+/// The `POST /compose` refusal code each rule answers under, beside its wording
+/// for the same reason: a layer with no `400` of its own still names the rule by
+/// one - a streaming send reports the residual pass's refusal as a `400`, and a
+/// code spelled at that site is a code that drifts from the rule it names.
+inline constexpr std::string_view COLLIDING_HEADER_NAMES_CODE =
+"colliding_header_names";
+inline constexpr std::string_view EMPTY_HEADER_NAME_CODE = "empty_header_name";
 
 } // namespace vayu::http

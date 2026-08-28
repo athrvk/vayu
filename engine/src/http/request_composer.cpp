@@ -820,7 +820,7 @@ namespace {
 // Builds through routes.hpp's error_body so /compose carries the same nested
 // shape as every other route (issue #173 landed while #226 was in flight).
 std::pair<int, nlohmann::json>
-compose_error (int status, const char* code, const std::string& message) {
+compose_error (int status, std::string_view code, const std::string& message) {
     return { status, routes::error_body (status, message, code) };
 }
 
@@ -1021,6 +1021,8 @@ struct ResolvedHeaders {
     std::optional<HeaderTextRefusal> unspellable;
     /// Two names that resolved to one (#1051).
     std::optional<vayu::http::HeaderNameCollision> collision;
+    /// A name that resolved to nothing, as it was written (#1084).
+    std::optional<std::string> nameless;
 };
 
 /**
@@ -1051,6 +1053,11 @@ DynamicResolution dynamic) {
     for (const auto& [key, value] : headers.items ()) {
         const std::string name =
         resolve_header_template (key, vars, bound_columns, dynamic, out.unspellable);
+        if (name.empty () && !out.nameless) {
+            // However it got there, unlike a collision: a name that is not
+            // there is nothing the author can see, whoever wrote it.
+            out.nameless = key;
+        }
         const auto [taken, was_free] = produced.emplace (name, key);
         const bool resolution_made_it = name != key || taken->second != taken->first;
         if (!was_free && resolution_made_it && !out.collision) {
@@ -1072,8 +1079,9 @@ DynamicResolution dynamic) {
  * the one the author cannot see the result of: its text has a terminator and no
  * escape for it, so a substituted CR or LF ends the line rather than sitting in
  * it (`http/header_text.hpp`), and its name is a map key, so a substituted name
- * can quietly take another header's place (`http/header_names.hpp`). Both files
- * carry the rule and the layers that share it.
+ * can quietly take another header's place - or leave the line with no name at
+ * all (`http/header_names.hpp`). Both files carry the rules and the layers that
+ * share them.
  *
  * @return the refusal, or nothing.
  */
@@ -1100,8 +1108,15 @@ nlohmann::json& payload) {
             return compose_error (400, "unsendable_header",
             describe_header_text_refusal (*resolved.unspellable));
         }
+        // Before the collision, because it is the nearer fault: two names that
+        // both resolved to nothing collide on the empty name, and "they
+        // resolved alike" is not what the author needs to be told about them.
+        if (resolved.nameless) {
+            return compose_error (400, vayu::http::EMPTY_HEADER_NAME_CODE,
+            vayu::http::describe_empty_header_name (*resolved.nameless));
+        }
         if (resolved.collision) {
-            return compose_error (400, "colliding_header_names",
+            return compose_error (400, vayu::http::COLLIDING_HEADER_NAMES_CODE,
             vayu::http::describe_header_name_collision (*resolved.collision));
         }
         *headers = std::move (resolved.headers);

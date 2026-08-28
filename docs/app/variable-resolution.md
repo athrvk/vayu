@@ -549,6 +549,36 @@ send rather than a rejected payload. The pre-send gate is deliberately *not* the
 backstop here, and cannot be: by the time it sees a request the erased header is
 already missing, with nothing left to notice.
 
+### And the name that resolves to nothing (#1084)
+
+The same file holds a second rule about a header *name*, one step further along:
+a name that resolves to the empty string. `{{blank}}: acme` with `blank` holding
+`""` - which is what an enabled row with a blank value is, an ordinary value
+rather than an exotic one - leaves a key with nothing in it, and the line that
+reaches the wire is `": acme"`, under no name at all. A strict server answers
+`400` and the run reads as the endpoint being broken; a lenient one ignores the
+line, and the header being set is simply absent.
+
+So it gets the answer the two above get: a `400` with code `empty_header_name`,
+naming the name as written - which is all there is to name, since what it
+produced is nothing. The pre-send gate is no backstop for this one either, and
+for a sharper reason than before: it reads a header's text for the bytes that
+end a line early, and an absent name ends nothing, so a nameless line passes
+every check between composition and libcurl.
+
+One difference from the collision. That one is refused only where resolution
+made it, because two names typed side by side are two lines the author can see;
+composition refuses this one however the name got there, a name that is not
+there being nothing to see whoever wrote it. In practice both flattenings that
+feed composition drop such a row first - a stored request's headers, and the
+app's - so what that catches beyond a produced name is a payload built by hand.
+The three layers are the ones above: composition's `400`, the residual pass as a
+failed send, and `pm.sendRequest`, which met this first because a script writes
+header names of its own. The residual pass reads a name only where the name held
+a `{{token}}`, which is its reach for the collision rule too - a request posted
+already-resolved is composition's to refuse - and a name a data row binds is the
+one layer with no empty-name rule yet (#1095).
+
 ---
 
 ## Dynamic variables

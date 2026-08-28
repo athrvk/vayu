@@ -3883,6 +3883,27 @@ with specific codes:
   `INTERNAL_ERROR` carrying the message, exactly as the pre-send gate does,
   while a streaming send - which has not answered yet - is a `400` with this
   same code and fails its run row.
+- `400` `{"error": {"code": "empty_header_name", "message": "..."}}` - a header
+  name resolved to the empty string, so the line would go out under no name at
+  all. `{{blank}}: acme` with `blank` holding `""` is not a header the caller
+  can see: the name is a map key, the key is empty, and what libcurl is handed
+  is the line `": acme"`. Nothing further down refuses it - the pre-send gate
+  reads a header's text for the bytes that end a line early, and an absent name
+  ends nothing - so composition is where it is caught. The message names the
+  name as written, which is all there is to name; what it produced is nothing.
+
+  Refused however the name got there, unlike the collision above. A collision
+  has to be one resolution produced, because two names the caller typed are two
+  entries they can see; a name that is not there is nothing to see whoever wrote
+  it. Both flattenings that feed composition drop such a row before it arrives -
+  a stored request's headers and the app's - so what this catches beyond a
+  produced name is a payload built by hand. The execute-time residual pass
+  refuses it in the same words and under this same code, in each of the two
+  shapes it answers a refusal in (above), and reads a name only where the name
+  held a token - the reach it has for the collision rule too, a request posted
+  already-resolved being composition's to refuse. `pm.sendRequest` has refused
+  it since its own header names began resolving, with the call named in front of
+  the same wording.
 
 ### POST /execute
 

@@ -870,10 +870,18 @@ script and before the send (`resolve_residual_tokens`,
 `engine/src/http/request_exchange.cpp`) - a value compose already substituted
 is finished text and this pass does not revisit it, so nothing is resolved
 twice. **That pass can refuse** (#1051): a header name it resolves onto a name
-the request already carries would erase that header, so it returns a
-`vayu::Error` and the send does not happen - composition refuses the same
-collision with a `400`, in the same words, and `http/header_names.hpp` holds
-the rule. Two entry shapes: `requestId` (stored request; MCP uses
+the request already carries would erase that header, so it refuses and the send
+does not happen - composition refuses the same collision with a `400`, in the
+same words, and `http/header_names.hpp` holds the rule. **A name that resolves
+to nothing is refused beside it** (#1084), by both layers and in that file's
+one wording: what is left of an empty name is a `": value"` line no name owns,
+and the pre-send gate is no backstop for it - it reads header text for the
+bytes that end a line early, and an absent name ends nothing. The pass answers
+a `ResidualRefusal`, which carries the compose refusal code as well as the
+error, because the streaming send answers a `400` of its own and a code spelled
+at that call site is one that drifts from the rule it names. Both rules read a
+name only where this pass reads one, so a request posted already-resolved is
+composition's to refuse. Two entry shapes: `requestId` (stored request; MCP uses
 this, and gates its allowlist on the *composed* URL) and an inline `request`
 (+ `collectionId` scope; the renderer uses this because Send/replay execute
 *editor state*, which may be unsaved or detached). Inline over stored = the
