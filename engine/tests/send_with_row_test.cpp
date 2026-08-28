@@ -190,7 +190,7 @@ TEST (SendWithRowAuth, CredentialTokenDefersTheAuth) {
     ASSERT_TRUE (plan.ok);
     EXPECT_FALSE (plan.credentials.empty ());
     EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Defer);
-    EXPECT_EQ (plan.credentials.first_token ().value_or (""), "{{data.user}}");
+    EXPECT_EQ (plan.credentials.first_data_token ().value_or (""), "{{data.user}}");
 }
 
 /// Without a row there is nothing to bind against, so the token keeps the

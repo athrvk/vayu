@@ -673,6 +673,30 @@ TEST_F (ScenarioPlanTest, ADataTokenWithNoDataSetIsRefusedNamingTheStepAndTheTok
     EXPECT_TRUE (resolved.plan.steps.empty ());
 }
 
+// The identity shares the data namespace's template, and the refusal above must
+// not follow it there: `{{$vu}}` needs no rows behind it, so a plan carrying
+// only identity tokens is perfectly runnable (issue #994). Point the refusal's
+// scan at `first_token` again instead of `first_data_token` and this reddens,
+// with a run refused for lacking a data set it never needed.
+TEST_F (ScenarioPlanTest, AnIdentityTokenNeedsNoDataSetAndIsNotRefusedForLackingOne) {
+    seed_collection ("col", "");
+    seed_request ("identity", "col", /*order=*/0,
+    "https://example.test/u/{{$vu}}/i/{{$iteration}}");
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.plan.steps.size (), 1u);
+    // Split for the bind and left written for it: the executor substitutes
+    // them, so the plan still carries the tokens as composed.
+    EXPECT_FALSE (resolved.plan.steps[0].data_template.empty ())
+    << "the step's identity tokens were not split, so nothing would bind them";
+    EXPECT_FALSE (resolved.plan.steps[0].data_template.first_data_token ().has_value ())
+    << "an identity token must not read as a data token - that is what the "
+       "no-data refusal scans for";
+    EXPECT_NE (resolved.plan.steps[0].request.url.find ("{{$vu}}"), std::string::npos);
+}
+
 TEST_F (ScenarioPlanTest, TheSameCollectionResolvesWhenTheRunCarriesADataSet) {
     // The other half of the rule: the refusal is about the *absent* data set, not
     // about the token. A run with rows still resolves, and the token still
@@ -804,8 +828,8 @@ TEST_F (ScenarioPlanTest, BasicAuthCredentialsBindPerIterationRatherThanEncoding
     << "auth was applied at plan time, which is what hid the token";
 
     vayu::Request request = step.request;
-    const auto bound =
-    vayu::core::bind_step_row (request, step, resolved.data_rows[0], /*row_index=*/0);
+    const auto bound      = vayu::core::bind_step_iteration (request, step,
+         resolved.data_rows, /*row_index=*/0, vayu::core::IterationIdentity{});
     ASSERT_TRUE (bound.ok) << bound.error;
     EXPECT_EQ (authorization_of (request),
     "Basic " + vayu::utils::base64_encode ("alice:s3cret"));
@@ -830,8 +854,8 @@ TEST_F (ScenarioPlanTest, EachRowGetsItsOwnCredentialsFromTheSamePlan) {
     std::vector<std::string> sent;
     for (size_t row = 0; row < resolved.data_rows.size (); ++row) {
         vayu::Request request = step.request;
-        const auto bound =
-        vayu::core::bind_step_row (request, step, resolved.data_rows[row], row);
+        const auto bound      = vayu::core::bind_step_iteration (
+        request, step, resolved.data_rows, row, vayu::core::IterationIdentity{});
         ASSERT_TRUE (bound.ok) << bound.error;
         sent.push_back (authorization_of (request));
     }
@@ -858,8 +882,9 @@ TEST_F (ScenarioPlanTest, BearerAndApiKeyCredentialsBindByContract) {
         const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
         EXPECT_TRUE (resolved.ok) << resolved.error;
         vayu::Request request = resolved.plan.steps[0].request;
-        const auto result     = vayu::core::bind_step_row (
-        request, resolved.plan.steps[0], resolved.data_rows[0], /*row_index=*/0);
+        const auto result =
+        vayu::core::bind_step_iteration (request, resolved.plan.steps[0],
+        resolved.data_rows, /*row_index=*/0, vayu::core::IterationIdentity{});
         EXPECT_TRUE (result.ok) << result.error;
         return request;
     };
@@ -897,8 +922,8 @@ TEST_F (ScenarioPlanTest, AMissingColumnInACredentialEndsTheStepByName) {
     ASSERT_TRUE (resolved.ok) << resolved.error;
 
     vayu::Request request = resolved.plan.steps[0].request;
-    const auto bound      = vayu::core::bind_step_row (
-    request, resolved.plan.steps[0], resolved.data_rows[0], /*row_index=*/0);
+    const auto bound = vayu::core::bind_step_iteration (request, resolved.plan.steps[0],
+    resolved.data_rows, /*row_index=*/0, vayu::core::IterationIdentity{});
     EXPECT_FALSE (bound.ok);
     EXPECT_NE (bound.error.find ("{{data.missing}}"), std::string::npos)
     << bound.error;
@@ -971,10 +996,10 @@ TEST_F (ScenarioPlanTest, CredentialsWithoutADataTokenAreStillResolvedIntoThePla
     EXPECT_EQ (authorization_of (step.request),
     "Basic " + vayu::utils::base64_encode ("alice:s3cret"));
 
-    // And `bind_step_row` is the no-op the executors call unconditionally.
+    // And `bind_step_iteration` is the no-op the executors call unconditionally.
     vayu::Request request = step.request;
-    const auto bound =
-    vayu::core::bind_step_row (request, step, resolved.data_rows[0], /*row_index=*/0);
+    const auto bound      = vayu::core::bind_step_iteration (request, step,
+         resolved.data_rows, /*row_index=*/0, vayu::core::IterationIdentity{});
     EXPECT_TRUE (bound.ok) << bound.error;
     EXPECT_EQ (authorization_of (request), authorization_of (step.request));
 }
@@ -996,8 +1021,8 @@ TEST_F (ScenarioPlanTest, AUserSuppliedAuthorizationHeaderStillWinsOverBoundCred
     ASSERT_TRUE (resolved.ok) << resolved.error;
 
     vayu::Request request = resolved.plan.steps[0].request;
-    const auto bound      = vayu::core::bind_step_row (
-    request, resolved.plan.steps[0], resolved.data_rows[0], /*row_index=*/0);
+    const auto bound = vayu::core::bind_step_iteration (request, resolved.plan.steps[0],
+    resolved.data_rows, /*row_index=*/0, vayu::core::IterationIdentity{});
     ASSERT_TRUE (bound.ok) << bound.error;
     EXPECT_EQ (authorization_of (request), "Bearer mine");
 }

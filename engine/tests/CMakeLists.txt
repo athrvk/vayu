@@ -86,6 +86,7 @@ add_executable(vayu_tests
     execution_http_version_test.cpp
     load_strategy_test.cpp
     load_data_test.cpp
+    load_identity_test.cpp
     refill_deficit_test.cpp
     reservoir_test.cpp
     sample_capture_test.cpp
@@ -315,6 +316,8 @@ set(vayu_scratch_database_suites
     InboxListenerTest
     InboxStorageTest
     LoadDataTest
+    LoadIdentityTest
+    ScenarioIdentityTest
     LoadReplayEventsTest
     LoadScriptScopesTest
     LoadStrategyTest

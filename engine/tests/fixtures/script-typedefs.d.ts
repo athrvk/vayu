@@ -571,7 +571,7 @@ declare const pm: {
 		 */
 		eventName: 'prerequest' | 'test';
 		/**
-		 * Which pass of a collection run this step belongs to, 0-based. undefined everywhere else - a single Send and a load run's Tests script have no iteration to report.
+		 * Which pass this response belongs to, 0-based: a collection run's pass, or the iteration a load run's sampled response was sent in. undefined on a single Send, which is one request rather than a pass of anything.
 		 * 
 		 * Example:
 		 * if (pm.info.iteration === 0) { /* first pass only *\/ }
@@ -595,6 +595,13 @@ declare const pm: {
 		 * console.log('running ' + (pm.info.requestName || 'an unnamed request'));
 		 */
 		requestName: string | undefined;
+		/**
+		 * Which virtual user sent this request, 1-based. Spans the run's concurrency in a collection load run, where each user walks the sequence on its own; 1 for a single request repeated under load, which is one user's iterations however many are in flight. undefined on a single Send.
+		 * 
+		 * Example:
+		 * console.log('user ' + pm.info.vu + ' iteration ' + pm.info.iteration);
+		 */
+		vu: number | undefined;
 	};
 	/**
 	 * The row a data-driven collection run bound to this iteration - row i % rows for iteration i - read through get(), has() and toObject().

@@ -417,7 +417,7 @@ bool MetricsCollector::should_sample_success () {
 }
 
 void MetricsCollector::record_response_sample (const Response& response,
-std::optional<size_t> data_row_index) {
+SampleIdentity identity) {
     // Only sample based on configured rate
     size_t counter = response_sample_counter_.fetch_add (1, std::memory_order_relaxed);
     if (counter % config_.response_sample_rate != 0) {
@@ -442,7 +442,9 @@ std::optional<size_t> data_row_index) {
     }
 
     ResponseSample sample (response, now_ms ());
-    sample.data_row_index = data_row_index;
+    sample.iteration      = identity.iteration;
+    sample.vu             = identity.vu;
+    sample.data_row_index = identity.data_row_index;
 
     bool displaced = false;
     {
@@ -485,8 +487,7 @@ void MetricsCollector::configure_step_samples (const std::vector<bool>& sampled)
 
 void MetricsCollector::record_step_response_sample (const Response& response,
 size_t step_index,
-size_t iteration,
-std::optional<size_t> data_row_index) {
+SampleIdentity identity) {
     if (step_index >= step_samples_.size ()) {
         return;
     }
@@ -515,8 +516,9 @@ std::optional<size_t> data_row_index) {
     }
 
     ResponseSample sample (response, now_ms ());
-    sample.iteration      = iteration;
-    sample.data_row_index = data_row_index;
+    sample.iteration      = identity.iteration;
+    sample.vu             = identity.vu;
+    sample.data_row_index = identity.data_row_index;
 
     bool displaced = false;
     {

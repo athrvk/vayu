@@ -161,6 +161,24 @@
       "expected": "{{data.id}}"
     },
     {
+      "name": "$vu and $iteration keep their braces - only the iteration that sends binds them (issue #994)",
+      "scopes": { "environment": { "known": { "value": "x", "enabled": true } } },
+      "input": "https://api.test/u{{$vu}}/i{{$iteration}}?k={{known}}",
+      "expected": "https://api.test/u{{$vu}}/i{{$iteration}}?k=x"
+    },
+    {
+      "name": "a variable named $vu does not answer for the reserved identity (issue #994)",
+      "scopes": { "environment": { "$vu": { "value": "shadowed", "enabled": true } } },
+      "input": "{{$vu}}",
+      "expected": "{{$vu}}"
+    },
+    {
+      "name": "a $name that only looks like the identity follows the unknown-$name rule (issue #994)",
+      "scopes": {},
+      "input": "a={{$vus}}&b={{$iterations}}",
+      "expected": "a={{$vus}}&b={{$iterations}}"
+    },
+    {
       "name": "the data. prefix alone names no column and follows the unknown-name rule",
       "scopes": {},
       "input": "a{{data.}}b{{data}}c",

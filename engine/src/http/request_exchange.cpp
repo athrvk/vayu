@@ -456,6 +456,7 @@ bool verbose) {
         ctx.request_id      = inputs.request_id;
         ctx.request_name    = inputs.request_name;
         ctx.iteration       = inputs.iteration;
+        ctx.vu              = inputs.vu;
         ctx.iteration_count = inputs.iteration_count;
         ctx.in_scenario     = inputs.in_scenario;
         // Both scripts' `pm.sendRequest` leaves by the same route the send

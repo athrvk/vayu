@@ -738,11 +738,23 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.info.iteration" }, { "kind", KIND_FIELD },
     { "insertText", "pm.info.iteration" }, { "detail", "number | undefined" },
     { "documentation",
-    "Which pass of a collection run this step belongs to, 0-based. undefined "
-    "everywhere else - a single Send and a load run's Tests script have no "
-    "iteration to report.\n\nExample:\nif (pm.info.iteration === 0) { /* "
+    "Which pass this response belongs to, 0-based: a collection run's pass, or "
+    "the iteration a load run's sampled response was sent in. undefined on a "
+    "single Send, which is one request rather than a pass of "
+    "anything.\n\nExample:\nif (pm.info.iteration === 0) { /* "
     "first pass only */ }" },
     { "sortText", "1_pm_info_iteration" } });
+
+    completions.push_back ({ { "label", "pm.info.vu" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.vu" }, { "detail", "number | undefined" },
+    { "documentation",
+    "Which virtual user sent this request, 1-based. Spans the run's "
+    "concurrency in a collection load run, where each user walks the sequence "
+    "on its own; 1 for a single request repeated under load, which is one "
+    "user's iterations however many are in flight. undefined on a single "
+    "Send.\n\nExample:\nconsole.log('user ' + pm.info.vu + ' iteration ' + "
+    "pm.info.iteration);" },
+    { "sortText", "1_pm_info_vu" } });
 
     completions.push_back ({ { "label", "pm.info.iterationCount" }, { "kind", KIND_FIELD },
     { "insertText", "pm.info.iterationCount" }, { "detail", "number | undefined" },

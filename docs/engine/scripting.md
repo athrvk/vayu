@@ -801,7 +801,7 @@ worse than a break you can see.
 
 ## Script Identity (`pm.info`)
 
-What the script is attached to, and which hook is running it. Five fields,
+What the script is attached to, and which hook is running it. Six fields,
 each **optional** - `pm.info` is always an object, but a field with no truthful
 value is absent rather than `""`, so `typeof` is how a script tests for one:
 
@@ -809,7 +809,8 @@ value is absent rather than `""`, so `typeof` is how a script tests for one:
 pm.info.requestId      // string | undefined - the saved request this send is filed under
 pm.info.requestName    // string | undefined - its name, as the client sent it
 pm.info.eventName      // 'prerequest' in a pre-request script, 'test' in a test script
-pm.info.iteration      // number | undefined - 0-based, in a collection run only
+pm.info.iteration      // number | undefined - 0-based, in a run of any shape
+pm.info.vu             // number | undefined - 1-based, the virtual user that sent it
 pm.info.iterationCount // number | undefined - the run's iteration total
 ```
 
@@ -835,11 +836,21 @@ deferred per-step script reads it too: each sampled response carries the virtual
 user's iteration it was actually sent in, so the number is a fact about that
 response rather than its position in a reservoir.
 
-A single-request load run's `tests` script gets `undefined`, which is the honest
-answer rather than an omission: it runs once per *sampled* response after the
-run has finished, and the sample is a reservoir over the whole run rather than
-the first N iterations, so an index reported there would not be an iteration
-number. A binding that cannot fail is worse than a missing one.
+**A single-request load run reports one too, since issue #994.** It used to read
+`undefined` there, on the rule that a *reservoir position* is not an iteration -
+and that rule is intact, because this is not one: each submission claims its
+index before it is sent, and the index travels with the response into the
+sample, exactly as `dataRowIndex` does. It is the same counter the run's data
+rows are claimed from, so a script grading a sampled response can say which
+iteration produced it and which row it carried, and the two agree. An ordinary
+Send still reads `undefined`: one request is not a pass of anything.
+
+**`vu` is the virtual user that sent the request, 1-based.** It spans the run's
+concurrency in a scenario load run, where each user walks the sequence with its
+own cookies and its own iteration counter. Everywhere else it is `1`, and that
+is a statement rather than a placeholder: a single request repeated under load
+is one user's iterations however many are in flight, and so is a collection run
+in design mode. `undefined` on an ordinary Send, beside `iteration`.
 
 **`iterationCount` is set by the collection runner and by nothing else.** A
 duration-bounded load run has no iteration total to report, and a field readable
@@ -974,10 +985,21 @@ deliberately does not: `resolve_template` leaves `{{data.column}}` written as it
 stands because a plan is composed once, before any row is bound, while this runs
 per step with the iteration's row in hand. A column the row does not carry is a
 `TypeError` naming the token and the row's columns - the bind-time rule
-(`apply_data_template`) in a shape a script can catch - and with no row bound at
+(`apply_iteration_template`) in a shape a script can catch - and with no row bound at
 all the token keeps its braces. It stops at `replaceIn`: `pm.variables.get` and
 `.has` read the variable *scopes*, and `data.` is disjoint from them by design
 (`core/scenario_data.hpp`), with `pm.iterationData` as its accessor.
+
+**The identity namespace is not readable from `replaceIn`, and that is
+deliberate** (issue #994). `{{$vu}}` and `{{$iteration}}` keep their braces
+here, unlike `{{data.column}}` above: the identity belongs to the *send*, which
+binds it into the request before the pre-request script runs and long before a
+deferred test script grades the response - so a script asking `replaceIn` to
+resolve it would be asking the resolver for a fact the resolver does not hold.
+What a script reads instead is `pm.info.vu` and `pm.info.iteration`, which carry
+exactly the numbers the request beside them was bound with. #1057 is the record
+of the alternative - teaching `replaceIn` the identity so the two agree by
+construction rather than by a script reaching for the right one of two APIs.
 
 **Dynamic variables are otherwise not readable from a script.** `{{$guid}}`,
 `{{$timestamp}}` and the rest of the set in
@@ -1307,10 +1329,10 @@ See [api-reference.md](api-reference.md#post-execute).
 and any run started without a data set. Where a run *was* given rows, its
 deferred script reads one whichever shape the run took: a sampled response
 carries the row the submission or iteration that produced it was bound to, so
-the row is a fact about that response rather than a guess. (`pm.info.iteration`
-is narrower and stays so: a scenario step carries the virtual user's real
-iteration index, while a single-request run has none to report - a reservoir
-position is not an iteration.) That is deliberate, and it is the opposite treatment to `pm.execution`
+the row is a fact about that response rather than a guess. (`pm.info.iteration` and
+`pm.info.vu` travel the same way and are populated on both shapes since issue
+#994 - what a sample carries is the identity its submission claimed before it
+was sent, never its position in a reservoir.) That is deliberate, and it is the opposite treatment to `pm.execution`
 above: flow control is a *capability*, and one that silently does nothing is a
 false success, so it is always bound and explains itself. A data row is *data*,
 and "this run is not data-driven" is a fact a script may legitimately branch on:
@@ -1753,9 +1775,10 @@ The **language** is current; what is missing is the **host environment**:
   says how many responses the bound thinned away
 - Results are aggregated and reported in the final report
 - `pm.info` reports the same identity a Send does: `eventName` is `"test"`, and
-  `requestId` / `requestName` are the run's linked request when it has one. There
-  is no `iteration` - the script runs per sampled response, not per iteration
-  (a collection run does report one; see [`pm.info`](#script-identity-pminfo))
+  `requestId` / `requestName` are the run's linked request when it has one. It
+  also reports `iteration` - the index the sampled submission claimed before it
+  was sent - and `vu`, which is `1` here because a single request repeated is
+  one user's iterations (issue #994; see [`pm.info`](#script-identity-pminfo))
 - `POST /runs`'s `tests` field carries the collection chain's test scripts as
   well as the request's own, composed the same way as `POST /execute` (see
   [Script Parts](#script-parts) below) - a collection-level assertion is now
@@ -1789,9 +1812,10 @@ shape:
 
 - `pm.request` is the step's own request, and `pm.info.requestId` /
   `requestName` are that step's, not a run-level one.
-- `pm.info.iteration` is bound - the sample carries the virtual user's real
-  iteration index - beside the `pm.iterationData` a single-request run's rows
-  also provide, so a script asserting on `{{data.*}}`-driven behaviour grades the
+- `pm.info.iteration` is the virtual user's own iteration index and
+  `pm.info.vu` is that user's number, so a script can tell two users' responses
+  apart - beside the `pm.iterationData` a single-request run's rows also
+  provide, so a script asserting on `{{data.*}}`-driven behaviour grades the
   right row either way.
 - The sample budget is split across the steps that carry a script rather than
   spent run-wide, so the last step of a long plan is validated instead of being

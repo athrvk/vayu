@@ -122,6 +122,18 @@ const nlohmann::json& config);
  * the hand-off free of any lock on the completion path.
  */
 struct VirtualUser {
+    /**
+     * This user's own number in the run, **1-based** and fixed for the run's
+     * whole life: what `{{$vu}}` binds into its requests and what a completion
+     * reports as `pm.info.vu` (issue #994).
+     *
+     * Stored rather than derived from the user's position in
+     * `ScenarioLoadState::vus`, because the producer hands a `VirtualUser*` to
+     * the submission and the completion alike, and a number recovered by
+     * searching that vector for the pointer would be an index the two could
+     * disagree about.
+     */
+    size_t index = 1;
     /// Next step of the plan this VU will send.
     size_t step = 0;
     /// 0-based, and only ever advanced by this VU.
