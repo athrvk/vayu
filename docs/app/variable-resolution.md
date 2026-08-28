@@ -570,22 +570,31 @@ value per occurrence. `pm.variables.get("$guid")` (getter fall-through to the
 generators) is deliberately not wired. See
 [pm API compatibility](./pm-api-compatibility.md).
 
-**Load runs generate once, not per iteration.** A run's request half is
-composed once (`POST /compose`) and then handed to the engine, which repeats
-it - so every request in the run carries the *same* `{{$guid}}`. The load-test
-dialog says so when the request contains one. Per-iteration values would mean
-interpolating on the load generator's hot path (which targets 60k+ RPS), and
-were deliberately kept out of #226's scope.
+**Load runs generate per iteration, not once** (issue #995). A run's request
+half is composed once (`POST /compose`) and then handed to the engine, which
+repeats it - so a value generated at composition would be the *same* `{{$guid}}`
+on every request of every virtual user, which is the opposite of what a
+unique-id token is written for. A composition made for a run therefore says so
+(`deferDynamicVariables`), and the family is left written as it stands, exactly
+as `{{data.column}}` and the two identity names are: the run's executor
+generates a fresh value per occurrence, immediately before each send.
 
-That still holds for this table. It does **not** hold for the two reserved
-identity names (issue #994), and the difference is what makes them cheap enough
-to be the exception: a generator has to run per occurrence per iteration, while
-`{{$vu}}` and `{{$iteration}}` substitute two integers the executor is already
-holding, into fields a compose-time scan has already located. A request that
-spells neither is walked for neither - the template is empty, and the executor
-tests that before doing anything - so the freeze above is lifted for exactly two
-names and for nothing else. `{{$guid}}` per iteration on the load path is #995,
-and is a different measurement.
+The hot path is what shaped the fix rather than what blocked it. A generator has
+to *run* per occurrence per iteration, where `{{$vu}}` and `{{$iteration}}`
+(issue #994) substitute two integers the executor is already holding - so the
+cost is not made free, it is made *conditional*: a request spelling no generator
+has nothing left for the compose-time scan to find, its template is empty, and
+the executor tests that before doing anything. A run that does not use the
+family pays what it always did. What a run that uses it pays is one table call
+per token per iteration, on the same walk that binds a data row.
+
+Two things this does not change. A **Send** composes once and sends once, so it
+still generates at composition - `POST /compose` defers only when the caller
+asks. And a generator inside an **auth credential** is still generated once, at
+composition: `apply_auth` encodes a credential when the request is built - basic
+auth collapses into one base64 value - so a token left for the bind would go out
+as base64 of its own text. That exception is the deferral issue #1055 carries,
+and it is the same reason a credential does not carry `{{$vu}}` either.
 
 ### The engine copy of the table
 

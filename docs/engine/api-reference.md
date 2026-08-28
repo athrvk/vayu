@@ -3755,7 +3755,8 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   },
   "collectionId": "col_1234567890", // Optional: chain scope for an inline request
   "environmentId": "env_1234567890", // Optional: environment scope
-  "dataColumns": ["username", "city"] // Optional: bare names a bound row will substitute
+  "dataColumns": ["username", "city"], // Optional: bare names a bound row will substitute
+  "deferDynamicVariables": true      // Optional: this payload is for a run that repeats it
 }
 ```
 
@@ -3775,6 +3776,25 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   itself](#scenario-runs) and
   [D18](../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007)
   for the precedence this buys.
+
+- **`deferDynamicVariables`** (issue #995) says this payload is being composed
+  for a **run**, which will send it many times. A generator resolved here would
+  be one value repeated by every iteration of every virtual user - the
+  uniqueness `{{$randomUUID}}` is written for, lost exactly where concurrency
+  makes collisions matter - so with the field true every name the dynamic table
+  generates is left written as it stands, the way `{{data.*}}` and the identity
+  names already are, and the run's executor generates a fresh value per
+  occurrence immediately before each send. **Absent, `null` or `false` composes
+  exactly as it did before this field existed**, which is what a Send, a preview
+  and a script's `replaceIn` want: composed once, sent once. Refused with `400`
+  `invalid_compose_request` when present and not a boolean. Two limits worth
+  knowing: an unknown `{{$typo}}` is unaffected (nothing would generate it
+  either way, so it keeps its braces - issue #186), and a generator inside the
+  **auth block** is generated here even when the field is true, because
+  `apply_auth` encodes a credential when the request is built and a token left
+  for the bind would go out as base64 of its own text (the deferral issue #1055
+  carries). A scenario plan's steps are composed with it internally, so a
+  collection run needs no field at all.
 
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
   headers (later duplicates win), body, auth (absent auth defaults to

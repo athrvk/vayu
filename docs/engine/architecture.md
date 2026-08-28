@@ -446,7 +446,10 @@ ids, and returns the execute-ready payload that `POST /execute` and `POST
   the URL, header keys/values, body content/fields, and the auth block -
   single-pass, raw stored strings, unknown plain names to `""`, unknown
   `$names` kept braced, dynamic variables (`{{$guid}}`, …) generated per
-  occurrence;
+  occurrence - unless the caller asked for them to be deferred
+  (`deferDynamicVariables`), which a composition made for a *run* does, so the
+  run generates a fresh value per iteration instead of repeating one (issue
+  #995);
 - resolves `inherit` auth by walking the collection ancestor chain leaf→root
   (an explicit `noauth` terminates the walk, `none` is stepped over), and
   resolves variables inside the winning block **before** any OAuth 2.0 cache

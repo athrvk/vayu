@@ -246,6 +246,60 @@ response was sent in. Anyone re-measuring should do it on a quiet host: this one
 is a 4-core container running the Go mock server beside the engine, and a single
 arm's own runs vary by more than either effect being looked for.
 
+### Per-iteration generators: also inside this host's noise (2026-08-28, engine 0.23.0)
+
+The `{{$guid}}` family generates per iteration on the load path since issue
+#995, where it used to be resolved once at composition and repeated for the
+whole run. It is the same shape of change the identity was, one step more
+expensive: a generator has to *run* per occurrence per iteration, where the
+identity substitutes two integers the executor is already holding.
+
+**The generation, when a run uses it.** One daemon, four arms interleaved and
+rotated per round so drift lands on all four - a plain URL (`off`), the same URL
+with a uuid written out (`literal`), the same URL with `{{$iteration}}` in it
+(`identity` - the bind path #994 already put every bound run on, generating
+nothing), and the same URL with `{{$randomUUID}}` in it (`on`).
+`constant_concurrency`, c=32, 5 s per arm, 8 rounds, retention effectively off
+(a sampling period of 100000).
+
+| Arm | Median req/s | Mean | Min | Max |
+|---|---|---|---|---|
+| off (no query, no token) | 20 007 | 20 358 | 19 183 | 21 846 |
+| literal (`?u=<a uuid>`) | 21 367 | 20 806 | 16 078 | 23 473 |
+| identity (`?u={{$iteration}}`) | 21 990 | 21 766 | 19 583 | 23 493 |
+| on (`?u={{$randomUUID}}`) | 20 854 | 21 051 | 19 614 | 22 678 |
+
+**Nothing is resolvable.** `on` lands *above* `off` and below `identity`; the
+arms' own min-max spans are 12-46% wide, which is wider than any distance
+between them. The one number worth keeping is what the arms say together: three
+of the four bind per submission - `identity` and `on` copy the request and
+rebuild a field, `on` also runs the table - and they do not separate from the
+two that do not.
+
+An unrotated first pass had `on` 26% below `off`, which is the whole reason the
+method rotates: that reading came from one round in a fixed order, and it did
+not survive eight rounds of rotation. A single ordered pair on this host is not
+evidence.
+
+**The feature-off path, against master.** The same payload with no token at all,
+run against `master`'s binary and this branch's, one daemon at a time,
+alternating every round (10 rounds, 5 s, c=32): a paired median of **-0.01%**
+(master 25 279, branch 25 276). The null test says how much of that to believe -
+the same harness with **this branch's binary in both arms** reports **-1.51%**,
+so the harness alone moves the number further than the change did. Per-round
+deltas run from -17% to +30%.
+
+**Verdict: no change is resolvable here either, and the guard is structural.** A
+request spelling no generator has nothing left for the compose-time split to
+find, so its template is empty and the submission path takes the branch it
+always did - no copy, no join, the same submit of the same shared request.
+`LoadDataTest.ARunWithoutAGeneratorCarriesAnEmptyTemplate` and
+`ScenarioPlanTest.AStepWithoutAGeneratorCarriesAnEmptyTemplate` assert that
+emptiness rather than a throughput figure, which is the claim that can actually
+be pinned. Same host caveat as the section above: a 4-core container running the
+Go mock server beside the engine, where a single arm's own runs vary by more
+than either effect being looked for.
+
 ### SSE frame counting: not yet measured (issue #576)
 
 Streaming under load puts a second thing on the write callback's hot path: an
