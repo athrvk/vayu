@@ -88,12 +88,12 @@ nlohmann::json get_script_completions () {
     { "detail", "pm.expect.fail(message?: string): never" },
     { "documentation",
     "Fail here, as an assertion rather than as an error.\n\nInside pm.test it "
-    "fails that test; outside one it records an assertion failure the way "
-    "every other matcher does, where a thrown Error would abort the "
-    "script.\n\nchai's fail(actual, expected, message, operator) form is not "
-    "supported - this AssertionError has nowhere to carry the two compared "
-    "values, so more than one argument is refused rather than read as the "
-    "message." },
+    "fails that test; outside one it aborts the script as a failed assertion "
+    "- an AssertionError carrying the message, rather than as the TypeError a "
+    "misuse reports.\n\nchai's fail(actual, expected, message, operator) form "
+    "is not supported - this AssertionError has nowhere to carry the two "
+    "compared values, so more than one argument is refused rather than read "
+    "as the message." },
     { "sortText", "0_pm_expect_fail" } });
 
     // ========================================
