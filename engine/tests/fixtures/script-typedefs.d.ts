@@ -763,7 +763,7 @@ declare const pm: {
 	/**
 	 * What this script is attached to and which hook it is running in. Every field is optional - an ad-hoc request has no id, and an unsaved one has a name no stored request carries - so test with typeof rather than assuming a value.
 	 * 
-	 * iteration / iterationCount are set by the collection runner and by nothing else. A load test's Tests script runs once per sampled response rather than once per iteration, so it has no iteration number to report and reads undefined for both.
+	 * iteration and vu are reported wherever a real one exists: a collection run's pass, the iteration a load run's sampled response was sent in, and a send that bound a data row, which is row 0 of 1. iterationCount is narrower - the collection runner's total, or that send's 1 - and stays undefined under load, where a duration-bounded run has no total to report. An ordinary Send reports none of the three.
 	 */
 	info: {
 		/**
@@ -774,14 +774,14 @@ declare const pm: {
 		 */
 		eventName: 'prerequest' | 'test';
 		/**
-		 * Which pass this response belongs to, 0-based: a collection run's pass, or the iteration a load run's sampled response was sent in. undefined on a single Send, which is one request rather than a pass of anything.
+		 * Which pass this response belongs to, 0-based: a collection run's pass, the iteration a load run's sampled response was sent in, or 0 for a send that bound a data row, since that send is row 0 of 1. undefined on an ordinary Send, which is one request rather than a pass of anything.
 		 * 
 		 * Example:
 		 * if (pm.info.iteration === 0) { /* first pass only *\/ }
 		 */
 		iteration: number | undefined;
 		/**
-		 * How many passes the collection run will make in total. undefined outside a collection run, and set by the runner alone.
+		 * How many passes the run will make in total: the collection runner's total, or 1 for a send that bound a data row, which is row 0 of 1. undefined on an ordinary Send and under load, where a duration-bounded run has no total to report.
 		 * 
 		 * Example:
 		 * console.log('pass ' + (pm.info.iteration + 1) + ' of ' + pm.info.iterationCount);
@@ -799,7 +799,7 @@ declare const pm: {
 		 */
 		requestName: string | undefined;
 		/**
-		 * Which virtual user sent this request, 1-based. Spans the run's concurrency in a collection load run, where each user walks the sequence on its own; 1 for a single request repeated under load, which is one user's iterations however many are in flight. undefined on a single Send.
+		 * Which virtual user sent this request, 1-based. Spans the run's concurrency in a collection load run, where each user walks the sequence on its own; 1 for a single request repeated under load, which is one user's iterations however many are in flight, and 1 for a send that bound a data row, beside its iteration 0. undefined on an ordinary Send.
 		 * 
 		 * Example:
 		 * console.log('user ' + pm.info.vu + ' iteration ' + pm.info.iteration);

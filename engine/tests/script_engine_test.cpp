@@ -5109,8 +5109,8 @@ TEST_F (ScriptEngineTest, PmInfoDoesNotSurviveIntoTheNextExecution) {
 // reaches the engine with. Both read undefined, and that is #300's ruling
 // intact: an invented index would be a binding that cannot fail.
 //
-// The pair does not belong to the scenario runner alone, and this test does not
-// say it does. A load run's deferred `validate_scripts` sets `iteration` and
+// More than the scenario runner reports the pair, and this test does not say
+// otherwise. A load run's deferred `validate_scripts` sets `iteration` and
 // `vu` from the sample the response was actually sent in (#994,
 // `run_manager.cpp`), and a send that bound a row reports iteration 0 of 1
 // (#601). `iterationCount` is the one that stays absent under load - a
