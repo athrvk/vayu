@@ -251,3 +251,51 @@ describe('`pm.variables.get("` in a script', () => {
 		expect(column!.filterText).toBe("{{email}}");
 	});
 });
+
+/**
+ * Which spelling each mode offers (issue #1077).
+ *
+ * `replaceIn` resolves `{{data.email}}` and `{{email}}` from the same row, so
+ * offering one of the two would be the gap #1063 closed, one call over. A name
+ * argument is the opposite case: `pm.variables.get("data.email")` reads no
+ * column, so the prefixed spelling there would teach a call that returns
+ * `undefined`.
+ */
+describe("the two column spellings, per accessor mode", () => {
+	it("offers the prefixed spelling to replaceIn, beside the bare one", () => {
+		contract.current = declared;
+		const suggestions = inScript('pm.variables.replaceIn("{{');
+		const prefixed = suggestions.find((s) => s.label === "data.email");
+		expect(prefixed, "replaceIn resolves {{data.email}} from the bound row").toBeTruthy();
+		expect(prefixed!.insertText).toBe("{{data.email}}");
+	});
+
+	it("labels the two spellings so picking one is deliberate", () => {
+		contract.current = declared;
+		const suggestions = inScript('pm.variables.replaceIn("{{');
+		const prefixed = suggestions.find((s) => s.label === "data.email")!;
+		const bare = suggestions.find((s) => s.label === "email")!;
+		expect(prefixed.detail).not.toBe(bare.detail);
+		expect(bare.detail).toMatch(/bare/i);
+	});
+
+	it("withholds the prefixed spelling from a name argument, which cannot read it", () => {
+		/*
+		 * The mutation check for the rule above: applying the fix to both modes
+		 * is the obvious wrong version of it, and this is the only case that
+		 * fails when it is.
+		 */
+		contract.current = declared;
+		expect(inScript('pm.variables.get("').map((s) => s.label)).not.toContain("data.email");
+		expect(inScript("pm.variables.has('").map((s) => s.label)).not.toContain("data.email");
+	});
+
+	it("does not say (bare) where only one spelling is offered", () => {
+		// The word tells two adjacent entries apart; in a list with one entry
+		// per column it names a contrast that list does not contain.
+		contract.current = declared;
+		const bare = inScript('pm.variables.get("').find((s) => s.label === "email")!;
+		expect(bare.detail).not.toMatch(/bare/i);
+		expect(bare.detail).toContain("Checkout flow");
+	});
+});

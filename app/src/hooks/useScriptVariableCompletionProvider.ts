@@ -58,6 +58,7 @@ import { useActiveCollectionId } from "./useActiveCollectionId";
 import { useDataContract } from "./useDataContract";
 import { scriptVariableCompletionContext } from "@/lib/script-variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
+import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
 
 /** Script editors mount with language="javascript". */
 const SCRIPT_LANGUAGE = "javascript";
@@ -186,9 +187,34 @@ export function useScriptVariableCompletionProvider() {
 				 * offered twice on purpose: the row wins while one is bound and
 				 * the scope answers when none is, and a single entry would have
 				 * to hide one of those.
+				 *
+				 * **Only `replaceIn` gets the prefixed spelling** (issue #1077), and
+				 * the asymmetry is the rule rather than an oversight: `replaceIn`
+				 * resolves `{{data.email}}` and `{{email}}` from the same row, so
+				 * withholding one of two spellings that work would be the same gap
+				 * this fixes; `pm.variables.get("data.email")` reads no column at
+				 * all, the namespace being disjoint from the scopes there, so
+				 * offering it in a name argument would teach a call that returns
+				 * `undefined`.
 				 */
 				if (context.scope === "all") {
 					for (const column of dataColumns?.columns ?? []) {
+						if (template) {
+							const prefixed = `${DATA_NAMESPACE_PREFIX}${column}`;
+							suggestions.push({
+								label: prefixed,
+								kind: monaco.languages.CompletionItemKind.Field,
+								insertText: wrap(prefixed),
+								detail: `Data column - ${dataColumns?.collectionName}`,
+								documentation:
+									"Bound per iteration by a collection run's data file. The prefixed spelling can never collide with a variable.",
+								// The same group as the bare spelling below, so one column's
+								// two entries sit together rather than scattering.
+								sortText: `${DATA_SORT_GROUP}${column}`,
+								filterText: wrap(prefixed),
+								range,
+							});
+						}
 						suggestions.push({
 							label: column,
 							// `Field`, not `Variable`: the icon is the only thing in
@@ -196,7 +222,15 @@ export function useScriptVariableCompletionProvider() {
 							// than a name some scope defines.
 							kind: monaco.languages.CompletionItemKind.Field,
 							insertText: wrap(column),
-							detail: `Data column - ${dataColumns?.collectionName}`,
+							/*
+							 * `(bare)` only where the prefixed entry is beside it: the
+							 * word exists to tell two adjacent spellings apart, and in
+							 * the `get` / `has` list - which offers one - it would draw
+							 * a contrast that list does not contain.
+							 */
+							detail: template
+								? `Data column (bare) - ${dataColumns?.collectionName}`
+								: `Data column - ${dataColumns?.collectionName}`,
 							documentation:
 								"Bound per iteration by a collection run's data file. A bound row answers this name above every scope; with no row bound, the scopes answer it.",
 							sortText: `${DATA_SORT_GROUP}${column}`,
