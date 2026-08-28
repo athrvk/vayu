@@ -431,9 +431,12 @@ reported unequal by `eql` rather than compared (their contents are not
 properties); `Date` compares by instant, `RegExp` by pattern; a cyclic value
 raises a `RangeError` after 64 levels rather than hanging. **A throw the
 comparison runs into is the verdict** (#1048) - a key, an array element or an
-array `length` behind a getter that throws, and an overridden `toJSON` /
-`toString` on the `Date` and `RegExp` sides, all reach the test as the script's
-own error rather than as a difference.
+array `length` behind a getter that throws, an overridden `toJSON` / `toString`
+on the `Date` and `RegExp` sides, and the values `include`, `oneOf`, `members`,
+`keys`, `property`, `empty` and `length` read before they compare, all reach the
+test as the script's own error rather than as a difference. Chai reports a
+difference for some of these, which under `.not` is a pass; a test that cannot
+read its subject has not passed.
 
 ### Response status classes (`pm.response.to.be`)
 

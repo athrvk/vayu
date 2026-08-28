@@ -995,12 +995,17 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
     // have written - an own `toJSON`, an overridden `toString` - and both
     // renderers answer "" when that throws, leaving the exception pending. Two
     // empty renderings compare *equal*, so a pair of throwing Dates used to
-    // report a pass. Asking the context settles either branch: a comparison
-    // that ran script and left an error behind has no verdict to give.
+    // report a pass. Neither renderer reports failure, so the context is asked
+    // instead - and asked after each side, because `JS_Throw` replaces the
+    // pending exception, so rendering the second side over a first that threw
+    // would report b's error for a's read.
     if (tag == "[object Date]") {
         // JSON renders a Date as its ISO instant, which is the comparison chai
         // makes (and keeps millisecond resolution, unlike toString).
         const std::string a_json = js_to_json (ctx, a);
+        if (JS_HasException (ctx)) {
+            return -1;
+        }
         const std::string b_json = js_to_json (ctx, b);
         if (JS_HasException (ctx)) {
             return -1;
@@ -1009,6 +1014,9 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
     }
     if (tag == "[object RegExp]") {
         const std::string a_source = js_to_string (ctx, a);
+        if (JS_HasException (ctx)) {
+            return -1;
+        }
         const std::string b_source = js_to_string (ctx, b);
         if (JS_HasException (ctx)) {
             return -1;
@@ -1501,9 +1509,17 @@ JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValue
         // `JS_ToCString` forms, under which every object member matched every
         // object needle - both render as "[object Object]".
         for (uint32_t i = 0; i < len && !includes; i++) {
-            JSValue elem = JS_GetPropertyUint32 (ctx, state->actual, i);
-            const int same = js_compare_for_chain (ctx, elem, argv[0], state->deep);
-            JS_FreeValue (ctx, elem);
+            // The reads a comparison is given are the comparison's own: an
+            // element behind a getter that throws is a read that did not
+            // happen. Handing the exception sentinel to `js_compare_for_chain`
+            // answers "not a member" about it, and under `.not` that is a pass.
+            // Same rule the deep compare states for its own reads.
+            ScopedValue elem (ctx, JS_GetPropertyUint32 (ctx, state->actual, i));
+            if (JS_IsException (elem.get ())) {
+                return JS_EXCEPTION;
+            }
+            const int same =
+            js_compare_for_chain (ctx, elem.get (), argv[0], state->deep);
             if (same < 0) {
                 return JS_EXCEPTION;
             }
@@ -1619,6 +1635,12 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
         JSValue next = JS_GetPropertyStr (ctx, holder, segments[i].c_str ());
         JS_FreeValue (ctx, holder);
         holder = next;
+        // A segment behind a getter that throws is a walk that did not finish.
+        // The sentinel is not an object, so the loop would call it a missing
+        // property - and under `.not` that reads as a pass.
+        if (JS_IsException (holder)) {
+            return JS_EXCEPTION;
+        }
     }
 
     if (has_prop) {
@@ -1635,9 +1657,16 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
     // the chain is `deep`, which is why this cannot stringify: two objects with
     // the same JSON are still different references.
     if (has_prop && argc >= 2) {
-        JSValue actual_val = JS_GetPropertyStr (ctx, holder, segments.back ().c_str ());
-        const int same = js_compare_for_chain (ctx, actual_val, argv[1], state->deep);
-        JS_FreeValue (ctx, actual_val);
+        // `JS_HasProperty` above does not run the getter, so this is the first
+        // read of the value - and the one the comparison is given.
+        ScopedValue actual_val (
+        ctx, JS_GetPropertyStr (ctx, holder, segments.back ().c_str ()));
+        if (JS_IsException (actual_val.get ())) {
+            JS_FreeValue (ctx, holder);
+            return JS_EXCEPTION;
+        }
+        const int same =
+        js_compare_for_chain (ctx, actual_val.get (), argv[1], state->deep);
         if (same < 0) {
             JS_FreeValue (ctx, holder);
             return JS_EXCEPTION;
@@ -1746,14 +1775,18 @@ JSValue expect_empty_getter (JSContext* ctx, JSValueConst this_val, int argc, JS
     } else if (JS_IsObject (state->actual)) {
         JSPropertyEnum* tab = nullptr;
         uint32_t count      = 0;
+        // The key list is what "empty" means for an object, and a proxy's
+        // ownKeys trap can refuse to produce it. Reporting "not empty" for a
+        // list that was never produced is a pass under `.not`.
         if (JS_GetOwnPropertyNames (ctx, &tab, &count, state->actual,
-            JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
-            is_empty = (count == 0);
-            for (uint32_t i = 0; i < count; i++) {
-                JS_FreeAtom (ctx, tab[i].atom);
-            }
-            js_free (ctx, tab);
+            JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0) {
+            return JS_EXCEPTION;
         }
+        is_empty = (count == 0);
+        for (uint32_t i = 0; i < count; i++) {
+            JS_FreeAtom (ctx, tab[i].atom);
+        }
+        js_free (ctx, tab);
     }
 
     bool pass = state->negated ? !is_empty : is_empty;
@@ -1811,15 +1844,21 @@ JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
 
-    JSValue length_val = JS_GetPropertyStr (ctx, state->actual, "length");
-    if (JS_IsUndefined (length_val)) {
-        JS_FreeValue (ctx, length_val);
+    ScopedValue length_val (ctx, JS_GetPropertyStr (ctx, state->actual, "length"));
+    // A `length` the read could not produce is neither absent nor a number:
+    // the script's own error is the answer, not "requires a value with a
+    // length" and not a comparison against an uninitialised double.
+    if (JS_IsException (length_val.get ())) {
+        return JS_EXCEPTION;
+    }
+    if (JS_IsUndefined (length_val.get ())) {
         return JS_ThrowTypeError (ctx, "length() requires a value with a length");
     }
 
-    double actual_len, expected;
-    JS_ToFloat64 (ctx, &actual_len, length_val);
-    JS_FreeValue (ctx, length_val);
+    double actual_len = 0, expected = 0;
+    if (JS_ToFloat64 (ctx, &actual_len, length_val.get ()) < 0) {
+        return JS_EXCEPTION;
+    }
     if (JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
         return JS_ThrowTypeError (ctx, "length() requires a numeric argument");
     }
@@ -1946,10 +1985,14 @@ JSValue expect_one_of (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
 
     bool found = false;
     for (uint32_t i = 0; i < len && !found; i++) {
-        JSValue candidate = JS_GetPropertyUint32 (ctx, argv[0], i);
+        // Same rule as `include`: a candidate that could not be read is not a
+        // candidate the target failed to match.
+        ScopedValue candidate (ctx, JS_GetPropertyUint32 (ctx, argv[0], i));
+        if (JS_IsException (candidate.get ())) {
+            return JS_EXCEPTION;
+        }
         const int same =
-        js_compare_for_chain (ctx, state->actual, candidate, state->deep);
-        JS_FreeValue (ctx, candidate);
+        js_compare_for_chain (ctx, state->actual, candidate.get (), state->deep);
         if (same < 0) {
             return JS_EXCEPTION;
         }
@@ -1989,9 +2032,14 @@ JSValue expect_keys (JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
         JS_ToUint32 (ctx, &len, length_val);
         JS_FreeValue (ctx, length_val);
         for (uint32_t i = 0; i < len; i++) {
-            JSValue key = JS_GetPropertyUint32 (ctx, argv[0], i);
-            expected.push_back (js_to_string (ctx, key));
-            JS_FreeValue (ctx, key);
+            // A name that could not be read is not a name: `js_to_string`
+            // answers "" for it, and an empty key would be compared against
+            // the target's real ones as though the script had asked for it.
+            ScopedValue key (ctx, JS_GetPropertyUint32 (ctx, argv[0], i));
+            if (JS_IsException (key.get ())) {
+                return JS_EXCEPTION;
+            }
+            expected.push_back (js_to_string (ctx, key.get ()));
         }
     } else {
         for (int i = 0; i < argc; i++) {
@@ -2051,17 +2099,24 @@ JSValue expect_members (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     bool matches = (actual_len == expected_len);
     std::vector<bool> claimed (actual_len, false);
     for (uint32_t i = 0; i < expected_len && matches; i++) {
-        JSValue wanted = JS_GetPropertyUint32 (ctx, argv[0], i);
-        bool paired    = false;
+        // Same rule as `include`: an element that could not be read is not an
+        // element that failed to pair.
+        ScopedValue wanted (ctx, JS_GetPropertyUint32 (ctx, argv[0], i));
+        if (JS_IsException (wanted.get ())) {
+            return JS_EXCEPTION;
+        }
+        bool paired = false;
         for (uint32_t j = 0; j < actual_len && !paired; j++) {
             if (claimed[j]) {
                 continue;
             }
-            JSValue candidate = JS_GetPropertyUint32 (ctx, state->actual, j);
-            const int same = js_compare_for_chain (ctx, candidate, wanted, state->deep);
-            JS_FreeValue (ctx, candidate);
+            ScopedValue candidate (ctx, JS_GetPropertyUint32 (ctx, state->actual, j));
+            if (JS_IsException (candidate.get ())) {
+                return JS_EXCEPTION;
+            }
+            const int same =
+            js_compare_for_chain (ctx, candidate.get (), wanted.get (), state->deep);
             if (same < 0) {
-                JS_FreeValue (ctx, wanted);
                 return JS_EXCEPTION;
             }
             if (same == 1) {
@@ -2069,7 +2124,6 @@ JSValue expect_members (JSContext* ctx, JSValueConst this_val, int argc, JSValue
                 paired     = true;
             }
         }
-        JS_FreeValue (ctx, wanted);
         matches = paired;
     }
 

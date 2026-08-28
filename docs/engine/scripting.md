@@ -187,13 +187,16 @@ Notes on the edges:
   keep their contents outside the property list, so two distinct ones report
   *not* equal rather than silently passing. `Date` compares by instant and
   `RegExp` by pattern.
-- **A throw reached through the comparison is the verdict.** A key, an array
-  element or an array `length` backed by a getter that throws is a read that did
-  not happen, so the error reaches the test instead of being reported as "these
-  differ" - which under `.not` would have been a pass. The same holds for the
-  rendering the `Date` and `RegExp` comparisons run: an overridden `toJSON` or
-  `toString` that throws used to leave both sides rendered as the empty string,
-  which compared *equal* (#1048).
+- **A throw reached through a comparison is the verdict** (#1048). A key, an
+  array element or an array `length` behind a getter that throws is a read that
+  did not happen, so the error reaches the test instead of being reported as
+  "these differ" - which under `.not` would have been a pass. That holds for the
+  reads an assertion makes before comparing, too: `include`, `oneOf`, `members`,
+  `keys`, `property` (its nested walk included), `empty` and `length` stop at the
+  read rather than answering about it. And for the rendering the `Date` and
+  `RegExp` comparisons run: an overridden `toJSON` or `toString` that throws used
+  to leave both sides rendered as the empty string, which compared *equal*. When
+  both sides throw, the first side's error is the one reported.
 - **A cycle fails loudly.** Deep equality gives up after 64 levels with a
   `RangeError` naming the cause.
 - **`eql` separates `+0` from `-0`; `equal` does not.** That is chai: `equal`

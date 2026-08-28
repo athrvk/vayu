@@ -1511,6 +1511,58 @@ TEST_F (ScriptEngineTest, DeepEqualPropagatesAThrowFromAMemberItReads) {
     }
 }
 
+// The audit the issue asked for: the same omission in the reads each assertion
+// helper makes *before* handing a value to the comparison. Every case below is
+// negated, because that is where the swallow paid out - "these differ" about a
+// read that never happened is a PASS under `.not`, which is a green test over a
+// broken object.
+TEST_F (ScriptEngineTest, AssertionHelpersPropagateAThrowFromTheReadsTheyCompare) {
+    auto result = engine.execute_test (R"(
+        function throwingElement() {
+            var arr = [];
+            Object.defineProperty(arr, 0, {
+                enumerable: true, get: function() { throw new Error("from the element"); }
+            });
+            return arr;
+        }
+        function throwingLength() {
+            return { get length () { throw new Error("from the length"); } };
+        }
+        function unlistableKeys() {
+            return new Proxy({}, {
+                ownKeys: function() { throw new Error("from the keys"); }
+            });
+        }
+        function throwingKey(message) {
+            return { get a () { throw new Error(message); } };
+        }
+
+        pm.test("include", function() { pm.expect(throwingElement()).to.not.include(1); });
+        pm.test("oneOf", function() { pm.expect(1).to.not.be.oneOf(throwingElement()); });
+        pm.test("members", function() { pm.expect(throwingElement()).to.not.have.members([1]); });
+        pm.test("keys", function() { pm.expect({a: 1}).to.not.have.keys(throwingElement()); });
+        pm.test("property value", function() {
+            pm.expect(throwingKey("from the property")).to.not.have.property("a", 1);
+        });
+        pm.test("nested walk", function() {
+            pm.expect(throwingKey("from the walk")).to.not.have.nested.property("a.b");
+        });
+        pm.test("empty", function() { pm.expect(unlistableKeys()).to.not.be.empty; });
+        pm.test("length", function() { pm.expect(throwingLength()).to.not.have.length(0); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 8u);
+    const std::array<const char*, 8> expected = { "from the element",
+        "from the element", "from the element", "from the element",
+        "from the property", "from the walk", "from the keys", "from the length" };
+    for (size_t i = 0; i < result.tests.size (); i++) {
+        EXPECT_FALSE (result.tests[i].passed) << result.tests[i].name;
+        EXPECT_NE (result.tests[i].error_message.find (expected.at (i)), std::string::npos)
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+}
+
 // A Date and a RegExp are compared through their own rendering, and both
 // renderers answer "" when the script they run throws. Two empty renderings
 // compare *equal*, so this pair used to PASS - the dangerous direction, and
@@ -1519,14 +1571,14 @@ TEST_F (ScriptEngineTest, DeepEqualDoesNotPassAPairItCouldNotRender) {
     auto result = engine.execute_test (R"(
         pm.test("dates", function() {
             var a = new Date(0), b = new Date(5);
-            a.toJSON = function() { throw new Error("from toJSON"); };
-            b.toJSON = function() { throw new Error("from toJSON"); };
+            a.toJSON = function() { throw new Error("from the first toJSON"); };
+            b.toJSON = function() { throw new Error("from the second toJSON"); };
             pm.expect(a).to.eql(b);
         });
         pm.test("regexps", function() {
             var a = /one/, b = /two/;
-            a.toString = function() { throw new Error("from toString"); };
-            b.toString = function() { throw new Error("from toString"); };
+            a.toString = function() { throw new Error("from the first toString"); };
+            b.toString = function() { throw new Error("from the second toString"); };
             pm.expect(a).to.eql(b);
         });
         pm.test("dates that render still compare", function() {
@@ -1539,11 +1591,15 @@ TEST_F (ScriptEngineTest, DeepEqualDoesNotPassAPairItCouldNotRender) {
     ASSERT_EQ (result.tests.size (), 3u);
     EXPECT_FALSE (result.tests[0].passed)
     << "two Dates that cannot be rendered are not equal Dates";
-    EXPECT_NE (result.tests[0].error_message.find ("from toJSON"), std::string::npos)
+    // The *first* side's error, because rendering the second over a throw
+    // replaces the pending exception with one about a read the author is not
+    // being told failed.
+    EXPECT_NE (result.tests[0].error_message.find ("from the first toJSON"), std::string::npos)
     << result.tests[0].error_message;
     EXPECT_FALSE (result.tests[1].passed)
     << "two RegExps that cannot be rendered are not equal RegExps";
-    EXPECT_NE (result.tests[1].error_message.find ("from toString"), std::string::npos)
+    EXPECT_NE (result.tests[1].error_message.find ("from the first toString"),
+    std::string::npos)
     << result.tests[1].error_message;
     EXPECT_TRUE (result.tests[2].passed) << result.tests[2].error_message;
 }
