@@ -800,17 +800,103 @@ nlohmann::json get_script_completions () {
     { "sortText", "1_pm_request_headers_index_of" } });
 
     completions.push_back ({ { "label", "pm.request.body" }, { "kind", KIND_FIELD },
-    { "insertText", "pm.request.body" }, { "detail", "string | undefined (writable pre-request)" },
+    { "insertText", "pm.request.body" }, { "detail", "string & object (writable pre-request)" },
     { "documentation",
-    "The request body as a string (if any). Assign a string to replace it, or "
-    "delete it to send none. A body set on a request that had none is sent as "
-    "raw text - set Content-Type yourself. A form body reads as its fields "
-    "encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire "
-    "body and an assignment parses back into the fields, while for form-data "
-    "it "
-    "is a rendering of the parts (the multipart bytes carry a boundary that "
-    "does not exist until the send) and an assignment is refused." },
+    "The request body (if any), as Postman's RequestBody object: mode, raw, "
+    "and the urlencoded/formdata field lists.\n\nIt still behaves as the "
+    "string it used to be - concatenation, template literals, ==, the String "
+    "methods and .length all give the body - so `===` and `typeof` are two of "
+    "the three things that changed; the third is that assigning it straight to "
+    "a header value is refused, like pm.request.url. Assign a string (or "
+    "body.raw) to replace the body, or delete it to send none. A body set on a "
+    "request that had none is sent as raw text - set Content-Type yourself. A "
+    "form body reads as its fields encoded `key=value&...`: for "
+    "x-www-form-urlencoded that is the exact wire body and an assignment "
+    "parses back into the fields, while for form-data it is a rendering of the "
+    "parts (the multipart bytes carry a boundary that does not exist until the "
+    "send) and an assignment is refused." },
     { "sortText", "1_pm_request_body" } });
+
+    completions.push_back ({ { "label", "pm.request.body.mode" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.body.mode" }, { "detail", "string" },
+    { "documentation",
+    "Postman's mode name: \"urlencoded\", \"formdata\", or \"raw\" for every "
+    "content mode - json, text, xml, binary, graphql and jsonrpc all carry "
+    "their body as one string, which is what raw means. Read-only; the mode "
+    "follows the request's body type." },
+    { "sortText", "2_pm_request_body_mode" } });
+
+    completions.push_back ({ { "label", "pm.request.body.raw" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.body.raw" }, { "detail", "string" },
+    { "documentation",
+    "The body as a string - the same text pm.request.body itself reads as, so "
+    "JSON.parse(pm.request.body.raw) is the imported-script idiom that "
+    "works.\n\nDefined for every mode, where Postman leaves it undefined for "
+    "the two form ones: a form body reading as nothing cannot be told apart "
+    "from a request with no body. Assigning it is the same write as assigning "
+    "the body - it parses back into the fields for x-www-form-urlencoded, and "
+    "is refused for form-data." },
+    { "sortText", "2_pm_request_body_raw" } });
+
+    completions.push_back ({ { "label", "pm.request.body.urlencoded" },
+    { "kind", KIND_FIELD }, { "insertText", "pm.request.body.urlencoded" },
+    // `object[]`, the spelling `pm.response.events` already uses, because the
+    // declaration generator names a fixed vocabulary of types and renders
+    // anything else as `void` - which would make every use of this list an
+    // editor error on correct code. The entry shape is the first line of the
+    // documentation instead, where the popup shows it.
+    { "detail", "object[] | undefined" },
+    { "documentation",
+    "{ key, value, disabled } for each x-www-form-urlencoded pair, or "
+    "undefined in any other mode. Values "
+    "are as the user wrote them, not percent-encoded - the encoding is what "
+    "body.raw answers. Disabled rows are listed with disabled: true rather "
+    "than omitted, so a script can see the row it would otherwise re-add.\n\n"
+    "Read-only: edit the request's form fields, or assign body.raw." },
+    { "sortText", "2_pm_request_body_urlencoded" } });
+
+    completions.push_back ({ { "label", "pm.request.body.formdata" },
+    { "kind", KIND_FIELD }, { "insertText", "pm.request.body.formdata" },
+    // `object[]` for the reason the urlencoded row above gives.
+    { "detail", "object[] | undefined" },
+    { "documentation",
+    "{ key, value?, type, fileName?, disabled } for each multipart part, or "
+    "undefined in any other mode. A text part carries "
+    "type \"text\" and a value; a file part carries type \"file\" and the "
+    "fileName the server is told, with no value at all - an empty string there "
+    "would read as a text field that happens to be empty, and the local path "
+    "is never disclosed.\n\nRead-only: edit the request's form fields." },
+    { "sortText", "2_pm_request_body_formdata" } });
+
+    completions.push_back ({ { "label", "pm.request.body.length" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.body.length" }, { "detail", "number" },
+    { "documentation",
+    "The length of the body string - defined on the object rather than "
+    "inherited, so it is the body's own length and not the 0 that String's "
+    "prototype would have answered." },
+    { "sortText", "2_pm_request_body_length" } });
+
+    completions.push_back ({ { "label", "pm.request.body.toString" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.body.toString()" },
+    { "detail", "pm.request.body.toString(): string" },
+    { "documentation",
+    "The body as a string. The explicit spelling of what every string context "
+    "already does, and what `===` needs to keep comparing the way it did." },
+    { "sortText", "2_pm_request_body_toString" } });
+
+    completions.push_back ({ { "label", "pm.request.body.valueOf" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.body.valueOf()" },
+    { "detail", "pm.request.body.valueOf(): string" },
+    { "documentation", "The body as a string - what an arithmetic or == coercion reaches." },
+    { "sortText", "2_pm_request_body_valueOf" } });
+
+    completions.push_back ({ { "label", "pm.request.body.toJSON" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.body.toJSON()" },
+    { "detail", "pm.request.body.toJSON(): string" },
+    { "documentation",
+    "The body as a string - what JSON.stringify embeds, so an object holding "
+    "the body serialises as the body and not as its members." },
+    { "sortText", "2_pm_request_body_toJSON" } });
 
     // Snippets for the mutation patterns. Without these, `pm.request.` offers
     // only the four reads and the capability is invisible in the editor.
@@ -838,14 +924,17 @@ nlohmann::json get_script_completions () {
     { { "label", "pm.request.body = JSON.stringify(...) (rewrite the body)" },
     { "kind", KIND_SNIPPET },
     { "insertText",
-    "var body = JSON.parse(pm.request.body);\n${1:// body.field = \"value\";}\n"
-    "pm.request.body = JSON.stringify(body);" },
+    "var body = JSON.parse(pm.request.body.raw);\n${1:// body.field = "
+    "\"value\";}\n"
+    "pm.request.body.raw = JSON.stringify(body);" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "filterText", "pm.request.body rewrite json" },
     { "detail", "Parse, edit and re-serialise the body (pre-request)" },
     { "documentation",
     "The body is a string in and a string out, so a structural edit is "
-    "parse - mutate - stringify. Compute anything derived from the body after "
-    "this, or it describes the old one." },
+    "parse - mutate - stringify. `.raw` is the Postman spelling and leaves the "
+    "body object in place; assigning pm.request.body a string still works and "
+    "replaces it with that string. Compute anything derived from the body "
+    "after this, or it describes the old one." },
     { "sortText", "2_pm_request_body_rewrite" } });
 
     // ========================================

@@ -670,7 +670,7 @@ Access request data:
 pm.request.method            // HTTP method (string)
 pm.request.url               // Full URL (Postman Url object - see below)
 pm.request.headers           // Request headers (object, with the methods below)
-pm.request.body              // Request body (string, if any)
+pm.request.body              // Request body (Postman RequestBody object, if any - see below)
 ```
 
 **`headers` is a different set in each hook, and that is the point.** A
@@ -702,11 +702,36 @@ Four consequences worth knowing:
   cookie surface, and the response's raw view is the full wire frame (which also
   carries libcurl's own `Accept`, `Host` and `Content-Length`).
 
-`body` is a string for every mode, including the two whose content is a list of
-fields rather than text. A form body reads as its **enabled** fields encoded
-`key=value&…`:
+`pm.request.body` is Postman's `RequestBody` object (issue #1003), present only
+when the request has a body: a bodyless request still defines no `body`
+property at all, so `typeof pm.request.body === 'undefined'` still separates
+"no body" from "a body that happens to be empty", exactly as it did when this
+was a string.
 
-| Body mode | What `pm.request.body` reads | Assigning a string |
+```javascript
+pm.request.body.mode         // 'urlencoded' | 'formdata' | 'raw'
+pm.request.body.raw          // the body as a string, for every mode
+pm.request.body.urlencoded   // [{key, value, disabled}, ...] or undefined
+pm.request.body.formdata     // [{key, value?, type, fileName?, disabled}, ...] or undefined
+pm.request.body.length       // the body string's own length
+```
+
+`.mode` reads `raw` for every content mode - `json`, `text`, `xml`, `binary`,
+`graphql` and `jsonrpc` all carry their body as one string, which is what `raw`
+means. Postman's own `graphql` and `file` modes are deliberately not answered:
+each promises a member this engine has nothing to fill it from - a stored
+GraphQL body may be an envelope or a bare document rather than Postman's
+`{query, variables}` pair, and a binary body carries bytes rather than the path
+`file.src` names - so answering the mode without the member it exists for would
+be a silent wrong answer (issue #1111 tracks filling them in).
+
+`.raw` is the string every mode reads as, including the two whose content is a
+list of fields rather than text - and it is defined for both of those, where
+Postman leaves it `undefined`, because a form body reading as nothing cannot be
+told apart from a request with no body (issue #411). A form body's `.raw` reads
+its **enabled** fields encoded `key=value&…`:
+
+| Body mode | What `.raw` reads | Assigning a string (or `.raw`) |
 |---|---|---|
 | `json` / `text` / `xml` / `graphql` / … | the content, as stored | replaces it |
 | `x-www-form-urlencoded` | the encoded fields - **exactly** the bytes sent | parses back into the fields |
@@ -729,10 +754,63 @@ refused there rather than accepted and then ignored by the transfer layer. To
 change a multipart body, edit the request's form fields; `delete pm.request.body`
 still drops it entirely.
 
+`.urlencoded` and `.formdata` are the two field lists, present only in their own
+mode and `undefined` in every other: `{ key, value, disabled }` per
+x-www-form-urlencoded pair, or `{ key, value?, type, fileName?, disabled }` per
+multipart part. Values are as the user wrote them, not percent-encoded - the
+encoding is `.raw`'s answer, so a signature built from these pairs would
+double-encode if this were encoded too. A disabled row is listed with
+`disabled: true` rather than omitted, so a script can see the row it would
+otherwise re-add. A file part carries no `value` at all, rather than the `""`
+an empty text field would hold - an empty string there would read as a text
+field that happens to be empty - and never the local path.
+
+Both lists are **read-only**, and so are `.mode` and `.length`. Assigning any of
+the four throws naming the member, and so does `push`ing into a list, which is
+frozen. Writing to a field *inside* an entry is the one edit that does not throw
+- a frozen object drops a write silently in non-strict code, which is
+JavaScript's own rule rather than one this surface adds - and it reaches nothing
+either way. Assign `pm.request.body` or `.raw` to change what is sent, or edit
+the request's form fields directly.
+
 Reading a form body never rewrites it. The write-back reads `body` off the
-script's object whether or not the script assigned it, so an **unchanged** string
-means untouched - without that, a script that only looked at the body would
-delete the disabled rows the encoded view leaves out.
+script's object whether or not the script assigned it, so an **unchanged**
+value means untouched - without that, a script that only looked at the body
+would delete the disabled rows the encoded view leaves out.
+
+### The body was a string too, and mostly still behaves as one
+
+This shape replaced a plain string (issue #1003: Postman compatibility over the
+shipped string shape, the same trade issue #991 made for the
+[URL](#url-parts-pmrequesturl)). The object keeps as much of the old behaviour
+as JavaScript allows - it carries its own `toString`, `valueOf`, `toJSON` and
+`Symbol.toPrimitive`, and inherits from `String.prototype`:
+
+```javascript
+'' + pm.request.body;                     // the body
+`${pm.request.body}`;                     // the body
+pm.request.body == 'plain text';          // compares as the body
+pm.request.body.startsWith('{');          // String methods work
+pm.request.body.length;                   // the body's own length
+JSON.stringify({ b: pm.request.body });   // embeds the body string
+```
+
+Three things did change, and no mitigation can fix them:
+
+| Was | Now | Use |
+|-----|-----|-----|
+| `pm.request.body === '...'` | `false` | `==`, or `.toString()` |
+| `typeof pm.request.body` | `'object'` | - |
+| `pm.request.headers['X-Body'] = pm.request.body` | refused | `pm.request.headers['X-Body'] = String(pm.request.body)` |
+
+The third is the same refusal `pm.request.url` already gets: a value the engine
+cannot send is refused rather than coerced, and an object is not a header
+value.
+
+`.length` is **not** one of them: it is defined on the object as the body's own
+length. Inheriting it from `String.prototype` - which is a String object
+holding `""` - would have answered `0` for a body that is not empty, and a
+plausible wrong number is worse than a break you can see.
 
 ### Mutating the request (pre-request scripts)
 
@@ -759,12 +837,14 @@ Rules worth knowing before you rely on them:
   sees the real `Authorization` header and can replace or remove it.
 - **A bad value is refused, not coerced.** `method` must be a string (one of the
   seven HTTP verbs), `url` a URL string (assigning anything else throws at the
-  assignment), header values must be strings,
-  numbers or booleans, and `body` must be a string. Anything else fails the
-  whole write-back - the request is sent unchanged and the reason is reported
-  as the pre-request script error, visible in the response pane's Console tab.
-  Assigning a string to a `form-data` body fails the same way, for the same
-  reason: a value the engine cannot send is refused rather than dropped.
+  assignment), header values must be strings, numbers or booleans, and `body`
+  must be a string or the `RequestBody` object `pm.request.body` itself holds -
+  handing the object straight back (`pm.request.body = pm.request.body`)
+  changes nothing. Anything else fails the whole write-back - the request is
+  sent unchanged and the reason is reported as the pre-request script error,
+  visible in the response pane's Console tab. Assigning a string to a
+  `form-data` body fails the same way, for the same reason: a value the engine
+  cannot send is refused rather than dropped.
 - **Setting a variable can re-render the URL, if composition left it
   unresolved.** `{{placeholders}}` are still resolved at compose time
   (`POST /compose`), strictly before any script runs (#226, D1 stands) - but a
@@ -1830,10 +1910,10 @@ parse - mutate - stringify. Anything derived from the body (a length, a digest,
 a checksum) has to be computed *after* the edit, or it describes the old one.
 
 ```javascript
-var body = JSON.parse(pm.request.body);
+var body = JSON.parse(pm.request.body.raw);
 body.metadata = { client: 'vayu', sentAt: new Date().toISOString() };
 delete body.debugOnly;
-pm.request.body = JSON.stringify(body);
+pm.request.body.raw = JSON.stringify(body);
 
 // Recomputed from the final body, not the original.
 pm.request.headers['Content-Length'] = String(pm.request.body.length);

@@ -120,7 +120,7 @@ TEST (ScriptCompletions, TheMutationSnippetsAreOfferedAndReachable) {
         } else if (insert.rfind ("pm.request.headers[", 0) == 0) {
             has_set_header = true;
             EXPECT_NE (match.find ("pm.request.headers"), std::string::npos) << match;
-        } else if (insert.find ("pm.request.body = JSON.stringify") != std::string::npos) {
+        } else if (insert.find ("pm.request.body.raw = JSON.stringify") != std::string::npos) {
             has_body_rewrite = true;
             EXPECT_NE (match.find ("pm.request.body"), std::string::npos) << match;
         }

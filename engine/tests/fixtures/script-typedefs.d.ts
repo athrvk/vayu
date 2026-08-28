@@ -854,9 +854,51 @@ declare const pm: {
 	 */
 	request: {
 		/**
-		 * The request body as a string (if any). Assign a string to replace it, or delete it to send none. A body set on a request that had none is sent as raw text - set Content-Type yourself. A form body reads as its fields encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire body and an assignment parses back into the fields, while for form-data it is a rendering of the parts (the multipart bytes carry a boundary that does not exist until the send) and an assignment is refused.
+		 * The request body (if any), as Postman's RequestBody object: mode, raw, and the urlencoded/formdata field lists.
+		 * 
+		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the body - so `===` and `typeof` are two of the three things that changed; the third is that assigning it straight to a header value is refused, like pm.request.url. Assign a string (or body.raw) to replace the body, or delete it to send none. A body set on a request that had none is sent as raw text - set Content-Type yourself. A form body reads as its fields encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire body and an assignment parses back into the fields, while for form-data it is a rendering of the parts (the multipart bytes carry a boundary that does not exist until the send) and an assignment is refused.
 		 */
-		body: string | undefined;
+		get body(): string & {
+			/**
+			 * { key, value?, type, fileName?, disabled } for each multipart part, or undefined in any other mode. A text part carries type "text" and a value; a file part carries type "file" and the fileName the server is told, with no value at all - an empty string there would read as a text field that happens to be empty, and the local path is never disclosed.
+			 * 
+			 * Read-only: edit the request's form fields.
+			 */
+			formdata: { [key: string]: any }[] | undefined;
+			/**
+			 * The length of the body string - defined on the object rather than inherited, so it is the body's own length and not the 0 that String's prototype would have answered.
+			 */
+			length: number;
+			/**
+			 * Postman's mode name: "urlencoded", "formdata", or "raw" for every content mode - json, text, xml, binary, graphql and jsonrpc all carry their body as one string, which is what raw means. Read-only; the mode follows the request's body type.
+			 */
+			mode: string;
+			/**
+			 * The body as a string - the same text pm.request.body itself reads as, so JSON.parse(pm.request.body.raw) is the imported-script idiom that works.
+			 * 
+			 * Defined for every mode, where Postman leaves it undefined for the two form ones: a form body reading as nothing cannot be told apart from a request with no body. Assigning it is the same write as assigning the body - it parses back into the fields for x-www-form-urlencoded, and is refused for form-data.
+			 */
+			raw: string;
+			/**
+			 * The body as a string - what JSON.stringify embeds, so an object holding the body serialises as the body and not as its members.
+			 */
+			toJSON(): string;
+			/**
+			 * The body as a string. The explicit spelling of what every string context already does, and what `===` needs to keep comparing the way it did.
+			 */
+			toString(): string;
+			/**
+			 * { key, value, disabled } for each x-www-form-urlencoded pair, or undefined in any other mode. Values are as the user wrote them, not percent-encoded - the encoding is what body.raw answers. Disabled rows are listed with disabled: true rather than omitted, so a script can see the row it would otherwise re-add.
+			 * 
+			 * Read-only: edit the request's form fields, or assign body.raw.
+			 */
+			urlencoded: { [key: string]: any }[] | undefined;
+			/**
+			 * The body as a string - what an arithmetic or == coercion reaches.
+			 */
+			valueOf(): string;
+		};
+		set body(value: string);
 		/**
 		 * Request headers as key-value pairs. The object is authoritative: the set it holds at the end is the set that is sent, so delete removes a header. Names are case-sensitive here (use 'Authorization', not 'authorization'), and values must be a string, number or boolean.
 		 */

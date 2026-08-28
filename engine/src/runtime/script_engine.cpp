@@ -549,6 +549,68 @@ RequestUrlState* request_url_state (JSValueConst value) {
 }
 
 /**
+ * @brief What `pm.request.body` carries (issue #1003).
+ *
+ * `body` is the composed body, which is where the mode and the field lists are
+ * read from; `text` is the string view (`script_body_view`) the object answers
+ * every string context with, and the one thing the write-back reads back. A
+ * `.raw` assignment moves `text` and nothing else - the write-back applies it
+ * through the same rules a whole-string assignment goes through, so there is one
+ * definition of what assigning a body means rather than two.
+ */
+struct RequestBodyState {
+    Body body;
+    std::string text;
+};
+
+JSClassID request_body_class_id = 0;
+
+void request_body_finalizer (JSRuntime* rt, JSValue val) {
+    (void)rt;
+    delete static_cast<RequestBodyState*> (JS_GetOpaque (val, request_body_class_id));
+}
+
+// No gc_mark, for the reason the Url class gives: the state holds C++ values,
+// never a JSValue.
+JSClassDef request_body_class = { .class_name = "RequestBody",
+    .finalizer                                = request_body_finalizer,
+    .gc_mark                                  = nullptr,
+    .call                                     = nullptr,
+    .exotic                                   = nullptr };
+
+/// The state behind a RequestBody object, or nullptr for anything else - a real
+/// class test, for the reason `request_url_state` gives.
+RequestBodyState* request_body_state (JSValueConst value) {
+    return static_cast<RequestBodyState*> (JS_GetOpaque (value, request_body_class_id));
+}
+
+/**
+ * @brief The text an assertion should read a string-like target as.
+ *
+ * A JS string, and the two objects that replaced one on `pm.request`: the Url
+ * (#991) and the RequestBody (#1003). Both are documented as still behaving as
+ * the string they replaced, and `pm.expect(pm.request.url).to.include(...)` is
+ * the idiom in this repo's own docs and tests - a verdict that silently flipped
+ * to failing is the worst thing an assertion can do, so the two are named here
+ * rather than left to whichever branch an object falls into.
+ *
+ * Only these three. Coercing *any* object would make
+ * `pm.expect({}).to.include('object')` pass.
+ */
+std::optional<std::string> expect_string_like (JSContext* ctx, JSValueConst value) {
+    if (auto* url = request_url_state (value)) {
+        return request_url_current_text (ctx, value, *url);
+    }
+    if (auto* body = request_body_state (value)) {
+        return body->text;
+    }
+    if (JS_IsString (value)) {
+        return js_to_string (ctx, value);
+    }
+    return std::nullopt;
+}
+
+/**
  * @brief The URL a value carries, for the surfaces that used to require a
  *        string and are documented as taking `pm.request.url`.
  *
@@ -1520,19 +1582,13 @@ JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValue
 
     bool includes = false;
 
-    // A Url object takes the substring branch, not the "neither string nor
-    // array" one that answers false. `pm.expect(pm.request.url).to.include(...)`
-    // is the idiom in this repo's own docs and tests, and #991 turned its
-    // target from a string into an object - a verdict that silently flipped to
-    // failing is the worst thing an assertion can do.
-    RequestUrlState* url = request_url_state (state->actual);
-
-    if (JS_IsString (state->actual) || url != nullptr) {
-        const std::string str = url != nullptr ?
-        request_url_current_text (ctx, state->actual, *url) :
-        js_to_string (ctx, state->actual);
-        std::string substr    = js_to_string (ctx, argv[0]);
-        includes              = str.find (substr) != std::string::npos;
+    // A Url or RequestBody object takes the substring branch, not the "neither
+    // string nor array" one that answers false: both replaced a string on
+    // `pm.request` (#991, #1003) and both are documented as still reading as
+    // one. See `expect_string_like`.
+    if (auto text = expect_string_like (ctx, state->actual)) {
+        const std::string substr = js_to_string (ctx, argv[0]);
+        includes                 = text->find (substr) != std::string::npos;
     } else if (JS_IsArray (state->actual)) {
         JSValue length = JS_GetPropertyStr (ctx, state->actual, "length");
         uint32_t len;
@@ -5399,6 +5455,283 @@ void install_request_url (JSContext* ctx, JSValue request, const std::string& ur
     JS_FreeValue (ctx, url);
 }
 
+// ---------------------------------------------------------------------------
+// pm.request.body - Postman's RequestBody object (issue #1003)
+// ---------------------------------------------------------------------------
+
+/// Which member a bound accessor answers for.
+enum BodyMember : std::uint8_t {
+    BODY_MODE,
+    BODY_RAW,
+    BODY_URLENCODED,
+    BODY_FORMDATA,
+    BODY_LENGTH
+};
+
+/**
+ * @brief The Postman mode name this body reads as.
+ *
+ * Three names, because those are the three shapes a script can *act* on: a
+ * string it can parse, a pair list, and a multipart part list. Vayu's other
+ * content modes - `json`, `text`, `xml`, `binary`, `graphql`, `jsonrpc` - each
+ * carry their body as one string, which is what `raw` means, so a lifted
+ * `body.mode === 'raw'` guard answers true for every one of them.
+ *
+ * The two Postman modes deliberately not answered are `graphql` and `file`,
+ * because each promises a member this engine has nothing to fill it from: a
+ * `graphql` body is stored as one string that may be an envelope or a bare
+ * document (`graphql_body.hpp`), never as Postman's `{query, variables}` pair,
+ * and a `binary` body carries bytes rather than the path `file.src` names.
+ * Answering the mode without the member it exists for would be a silent wrong
+ * answer, which is the class this program closes rather than adds to; issue
+ * #1111 tracks filling them in.
+ */
+const char* postman_body_mode (BodyMode mode) {
+    switch (mode) {
+    case BodyMode::Form: return "urlencoded";
+    case BodyMode::FormData: return "formdata";
+    // `None` never reaches here: a bodyless request defines no `body` property
+    // at all, so no object is built for it. See setup_pm_request.
+    default: return "raw";
+    }
+}
+
+/// The member a magic stands for, for the refusal that has to name it.
+const char* body_member_name (int magic) {
+    switch (magic) {
+    case BODY_MODE: return "mode";
+    case BODY_RAW: return "raw";
+    case BODY_URLENCODED: return "urlencoded";
+    case BODY_FORMDATA: return "formdata";
+    default: return "length";
+    }
+}
+
+/// One form field as Postman presents it - a read-only view of a composed part.
+JSValue body_field_entry (JSContext* ctx, const FormField& field, bool multipart) {
+    JSValue entry     = JS_NewObject (ctx);
+    const auto define = [&] (const char* name, JSValue value) {
+        JS_DefinePropertyValueStr (ctx, entry, name, value, JS_PROP_ENUMERABLE);
+    };
+    const auto define_text = [&] (const char* name, const std::string& text) {
+        define (name, JS_NewStringLen (ctx, text.data (), text.size ()));
+    };
+    define_text ("key", field.key);
+    if (multipart && field.type == FormFieldType::File) {
+        // No `value` at all, rather than the `""` a file part's `value` holds:
+        // an empty string here reads as a text field that happens to be empty,
+        // which is the one distinction `render_form_data_parts` exists to keep
+        // (issue #411). What a script may see is the name the *server* is told,
+        // never the path - see `declared_file_name`.
+        define ("type", JS_NewString (ctx, "file"));
+        define_text ("fileName", vayu::http::declared_file_name (field));
+    } else {
+        define_text ("value", field.value);
+        if (multipart) {
+            define ("type", JS_NewString (ctx, "text"));
+        }
+    }
+    // Disabled rows are listed rather than dropped, unlike the string view: the
+    // list is what a script inspects the *request* with, and a row it cannot see
+    // is one it would re-add. The flag is what says the row is not sent.
+    define ("disabled", JS_NewBool (ctx, !field.enabled));
+    (void)JS_PreventExtensions (ctx, entry);
+    return entry;
+}
+
+/**
+ * @brief The read-only list `.urlencoded` / `.formdata` answer with.
+ *
+ * Not extensible, and its entries not writable, so `push`, `splice` and a field
+ * assignment throw instead of editing a list nothing reads back. #1003 keeps the
+ * write surface exactly as it shipped - a whole-body string, or `.raw` - and a
+ * list that quietly accepted edits would be the silent-wrong shape again.
+ */
+JSValue body_field_list (JSContext* ctx, const std::vector<FormField>& fields, bool multipart) {
+    JSValue list  = JS_NewArray (ctx);
+    uint32_t next = 0;
+    for (const auto& field : fields) {
+        JS_SetPropertyUint32 (ctx, list, next++, body_field_entry (ctx, field, multipart));
+    }
+    (void)JS_PreventExtensions (ctx, list);
+    return list;
+}
+
+/**
+ * The body as a string, and the single answer behind every string context.
+ *
+ * `toString`, `valueOf`, `toJSON` and `@@toPrimitive` all land here, for the
+ * reason `js_url_to_string` gives: concatenation, a template literal, `==`
+ * against a string, `JSON.stringify` and `String.prototype`'s generic methods
+ * keep behaving the way they did when this was a string.
+ */
+JSValue js_body_to_string (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = request_body_state (this_val);
+    if (!state) {
+        return JS_ThrowTypeError (ctx, "not a pm.request.body object");
+    }
+    return JS_NewStringLen (ctx, state->text.data (), state->text.size ());
+}
+
+JSValue js_body_member_get (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)argc;
+    (void)argv;
+    (void)func_data;
+    auto* state = request_body_state (this_val);
+    if (!state) {
+        return JS_ThrowTypeError (ctx, "not a pm.request.body object");
+    }
+    switch (magic) {
+    case BODY_MODE:
+        return JS_NewString (ctx, postman_body_mode (state->body.mode));
+    // `.raw` is the string view for **every** mode, where Postman leaves it
+    // undefined for the two form ones. That is the divergence #411 already
+    // decided: a form body reading as nothing is indistinguishable from a
+    // request with no body, and this object exists to add answers rather than
+    // take one back.
+    case BODY_RAW:
+        return JS_NewStringLen (ctx, state->text.data (), state->text.size ());
+    case BODY_URLENCODED:
+        return state->body.mode == BodyMode::Form ?
+        body_field_list (ctx, state->body.fields, /*multipart=*/false) :
+        JS_UNDEFINED;
+    case BODY_FORMDATA:
+        return state->body.mode == BodyMode::FormData ?
+        body_field_list (ctx, state->body.fields, /*multipart=*/true) :
+        JS_UNDEFINED;
+    // Defined rather than left to the prototype, for the reason #991 gives
+    // about the URL's: `String.prototype` is a String object holding `""`, so
+    // an inherited `length` answers 0 - a plausible number for a body that is
+    // not empty, and `docs/engine/scripting.md` sets Content-Length from it.
+    case BODY_LENGTH:
+        return JS_NewInt64 (ctx, static_cast<int64_t> (state->text.size ()));
+    default: return JS_UNDEFINED;
+    }
+}
+
+JSValue js_body_member_set (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)func_data;
+    auto* state = request_body_state (this_val);
+    if (!state) {
+        return JS_ThrowTypeError (ctx, "not a pm.request.body object");
+    }
+    if (magic != BODY_RAW) {
+        // The members that *describe* the body rather than carry it. Refused at
+        // the assignment rather than ignored: a script that set `.mode` or
+        // rebuilt `.urlencoded` would otherwise send the body it started with
+        // and be told nothing, which is the exact silent-wrong shape this
+        // program exists to close.
+        return JS_ThrowTypeError (ctx,
+        "pm.request.body.%s is read-only - assign pm.request.body or "
+        "pm.request.body.raw to change what is sent, or edit the request's "
+        "form "
+        "fields",
+        body_member_name (magic));
+    }
+    if (argc < 1 || !JS_IsString (argv[0])) {
+        return JS_ThrowTypeError (ctx, "pm.request.body.raw must be assigned a string, got %s",
+        argc > 0 ? js_type_name (ctx, argv[0]) : "no value");
+    }
+    // Only the view moves. What assigning a body *means* - the untouched rule,
+    // the urlencoded parse-back, the form-data refusal - is the write-back's,
+    // and is reached identically whether the script assigned `.raw` or the whole
+    // body. One definition, not two.
+    state->text = js_to_string (ctx, argv[0]);
+    return JS_UNDEFINED;
+}
+
+/**
+ * @brief A RequestBody object over @p body, with the Postman members on it.
+ *
+ * A plain property on `pm.request` rather than #991's accessor pair, and the one
+ * place this shape departs from that precedent. The URL needed an accessor so
+ * that `pm.request.url = x` left a Url object behind; for the body, a string
+ * assignment leaving a plain string *is* the shipped contract, and `null` and
+ * `delete` both mean "send no body" - an accessor would have to carry an
+ * emptied-state flag to keep saying so, machinery bought for a chained access
+ * nothing asks for.
+ */
+JSValue new_request_body (JSContext* ctx, const Body& body) {
+    JSValue object = JS_NewObjectClass (ctx, request_body_class_id);
+    if (JS_IsException (object)) {
+        return object;
+    }
+    auto* state = new RequestBodyState{ body, script_body_view (body) };
+    if (JS_SetOpaque (object, state) < 0) {
+        // The object is not of this class, so the finalizer will never run and
+        // nothing else would free the state.
+        delete state;
+        JS_FreeValue (ctx, object);
+        return JS_EXCEPTION;
+    }
+
+    // Defined rather than set, for the reason build_request_url_members gives:
+    // `String.prototype` is the prototype here, and `[[Set]]` consults it.
+    const auto define = [&] (const char* name, JSValue value) {
+        JS_DefinePropertyValueStr (ctx, object, name, value, JS_PROP_C_W_E);
+    };
+    define ("toString", JS_NewCFunction (ctx, js_body_to_string, "toString", 0));
+    define ("valueOf", JS_NewCFunction (ctx, js_body_to_string, "valueOf", 0));
+    define ("toJSON", JS_NewCFunction (ctx, js_body_to_string, "toJSON", 0));
+    JSAtom to_primitive = well_known_symbol_atom (ctx, "toPrimitive");
+    JS_DefinePropertyValue (ctx, object, to_primitive,
+    JS_NewCFunction (ctx, js_body_to_string, "[Symbol.toPrimitive]", 1),
+    JS_PROP_CONFIGURABLE);
+    JS_FreeAtom (ctx, to_primitive);
+
+    // Accessors, not values: a read is answered from the state, and a write
+    // reaches it or is refused by name. `this` carries the state, so the pair
+    // needs no bound data - and a getter pulled off the object and called on
+    // something else finds no state and throws rather than reading one.
+    const auto define_accessor = [&] (const char* name, int magic) {
+        JSAtom atom = JS_NewAtom (ctx, name);
+        JS_DefinePropertyGetSet (ctx, object, atom,
+        JS_NewCFunctionData (ctx, js_body_member_get, 0, magic, 0, nullptr),
+        JS_NewCFunctionData (ctx, js_body_member_set, 1, magic, 0, nullptr),
+        JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JS_FreeAtom (ctx, atom);
+    };
+    define_accessor ("mode", BODY_MODE);
+    define_accessor ("raw", BODY_RAW);
+    define_accessor ("urlencoded", BODY_URLENCODED);
+    define_accessor ("formdata", BODY_FORMDATA);
+    define_accessor ("length", BODY_LENGTH);
+    return object;
+}
+
+/**
+ * @brief The body text a value carries, the sibling of `script_url_text`.
+ *
+ * A JS string is itself; a RequestBody object is the string view it holds, which
+ * a `.raw` assignment has already moved. Anything else is `nullopt`, and the
+ * caller says so in its own words.
+ *
+ * Deliberately *not* "any object, via toString": `pm.request.body = {}` would
+ * then become the string `[object Object]` and reach the wire, which is exactly
+ * the silent-wrong-request class this program exists to close.
+ */
+std::optional<std::string> script_body_text (JSContext* ctx, JSValueConst value) {
+    if (JS_IsString (value)) {
+        return js_to_string (ctx, value);
+    }
+    if (auto* state = request_body_state (value)) {
+        return state->text;
+    }
+    return std::nullopt;
+}
+
 void setup_pm_request (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
 
@@ -5428,13 +5761,24 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
         }
         JS_SetPropertyStr (ctx, request, "headers", headers);
 
-        // pm.request.body - a string for every mode, including the two that
-        // carry their content in `fields`. A bodyless request still defines no
-        // property at all, so `typeof pm.request.body` stays the way a script
-        // tells "no body" from "a body that happens to be empty".
+        // pm.request.body - Postman's RequestBody object, not the string it used
+        // to be (issue #1003). It still *reads* as that string in every context
+        // JavaScript allows, and the string is still what an assignment means.
+        // A bodyless request defines no property at all, so
+        // `typeof pm.request.body` stays the way a script tells "no body" from
+        // "a body that happens to be empty".
         if (data->request->body.mode != BodyMode::None) {
-            const std::string view = script_body_view (data->request->body);
-            JS_SetPropertyStr (ctx, request, "body", JS_NewString (ctx, view.c_str ()));
+            JSValue body = new_request_body (ctx, data->request->body);
+            if (JS_IsException (body)) {
+                // Defining the exception sentinel as a property would make
+                // `pm.request.body` an object no read can touch. A request with
+                // no reachable body reads as one with no body, which is the
+                // failure this can degrade to honestly. Same guard, same
+                // reason, as install_request_url.
+                JS_FreeValue (ctx, body);
+            } else {
+                JS_SetPropertyStr (ctx, request, "body", body);
+            }
         }
     }
 
@@ -5660,8 +6004,11 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
     ScopedValue js_body (ctx, JS_GetPropertyStr (ctx, js_request.get (), "body"));
     if (JS_IsUndefined (js_body.get ()) || JS_IsNull (js_body.get ())) {
         staged.body = Body{};
-    } else if (JS_IsString (js_body.get ())) {
-        std::string body_text = js_to_string (ctx, js_body.get ());
+    } else if (auto staged_text = script_body_text (ctx, js_body.get ())) {
+        // Either shape: the RequestBody object `pm.request.body` normally holds,
+        // or a plain string, which is what an assignment leaves there. Both are
+        // the body as a string, and both mean the same thing from here on.
+        std::string body_text = std::move (*staged_text);
         // Every other member of pm.request is authoritative rather than a diff:
         // whatever the object holds is what is sent. `body` cannot be read that
         // way for a form mode, because the string the script was handed is a
@@ -5703,7 +6050,8 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
             }
         }
     } else {
-        return "pm.request.body must be a string, got " +
+        return "pm.request.body must be a string or a request body object, "
+               "got " +
         std::string (js_type_name (ctx, js_body.get ()));
     }
 
@@ -7988,9 +8336,13 @@ void setup_pm_object (JSContext* ctx) {
     // through `ToString(this)`, which the object's own `@@toPrimitive` answers
     // with the URL. What it does not restore is `.length` - an own property of
     // a real string, and one of the three breaks #991 documents.
+    // `pm.request.body` inherits from it for the same reason (issue #1003), so
+    // the first call gets a reference of its own - `JS_SetClassProto` takes
+    // ownership of the value it is given.
     JSValue string_ctor  = JS_GetPropertyStr (ctx, global, "String");
     JSValue string_proto = JS_GetPropertyStr (ctx, string_ctor, "prototype");
     JS_FreeValue (ctx, string_ctor);
+    JS_SetClassProto (ctx, request_body_class_id, JS_DupValue (ctx, string_proto));
     JS_SetClassProto (ctx, request_url_class_id, string_proto);
 
     // pm.test()
@@ -8133,6 +8485,12 @@ class ScriptEngine::Impl {
             JS_NewClassID (rt, &request_url_class_id);
         }
         JS_NewClass (rt, request_url_class_id, &request_url_class);
+
+        // Register the pm.request.body class - same story, same prototype.
+        if (request_body_class_id == 0) {
+            JS_NewClassID (rt, &request_body_class_id);
+        }
+        JS_NewClass (rt, request_body_class_id, &request_body_class);
 
         JSContext* ctx = JS_NewContext (rt);
         if (ctx) {

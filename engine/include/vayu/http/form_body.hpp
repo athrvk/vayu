@@ -171,6 +171,23 @@ namespace vayu::http {
 [[nodiscard]] bool has_file_parts (const Body& body);
 
 /**
+ * @brief The filename the server is told a file part carries.
+ *
+ * `file_name` when the part declares one, else the basename of `src`, with
+ * separators for both platforms because the path is whatever the client on this
+ * machine wrote. It mirrors what the transfer setup hands libcurl
+ * (`curl_mime_filedata` declares the basename, an explicit `curl_mime_filename`
+ * overrides it), so nothing that shows a part can name one thing while the send
+ * names another.
+ *
+ * The path itself is deliberately not part of any answer built from this: it
+ * discloses this machine's layout to anything a script logs and adds nothing the
+ * request sends. `render_form_data_parts` and `pm.request.body.formdata` (issue
+ * #1003) are the two surfaces that show a part, and they show this.
+ */
+[[nodiscard]] std::string declared_file_name (const FormField& field);
+
+/**
  * @brief Why this body's file parts cannot be sent, if any of them cannot.
  *
  * A part with no `src` (a row authored but never pointed at a file, or one
