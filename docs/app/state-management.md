@@ -1663,8 +1663,10 @@ or collection the winning value came from (absent for `global`).
 
 `getVariableOrigins` returns **every** definition of a name, lowest precedence
 first, including disabled ones that never resolve. Display-only; the variable
-popover renders it as "also defined". See `docs/app/variable-resolution.md` for
-why the losers are kept and why the MCP copy is not given the same accessor.
+popover renders it as "also defined". Since issue #1064 it also carries the
+bound row on top when one answers the name, taking `winner` from whichever
+scope it beat. See `docs/app/variable-resolution.md` for why the losers are
+kept and why the MCP copy is not given the same accessor.
 
 ### `RequestBuilderContext` - variable members
 

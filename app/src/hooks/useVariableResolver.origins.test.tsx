@@ -70,6 +70,7 @@ function setup(opts: {
 	envs?: Array<{ id: string; name: string; variables?: Record<string, unknown> }>;
 	activeCollectionId?: string | null;
 	activeEnvironmentId?: string | null;
+	boundRow?: Record<string, unknown>;
 }) {
 	globals.variables = opts.globalVars ?? {};
 	collections.length = 0;
@@ -83,7 +84,10 @@ function setup(opts: {
 	 * here and no writer anywhere.
 	 */
 	return renderHook(() =>
-		useVariableResolver({ collectionId: opts.activeCollectionId ?? undefined })
+		useVariableResolver({
+			collectionId: opts.activeCollectionId ?? undefined,
+			boundRow: opts.boundRow,
+		})
 	).result.current;
 }
 
@@ -275,5 +279,100 @@ describe("the definitions that lost", () => {
 			activeCollectionId: "c1",
 		});
 		expect(r.getVariableOrigins("host").map((o) => o.sourceName)).toEqual(["Acme"]);
+	});
+});
+
+/**
+ * Issue #1064. The bound row is a tier above every scope (D18, issue #1007),
+ * and until now `getVariableOrigins` could not say so - it was built from the
+ * scopes alone, so the popover reading it explained a definition the send was
+ * about to ignore.
+ *
+ * The row is layered on in `getVariableOrigins` rather than in the scope ladder
+ * underneath it, and the tests below pin both halves of that split: the origins
+ * list gains the row, and the resolved-variable map does not.
+ */
+describe("the bound row as an origin", () => {
+	it("puts the row above the environment and takes the win from it", () => {
+		const r = setup({
+			envs: [{ id: "e1", name: "Staging", variables: { email: v("staging@acme.io") } }],
+			activeEnvironmentId: "e1",
+			boundRow: { email: "alice@acme.io" },
+		});
+		const origins = r.getVariableOrigins("email");
+		expect(origins.map((o) => o.scope)).toEqual(["environment", "row"]);
+		expect(origins.find((o) => o.winner)?.value).toBe("alice@acme.io");
+		/*
+		 * The mutation check. Leave the environment's `winner` as the scope ladder
+		 * set it and two origins claim to have won at once - a list no reader can
+		 * render honestly, and the popover would go on striking the wrong one.
+		 */
+		expect(origins.filter((o) => o.winner)).toHaveLength(1);
+		expect(origins.find((o) => o.scope === "environment")?.winner).toBe(false);
+	});
+
+	it("answers a name no scope defines at all", () => {
+		const r = setup({ boundRow: { email: "alice@acme.io" } });
+		const origins = r.getVariableOrigins("email");
+		expect(origins).toHaveLength(1);
+		expect(origins[0]).toMatchObject({ scope: "row", value: "alice@acme.io", winner: true });
+	});
+
+	it("counts a column whose cell is empty as an answer", () => {
+		// `rowCells.get(name) === undefined` is the test, not truthiness: an empty
+		// cell binds, and binds to "". Read it as falsy and the popover explains
+		// the environment for a name the send will blank out.
+		const r = setup({
+			envs: [{ id: "e1", name: "Staging", variables: { email: v("staging@acme.io") } }],
+			activeEnvironmentId: "e1",
+			boundRow: { email: "" },
+		});
+		expect(r.getVariableOrigins("email").find((o) => o.winner)?.scope).toBe("row");
+	});
+
+	it("leaves a name the row has no column for alone", () => {
+		const r = setup({
+			envs: [{ id: "e1", name: "Staging", variables: { host: v("staging.acme.io") } }],
+			activeEnvironmentId: "e1",
+			boundRow: { email: "alice@acme.io" },
+		});
+		const origins = r.getVariableOrigins("host");
+		expect(origins.map((o) => o.scope)).toEqual(["environment"]);
+		expect(origins[0].winner).toBe(true);
+	});
+
+	it("gives the reserved data.* spelling no row origin", () => {
+		// The cells are keyed by bare column name, so `data.email` finds nothing
+		// here - which is what keeps its own terminal explanation correct.
+		const r = setup({ boundRow: { email: "alice@acme.io" } });
+		expect(r.getVariableOrigins("data.email")).toEqual([]);
+	});
+
+	it("keeps the row out of the resolved-variable map", () => {
+		/*
+		 * The split this change turns on. `getVariableOrigins` is display-only;
+		 * `getVariable` / `getAllVariables` feed the token painting and the
+		 * editable field, and a row folded into them would report a cell as the
+		 * variable's value and hand `ResolvedVariable` a scope nothing can write.
+		 */
+		const r = setup({
+			envs: [{ id: "e1", name: "Staging", variables: { email: v("staging@acme.io") } }],
+			activeEnvironmentId: "e1",
+			boundRow: { email: "alice@acme.io" },
+		});
+		expect(r.getVariable("email")?.value).toBe("staging@acme.io");
+		expect(r.getVariable("email")?.scope).toBe("environment");
+		// The preview, which is the row-aware surface, still binds the row.
+		expect(r.resolveString("{{email}}")).toBe("alice@acme.io");
+	});
+
+	it("has no row origins at all when no row is bound", () => {
+		const r = setup({
+			envs: [{ id: "e1", name: "Staging", variables: { email: v("staging@acme.io") } }],
+			activeEnvironmentId: "e1",
+		});
+		const origins = r.getVariableOrigins("email");
+		expect(origins.some((o) => o.scope === "row")).toBe(false);
+		expect(origins.find((o) => o.winner)?.scope).toBe("environment");
 	});
 });

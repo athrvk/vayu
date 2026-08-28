@@ -31,13 +31,21 @@
  * and are held to the engine's behaviour by the shared conformance fixture, so
  * the preview cannot quietly drift from what actually gets sent.
  * `getVariableOrigins` keeps the definitions that lost so the UI can explain
- * the winner; execution has no use for losers, so the engine has no analogue.
+ * the winner - and, since issue #1064, the bound row above them, so the answer
+ * it gives is the one the send will use rather than the one the scopes settled
+ * on. Execution has no use for losers, so the engine has no analogue.
  */
 
 import { useMemo, useCallback } from "react";
 import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import { useSessionStore } from "@/stores";
-import type { VariableValue, ResolvedVariable, VariableOrigin } from "@/types";
+import type {
+	VariableValue,
+	ResolvedVariable,
+	VariableOrigin,
+	ScopeVariableOrigin,
+	VariableScope,
+} from "@/types";
 import { castByType } from "@/lib/variable-cast";
 // The chain this hook used to build itself, guard and all - see tree-utils for
 // why every `parentId` walk in the renderer now comes from one place.
@@ -126,12 +134,12 @@ export function useVariableResolver(
 	 * definitions are in the list, "last" and "wins" are different things.
 	 */
 	const originsByName = useMemo(() => {
-		const result: Record<string, VariableOrigin[]> = {};
+		const result: Record<string, ScopeVariableOrigin[]> = {};
 
 		const push = (
 			name: string,
 			v: VariableValue,
-			scope: VariableOrigin["scope"],
+			scope: VariableScope,
 			source?: { id: string; name: string }
 		) => {
 			(result[name] ??= []).push({
@@ -229,11 +237,6 @@ export function useVariableResolver(
 		[variableMap]
 	);
 
-	const getVariableOrigins = useCallback(
-		(name: string): VariableOrigin[] => originsByName[name] ?? [],
-		[originsByName]
-	);
-
 	/**
 	 * The caller-wide bound row's cells as the text each substitutes, rendered
 	 * once rather than per token. Undefined - not an empty map - when no row is
@@ -244,6 +247,41 @@ export function useVariableResolver(
 	const rowCells = useMemo<DataRowCells | undefined>(
 		() => (boundRow ? cellsOf(boundRow) : undefined),
 		[boundRow]
+	);
+
+	/**
+	 * The scope ladder, plus the bound row on top of it (issue #1064).
+	 *
+	 * The row is layered on *here* rather than inside `originsByName`, and the
+	 * split is the point: `originsByName` is what `variableMap` resolves from, so
+	 * a row folded into it would make `getAllVariables` report a row's cell as
+	 * the variable's value and hand `ResolvedVariable` a scope nobody can write.
+	 * This function is display-only - nothing about execution reads it - which is
+	 * exactly the layer where "what will actually be sent" belongs.
+	 *
+	 * The row takes `winner` away from every definition beneath it, rather than
+	 * being appended beside a scope that still claims to have won. Two origins
+	 * flagged as the winner is a list that cannot be rendered honestly, and
+	 * `winner` means "what the send will use" to every reader of it.
+	 *
+	 * A `{{data.column}}` name never lands here: the cells are keyed by bare
+	 * column name, so the reserved spelling finds nothing and keeps the terminal
+	 * explanation it already had - which is correct for it, and wrong for a bare
+	 * name, since defining a variable of *that* name does something.
+	 */
+	const getVariableOrigins = useCallback(
+		(name: string): VariableOrigin[] => {
+			const defined: VariableOrigin[] = originsByName[name] ?? [];
+			// `get`, not a truthiness check: a column whose cell is empty still
+			// answers the name, and answers it with "".
+			const cell = rowCells?.get(name);
+			if (cell === undefined) return defined;
+			return [
+				...defined.map((o) => ({ ...o, winner: false })),
+				{ scope: "row" as const, value: cell, enabled: true, winner: true },
+			];
+		},
+		[originsByName, rowCells]
 	);
 
 	/**
