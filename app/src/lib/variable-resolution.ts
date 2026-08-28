@@ -31,7 +31,9 @@
  *    bind - a variable defined with either name never answers for it
  *  - so does a bare name a bound data row will substitute (issue #1007) - the
  *    same deferral for the same reason, spelled the way Postman's data
- *    variables are
+ *    variables are. A caller that already holds the row is the one exception,
+ *    and it reads `resolveTemplateWithRow`: it previews the bind that follows
+ *    composition rather than composition alone (issue #1062)
  *  - a user-defined variable named `$guid` beats the generator; generators run
  *    once per occurrence
  *  - a value that itself holds `{{tokens}}` resolves through them, to a depth
@@ -140,8 +142,10 @@ export function dataColumnName(name: string): string | null {
  * stands.
  *
  * Empty is every resolution with no dataset behind it, which is every preview
- * this module serves today; the parameter exists so the preview cannot answer
- * the conformance fixture's cases differently from the engine.
+ * that composes without a row in hand; the parameter exists so the preview
+ * cannot answer the conformance fixture's cases differently from the engine. A
+ * preview that *has* the row reads `resolveTemplateWithRow` instead, which is
+ * the bind rather than the composition (issue #1062).
  */
 export type BoundColumnNames = ReadonlySet<string>;
 
@@ -157,27 +161,21 @@ const NO_BOUND_COLUMNS: BoundColumnNames = new Set<string>();
 const MAX_NESTED_RESOLUTIONS = 8;
 
 /**
- * Substitute `{{name}}` occurrences: the reserved `data.*` namespace and the
- * reserved `$vu` / `$iteration` identity namespace first, with `boundColumns`
- * beside them (all kept verbatim, issue #1007), then scopes, then the
- * dynamic-variable table. A defined name (even one spelled `$guid`) wins over
- * a generator; a name nothing answers keeps its braces, `$name` (issue #186)
- * and ordinary alike (issue #1009) - the token reaching the wire is what makes
- * the miss visible, where an empty string silently changed the request.
+ * Replace every `{{name}}` in @p input with what @p lookup answers for it, a
+ * name it answers `undefined` for keeping its braces.
+ *
+ * The engine's `substitute_tokens`, restated: the recursion and its bound live
+ * here and the tier order lives in the lookup, which is what lets one core
+ * serve both a composition preview (`resolveTemplate`) and a preview that holds
+ * the row (`resolveTemplateWithRow`) without either restating the other's
+ * nesting rules.
  *
  * A replacement that carries tokens of its own is resolved through the same
  * lookup, to `MAX_NESTED_RESOLUTIONS` levels, so a layered `{{baseUrl}}`
  * previews as the URL it spells. A name already being expanded is a cycle and
  * its token stays literal; the surrounding text is never rescanned.
- *
- * `boundColumns` defaults to empty, which is resolution as it was: every caller
- * with no dataset behind it resolves exactly the names it always did.
  */
-export function resolveTemplate(
-	input: string,
-	lookup: (name: string) => string | undefined,
-	boundColumns: BoundColumnNames = NO_BOUND_COLUMNS
-): string {
+function substituteTokens(input: string, lookup: (name: string) => string | undefined): string {
 	if (!input || typeof input !== "string") return input;
 	// The names currently being expanded, innermost last - the chain the cycle
 	// check reads, not a set of every name seen: `{{a}} {{a}}` side by side is
@@ -186,36 +184,8 @@ export function resolveTemplate(
 	const substitute = (text: string): string =>
 		text.replace(VARIABLE_PATTERN, (match, rawName: string) => {
 			const name = rawName.trim();
-			// Before the lookup, not after: the namespace is disjoint from the
-			// scopes, so a variable named `data.id` must not answer for the column.
-			// Only a scenario run's iteration can bind one, and the engine's
-			// composer leaves it written as it stands for exactly that reason.
-			if (isDataVariableName(name)) return match;
-			// Same reasoning, same placement: `$vu` / `$iteration` name the
-			// reserved identity namespace (issue #994), not a variable, so a
-			// scope definition of either must not answer here either. Only the
-			// iteration that sends binds them - the engine's composer leaves the
-			// token written as it stands for exactly that reason.
-			if (isIterationVariableName(name)) return match;
-			// Before the lookup for the opposite reason: this name is *not*
-			// disjoint from the scopes, and the row is the one that wins. Postman
-			// puts a data column above the environment, so a scope answering here
-			// would preview the value the row is there to replace - and ahead of
-			// the generator table too, so a column named `$guid` is deferred rather
-			// than generated. After the two reserved namespaces, as the engine
-			// orders them.
-			if (boundColumns.has(name)) return match;
 			if (expanding.includes(name)) return match;
-			const defined = lookup(name);
-			// The generator answers `null` for a name its table does not have,
-			// where a scope answers `undefined` - one shape here, so the miss is
-			// tested once rather than at each use below.
-			const value =
-				defined !== undefined
-					? defined
-					: isDynamicVariableName(name)
-						? (resolveDynamicVariable(name) ?? undefined)
-						: undefined;
+			const value = lookup(name);
 			if (value === undefined) return match;
 			if (!value.includes("{{") || expanding.length >= MAX_NESTED_RESOLUTIONS) return value;
 			expanding.push(name);
@@ -226,4 +196,128 @@ export function resolveTemplate(
 			}
 		});
 	return substitute(input);
+}
+
+/**
+ * One name's answer for a resolution with no row behind it - the engine's
+ * `lookup_variable`, tier for tier.
+ *
+ * `undefined` is "keeps its braces", which is every reserved or deferred name
+ * as well as every name nothing defines.
+ */
+function lookupVariable(
+	name: string,
+	lookup: (name: string) => string | undefined,
+	boundColumns: BoundColumnNames
+): string | undefined {
+	// Before the lookup, not after: the namespace is disjoint from the
+	// scopes, so a variable named `data.id` must not answer for the column.
+	// Only a scenario run's iteration can bind one, and the engine's
+	// composer leaves it written as it stands for exactly that reason.
+	if (isDataVariableName(name)) return undefined;
+	// Same reasoning, same placement: `$vu` / `$iteration` name the
+	// reserved identity namespace (issue #994), not a variable, so a
+	// scope definition of either must not answer here either. Only the
+	// iteration that sends binds them - the engine's composer leaves the
+	// token written as it stands for exactly that reason.
+	if (isIterationVariableName(name)) return undefined;
+	// Before the lookup for the opposite reason: this name is *not*
+	// disjoint from the scopes, and the row is the one that wins. Postman
+	// puts a data column above the environment, so a scope answering here
+	// would preview the value the row is there to replace - and ahead of
+	// the generator table too, so a column named `$guid` is deferred rather
+	// than generated. After the two reserved namespaces, as the engine
+	// orders them.
+	if (boundColumns.has(name)) return undefined;
+	const defined = lookup(name);
+	if (defined !== undefined) return defined;
+	// The generator answers `null` for a name its table does not have, where a
+	// scope answers `undefined` - one shape here, so the miss is tested once.
+	return isDynamicVariableName(name) ? (resolveDynamicVariable(name) ?? undefined) : undefined;
+}
+
+/**
+ * Substitute `{{name}}` occurrences: the reserved `data.*` namespace and the
+ * reserved `$vu` / `$iteration` identity namespace first, with `boundColumns`
+ * beside them (all kept verbatim, issue #1007), then scopes, then the
+ * dynamic-variable table. A defined name (even one spelled `$guid`) wins over
+ * a generator; a name nothing answers keeps its braces, `$name` (issue #186)
+ * and ordinary alike (issue #1009) - the token reaching the wire is what makes
+ * the miss visible, where an empty string silently changed the request.
+ *
+ * `boundColumns` defaults to empty, which is resolution as it was: every caller
+ * with no dataset behind it resolves exactly the names it always did.
+ */
+export function resolveTemplate(
+	input: string,
+	lookup: (name: string) => string | undefined,
+	boundColumns: BoundColumnNames = NO_BOUND_COLUMNS
+): string {
+	return substituteTokens(input, (name) => lookupVariable(name, lookup, boundColumns));
+}
+
+/**
+ * One row's cells, keyed by column name with no `data.` prefix, holding the
+ * text each substitutes - the engine's `DataRowColumns`.
+ */
+export type DataRowCells = ReadonlyMap<string, string>;
+
+/**
+ * Render one row value as the text a token substitutes - the engine's
+ * `render_data_value`, restated.
+ *
+ * A string is its own text: the CSV/TSV path produces only strings, so this is
+ * the ordinary case and it is byte-exact. A JSON or JSONL file may carry any
+ * type: numbers and booleans render as JSON writes them (`7`, `true`), `null`
+ * renders empty, and an object or array renders as compact JSON so a nested
+ * value can still be dropped into a body.
+ *
+ * A null cell never reaches a request through the binder - it is refused, for
+ * the same reason a missing column is - so the empty rendering is the answer to
+ * "what does this value say", not a value the wire ever sees.
+ */
+export function renderDataValue(value: unknown): string {
+	if (typeof value === "string") return value;
+	if (value === null || value === undefined) return "";
+	// Every other cell came out of a CSV, TSV, JSON or JSONL parse, so it is a
+	// number, a boolean, or a plain object or array - each of which `stringify`
+	// spells. Nothing a data file can hold makes it answer nothing.
+	return JSON.stringify(value);
+}
+
+/**
+ * Resolve @p input against a bound row as well as the scopes - the engine's
+ * `resolve_template_with_data`, restated for the preview that holds a row.
+ *
+ * Composition has no row: a payload is composed once and a row is bound per
+ * iteration, which is why `resolveTemplate` above leaves both spellings of a
+ * data read written as they stand. A Send-with-row's preview is the other case,
+ * the one the engine meets in `pm.variables.replaceIn` (issue #890) - the row
+ * is already picked, so the preview can show what the send will put on the wire
+ * rather than the token that stands in for it.
+ *
+ * The tiers, in the engine's order:
+ *  - `{{data.column}}` reads @p row, and a `data.` name the row has no column
+ *    for keeps its braces rather than emptying - the token says the value came
+ *    from the file, so a name no column answers is a mistake about the column
+ *    and the quiet answer hides it (the Data tab's column audit is what names
+ *    it, and `describeDataToken` is what paints it)
+ *  - a bare name the row carries reads the row too (issue #1007), above the
+ *    scopes, because that is where Postman puts a data variable
+ *  - every other bare name falls through to `lookupVariable` with no bound
+ *    columns: a name the row does not carry is an ordinary variable, not a
+ *    mistake about a column, which is what keeps one request previewing the
+ *    same way with and without a row picked
+ */
+export function resolveTemplateWithRow(
+	input: string,
+	lookup: (name: string) => string | undefined,
+	row: DataRowCells
+): string {
+	return substituteTokens(input, (name) => {
+		const column = dataColumnName(name);
+		if (column !== null) return row.get(column);
+		const cell = row.get(name);
+		return cell !== undefined ? cell : lookupVariable(name, lookup, NO_BOUND_COLUMNS);
+	});
 }
