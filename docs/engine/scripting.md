@@ -1020,12 +1020,41 @@ over it. Use `pm.variables.replaceIn(template)`.
 pm.cookies.get('session');      // value, or undefined
 pm.cookies.has('session');      // boolean
 pm.cookies.toObject();          // { session: 'abc' }
+pm.cookies.each(function (cookie) { console.log(cookie.name); });
+pm.cookies.all();               // array of cookie objects
+pm.cookies.count();             // number
 ```
 
 `pm.cookies` is what the engine is holding *for this request's URL* - matched on
 domain, path, `Secure` and expiry, exactly as it will be sent. It is what makes
 "log in once, reuse the session" work: a `Set-Cookie` on one request is carried
 to the next one automatically, with no header to set by hand.
+
+**`each`, `all()` and `count()`** are Postman's CookieList reads, over the same
+matched set `get`/`has`/`toObject` answer over - what this request's URL would
+carry. Each call reads the jar afresh, so a `jar().set` earlier in the script is
+visible by the time one of these runs. `each(fn, context?)` calls `fn` once per
+cookie with the whole cookie object (below), `context` becoming the iterator's
+`this`; a throw from `fn` - a failed `pm.expect` inside it, most likely - ends
+the walk and is the script's error rather than being swallowed. `all()` returns
+an array of cookie objects, `count()` the number of them.
+
+A cookie object - what `each`, `all()`, `jar().getAll()` (below) and
+`jar().set`'s callback all hand back - carries:
+
+| Field | Value |
+|-------|-------|
+| `name`, `key` | the cookie's name, under both spellings. Postman's `Cookie` calls it `key`; both are present, same value |
+| `value` | the cookie's value |
+| `domain`, `path` | where it is scoped |
+| `secure`, `httpOnly` | booleans |
+| `hostOnly` | `true` when the cookie answers for that host only, `false` when it answers for subdomains too |
+| `session` | `true` for a session cookie |
+| `expires` | a `Date`, or `null` for a session cookie |
+
+Postman's `maxAge` and its unmodelled `extensions` are deliberately absent: the
+jar does not keep them, and a field with nothing behind it is a value a script
+would read and act on.
 
 - **One jar per environment**, plus one for requests sent with no environment
   selected. A staging session therefore cannot ride along on a production call
@@ -1037,10 +1066,11 @@ to the next one automatically, with no header to set by hand.
 - **`pm.sendRequest` shares the jar** of the request it runs inside. A
   pre-request script that logs in through it leaves the session where the real
   request will find it.
-- **Load runs have no jar.** These three throw there rather than answering
-  `undefined`, which would read as "the cookie is gone". The jar is deliberately
-  off the load path: sharing one across the event loop's workers would put a
-  lock on the hot path, and a load run repeats a single request anyway.
+- **Load runs have no jar.** Every one of these reads throws there rather than
+  answering `undefined`, which would read as "the cookie is gone". The jar is
+  deliberately off the load path: sharing one across the event loop's workers
+  would put a lock on the hot path, and a load run repeats a single request
+  anyway.
 - **Writing goes through `jar()`**, below. There is deliberately no flat
   `pm.cookies.set(name, value)`: a written cookie needs a URL to take its
   domain and path from, which is exactly why Postman's write half hangs off
@@ -1057,18 +1087,32 @@ const jar = pm.cookies.jar();
 jar.set(pm.request.url, { name: 'session', value: token });
 jar.set(pm.request.url, 'session', token);            // the same, flat
 jar.get('https://api.example.com/', 'session');        // value, or undefined
+jar.getAll('https://api.example.com/');                 // every cookie that URL would carry
 jar.unset('https://api.example.com/', 'session');
 jar.clear('https://api.example.com/');                 // that URL's cookies
 jar.clear();                                           // this environment's jar
 ```
 
-Postman's jar object, whole. Every method is **URL-scoped** - it takes the URL
-the cookie belongs to rather than assuming this request's (`clear`'s URL is
-optional; see below) - and each accepts an
-optional trailing `callback(err, value)`, invoked inline the way
-[`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest)'s is,
-since the work has already happened by the time it is called. `get` also
-*returns* the value, which a synchronous implementation can do honestly.
+Postman's jar object, whole - **`getAll`** is new, Postman's "dump the session"
+read: every cookie a request to that URL would carry, as an array, whole. It is
+exactly what `get(url, name)` matches, without a name to narrow it - the same
+domain/path/`Secure`/expiry rules, the same per-environment jar, and a cookie
+this script has already staged with `set` is included. Every method is
+**URL-scoped** - it takes the URL the cookie belongs to rather than assuming
+this request's (`clear`'s URL is optional; see below) - and each accepts an
+optional trailing callback, invoked inline the way
+[`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest)'s is, since
+the work has already happened by the time it is called. What the callback
+carries, and what the call itself returns, is what that call did - there is no
+longer one shape for all five:
+
+| Method | Callback / return |
+|--------|--------------------|
+| `get(url, name)` | the value, or `undefined` |
+| `getAll(url)` | every matching cookie, as an array of cookie objects |
+| `set(url, cookie)` | the **stored** cookie object - the one thing this call knows and the script does not, since it carries the domain and path derived from the URL where `cookie` left them out |
+| `unset(url, name)` | the removed name |
+| `clear(url?)` | `undefined` - there is nothing left to describe |
 
 The cookie object needs `name` and `value`; everything else is optional and
 defaults from the URL:
@@ -1078,14 +1122,27 @@ defaults from the URL:
 | `domain` | the URL's host, host-only. A leading dot (`.example.com`) means subdomains too |
 | `path` | RFC 6265 default-path - the URL's path with its last segment removed, so `/v1/orders/42` gives `/v1/orders` |
 | `secure`, `httpOnly` | `false` |
-| `expires` | `0`, a session cookie. Otherwise **seconds since the epoch** - `Math.floor(date.getTime() / 1000)` |
+| `expires` | `0`, a session cookie. Otherwise a `Date`, a date string, or a whole number of seconds since the epoch |
+
+**`expires` takes three spellings**, matching Postman: a `Date`; a date string -
+anything JavaScript's own `Date.parse` accepts, an ISO 8601 or an HTTP date; or
+a whole number of seconds since the epoch, `0` still meaning a session cookie.
+The Date and the string are read by asking QuickJS's own `Date` (`getTime` and
+`Date.parse`) rather than a date parser written into the engine, so the answer
+here is the one the same script's own `new Date(s)` would give. Because a
+stored cookie reads back with `expires` as a `Date` (above), and `set` now
+takes a `Date`, a cookie can be read and written back with nothing to convert.
 
 Anything else is refused with an error rather than guessed at: a non-string
-`value`, a `secure: "yes"`, a date string in `expires`, a field carrying a tab
-or newline (the separators of the format the jar stores), or a URL that cannot
-be parsed. A cookie stored under the wrong domain reads as "the session did not
-stick" three requests later, which is a much worse afternoon than a thrown
-error.
+`value`, a `secure: "yes"`, a field carrying a tab or newline (the separators
+of the format the jar stores), or a URL that cannot be parsed. `expires` has
+its own refusals, loud ones: an Invalid Date, a string `Date.parse` cannot
+read, a **fractional** number of seconds - `date.getTime() / 1000` without the
+floor, which the message names both cures for (pass the `Date` itself, or keep
+the `Math.floor`) - a value before the epoch, and one further in the future than
+the jar can store. A cookie stored under the
+wrong domain reads as "the session did not stick" three requests later, which
+is a much worse afternoon than a thrown error.
 
 **A written cookie is matched by the same rules a received one is.** Setting it
 for one host does not send it to another, `/admin` does not reach `/`, and the
