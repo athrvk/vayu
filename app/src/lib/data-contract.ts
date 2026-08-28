@@ -126,9 +126,26 @@ function describeDeclaredColumn(note: string): DataTokenDescription {
 }
 
 /**
- * What the token says about itself, given the contract in scope.
+ * Phase 1's neutral wording, for a column there is nothing to validate against.
  *
- * Three states, and the middle one is the reason the phase exists:
+ * One object rather than a literal in each caller: "no contract declared" is a
+ * single state, and two copies of its wording is how the surfaces start to
+ * disagree about what they are saying.
+ */
+const UNVALIDATED_COLUMN: DataTokenDescription = {
+	tone: "muted",
+	description: "Bound by the run's data file",
+	note: "per iteration",
+};
+
+/**
+ * What a **column name** says about itself, given the contract in scope - the
+ * three states below, decided without reference to how the name was spelled.
+ *
+ * Split out of `describeDataToken` because the `data.` prefix is a spelling and
+ * not a rule (issue #1063): `pm.iterationData.get("email")` names the column
+ * `{{data.email}}` names and reads the same row, so the two spellings must not
+ * each own a copy of "declared, undeclared, or no contract at all".
  *
  * - **No contract anywhere in the chain** - phase 1's neutral wording, kept
  *   exactly: nothing has been declared, so nothing can be validated, and a
@@ -136,21 +153,14 @@ function describeDeclaredColumn(note: string): DataTokenDescription {
  * - **A declared column** - informational, and the tooltip names the declaring
  *   collection so the reader knows which Data tab owns it.
  * - **A column no contract in scope declares** - warning. The run will send the
- *   braces literally unless the file happens to carry the column anyway, and
- *   the declared list is printed because the fix is nearly always a typo.
+ *   token literally unless the file happens to carry the column anyway, and the
+ *   declared list is printed because the fix is nearly always a typo.
  */
-export function describeDataToken(
-	name: string,
+export function describeColumnToken(
+	column: string,
 	contract: DataContractScope | null | undefined
 ): DataTokenDescription {
-	const column = dataColumnName(name);
-	if (!contract || !column) {
-		return {
-			tone: "muted",
-			description: "Bound by the run's data file",
-			note: "per iteration",
-		};
-	}
+	if (!contract) return UNVALIDATED_COLUMN;
 	if (contract.columns.includes(column)) {
 		return describeDeclaredColumn(`declared in ${contract.collectionName}`);
 	}
@@ -159,6 +169,22 @@ export function describeDataToken(
 		description: `Not a declared column of ${contract.collectionName}`,
 		note: `declared: ${columnList(contract.columns)}`,
 	};
+}
+
+/**
+ * What a `{{data.*}}` token says about itself, given the contract in scope -
+ * `describeColumnToken`'s three states, reached through the prefixed spelling.
+ *
+ * A name outside the namespace addresses no column, so it keeps the neutral
+ * wording rather than being validated against a list it does not belong to.
+ */
+export function describeDataToken(
+	name: string,
+	contract: DataContractScope | null | undefined
+): DataTokenDescription {
+	const column = dataColumnName(name);
+	if (!column) return UNVALIDATED_COLUMN;
+	return describeColumnToken(column, contract);
 }
 
 /**
