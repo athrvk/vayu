@@ -21,15 +21,20 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { DOC_READING_GUARDS, fromRepoRoot, repoRoot } from "@/lib/routed-docs.testkit";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+/*
+ * The two doc pages are named through the testkit so CI routes an edit to them
+ * back to this suite. They stay literal keys below - the keys are what `RETIRED`
+ * points at, and a typo there should still be a type error.
+ */
+const [DATA_DRIVEN_RUNS_DOC, COMPONENTS_DOC] = DOC_READING_GUARDS.rowPersistence.pages;
 
 /** Every surface that told a user what happens to their data rows. */
 const SURFACES = {
-	"docs/app/data-driven-runs.md": join(repoRoot, "docs", "app", "data-driven-runs.md"),
-	"docs/app/COMPONENTS.md": join(repoRoot, "docs", "app", "COMPONENTS.md"),
+	[DATA_DRIVEN_RUNS_DOC]: fromRepoRoot(DATA_DRIVEN_RUNS_DOC),
+	[COMPONENTS_DOC]: fromRepoRoot(COMPONENTS_DOC),
 	"DataTab.tsx": join(
 		repoRoot,
 		"app",

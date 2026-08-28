@@ -222,6 +222,14 @@ loses the cascade - write the pair `bg-card surface-card`
 | `docs/app/file-name-conventions.md` | The naming conventions themselves                            |
 | `docs/app/building.md`              | App build steps or tooling                                   |
 
+**A test that reads a page under `docs/` registers it in
+`src/lib/routed-docs.testkit.ts`.** CI routes only the pages named there, and
+every area filter excludes Markdown - so a guard whose page is unrouted never
+runs on the edit that breaks it, and fails later on an unrelated change to
+`app/` as if that change were the cause (#1118, #1121). That list and the
+`app_doc_fixtures` filter in `pr-tests.yml` are compared by
+`routed-docs.test.ts`, which fails if either side changes alone.
+
 Module READMEs carry the _why_ for their feature and are easy to miss:
 `app/src/modules/README.md`, plus one each for `welcome/`, `request-builder/`
 and `dashboard/`.

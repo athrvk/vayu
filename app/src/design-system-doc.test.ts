@@ -23,10 +23,14 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-docs.testkit";
+
+/** Repository-relative, so CI can route the page this reads. See the testkit. */
+const [DESIGN_SYSTEM_DOC] = DOC_READING_GUARDS.designSystem.pages;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(here, "index.css"), "utf8");
-const doc = readFileSync(join(here, "..", "..", "docs", "design-system.md"), "utf8");
+const doc = readFileSync(fromRepoRoot(DESIGN_SYSTEM_DOC), "utf8");
 
 /** Every declared value for a token, anywhere in the stylesheet. */
 function declaredValues(): Map<string, Set<string>> {
