@@ -2780,6 +2780,40 @@ TEST_F (ScriptEngineTest, OrdinaryThrowStillSatisfiesThrowUnderAShortTimeout) {
 #endif
 }
 
+// The flag answers about the call just made, not about the execution so far,
+// and that distinction is reachable from a script: `pm.test` consumes an abort
+// natively and lets the script run on with a fresh 10,000-operation budget
+// before QuickJS polls again, so a second test in the same script is judged
+// after a deadline has already blown. Its ordinary throw is still an ordinary
+// throw. Mutation check: drop the `arm_script_deadline_watch` call before
+// `JS_Call` in expect_throw - leaving the once-per-execution reset alone - and
+// the second test reports FAIL with "Error: boom" instead of passing.
+TEST_F (ScriptEngineTest, AThrowAfterACaughtDeadlineAbortIsStillJudgedOnItsOwn) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 300;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (R"(
+        pm.test("spins past the deadline", function () {
+            pm.expect(function () { while (true) {} }).to.throw();
+        });
+        pm.test("an ordinary throw afterwards", function () {
+            pm.expect(function () { throw new Error("boom"); }).to.throw();
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_TRUE (result.tests[1].passed)
+    << "an ordinary throw was read as the earlier abort: "
+    << result.tests[1].error_message;
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
 // `.satisfy` is the other matcher that calls back into the script. It already
 // propagated the exception rather than reading it as a verdict; this pins that
 // it stays so, since the audit that established it is otherwise unrecorded.

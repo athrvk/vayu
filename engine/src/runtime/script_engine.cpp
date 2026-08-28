@@ -90,10 +90,11 @@ struct RuntimeState {
     bool enabled = false; // false => no wall-clock limit (timeout_ms == 0)
     std::chrono::steady_clock::time_point deadline{};
     /// Set by the interrupt handler when it stops a call, cleared before each
-    /// execution. The handler is the only thing that knows *why* a call ended,
-    /// and an assertion that calls back into the script cannot tell the
-    /// engine's abort from a value the script threw: both arrive as a pending
-    /// exception at the call site. See `script_deadline_expired`.
+    /// execution and before each call an assertion makes into the script. The
+    /// handler is the only thing that knows *why* a call ended, and an
+    /// assertion that calls back into the script cannot tell the engine's abort
+    /// from a value the script threw: both arrive as a pending exception at the
+    /// call site. See `arm_script_deadline_watch` and `script_deadline_expired`.
     bool interrupted = false;
 };
 
@@ -184,9 +185,23 @@ std::optional<int64_t> remaining_script_budget_ms (JSContext* ctx) {
     .count ();
 }
 
-// Whether the wall-clock deadline has already stopped this execution. Asked by
-// the assertions that call back into the script: the interrupt stops the call
-// by raising an exception into it, which at the call site is indistinguishable
+// Clears the handler's record before a call an assertion is about to make into
+// the script, so that `script_deadline_expired` afterwards answers about *that
+// call* rather than about the execution so far. The distinction is not
+// theoretical: `pm.test` consumes an abort natively and lets the script run on,
+// and QuickJS gives it a fresh 10,000-operation budget before the next poll -
+// so a flag left standing would read the ordinary throw in the next test as an
+// abort too, failing an assertion that holds.
+void arm_script_deadline_watch (JSContext* ctx) {
+    if (auto* state =
+        static_cast<RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)))) {
+        state->interrupted = false;
+    }
+}
+
+// Whether the wall-clock deadline stopped the call just made. Asked by the
+// assertions that call back into the script: the interrupt stops the call by
+// raising an exception into it, which at the call site is indistinguishable
 // from one the script threw, so reading a pending exception as "the function
 // threw" reports a pass about a function that never returned. The handler's own
 // flag is the only honest answer - comparing the clock here would also call a
@@ -2121,6 +2136,7 @@ JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowTypeError (ctx, "throw() requires the target to be a function");
     }
 
+    arm_script_deadline_watch (ctx);
     JSValue result   = JS_Call (ctx, state->actual, JS_UNDEFINED, 0, nullptr);
     const bool threw = JS_IsException (result);
     JS_FreeValue (ctx, result);
