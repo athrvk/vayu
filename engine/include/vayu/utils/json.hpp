@@ -172,11 +172,6 @@ int indent = vayu::core::constants::json::DEFAULT_INDENT);
 [[nodiscard]] Json serialize (const Error& error);
 
 /**
- * @brief Serialize test results to JSON
- */
-[[nodiscard]] Json serialize (const ScriptResult& result);
-
-/**
  * @brief Pretty-print JSON with colors for terminal output
  */
 [[nodiscard]] std::string pretty_print (const Json& json, bool color = true);
