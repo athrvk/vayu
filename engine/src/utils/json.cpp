@@ -1029,43 +1029,6 @@ Json serialize (const Error& error) {
 }
 
 // ============================================================================
-// Script Result Serialization
-// ============================================================================
-
-Json serialize (const ScriptResult& result) {
-    Json json;
-
-    json["success"] = result.success;
-
-    Json tests = Json::array ();
-    for (const auto& test : result.tests) {
-        Json test_json;
-        test_json["name"]   = test.name;
-        test_json["passed"] = test.passed;
-        if (!test.error_message.empty ()) {
-            test_json["error"] = test.error_message;
-        } else {
-            test_json["error"] = nullptr;
-        }
-        tests.push_back (test_json);
-    }
-    json["testResults"] = tests;
-
-    Json console = Json::array ();
-    for (const auto& entry : result.console_output) {
-        console.push_back (
-        { { "level", to_string (entry.level) }, { "message", entry.message } });
-    }
-    json["consoleOutput"] = console;
-
-    if (!result.error_message.empty ()) {
-        json["error"] = result.error_message;
-    }
-
-    return json;
-}
-
-// ============================================================================
 // Pretty Printing
 // ============================================================================
 
