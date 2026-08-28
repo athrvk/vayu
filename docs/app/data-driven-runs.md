@@ -244,8 +244,9 @@ preview exists to remove.
 **A load run** binds rows differently: every virtual user claims rows from one
 shared cursor, so no two start on the same row while unclaimed rows remain, and
 the rows then repeat for as long as the duration lasts. Once they wrap, users do
-share rows - size the file to the concurrency if that matters. The row count
-says nothing about how long the run is.
+share rows - size the file to the concurrency if that matters, or reach for what
+[varies without a column](#what-varies-without-a-column). The row count says
+nothing about how long the run is.
 
 **A single request's load test** is that same cursor with one request where a
 collection run has a sequence: one row is claimed per request sent, in turn,
@@ -254,6 +255,66 @@ wrapping when the set runs out. So a 3-row file under a 6-request run sends rows
 many requests it sends, which is the load profile's job. Iterations is not
 defaulted from the row count here, unlike a collection run: a load profile
 already says how long the run is.
+
+## What varies without a column
+
+A file is one way to make iterations differ. A run has two more that need no
+column at all, and a data-driven load run usually wants all three at once.
+[Variable Resolution](variable-resolution.md) owns their rules; what follows is
+what they mean beside a bound row.
+
+**`{{$vu}}` and `{{$iteration}}` name the run rather than the row** (issue
+#994): which virtual user this request belongs to, 1-based, and which of that
+user's iterations it is, 0-based. They are reserved names and not variables - a
+variable of either name does not answer for the identity - and they are
+substituted immediately before each send, so every iteration carries its own
+numbers. Neither needs a file: the identity comes from the iteration rather than
+from a row, so both bind on a load run carrying no data at all. What each shape
+of run answers is tabulated under [`$vu` and `$iteration` are reserved
+too](variable-resolution.md#vu-and-iteration-are-reserved-too-for-the-same-reason);
+the shape to know here is that **a single request's load test is one user's
+iterations**, so `{{$vu}}` is `1` there and `{{$iteration}}` is the counter that
+varies - the same counter the row cursor claims from, so iteration `i` holds row
+`i % rows`. A script renders them with `pm.variables.replaceIn("{{$vu}}")`
+(issue #1057), which reads the identity the request beside it was bound with.
+
+**The `{{$guid}}` family generates per iteration** (issue #995). A run's request
+is composed once and then repeated, so the generators are left written as they
+stand and a fresh value is produced per occurrence, immediately before each
+send: two `{{$guid}}` in one body are two different ids, on every iteration. A
+plain Send still generates at composition, because it composes once and sends
+once. Which names generate, and why a run defers them, is [the dynamic
+variables table](variable-resolution.md#dynamic-variables).
+
+**All three at once.** A collection load run of 20 users, driven by a
+`tokens.csv` of `user,token`, sending a request whose bearer token is
+`{{data.token}}`, whose `X-Client` header is `vu-{{$vu}}` and whose body carries
+`"requestId": "{{$guid}}"`:
+
+| Token            | Where its value comes from     | What it varies with                                  |
+| ---------------- | ------------------------------ | ---------------------------------------------------- |
+| `{{data.token}}` | the row this iteration claimed | per iteration, off the shared cursor                 |
+| `{{$vu}}`        | the user sending it            | per virtual user, the same across that user's passes |
+| `{{$guid}}`      | generated at the send          | per occurrence, per iteration                        |
+
+Write `user-{{$vu}}` into a basic-auth username instead of that header and it
+binds there too (issue #1055), even on a run with no data file at all: what
+defers a credential's build is the token the credential carries, not whether the
+run has rows to bind.
+
+Credentials bind before the request's auth is applied, so a row or an identity
+token reaches the credential itself rather than the header the credential is
+built into - the order [Send with a row](#send-with-a-row) describes. Basic
+auth is where the order shows, since it collapses username and password into one
+base64 value: a token still unbound by then would go out as base64 of its own
+text. That is also why a **generator** in a credential is resolved at
+composition rather than deferred like the rest - write `{{$guid}}` into the body
+or a header instead. OAuth 2.0 takes none of the three, for the reason that same
+section gives.
+
+This is also the answer when the file is smaller than the concurrency. Rows
+repeat once the cursor wraps, while `{{$vu}}` and `{{$iteration}}` together name
+each iteration of the run exactly once, and a generator is fresh at every send.
 
 ## Declaring the contract: the Data tab
 
