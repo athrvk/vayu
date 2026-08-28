@@ -1308,7 +1308,7 @@ choose where the value is stored.
 ```
 
 **`pm.variables.replaceIn(template)`** - Postman's `{{name}}` interpolation of
-an arbitrary string - runs the same single-pass resolver `POST /compose` uses
+an arbitrary string - runs the same resolver `POST /compose` uses
 (`request_composer.cpp::resolve_template`), over the script's scopes in
 `pm.variables`' precedence, at **call time** - so a variable the script set a
 line earlier resolves, unlike `{{}}` in the URL, which was composed before the

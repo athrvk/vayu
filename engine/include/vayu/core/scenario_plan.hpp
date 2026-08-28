@@ -279,7 +279,8 @@ struct ScenarioLimits {
  * Everything resolution needs beyond the `scenario` block itself.
  *
  * `environment_id` is not part of the block: it is the *run's* environment, and
- * composition needs it or every `{{env var}}` in the plan resolves to "".
+ * composition needs it or every `{{env var}}` in the plan keeps its braces
+ * (issue #1009) instead of resolving.
  */
 struct ScenarioResolveOptions {
     std::string environment_id;

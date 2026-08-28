@@ -825,11 +825,12 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
 
 - **Variables** - the engine resolves URL, headers, and body with the app's
   precedence (environment > collection chain, leaf→root > globals; enabled
-  only; unknown → empty string; dynamic variables like `{{$guid}}` generated
-  per occurrence). MCP hands it raw strings and checks the allowlist against
-  the **composed** host. `start_load_run` composes for a *run*, like the app,
-  so the `{{$guid}}` family is deferred and the engine generates a fresh value
-  per iteration rather than repeating one across them (issue #995); see
+  only; an unknown name keeps its braces, issue #1009; dynamic variables like
+  `{{$guid}}` generated per occurrence). MCP hands it raw strings and checks
+  the allowlist against the **composed** host. `start_load_run` composes for a
+  *run*, like the app, so the `{{$guid}}` family is deferred and the engine
+  generates a fresh value per iteration rather than repeating one across them
+  (issue #995); see
   [variable resolution](../app/variable-resolution.md#dynamic-variables).
 - **Auth** - `run_collection_smoke` composes each saved request by id, so its
   stored auth applies (`inherit` resolved against the collection chain);

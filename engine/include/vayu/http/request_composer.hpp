@@ -41,7 +41,8 @@
  *    "" (D17, enforced by `vayu::json::parse_variables`)
  *  - a user-defined variable named `$guid` beats the generator, and each
  *    generator runs once per `{{...}}` occurrence
- *  - single pass, no recursion: a value containing `{{other}}` stays literal
+ *  - a value containing `{{other}}` is resolved through it too (issue #1009),
+ *    under the cycle rule and depth bound `substitute_tokens` states below
  *  - the raw stored string is substituted, never the typed value
  *  - `noauth` on a collection terminates the inherit walk, `none` does not
  *  - auth is resolved *before* any OAuth 2.0 cache key is computed (the key
