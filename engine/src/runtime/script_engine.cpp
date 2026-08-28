@@ -5768,8 +5768,17 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
         // `typeof pm.request.body` stays the way a script tells "no body" from
         // "a body that happens to be empty".
         if (data->request->body.mode != BodyMode::None) {
-            JS_SetPropertyStr (
-            ctx, request, "body", new_request_body (ctx, data->request->body));
+            JSValue body = new_request_body (ctx, data->request->body);
+            if (JS_IsException (body)) {
+                // Defining the exception sentinel as a property would make
+                // `pm.request.body` an object no read can touch. A request with
+                // no reachable body reads as one with no body, which is the
+                // failure this can degrade to honestly. Same guard, same
+                // reason, as install_request_url.
+                JS_FreeValue (ctx, body);
+            } else {
+                JS_SetPropertyStr (ctx, request, "body", body);
+            }
         }
     }
 

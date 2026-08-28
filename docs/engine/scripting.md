@@ -762,9 +762,13 @@ otherwise re-add. A file part carries no `value` at all, rather than the `""`
 an empty text field would hold - an empty string there would read as a text
 field that happens to be empty - and never the local path.
 
-Both lists are **read-only**, and so are `.mode` and `.length`: assigning one,
-or `push`ing into one, throws naming the member. Assign `pm.request.body` or
-`.raw` to change what is sent, or edit the request's form fields directly.
+Both lists are **read-only**, and so are `.mode` and `.length`. Assigning any of
+the four throws naming the member, and so does `push`ing into a list, which is
+frozen. Writing to a field *inside* an entry is the one edit that does not throw
+- a frozen object drops a write silently in non-strict code, which is
+JavaScript's own rule rather than one this surface adds - and it reaches nothing
+either way. Assign `pm.request.body` or `.raw` to change what is sent, or edit
+the request's form fields directly.
 
 Reading a form body never rewrites it. The write-back reads `body` off the
 script's object whether or not the script assigned it, so an **unchanged**

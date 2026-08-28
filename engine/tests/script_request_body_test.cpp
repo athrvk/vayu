@@ -403,7 +403,7 @@ TEST_F (ScriptRequestBodyTest, DeletingTheBodyStillSendsNone) {
  * and only the second is the all-or-nothing rule the write-back promises.
  */
 TEST_F (ScriptRequestBodyTest, TheDescribingMembersAreReadOnlyAndSaySo) {
-    for (const char* member : { "mode", "urlencoded", "formdata" }) {
+    for (const char* member : { "mode", "urlencoded", "formdata", "length" }) {
         request.body      = urlencoded_body ();
         const Body before = request.body;
 
@@ -432,6 +432,30 @@ TEST_F (ScriptRequestBodyTest, TheFieldListsRefuseAnEditRatherThanLoseIt) {
 
     EXPECT_FALSE (result.success);
     ASSERT_EQ (request.body.fields.size (), before.fields.size ());
+}
+
+/**
+ * The one edit that is dropped rather than refused, pinned so the docs describe
+ * what the engine does.
+ *
+ * The entries are frozen objects, and JavaScript's own rule for a write to a
+ * non-writable property in non-strict code is a silent no-op - not something
+ * this surface adds, and not something a C++ setter could change without giving
+ * every field of every entry an accessor. What matters is that the write
+ * reaches nothing: the request is sent with the fields it was composed with.
+ */
+TEST_F (ScriptRequestBodyTest, WritingIntoAFieldListEntryReachesNothing) {
+    request.body      = urlencoded_body ();
+    const Body before = request.body;
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body.urlencoded[0].value = 'stolen';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (request.body.fields.size (), before.fields.size ());
+    EXPECT_EQ (request.body.fields[0].value, before.fields[0].value);
 }
 
 TEST_F (ScriptRequestBodyTest, AssigningRawSomethingThatIsNotAStringIsRefusedAtTheLine) {
