@@ -39,6 +39,7 @@
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/form_body.hpp"
+#include "vayu/http/graphql_body.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/set_cookie.hpp"
@@ -5465,31 +5466,42 @@ enum BodyMember : std::uint8_t {
     BODY_RAW,
     BODY_URLENCODED,
     BODY_FORMDATA,
+    BODY_GRAPHQL,
     BODY_LENGTH
 };
 
 /**
  * @brief The Postman mode name this body reads as.
  *
- * Three names, because those are the three shapes a script can *act* on: a
- * string it can parse, a pair list, and a multipart part list. Vayu's other
- * content modes - `json`, `text`, `xml`, `binary`, `graphql`, `jsonrpc` - each
- * carry their body as one string, which is what `raw` means, so a lifted
+ * Four names, because those are the four shapes a script can *act* on: a string
+ * it can parse, a pair list, a multipart part list, and a GraphQL operation.
+ * Vayu's other content modes - `json`, `text`, `xml`, `binary`, `jsonrpc` -
+ * each carry their body as one string, which is what `raw` means, so a lifted
  * `body.mode === 'raw'` guard answers true for every one of them.
  *
- * The two Postman modes deliberately not answered are `graphql` and `file`,
- * because each promises a member this engine has nothing to fill it from: a
- * `graphql` body is stored as one string that may be an envelope or a bare
- * document (`graphql_body.hpp`), never as Postman's `{query, variables}` pair,
- * and a `binary` body carries bytes rather than the path `file.src` names.
+ * `graphql` was the third name for the whole of #1003, because Postman's mode
+ * promises a `{query, variables}` member and this engine stores a GraphQL body
+ * as one string that may be an envelope or a bare document. What #1111 found is
+ * that the pair is *derivable* from that string by a rule the engine already
+ * owns - `graphql_body.hpp`'s classifier, the one the send itself goes through
+ * - so the member has something to fill it from after all. See
+ * `body_graphql_view`.
+ *
+ * The one Postman mode still not answered is `file`, which promises `file.src`,
+ * a path. A `BodyMode::Binary` body carries *bytes* in `Body::content`; the only
+ * path in this model belongs to a form-data file part, is a different mode, and
+ * is deliberately never disclosed to a script (issue #411, `declared_file_name`).
  * Answering the mode without the member it exists for would be a silent wrong
- * answer, which is the class this program closes rather than adds to; issue
- * #1111 tracks filling them in.
+ * answer, which is the class this program closes rather than adds to, so
+ * `binary` reads `raw` and `docs/app/pm-api-compatibility.md` records it as a
+ * stated divergence. Reporting a path would be a *storage* change, not a
+ * scripting one, and wants its own issue if it is ever wanted.
  */
 const char* postman_body_mode (BodyMode mode) {
     switch (mode) {
     case BodyMode::Form: return "urlencoded";
     case BodyMode::FormData: return "formdata";
+    case BodyMode::GraphQL: return "graphql";
     // `None` never reaches here: a bodyless request defines no `body` property
     // at all, so no object is built for it. See setup_pm_request.
     default: return "raw";
@@ -5503,6 +5515,7 @@ const char* body_member_name (int magic) {
     case BODY_RAW: return "raw";
     case BODY_URLENCODED: return "urlencoded";
     case BODY_FORMDATA: return "formdata";
+    case BODY_GRAPHQL: return "graphql";
     default: return "length";
     }
 }
@@ -5558,6 +5571,103 @@ JSValue body_field_list (JSContext* ctx, const std::vector<FormField>& fields, b
 }
 
 /**
+ * @brief `.graphql` - Postman's `{query, variables}`, read off the one string.
+ *
+ * A GraphQL body is stored as one string that is allowed to be either the
+ * `{"query": ...}` envelope the request builder writes or the bare document an
+ * agent or a `curl` caller hands over, and `graphql_body.hpp` is what decides
+ * which. This asks *that* classifier rather than a second copy of the rule, so
+ * `.graphql.query` is the query the send would carry - a copy could call the
+ * same body an envelope here and a document at the wire, which is the one
+ * failure adding this member could introduce.
+ *
+ * Three answers, one per case the classifier separates:
+ *
+ * - A readable envelope: its own `query`, and `variables` when it carries them.
+ * - A bare document: `{query: <the document>}` - what wrapping it would send.
+ * - Object-shaped text that does not parse (an envelope whose `{{token}}` went
+ *   unresolved, or a mistyped one): **undefined**. `graphql_wire_body` passes
+ *   that through untouched rather than guessing at it, and any pair invented
+ *   here would be the guess it refuses. `.raw` still carries the string, so the
+ *   body is described as unreadable rather than hidden.
+ *
+ * An empty body answers `undefined` for the reason the header gives: empty in,
+ * empty out, and `{query: ""}` would give a bodiless request a query.
+ *
+ * `variables` is the JSON value the envelope carries, where Postman's is the
+ * *text* of its variables editor - a divergence rather than an oversight: Vayu
+ * never stored that text, and serializing one here would invent whitespace and
+ * key order the user never wrote, which is the thing `graphql_wire_body`
+ * refuses to do at the wire. `docs/app/pm-api-compatibility.md` states it.
+ */
+JSValue body_graphql_view (JSContext* ctx, const std::string& text) {
+    if (text.empty ()) {
+        return JS_UNDEFINED;
+    }
+    const auto define = [&] (JSValue object, const char* name, JSValue value) {
+        JS_DefinePropertyValueStr (ctx, object, name, value, JS_PROP_ENUMERABLE);
+    };
+    const auto frozen = [&] (JSValue object) {
+        (void)JS_PreventExtensions (ctx, object);
+        return object;
+    };
+    if (!vayu::http::graphql_body_is_enveloped (text)) {
+        JSValue document = JS_NewObject (ctx);
+        define (document, "query", JS_NewStringLen (ctx, text.data (), text.size ()));
+        return frozen (document);
+    }
+    const auto document =
+    nlohmann::json::parse (text, nullptr, /*allow_exceptions=*/false);
+    if (document.is_discarded ()) {
+        // The classifier's object-shaped-but-unreadable case: it said envelope
+        // on the shape alone, and there is nothing under the shape to read.
+        return JS_UNDEFINED;
+    }
+    // QuickJS is handed what nlohmann *read*, never the bytes it read them from.
+    // The two are not the same grammar - a leading byte-order mark is nlohmann's
+    // to skip and `JSON.parse`'s to reject - so parsing the body twice lets the
+    // send carry a query this member answers `undefined` about. Only one reader
+    // of a body may have an opinion, and it is the one the send asks; the dump
+    // is a transport between them, not a second reading.
+    const std::string canonical =
+    document.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    JSValue envelope = JS_ParseJSON (
+    ctx, canonical.c_str (), canonical.size (), "<pm.request.body.graphql>");
+    if (JS_IsException (envelope)) {
+        // Not reachable through any body: `canonical` is what nlohmann just
+        // serialized, and `replace` leaves it valid JSON even for a lone UTF-8
+        // continuation byte. Handled rather than assumed, because the
+        // alternative is a parse error escaping a getter.
+        JS_FreeValue (ctx, envelope);
+        JSValue pending = JS_GetException (ctx);
+        JS_FreeValue (ctx, pending);
+        return JS_UNDEFINED;
+    }
+    JSValue query = JS_GetPropertyStr (ctx, envelope, "query");
+    if (!JS_IsString (query)) {
+        // Also not reachable: the classifier returned true on a parse that was
+        // not discarded, which is exactly its "object with a string `query`"
+        // case, and the round trip above preserves the type. Restated as a
+        // guard rather than assumed, so the function stays total.
+        JS_FreeValue (ctx, query);
+        JS_FreeValue (ctx, envelope);
+        return JS_UNDEFINED;
+    }
+    JSValue variables = JS_GetPropertyStr (ctx, envelope, "variables");
+    JSValue view      = JS_NewObject (ctx);
+    define (view, "query", query);
+    // Absent rather than `undefined`-valued, so `'variables' in body.graphql`
+    // answers what the envelope actually carries.
+    if (JS_IsUndefined (variables)) {
+        JS_FreeValue (ctx, variables);
+    } else {
+        define (view, "variables", variables);
+    }
+    JS_FreeValue (ctx, envelope);
+    return frozen (view);
+}
+
+/**
  * The body as a string, and the single answer behind every string context.
  *
  * `toString`, `valueOf`, `toJSON` and `@@toPrimitive` all land here, for the
@@ -5605,6 +5715,13 @@ JSValue* func_data) {
     case BODY_FORMDATA:
         return state->body.mode == BodyMode::FormData ?
         body_field_list (ctx, state->body.fields, /*multipart=*/true) :
+        JS_UNDEFINED;
+    // Read off `text` rather than `body.content`, so a script that assigned
+    // `.raw` reads the pair its *new* string carries. One string, one answer -
+    // the two disagreeing would be `.graphql` describing a body no longer sent.
+    case BODY_GRAPHQL:
+        return state->body.mode == BodyMode::GraphQL ?
+        body_graphql_view (ctx, state->text) :
         JS_UNDEFINED;
     // Defined rather than left to the prototype, for the reason #991 gives
     // about the URL's: `String.prototype` is a String object holding `""`, so
@@ -5707,6 +5824,7 @@ JSValue new_request_body (JSContext* ctx, const Body& body) {
     define_accessor ("raw", BODY_RAW);
     define_accessor ("urlencoded", BODY_URLENCODED);
     define_accessor ("formdata", BODY_FORMDATA);
+    define_accessor ("graphql", BODY_GRAPHQL);
     define_accessor ("length", BODY_LENGTH);
     return object;
 }

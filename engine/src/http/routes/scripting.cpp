@@ -803,7 +803,8 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.request.body" }, { "detail", "string & object (writable pre-request)" },
     { "documentation",
     "The request body (if any), as Postman's RequestBody object: mode, raw, "
-    "and the urlencoded/formdata field lists.\n\nIt still behaves as the "
+    "the urlencoded/formdata field lists and the graphql pair.\n\nIt still "
+    "behaves as the "
     "string it used to be - concatenation, template literals, ==, the String "
     "methods and .length all give the body - so `===` and `typeof` are two of "
     "the three things that changed; the third is that assigning it straight to "
@@ -820,10 +821,12 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.request.body.mode" }, { "kind", KIND_FIELD },
     { "insertText", "pm.request.body.mode" }, { "detail", "string" },
     { "documentation",
-    "Postman's mode name: \"urlencoded\", \"formdata\", or \"raw\" for every "
-    "content mode - json, text, xml, binary, graphql and jsonrpc all carry "
-    "their body as one string, which is what raw means. Read-only; the mode "
-    "follows the request's body type." },
+    "Postman's mode name: \"urlencoded\", \"formdata\", \"graphql\", or "
+    "\"raw\" for every other content mode - json, text, xml, binary and "
+    "jsonrpc all carry their body as one string, which is what raw means. "
+    "Postman's fifth mode, \"file\", is never answered: it promises a path, "
+    "and a binary body here carries bytes. Read-only; the mode follows the "
+    "request's body type." },
     { "sortText", "2_pm_request_body_mode" } });
 
     completions.push_back ({ { "label", "pm.request.body.raw" }, { "kind", KIND_FIELD },
@@ -867,6 +870,25 @@ nlohmann::json get_script_completions () {
     "would read as a text field that happens to be empty, and the local path "
     "is never disclosed.\n\nRead-only: edit the request's form fields." },
     { "sortText", "2_pm_request_body_formdata" } });
+
+    completions.push_back ({ { "label", "pm.request.body.graphql" },
+    { "kind", KIND_FIELD }, { "insertText", "pm.request.body.graphql" },
+    // `object` for the reason the two list rows above give: the generator names
+    // a fixed vocabulary of types, so the member shape is prose here.
+    { "detail", "object | undefined" },
+    { "documentation",
+    "{ query, variables? } for a graphql body, or undefined in any other "
+    "mode. The pair is read off the same string body.raw answers with, "
+    "through the classifier the send itself uses: an enveloped body answers "
+    "its own query and variables, and a bare document answers as the query it "
+    "would be sent as.\n\nTwo things Postman spells differently: variables is "
+    "the JSON value the envelope carries, not the text of Postman's variables "
+    "editor, which Vayu never stored; and a body that is shaped like an "
+    "envelope but does not parse - an unresolved {{token}}, a typo - answers "
+    "undefined rather than a guessed pair, because that is the body the send "
+    "passes through untouched. body.raw still carries the string.\n\n"
+    "Read-only: assign body.raw to change what is sent." },
+    { "sortText", "2_pm_request_body_graphql" } });
 
     completions.push_back ({ { "label", "pm.request.body.length" }, { "kind", KIND_FIELD },
     { "insertText", "pm.request.body.length" }, { "detail", "number" },

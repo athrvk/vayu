@@ -709,21 +709,62 @@ property at all, so `typeof pm.request.body === 'undefined'` still separates
 was a string.
 
 ```javascript
-pm.request.body.mode         // 'urlencoded' | 'formdata' | 'raw'
+pm.request.body.mode         // 'urlencoded' | 'formdata' | 'graphql' | 'raw'
 pm.request.body.raw          // the body as a string, for every mode
 pm.request.body.urlencoded   // [{key, value, disabled}, ...] or undefined
 pm.request.body.formdata     // [{key, value?, type, fileName?, disabled}, ...] or undefined
+pm.request.body.graphql      // {query, variables?} or undefined
 pm.request.body.length       // the body string's own length
 ```
 
-`.mode` reads `raw` for every content mode - `json`, `text`, `xml`, `binary`,
-`graphql` and `jsonrpc` all carry their body as one string, which is what `raw`
-means. Postman's own `graphql` and `file` modes are deliberately not answered:
-each promises a member this engine has nothing to fill it from - a stored
-GraphQL body may be an envelope or a bare document rather than Postman's
-`{query, variables}` pair, and a binary body carries bytes rather than the path
-`file.src` names - so answering the mode without the member it exists for would
-be a silent wrong answer (issue #1111 tracks filling them in).
+`.mode` reads `raw` for every content mode without a Postman name of its own -
+`json`, `text`, `xml`, `binary` and `jsonrpc` all carry their body as one
+string, which is what `raw` means.
+
+Postman's fifth mode, `file`, is deliberately not answered: it promises
+`file.src`, a path, and a `binary` body here carries **bytes**. The only path
+this model holds belongs to a form-data file part, which is a different mode and
+is never disclosed to a script (issue #411). A `binary` body therefore reads
+`raw`, and that is a stated divergence rather than an omission - see
+[pm-api-compatibility.md](../app/pm-api-compatibility.md).
+
+### `graphql` bodies (issue #1111)
+
+`.mode` reads `graphql` for a GraphQL body, and `.graphql` answers Postman's
+`{query, variables}` pair. Vayu stores such a body as **one string** that is
+allowed to be either the `{"query": …}` envelope the request builder writes or
+the bare document an agent or a `curl` caller hands over; the pair is derived
+from that string by the same classifier the send itself goes through, so
+`.graphql.query` is the query that goes on the wire rather than a second reading
+of the same bytes.
+
+```javascript
+// An enveloped body answers its own members.
+pm.request.body.graphql.query        // 'query User($id: ID!) { user(id: $id) { name } }'
+pm.request.body.graphql.variables.id // '42'
+
+// A bare document answers as the query it would be wrapped and sent as.
+pm.request.body.graphql.query        // 'query User { user { name } }'
+```
+
+Three things worth knowing before scripting against it:
+
+- **`variables` is the JSON value the envelope carries**, where Postman's is the
+  *text* of its variables editor. Vayu never stored that text, and serializing
+  one here would invent whitespace and key order the user never wrote. Read it
+  as an object; a lifted `JSON.parse(…variables)` is the one call to change.
+- **A body that is envelope-shaped but does not parse answers `undefined`** - an
+  unresolved `{{token}}`, or a mistyped envelope. The send passes such a body
+  through untouched rather than wrapping something it could not read, and a pair
+  invented here would be the guess it refuses. `.raw` still carries the string.
+- **`.raw` stays the whole string in this mode too**, where Postman leaves it
+  undefined - the same divergence `.raw` already carries for the two form modes,
+  and for the same reason. Assigning `.raw` moves the pair with it.
+
+A lifted `pm.request.body.mode === 'raw'` guard over a GraphQL body took the
+true branch before this and takes the false one now. That is the break, and it
+is the compatible answer: Postman names this mode too, so a script written
+against Postman was already reading `graphql` there.
 
 `.raw` is the string every mode reads as, including the two whose content is a
 list of fields rather than text - and it is defined for both of those, where
