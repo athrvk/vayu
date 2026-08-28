@@ -112,8 +112,11 @@ nlohmann::json get_script_completions () {
     { "sortText", "1_pm_response_code" } });
 
     completions.push_back ({ { "label", "pm.response.status" }, { "kind", KIND_FIELD },
-    { "insertText", "pm.response.status" }, { "detail", "number" },
-    { "documentation", "The HTTP status code (alias for pm.response.code)." },
+    { "insertText", "pm.response.status" }, { "detail", "string" },
+    { "documentation",
+    "The status line's reason phrase ('OK', 'Not Found') - the same string "
+    "pm.response.reason() answers, and Postman's meaning for this name. The "
+    "number is pm.response.code." },
     { "sortText", "1_pm_response_status" } });
 
     completions.push_back ({ { "label", "pm.response.responseTime" }, { "kind", KIND_FIELD },
@@ -1309,7 +1312,8 @@ nlohmann::json get_script_completions () {
     "sendRequest returns. Postman's promise-returning overload is deliberately "
     "absent - it could only never resolve.\n\nThe callback gets (err, res). "
     "Transport failures - refused, DNS, timeout - arrive as err with a .code; "
-    "res is null then. res carries code, status, responseTime, headers.get() "
+    "res is null then. res carries code, status (the reason phrase, as on "
+    "pm.response - the number is code), responseTime, headers.get() "
     "and json()/text() - a subset of pm.response, not the assertion "
     "chain.\n\nThe url may be a string or pm.request.url, and {{variables}} in "
     "it, in header names and values, in a raw body and in auth credentials "

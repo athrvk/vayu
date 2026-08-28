@@ -333,7 +333,7 @@ Access HTTP response data:
 
 ```javascript
 pm.response.code              // Status code (number, e.g., 200)
-pm.response.status            // Alias for code
+pm.response.status            // Reason phrase (string, e.g., 'OK') - see below
 pm.response.responseTime      // Perceived latency in ms (submit → completion).
                               // In load tests this includes generator-side
                               // queue wait. For pure server wire time, use
@@ -366,6 +366,38 @@ reached the script from a server carries neither.
 received it falls back to the canonical text for the code, so a client-side
 failure - vayu's synthetic status `0` - reads `"Error"` rather than an empty
 string. (Postman returns `null` in that case; vayu always returns a string.)
+
+### `status` is the reason phrase, `code` is the number
+
+Postman spells the two apart: `code` is the number and `status` is the phrase
+the status line carried. Vayu used to spell both as the number, so a lifted
+`if (res.status === 'OK')` guard was always false and
+`pm.expect(pm.response.status).to.eql('OK')` failed where Postman passes.
+`status` is now the phrase - the same string `reason()` answers, wire phrase
+where there was one and the registered text for the code where there was not -
+on **both** objects that carry a status: the response a post-request script
+reads, and the one a
+[`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) callback
+receives. `code` is untouched on both.
+
+That is a break for a script written against vayu's old spelling:
+
+| Was | Reads now | Use instead |
+|---|---|---|
+| `pm.response.status` | `"OK"`, not `200` | `pm.response.code` |
+| `pm.expect(pm.response.status).to.equal(200)` | fails - the phrase is not the code | `pm.expect(pm.response.code).to.equal(200)` |
+| `if (pm.response.status >= 400)` | **never taken** - a phrase compares false against a number | `if (pm.response.code >= 400)` |
+| `res.status` in a `pm.sendRequest` callback | the phrase | `res.code` |
+
+The first two rows fail loudly: the comparison is always false, so the test
+that made it goes red and names itself. **The third does not.** A guard
+comparing `status` against a number is not an assertion, and JavaScript
+answers `false` for it rather than throwing, so the branch simply stops being
+entered and nothing reports that it stopped. Search a ported script for
+arithmetic on `status` before trusting a green run.
+
+`pm.response.to.have.status(...)` needs no migration - it has taken either
+form since it learned the reason phrase, and decides by the argument's type.
 
 `size()` counts the body the script can read through `text()`, so
 `size().body === pm.response.text().length` for an ASCII body. `size().header`
@@ -1389,7 +1421,7 @@ a `.code` (`CONNECTION_FAILED`, `DNS_ERROR`, `TIMEOUT`, …) and `res` null. The
 script's own mistakes throw out of the call instead: an unusable argument, an
 unsupported body mode, exceeding the request cap, and the capability being off.
 
-`res` carries `code`, `status` (the numeric code, as on `pm.response`),
+`res` carries `code`, `status` (the reason phrase, as on `pm.response`),
 `responseTime`, `headers` with `get()`/`has()`/`each()`/`all()`/`count()`/
 `toObject()`/`one()`/`indexOf()` - the same read methods documented under
 [Reading response headers](#reading-response-headers) - `json()` and `text()`.

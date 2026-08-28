@@ -1510,13 +1510,91 @@ TEST_F (ScriptEngineTest, ResponseStatusCode) {
             pm.expect(pm.response.code).to.equal(200);
         });
 
-        pm.test("Status is also available", function() {
-            pm.expect(pm.response.status).to.equal(200);
+        pm.test("Status is the reason phrase", function() {
+            pm.expect(pm.response.status).to.equal("OK");
         });
     )",
     request, response, env);
 
     EXPECT_TRUE (result.success);
+}
+
+// Postman splits the status line in two and a lifted script reads it that way:
+// `status` is the phrase, `code` the number. Vayu spelled both as the number
+// until #1000, so this pins the split rather than either half - a `status` that
+// went back to the code would still pass every assertion on `code`, and this is
+// what would notice.
+TEST_F (ScriptEngineTest, ResponseStatusIsThePhraseAndCodeIsTheNumber) {
+    response.status_code = 404;
+    response.status_text = "Not Found";
+
+    auto result = engine.execute_test (R"(
+        pm.test("phrase", function() { pm.expect(pm.response.status).to.equal("Not Found"); });
+        pm.test("a string, not a number", function() { pm.expect(typeof pm.response.status).to.equal("string"); });
+        pm.test("code stays the number", function() { pm.expect(pm.response.code).to.equal(404); });
+        pm.test("agrees with the reason accessor", function() { pm.expect(pm.response.status).to.equal(pm.response.reason()); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 4u);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+}
+
+// The wire's own phrase wins where there was one - a server may word its status
+// line however it likes, and reporting the registered text instead would answer
+// about the code rather than about the response.
+TEST_F (ScriptEngineTest, ResponseStatusPrefersTheWirePhrase) {
+    response.status_code = 200;
+    response.status_text = "Totally Fine";
+
+    auto result = engine.execute_test (R"(
+        pm.test("the wire's wording", function() { pm.expect(pm.response.status).to.equal("Totally Fine"); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// HTTP/2 carries no reason phrase at all, so `status` falls back to the
+// registered text for the code rather than to an empty string - the same
+// fallback `reason()` and `to.have.status("...")` make, out of the one helper.
+// A client-side failure is the same fallback reached from vayu's synthetic 0,
+// which the canonical table spells "Error".
+TEST_F (ScriptEngineTest, ResponseStatusFallsBackToTheRegisteredPhrase) {
+    response.status_code = 503;
+    response.status_text.clear ();
+
+    auto result = engine.execute_test (R"(
+        pm.test("registered phrase", function() { pm.expect(pm.response.status).to.equal("Service Unavailable"); });
+        pm.test("and the assertion agrees", function() { pm.response.to.have.status("Service Unavailable"); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 2u);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+
+    response.status_code = 0;
+    response.status_text.clear ();
+
+    auto failed = engine.execute_test (R"(
+        pm.test("synthetic status", function() { pm.expect(pm.response.status).to.equal("Error"); });
+        pm.test("synthetic code", function() { pm.expect(pm.response.code).to.equal(0); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (failed.success) << failed.error_message;
+    ASSERT_EQ (failed.tests.size (), 2u);
+    for (const auto& test : failed.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
 }
 
 TEST_F (ScriptEngineTest, ResponseJson) {
