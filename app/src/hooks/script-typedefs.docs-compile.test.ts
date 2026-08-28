@@ -45,11 +45,19 @@ const repoRoot = join(here, "..", "..", "..");
 
 const DECLARATIONS_PATH = join(repoRoot, "engine", "tests", "fixtures", "script-typedefs.d.ts");
 
-/** The two pages whose `pm.*` blocks are the contract. */
-const DOC_PATHS = [
-	join(repoRoot, "docs", "engine", "scripting.md"),
-	join(repoRoot, "docs", "app", "pm-api-compatibility.md"),
-];
+/**
+ * The two pages whose `pm.*` blocks are the contract, repository-relative and
+ * POSIX-spelled: this is the form the workflow lists them in, and
+ * `routes every page it compiles` below compares the two lists directly.
+ */
+const DOC_PATHS_FROM_ROOT = ["docs/engine/scripting.md", "docs/app/pm-api-compatibility.md"];
+
+const DOC_PATHS = DOC_PATHS_FROM_ROOT.map((doc) => join(repoRoot, ...doc.split("/")));
+
+const WORKFLOW_PATH = join(repoRoot, ".github", "workflows", "pr-tests.yml");
+
+/** The filter in that workflow whose whole job is to route the pages above. */
+const ROUTING_FILTER = "app_doc_fixtures";
 
 interface DocBlock {
 	doc: string;
@@ -82,6 +90,33 @@ function extractPmBlocks(path: string): DocBlock[] {
 		start = -1;
 	}
 	return blocks;
+}
+
+/**
+ * The paths the PR workflow's `app_doc_fixtures` filter routes to this suite.
+ *
+ * Read as text, not YAML: `app/` declares no YAML parser, and the block is a
+ * flat list of single-quoted paths - the same shape every other guard in this
+ * repository scans its input in. A line that is neither a comment nor a list
+ * entry ends the filter, which is how the next filter's key stops the walk.
+ */
+function routedDocPaths(workflow: string): string[] {
+	const lines = workflow.split("\n");
+	const key = lines.findIndex((line) => line.trim() === `${ROUTING_FILTER}:`);
+	if (key === -1) return [];
+
+	const keyIndent = lines[key].length - lines[key].trimStart().length;
+	const routed: string[] = [];
+	for (const line of lines.slice(key + 1)) {
+		const indent = line.length - line.trimStart().length;
+		if (indent <= keyIndent) break;
+		const trimmed = line.trim();
+		if (trimmed.startsWith("#")) continue;
+		const entry = /^- '(.+)'$/.exec(trimmed);
+		if (!entry) break;
+		routed.push(entry[1]);
+	}
+	return routed;
 }
 
 const SCRIPT_NAME = "/script.js";
@@ -198,6 +233,33 @@ describe("the documented pm.* examples compile against the generated declaration
 		expect(blocks.length).toBeGreaterThan(40);
 		expect(declarations).toContain("declare const pm: {");
 		expect(declarations.length).toBeGreaterThan(20000);
+	});
+
+	/*
+	 * The other way this suite checks nothing: it runs on no pull request that
+	 * edits its own inputs. Both pages are Markdown, which every area filter in
+	 * `pr-tests.yml` excludes, so until #1118 a doc example that stopped
+	 * type-checking landed green and the failure waited for the next change to
+	 * `app/`. The routing that fixes it is a list of the same two paths in a
+	 * different file, which is the drift this repository keeps paying for - so
+	 * the lists are compared rather than trusted, and adding a third page here
+	 * is red until it is routed there too.
+	 *
+	 * The three assertions are the three links in that wiring: the filter names
+	 * exactly these pages, the `changes` job exports it, and the job that runs
+	 * `pnpm test` reads it. A filter nothing reads would be this repository's
+	 * most repeated defect in the file that documents it.
+	 */
+	it("routes every page it compiles", () => {
+		const workflow = readFileSync(WORKFLOW_PATH, "utf8");
+		const routed = routedDocPaths(workflow);
+
+		expect(routed.length).toBeGreaterThan(0);
+		expect([...routed].sort()).toEqual([...DOC_PATHS_FROM_ROOT].sort());
+		expect(workflow).toContain(
+			`${ROUTING_FILTER}: \${{ steps.area.outputs.${ROUTING_FILTER} }}`
+		);
+		expect(workflow).toContain(`needs.changes.outputs.${ROUTING_FILTER} == 'true'`);
 	});
 
 	/*
