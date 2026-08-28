@@ -23,10 +23,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-docs.testkit";
+import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
 /** Repository-relative, so CI can route the page this reads. See the testkit. */
-const [DESIGN_SYSTEM_DOC] = DOC_READING_GUARDS.designSystem.pages;
+const [DESIGN_SYSTEM_DOC] = DOC_READING_GUARDS.designSystem.paths;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(here, "index.css"), "utf8");

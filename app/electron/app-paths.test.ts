@@ -24,8 +24,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
 const APP_PATH = join("/fake", "vayu", "app");
 const USER_DATA = join("/fake", "userData", "vayu-client");
@@ -109,14 +109,9 @@ describe("app:getPaths and the sidecar share one data directory", () => {
 describe("the logs/db names match the engine that creates them", () => {
 	it("finds both constants in daemon.cpp's data-dir layout", async () => {
 		const { ENGINE_LOGS_DIR, ENGINE_DB_DIR } = await import("./constants");
-		const daemonPath = join(
-			dirname(fileURLToPath(import.meta.url)),
-			"..",
-			"..",
-			"engine",
-			"src",
-			"daemon.cpp"
-		);
+		// Held in the testkit, so CI routes an edit to the daemon back to this
+		// suite rather than to the next unrelated change under `app/`.
+		const [daemonPath] = ENGINE_READING_GUARDS.dataDirLayout.paths.map(fromRepoRoot);
 
 		const source = readFileSync(daemonPath, "utf-8");
 		// A scan that read nothing passes every assertion below it.

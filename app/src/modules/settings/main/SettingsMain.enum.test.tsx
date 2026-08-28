@@ -27,8 +27,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import SettingsMain from "./SettingsMain";
 import { HTTP_VERSIONS } from "@/constants/request";
 import type { ConfigEntry } from "@/types";
@@ -161,19 +160,11 @@ describe("HTTP_VERSIONS parity with the engine", () => {
 	// `defaultHttpVersion` config `options` derive from - see the comment on
 	// `HttpVersion` there. Reading it here, rather than trusting a second
 	// hand-copied list, is what makes this a drift guard instead of a tautology.
-	const enginePath = join(
-		dirname(fileURLToPath(import.meta.url)),
-		"..",
-		"..",
-		"..",
-		"..",
-		"..",
-		"engine",
-		"include",
-		"vayu",
-		"types.hpp"
-	);
-	const source = readFileSync(enginePath, "utf8");
+	// Both paths are held in the testkit, so CI routes an edit to either back to
+	// this suite instead of failing on the next unrelated change under `app/`.
+	const [TYPES_HPP, DATABASE_CPP] =
+		ENGINE_READING_GUARDS.httpVersionOptions.paths.map(fromRepoRoot);
+	const source = readFileSync(TYPES_HPP, "utf8");
 
 	// `types.hpp` only proves the two sides agree on the *domain*. What the
 	// engine actually seeds into `defaultHttpVersion.options` is built by
@@ -182,19 +173,7 @@ describe("HTTP_VERSIONS parity with the engine", () => {
 	// `all_http_versions()` / `to_string` / `http_version_label`, rather than a
 	// literal array someone swapped in later that could silently drift or
 	// reorder without either of the checks above noticing.
-	const databasePath = join(
-		dirname(fileURLToPath(import.meta.url)),
-		"..",
-		"..",
-		"..",
-		"..",
-		"..",
-		"engine",
-		"src",
-		"db",
-		"database.cpp"
-	);
-	const databaseSource = readFileSync(databasePath, "utf8");
+	const databaseSource = readFileSync(DATABASE_CPP, "utf8");
 
 	it("read non-empty engine source files", () => {
 		// Guards against the failure mode CLAUDE.md documents: a source-scanning

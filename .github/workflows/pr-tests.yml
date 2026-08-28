@@ -62,6 +62,7 @@ jobs:
       code: ${{ steps.code.outputs.code }}
       app: ${{ steps.area.outputs.app }}
       app_doc_fixtures: ${{ steps.area.outputs.app_doc_fixtures }}
+      app_engine_inputs: ${{ steps.area.outputs.app_engine_inputs }}
       engine: ${{ steps.area.outputs.engine }}
       installer: ${{ steps.area.outputs.installer }}
       build_script: ${{ steps.area.outputs.build_script }}
@@ -204,12 +205,12 @@ jobs:
             # repository - the cost `!**/*.md` exists to avoid.
             #
             # This list is not free-standing. `DOC_READING_GUARDS` in
-            # `app/src/lib/routed-docs.testkit.ts` names the same pages, and
-            # `routes every page a guard reads, and no other`
-            # (`app/src/lib/routed-docs.test.ts`) compares this block against the
-            # union of the four guards' lists - so adding a page to a guard is
-            # red until it is routed here, and routing a page no guard reads is
-            # red too.
+            # `app/src/lib/routed-inputs.testkit.ts` names the same pages, and
+            # `routes every path a guard reads, and no other`
+            # (`app/src/lib/routed-inputs.test.ts`) compares this block against
+            # the union of the four guards' lists - so adding a page to a guard
+            # is red until it is routed here, and routing a page no guard reads
+            # is red too.
             app_doc_fixtures:
               - 'docs/engine/scripting.md'
               - 'docs/app/pm-api-compatibility.md'
@@ -219,6 +220,58 @@ jobs:
               - 'docs/app/api-integration.md'
               - 'docs/app/data-driven-runs.md'
               - 'docs/app/COMPONENTS.md'
+            # The files under `engine/` that a suite in `app/` reads: engine
+            # headers and sources a parity guard pins a value against, and the
+            # fixtures a conformance guard replays. Same defect as the pages
+            # above, by a different route (#1122) - these paths match `engine`
+            # and nothing else, so an engine-only pull request ran the C++
+            # matrix and skipped every app-side half of a conformance pair. The
+            # engine side is not a substitute: ctest pins the fixture it
+            # generates, and what no ctest can answer is whether the renderer
+            # still agrees with the new value.
+            #
+            # `app_engine_fixtures` would have matched the name above, but half
+            # of these are ordinary engine sources - `daemon.cpp` is nobody's
+            # fixture - so the name says inputs.
+            #
+            # Narrow list rather than ORing the whole `engine` filter into the
+            # job condition, decided on the last 100 merged pull requests
+            # (2026-08-21 to 08-28 UTC, `git log --first-parent --merges`, each
+            # merge's files replayed through the `app` and `engine` globs rather
+            # than through "touched engine/" - a pull request that also bumps
+            # `VERSION` is already an `app` pull request and pays regardless):
+            #
+            #   ran the engine matrix, skipped the app job   34 of 100
+            #   ... of which touch a path listed here        21  (pay either way)
+            #   ... of which touch no app test input         13  (the saving)
+            #
+            # The app matrix is four runners at a ~5m12s-6m10s median, so ~23
+            # runner-minutes a pull request: routing the whole `engine` filter
+            # would have added ~790 runner-minutes over that week against ~490
+            # for this list. The saving is well under half because
+            # `script-typedefs.d.ts` (10 of the 21) and `daemon.cpp` (8) are
+            # touched by most engine work - but it is the same saving `!**/*.md`
+            # buys above, and the list costs nothing to keep honest, because it
+            # is compared against what the guards read (see below).
+            #
+            # This list is not free-standing either. `ENGINE_READING_GUARDS` in
+            # `app/src/lib/routed-inputs.testkit.ts` names the same paths, and
+            # the same comparison that holds the doc list to its guards holds
+            # this one to its own - one table, two filters, so a third kind of
+            # input costs an entry rather than a second copy of the assertions.
+            app_engine_inputs:
+              - 'engine/include/vayu/core/constants.hpp'
+              - 'engine/src/daemon.cpp'
+              - 'engine/src/http/routes/execution.cpp'
+              - 'engine/src/db/database.cpp'
+              - 'engine/include/vayu/types.hpp'
+              - 'engine/include/vayu/http/curl_version_map.hpp'
+              - 'engine/tests/fixtures/script-typedefs.d.ts'
+              - 'engine/tests/fixtures/tree-order-conformance.json'
+              - 'engine/tests/fixtures/recursive-run-order-conformance.json'
+              - 'engine/tests/fixtures/variable-resolution-conformance.json'
+              - 'engine/tests/fixtures/set-cookie-conformance.json'
+              - 'engine/tests/fixtures/import-conformance.json'
             engine:
               - 'engine/**'
               - 'VERSION'
@@ -336,15 +389,18 @@ jobs:
     name: App on ${{ matrix.os }}${{ matrix.shard && format(' (shard {0})', matrix.shard) || '' }}
     runs-on: ${{ matrix.os }}
     needs: changes
-    # The second clause is the one job the doc fixtures need: this is where
-    # `pnpm test` runs, so it is where every guard that reads one of those pages
-    # runs. It is an OR rather than another entry in `app` because `code` rejects
-    # a documentation path too, and `code && app` would answer false on the
-    # `code` half however the area filter were written. `quality` deliberately
-    # keeps the plain condition - eslint reads TS/TSX, prettier's domain is
-    # `app/` and tsc reads none of those pages, so nothing it runs can change
-    # colour over a Markdown edit.
-    if: (needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true') || needs.changes.outputs.app_doc_fixtures == 'true'
+    # The second and third clauses are the one job those inputs need: this is
+    # where `pnpm test` runs, so it is where every guard that reads one of those
+    # files runs. The doc clause is an OR rather than another entry in `app`
+    # because `code` rejects a documentation path too, and `code && app` would
+    # answer false on the `code` half however the area filter were written. The
+    # engine clause could have been ANDed with `code` - every path it lists is
+    # source or fixture, never Markdown, so `code` is true whenever it is - and
+    # is left bare to read as the clause beside it. `quality` deliberately keeps
+    # the plain condition: eslint reads TS/TSX, prettier's domain is `app/` and
+    # tsc reads none of these files, so nothing it runs can change colour over
+    # an edit to one.
+    if: (needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true') || needs.changes.outputs.app_doc_fixtures == 'true' || needs.changes.outputs.app_engine_inputs == 'true'
     permissions:
       contents: read
     strategy:

@@ -18,8 +18,11 @@
  */
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { ImportResult } from "@/services/importers/types";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+
+/** Held in the testkit, so CI routes an edit to the fixture back to the suites. */
+const [FIXTURE] = ENGINE_READING_GUARDS.recordedParse.paths.map(fromRepoRoot);
 
 /**
  * Not a hand-written stand-in: `engine/tests/fixtures/import-conformance.json`
@@ -29,12 +32,9 @@ import type { ImportResult } from "@/services/importers/types";
  * previews it is looking at the same tree a running engine would answer with.
  */
 export function recordedParse(name: string): ImportResult {
-	const fixture = JSON.parse(
-		readFileSync(
-			join(__dirname, "../../../../engine/tests/fixtures/import-conformance.json"),
-			"utf8"
-		)
-	) as { cases: { name: string; expected: ImportResult }[] };
+	const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as {
+		cases: { name: string; expected: ImportResult }[];
+	};
 	const found = fixture.cases.find((entry) => entry.name === name);
 	if (!found) throw new Error(`no recorded parse named "${name}"`);
 	return found.expected;

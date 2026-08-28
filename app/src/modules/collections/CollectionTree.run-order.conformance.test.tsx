@@ -31,27 +31,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
 import { compareTreeOrder } from "@/types";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const fixturePath = join(
-	here,
-	"..",
-	"..",
-	"..",
-	"..",
-	"engine",
-	"tests",
-	"fixtures",
-	"recursive-run-order-conformance.json"
-);
+/** Held in the testkit, so CI routes an edit to the fixture back to this suite. */
+const [fixturePath] = ENGINE_READING_GUARDS.recursiveRunOrder.paths.map(fromRepoRoot);
 
 interface FixtureCollection {
 	id: string;

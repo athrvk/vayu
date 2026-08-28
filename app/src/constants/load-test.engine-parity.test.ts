@@ -28,20 +28,18 @@
  */
 
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { LOAD_TEST_CEILING_BOUNDS, LOAD_TEST_DEFAULTS, LOAD_TEST_LIMITS } from "./load-test";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const constantsHpp = readFileSync(
-	join(repoRoot, "engine", "include", "vayu", "core", "constants.hpp"),
-	"utf8"
-);
-const executionCpp = readFileSync(
-	join(repoRoot, "engine", "src", "http", "routes", "execution.cpp"),
-	"utf8"
-);
+/**
+ * The engine files this reads, held in the testkit rather than spelled here:
+ * the workflow filter that routes an edit to one of them back to this suite is
+ * compared against the union of every guard's list (`routed-inputs.test.ts`).
+ */
+const [CONSTANTS_HPP, EXECUTION_CPP] = ENGINE_READING_GUARDS.loadTestBounds.paths.map(fromRepoRoot);
+const constantsHpp = readFileSync(CONSTANTS_HPP, "utf8");
+const executionCpp = readFileSync(EXECUTION_CPP, "utf8");
 
 /**
  * One `constexpr <type> NAME = <expr>;` from the engine header, evaluated.

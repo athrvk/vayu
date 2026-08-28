@@ -6,9 +6,8 @@
  */
 
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import {
 	extractHost,
 	checkAllowlist,
@@ -396,11 +395,10 @@ describe("capacity discovery", () => {
 		// is the number the engine actually falls back to, and nothing else
 		// connects the two files. Same pattern as
 		// `src/constants/load-test.engine-parity.test.ts`.
-		const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-		const constantsHpp = readFileSync(
-			join(repoRoot, "engine", "include", "vayu", "core", "constants.hpp"),
-			"utf8"
-		);
+		// Held in the testkit, so CI routes an edit to the header back to this
+		// suite rather than to the next unrelated change under `app/`.
+		const [CONSTANTS_HPP] = ENGINE_READING_GUARDS.mcpSafetyCeiling.paths.map(fromRepoRoot);
+		const constantsHpp = readFileSync(CONSTANTS_HPP, "utf8");
 		// CLAUDE.md's documented failure mode: a source scan reading "" passes.
 		expect(constantsHpp.length).toBeGreaterThan(0);
 

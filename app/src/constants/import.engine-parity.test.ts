@@ -20,25 +20,13 @@
  */
 
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { IMPORT_FETCH_EVENTS } from "./import";
 
-const constantsHpp = readFileSync(
-	join(
-		dirname(fileURLToPath(import.meta.url)),
-		"..",
-		"..",
-		"..",
-		"engine",
-		"include",
-		"vayu",
-		"core",
-		"constants.hpp"
-	),
-	"utf8"
-);
+/** Held in the testkit, so CI routes an edit to the header back to this suite. */
+const [CONSTANTS_HPP] = ENGINE_READING_GUARDS.importEvents.paths.map(fromRepoRoot);
+const constantsHpp = readFileSync(CONSTANTS_HPP, "utf8");
 
 /** One `constexpr const char* NAME = "value";` from the engine header. */
 function engineString(name: string): string {
