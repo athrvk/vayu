@@ -197,8 +197,11 @@ Notes on the edges:
   `RegExp` comparisons run: an overridden `toJSON` or `toString` that throws used
   to leave both sides rendered as the empty string, which compared *equal*. When
   both sides throw, the first side's error is the one reported.
-- **A cycle fails loudly.** Deep equality gives up after 64 levels with a
-  `RangeError` naming the cause.
+- **A cycle fails loudly, at the depth it closes** (#959). The walk carries the
+  pairs of objects it is already comparing, so meeting one twice is a
+  `RangeError` naming that repetition - not a wait for a depth limit to be
+  reached. The 64-level cap is still there behind it, with a message of its own,
+  as the backstop for a structure that is merely very deeply nested.
 - **`eql` separates `+0` from `-0`; `equal` does not.** That is chai: `equal`
   is `===`, under which the two zeros are one value, while `eql` is deep-eql,
   whose number rule is `x === y && (x !== 0 || 1/x === 1/y)`. The
@@ -935,9 +938,13 @@ is a statement rather than a placeholder: a single request repeated under load
 is one user's iterations however many are in flight, and so is a collection run
 in design mode. `undefined` on an ordinary Send, beside `iteration`.
 
-**`iterationCount` is set by the collection runner and by nothing else.** A
-duration-bounded load run has no iteration total to report, and a field readable
-from one mode and not another is worse than one that is never readable at all.
+**`iterationCount` is set by the collection runner, and by a send that bound a
+row.** The runner reports the run's total; a send-with-row reports `1`, since
+that send is row 0 of 1 and says so about `iteration` already (see
+[Data rows](#data-rows-pmiterationdata)). A **load run** is where it stays
+`undefined`: a duration-bounded run has no iteration total to report, and a
+field readable from one load run and not another is worse than one that is
+never readable there at all.
 
 ## Environment Variables (`pm.environment`)
 
@@ -1419,6 +1426,13 @@ made, and the next transfer of that execution carries it:
   finished and the write lands on the next one.
 - A `set` in a **post-request script** has no transfer left to ride, so it is
   applied to the jar when the script ends.
+
+`unset` and `clear` are staged by the same rule and on the same queue - the
+bullets say `set` because it is the one that reads as immediate, not because
+the other two are. So `jar.clear(url)` followed by `jar.getAll(url)` in one
+script sees the clear, because a read is answered over the staged writes as
+well as the jar; the stored jar itself is not emptied until that execution's
+next transfer carries the write.
 
 **`clear` has two forms.** `clear(url)` is Postman's: it removes every cookie a
 request to that URL would have carried - `unset` with no name to narrow it, and
