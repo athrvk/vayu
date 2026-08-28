@@ -13,7 +13,6 @@
  */
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <map>
@@ -26,6 +25,10 @@
 // one needs; constants.hpp depends on nothing but the version string, so it
 // cannot cycle back here.
 #include "vayu/core/constants.hpp"
+
+// For `CaseInsensitiveLess`, whose fold is the engine's one ASCII fold. Depends
+// on nothing but the standard library, so it cannot cycle back here either.
+#include "vayu/utils/ascii_case.hpp"
 
 namespace vayu {
 
@@ -107,18 +110,19 @@ inline std::optional<HttpMethod> parse_method (const std::string& str) {
  */
 struct CaseInsensitiveLess {
     bool operator() (const std::string& a, const std::string& b) const {
-        return std::lexicographical_compare (a.begin (), a.end (), b.begin (),
-        b.end (), [] (unsigned char c1, unsigned char c2) {
-            return std::tolower (c1) < std::tolower (c2);
+        return std::lexicographical_compare (
+        a.begin (), a.end (), b.begin (), b.end (), [] (char c1, char c2) {
+            return utils::ascii_lower (c1) < utils::ascii_lower (c2);
         });
     }
 
     /// Header-name equality, for the callers that compare a name outside the
     /// map - the same rule the map's ordering already applies, rather than a
-    /// private lower-casing copy at each call site.
+    /// private lower-casing copy at each call site. Both halves fold through
+    /// `utils::ascii_lower` (#1060), so the map's ordering and this answer
+    /// cannot come to disagree about what two names being the same means.
     static bool equal (const std::string& a, const std::string& b) {
-        const CaseInsensitiveLess less;
-        return !less (a, b) && !less (b, a);
+        return utils::ascii_lower_equal (a, b);
     }
 };
 
