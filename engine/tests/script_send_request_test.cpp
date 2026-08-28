@@ -230,7 +230,10 @@ TEST_F (SendRequestTest, DeliversTheResponseToTheCallback) {
     "pm.test('shape', function () { "
     "  pm.expect(seen.err).to.equal(null); "
     "  pm.expect(seen.code).to.equal(200); "
-    "  pm.expect(seen.status).to.equal(200); "
+    // The callback response spells the status line the way pm.response does
+    // since #1000: the phrase under `status`, the number under `code`. Two
+    // objects called a response inside one sandbox must not disagree.
+    "  pm.expect(seen.status).to.equal('OK'); "
     "  pm.expect(seen.token).to.equal('tok_123'); "
     "  pm.expect(seen.type).to.equal('application/json'); "
     "  pm.expect(seen.text.length > 0).to.equal(true); "

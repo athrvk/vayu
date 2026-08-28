@@ -1192,9 +1192,9 @@ declare const pm: {
 		 */
 		size(): { body: number, header: number, total: number };
 		/**
-		 * The HTTP status code (alias for pm.response.code).
+		 * The status line's reason phrase ('OK', 'Not Found') - the same string pm.response.reason() answers, and Postman's meaning for this name. The number is pm.response.code.
 		 */
-		status: number;
+		status: string;
 		/**
 		 * Return the response body as a string.
 		 */
@@ -1384,7 +1384,7 @@ declare const pm: {
 	 * 
 	 * Synchronous despite the callback: the sandbox has no event loop, so the send blocks and the callback runs inline before sendRequest returns. Postman's promise-returning overload is deliberately absent - it could only never resolve.
 	 * 
-	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status, responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
+	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status (the reason phrase, as on pm.response - the number is code), responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
 	 * 
 	 * The url may be a string or pm.request.url, and {{variables}} in it, in header names and values, in a raw body and in auth credentials resolve as the call is made - so a value this script set two lines earlier is visible. Two header names that resolve to one name are refused rather than sent a header short, and a name resolving to nothing is refused too.
 	 * 

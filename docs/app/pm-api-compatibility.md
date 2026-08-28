@@ -252,8 +252,12 @@ capability being off. `res` carries `code`, `status`, `responseTime`,
 `headers` with `get()`/`has()`/`each()`/`all()`/`count()`/`toObject()`/`one()`/
 `indexOf()` - the same read methods as `pm.response.headers` - `json()` and
 `text()`, a subset of `pm.response` with no assertion chain. `status` is the
-numeric code there too, so the two objects called a response do not disagree
-inside one sandbox.
+reason phrase there too, so the two objects called a response do not disagree
+inside one sandbox - `code` is the number on both. Both spellings changed
+together in #1000; a script reading `res.status` as a number wants `res.code`,
+and [the migration
+note](../engine/scripting.md#status-is-the-reason-phrase-code-is-the-number)
+names the one pattern that degrades silently.
 
 **It is bounded, and both bounds throw.** The request's timeout is clamped to
 whatever is left of the script's own time budget (`scriptTimeout`, 5s by
@@ -496,6 +500,22 @@ on the `Date` and `RegExp` sides, and the values `include`, `oneOf`, `members`,
 test as the script's own error rather than as a difference. Chai reports a
 difference for some of these, which under `.not` is a pass; a test that cannot
 read its subject has not passed.
+
+### `code` is the number, `status` is the reason phrase
+
+Postman splits the status line in two and Vayu answers the same split:
+`pm.response.code` is `200`, `pm.response.status` is `"OK"` - the phrase the
+status line carried, or the registered text for the code where the wire had
+none (HTTP/2 carries no phrase at all). `pm.response.reason()` answers the
+same string, and `pm.response.to.have.status(...)` compares a number against
+the code and a string against the phrase.
+
+Vayu spelled `status` as the number until #1000, so this is a break for a
+script written against the old spelling rather than against Postman.
+`docs/engine/scripting.md` carries [the migration
+note](../engine/scripting.md#status-is-the-reason-phrase-code-is-the-number),
+including the one legacy pattern - arithmetic on `status` - that goes on
+compiling, stops matching, and reports nothing.
 
 ### Response timings, and the two error fields
 

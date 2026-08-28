@@ -4573,9 +4573,12 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         JS_SetPropertyStr (
         ctx, response, "code", JS_NewInt32 (ctx, data->response->status_code));
 
-        // pm.response.status (same as code for compatibility)
-        JS_SetPropertyStr (
-        ctx, response, "status", JS_NewInt32 (ctx, data->response->status_code));
+        // pm.response.status - Postman's reason phrase, not a second spelling
+        // of the code. Derived here rather than carried: the phrase is wanted
+        // only when a script reads it, and scripts run deferred on sampled
+        // responses, so nothing is added to the transfer path for it.
+        JS_SetPropertyStr (ctx, response, "status",
+        JS_NewString (ctx, response_reason_phrase (*data->response).c_str ()));
 
         // pm.response.responseTime - perceived latency (submit → completion),
         // includes generator-side queue wait. For pure server time, use
@@ -7123,16 +7126,19 @@ build_send_request (JSContext* ctx, JSValueConst arg, Request& out, vayu::http::
 // The response a pm.sendRequest callback receives.
 //
 // A deliberate subset of pm.response: code, status, responseTime, headers,
-// json() and text(). `status` is the numeric code, as it is on pm.response -
-// Postman spells the reason phrase there instead, but two objects called a
-// response inside one sandbox disagreeing about what `status` means is the
-// worse divergence. The body readers are the same two functions pm.response
-// installs, so the two cannot drift.
+// json() and text(). `status` is the reason phrase, as it is on pm.response -
+// which is Postman's contract and, since the two spellings moved together in
+// #1000, still leaves no room for two objects called a response inside one
+// sandbox to disagree about what `status` means. The phrase comes from the
+// same `response_reason_phrase` pm.response and `to.have.status` read, and
+// the body readers are the same two functions pm.response installs, so
+// neither answer can drift from its sibling.
 JSValue build_send_response (JSContext* ctx, const Response& response) {
     JSValue result = JS_NewObject (ctx);
 
     JS_SetPropertyStr (ctx, result, "code", JS_NewInt32 (ctx, response.status_code));
-    JS_SetPropertyStr (ctx, result, "status", JS_NewInt32 (ctx, response.status_code));
+    JS_SetPropertyStr (ctx, result, "status",
+    JS_NewString (ctx, response_reason_phrase (response).c_str ()));
     JS_SetPropertyStr (
     ctx, result, "responseTime", JS_NewFloat64 (ctx, response.timing.total_ms));
 
