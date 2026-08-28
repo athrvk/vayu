@@ -54,9 +54,19 @@ export const ITERATION_VARIABLES: readonly IterationVariable[] = [
 	},
 ] as const;
 
-const NAMES = new Set(ITERATION_VARIABLES.map((v) => v.name));
+const BY_NAME = new Map(ITERATION_VARIABLES.map((v) => [v.name, v]));
+
+/**
+ * The reserved name `name` addresses, or `undefined` - for a surface that needs
+ * the entry itself rather than the yes/no, `VariableInput`'s token paint being
+ * the one that does. One map behind both, so a surface cannot decide a name is
+ * reserved and then fail to find what it says.
+ */
+export function iterationVariable(name: string): IterationVariable | undefined {
+	return BY_NAME.get(name);
+}
 
 /** True for exactly `$vu` and `$iteration` - the reserved identity namespace. */
 export function isIterationVariableName(name: string): boolean {
-	return NAMES.has(name);
+	return BY_NAME.has(name);
 }

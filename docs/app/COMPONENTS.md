@@ -1342,15 +1342,23 @@ same reason - there is deliberately **no re-export shim** in
 scope; without one it is a plain text field, since a token would paint a name
 "not defined" and open an editor with nowhere to write.
 
-**A token has three states, and the overlay decides between them in the order
-`resolveTemplate` does** - reserved namespace first, then the scopes, then the
+**A token has four states, and the overlay decides between them in the order
+`resolveTemplate` does** - reserved namespaces first, then the scopes, then the
 generator table:
 
 | Token | Painted by | Looks like |
 |-------|-----------|------------|
 | `{{data.email}}` - the reserved `data.*` namespace (issue #402) | `RuntimeToken` | muted or amber, depending on the declared contract - see below |
+| `{{$vu}}`, `{{$iteration}}` - the reserved identity namespace (issues #994, #1101) | `RuntimeToken` | muted, "not generated here", no popover |
 | `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable` | accent when it resolves, **red** when it does not; hover reads, click edits or creates |
 | `{{$guid}}` - a generator | `RuntimeToken` | muted, "generated per use", no popover |
+
+The two reserved rows sit above the scopes for the same reason and the generator
+row below them for the opposite one: a scope that defines `$guid` wins and takes
+the editable token, while a variable named `data.email` or `$vu` answers for
+neither the column nor the identity, so it must not paint as though it had. The
+identity names are matched exactly, so `{{$vus}}` is an ordinary unknown `$name`
+and keeps the red paint that is how a typo is spotted (issue #186).
 
 **A `data.*` token has three states of its own** (issue #600), decided by
 `describeDataToken` against `VariableSupport.dataColumns` - the contract the
@@ -1428,13 +1436,14 @@ inside: `{{data.email}}` is one atom to everything that reads it, and a caret
 between its braces is how a keystroke corrupts the name.
 
 `EditableVariable` takes the scope as a **required** prop, because a token only
-renders where there is one. `RuntimeToken` serves both run-time cases - a value
-produced when the request is sent rather than stored anywhere - and is one
-component rather than two because they differ only in the words of the tooltip.
+renders where there is one. `RuntimeToken` serves all three run-time cases - a
+value produced when the request is sent rather than stored anywhere - and is one
+component rather than three because they differ only in the words of the tooltip.
 
-The namespace check comes **before** the scope lookup deliberately: `data.*` is
-disjoint from the tiers, so a variable someone happens to name `data.email`
-neither answers for the column nor may paint the token as though it had. Reading
+The namespace checks come **before** the scope lookup deliberately: `data.*` and
+the identity names are both disjoint from the tiers, so a variable someone
+happens to name `data.email` or `$vu` neither answers for the column or the
+identity nor may paint the token as though it had. Reading
 the scopes first would show a resolved token carrying a value the engine will
 never send. The same rule keeps the create offer out of `VariablePopover` for
 these names - a variable of that name can never resolve, so offering to make one

@@ -142,6 +142,15 @@ it. That is the one thing these names exist to prevent. The two names are
 matched exactly, so `{{$vus}}` is an ordinary unknown `$name` and keeps its
 braces.
 
+**The UI paints them as their own state too** (issue #1101), for the reason the
+`data.*` paragraph above gives and one more. Until #1101 the builder rendered
+`{{$vu}}` red, hovered it to "not defined" and offered to create a variable of
+that name - the one offer that is guaranteed to change nothing, since the
+resolver answers the identity ahead of every scope. So they get the same muted
+`RuntimeToken` treatment, noted `not generated here` to tell them from the
+generator beside them, and no surface offers to create one. `{{$vus}}` keeps the
+red paint, which is what makes the near-miss visible.
+
 What they resolve to depends on the shape of the run, and every shape has an
 answer:
 
