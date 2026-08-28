@@ -60,7 +60,7 @@ Body urlencoded_body () {
 Body form_data_body () {
     Body body;
     body.mode = BodyMode::FormData;
-    body.fields.push_back ({ "name", "Ada", true });
+    body.fields.emplace_back ("name", "Ada", true);
     FormField upload;
     upload.key       = "avatar";
     upload.type      = FormFieldType::File;

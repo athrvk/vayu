@@ -5484,7 +5484,7 @@ enum BodyMember : std::uint8_t {
  * and a `binary` body carries bytes rather than the path `file.src` names.
  * Answering the mode without the member it exists for would be a silent wrong
  * answer, which is the class this program closes rather than adds to; issue
- * #1110 tracks filling them in.
+ * #1111 tracks filling them in.
  */
 const char* postman_body_mode (BodyMode mode) {
     switch (mode) {
