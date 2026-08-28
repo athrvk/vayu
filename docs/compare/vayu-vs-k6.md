@@ -61,6 +61,14 @@ against k6 itself is not published here, because it has not been run on this
 hardware - the [benchmarks page](../engine/benchmarks.md) carries the full
 methodology and a one-command reproduction so you can measure your own.
 
+One caveat, stated here because the benchmarks page states it: an earlier
+2026-07 CLI session measured the opposite curve shape - Vayu at **66%** of
+`wrk` at this same concurrency 64 - and the two measurements have not been
+reconciled. The 105% above is the newer of the two, not a settled result; the
+gap is too large to be run-to-run noise, so one of them is not measuring what
+it claims. Read both before quoting either:
+[prior results (2026-07, CLI, unreconciled)](../engine/benchmarks.md#prior-results-2026-07-cli-unreconciled).
+
 ## No translation step, and a dashboard while it runs
 
 With k6 the request you debugged in a client becomes a `http.post(...)` call you
@@ -81,8 +89,10 @@ are not close:
 - **You need distributed or cloud execution.** k6 runs from multiple machines and
   regions. Vayu drives load from the one machine it is installed on.
 - **Load tests belong in CI.** k6 is CLI-first and designed to gate a pipeline.
-  Vayu's engine has a [command line](../engine/cli.md), but the headless
-  wait-and-exit-code gate is still an open issue, not a shipped feature.
+  Vayu's engine has a [command line](../engine/cli.md), but it starts a run
+  rather than gating one: there is no wait-and-exit-code gate, and that is a
+  parked decision rather than a pending one -
+  [#473](https://github.com/athrvk/vayu/issues/473) was closed unimplemented.
 - **You want tests as reviewable code.** A k6 script is a file in your repo with
   a rich ecosystem around it - executors, scenarios, custom metrics, extensions,
   and output integrations to Prometheus, Grafana and others.
