@@ -258,16 +258,18 @@ Postman's `header` array of `{ key, value }` or a plain object under either
 `header` or `headers`; sending both spellings at once is refused rather than
 resolved by precedence.
 
-`{{variables}}` in the script-supplied URL, header values, a raw body and an
-`auth` credential **are** resolved, as the call is made (issue #1001) - so a
-value the same script set two lines earlier is visible, which is Postman's rule
-and the reason an imported token-refresh script works. This is not a second pass
-over the composed payload: those fields were composed once, before the script
-ran, and nothing here revisits them. A name nothing defines keeps its braces
-rather than becoming empty, as everywhere else. Header *names* are sent as
-written - two that resolve to one name are a collision rule composition owns
-(issue #1051), and a second answer to it invented here would be one more place
-for the two to drift.
+`{{variables}}` in the script-supplied URL, header names and values, a raw body
+and an `auth` credential **are** resolved, as the call is made (issues #1001,
+#1067) - so a value the same script set two lines earlier is visible, which is
+Postman's rule and the reason an imported token-refresh script works. This is
+not a second pass over the composed payload: those fields were composed once,
+before the script ran, and nothing here revisits them. A name nothing defines
+keeps its braces rather than becoming empty, as everywhere else. Two header
+*names* that resolve to one name are refused rather than sent with one of the
+two dropped - the
+collision rule composition owns (issue #1051), in its words, so the script layer
+answers it the way every other layer does; a name resolving to nothing is
+refused beside it.
 
 `auth` takes Postman's `{ type, <type>: params }` shape, with the parameter block
 in either spelling - the exported `[{ key, value }]` array or a plain object.
