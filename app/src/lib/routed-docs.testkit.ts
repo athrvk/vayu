@@ -42,6 +42,14 @@ export function fromRepoRoot(path: string): string {
 }
 
 /**
+ * This module, as a guard imports it and as the repository stores it.
+ * `routed-docs.test.ts` asserts both, so a rename that reaches three of the four
+ * guards cannot pass by leaving a stale name that still reads as a prefix.
+ */
+export const TESTKIT_MODULE = "@/lib/routed-docs.testkit";
+export const TESTKIT_PATH = "app/src/lib/routed-docs.testkit.ts";
+
+/**
  * Every guard that reads a page under `docs/`, with the pages it reads.
  *
  * `test` is the guard itself, repository-relative: `routed-docs.test.ts` asserts

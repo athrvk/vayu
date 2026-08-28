@@ -27,6 +27,8 @@ import {
 	DOC_READING_GUARDS,
 	ROUTED_DOC_PAGES,
 	ROUTING_FILTER,
+	TESTKIT_MODULE,
+	TESTKIT_PATH,
 	WORKFLOW_PATH,
 	fromRepoRoot,
 	routedDocPaths,
@@ -74,10 +76,12 @@ describe("the docs the app suite reads", () => {
 	 * correctly right up until someone edited one of the two copies.
 	 */
 	it("is the list its guards actually read", () => {
+		expect(existsSync(fromRepoRoot(TESTKIT_PATH)), TESTKIT_PATH).toBe(true);
+
 		for (const [name, guard] of Object.entries(DOC_READING_GUARDS)) {
 			const path = fromRepoRoot(guard.test);
 			expect(existsSync(path), guard.test).toBe(true);
-			expect(readFileSync(path, "utf8"), name).toContain("routed-docs.testkit");
+			expect(readFileSync(path, "utf8"), name).toContain(`from "${TESTKIT_MODULE}"`);
 			expect(guard.pages.length, name).toBeGreaterThan(0);
 		}
 	});
