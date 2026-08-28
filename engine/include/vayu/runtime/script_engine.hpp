@@ -137,7 +137,8 @@ struct ScriptContext {
      * `iterationCount` stays narrower than either: a duration-bounded run has
      * no total to report, and a field readable from one mode and not another is
      * worse than one that is never readable at all. The collection runner sets
-     * it and nothing else does.
+     * it, and so does the `data` row send above - `1`, the total that send's
+     * row 0 of 1 belongs to.
      *
      * `iteration` is 0-based (Postman's convention); `vu` is 1-based, because
      * it is a name for a user rather than an index into anything;
