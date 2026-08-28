@@ -112,8 +112,10 @@ TEST (AsciiLowerEqual, MatchesUnderTheFoldAndBuildsNothing) {
 /**
  * The two answers `CaseInsensitiveLess` gives have to agree: `equal` is what
  * callers ask outside the map and `operator()` is what the map itself orders
- * by, and before #1060 they were two separate spellings of the fold. A byte
- * above 127 is where a divergence would have shown first.
+ * by. Before #1060 `equal` could not disagree because it *was* the ordering,
+ * asked twice (`!less (a, b) && !less (b, a)`); now the two are separate
+ * functions over the same fold, so agreeing is a property worth a test rather
+ * than a tautology. A byte above 127 is where a divergence would show first.
  */
 TEST (CaseInsensitiveLess, TheOrderingAndTheEqualityAgree) {
     const CaseInsensitiveLess less;

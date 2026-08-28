@@ -126,8 +126,10 @@ engine/
   **`vayu::utils::ascii_lower`** (`utils/ascii_case.hpp`) is the fold, for a
   character or a whole string, and **`ascii_lower_equal`** is the answer for
   the callers that compare without building a lowered copy -
-  `vayu::CaseInsensitiveLess` included, whose ordering and whose `equal` were
-  two spellings of it before. ASCII is in the name because it is the contract:
+  `vayu::CaseInsensitiveLess` included, whose `equal` used to derive an answer
+  from the ordering by comparing twice (`!less (a, b) && !less (b, a)`) and now
+  folds through the same helper in one pass. ASCII is in the name because it is
+  the contract:
   every caller folds a header name, a scheme, a MIME type, a hostname or a
   log-level word, all ASCII by their own specifications, and `std::tolower`
   would answer for a byte above 127 out of whatever the process last set as its
