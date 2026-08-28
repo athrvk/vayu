@@ -347,9 +347,29 @@ std::vector<std::string*> resolvable_strings (vayu::Request& request) {
     return targets;
 }
 
-bool a_header_name_holds_a_token (const vayu::Headers& headers) {
-    return std::any_of (headers.begin (), headers.end (),
-    [] (const auto& entry) { return holds_a_token (entry.first); });
+/**
+ * Whether the name map has to be read at all: a name still holding a token,
+ * which the walk below resolves, or a name that is already nothing, which it
+ * refuses.
+ *
+ * The second half is what widens this pass past the tokens (issue #1095). The
+ * gate exists so an ordinary request pays one search per field and no more, and
+ * asking whether a name is empty beside that search costs a compare on a map
+ * the search already walks - which buys the one thing a token search cannot
+ * see: a header a *script* has just left nameless, and a payload posted
+ * straight to `POST /execute` carrying an empty key. Neither is a name this
+ * pass resolved, and both are a `": value"` line going out under no name.
+ *
+ * The collision rule does not widen with it, and that is not the two rules
+ * drifting: a request that arrives already resolved cannot carry a collision to
+ * find, because `Headers` holds one value per name and compares without case,
+ * so two names that are already equal are already one. There is nothing there
+ * to see, where an empty name is in plain sight.
+ */
+bool a_header_name_needs_reading (const vayu::Headers& headers) {
+    return std::any_of (headers.begin (), headers.end (), [] (const auto& entry) {
+        return entry.first.empty () || holds_a_token (entry.first);
+    });
 }
 
 /// Both halves of a refusal from one wording: the pre-send gate's shape for the
@@ -378,16 +398,17 @@ ResidualRefusal refusal_of (std::string reason, std::string_view code) {
  * one wording: it is the same shape of quiet wrong request with the erased
  * header replaced by a `": value"` line no name owns, and this pass is the
  * layer composition cannot stand in for - the name a script has just defined is
- * one composition never saw. A name that arrives *already* empty holds no token
- * and so is never walked here at all, which is this pass's reach for both rules
- * alike: composition refuses that one (see issue #1095).
+ * one composition never saw. Since #1095 that rule reaches a name which arrives
+ * *already* empty as well, holding no token for the gate to find - see
+ * `a_header_name_needs_reading` for why this rule widened there and the
+ * collision rule did not.
  *
  * @return the first refusal, the headers left as they were; nothing, and the
  *         map rebuilt, when every name is still its own.
  */
 std::optional<ResidualRefusal> resolve_header_names (vayu::Headers& headers,
 const vayu::http::VariableValues& vars) {
-    if (!a_header_name_holds_a_token (headers)) {
+    if (!a_header_name_needs_reading (headers)) {
         return std::nullopt;
     }
     vayu::Headers resolved;
@@ -429,7 +450,7 @@ vayu::http::VariableValues values_from_scopes (const ScriptVariableScopes& scope
 std::optional<ResidualRefusal> resolve_residual_tokens (vayu::Request& request,
 const ScriptVariableScopes& scopes) {
     auto targets             = resolvable_strings (request);
-    const bool anything_left = a_header_name_holds_a_token (request.headers) ||
+    const bool anything_left = a_header_name_needs_reading (request.headers) ||
     std::any_of (targets.begin (), targets.end (),
     [] (const std::string* text) { return holds_a_token (*text); });
     if (!anything_left) {

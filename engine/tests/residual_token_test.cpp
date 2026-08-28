@@ -405,6 +405,55 @@ TEST (ResidualTokens, ARefusedEmptyNameLeavesTheHeadersAlone) {
     EXPECT_EQ (request.headers.count (""), 0u);
 }
 
+// --- a name that arrives already empty (#1095) -------------------------------
+//
+// The reach the two rules do not share. A name holding no token is one this
+// pass used to skip, so a script writing `pm.request.headers[""] = "acme"` and a
+// payload posted straight to `POST /execute` with an empty key both sent the
+// `": acme"` line the rule above exists to stop - the pre-send gate is no
+// backstop for it, since an absent name ends no line. The collision rule stays
+// where it was and loses nothing: two names that are already equal are already
+// one key, so there is no collision left to find in a request that arrives
+// resolved.
+//
+// Mutation-check for the two below: drop `entry.first.empty ()` from
+// `a_header_name_needs_reading` and the first fails on the refusal it no longer
+// gets, the second on the send it then allows.
+
+TEST (ResidualTokens, ANameThatArrivesAlreadyEmptyIsRefused) {
+    vayu::Request request;
+    request.url             = "https://api.example.com/x";
+    request.headers[""]     = "acme";
+    request.headers["Host"] = "api.example.com";
+
+    ScriptVariableScopes scopes;
+    const auto refusal = resolve_residual_tokens (request, scopes);
+
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_EQ (refusal->error.code, vayu::ErrorCode::InternalError);
+    EXPECT_EQ (refusal->code, "empty_header_name");
+    // No spelling to quote back, so the message says the subject rather than
+    // naming it - the one thing the shared wording says differently.
+    EXPECT_NE (refusal->error.message.find ("no name at all"), std::string::npos)
+    << refusal->error.message;
+    EXPECT_EQ (refusal->error.message.find ("resolves to an empty name"), std::string::npos)
+    << refusal->error.message;
+}
+
+/// The gate still answers "nothing to read" for the request that has neither, so
+/// the ordinary send pays the compare and no walk.
+TEST (ResidualTokens, ARequestWithNeitherATokenNorAnEmptyNameIsUntouched) {
+    vayu::Request request;
+    request.url                      = "https://api.example.com/x";
+    request.headers["Authorization"] = "Bearer real";
+    const vayu::Request before       = request;
+
+    ScriptVariableScopes scopes;
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
+    EXPECT_EQ (request.headers, before.headers);
+    EXPECT_EQ (request.url, before.url);
+}
+
 // --- the exchange, on the wire -----------------------------------------------
 
 class ResidualTokenExchangeTest : public ::testing::Test {

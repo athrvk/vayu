@@ -3899,11 +3899,16 @@ with specific codes:
   a stored request's headers and the app's - so what this catches beyond a
   produced name is a payload built by hand. The execute-time residual pass
   refuses it in the same words and under this same code, in each of the two
-  shapes it answers a refusal in (above), and reads a name only where the name
-  held a token - the reach it has for the collision rule too, a request posted
-  already-resolved being composition's to refuse. `pm.sendRequest` has refused
-  it since its own header names began resolving, with the call named in front of
-  the same wording.
+  shapes it answers a refusal in (above), and for this rule it reads **every**
+  header name rather than only the ones still holding a token (issue #1095) - so
+  a name a pre-request script has just emptied and an empty key posted straight
+  to `POST /execute` are refused there as well. The collision rule keeps the
+  narrower reach and loses nothing by it: a request that arrives already
+  resolved cannot carry a collision, two names that are already equal being
+  already one key. `pm.sendRequest` has refused it since its own header names
+  began resolving, with the call named in front of the same wording, and a data
+  row that binds a name away is refused at bind time with the row in front of it
+  (see [Scenario runs](#scenario-runs)).
 
 ### POST /execute
 
@@ -4091,7 +4096,7 @@ Refused with a **400**, before any run row exists and with nothing sent:
 | `data` is not an object | `'data' must be an object of name/value pairs (got array). A single send binds one row; a set of rows is a collection run.` |
 | over the byte cap | `'data' is N bytes, over the limit of M (raise the 'maxScenarioDataBytes' setting to allow more)` |
 | a token names a column the row lacks | the binder's own sentence, naming the token, the row and the row's columns |
-| a `null` cell, a header collision, an unwritable XML placement | the binder's own sentence - identical to a run's, see [Scenario runs](#scenario-runs) |
+| a `null` cell, a header collision, a header name bound to nothing, an unwritable XML placement | the binder's own sentence - identical to a run's, see [Scenario runs](#scenario-runs) |
 | an OAuth 2.0 config carries a `{{data.*}}` token | `Auth credentials carry {{data.client}} in an OAuth 2.0 configuration, and no row can reach it: ...` |
 
 **Credentials bind here too** (issue #642). A `{{data.user}}` in a basic-auth
@@ -5045,6 +5050,17 @@ produced and the row. Note this is deliberately *not* composition's duplicate
 rule, which is last-wins: a duplicate there is two headers the author typed and
 can see, while this one exists only for the rows that produce it.
 
+**A header name a row binds to nothing** errors the same way (issue #1095), and
+is reported ahead of a collision when a row does both - two names that bind to
+nothing collide on a name neither of them has, which is not what the file's
+author needs to be told. `{{data.header_name}}: acme` whose cell is blank would
+otherwise send the line `": acme"`, under a name nobody wrote and with a value
+they did mean, once per iteration. The message is the one every layer that can
+leave a header nameless shares, with the row in front of it; the column is
+inside the header as written, where that wording names it. A name a bind merely
+*shortens* is not this rule - `X-{{data.h}}` with a blank cell binds to `X-`,
+which is a name a request can carry.
+
 A cell that is present but **`null`** errors the same way, naming the token and
 the row. It is the same failure one type down - the token says the value comes
 from the file and the file says there is none - and writing `""` for it would
@@ -5198,8 +5214,8 @@ knob.
   step**: nothing is sent, the step's `errors` count in the breakdown moves, and
   the run's error list carries an entry with `error_type: "data_binding_failed"`
   naming the token, the row and the row's columns. It is never substituted with
-  an empty string. A `null` cell and two headers binding to one name fail the
-  same step the same way.
+  an empty string. A `null` cell, two headers binding to one name, and a header
+  name a row binds to nothing fail the same step the same way.
 
   Every retained result carries **`dataRowIndex`** on its `trace`, which is how
   a failure is attributed to a row when no per-step `results` rows exist. Absent

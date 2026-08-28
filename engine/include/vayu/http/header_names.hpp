@@ -83,9 +83,10 @@
  * author can see either, and the gate is no backstop for it for the same reason
  * - it reads header text for the bytes that break a line, and an empty name
  * breaks nothing. What is left goes out as the line `": acme"`, under no name
- * at all. The three layers that resolve a name refuse it: composition and the
+ * at all. The three layers that resolve a name refuse it - composition and the
  * residual pass (issue #1084) and `pm.sendRequest` (issue #1067), which met it
- * first because a script writes header names of its own.
+ * first because a script writes header names of its own - and so does the one
+ * that *binds* a name from a data row (issue #1095, below).
  *
  * Unlike a collision, composition refuses this one however the name got there.
  * A collision has to be one resolution produced, because two names the author
@@ -95,12 +96,22 @@
  * that catches beyond a produced name is a caller that built the payload
  * itself.
  *
- * The other two layers see less, and neither rule pretends otherwise: the
- * residual pass reads a name only where the name held a `{{token}}`, so a
- * payload posted straight to `POST /execute` carrying an already-empty name is
- * composition's to refuse and this pass never looks at it - the same reach the
- * collision rule has there - and a name bound from a data row has no rule of
- * its own yet, where the collision rule does (issue #1095).
+ * **Every layer that can leave a header nameless refuses it** (issue #1095),
+ * which is one layer more than the collision rule has and one reach wider at
+ * the residual pass:
+ *
+ * - **A bound data cell** refuses it at bind time, in these words with the row
+ *   in front of them - a blank cell is an ordinary thing for a data file to
+ *   hold, and the load path runs no residual pass, so this is the layer or
+ *   nothing. It words the *collision* itself, because that message has to name
+ *   what the bound name collided with; this one has only the row to add.
+ * - **The residual pass** reads every name for this rule rather than only the
+ *   templated ones, so a name a script has just emptied and a payload posted
+ *   straight to `POST /execute` carrying an empty key are both refused. The
+ *   collision rule keeps the narrower reach and loses nothing by it: a request
+ *   that arrives already resolved cannot carry a collision to find, since
+ *   `Headers` holds one value per name and compares without case, so two names
+ *   that are already equal are already one.
  */
 
 namespace vayu::http {
@@ -133,14 +144,18 @@ struct HeaderNameCollision {
 /**
  * @brief The refusal a header name that resolved to nothing reads as.
  *
- * One wording for the same three layers, on the reasoning above: a caller
- * meeting this at composition and again at execute time is meeting one rule,
- * and three spellings of it would read as three. A layer may name itself in
+ * One wording for four layers - the three above and the bind, which is one more
+ * than the collision rule reaches - on the same reasoning: a caller meeting this
+ * at composition, again at execute time and again from a data row is meeting one
+ * rule, and four spellings of it would read as four. A layer may name itself in
  * front of the wording, never inside it.
  *
  * @param written the name as the request carries it, before resolution. It is
  *        the whole of what the message can name - what the name produced is
  *        nothing, and `{{blank}}` is what the author has to go and look at.
+ *        Empty for a name that arrived with nothing in it rather than resolving
+ *        to nothing, which is a subject with no spelling to quote and so the
+ *        one thing the wording says differently.
  */
 [[nodiscard]] std::string describe_empty_header_name (const std::string& written);
 

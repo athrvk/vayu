@@ -879,9 +879,16 @@ and the pre-send gate is no backstop for it - it reads header text for the
 bytes that end a line early, and an absent name ends nothing. The pass answers
 a `ResidualRefusal`, which carries the compose refusal code as well as the
 error, because the streaming send answers a `400` of its own and a code spelled
-at that call site is one that drifts from the rule it names. Both rules read a
-name only where this pass reads one, so a request posted already-resolved is
-composition's to refuse. Two entry shapes: `requestId` (stored request; MCP uses
+at that call site is one that drifts from the rule it names. **The two rules
+read different reaches, decided in #1095**: the empty-name rule reads every
+header name, so a name a script has just emptied and an empty key posted
+straight to `POST /execute` are refused here too, while the collision rule reads
+only the names that still held a token - a request that arrives already resolved
+cannot carry a collision to find, two names that are already equal being already
+one key. **A fourth layer *binds* a name** rather than resolving one: a data row
+whose header-name column is blank is refused at bind time
+(`core/scenario_data.cpp`), which the load path needs because it runs no
+residual pass over what it binds. Two entry shapes: `requestId` (stored request; MCP uses
 this, and gates its allowlist on the *composed* URL) and an inline `request`
 (+ `collectionId` scope; the renderer uses this because Send/replay execute
 *editor state*, which may be unsaved or detached). Inline over stored = the
