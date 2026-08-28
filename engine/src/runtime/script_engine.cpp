@@ -5453,9 +5453,11 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
  * `iteration` and `vu` are present wherever a real one exists: a scenario run's
  * steps, a load run's sampled response (issue #994), and a send that bound a
  * data row, which is row 0 of 1. `iterationCount` is narrower - the scenario
- * runner's total, or that send's `1` - and stays unset under load, where a
- * duration-bounded run has no total. An ordinary Send sets none of the three,
- * so the script reads `undefined` (see ScriptContext).
+ * runner's total, or that send's `1` - and no load run sets it: a
+ * duration-bounded one has no total, and a field readable from one load shape
+ * and not another is worse than one that is never readable there. An ordinary
+ * Send sets none of the three, so the script reads `undefined` (see
+ * ScriptContext).
  */
 void setup_pm_info (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);

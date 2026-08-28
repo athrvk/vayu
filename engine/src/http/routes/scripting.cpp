@@ -861,8 +861,10 @@ nlohmann::json get_script_completions () {
     "collection run's pass, the iteration a load run's sampled response was "
     "sent in, and a send that bound a data row, which is row 0 of 1. "
     "iterationCount is narrower - the collection runner's total, or that "
-    "send's 1 - and stays undefined under load, where a duration-bounded run "
-    "has no total to report. An ordinary Send reports none of the three." },
+    "send's 1 - and no load run reports it: a duration-bounded one has no "
+    "total, and a field readable from one load shape and not another is worse "
+    "than one that is never readable there. An ordinary Send reports none of "
+    "the three." },
     { "sortText", "0_pm_info" } });
 
     completions.push_back ({ { "label", "pm.info.requestId" }, { "kind", KIND_FIELD },
@@ -918,8 +920,10 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "How many passes the run will make in total: the collection runner's "
     "total, or 1 for a send that bound a data row, which is row 0 of 1. "
-    "undefined on an ordinary Send and under load, where a duration-bounded "
-    "run has no total to report.\n\nExample:\nconsole.log("
+    "undefined on an ordinary Send, and on every load run - a duration-bounded "
+    "one has no total to report, and a field readable from one load shape and "
+    "not another is worse than one that is never readable there."
+    "\n\nExample:\nconsole.log("
     "'pass ' + (pm.info.iteration + 1) + ' of ' + pm.info.iterationCount);" },
     { "sortText", "1_pm_info_iterationCount" } });
 
