@@ -1150,6 +1150,15 @@ could mask a value was to hover the row. It is now always visible on
 Same rule for anything that reports state - a pin, a mute, an enable. Quiet is
 fine; absent is not.
 
+**A row with no action of its own keeps its controls visible too.** Hover-reveal
+exists so the row's own job - open the request, select the run - is not crowded
+by buttons the user did not come for. A Trash row (`modules/trash`) has no such
+job: it opens nothing, and Restore and Delete forever are the entire reason it
+is on screen. Revealed on hover they would hide the surface's whole purpose and
+leave a list of names that reads as inert. The test is the same one the state
+toggle above passes - would the row still say what it is for with the control
+absent - and here the answer is no.
+
 **Prefer `RowActionsMenu`** (`components/shared`) over adding another inline icon
 button. It renders the `⋯` trigger plus a `DropdownMenu`, so rows expose actions
 consistently and get focus management, Escape-to-close and arrow-key navigation

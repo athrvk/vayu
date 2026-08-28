@@ -127,6 +127,9 @@ export {
 	useStopMockServerMutation,
 } from "./mock-server";
 
+// Trash (issue #988)
+export { useTrashQuery, useRestoreTrashMutation, usePurgeTrashMutation } from "./trash";
+
 // Health & Config
 export { useHealthQuery } from "./health";
 export { useConfigQuery, useUpdateConfigMutation } from "./config";

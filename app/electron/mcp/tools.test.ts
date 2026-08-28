@@ -140,6 +140,11 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		}),
 		updateRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "Renamed" }),
 		deleteRequest: vi.fn().mockResolvedValue({ message: "Request deleted successfully" }),
+		listTrash: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+		restoreTrashEntry: vi
+			.fn()
+			.mockResolvedValue({ id: "col_9", restored: true, reparentedToRoot: false }),
+		purgeTrashEntry: vi.fn().mockResolvedValue({ id: "col_9", purged: true }),
 		createCollection: vi.fn().mockResolvedValue({ id: "col_1", name: "API" }),
 		updateCollection: vi.fn().mockResolvedValue({ id: "col_1", name: "Renamed" }),
 		deleteCollection: vi.fn().mockResolvedValue({ message: "Collection deleted successfully" }),
@@ -1479,6 +1484,145 @@ describe("destructive deletes ask first", () => {
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toContain("req_gone");
 		expect(client.deleteRequest).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * The Trash tools (issue #1071): list what `delete_collection` / `delete_request`
+ * left recoverable, restore from it, or purge it for good. `restore_trash_entry`
+ * is the one write here that is not destructive - it puts a row back rather than
+ * removing one - so it carries the write toggle alone; `purge_trash_entry` is the
+ * Trash's own hard delete and carries both gates the way `delete_collection` does.
+ */
+describe("trash tools", () => {
+	const TRASH_ITEM = {
+		id: "col_9",
+		kind: "collection",
+		name: "Retired API",
+		deletedAt: 1_755_000_000_000,
+		parentId: null,
+		collections: 2,
+		requests: 5,
+	};
+
+	test("list_trash returns the engine's list verbatim", async () => {
+		const client = fakeClient({
+			listTrash: vi.fn().mockResolvedValue({ items: [TRASH_ITEM], total: 1 }),
+		});
+		const res = await dispatchTool("list_trash", {}, ctxWith(client));
+		expect(res.isError).toBeFalsy();
+		expect(JSON.parse(firstText(res))).toEqual({ items: [TRASH_ITEM], total: 1 });
+	});
+
+	test("restore_trash_entry restores and reports a re-parented collection", async () => {
+		const client = fakeClient({
+			restoreTrashEntry: vi
+				.fn()
+				.mockResolvedValue({ ...TRASH_ITEM, restored: true, reparentedToRoot: true }),
+		});
+		const res = await dispatchTool(
+			"restore_trash_entry",
+			{ id: "col_9" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.restoreTrashEntry).toHaveBeenCalledWith("col_9", undefined);
+		// The caveat is what tells the caller its parent did not survive - without
+		// it the result reads as an ordinary restore to where it was.
+		expect(res.content.map((c) => c.text).join("\n")).toMatch(/top level/i);
+	});
+
+	test("restore_trash_entry surfaces the engine's own 409 message verbatim", async () => {
+		// The engine's actual wording, in the shape `error_response` actually
+		// sends it: nested `{"error": {"code", "message"}}` per routes.hpp, which
+		// is the one shape issue #173 settled on. A flat `{"error": "..."}`
+		// fixture here would have passed against a body the trash routes never
+		// produce, and the agent would have been shown raw JSON.
+		const message =
+			"Request 'req_5' cannot be restored on its own - the collection it belongs to is in the trash, so restore that first";
+		const client = fakeClient({
+			restoreTrashEntry: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError(
+						"Engine responded 409",
+						409,
+						JSON.stringify({ error: { code: "conflict", message } })
+					)
+				),
+		});
+		const res = await dispatchTool(
+			"restore_trash_entry",
+			{ id: "req_5" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		// Verbatim - not a paraphrase this tool invented and could disagree with.
+		expect(firstText(res)).toBe(message);
+	});
+
+	test("restore_trash_entry refuses while writes are disabled, without calling the engine", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool("restore_trash_entry", { id: "col_9" }, ctxWith(client));
+		expect(res.isError).toBe(true);
+		expect(client.restoreTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("purge_trash_entry previews the entry's name and counts, and purges nothing", async () => {
+		const client = fakeClient({
+			listTrash: vi.fn().mockResolvedValue({ items: [TRASH_ITEM], total: 1 }),
+		});
+		const res = await dispatchTool(
+			"purge_trash_entry",
+			{ id: "col_9" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).toMatch(/awaiting confirmation/i);
+		expect(firstText(res)).toContain("Retired API");
+		expect(firstText(res)).toContain("2 sub-collection(s)");
+		expect(firstText(res)).toContain("5 saved request(s)");
+		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("purge_trash_entry purges once confirmed", async () => {
+		const client = fakeClient({
+			listTrash: vi.fn().mockResolvedValue({ items: [TRASH_ITEM], total: 1 }),
+			purgeTrashEntry: vi.fn().mockResolvedValue({ ...TRASH_ITEM, purged: true }),
+		});
+		const res = await dispatchTool(
+			"purge_trash_entry",
+			{ id: "col_9", confirmed: true },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.purgeTrashEntry).toHaveBeenCalledWith("col_9", undefined);
+	});
+
+	test("purge_trash_entry refuses an id the trash does not hold, without a prompt", async () => {
+		const client = fakeClient({
+			listTrash: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+		});
+		const res = await dispatchTool(
+			"purge_trash_entry",
+			{ id: "col_missing", confirmed: true },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("col_missing");
+		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("purge_trash_entry refuses while writes are disabled, without reading the trash", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"purge_trash_entry",
+			{ id: "col_9", confirmed: true },
+			ctxWith(client)
+		);
+		expect(res.isError).toBe(true);
+		expect(client.listTrash).not.toHaveBeenCalled();
+		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
 	});
 });
 

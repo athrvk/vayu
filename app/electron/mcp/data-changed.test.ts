@@ -153,6 +153,13 @@ describe("the registry declares its effects", () => {
 			create_request: ["request"],
 			update_request: ["request"],
 			delete_request: ["request"],
+			// Trash (#1071). A restore can bring back either family, and there is
+			// no argument that says which in advance - the same reasoning
+			// `move_item` carries the pair for. A purge only ever destroys what a
+			// delete already took, so it touches the same two families a delete
+			// would have.
+			restore_trash_entry: ["collection", "request"],
+			purge_trash_entry: ["collection", "request"],
 			// Document CRUD (#759). The example tools take the `request` family
 			// because that is where their rows live: the examples query key is
 			// nested under `requests.detail(id)`, so invalidating the request the

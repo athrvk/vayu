@@ -86,6 +86,9 @@ export const DRAWER_VIEW_CHORDS: Record<DrawerView, Chord> = {
 	history: { mod: true, shift: true, key: "H", label: "Show history" },
 	variables: { mod: true, shift: true, key: "U", label: "Show variables" },
 	services: { mod: true, shift: true, key: "S", label: "Show services" },
+	// ⇧⌘T, free in both maps: the native menu binds no T at all (its only ⇧⌘
+	// entry is ⇧⌘W) and the renderer's other view chords are E, H, U and S.
+	trash: { mod: true, shift: true, key: "T", label: "Show trash" },
 	settings: SETTINGS_CHORD,
 };
 

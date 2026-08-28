@@ -1078,12 +1078,14 @@ engine's `scenario_plan_test.cpp` (issue #431).
 **Mutations:**
 - **`useCreateCollectionMutation()`** - Create collection
 - **`useUpdateCollectionMutation()`** - Update collection (with cache update)
-- **`useDeleteCollectionMutation()`** - Delete collection (invalidates coarsely,
-  see below)
+- **`useDeleteCollectionMutation()`** - Soft-delete a collection into the trash
+  rather than removing it (issue #988); invalidates coarsely, see below, and
+  also invalidates the trash list so the Trash view picks it up
 - **`useCreateRequestMutation()`** - Create request
 - **`useUpdateRequestMutation()`** - Update request (invalidates only the lists
   that can have changed, see below)
-- **`useDeleteRequestMutation()`** - Delete request (also clears the response)
+- **`useDeleteRequestMutation()`** - Soft-delete a request into the trash (also
+  clears the response, and invalidates the trash list)
 - **`useReorderMutation()`** - Reposition collections and requests through
   `POST /reorder` in one transaction, optimistically (see below)
 - **`useImportMutation()`** (`queries/import.ts`) - Apply a parsed import through
@@ -1115,6 +1117,26 @@ the reveal effect, so an in-place edit would move a row on screen that the tree
 never notices. The plan itself comes from
 `modules/collections/reorder-math.ts` - a pure module, node-tested, that turns
 sibling lists and a drop index into the minimal set of rows to rewrite.
+
+#### Trash
+
+The read side of the same soft delete (issue #989): `useDeleteCollectionMutation`
+and `useDeleteRequestMutation` stamp a row rather than removing it, and these
+are how the app sees what got stamped (`queries/trash.ts`).
+
+- **`useTrashQuery()`** - Every deleted root, newest first (`GET /trash`). No
+  `staleTime`: the list changes only through the two mutations below, the two
+  delete mutations above, and the startup retention purge, so the default is
+  already the cheapest correct answer.
+- **`useRestoreTrashMutation()`** - Put one deleted root back
+  (`POST /trash/:id/restore`). Invalidates `trash.all`, `collections.all`,
+  `requests.all` and `prefetch.allRequests()` - the same coarse invalidation
+  `useDeleteCollectionMutation` does, and for the same reason (see the cascade
+  delete note below).
+- **`usePurgeTrashMutation()`** - Destroy one deleted root for good
+  (`DELETE /trash/:id`). Invalidates only `trash.all`: every other cache
+  already stopped serving these rows when they were stamped, so purging them
+  changes nothing a live read can see.
 
 #### Environments & Variables
 
@@ -1292,6 +1314,10 @@ requests: {
   detail: (id) => ["requests", "detail", id],
   examples: (id) => ["requests", "detail", id, "examples"],  // saved example responses (#481)
 },
+trash: {
+  all: ["trash"],
+  list: () => ["trash", "list"],   // no per-entry detail cache - the list is the only read
+},
 runs: {
   all: ["runs"],
   lists: () => ["runs", "list"],
@@ -1369,7 +1395,12 @@ key rather than a stale entry under this one.
   "descendant". So `useDeleteCollectionMutation` invalidates
   `collections.all` + `requests.all` wholesale. `requests.detail` entries carry
   `staleTime: Infinity`, so without this a deleted request stays fresh forever
-  and keeps feeding restored tabs.
+  and keeps feeding restored tabs. `useRestoreTrashMutation` invalidates the
+  same two families for the same reason, in the other direction: which rows a
+  restore brought back is just as much engine-side knowledge - the cohort is
+  defined by a timestamp the client never sees - so it takes the same wholesale
+  invalidation rather than a client guess at which requests came back with a
+  restored collection.
 - **A single-request update invalidates narrowly, for the same reason.** Which
   lists a request write can affect *is* client-side knowledge: the request's own
   collection, plus the one it left if the write was a move. So

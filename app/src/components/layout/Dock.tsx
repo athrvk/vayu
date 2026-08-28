@@ -14,6 +14,7 @@ import {
 	Radio,
 	RefreshCw,
 	Settings,
+	Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
@@ -102,6 +103,23 @@ const DRAWER_BUTTONS: DrawerButton[] = [
 		icon: <Radio className="w-4 h-4" />,
 		label: "Services",
 		shortcut: formatChord(DRAWER_VIEW_CHORDS.services),
+	},
+	{
+		view: "trash",
+		/*
+		 * `Trash2`, the same glyph every delete affordance in the app already
+		 * uses - and that repetition is the argument for it rather than against
+		 * it. The user meets this icon on the row action that put the item here;
+		 * finding it again in the Dock is how they learn where the item went.
+		 *
+		 * Distinct in the strip: a tapered bin with a lid line across the top,
+		 * the only glyph of the six that is wider at the shoulders than the foot
+		 * - Collections a solid trapezoid, History a filled circle, Variables
+		 * two open curves, Services concentric arcs, Settings a round cog.
+		 */
+		icon: <Trash2 className="w-4 h-4" />,
+		label: "Trash",
+		shortcut: formatChord(DRAWER_VIEW_CHORDS.trash),
 	},
 	{
 		view: "settings",

@@ -32,6 +32,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
     │   ├── <HistoryList />              //   history view
     │   ├── <VariablesCategoryTree />    //   variables view
     │   ├── <ServicesPanel />            //   services view - modules/services/
+    │   ├── <TrashList />                //   trash view - modules/trash/
     │   └── <SettingsCategoryTree />     //   settings view
     ├── <TabStrip />                     // Open tabs + "+" button - over main+context, left edge = drawer edge
     ├── main content (switched on active tab type)
@@ -107,7 +108,7 @@ Main layout: tab-centric with resizable drawer, split/overlay context bar, and d
 
 - **One uniform layout for every tab** - `Drawer` (left) + a content column holding `TabStrip` over main + `ContextBar`. No tab type takes over the row. This is deliberate: the Dock's drawer switchers always have a Drawer to act on, so they can never be dead. (Settings used to full-take-over and suppress the Drawer, which left those buttons doing nothing while Settings was open.)
 - **Left navigation is always the Drawer.** Every main view that needs a category/entity list uses the shared Drawer for it - never its own left rail. `SettingsMain` and `VariablesMain` are pure content panes; their category trees live in the Drawer (`settings` / `variables` views). Follow this pattern for any new view - do not add a second sidebar inside the main area.
-- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U/S (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab). Every one of them is a `Chord` in `constants/shortcuts.ts`, matched by `matchesChord` - the same registry the Dock's tooltips advertise from, so no surface can claim a chord the handler does not listen for. They were fourteen hand-rolled comparisons until #938, which is how AltGr (Ctrl+Alt on European Windows layouts) came to fire Save and close tabs, and how ⌘1-9 came to be dead on AZERTY. ⌘K (command palette) is **not** in this map - it is owned by `CommandPalette`, on the capture phase, because Monaco swallows the key on the bubble.
+- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U/S/T (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab). Every one of them is a `Chord` in `constants/shortcuts.ts`, matched by `matchesChord` - the same registry the Dock's tooltips advertise from, so no surface can claim a chord the handler does not listen for. They were fourteen hand-rolled comparisons until #938, which is how AltGr (Ctrl+Alt on European Windows layouts) came to fire Save and close tabs, and how ⌘1-9 came to be dead on AZERTY. ⌘K (command palette) is **not** in this map - it is owned by `CommandPalette`, on the capture phase, because Monaco swallows the key on the bubble.
 - **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
 - **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
 - **Drawer-view sync:** an effect points the Drawer at the view matching the active tab - `variables`→variables, `settings`→settings, `request`/`collection`→collections - and opens it.
@@ -118,7 +119,7 @@ Main layout: tab-centric with resizable drawer, split/overlay context bar, and d
 
 ### `Drawer` (`components/layout/Drawer.tsx`)
 
-Resizable sidebar (220–480px default, per view). The single left navigation for the whole app - one of five views per `useLayoutStore.drawerView`. Every view is titled: its `DrawerPanel` header is the drawer's half of the second chrome row, sharing `--tabstrip-height` and its bottom rule with the tab strip across the resize handle, with an optional tools slot beside the title.
+Resizable sidebar (220–480px default, per view). The single left navigation for the whole app - one of six views per `useLayoutStore.drawerView`. Every view is titled: its `DrawerPanel` header is the drawer's half of the second chrome row, sharing `--tabstrip-height` and its bottom rule with the tab strip across the resize handle, with an optional tools slot beside the title.
 
 | View | Component | Band tools today |
 |------|-----------|------------------|
@@ -126,6 +127,7 @@ Resizable sidebar (220–480px default, per view). The single left navigation fo
 | **`history`** | `HistoryList` (past runs, filtered/sorted) | run count |
 | **`variables`** | `VariablesCategoryTree` (globals, collections, environments) | - |
 | **`services`** | `ServicesPanel` (webhook inboxes, OAuth issuers, mock servers) | new inbox, new issuer |
+| **`trash`** | `TrashList` (deleted collections and requests, restore or purge for good) | item count |
 | **`settings`** | `SettingsCategoryTree` (app + engine setting categories) | - |
 
 Both `variables` and `settings` follow the same nav/content split: the tree lives here in the Drawer, the editor is the corresponding tab (`VariablesMain` / `SettingsMain`), and selecting a category sets the shared store selection **and** opens/focuses that tab.

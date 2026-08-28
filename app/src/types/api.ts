@@ -926,6 +926,65 @@ export interface WorkspaceBackupResult {
 	pruned: number;
 }
 
+// Trash (issue #988)
+
+/**
+ * One deleted root, as `GET /trash` lists it.
+ *
+ * **Roots only.** Deleting a collection stamps its whole subtree in one
+ * transaction, and the engine reports the row the user actually deleted rather
+ * than every row that went with it - a request whose collection is in the trash
+ * is not listed separately. `collections` and `requests` are how many went along
+ * with this one, counted over that same delete (rows an *earlier* delete left
+ * inside the subtree are not in the cohort and are not counted here).
+ */
+export interface TrashEntry {
+	id: string;
+	kind: "collection" | "request";
+	name: string;
+	/** When it was deleted, in Unix ms - the stamp the retention purge reads. */
+	deletedAt: number;
+	/*
+	 * The engine also sends `parentId` - where the row came out of - and this
+	 * type deliberately does not claim it, the way `RequestExample` omits the
+	 * `order` and timestamps it does not use. Nothing here reads it: a trash row
+	 * names the item, not its old location, and resolving the id to a name would
+	 * fail for exactly the parents worth naming (a parent that is itself deleted
+	 * is not in the live tree). Add it back with the reader, not before. The
+	 * whole wire shape is in `docs/engine/api-reference.md` under Trash.
+	 */
+	/** Sub-collections this delete took with it. Always 0 for a request. */
+	collections: number;
+	/** Requests this delete took with it. Always 0 for a request. */
+	requests: number;
+}
+
+export interface ListTrashResponse {
+	items: TrashEntry[];
+	total: number;
+}
+
+/**
+ * What `POST /trash/{id}/restore` answers with: the entry, as it was listed,
+ * plus what the restore had to do to put it back.
+ *
+ * `reparentedToRoot` is the one thing the caller cannot infer. A collection
+ * whose parent is gone or itself in the trash cannot go back where it came
+ * from, so the engine clears its parent and it returns as a tree root - which
+ * moves a folder the user has to be told about. A *request* in that position is
+ * refused instead (409, `restore that first`), because a request has no root to
+ * land on.
+ */
+export interface RestoreTrashResponse extends TrashEntry {
+	restored: true;
+	reparentedToRoot: boolean;
+}
+
+/** What `DELETE /trash/{id}` answers with - the entry it destroyed. */
+export interface PurgeTrashResponse extends TrashEntry {
+	purged: true;
+}
+
 // Webhook inbox API (issue #480). An inbox is engine-hosted listener state, so
 // none of these shapes is stored client-side - the surface reads them back.
 

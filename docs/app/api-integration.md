@@ -476,6 +476,43 @@ A request carries **`specOperation`** - which operation of the bound spec it is
 absent key; on `updateRequest` the field is `SpecOperation | null`, so stamping
 and clearing an identity are the same verb.
 
+#### Trash
+
+```typescript
+apiService.listTrash(): Promise<ListTrashResponse>              // GET    /trash
+apiService.restoreTrashEntry(id): Promise<RestoreTrashResponse> // POST   /trash/:id/restore
+apiService.purgeTrashEntry(id): Promise<PurgeTrashResponse>     // DELETE /trash/:id
+```
+
+What `deleteCollection` and `deleteRequest` now do is a soft delete (issue
+#988): the engine stamps the row instead of removing it, and these three read
+that stamp back. No transformer on any of the three - a trash entry is the
+engine's own summary of a deleted row (a name, a stamp and two counts), not a
+stored record the app reshapes, so the wire shape is the only shape.
+
+`listTrash` returns **roots only** - the row a user actually asked to delete,
+never a descendant the same cascade took with it. A deleted collection's whole
+subtree is represented by that one root entry, with `collections` / `requests`
+counting what that delete took along.
+
+`restoreTrashEntry` puts one deleted root back, with everything the same
+delete took, and answers with the entry plus `restored: true` and
+`reparentedToRoot` - true when the collection's parent is gone or itself in
+the trash, so the engine clears its parent and returns it as a tree root
+instead. It rejects with a `404` for an id the trash does not hold (a live row,
+or one already purged) and a `409` for a request whose collection is itself
+deleted or gone - a request has no root to land on the way a collection does,
+so the engine's message names the collection to restore first; surface
+`ApiError.message` rather than inventing wording for it.
+
+`purgeTrashEntry` is the hard purge the soft delete deferred - it destroys the
+row for good, with its whole subtree, and there is no undo. It answers with the
+entry plus `purged: true`, or a `404` if the trash does not hold that id.
+
+The full contract - request/response bodies, the restore's cohort and
+re-parent rules, and the startup retention sweep - is in
+[engine/api-reference.md](../engine/api-reference.md#trash) under Trash.
+
 #### Reorder
 
 ```typescript
