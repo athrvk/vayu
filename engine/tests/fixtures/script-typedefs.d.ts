@@ -2,6 +2,13 @@
 // (GET /scripting/types). Do not edit - add to the table instead.
 
 interface VayuExpectTo {
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(n).to.be.above(0).and.also.be.below(10);
+	 */
+	also: VayuExpectTo;
 	be: {
 		/**
 		 * Assert the value is NaN. chai's rule is `value !== value`, so only the number NaN passes - a string that would read as NaN does not.
@@ -103,6 +110,20 @@ interface VayuExpectTo {
 		undefined: void;
 	};
 	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(body.name).to.have.been.a('string');
+	 */
+	been: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(rows).to.be.an('array').but.not.empty;
+	 */
+	but: VayuExpectTo;
+	/**
 	 * Assert array includes value (alias for .to.include).
 	 */
 	contain(value: any): VayuExpectation;
@@ -122,6 +143,13 @@ interface VayuExpectTo {
 		 */
 		include(value: any): VayuExpectation;
 	};
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(name).to.be.a('string').and.does.include('vayu');
+	 */
+	does: VayuExpectTo;
 	/**
 	 * Assert deep equality (for objects/arrays). Key order does not matter.
 	 * 
@@ -144,6 +172,13 @@ interface VayuExpectTo {
 	 * Assert the value is not null or undefined.
 	 */
 	exist: void;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.be.an('object').which.has.property('id');
+	 */
+	has: VayuExpectTo;
 	have: {
 		all: {
 			/**
@@ -230,6 +265,13 @@ interface VayuExpectTo {
 	 */
 	include(value: any): VayuExpectation;
 	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(rows).to.be.an('array').that.is.not.empty;
+	 */
+	is: VayuExpectTo;
+	/**
 	 * Assert the string matches a regular expression.
 	 * 
 	 * Example:
@@ -244,12 +286,40 @@ interface VayuExpectTo {
 	 */
 	not: VayuExpectTo;
 	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(items).to.be.an('array').of.length(3);
+	 */
+	of: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(ids).to.have.same.members([3, 1, 2]);
+	 */
+	same: VayuExpectTo;
+	/**
 	 * Assert the predicate returns a truthy value for the target.
 	 * 
 	 * Example:
 	 * pm.expect(n).to.satisfy(function(v) { return v % 2 === 0; });
 	 */
 	satisfy(predicate: (value: any) => boolean): VayuExpectation;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(n).to.be.above(0).and.still.be.below(10);
+	 */
+	still: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(rows).to.be.an('array').that.is.not.empty;
+	 */
+	that: VayuExpectTo;
 	/**
 	 * Assert the function throws. A string or regular expression is matched against the error's message, and an error constructor against what was thrown - with an optional message matcher after it.
 	 * 
@@ -262,9 +332,30 @@ interface VayuExpectTo {
 	 * Assert the function throws (alias for .to.throw).
 	 */
 	throws(error?: ErrorConstructor | string | RegExp, message?: string | RegExp): VayuExpectation;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.have.property('id').which.is.a('number');
+	 */
+	which: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.be.an('object').with.property('id');
+	 */
+	with: VayuExpectTo;
 }
 
 interface VayuExpectation {
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(n).to.be.above(0).and.also.be.below(10);
+	 */
+	also: VayuExpectTo;
 	/**
 	 * Continue an assertion chain. Flags already set (including `not`) carry over.
 	 * 
@@ -272,7 +363,84 @@ interface VayuExpectation {
 	 * pm.expect(n).to.be.above(0).and.to.be.below(10);
 	 */
 	and: VayuExpectation;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(body.name).to.have.been.a('string');
+	 */
+	been: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(rows).to.be.an('array').but.not.empty;
+	 */
+	but: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(name).to.be.a('string').and.does.include('vayu');
+	 */
+	does: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.be.an('object').which.has.property('id');
+	 */
+	has: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(rows).to.be.an('array').that.is.not.empty;
+	 */
+	is: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(items).to.be.an('array').of.length(3);
+	 */
+	of: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(ids).to.have.same.members([3, 1, 2]);
+	 */
+	same: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(n).to.be.above(0).and.still.be.below(10);
+	 */
+	still: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(rows).to.be.an('array').that.is.not.empty;
+	 */
+	that: VayuExpectTo;
 	to: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.have.property('id').which.is.a('number');
+	 */
+	which: VayuExpectTo;
+	/**
+	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.be.an('object').with.property('id');
+	 */
+	with: VayuExpectTo;
 }
 
 /**
@@ -537,7 +705,17 @@ declare const pm: {
 	 * - .to.include(value)
 	 * - .and to continue a chain
 	 */
-	expect(value: any, message?: string): VayuExpectation;
+	expect: {
+		(value: any, message?: string): VayuExpectation;
+		/**
+		 * Fail here, as an assertion rather than as an error.
+		 * 
+		 * Inside pm.test it fails that test; outside one it records an assertion failure the way every other matcher does, where a thrown Error would abort the script.
+		 * 
+		 * chai's fail(actual, expected, message, operator) form is not supported - this AssertionError has nowhere to carry the two compared values, so more than one argument is refused rather than read as the message.
+		 */
+		fail(message?: string): never;
+	};
 	/**
 	 * Access and modify global variables. Changes persist to global variables.
 	 */
@@ -1188,8 +1366,12 @@ declare const pm: {
 	 * pm.test('Status code is 200', () => {
 	 *   pm.response.to.have.status(200);
 	 * });
+	 * 
+	 * Returns pm, so calls chain: pm.test(a, fn).test(b, fn).
+	 * 
+	 * A callback that declares a parameter is handed a done callback: call done() to pass, done(err) to fail. It must be called before the callback returns - the sandbox is synchronous and has no job queue, so a test that leaves done() for later fails saying so.
 	 */
-	test(name: string, fn: () => void): void;
+	test(name: string, fn: (done: (error?: unknown) => void) => void): typeof pm;
 	/**
 	 * Read a variable without naming its scope. Resolves environment, then collection, then global - the same order {{name}} uses. Writes must name a scope: pm.variables.set() throws.
 	 */

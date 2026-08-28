@@ -79,6 +79,31 @@ constexpr const char* ANY_OBJECT = "{ [key: string]: any }";
 constexpr auto CHAIN_CONTINUATIONS = std::to_array<const char*> ({ "not", "and" });
 
 /**
+ * @brief chai's language chains - the words that assert nothing (issue #1053).
+ *
+ * Continuations like `and`, with one thing the declarations have to say that
+ * `and` does not. A language word can be followed by anything the chain
+ * allows, a matcher included (`.that.is.not.empty`, `.of.length(3)`), so it is
+ * typed `VayuExpectTo` the way `not` is, and declared on *both* chain
+ * interfaces. The runtime has one object - `create_expectation` installs every
+ * member on the same expectation - so declaring these on the chain root alone
+ * would make the editor reject `pm.expect(rows).to.be.an('array').that.is.not
+ * .empty`, which the runtime runs. That is the defect the `deep` entry hit
+ * before it listed more than `equal`; see the note in `scripting.cpp`.
+ *
+ * `script_types_test.cpp` asserts each of these is still offered by the table,
+ * for the reason above it: a name hardcoded here and dropped there degrades
+ * silently to `void`.
+ */
+constexpr auto LANGUAGE_CHAINS = std::to_array<const char*> ({ "also", "been",
+"but", "does", "has", "is", "of", "same", "still", "that", "which", "with" });
+
+bool is_language_chain (const std::string& name) {
+    return std::find (std::begin (LANGUAGE_CHAINS), std::end (LANGUAGE_CHAINS),
+           name) != std::end (LANGUAGE_CHAINS);
+}
+
+/**
  * @brief Host globals a browser or Node would have and this sandbox does not.
  *
  * Declared, rather than simply left out, so that using one is an *error the
@@ -139,8 +164,26 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 });
 
 bool is_chain_continuation (const std::string& name) {
-    return std::find (std::begin (CHAIN_CONTINUATIONS),
-           std::end (CHAIN_CONTINUATIONS), name) != std::end (CHAIN_CONTINUATIONS);
+    return is_language_chain (name) ||
+    std::find (std::begin (CHAIN_CONTINUATIONS), std::end (CHAIN_CONTINUATIONS),
+    name) != std::end (CHAIN_CONTINUATIONS);
+}
+
+/// What a continuation hands back: the `to` node for anything a matcher may
+/// follow, the chain root for `and`, which is written before `.to` again.
+const char* continuation_type (const std::string& name) {
+    return (name == "not" || is_language_chain (name)) ? CHAIN_TO : CHAIN;
+}
+
+/**
+ * @brief Whether a label's first segment opens the assertion chain.
+ *
+ * A label rooted at `to`, `and` or one of chai's language chains is a chain
+ * continuation offered after `pm.expect(...)`, not a global - without the last
+ * of those, `.that` would declare a top-level `that` nothing binds.
+ */
+bool opens_the_chain (const std::string& root_segment) {
+    return root_segment == "to" || root_segment == "and" || is_language_chain (root_segment);
 }
 
 /// A node in the declaration tree built from the dotted labels.
@@ -523,6 +566,25 @@ void append_doc (std::string& out, const TypeNode& node, const std::string& inde
     out += indent + " */\n";
 }
 
+/**
+ * @brief What a listed call returns, in the one place both callable shapes ask.
+ *
+ * `forced_return` is the answer the table cannot write down (`pm.expect` opens
+ * the chain and its own entry does not say so); a documented return type is the
+ * answer it can; and an assertion that documents none continues the chain it
+ * sits in, or yields nothing outside one. Read once here, so a plain function
+ * and a function that carries members cannot come to disagree.
+ */
+std::string function_return_type (const TypeNode& node, const Signature& sig, bool in_chain) {
+    if (!node.forced_return.empty ()) {
+        return node.forced_return;
+    }
+    if (!sig.return_type.empty ()) {
+        return sig.return_type;
+    }
+    return in_chain ? CHAIN : "void";
+}
+
 std::string render_member (const TypeNode& node,
 const std::string& name,
 const std::string& indent,
@@ -559,9 +621,25 @@ bool in_chain) {
         // of the documented jar block was "Property 'set' does not exist on
         // type 'object'". One member, whose return type is the members the
         // labels gave it.
-        if (node.kind == KIND_FUNCTION || node.called) {
+        if (node.called) {
             const Signature sig = parse_signature (node.detail, name);
             out += indent + name + "(" + (sig.parsed ? sig.params : "") + "): {\n";
+            out += render_body (node, indent + "\t", in_chain);
+            out += indent + "};\n";
+            return out;
+        }
+        // A function whose children were reached *without* a call: the label
+        // is `pm.expect.fail`, not `pm.expect().fail`, so `fail` is a member of
+        // the function object rather than of what calling it returns. The `()`
+        // in a label is the whole of that distinction - read as the jar's
+        // shape above, `pm.expect(x)` would return `{ fail }` and every
+        // documented `pm.expect(x).to...` would stop compiling. TypeScript
+        // writes a callable with members as a call signature beside them.
+        if (node.kind == KIND_FUNCTION) {
+            const Signature sig = parse_signature (node.detail, name);
+            out += indent + name + ": {\n";
+            out += indent + "\t(" + (sig.parsed ? sig.params : "...args: any[]") +
+            "): " + function_return_type (node, sig, in_chain) + ";\n";
             out += render_body (node, indent + "\t", in_chain);
             out += indent + "};\n";
             return out;
@@ -586,27 +664,42 @@ bool in_chain) {
     }
 
     if (node.kind == KIND_FUNCTION) {
-        const Signature sig = parse_signature (node.detail, name);
-        std::string params  = sig.parsed ? sig.params : "...args: any[]";
-        std::string ret     = sig.return_type;
-        if (!node.forced_return.empty ()) {
-            ret = node.forced_return;
-        }
-        if (ret.empty ()) {
-            // An assertion that documents no return continues the chain when it
-            // sits in one, and otherwise yields nothing.
-            ret = in_chain ? CHAIN : "void";
-        }
-        out += indent + name + "(" + params + "): " + ret + ";\n";
+        const Signature sig      = parse_signature (node.detail, name);
+        const std::string params = sig.parsed ? sig.params : "...args: any[]";
+        out += indent + name + "(" + params +
+        "): " + function_return_type (node, sig, in_chain) + ";\n";
         return out;
     }
 
     if (in_chain && is_chain_continuation (name)) {
-        out += indent + name + ": " + (name == "not" ? CHAIN_TO : CHAIN) + ";\n";
+        out += indent + name + ": " + continuation_type (name) + ";\n";
         return out;
     }
     out += indent + name + ": " + field_type (node.detail) + ";\n";
     return out;
+}
+
+/**
+ * @brief Declare the language chains on the `to` node as well as the root.
+ *
+ * A language chain is offered once and belongs on both chain interfaces: the
+ * runtime installs every member on one object, so `.that` is reachable after a
+ * matcher (which lands on `VayuExpectation`) and after another language word or
+ * `.to` (which lands on `VayuExpectTo`). Copied into the `to` node rather than
+ * appended at render time, so the declarations stay in the sorted order the
+ * checked-in fixture is compared against.
+ */
+void share_language_chains_with_to (TypeNode& chain_root) {
+    auto to = chain_root.children.find ("to");
+    if (to == chain_root.children.end ()) {
+        return;
+    }
+    for (const char* word : LANGUAGE_CHAINS) {
+        if (auto listed = chain_root.children.find (word);
+        listed != chain_root.children.end ()) {
+            to->second.children[word] = listed->second;
+        }
+    }
 }
 
 } // namespace
@@ -631,10 +724,7 @@ void build_type_tree (TypeNode& global_root, TypeNode& chain_root) {
         }
 
         const auto segments = split_dotted (label);
-        // A label rooted at `to`/`and` is a chain continuation offered after
-        // `pm.expect(...)`, not a global.
-        TypeNode* node =
-        (segments[0] == "to" || segments[0] == "and") ? &chain_root : &global_root;
+        TypeNode* node = opens_the_chain (segments[0]) ? &chain_root : &global_root;
         for (const auto& raw : segments) {
             // `pm.cookies.jar().set` spells out the call that produced the
             // object it hangs off. The call belongs to `jar`, which the table
@@ -653,6 +743,8 @@ void build_type_tree (TypeNode& global_root, TypeNode& chain_root) {
         node->listed        = true;
         node->optional      = split_optional_suffix (node->detail).second;
     }
+
+    share_language_chains_with_to (chain_root);
 
     // `pm.expect(value)` opens the chain the `to.*` entries continue. Nothing
     // in its entry says so - see `forced_return`.

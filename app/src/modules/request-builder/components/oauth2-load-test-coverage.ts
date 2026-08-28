@@ -47,9 +47,20 @@ export type CoverageState =
 /**
  * Whether the engine will keep this credential current for the whole run.
  *
- * Mirrors `plan_auth_refresh` (engine/src/http/auth_resolver.cpp) case for
- * case - the guard must not promise a refresh the engine will not perform, and
- * must not block a run the engine can carry. Change one, change both.
+ * Mirrors the config-and-token cases of `plan_auth_refresh`
+ * (engine/src/http/auth_resolver.cpp) - the guard must not promise a refresh
+ * the engine will not perform, and must not block a run the engine can carry.
+ * Change one, change both.
+ *
+ * It cannot mirror that function's last case, which plans a refresh only for a
+ * run whose `Authorization` header is the token's own value, and declines when
+ * a user-supplied header beat the token to it - swapping the token under that
+ * header would change nothing on the wire. This decision is made before a
+ * request is composed and is handed a config and a token, never headers, so
+ * that case is outside its inputs. The gap leans the safe way: it takes a
+ * user-supplied `Authorization` header to reach, and such a run is
+ * authenticated by that header rather than by this token, which makes the
+ * coverage question moot. Covering it would be a signature change.
  */
 export function isMidRunRefreshable(
 	config: Pick<OAuth2Config, "grantType" | "tokenPlacement" | "autoRefreshToken">,

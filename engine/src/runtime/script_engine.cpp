@@ -91,6 +91,13 @@ namespace vayu::runtime {
 struct RuntimeState {
     bool enabled = false; // false => no wall-clock limit (timeout_ms == 0)
     std::chrono::steady_clock::time_point deadline{};
+    /// Set by the interrupt handler when it stops a call, cleared before each
+    /// execution and before each call an assertion makes into the script. The
+    /// handler is the only thing that knows *why* a call ended, and an
+    /// assertion that calls back into the script cannot tell the engine's abort
+    /// from a value the script threw: both arrive as a pending exception at the
+    /// call site. See `arm_script_deadline_watch` and `script_deadline_expired`.
+    bool interrupted = false;
 };
 
 // ============================================================================
@@ -178,6 +185,32 @@ std::optional<int64_t> remaining_script_budget_ms (JSContext* ctx) {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
     state->deadline - std::chrono::steady_clock::now ())
     .count ();
+}
+
+// Clears the handler's record before a call an assertion is about to make into
+// the script, so that `script_deadline_expired` afterwards answers about *that
+// call* rather than about the execution so far. The distinction is not
+// theoretical: `pm.test` consumes an abort natively and lets the script run on,
+// and QuickJS gives it a fresh 10,000-operation budget before the next poll -
+// so a flag left standing would read the ordinary throw in the next test as an
+// abort too, failing an assertion that holds.
+void arm_script_deadline_watch (JSContext* ctx) {
+    if (auto* state =
+        static_cast<RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)))) {
+        state->interrupted = false;
+    }
+}
+
+// Whether the wall-clock deadline stopped the call just made. Asked by the
+// assertions that call back into the script: the interrupt stops the call by
+// raising an exception into it, which at the call site is indistinguishable
+// from one the script threw, so reading a pending exception as "the function
+// threw" reports a pass about a function that never returned. The handler's own
+// flag is the only honest answer - comparing the clock here would also call a
+// script's ordinary throw a timeout when it happened to land past the deadline.
+bool script_deadline_expired (JSContext* ctx) {
+    auto* state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
+    return state != nullptr && state->enabled && state->interrupted;
 }
 
 // Frees a borrowed JSValue on every exit. QuickJS ships no such helper, and the
@@ -2202,9 +2235,17 @@ JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowTypeError (ctx, "throw() requires the target to be a function");
     }
 
+    arm_script_deadline_watch (ctx);
     JSValue result   = JS_Call (ctx, state->actual, JS_UNDEFINED, 0, nullptr);
     const bool threw = JS_IsException (result);
     JS_FreeValue (ctx, result);
+    // A target that ran past the script's deadline did not throw - the engine
+    // stopped it, and the exception it left pending is the abort. Propagate it
+    // as every other surface does; reading it as a satisfied `.throw()` reports
+    // a green verdict about a function that never returned.
+    if (threw && script_deadline_expired (ctx)) {
+        return JS_EXCEPTION;
+    }
     ScopedValue thrown (ctx, threw ? JS_GetException (ctx) : JS_UNDEFINED);
     const std::string message =
     threw ? thrown_message (ctx, thrown.get ()) : std::string ();
@@ -2420,7 +2461,22 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     // quantifier for `.keys`, so it changes nothing - `.any` is deliberately
     // absent rather than aliased to `all`, which would silently assert more
     // than the script asked.
-    const char* passthrough_chainers[] = { "and", "all" };
+    //
+    // The rest are chai's language chains (issue #1053): they assert nothing at
+    // all and exist so a chain reads as English - `expect(rows).to.be.an
+    // ('array').that.is.not.empty`. Without them an imported collection written
+    // in the fluent style fails on the *language* rather than on the API under
+    // test, since #999 armed the unknown-member hook and every one of these
+    // words now throws by name. Each hands the same expectation back, so the
+    // flags a chain has set - `not` included - carry across exactly as they do
+    // for `and`.
+    //
+    // `.own` and `.itself` are deliberately not here and are not passthroughs:
+    // they change what `.property` looks at rather than reading as prose, so
+    // aliasing them would assert something other than what the script wrote.
+    // `.own.property` is listed as unsupported in docs/app/pm-api-compatibility.md.
+    const char* passthrough_chainers[] = { "and", "all", "also", "been", "but",
+        "does", "has", "is", "of", "same", "still", "that", "which", "with" };
     for (const char* name : passthrough_chainers) {
         JSAtom atom = JS_NewAtom (ctx, name);
         JS_DefinePropertyGetSet (ctx, obj, atom,
@@ -2793,6 +2849,118 @@ void setup_pm_crypto (JSContext* ctx, JSValue pm) {
 // pm Object Implementation
 // ============================================================================
 
+// The three fields a done-style test reports its outcome through. They live on
+// a plain JS object rather than on a C++ struct on `js_pm_test`'s frame,
+// because nothing stops a script from keeping `done` and calling it after
+// `pm.test` has returned - the sandbox has no job queue to *resume* such a
+// script, but the call itself still runs. Bound to a stack pointer that is a
+// use-after-free; bound to an object the collector owns it is a write nobody
+// reads.
+constexpr const char* DONE_CALLED  = "called";
+constexpr const char* DONE_FAILED  = "failed";
+constexpr const char* DONE_MESSAGE = "message";
+
+/**
+ * @brief The `done` a test callback that declares a parameter is handed.
+ *
+ * Mocha's contract, which postman-sandbox follows: no argument (or a falsy one)
+ * completes the test, and any truthy argument fails it - an `Error` being the
+ * documented shape, reported by the same `js_to_string` the throw path reports
+ * a thrown one with, so the two spellings of "this test failed" read alike.
+ *
+ * A second call is refused rather than allowed to overwrite the first verdict:
+ * called twice inside the callback it throws, and the throw fails the test
+ * naming what happened, which is what Postman does with it.
+ */
+JSValue js_test_done (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)magic;
+    JSValueConst state = func_data[0];
+
+    JSValue called_before = JS_GetPropertyStr (ctx, state, DONE_CALLED);
+    const bool already    = JS_ToBool (ctx, called_before) > 0;
+    JS_FreeValue (ctx, called_before);
+    if (already) {
+        return JS_ThrowTypeError (ctx, "done() was already called for this test");
+    }
+    JS_SetPropertyStr (ctx, state, DONE_CALLED, JS_TRUE);
+
+    if (argc >= 1 && JS_ToBool (ctx, argv[0]) > 0) {
+        const std::string message = js_to_string (ctx, argv[0]);
+        JS_SetPropertyStr (ctx, state, DONE_FAILED, JS_TRUE);
+        JS_SetPropertyStr (ctx, state, DONE_MESSAGE, JS_NewString (ctx, message.c_str ()));
+    }
+    return JS_UNDEFINED;
+}
+
+/**
+ * @brief Whether @p callback declares a parameter, so it wants a `done`.
+ *
+ * postman-sandbox reads `fn.length` for exactly this, and the two forms report
+ * their verdict differently, so the arity is the question that has to be asked
+ * before the call rather than inferred from what the call did.
+ *
+ * @return the declared arity, or -1 with a pending exception.
+ */
+int32_t callback_arity (JSContext* ctx, JSValueConst callback) {
+    JSValue length = JS_GetPropertyStr (ctx, callback, "length");
+    if (JS_IsException (length)) {
+        return -1;
+    }
+    int32_t arity = 0;
+    const int ok  = JS_ToInt32 (ctx, &arity, length);
+    JS_FreeValue (ctx, length);
+    if (ok < 0) {
+        return -1;
+    }
+    return arity;
+}
+
+/**
+ * @brief Record what a done-style callback left behind on @p state.
+ *
+ * Called only when the callback returned without throwing - a throw is already
+ * the verdict, and a test that threw before reaching its `done()` is not also
+ * an asynchronous-completion mistake.
+ */
+void apply_done_verdict (JSContext* ctx, JSValueConst state, TestResult& result) {
+    JSValue called        = JS_GetPropertyStr (ctx, state, DONE_CALLED);
+    const bool was_called = JS_ToBool (ctx, called) > 0;
+    JS_FreeValue (ctx, called);
+
+    if (!was_called) {
+        // Postman genuinely waits here; this sandbox cannot. It is synchronous
+        // and drains no job queue, so a `done()` the callback left for later
+        // would never run and the test would be reported on a verdict nothing
+        // ever gave. Saying so is the honest outcome - and a loud one, where
+        // the same script used to fail with "undefined is not a function".
+        result.passed = false;
+        result.error_message =
+        "done() was never called. The script sandbox is synchronous and has no "
+        "job queue, so a test cannot complete asynchronously - call done() "
+        "before the callback returns.";
+        return;
+    }
+
+    JSValue failed      = JS_GetPropertyStr (ctx, state, DONE_FAILED);
+    const bool did_fail = JS_ToBool (ctx, failed) > 0;
+    JS_FreeValue (ctx, failed);
+    if (!did_fail) {
+        result.passed = true;
+        return;
+    }
+
+    JSValue message      = JS_GetPropertyStr (ctx, state, DONE_MESSAGE);
+    result.passed        = false;
+    result.error_message = js_to_string (ctx, message);
+    JS_FreeValue (ctx, message);
+}
+
 JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 2) {
         return JS_ThrowTypeError (ctx, "pm.test requires name and callback");
@@ -2801,25 +2969,57 @@ JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
     auto* data            = get_context_data (ctx);
     std::string test_name = js_to_string (ctx, argv[0]);
 
+    const int32_t arity = callback_arity (ctx, argv[1]);
+    if (arity < 0) {
+        return JS_EXCEPTION;
+    }
+
     TestResult result;
     result.name = test_name;
 
+    // A callback that declares a parameter is asking for the done-style form,
+    // and gets one. One that does not is called exactly as it always was.
+    JSValue state = JS_UNDEFINED;
+    JSValue done  = JS_UNDEFINED;
+    if (arity > 0) {
+        state = JS_NewObject (ctx);
+        if (JS_IsException (state)) {
+            return JS_EXCEPTION;
+        }
+        JS_SetPropertyStr (ctx, state, DONE_CALLED, JS_FALSE);
+        JS_SetPropertyStr (ctx, state, DONE_FAILED, JS_FALSE);
+        done = JS_NewCFunctionData (ctx, js_test_done, 1, 0, 1, &state);
+        if (JS_IsException (done)) {
+            JS_FreeValue (ctx, state);
+            return JS_EXCEPTION;
+        }
+    }
+
     // Call the test function
-    JSValue ret = JS_Call (ctx, argv[1], JS_UNDEFINED, 0, nullptr);
+    JSValue ret = JS_Call (
+    ctx, argv[1], JS_UNDEFINED, arity > 0 ? 1 : 0, arity > 0 ? &done : nullptr);
 
     if (JS_IsException (ret)) {
         JSValue exc          = JS_GetException (ctx);
         result.passed        = false;
         result.error_message = js_to_string (ctx, exc);
         JS_FreeValue (ctx, exc);
+    } else if (arity > 0) {
+        apply_done_verdict (ctx, state, result);
     } else {
         result.passed = true;
     }
 
+    JS_FreeValue (ctx, done);
+    JS_FreeValue (ctx, state);
     JS_FreeValue (ctx, ret);
     data->tests.push_back (std::move (result));
 
-    return JS_UNDEFINED;
+    // Postman returns `pm` to make the call chainable ("make it chainable",
+    // verbatim in pmapi-setup-runner), so `pm.test(...).test(...)` runs both.
+    // The `pm` a chain continues on is the one the call was made on, which is
+    // what `this` is for every documented spelling of it.
+    return JS_DupValue (ctx, this_val);
 }
 
 JSValue js_pm_expect (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -2843,6 +3043,45 @@ JSValue js_pm_expect (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     }
 
     return create_expectation (ctx, argv[0], std::move (message));
+}
+
+/**
+ * @brief chai's `expect.fail([message])` - fail here, with this message.
+ *
+ * It is the one way a script states a failure *as an assertion* rather than as
+ * an error: inside `pm.test` both fail the test, but at script level a thrown
+ * `Error` aborts the script while this records what every other matcher
+ * records. Reached as a property of the `pm.expect` function itself, which is
+ * how chai spells it.
+ *
+ * chai's four-argument form (`actual, expected, message, operator`) builds an
+ * AssertionError carrying the two values it compared; this AssertionError has
+ * nowhere to put them, so that form is refused by name. Reading `actual` as
+ * the message instead - what a single-argument implementation would do with
+ * `fail(a, b)` - reports the value as the failure text and is the silent-wrong
+ * shape this program exists to close.
+ */
+JSValue js_pm_expect_fail (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    if (argc > 1) {
+        return JS_ThrowTypeError (ctx,
+        "pm.expect.fail takes an optional message; chai's fail(actual, "
+        "expected, message, operator) form is not supported");
+    }
+
+    // chai's own default when nothing is said, so a bare `pm.expect.fail()`
+    // reports what a reader of chai's docs expects to see.
+    std::string message = "expect.fail()";
+    if (argc == 1 && !JS_IsUndefined (argv[0]) && !JS_IsNull (argv[0])) {
+        const char* str = JS_ToCString (ctx, argv[0]);
+        if (!str) {
+            return JS_EXCEPTION;
+        }
+        message = str;
+        JS_FreeCString (ctx, str);
+    }
+
+    return throw_assertion_failure (ctx, message);
 }
 
 // json() and text() read the body bound to the function at build time rather
@@ -7749,8 +7988,14 @@ void setup_pm_object (JSContext* ctx) {
     // pm.test()
     JS_SetPropertyStr (ctx, pm, "test", JS_NewCFunction (ctx, js_pm_test, "test", 2));
 
-    // pm.expect()
-    JS_SetPropertyStr (ctx, pm, "expect", JS_NewCFunction (ctx, js_pm_expect, "expect", 1));
+    // pm.expect(), with chai's `expect.fail` on the function object itself.
+    // The first member on a callable here: a JS function *is* an object, so
+    // the property write is ordinary - what is new is holding the function
+    // value long enough to write to it instead of handing it straight to `pm`.
+    JSValue expect_fn = JS_NewCFunction (ctx, js_pm_expect, "expect", 1);
+    JS_SetPropertyStr (
+    ctx, expect_fn, "fail", JS_NewCFunction (ctx, js_pm_expect_fail, "fail", 1));
+    JS_SetPropertyStr (ctx, pm, "expect", expect_fn);
 
     // pm.response
     setup_pm_response (ctx, pm);
@@ -7808,7 +8053,10 @@ extern "C" int script_interrupt_handler (JSRuntime* /*rt*/, void* opaque) {
     auto* state = static_cast<RuntimeState*> (opaque);
     if (!state || !state->enabled)
         return 0;
-    return std::chrono::steady_clock::now () > state->deadline ? 1 : 0;
+    if (std::chrono::steady_clock::now () <= state->deadline)
+        return 0;
+    state->interrupted = true;
+    return 1;
 }
 
 class ScriptEngine::Impl {
@@ -7922,7 +8170,8 @@ class ScriptEngine::Impl {
         // Refresh the per-execution deadline. A pooled context reused for the next
         // script gets a fresh budget; timeout_ms == 0 disables the wall-clock limit.
         if (auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt))) {
-            rt_state->enabled = config.timeout_ms != 0;
+            rt_state->enabled     = config.timeout_ms != 0;
+            rt_state->interrupted = false;
             if (rt_state->enabled) {
                 rt_state->deadline = std::chrono::steady_clock::now () +
                 std::chrono::milliseconds (config.timeout_ms);

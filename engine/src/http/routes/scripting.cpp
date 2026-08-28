@@ -53,11 +53,17 @@ nlohmann::json get_script_completions () {
     // ========================================
     completions.push_back ({ { "label", "pm.test" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.test(\"${1:test name}\", function() {\n\t${2:// assertions}\n});" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "pm.test(name: string, fn: () => void)" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.test(name: string, fn: (done: (error?: unknown) => void) => void): typeof pm" },
     { "documentation",
     "Define a test with assertions. The test name appears in "
     "results.\n\nExample:\npm.test('Status code is 200', () => {\n  "
-    "pm.response.to.have.status(200);\n});" },
+    "pm.response.to.have.status(200);\n});\n\nReturns pm, so calls chain: "
+    "pm.test(a, fn).test(b, fn).\n\nA callback that declares a parameter is "
+    "handed a done callback: call done() to pass, done(err) to fail. It must "
+    "be called before the callback returns - the sandbox is synchronous and "
+    "has no job queue, so a test that leaves done() for later fails saying "
+    "so." },
     { "sortText", "0_pm_test" } });
 
     // ========================================
@@ -76,6 +82,19 @@ nlohmann::json get_script_completions () {
     ".to.be.false\n- .to.exist\n- .to.have.property(name)\n- "
     ".to.include(value)\n- .and to continue a chain" },
     { "sortText", "0_pm_expect" } });
+
+    completions.push_back ({ { "label", "pm.expect.fail" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.expect.fail(${1:message})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.expect.fail(message?: string): never" },
+    { "documentation",
+    "Fail here, as an assertion rather than as an error.\n\nInside pm.test it "
+    "fails that test; outside one it records an assertion failure the way "
+    "every other matcher does, where a thrown Error would abort the "
+    "script.\n\nchai's fail(actual, expected, message, operator) form is not "
+    "supported - this AssertionError has nowhere to carry the two compared "
+    "values, so more than one argument is refused rather than read as the "
+    "message." },
+    { "sortText", "0_pm_expect_fail" } });
 
     // ========================================
     // pm.response - Response object
@@ -1826,6 +1845,43 @@ nlohmann::json get_script_completions () {
     "Continue an assertion chain. Flags already set (including `not`) carry "
     "over.\n\nExample:\npm.expect(n).to.be.above(0).and.to.be.below(10);" },
     { "sortText", "2_and" }, { "filterText", ".and" } });
+
+    // chai's language chains (issue #1053) - words that assert nothing and
+    // exist so a chain reads as English. Offered as fields, paren-less like
+    // `.and`, because each is a getter handing the same expectation back; a
+    // written pair of parentheses would call the chain's result. Every name the
+    // runtime binds has to be offered here or
+    // `ScriptCompletions.EveryExpectMemberTheRuntimeBindsIsOffered` fails by
+    // name, and the generated declarations are derived from this table.
+    struct LanguageChainCompletion {
+        const char* name;
+        const char* example;
+    };
+    constexpr auto language_chains = std::to_array<LanguageChainCompletion> ({
+    { "also", "pm.expect(n).to.be.above(0).and.also.be.below(10);" },
+    { "been", "pm.expect(body.name).to.have.been.a('string');" },
+    { "but", "pm.expect(rows).to.be.an('array').but.not.empty;" },
+    { "does", "pm.expect(name).to.be.a('string').and.does.include('vayu');" },
+    { "has", "pm.expect(json).to.be.an('object').which.has.property('id');" },
+    { "is", "pm.expect(rows).to.be.an('array').that.is.not.empty;" },
+    { "of", "pm.expect(items).to.be.an('array').of.length(3);" },
+    { "same", "pm.expect(ids).to.have.same.members([3, 1, 2]);" },
+    { "still", "pm.expect(n).to.be.above(0).and.still.be.below(10);" },
+    { "that", "pm.expect(rows).to.be.an('array').that.is.not.empty;" },
+    { "which", "pm.expect(json).to.have.property('id').which.is.a('number');" },
+    { "with", "pm.expect(json).to.be.an('object').with.property('id');" },
+    });
+
+    for (const auto& chain : language_chains) {
+        const std::string name (chain.name);
+        completions.push_back ({ { "label", name }, { "kind", KIND_FIELD },
+        { "insertText", name }, { "detail", "." + name },
+        { "documentation",
+        "Reads as English and asserts nothing - one of chai's language chains. "
+        "Flags already set (including `not`) carry over.\n\nExample:\n" +
+        std::string (chain.example) },
+        { "sortText", "2_" + name }, { "filterText", "." + name } });
+    }
 
     // ========================================
     // Common snippets / templates

@@ -154,6 +154,232 @@ TEST_F (ScriptEngineTest, PmTestMultiple) {
 }
 
 // ============================================================================
+// pm.test() done-callbacks, chainability, pm.expect.fail (issue #1004)
+// ============================================================================
+
+// Mutation check for this block: call the callback with zero arguments again
+// (`JS_Call (ctx, argv[1], JS_UNDEFINED, 0, nullptr)`) and every done-style
+// case below reddens - `done` is `undefined`, calling it is a TypeError, and
+// the test that should pass fails with "not a function". The one exception is
+// AThrowBeatsTheNeverCalledRule, which never reaches `done` and so passes on
+// that code too; it guards an ordering the reversion does not disturb, and
+// names its own mutation.
+
+TEST_F (ScriptEngineTest, DoneCallbackPassesWhenItIsCalled) {
+    auto result = engine.execute_test (R"(
+        pm.test("done passes", function (done) {
+            pm.expect(1).to.equal(1);
+            done();
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (ScriptEngineTest, DoneCallbackFailsWithTheErrorItIsGiven) {
+    auto result = engine.execute_test (R"(
+        pm.test("done fails", function (done) {
+            done(new Error("the token was empty"));
+        });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("the token was empty"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// Mocha's rule, which postman-sandbox follows: the argument is a failure when
+// it is truthy, not when it is an Error. A falsy one completes the test, which
+// is what `done(err)` in a callback-style helper does on success.
+TEST_F (ScriptEngineTest, DoneCallbackTreatsAnyTruthyArgumentAsTheFailure) {
+    auto result = engine.execute_test (R"(
+        pm.test("truthy fails", function (done) { done("plain string"); });
+        pm.test("falsy passes", function (done) { done(null); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("plain string"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+}
+
+// The divergence from Postman, made loud. Postman genuinely waits for a later
+// done(); this sandbox is synchronous and drains no job queue, so the test is
+// failed with the reason rather than reported on a verdict nothing gave.
+TEST_F (ScriptEngineTest, DoneCallbackNeverCalledFailsSayingAsyncIsUnsupported) {
+    auto result = engine.execute_test (R"(
+        pm.test("never completes", function (done) {
+            pm.expect(1).to.equal(1);
+        });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("done() was never called"),
+    std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+    EXPECT_NE (result.tests[0].error_message.find ("synchronous"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// A throw is already the verdict: a callback that threw before reaching its
+// done() is not also an asynchronous-completion mistake, and the reader needs
+// the error that actually happened. Its own mutation check is the branch, not
+// the call: consult the done verdict unconditionally rather than in the
+// `else if` that the exception arm precedes, and the never-called message
+// replaces the error the script actually threw.
+TEST_F (ScriptEngineTest, AThrowBeatsTheNeverCalledRule) {
+    auto result = engine.execute_test (R"(
+        pm.test("throws first", function (done) {
+            throw new Error("the real failure");
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("the real failure"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+    EXPECT_EQ (result.tests[0].error_message.find ("done() was never called"),
+    std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+TEST_F (ScriptEngineTest, DoneCalledTwiceFailsNamingIt) {
+    auto result = engine.execute_test (R"(
+        pm.test("done twice", function (done) {
+            done();
+            done();
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("already called"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// The reason `done` reports through a JS object rather than through a pointer
+// to `js_pm_test`'s frame: nothing stops a script keeping it and calling it
+// after pm.test returned. There is no job queue to resume such a script, but
+// the call itself still runs - against a stack frame that is gone. Here it is
+// an ordinary refused second call, and the recorded verdict is untouched.
+TEST_F (ScriptEngineTest, DoneOutlivesTheCallThatHandedItOut) {
+    auto result = engine.execute_test (R"(
+        var saved;
+        pm.test("completes", function (done) {
+            saved = done;
+            done();
+        });
+        try {
+            saved();
+        } catch (e) {
+            console.log("late call: " + e.message);
+        }
+        pm.test("still running", function () {});
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_EQ (result.tests.size (), 2);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+}
+
+// Mutation check: return JS_UNDEFINED again and the chained call is a
+// TypeError on `undefined`, which aborts the script - no test is recorded at
+// all, so the size assertion is what reddens.
+TEST_F (ScriptEngineTest, PmTestIsChainable) {
+    auto result = engine.execute_test (R"(
+        pm.test("first", function () {
+            pm.expect(1).to.equal(1);
+        }).test("second", function () {
+            pm.expect(2).to.equal(2);
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_EQ (result.tests.size (), 2);
+    EXPECT_EQ (result.tests[0].name, "first");
+    EXPECT_EQ (result.tests[1].name, "second");
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+}
+
+TEST_F (ScriptEngineTest, PmExpectFailRecordsAnAssertionFailureInsideATest) {
+    auto result = engine.execute_test (R"(
+        pm.test("gives up", function () {
+            pm.expect.fail("no branch should reach here");
+        });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("AssertionError"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+    EXPECT_NE (
+    result.tests[0].error_message.find ("no branch should reach here"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// Outside a test it aborts the script the way any uncaught throw does - but as
+// an AssertionError, which is the difference from today's TypeError.
+TEST_F (ScriptEngineTest, PmExpectFailOutsideATestIsAnAssertionError) {
+    auto result = engine.execute_test (R"(
+        pm.expect.fail("stopping here");
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("AssertionError"), std::string::npos)
+    << "error was: " << result.error_message;
+    EXPECT_NE (result.error_message.find ("stopping here"), std::string::npos)
+    << "error was: " << result.error_message;
+}
+
+TEST_F (ScriptEngineTest, PmExpectFailDefaultsToChaisOwnMessage) {
+    auto result = engine.execute_test (R"(
+        pm.test("bare fail", function () { pm.expect.fail(); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("expect.fail()"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// chai's four-argument form carries the two compared values on the
+// AssertionError; this one has nowhere to put them, so it is refused by name
+// rather than reporting `actual` as the failure text.
+TEST_F (ScriptEngineTest, PmExpectFailRefusesChaisFourArgumentForm) {
+    auto result = engine.execute_test (R"(
+        pm.test("wrong form", function () { pm.expect.fail(1, 2); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("TypeError"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+    EXPECT_NE (result.tests[0].error_message.find ("not supported"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// ============================================================================
 // pm.expect() Assertion Tests
 // ============================================================================
 
@@ -904,6 +1130,85 @@ TEST_F (ScriptEngineTest, ExpectChainStillBehavesLikeAnObject) {
 
     ASSERT_EQ (result.tests.size (), 1u);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// ============================================================================
+// Issue #1053: chai's language chains read as English and assert nothing
+// ============================================================================
+
+// One chain per word, each asserting something true, so removing that word from
+// `passthrough_chainers` reddens its own case with "not a supported assertion" -
+// the mutation check. Where a case needs a second word to read at all, the
+// second is one Vayu already had (`and`, `have`, `not`), so exactly one new word
+// is under test in each line.
+TEST_F (ScriptEngineTest, LanguageChainsAreNoOps) {
+    const auto scripts = std::to_array<const char*> ({
+    R"(pm.test("t", function() { pm.expect(3).to.be.above(1).and.also.be.below(5); });)",
+    R"(pm.test("t", function() { pm.expect("a").to.have.been.a("string"); });)",
+    R"(pm.test("t", function() { pm.expect([1]).to.be.an("array").but.not.empty; });)",
+    R"(pm.test("t", function() { pm.expect("vayu").to.be.a("string").and.does.include("va"); });)",
+    R"(pm.test("t", function() { pm.expect({id:1}).to.be.an("object").and.has.property("id"); });)",
+    R"(pm.test("t", function() { pm.expect([1]).to.be.an("array").and.is.not.empty; });)",
+    R"(pm.test("t", function() { pm.expect([1,2,3]).to.be.an("array").of.length(3); });)",
+    R"(pm.test("t", function() { pm.expect([3,1,2]).to.have.same.members([1,2,3]); });)",
+    R"(pm.test("t", function() { pm.expect(3).to.be.above(1).and.still.be.below(5); });)",
+    R"(pm.test("t", function() { pm.expect([1,2]).to.be.an("array").that.include(2); });)",
+    R"(pm.test("t", function() { pm.expect([1,2]).to.be.an("array").which.include(2); });)",
+    R"(pm.test("t", function() { pm.expect({id:1}).to.be.an("object").with.property("id"); });)",
+    });
+
+    for (const char* script : scripts) {
+        auto result = engine.execute_test (script, request, response, env);
+        ASSERT_EQ (result.tests.size (), 1u) << script;
+        EXPECT_TRUE (result.tests[0].passed)
+        << script << " -> " << result.tests[0].error_message;
+    }
+}
+
+// A passthrough hands the same expectation back, so the flags the chain has set
+// survive it. `not` is the one that matters: it is a set rather than a toggle
+// (issue #883), so it still applies after a language word - a passthrough that
+// built a fresh expectation would assert the opposite of what was written and
+// report PASS for it.
+TEST_F (ScriptEngineTest, LanguageChainsCarryTheChainsFlags) {
+    auto result = engine.execute_test (R"(
+        pm.test("not survives", function() {
+            pm.expect("abc").to.not.include("z").and.which.is.include("y");
+        });
+        pm.test("deep survives", function() {
+            pm.expect([{a:1}]).to.have.deep.which.members([{a:1}]);
+        });
+        pm.test("nested survives", function() {
+            pm.expect({a:{b:1}}).to.have.nested.that.property("a.b", 1);
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 3u);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << " -> " << test.error_message;
+    }
+}
+
+// The three chai words that are *not* prose. `.any` quantifies `.keys` and
+// aliasing it to `all` would assert more than the script asked; `.own` and
+// `.itself` change what `.property` looks at. Each stays a throw naming itself,
+// which is the only honest answer while the semantics are unimplemented.
+TEST_F (ScriptEngineTest, LanguageChainsExcludeTheFlagSetters) {
+    const auto scripts = std::to_array<const char*> ({
+    R"(pm.test("t", function() { pm.expect({a:1}).to.have.any.keys("a"); });)",
+    R"(pm.test("t", function() { pm.expect({a:1}).to.have.own.property("a"); });)",
+    R"(pm.test("t", function() { pm.expect({a:1}).to.itself.have.property("a"); });)",
+    });
+
+    for (const char* script : scripts) {
+        auto result = engine.execute_test (script, request, response, env);
+        ASSERT_EQ (result.tests.size (), 1u) << script;
+        EXPECT_FALSE (result.tests[0].passed) << script;
+        EXPECT_NE (
+        result.tests[0].error_message.find ("not a supported assertion"), std::string::npos)
+        << script << " -> " << result.tests[0].error_message;
+    }
 }
 
 // `.NaN` is chai's `value !== value`, so only the number NaN satisfies it. The
@@ -2873,6 +3178,138 @@ TEST_F (ScriptEngineTest, FastScriptUnderTimeoutStillPasses) {
     EXPECT_TRUE (result.error_message.empty ());
     ASSERT_EQ (result.tests.size (), 1);
     EXPECT_TRUE (result.tests[0].passed);
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// #1056. The deadline is enforced by raising an exception into the running
+// call, so an assertion that calls back into the script sees the engine's abort
+// and a value the script threw as the same thing. `.to.throw()` read that as
+// "the function threw" and reported a green verdict about a function that never
+// returned - the silent-false-pass quadrant #996 exists to close.
+//
+// Mutation check: restore the "any pending exception is a throw" reading in
+// expect_throw (drop the script_deadline_expired guard) and this reddens - the
+// script runs to completion with the assertion satisfied.
+TEST_F (ScriptEngineTest, ThrowMatcherAbortsWhenTheTargetOutlivesTheDeadline) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 300;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (
+    R"(pm.expect(function () { while (true) {} }).to.throw();)", request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("timed out"), std::string::npos)
+    << "error was: " << result.error_message;
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// The same target inside a pm.test, which is how the issue reproduced it:
+// pm.test records any exception from its callback as a failure, so the abort
+// arrives as a FAIL rather than as the PASS today's code reports. This is the
+// verdict half of the criterion and does not depend on whether the interrupt
+// re-fires before the script ends.
+TEST_F (ScriptEngineTest, ThrowMatcherReportsFailForATargetPastTheDeadline) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 300;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (R"(
+        pm.test("a function that never returns", function () {
+            pm.expect(function () { while (true) {} }).to.throw();
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed)
+    << "a spinning target reported a pass: " << result.tests[0].error_message;
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// The other side of the fix: an ordinary throw under the same short timeout
+// still satisfies `.to.throw()`, in both the bare and the constructor form. A
+// guard that turned every throw into an abort would pass the two tests above.
+TEST_F (ScriptEngineTest, OrdinaryThrowStillSatisfiesThrowUnderAShortTimeout) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 300;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (R"(
+        pm.test("throws", function () {
+            pm.expect(function () { throw new Error("boom"); }).to.throw();
+            pm.expect(function () { throw new TypeError("bad"); }).to.throw(TypeError, "bad");
+            pm.expect(function () { return 1; }).to.not.throw();
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success) << "error was: " << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// The flag answers about the call just made, not about the execution so far,
+// and that distinction is reachable from a script: `pm.test` consumes an abort
+// natively and lets the script run on with a fresh 10,000-operation budget
+// before QuickJS polls again, so a second test in the same script is judged
+// after a deadline has already blown. Its ordinary throw is still an ordinary
+// throw. Mutation check: drop the `arm_script_deadline_watch` call before
+// `JS_Call` in expect_throw - leaving the once-per-execution reset alone - and
+// the second test reports FAIL with "Error: boom" instead of passing.
+TEST_F (ScriptEngineTest, AThrowAfterACaughtDeadlineAbortIsStillJudgedOnItsOwn) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 300;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (R"(
+        pm.test("spins past the deadline", function () {
+            pm.expect(function () { while (true) {} }).to.throw();
+        });
+        pm.test("an ordinary throw afterwards", function () {
+            pm.expect(function () { throw new Error("boom"); }).to.throw();
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_TRUE (result.tests[1].passed)
+    << "an ordinary throw was read as the earlier abort: "
+    << result.tests[1].error_message;
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// `.satisfy` is the other matcher that calls back into the script. It already
+// propagated the exception rather than reading it as a verdict; this pins that
+// it stays so, since the audit that established it is otherwise unrecorded.
+TEST_F (ScriptEngineTest, SatisfyPredicatePastTheDeadlineAbortsTheScript) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 300;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (
+    R"(pm.expect(1).to.satisfy(function () { while (true) {} });)", request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("timed out"), std::string::npos)
+    << "error was: " << result.error_message;
 #else
     GTEST_SKIP () << "QuickJS not compiled in";
 #endif

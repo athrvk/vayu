@@ -45,6 +45,42 @@ body's and the stored trace's `testResults` carries a `source` of `"pre"` or
 groups the list under the script's name (issue #810). A failing assertion fails
 its collection-run step from either script.
 
+**`pm.test` returns `pm`, so calls chain** - Postman's contract, and what an
+imported script written as one `pm.test(...).test(...)` expression relies on:
+
+```javascript
+pm.test('status', function() {
+  pm.response.to.have.status(200);
+}).test('body', function() {
+  pm.expect(pm.response.json().id).to.equal(1);
+});
+```
+
+**A callback that declares a parameter is handed `done`** (issue #1004).
+postman-sandbox reads the callback's arity to decide this and so does Vayu, so
+the zero-argument form above is untouched: `done()` completes the test, and
+`done(err)` fails it with `err` - any truthy argument, an `Error` being the
+documented one.
+
+```javascript
+pm.test('the token came back', function(done) {
+  pm.sendRequest(tokenRequest, function(err, res) {
+    if (err) { return done(err); }
+    pm.expect(res.json().access_token).to.be.a('string');
+    done();
+  });
+});
+```
+
+**`done()` must be called before the callback returns, and this is a
+divergence: Postman genuinely waits.** The sandbox is synchronous and drains no
+job queue (see [Limitations](#limitations)), so a `done()` left for later would
+never run at all. A callback that declares `done` and returns without calling
+it therefore **fails**, saying so - rather than being reported on a verdict
+nothing ever gave. Calling `done()` twice is refused for the same reason the
+first verdict is kept: the second call throws, and the throw fails the test
+naming what happened.
+
 ### pm.expect()
 
 Create Chai-style expectations for assertions.
@@ -81,6 +117,27 @@ try {
   e instanceof Error;              // true
 }
 ```
+
+**`pm.expect.fail([message])` fails on the spot**, as an assertion rather than
+as an error (issue #1004). It is chai's `expect.fail`, and the distinction is
+what it does *outside* a `pm.test`: a thrown `Error` there aborts the script,
+while this reports the same `AssertionError` every matcher reports.
+
+```javascript
+pm.test('no branch reached the response', function() {
+  if (!pm.response.json().items) {
+    pm.expect.fail('the list was absent');   // AssertionError: the list was absent
+  }
+});
+
+pm.expect.fail();                            // AssertionError: expect.fail()
+```
+
+chai's four-argument form (`fail(actual, expected, message, operator)`) is
+**not** supported: its `AssertionError` carries the two values it compared and
+this one has nowhere to put them, so more than one argument is refused by name
+rather than read as the message - which would report `actual` as the failure
+text.
 
 QuickJS has no `AssertionError` class, so this is an `Error` with that `name`
 and the stack a native throw carries; no `AssertionError` global is exposed,
@@ -167,6 +224,11 @@ pm.expect(value).to.not.equal(expected);     // negates the rest of the chain
 pm.expect(value).to.be.above(0).and.to.be.below(10);
 pm.expect(value).to.deep.include({ a: 1 });  // deep applies to include, property,
                                              // members and oneOf as well
+
+// Language chains - they assert nothing, and make a chain read as English
+pm.expect(value).to.be.an('array').that.include(item);
+pm.expect(value).to.be.an('array').which.have.length(n);
+pm.expect(value).to.be.above(0).and.still.be.below(10);
 ```
 
 Notes on the edges:
@@ -180,6 +242,18 @@ Notes on the edges:
   depended only on how many times the author had written `.not`.
 - **`deep` changes the comparison, it is not a matcher.** `include`, `property`,
   `members` and `oneOf` compare strictly unless a `deep` appears in the chain.
+- **The language chains assert nothing** (issue #1053). `that`, `which`, `is`,
+  `has`, `been`, `with`, `does`, `but`, `also`, `of`, `same` and `still` are
+  chai's words for making a chain read as English, and each hands the same
+  expectation back with the chain's flags - `not` included - intact. They are
+  accepted anywhere in a chain, so an imported collection written in the fluent
+  style fails on the API under test rather than on the language. `any`, `own`
+  and `itself` are **not** among them: each changes what the matcher after it
+  asserts rather than reading as prose, so each still throws by name. One thing
+  the editor cannot follow: the runtime carries every matcher on one object,
+  while the declarations nest them under `be` and `have` as the completion
+  labels spell them, so `.that.be.a('string')` type-checks where chai's
+  `.that.is.a('string')` does not - both run.
 - **`keys` means exactly these keys**, as in chai's `have.keys`. The subset form
   (`include.keys`) is not implemented; `all` is accepted and changes nothing,
   `any` is not.
@@ -1989,7 +2063,14 @@ The **language** is current; what is missing is the **host environment**:
   engine. Configurable via the `scriptTimeout` setting (milliseconds); `0` disables
   the limit. The deadline is checked *between bytecode operations*, so it cannot
   interrupt a blocking call - which is why `pm.sendRequest` clamps its own
-  timeout to the budget that is left rather than relying on it.
+  timeout to the budget that is left rather than relying on it. A function an
+  assertion calls - `pm.expect(fn).to.throw()`, `.to.satisfy(fn)` - is stopped
+  by the same deadline, and that is **reported as the abort it is**, never as a
+  satisfied assertion: the engine stopped `fn`, `fn` did not throw. Inside a
+  `pm.test` that is a failed test, since `pm.test` reports what its callback
+  threw; outside one it ends the script. A later assertion in the same script is
+  still judged on its own, and a stack overflow inside such a function is a
+  `RangeError` the script could have caught, so that still counts as a throw.
 
 ## Script Execution Context
 

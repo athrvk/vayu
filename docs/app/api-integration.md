@@ -1196,8 +1196,10 @@ means the run could never refresh (no OAuth 2.0 auth, a non-expiring or
 query-placed token, `autoRefreshToken: false`, or an older sidecar); present
 with an empty `refreshes` means it was watched and never needed to. The same
 eligibility rule decides whether `OAuth2LoadTestGuard` still blocks a run
-longer than its token - `isMidRunRefreshable` mirrors the engine's
-`plan_auth_refresh`, and the two must change together.
+longer than its token - `isMidRunRefreshable` mirrors the config-and-token
+cases of the engine's `plan_auth_refresh`, not its last one, a user-supplied
+`Authorization` header that beats the token and that the guard is never handed
+the headers to see. The two must change together.
 
 ### Load Test Execution
 
