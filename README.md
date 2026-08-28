@@ -50,6 +50,8 @@ The HTTP core is a multi-worker libcurl event loop in C++23, isolated from the E
 
 Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same ~57k system throughput ceiling, and at that ceiling the machine is still 79% idle, so it is the target saturating, not the client. Full methodology, the concurrency sweep, the `workers` A/B, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](https://athrvk.github.io/vayu/engine/benchmarks/)**.
 
+One caveat, carried over from the benchmarks page: an earlier 2026-07 CLI session measured the opposite curve shape - Vayu at **66%** of `wrk` at this same concurrency 64 - and the two measurements have not been reconciled. The 105% above is the newer of the two, not a settled result; the gap is too large to be run-to-run noise, so one of them is not measuring what it claims. Read both before quoting either: [prior results (2026-07, CLI, unreconciled)](https://athrvk.github.io/vayu/engine/benchmarks/#prior-results-2026-07-cli-unreconciled).
+
 **And from the UI, not just the CLI.** A 60-second run started from the app's own Load Test panel sustained **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout:
 
 ![In-app load test sustaining 51,922 req/s over 60 seconds with 3,115,391 requests and a 0.0% error rate](docs/images/vayu-loadtest4.png)
