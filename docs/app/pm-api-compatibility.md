@@ -22,7 +22,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Group               | API                                                                              |
 | ------------------- | -------------------------------------------------------------------------------- |
 | Core                | `pm`, `pm.test(name, fn)` - in either script, each result naming the one that made it (see below), `pm.expect(value[, message])` - the message prefixes the failure, as in chai |
-| Response            | `pm.response.code`, `.status`, `.responseTime`, `.responseTimeWire`, `.responseTimeQueueWait`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()`, plus `.errorCode` / `.errorMessage` on a transport failure, see below |
+| Response            | `pm.response.code`, `.status`, `.responseTime`, `.responseTimeWire`, `.responseTimeQueueWait`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()`, plus `.errorCode` / `.errorMessage` on a transport failure - see [Response timings](#response-timings-and-the-two-error-fields) |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated? }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
@@ -473,8 +473,8 @@ the transfer failed, two fields naming why:
 
 | Property | What it is |
 |---|---|
-| `responseTime` | What the caller waited - submission to completion, queue wait included. This is the one Postman's `pm.response.responseTime` corresponds to |
-| `responseTimeWire` | The transfer itself, without the time the submission spent queued |
+| `responseTime` | What the caller waited - submission to completion, queue wait included. The one a ported Postman script reads, since it is the one carrying Postman's name |
+| `responseTimeWire` | `CURLINFO_TOTAL_TIME`: DNS, connect, TLS, send and receive. What the server and the network cost, with none of Vayu's own queue in it |
 | `responseTimeQueueWait` | `responseTime` minus `responseTimeWire`, clamped at zero - the generator-side overhead. Near zero on a single send, which has no generator queue to wait in |
 | `errorCode` | The transport failure's code (`TIMEOUT`, `CONNECTION_FAILED`, …), as `pm.sendRequest`'s `err.code` spells it |
 | `errorMessage` | That failure's message |
