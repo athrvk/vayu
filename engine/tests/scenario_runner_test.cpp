@@ -27,6 +27,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -433,6 +434,31 @@ TEST_F (ScenarioRunnerTest, TheIterationIdentityBindsOnEveryPassOfADesignRun) {
        "composition";
 }
 
+// Issue #995 moved the generator family out of plan composition, and a design
+// run walks the same plan a load run does - so this is the case where deferring
+// and never binding would put the literal `{{$randomUUID}}` on the wire. Three
+// passes, three different ids: the deferral and the runner's bind, both.
+TEST_F (ScenarioRunnerTest, AGeneratorBindsPerPassOfADesignRunRatherThanFreezing) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok?id={{$randomUUID}}");
+
+    const auto run_id = start (/*iterations=*/3);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    std::set<std::string> targets;
+    for (const auto& request : seen) {
+        EXPECT_NE (request.target, "/ok?id={{$randomUUID}}")
+        << "the deferred token reached the wire as it stands - nothing bound "
+           "it";
+        targets.insert (request.target);
+    }
+    EXPECT_EQ (targets.size (), seen.size ())
+    << "the three passes shared one generated id, which is the freeze this "
+       "issue removed";
+}
+
 TEST_F (ScenarioRunnerTest, RunsEveryStepOfEveryIterationInPlanOrder) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/ok");
@@ -555,6 +581,32 @@ TEST_F (ScenarioRunnerTest, TheIterationIndexAndCountReachTheStepsScripts) {
     EXPECT_EQ (seen[0].marker, "0/3");
     EXPECT_EQ (seen[1].marker, "1/3");
     EXPECT_EQ (seen[2].marker, "2/3");
+}
+
+// The same agreement, read off one request rather than inferred from two tests
+// (issue #1057): the pre-request script renders the identity with `replaceIn`
+// into a header, and the URL beside it carries what the bind wrote - so the
+// wire holds both answers and they have to match, on every pass. A design run
+// is the shape where `{{$iteration}}` advances while `{{$vu}}` does not, so a
+// resolver reading the wrong number shows up here and not on a plain Send.
+TEST_F (ScenarioRunnerTest, AStepScriptRendersTheIdentityItsOwnRequestWasBoundWith) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok?u={{$vu}}&i={{$iteration}}",
+    R"(pm.request.headers.add({key: "X-Marker",
+       value: pm.variables.replaceIn("{{$vu}}/{{$iteration}}")});)");
+
+    const auto run_id = start (/*iterations=*/3);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    for (size_t pass = 0; pass < seen.size (); ++pass) {
+        const std::string i = std::to_string (pass);
+        EXPECT_EQ (seen[pass].target, "/ok?u=1&i=" + i);
+        EXPECT_EQ (seen[pass].marker, "1/" + i)
+        << "the script rendered an identity the request beside it did not "
+           "carry";
+    }
 }
 
 // A collection run in design mode is one user walking the sequence, and its

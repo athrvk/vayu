@@ -371,6 +371,15 @@ ScenarioPlan& plan) {
     if (!bound_columns.empty ()) {
         compose_body["dataColumns"] = bound_columns;
     }
+    // A plan step is composed once and *sent* per iteration, so the generator
+    // family belongs to the send rather than to this composition (issue #995):
+    // resolved here, `{{$randomUUID}}` would be one id repeated by every
+    // iteration of every virtual user. Unconditionally, not only for a load
+    // run - both executors join this step's template before every send, and a
+    // rule that depended on which one was running is one nobody could hold in
+    // their head. A step spelling no generator is unaffected: nothing survives
+    // composition, so nothing is split and nothing is joined.
+    compose_body["deferDynamicVariables"] = true;
     auto [status, payload] = vayu::http::compose_request_core (db, compose_body);
     if (status != 200) {
         return ("Cannot compose " + describe_step (index, row) + ": " +

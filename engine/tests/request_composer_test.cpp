@@ -138,6 +138,73 @@ TEST (DynamicVariables, GuidIsAUuidV4AndDiffersPerOccurrence) {
     EXPECT_NE (a, b);
 }
 
+// Issue #995. A payload a run repeats cannot carry a generated value, so a
+// composition that says so leaves the token for the per-iteration bind. The
+// three cases below are the whole of the rule: what defers, what does not, and
+// where the deferral sits against the scopes.
+TEST (DynamicVariables, DeferLeavesEveryGeneratorNameWrittenAsItStands) {
+    const vayu::http::VariableValues no_vars;
+    ASSERT_FALSE (vayu::http::dynamic_variable_names ().empty ())
+    << "the generator table is empty, so this test asserts nothing";
+    for (const auto& name : vayu::http::dynamic_variable_names ()) {
+        const std::string input = "{{" + name + "}}";
+        EXPECT_EQ (vayu::http::resolve_template (
+                   input, no_vars, {}, vayu::http::DynamicResolution::Defer),
+        input)
+        << name;
+        // The same call without the deferral still generates - the mutation
+        // check for the arm above.
+        EXPECT_NE (vayu::http::resolve_template (
+                   input, no_vars, {}, vayu::http::DynamicResolution::Generate),
+        input)
+        << name;
+    }
+}
+
+TEST (DynamicVariables, DeferIsTheTableOnly) {
+    const vayu::http::VariableValues no_vars;
+    // An unknown `$name` kept its braces before this existed and still does -
+    // nothing would ever generate it, so there is nothing to defer (#186).
+    EXPECT_EQ (vayu::http::resolve_template (
+               "{{$typo}}", no_vars, {}, vayu::http::DynamicResolution::Defer),
+    "{{$typo}}");
+    // The identity names are reserved ahead of the table and are unaffected by
+    // which side of it is running (#994).
+    EXPECT_EQ (vayu::http::resolve_template ("{{$vu}}/{{$iteration}}", no_vars,
+               {}, vayu::http::DynamicResolution::Defer),
+    "{{$vu}}/{{$iteration}}");
+    // An ordinary name is resolved by the scopes either way.
+    const vayu::http::VariableValues vars{ { "host", "example.test" } };
+    EXPECT_EQ (vayu::http::resolve_template (
+               "{{host}}", vars, {}, vayu::http::DynamicResolution::Defer),
+    "example.test");
+}
+
+TEST (DynamicVariables, ADefinedVariableStillOutranksTheGeneratorUnderDefer) {
+    // The deferral sits in the table's own position, after the scopes, so a
+    // variable someone defined as `$guid` answers for the token under either
+    // value. A deferral placed ahead of the scopes would leave this token for a
+    // bind that has no scope to read, and the name would mean two things.
+    const vayu::http::VariableValues vars{ { "$guid", "pinned" } };
+    EXPECT_EQ (vayu::http::resolve_template (
+               "{{$guid}}", vars, {}, vayu::http::DynamicResolution::Defer),
+    "pinned");
+    EXPECT_EQ (vayu::http::resolve_template (
+               "{{$guid}}", vars, {}, vayu::http::DynamicResolution::Generate),
+    "pinned");
+}
+
+TEST (DynamicVariables, IsAGeneratorNameAnswersForTheTableAndNothingElse) {
+    for (const auto& name : vayu::http::dynamic_variable_names ()) {
+        EXPECT_TRUE (vayu::http::is_generator_variable_name (name)) << name;
+    }
+    EXPECT_FALSE (vayu::http::is_generator_variable_name ("$typo"));
+    EXPECT_FALSE (vayu::http::is_generator_variable_name ("$vu"));
+    EXPECT_FALSE (vayu::http::is_generator_variable_name ("$iteration"));
+    EXPECT_FALSE (vayu::http::is_generator_variable_name ("data.id"));
+    EXPECT_FALSE (vayu::http::is_generator_variable_name (""));
+}
+
 TEST (DynamicVariables, IsoTimestampIsTheShapeTheRendererProduces) {
     // The renderer's `$isoTimestamp` is `new Date().toISOString()`, and the two
     // tables are a contract: this is that shape, spelled out. The engine now
@@ -585,6 +652,47 @@ TEST_F (RequestComposerTest, ComposesAnInlineRequestAgainstAScope) {
     EXPECT_EQ (payload["preRequestScripts"][0]["script"], "pm.request; // {{not-touched}}");
     EXPECT_EQ (payload["followRedirects"], true);
     EXPECT_EQ (payload["environmentId"], "env_1");
+}
+
+// Issue #995: `deferDynamicVariables` is what a client composing for a run
+// says, and it reaches every field of the request half.
+TEST_F (RequestComposerTest, DeferDynamicVariablesKeepsTheTokensForTheRunToBind) {
+    seed_collection ("col", "", "", R"({"mode":"basic","username":"u-{{$guid}}","password":"p"})");
+
+    const json request = { { "method", "post" },
+        { "url", "https://example.test/{{$randomUUID}}" },
+        { "headers", { { "X-Key", "{{$guid}}" } } },
+        { "body", { { "mode", "json" }, { "content", R"({"id":"{{$guid}}"})" } } },
+        { "auth", { { "mode", "inherit" } } } };
+
+    auto [status, deferred] = vayu::http::compose_request_core (*db_,
+    json{ { "request", request }, { "collectionId", "col" },
+    { "deferDynamicVariables", true } });
+    ASSERT_EQ (status, 200) << deferred.dump ();
+    EXPECT_EQ (deferred["url"], "https://example.test/{{$randomUUID}}");
+    EXPECT_EQ (deferred["headers"]["X-Key"], "{{$guid}}");
+    EXPECT_EQ (deferred["body"]["content"], R"({"id":"{{$guid}}"})");
+    // A credential is *encoded* when the request is built, so there is no later
+    // moment for a bind to reach it: composition generates it here, once, and
+    // says so (issue #1055 carries the deferral that would lift this).
+    EXPECT_NE (deferred["auth"]["username"], "u-{{$guid}}");
+
+    // Without the field, the same payload composes exactly as it always did -
+    // the mutation check for every assertion above.
+    auto [plain_status, composed] = vayu::http::compose_request_core (
+    *db_, json{ { "request", request }, { "collectionId", "col" } });
+    ASSERT_EQ (plain_status, 200) << composed.dump ();
+    EXPECT_NE (composed["url"], "https://example.test/{{$randomUUID}}");
+    EXPECT_NE (composed["headers"]["X-Key"], "{{$guid}}");
+    EXPECT_NE (composed["body"]["content"], R"({"id":"{{$guid}}"})");
+}
+
+TEST_F (RequestComposerTest, DeferDynamicVariablesMustBeABoolean) {
+    auto [status, payload] = vayu::http::compose_request_core (*db_,
+    json{ { "request", { { "url", "https://example.test" } } },
+    { "deferDynamicVariables", "yes" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (payload["error"]["code"], "invalid_compose_request");
 }
 
 // A form body carries its content as `fields`, so resolution has to reach

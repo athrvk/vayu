@@ -1123,16 +1123,27 @@ resolves both spellings because it renders a *template*, and `{{data.userId}}`
 is a token template syntax has - `get` and `.has` are lookups by name, and
 `data.userId` was never a name any scope, or now the row, answers to.
 
-**The identity namespace is not readable from `replaceIn`, and that is
-deliberate** (issue #994). `{{$vu}}` and `{{$iteration}}` keep their braces
-here, unlike `{{data.column}}` above: the identity belongs to the *send*, which
-binds it into the request before the pre-request script runs and long before a
-deferred test script grades the response - so a script asking `replaceIn` to
-resolve it would be asking the resolver for a fact the resolver does not hold.
-What a script reads instead is `pm.info.vu` and `pm.info.iteration`, which carry
-exactly the numbers the request beside them was bound with. #1057 is the record
-of the alternative - teaching `replaceIn` the identity so the two agree by
-construction rather than by a script reaching for the right one of two APIs.
+**The identity namespace resolves from `replaceIn` too** (issue #1057).
+`{{$vu}}` and `{{$iteration}}` render to numbers, the same way `{{data.column}}`
+does above: the resolver takes the identity the request beside the script was
+bound with, ahead of every scope and ahead of the row, so `replaceIn` and the
+request cannot disagree about one send. Which numbers those are is the run's
+own question, answered per shape in
+[the binding table](../app/variable-resolution.md#vu-and-iteration-are-reserved-too-for-the-same-reason):
+a collection run in design mode is one user walking the sequence, so `{{$vu}}`
+renders `1` while `{{$iteration}}` advances with the pass. On a plain Send the
+numbers are `1` and `0`, because `POST /execute` binds exactly those into every
+send that carries no row of its own (a single send is a run of one, issue
+#994) - and it binds them before the pre-request script runs, so they are what
+the request the script is handed already carries.
+
+That is not the same fact [`pm.info.vu` and `pm.info.iteration`](#script-identity-pminfo)
+carry, and the two staying different is not a contradiction to resolve: `pm.info`
+answers which iteration of which run this script is running in, and reads
+`undefined` on that same plain Send because there is no run to be an iteration
+of. A token in a template answers what it resolves to *here*, and here it
+resolves to what the request beside it carried - a run of one has an identity
+even though it has no `pm.info`.
 
 **Dynamic variables are otherwise not readable from a script.** `{{$guid}}`,
 `{{$timestamp}}` and the rest of the set in
@@ -1225,8 +1236,8 @@ bit a buffered send's are (issue #653). Pressing Send with the **Event stream**
 setting on and off gives `pm.sendRequest` the same answer.
 
 **`{{variables}}` resolve as the call is made** (#1001). The URL, each header
-value, a raw body and each credential of an `auth` block are resolved once,
-against the three scopes and the bound data row exactly as
+name and value, a raw body and each credential of an `auth` block are resolved
+once, against the three scopes and the bound data row exactly as
 `pm.variables.replaceIn` reads them - so a value this same script set two lines
 earlier is visible, which is Postman's rule and what makes an imported
 token-refresh script work. It is not a second pass over the composed request:
@@ -1234,9 +1245,15 @@ that payload was resolved before the script ran and nothing here revisits it.
 A name nothing defines keeps its braces (#1009), and a `{{data.column}}` the
 bound row lacks throws naming the column, the same way `replaceIn` does.
 
-Header **names** are sent as written. Two names that resolve to one name are a
-collision rule composition owns (#1051); answering it a second way here is how
-the two would drift.
+Header **names** resolve too (#1067), under the collision rule composition owns
+rather than a second one written here (#1051, `http/header_names.hpp`): two
+names that resolve to one name would send the request a header short, so the
+call throws naming both spellings and the name they produced, and nothing goes
+out. Names are compared without case, the way the header map keys them. A name
+that resolves to nothing at all is refused the same way, and it is the one thing
+resolution can produce that nothing further down the send would catch: the
+pre-send gate reads header text for the bytes that break a line, and what is
+left of an empty name is the line `: value`, which libcurl sends.
 
 ```javascript
 pm.environment.set("tenant", "acme");

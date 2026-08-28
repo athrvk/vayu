@@ -127,9 +127,12 @@ engine does with the token once a row exists.
 `{{$vu}}` and `{{$iteration}}` name the run that is executing - which virtual
 user this request belongs to, and which of that user's iterations it is (issue
 #994). They are spelled like a dynamic variable and behave like `data.*`: both
-resolvers leave them written exactly as they stand, and the executor
-substitutes them immediately before each send, because the value belongs to the
-iteration rather than to the request.
+compose-time resolvers leave them written exactly as they stand, and the
+executor substitutes them immediately before each send, because the value
+belongs to the iteration rather than to the request. A *script* resolves them
+(issue #1057): `pm.variables.replaceIn("{{$vu}}")` renders the number the
+request beside it was bound with, since by then the send has one - see
+[the scripting docs](../engine/scripting.md).
 
 Being reserved is what makes them bindable at all. A variable someone happens
 to name `$vu` does **not** answer for the identity - unlike `$guid`, where a
@@ -649,22 +652,31 @@ value per occurrence. `pm.variables.get("$guid")` (getter fall-through to the
 generators) is deliberately not wired. See
 [pm API compatibility](./pm-api-compatibility.md).
 
-**Load runs generate once, not per iteration.** A run's request half is
-composed once (`POST /compose`) and then handed to the engine, which repeats
-it - so every request in the run carries the *same* `{{$guid}}`. The load-test
-dialog says so when the request contains one. Per-iteration values would mean
-interpolating on the load generator's hot path (which targets 60k+ RPS), and
-were deliberately kept out of #226's scope.
+**Load runs generate per iteration, not once** (issue #995). A run's request
+half is composed once (`POST /compose`) and then handed to the engine, which
+repeats it - so a value generated at composition would be the *same* `{{$guid}}`
+on every request of every virtual user, which is the opposite of what a
+unique-id token is written for. A composition made for a run therefore says so
+(`deferDynamicVariables`), and the family is left written as it stands, exactly
+as `{{data.column}}` and the two identity names are: the run's executor
+generates a fresh value per occurrence, immediately before each send.
 
-That still holds for this table. It does **not** hold for the two reserved
-identity names (issue #994), and the difference is what makes them cheap enough
-to be the exception: a generator has to run per occurrence per iteration, while
-`{{$vu}}` and `{{$iteration}}` substitute two integers the executor is already
-holding, into fields a compose-time scan has already located. A request that
-spells neither is walked for neither - the template is empty, and the executor
-tests that before doing anything - so the freeze above is lifted for exactly two
-names and for nothing else. `{{$guid}}` per iteration on the load path is #995,
-and is a different measurement.
+The hot path is what shaped the fix rather than what blocked it. A generator has
+to *run* per occurrence per iteration, where `{{$vu}}` and `{{$iteration}}`
+(issue #994) substitute two integers the executor is already holding - so the
+cost is not made free, it is made *conditional*: a request spelling no generator
+has nothing left for the compose-time scan to find, its template is empty, and
+the executor tests that before doing anything. A run that does not use the
+family pays what it always did. What a run that uses it pays is one table call
+per token per iteration, on the same walk that binds a data row.
+
+Two things this does not change. A **Send** composes once and sends once, so it
+still generates at composition - `POST /compose` defers only when the caller
+asks. And a generator inside an **auth credential** is still generated once, at
+composition: `apply_auth` encodes a credential when the request is built - basic
+auth collapses into one base64 value - so a token left for the bind would go out
+as base64 of its own text. That exception is the deferral issue #1055 carries,
+and it is the same reason a credential does not carry `{{$vu}}` either.
 
 ### The engine copy of the table
 
@@ -861,6 +873,14 @@ These rules make the offered set match what the call can actually read:
   template and interpolates it, so it gets brace-style completion including
   `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no
   generator is offered there.
+- **So does the identity** (issue #1057). `{{$vu}}` and `{{$iteration}}` are
+  offered inside `replaceIn`, from the same `ITERATION_VARIABLES` table the URL
+  and body editors read, because that is where they resolve - the script
+  resolver answers them with the numbers the request beside the script was
+  bound with. They are offered in no other script list, since neither is a name
+  any lookup answers. Unlike a generator, the identity is never withheld for a
+  same-named scope variable: the engine resolves these two names ahead of every
+  scope, so a variable called `$vu` shadows nothing.
 
 The dotted `pm.*` completions (served by the engine, see
 [the scripting docs](../engine/scripting.md)) yield inside a string literal so

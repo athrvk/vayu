@@ -1455,6 +1455,26 @@ two - and shows it with a `Bound row` hint. A cell is never a secret, but a
 secret it shadows is still never printed. What did **not** move is the paint:
 the token's colour is decided as it always was.
 
+**The list of definitions is drawn under every state, not only the resolved
+one** (issue #1083). A name whose every definition is switched off has no
+winner, so it does not resolve and reached the popover's undefined states - and
+the list was rendered inside the resolved branch alone, so the case it was added
+for could not display it. The reader was offered a form to create a name that
+already existed and was one toggle from answering. The list now sits outside the
+branch chain, gated on holding a definition the popover is not already showing
+rather than on a count of entries, and the two undefined states say what it
+means: the create offer notes that the name is defined below and switched off,
+and the red sentence reads "defined, but every definition is switched off"
+instead of telling the reader to go and define it. The red itself stays - the
+token genuinely does not resolve. `data.*` is the one state with no list, for
+the same disjointness reason it has no create offer.
+
+Reaching the list into those states also reached the bound-row note into them,
+and it could not be carried over as written: "the definition above still
+resolves on a send that carries no row" is exactly what a switched-off
+definition does not do, so a row shadowing only off definitions gets the other
+sentence - dropping the pick there resolves nothing.
+
 It sits beside `KeyValueEditor` rather than inside the request builder because
 every row of that table renders one: a shared table reaching into a feature
 module for its cell input is the same inversion one level down (issue #567).

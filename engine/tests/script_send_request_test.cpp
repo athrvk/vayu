@@ -71,6 +71,14 @@ class SendRequestServer {
             echo["auth"]   = req.get_header_value ("Authorization");
             echo["apikey"] = req.get_header_value ("X-Api-Key");
             echo["target"] = req.target;
+            // Every name that arrived, because a header *name* the script
+            // templated is only observable as a name - the four reads above
+            // each need the name spelled here to see anything at all (#1067).
+            auto names = nlohmann::json::array ();
+            for (const auto& header : req.headers) {
+                names.push_back (header.first);
+            }
+            echo["names"] = names;
             res.set_content (echo.dump (), "application/json");
         });
 
@@ -558,6 +566,126 @@ TEST_F (SendRequestTest, AResolvedValueThatWouldForgeAHeaderIsRefused) {
 }
 
 // ============================================================================
+// {{variables}} in header names (issue #1067)
+// ============================================================================
+//
+// The half #1001 left written as it stood, because two names that resolve to
+// one were a rule composition had not yet decided. #1051 decided it - refusal,
+// never repair - so these adopt that rule rather than answer it again here.
+//
+// Mutation-check for the five below: leave the names as written (resolve the
+// values only, as `interpolate_send_request` did before #1067) and the first
+// fails on the name the server never sees, while the three refusals stop
+// refusing - the map silently drops a header instead, which is what the rule
+// exists to prevent. Only the pass-through case keeps passing, since it is
+// #1009's rule, which resolution inherits rather than replaces.
+
+TEST_F (SendRequestTest, AHeaderNameResolvesAsTheCallIsMade) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('marker_header', 'X-Marker'); "
+                       "var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { '{{marker_header}}': 'from-script' } "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.marker).to.equal('from-script'); "
+    "  pm.expect(echo.names.join(',').indexOf('{{') < 0).to.equal(true); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (server.hit_count (), 1);
+}
+
+// #1009's pass-through rule, which name resolution inherits rather than
+// replaces: a name nothing defines keeps its braces instead of becoming empty -
+// and an empty one is refused two tests below, which is what makes the
+// difference observable. The braced name goes out as written and the server
+// answers it however it likes (this one rejects the line, since `{}` are not
+// header-name bytes), so what is asserted is that the call was *sent* and
+// answered rather than refused here.
+TEST_F (SendRequestTest, AHeaderNameNothingDefinesKeepsItsBraces) {
+    SendRequestServer server;
+
+    auto result = run ("var failed = null; var answered = 0; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { '{{nothing_defines_this}}': 'v' } "
+    "}, function (err, res) { failed = err; answered = res ? res.code : 0; }); "
+    "pm.test('sent as written', function () { "
+    "  pm.expect(failed).to.equal(null); "
+    "  pm.expect(answered > 0).to.equal(true); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (SendRequestTest, TwoHeaderNamesResolvingAlikeAreRefused) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('a', 'X-Tenant'); "
+                       "pm.environment.set('b', 'X-Tenant'); "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { '{{a}}': 'acme', '{{b}}': 'legacy' } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    // Both spellings as written and the name they produced, because either is
+    // the one the author may have meant - the call names them and repairs
+    // neither, in composition's words with the call named in front of them.
+    EXPECT_NE (result.error_message.find ("pm.sendRequest:"), std::string::npos)
+    << result.error_message;
+    EXPECT_NE (result.error_message.find ("{{a}}"), std::string::npos) << result.error_message;
+    EXPECT_NE (result.error_message.find ("{{b}}"), std::string::npos) << result.error_message;
+    EXPECT_NE (result.error_message.find ("X-Tenant"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0) << "a request went out a header short";
+}
+
+// `Headers` keys without case, so the collision the map would make is looked
+// for the same way - a name resolving to `x-marker` erases the `X-Marker` the
+// script wrote itself.
+TEST_F (SendRequestTest, TheHeaderNameCollisionIsJudgedWithoutCase) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('h', 'x-marker'); "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { '{{h}}': 'acme', 'X-Marker': 'legacy' } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("compared without case"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0);
+}
+
+// The one thing resolution can produce that nothing further down the send
+// would notice: an empty name is refused at read time when it is written that
+// way, and the pre-send gate reads header text for bytes that break the line,
+// not for a name that is not there.
+TEST_F (SendRequestTest, AHeaderNameResolvingToNothingIsRefused) {
+    SendRequestServer server;
+
+    auto result = run ("pm.environment.set('blank', ''); "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { '{{blank}}': 'acme' } "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("empty name"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0);
+}
+
+// ============================================================================
 // Arguments that cannot be honoured fail loudly rather than sending something
 // the script did not write
 // ============================================================================
@@ -834,6 +962,42 @@ TEST_F (SendRequestTest, AThrowingCallbackSurfacesAsTheScriptsError) {
     EXPECT_FALSE (result.success);
     EXPECT_NE (result.error_message.find ("from the callback"), std::string::npos)
     << result.error_message;
+}
+
+// ============================================================================
+// The identity resolves here too (issue #1057)
+// ============================================================================
+
+// `pm.sendRequest` and `pm.variables.replaceIn` resolve through one function,
+// so teaching that function the identity has to reach the wire and not only
+// the string a script renders - read off the listener, because a resolution
+// that happened after the URL was taken would still look right in a script.
+TEST_F (SendRequestTest, TheIdentityReachesTheWireAsTheRequestBesideItCarriesIt) {
+    SendRequestServer server;
+
+    ScriptConfig config;
+    config.timeout_ms         = 30000;
+    config.allow_send_request = true;
+    ScriptEngine engine (config);
+
+    vayu::Environment globals;
+    response.status_code = 200;
+    auto ctx             = ScriptContext::for_test (request, response);
+    ctx.globals          = &globals;
+    ctx.vu               = 4;
+    ctx.iteration        = 6;
+
+    auto result = engine.execute ("var target = '';"
+                                  "pm.sendRequest({ url: '" +
+    server.url ("/echo?vu={{$vu}}&iteration={{$iteration}}") +
+    "', method: 'POST', body: { mode: 'raw', raw: 'vu {{$vu}}' } }, "
+    "function (err, res) { target = res.json().target + '|' + res.json().body; "
+    "});"
+    "pm.globals.set('seen', target);",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["seen"].value, "/echo?vu=4&iteration=6|vu 4");
 }
 
 } // namespace

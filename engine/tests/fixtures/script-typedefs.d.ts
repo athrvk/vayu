@@ -1334,7 +1334,7 @@ declare const pm: {
 	 * 
 	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status, responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
 	 * 
-	 * The url may be a string or pm.request.url, and {{variables}} in it, in header values, in a raw body and in auth credentials resolve as the call is made - so a value this script set two lines earlier is visible. Header names are sent as written.
+	 * The url may be a string or pm.request.url, and {{variables}} in it, in header names and values, in a raw body and in auth credentials resolve as the call is made - so a value this script set two lines earlier is visible. Two header names that resolve to one name are refused rather than sent a header short, and a name resolving to nothing is refused too.
 	 * 
 	 * auth takes Postman's { type, <type>: params } shape in either spelling, and composes basic, bearer and apikey. Any other type - oauth2 included - is refused by name rather than dropped, and an Authorization header the script set itself wins.
 	 * 
@@ -1374,7 +1374,7 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
-		 * Resolve {{name}} placeholders in a string, exactly as the request's own URL/headers/body are resolved: scopes first (environment > collection > global), then the dynamic-variable table - {{$guid}}, {{$timestamp}}, {{$random*}} generate a fresh value per occurrence. This is the way to use {{...}} inside a script: script code itself is never interpolated.
+		 * Resolve {{name}} placeholders in a string, exactly as the request's own URL/headers/body are resolved: scopes first (environment > collection > global), then the dynamic-variable table - {{$guid}}, {{$timestamp}}, {{$random*}} generate a fresh value per occurrence. {{$vu}} and {{$iteration}} resolve to the numbers the request beside this script was bound with - 1 and 0 outside a load run, which is a run of one. This is the way to use {{...}} inside a script: script code itself is never interpolated.
 		 * 
 		 * Example:
 		 * const id = pm.variables.replaceIn('{{$guid}}');

@@ -59,6 +59,11 @@
  *   just defined can collide with one composition already resolved. It has no
  *   `400` to return, so it refuses the send the way the pre-send gate does -
  *   see `resolve_residual_tokens`.
+ * - **A script's own `pm.sendRequest`** (`runtime/script_engine.cpp`, issue
+ *   #1067) refuses in the same words with the call named in front of them,
+ *   because that send is the script's rather than the request's - see
+ *   `resolve_send_request_headers`. It throws where the others refuse, since a
+ *   script asked for the send and a throw is what it can catch.
  *
  * The pre-send gate cannot be that backstop here, and this is the reason the
  * rule is enforced where the map is rebuilt rather than checked once before the
@@ -86,9 +91,10 @@ struct HeaderNameCollision {
 /**
  * @brief The refusal a header-name collision reads as.
  *
- * One wording for both layers that resolve a name - composition and the
- * residual pass - because they are one rule and a caller reading two
- * differently-worded refusals would reasonably think they were two.
+ * One wording for every layer that resolves a name - composition, the residual
+ * pass and a script's own `pm.sendRequest` - because they are one rule and a
+ * caller reading three differently-worded refusals would reasonably think they
+ * were three. A layer may name itself in front of the wording, never inside it.
  */
 [[nodiscard]] std::string describe_header_name_collision (const HeaderNameCollision& collision);
 

@@ -487,6 +487,20 @@ export interface ComposeRequestRequest {
 	 * `400`.
 	 */
 	dataColumns?: string[];
+	/**
+	 * Leave the `{{$guid}}` family (every `dynamic_variable_names()` token)
+	 * written as-is instead of resolving it now (issue #995).
+	 *
+	 * Composition happens once but a load run repeats the composed payload
+	 * per iteration, per virtual user - resolving the generator family here
+	 * would send the same generated value on every repetition. Set this only
+	 * by a caller that starts a run from the composed result (`POST /runs`);
+	 * an ordinary Send composes once and sends once, so it must keep
+	 * resolving the family at composition and leaves this absent. Absent or
+	 * `false` behaves exactly as composition always has; the engine rejects
+	 * a non-boolean with a `400`.
+	 */
+	deferDynamicVariables?: boolean;
 }
 
 /**

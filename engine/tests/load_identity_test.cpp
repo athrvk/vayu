@@ -230,15 +230,34 @@ class LoadIdentityTest : public ::testing::Test {
 // ============================================================================
 
 // The guard, stated structurally: a request naming no reserved token splits no
-// fields at all, so the per-iteration join is one `empty()` test. A generator
-// and an ordinary variable are deliberately in it - both are composition's, and
-// neither survives to the bind.
+// fields at all, so the per-iteration join is one `empty()` test. An ordinary
+// variable is deliberately in it - it is composition's, and does not survive to
+// the bind.
 TEST (IdentitySplit, ARequestCarryingNoReservedTokenSplitsNothing) {
-    auto request = request_to ("https://api.test/users?g={{$guid}}");
+    auto request               = request_to ("https://api.test/users");
     request.headers["X-Trace"] = "{{traceId}}";
     EXPECT_TRUE (tokenize_bindable_fields (request).empty ())
     << "a request with no reserved token must cost the executor nothing per "
        "iteration - a non-empty template here is walked for every submission";
+}
+
+// A generator used to be in the test above, on the rule that composition had
+// always resolved it. Issue #995 moved it: a composition for a run *defers* the
+// family, so one that reaches the split is one nothing has generated yet, and
+// leaving it out of the template would send the token to the wire as it stands.
+// The two halves of the guard still hold - a run that spells none of these
+// splits nothing (above), and a Send's composition leaves none of them to find.
+TEST (IdentitySplit, ADeferredGeneratorIsSplitBesideTheIdentity) {
+    auto request = request_to ("https://api.test/users?g={{$guid}}");
+    request.headers["X-Iteration"] = "{{$iteration}}";
+
+    const auto tmpl = tokenize_bindable_fields (request);
+    ASSERT_EQ (tmpl.fields.size (), 2u)
+    << "the URL and the header value each carry one";
+    EXPECT_EQ (tmpl.fields.front ().tokens, (std::vector<std::string>{ "$guid" }));
+    // Not a data token: this run needs no data set behind it, and the refusal
+    // that guards `{{data.*}}` must not claim a generator.
+    EXPECT_FALSE (tmpl.first_data_token ().has_value ());
 }
 
 TEST (IdentitySplit, BothNamesAreKeptOutOfEveryBindableField) {
@@ -420,6 +439,28 @@ TEST_F (LoadIdentityTest, TheDeferredScriptReadsTheIterationAndUserItWasSentAs) 
     EXPECT_EQ (validation.run->passed, 3u);
 }
 
+// The same run shape, asked the other way a script can ask (issue #1057): the
+// two APIs answer one question about one submission, so a script that renders
+// the identity gets what the script beside it reports reading.
+TEST_F (LoadIdentityTest, ADeferredScriptResolvesTheIdentityItWasSentAs) {
+    RecordingServer server;
+    json payload     = iterations_payload (server.url ("/plain"), 3);
+    payload["tests"] = R"js(pm.test('identity', function () {
+  var resolved = pm.variables.replaceIn('{{$vu}}/{{$iteration}}');
+  var reported = pm.info.vu + '/' + pm.info.iteration;
+  if (resolved !== reported) {
+    throw new Error(resolved + ' is not the ' + reported + ' it was sent as');
+  }
+});)js";
+
+    run (payload);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->failed, 0u) << replay_failures ();
+    EXPECT_EQ (validation.run->passed, 3u);
+}
+
 // Every pacing mode binds, not only the one whose submit path was written
 // first: the strategies share one submission helper, and this is what says so.
 TEST_F (LoadIdentityTest, EveryPacingModeBindsTheIdentity) {
@@ -565,6 +606,40 @@ TEST_F (ScenarioIdentityTest, ADeferredStepScriptReadsTheUserAndIterationItRanAs
     // Read through one binding rather than re-derived per assertion: the guard
     // and the uses have to be the same expression for the checker - and for a
     // reader - to connect them (engine/CLAUDE.md).
+    const auto& step_tally = validation.steps[0];
+    ASSERT_HAS_VALUE (step_tally);
+    EXPECT_EQ (step_tally->failed, 0u) << replay_failures ();
+    EXPECT_EQ (step_tally->passed, 4u);
+}
+
+// The script resolver answers the identity on the run shape where a wrong
+// source would show (issue #1057): two users, four iterations, nothing pinned
+// to the 1 and 0 a run of one gets. `pm.info` is what it is checked against,
+// and the chain that makes that the wire's answer is the two tests above -
+// `{{$vu}}` reaches the server as each user's own number, and `pm.info` reports
+// the number the sample was sent as.
+//
+// A deferred script is also the case that needs this most: the replay hands it
+// the *plan's* request, whose URL still spells the token, so before this change
+// there was no way for it to read the identity as text at all.
+TEST_F (ScenarioIdentityTest, AStepScriptResolvesTheIdentityItRanAs) {
+    RecordingServer server;
+    auto execution = plan_over (server.url ("/i/{{$vu}}-{{$iteration}}"));
+    execution.plan.steps[0].post_script =
+    "pm.test('identity', function () {"
+    "  var resolved = pm.variables.replaceIn('{{$vu}}-{{$iteration}}');"
+    "  var reported = pm.info.vu + '-' + pm.info.iteration;"
+    "  if (resolved !== reported) {"
+    "    throw new Error(resolved + ' is not the ' + reported + ' it ran as');"
+    "  }"
+    "});";
+
+    run_scenario (json{ { "mode", "iterations" }, { "iterations", 4 },
+                  { "concurrency", 2 }, { "response_sample_rate", 1 } },
+    execution);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    ASSERT_EQ (validation.steps.size (), 1u);
     const auto& step_tally = validation.steps[0];
     ASSERT_HAS_VALUE (step_tally);
     EXPECT_EQ (step_tally->failed, 0u) << replay_failures ();

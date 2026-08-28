@@ -99,7 +99,6 @@ function open(props: Partial<React.ComponentProps<typeof LoadTestConfigDialog>> 
 			onStart={onStart}
 			isStarting={false}
 			hasPreRequestScript={false}
-			hasDynamicVariables={false}
 			isStreamingRequest={false}
 			{...props}
 		/>
@@ -486,23 +485,24 @@ describe("notices", () => {
 	});
 
 	/*
-	 * Interpolation happens once, app-side, before the run payload is sent, so a
-	 * `{{$guid}}` is the *same* id on every iteration. That is the least visible
-	 * way to get a load test wrong - the run succeeds and the data is quietly
-	 * degenerate - so the dialog has to say it out loud.
+	 * The dialog used to warn that `{{$guid}}` resolved once and repeated on
+	 * every iteration - true when this test last named a prop, false since
+	 * issue #995: the load path composes with `deferDynamicVariables`, so the
+	 * engine generates a fresh value per iteration instead. Nothing about the
+	 * request's own dynamic variables belongs in this dialog any more.
 	 */
-	it("warns that a run generates a dynamic variable only once", () => {
-		open({ hasDynamicVariables: true });
-		expect(screen.getByText(/Dynamic variables are generated once/)).toBeInTheDocument();
+	it("says nothing about dynamic variables while still rendering its notices", () => {
+		// Opened with a notice that *is* still real, so the absence below is
+		// this dialog having nothing to say about generators rather than the
+		// notice list being empty - an assertion that scanned nothing would
+		// pass whatever the callout did.
+		open({ hasPreRequestScript: true });
+		expect(screen.getByText("Pre-request script will not run")).toBeInTheDocument();
+		expect(screen.queryByText(/dynamic variable/i)).toBeNull();
 	});
 
-	it("says nothing when the request has no dynamic variable", () => {
-		open();
-		expect(screen.queryByText(/Dynamic variables are generated once/)).toBeNull();
-	});
-
-	it("keeps the warning advisory - it does not gate Start", () => {
-		open({ hasDynamicVariables: true });
+	it("keeps an advisory notice from gating Start", () => {
+		open({ hasPreRequestScript: true });
 		expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled();
 	});
 
