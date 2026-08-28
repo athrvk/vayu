@@ -98,8 +98,10 @@ async function askToDeleteCollection(name: string) {
 
 /** The options object handed to the last `showToast` call. */
 function lastToast() {
-	const call = showToast.mock.calls.at(-1);
-	return call?.[0];
+	// Indexed rather than `.at(-1)`: the renderer's tsconfig targets a lib
+	// without it, and the type-check gate fails on it where vitest would not.
+	const calls = showToast.mock.calls;
+	return calls[calls.length - 1]?.[0];
 }
 
 beforeEach(() => {
@@ -111,7 +113,6 @@ beforeEach(() => {
 		kind: "collection",
 		name: "Acme",
 		deletedAt: 1,
-		parentId: null,
 		collections: 0,
 		requests: 0,
 		restored: true,

@@ -29,6 +29,10 @@ function entry(value: string, key = TRASH_RETENTION_KEY): ConfigEntry {
 		description: "",
 		category: "data_retention",
 		default: "30",
+		requiresRestart: false,
+		advanced: false,
+		keywords: [],
+		updatedAt: 0,
 	};
 }
 

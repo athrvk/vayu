@@ -45,7 +45,6 @@ function collectionEntry(over: Partial<TrashEntry> = {}): TrashEntry {
 		kind: "collection",
 		name: "Billing",
 		deletedAt: Date.now() - 60_000,
-		parentId: null,
 		collections: 0,
 		requests: 0,
 		...over,
@@ -190,7 +189,7 @@ describe("restore", () => {
 	it("says so when the engine had to put a folder back at the top level", async () => {
 		// The one outcome the tree cannot express: the folder reappears, just not
 		// where it was, because its parent is gone.
-		state.items = [collectionEntry({ parentId: "gone" })];
+		state.items = [collectionEntry()];
 		restore.mockResolvedValue({
 			...collectionEntry(),
 			restored: true,
@@ -218,9 +217,7 @@ describe("restore", () => {
 	});
 
 	it("repeats the engine's refusal verbatim, because it names the way out", async () => {
-		state.items = [
-			collectionEntry({ id: "r1", kind: "request", name: "Charge", parentId: "c1" }),
-		];
+		state.items = [collectionEntry({ id: "r1", kind: "request", name: "Charge" })];
 		restore.mockRejectedValue(
 			new Error(
 				"Request 'r1' cannot be restored on its own - the collection it belongs to is in the trash, so restore that first"

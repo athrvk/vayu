@@ -925,11 +925,15 @@ export interface TrashEntry {
 	name: string;
 	/** When it was deleted, in Unix ms - the stamp the retention purge reads. */
 	deletedAt: number;
-	/**
-	 * The collection this came out of: a collection's parent (null at the tree
-	 * root), a request's owner (never null).
+	/*
+	 * The engine also sends `parentId` - where the row came out of - and this
+	 * type deliberately does not claim it, the way `RequestExample` omits the
+	 * `order` and timestamps it does not use. Nothing here reads it: a trash row
+	 * names the item, not its old location, and resolving the id to a name would
+	 * fail for exactly the parents worth naming (a parent that is itself deleted
+	 * is not in the live tree). Add it back with the reader, not before. The
+	 * whole wire shape is in `docs/engine/api-reference.md` under Trash.
 	 */
-	parentId: string | null;
 	/** Sub-collections this delete took with it. Always 0 for a request. */
 	collections: number;
 	/** Requests this delete took with it. Always 0 for a request. */
