@@ -7,7 +7,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { Plus, Trash2, Edit2, FileJson, FolderPlus, Play } from "lucide-react";
-import { useTabsStore, useSaveStore, useToastStore } from "@/stores";
+import { useTabsStore, useSaveStore, useToastStore, useDataFileStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
 	useCreateCollectionMutation,
@@ -425,6 +425,49 @@ export function useTreeCrud({
 	}, []);
 
 	/**
+	 * What the delete threw away on the client, captured before it runs.
+	 *
+	 * A restore brings the rows back, and nothing else: the tab the delete
+	 * closed stays closed and the collection's remembered data-file path
+	 * (#599) stays cleared, because both were discarded on the way out. Neither
+	 * can be read back afterwards - that is the point of capturing here, while
+	 * they still exist - so the closure this returns carries them.
+	 *
+	 * **Only the tab that was focused.** Restoring a collection whose cascade
+	 * closed nine tabs must not reopen nine tabs; the complaint this answers is
+	 * the narrower one, that undoing the delete of the request you were editing
+	 * leaves you looking at something else. Every other closed tab is one click
+	 * away in the tree the restore just repopulated.
+	 *
+	 * The response body is deliberately not captured. It is a session artifact
+	 * keyed by request id, re-fetched by sending again, and holding a body plus
+	 * its raw copy alive against a maybe-undo is the leak `closeTabsForEntities`
+	 * exists to prevent.
+	 */
+	const captureClientState = useCallback(
+		(entityIds: Iterable<string>, collectionId?: string) => {
+			const { openTabs, activeTabId } = useTabsStore.getState();
+			const affected = new Set(entityIds);
+			const active = openTabs.find((t) => t.id === activeTabId);
+			const closedActiveTab =
+				active && active.entityId && affected.has(active.entityId)
+					? { type: active.type, entityId: active.entityId }
+					: null;
+			const dataFile = collectionId
+				? (useDataFileStore.getState().locations[collectionId] ?? null)
+				: null;
+
+			return () => {
+				if (closedActiveTab) openTab(closedActiveTab);
+				if (collectionId && dataFile) {
+					useDataFileStore.getState().setDataFile(collectionId, dataFile);
+				}
+			};
+		},
+		[openTab]
+	);
+
+	/**
 	 * Take the delete back.
 	 *
 	 * The engine's delete is soft (issue #988), so this is a restore of the row
@@ -439,9 +482,13 @@ export function useTreeCrud({
 	 * that silently does nothing is the one outcome worse than no undo.
 	 */
 	const undoDelete = useCallback(
-		async (entityId: string, name: string) => {
+		async (entityId: string, name: string, restoreClientState: () => void) => {
 			try {
 				const restored = await restoreTrashMutation.mutateAsync(entityId);
+				// Only after the engine has actually put the rows back: reopening
+				// a tab for a request the restore refused would be a pane pointed
+				// at a row that is still in the trash.
+				restoreClientState();
 				/*
 				 * An undo can put the folder back somewhere new: if its parent
 				 * went to the trash too while this toast was up - and the
@@ -478,14 +525,19 @@ export function useTreeCrud({
 	 * the tree it just came back to.
 	 */
 	const offerUndo = useCallback(
-		(entityId: string, name: string, kind: "collection" | "request") => {
+		(
+			entityId: string,
+			name: string,
+			kind: "collection" | "request",
+			restoreClientState: () => void
+		) => {
 			showToast({
 				message: `Moved "${name}" to the Trash`,
 				variant: "info",
 				action: {
 					label: "Undo",
 					altText: `Undo deleting the ${kind} ${name}`,
-					onClick: () => void undoDelete(entityId, name),
+					onClick: () => void undoDelete(entityId, name, restoreClientState),
 				},
 			});
 		},
@@ -503,10 +555,13 @@ export function useTreeCrud({
 			const affected = collectDescendantEntityIds(collectionId, collections, (id) =>
 				getRequestsByCollection(id).map((r) => r.id)
 			);
+			// Captured before the mutation: its own `onSuccess` clears the
+			// data-file path, and `closeTabsForEntities` below closes the tab.
+			const restoreClientState = captureClientState(affected, collectionId);
 			try {
 				await deleteCollectionMutation.mutateAsync(collectionId);
 				closeTabsForEntities(affected);
-				offerUndo(collectionId, name, "collection");
+				offerUndo(collectionId, name, "collection", restoreClientState);
 			} catch (error) {
 				reportFailure(error, "Failed to delete collection");
 			} finally {
@@ -521,6 +576,7 @@ export function useTreeCrud({
 			closeTabsForEntities,
 			collections,
 			getRequestsByCollection,
+			captureClientState,
 			offerUndo,
 			reportFailure,
 		]
@@ -529,11 +585,12 @@ export function useTreeCrud({
 	const handleDeleteRequest = useCallback(
 		async (requestId: string, name: string) => {
 			setDeletingRequestId(requestId);
+			const restoreClientState = captureClientState([requestId]);
 			try {
 				await deleteRequestMutation.mutateAsync(requestId);
 				// Close any open tab pointing at the now-deleted request.
 				closeTabsForEntities([requestId]);
-				offerUndo(requestId, name, "request");
+				offerUndo(requestId, name, "request", restoreClientState);
 			} catch (error) {
 				reportFailure(error, "Failed to delete request");
 			} finally {
@@ -541,7 +598,7 @@ export function useTreeCrud({
 				setDeletingRequestId(null);
 			}
 		},
-		[deleteRequestMutation, closeTabsForEntities, offerUndo, reportFailure]
+		[deleteRequestMutation, closeTabsForEntities, captureClientState, offerUndo, reportFailure]
 	);
 
 	const handleConfirmDelete = useCallback(() => {

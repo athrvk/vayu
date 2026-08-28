@@ -27,7 +27,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
-import { useTabsStore } from "@/stores";
+import { useTabsStore, useDataFileStore } from "@/stores";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 
@@ -121,6 +121,7 @@ beforeEach(() => {
 	showToast.mockReset();
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["root"]) });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
+	useDataFileStore.setState({ locations: {} });
 });
 
 describe("deleting from the tree", () => {
@@ -202,6 +203,96 @@ describe("deleting from the tree", () => {
 				expect.stringContaining("restore that first"),
 				"error"
 			)
+		);
+	});
+
+	it("reopens the tab the delete closed, but only the one that was focused", async () => {
+		/*
+		 * The narrow complaint (#1070): undoing the delete of the thing you were
+		 * looking at should give it back, not leave you on whatever tab the
+		 * close fell through to. Deliberately narrow - a collection whose
+		 * cascade closed nine tabs must not reopen nine.
+		 */
+		useTabsStore.setState({
+			openTabs: [
+				{ id: "t-req", type: "request", entityId: "r-root" },
+				{ id: "t-other", type: "collection", entityId: "root" },
+			],
+			activeTabId: "t-req",
+		});
+		renderTree();
+
+		fireEvent.pointerDown(
+			screen.getByRole("button", { name: "More actions for request Ping" }),
+			{
+				button: 0,
+				ctrlKey: false,
+				pointerType: "mouse",
+			}
+		);
+		fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+
+		await waitFor(() => expect(deleteRequest).toHaveBeenCalledWith("r-root"));
+		// Gone while it is in the trash.
+		expect(useTabsStore.getState().openTabs.some((t) => t.entityId === "r-root")).toBe(false);
+
+		lastToast().action.onClick();
+
+		await waitFor(() =>
+			expect(useTabsStore.getState().openTabs.some((t) => t.entityId === "r-root")).toBe(true)
+		);
+	});
+
+	it("reopens nothing when the restore was refused", async () => {
+		// The tab would be a pane pointed at a row still in the trash.
+		useTabsStore.setState({
+			openTabs: [{ id: "t-req", type: "request", entityId: "r-root" }],
+			activeTabId: "t-req",
+		});
+		restoreTrash.mockRejectedValue(new Error("Nothing in the trash with id 'r-root'"));
+		renderTree();
+
+		fireEvent.pointerDown(
+			screen.getByRole("button", { name: "More actions for request Ping" }),
+			{
+				button: 0,
+				ctrlKey: false,
+				pointerType: "mouse",
+			}
+		);
+		fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+		await waitFor(() => expect(deleteRequest).toHaveBeenCalled());
+
+		lastToast().action.onClick();
+
+		await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.any(String), "error"));
+		expect(useTabsStore.getState().openTabs.some((t) => t.entityId === "r-root")).toBe(false);
+	});
+
+	it("gives the collection back its remembered data file", async () => {
+		/*
+		 * `useDeleteCollectionMutation` clears the path (#599: a filesystem
+		 * location kept for a collection that no longer exists is persisted for
+		 * nothing), which is right for a delete and wrong for one that was
+		 * taken back - and it cannot be read back afterwards, so the undo
+		 * carries it.
+		 */
+		useDataFileStore.setState({
+			locations: { root: { path: "/data/users.csv", fileName: "users.csv" } },
+		});
+		renderTree();
+		await askToDeleteCollection("Acme");
+		await waitFor(() => expect(deleteCollection).toHaveBeenCalled());
+
+		lastToast().action.onClick();
+
+		await waitFor(() =>
+			expect(useDataFileStore.getState().locations.root).toEqual({
+				path: "/data/users.csv",
+				fileName: "users.csv",
+			})
 		);
 	});
 
