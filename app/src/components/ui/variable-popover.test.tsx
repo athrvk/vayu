@@ -357,6 +357,112 @@ describe("why this value won", () => {
 });
 
 /**
+ * Issue #1083. The list above exists for exactly one question - "why is this not
+ * the value I set?" - and could not reach the shape that asks it loudest.
+ *
+ * A name whose *only* definition is switched off has no winner, so it does not
+ * resolve, so it arrived in the create branch: offered a form to define a name
+ * that is already defined and one toggle from answering, with nothing on screen
+ * saying so. Acting on that offer writes a second definition which shadows
+ * nothing and leaves the first one off.
+ */
+describe("a name whose only definition is switched off", () => {
+	const onlyDisabled: VariableOrigin[] = [
+		origin({ scope: "environment", sourceName: "Staging", value: "env-token", enabled: false }),
+	];
+
+	it("lists that definition, with its off badge, where nothing is writable", () => {
+		// Mutation check: put `ShadowedBy` back inside the resolved branch, or
+		// restore the `origins.length < 2` gate, and all three of these vanish.
+		renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: [],
+			origins: onlyDisabled,
+		});
+		const panel = open();
+		expect(within(panel).getByText("also defined")).toBeInTheDocument();
+		expect(within(panel).getByText("env-token")).toBeInTheDocument();
+		expect(within(panel).getByText("off")).toBeInTheDocument();
+	});
+
+	it("says the definitions are off rather than telling you to go and define it", () => {
+		renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: [],
+			origins: onlyDisabled,
+		});
+		const panel = open();
+		expect(within(panel).getByText(/every definition is switched off/)).toBeInTheDocument();
+		expect(within(panel).queryByText(/Variable not defined/)).not.toBeInTheDocument();
+	});
+
+	it("still offers to create, and says what the offer is doing", () => {
+		// The offer stays: this popover writes values, not enabled flags, so it
+		// cannot present the switch that would be the better answer. What it can
+		// stop doing is offering in silence.
+		renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: ["global"],
+			origins: onlyDisabled,
+		});
+		const panel = open();
+		expect(within(panel).getByRole("button", { name: "Create" })).toBeInTheDocument();
+		expect(within(panel).getByText(/already defined below, switched off/)).toBeInTheDocument();
+		expect(within(panel).getByText("off")).toBeInTheDocument();
+	});
+
+	it("counts them when there is more than one", () => {
+		renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: ["global"],
+			origins: [
+				origin({ scope: "global", value: "global-token", enabled: false }),
+				...onlyDisabled,
+			],
+		});
+		const panel = open();
+		expect(within(panel).getByText(/already defined 2 times below/)).toBeInTheDocument();
+		expect(within(panel).getByText("global-token")).toBeInTheDocument();
+		expect(within(panel).getByText("env-token")).toBeInTheDocument();
+	});
+
+	it("does not promise a row-less send a definition that is switched off", () => {
+		/*
+		 * The list reaching the unresolved states brought the bound-row note with
+		 * it, into a state it had never been drawn in: "the definition above still
+		 * resolves on a send that carries no row" is the one thing an off
+		 * definition does not do. Dropping the pick here leaves the token red, and
+		 * that is what the reader needs to be told.
+		 */
+		renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: [],
+			origins: [...onlyDisabled, origin({ scope: "row", value: "row-token", winner: true })],
+		});
+		const panel = open();
+		expect(
+			within(panel).getByText(/a send that carries no row resolves nothing/)
+		).toBeInTheDocument();
+		expect(within(panel).queryByText(/still resolves on a send/)).not.toBeInTheDocument();
+	});
+
+	it("shows no list for a name nothing defines anywhere", () => {
+		// The companion to the first case: the gate moved from counting entries
+		// to asking whether any of them is not the winner, and a name with no
+		// entries at all must still say nothing rather than draw an empty list.
+		renderPopover({ varInfo: null, resolved: false, writableScopes: ["global"], origins: [] });
+		const panel = open();
+		expect(within(panel).queryByText("also defined")).not.toBeInTheDocument();
+		expect(within(panel).getByRole("button", { name: "Create" })).toBeInTheDocument();
+	});
+});
+
+/**
  * Issue #1064. #1007 put a bound row's columns above every scope and #1062 made
  * the *preview* say so, but the popover - the one surface whose entire job is
  * "why is this the value" - still explained the environment's definition while
