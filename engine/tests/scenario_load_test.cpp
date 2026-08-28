@@ -989,6 +989,42 @@ TEST_F (ScenarioLoadTest, ACredentialsFileBindsPerIterationOnTheWire) {
     "Basic " + vayu::utils::base64_encode ("bob:pw1") }));
 }
 
+// The same bind on a collection run that carries **no data set at all** (issue
+// #1055). This is the run shape the old rule could not serve: deferral was
+// keyed to the run having rows, so a step's `{{$vu}}` credential went out
+// base64-encoded as written. Two virtual users, so the assertion is about each
+// binding its *own* number rather than both binding `1` - which is what a bind
+// that dropped the caller's identity would produce.
+TEST_F (ScenarioLoadTest, AStepCredentialBindsTheIdentityWithNoDataSet) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/echo") });
+    with_deferred_auth (execution,
+    json{ { "mode", "basic" }, { "username", "user-{{$vu}}" }, { "password", "pw" } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 2 }, { "vus", 2 } };
+    run (config, execution);
+
+    std::vector<std::string> sent;
+    for (const auto& hit : server.hits_for ("/echo")) {
+        sent.push_back (hit.authorization);
+    }
+    std::sort (sent.begin (), sent.end ());
+    ASSERT_FALSE (sent.empty ()) << "no step reached the wire";
+    for (const auto& authorization : sent) {
+        EXPECT_NE (authorization.find ("Basic "), std::string::npos) << authorization;
+    }
+    // Every credential that left carries a bound number rather than the token
+    // text, and the set of numbers is the set of users that sent.
+    for (const auto& authorization : sent) {
+        EXPECT_EQ (authorization.find ("{{$vu}}"), std::string::npos)
+        << "the token text reached the wire base64-encoded as written: " << authorization;
+    }
+    EXPECT_TRUE (std::find (sent.begin (), sent.end (),
+                 "Basic " + vayu::utils::base64_encode ("user-1:pw")) != sent.end ())
+    << "virtual user 1 must authenticate as itself";
+}
+
 // The credential half of the failure path: a column the row does not carry ends
 // the step before the send, exactly as one in the URL does - never a request
 // with a blank password.

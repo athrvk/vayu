@@ -1045,8 +1045,10 @@ namespace {
 vayu::core::DataBindResult
 bind_auth (vayu::Request& request, const json& auth, const json& row, size_t row_index) {
     const auto parsed = vayu::http::parse_auth (auth);
+    const vayu::core::IterationBinding binding{ &row, row_index,
+        vayu::core::IterationIdentity{} };
     return vayu::core::bind_auth_row (
-    request, parsed, vayu::core::tokenize_auth_fields (parsed), row, row_index);
+    request, parsed, vayu::core::tokenize_auth_fields (parsed), binding);
 }
 
 } // namespace

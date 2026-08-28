@@ -29,8 +29,9 @@ AuthResolution auth_resolution) {
     out.request            = parsed.value ();
     out.request.timeout_ms = timeout_ms;
 
-    // Deferred: the caller holds credentials that must bind a data row before
-    // they are encoded, and applies the auth itself once they have. Left
+    // Deferred: the caller holds credentials that must bind a data row or the
+    // iteration identity before they are encoded, and applies the auth itself
+    // once they have. Left
     // untouched here rather than applied-then-rewritten, because `apply_auth`
     // is not reversible - a base64 `Authorization` value cannot be un-collapsed
     // back into the username and password a row was meant to fill.

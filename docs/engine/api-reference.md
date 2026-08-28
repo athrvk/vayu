@@ -3801,8 +3801,11 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   either way, so it keeps its braces - issue #186), and a generator inside the
   **auth block** is generated here even when the field is true, because
   `apply_auth` encodes a credential when the request is built and a token left
-  for the bind would go out as base64 of its own text (the deferral issue #1055
-  carries). A scenario plan's steps are composed with it internally, so a
+  for the bind would go out as base64 of its own text. That is a generator's
+  case alone: a credential carrying a `{{data.*}}` or a `{{$vu}}` defers the
+  whole build and is bound before the encoding (issue #1055), where a generator
+  has nothing to wait for. A scenario plan's steps are composed with it
+  internally, so a
   collection run needs no field at all.
 
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
@@ -4926,9 +4929,12 @@ iterations, whatever the concurrency), and `{{$iteration}}` is that user's
 plain `POST /execute`. A variable named `$vu` does not answer for the identity,
 for the reason a variable named `data.id` does not answer for the column, and
 `{{$vus}}` is an ordinary unknown `$name` that keeps its braces. They bind
-everywhere a `data.*` token does **except the credential fields**: a credential
-is encoded at build time and the deferral that lets a row reach one first
-happens only in a run that has rows (issue #1055).
+everywhere a `data.*` token does, **credential fields included** (issue #1055):
+a credential carrying either name defers its build and is bound before
+`apply_auth` encodes it, on every run shape rather than only on one carrying
+rows, because the identity comes from the iteration rather than from a row. An
+OAuth 2.0 config is the exception and is refused by name - its token is acquired
+before any iteration exists.
 
 **A run binds only what it was given rows for.** A `POST /runs` carrying
 `scenario.data` binds per iteration, one carrying the top-level

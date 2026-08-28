@@ -534,6 +534,20 @@ bool keeps_reserved_namespace (const std::string& name) {
     vayu::http::is_generator_variable_name (name);
 }
 
+/// Every kind of token a *credential* is split for (issue #1055): the row's
+/// columns and the iteration identity, which are the two the bind can answer
+/// once the build has been deferred.
+///
+/// A generator is deliberately not here, which is the one way this differs from
+/// `keeps_reserved_namespace`: composition generates a `{{$guid}}` inside the
+/// auth block rather than deferring it (issue #995), so no generator token
+/// survives into a credential for a split to find - and one kept here would
+/// defer a build for a token that is already a value.
+bool keeps_deferrable_credential_namespace (const std::string& name) {
+    return vayu::http::is_data_variable_name (name) ||
+    vayu::http::is_identity_variable_name (name);
+}
+
 /**
  * Split each visited field around the reserved tokens of one namespace, keeping
  * only the fields that carry one.
@@ -939,11 +953,10 @@ const vayu::http::BoundColumnNames& bound_columns) {
 
 StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth,
 const vayu::http::BoundColumnNames& bound_columns) {
-    // The data namespace alone here - see the header for why a credential does
-    // not carry the identity. A bare column *is* the data namespace in its
-    // other spelling (issue #1007), so it is split here: a credential written
-    // `{{username}}` binds from the row exactly as `{{data.username}}` does.
-    FieldSplitter splitter (vayu::http::is_data_variable_name, bound_columns);
+    // A bare column *is* the data namespace in its other spelling (issue
+    // #1007), so it is split here: a credential written `{{username}}` binds
+    // from the row exactly as `{{data.username}}` does.
+    FieldSplitter splitter (keeps_deferrable_credential_namespace, bound_columns);
     vayu::http::walk_auth_credentials (auth,
     [&splitter] (const std::string& field, vayu::http::CredentialDestination destination) {
         splitter (field, credential_context (destination));
@@ -953,12 +966,10 @@ const vayu::http::BoundColumnNames& bound_columns) {
 
 DataBindResult apply_auth_data_template (vayu::http::Auth& auth,
 const StepDataTemplate& tmpl,
-const nlohmann::json& row,
-size_t row_index) {
+const IterationBinding& binding) {
     if (tmpl.empty ()) {
         return DataBindResult{ true, {} };
     }
-    const IterationBinding binding{ &row, row_index, IterationIdentity{} };
     TemplateJoiner joiner (tmpl, binding);
     // A bearer token and an api key sent in a header are header text, so a line
     // break in the cell behind one forges a header exactly as it would in
@@ -982,31 +993,24 @@ const IterationBinding& binding) {
     if (credentials.empty ()) {
         return DataBindResult{ true, {} };
     }
-    if (binding.row == nullptr) {
-        // Unreachable through either executor - a build is deferred only for a
-        // run that has rows - and a refusal rather than an assumption, because
-        // the alternative is sending base64 of the literal token text, which is
-        // the failure the deferral exists to remove and the one that hides.
-        return DataBindResult{ false,
-            "this request's credentials carry a data token, but the run has no "
-            "data set to bind them from" };
-    }
     // The credentials second, which is the whole reason this order lives in one
-    // place - see the header.
-    return bind_auth_row (request, auth, credentials, *binding.row, binding.row_index);
+    // place - see the header. A run with no set at all reaches this with a null
+    // row and is not refused here: the credentials may carry the identity
+    // alone, which needs no row (issue #1055), and a data token that does need
+    // one is refused by the join itself, naming the token the way it names one
+    // in a request field.
+    return bind_auth_row (request, auth, credentials, binding);
 }
 
 DataBindResult bind_auth_row (vayu::Request& request,
 vayu::http::Auth auth,
 const StepDataTemplate& tmpl,
-const nlohmann::json& row,
-size_t row_index) {
+const IterationBinding& binding) {
     if (tmpl.empty ()) {
         return DataBindResult{ true, {} };
     }
 
-    if (auto bound = apply_auth_data_template (auth, tmpl, row, row_index);
-    !bound.ok) {
+    if (auto bound = apply_auth_data_template (auth, tmpl, binding); !bound.ok) {
         return bound;
     }
 
@@ -1018,12 +1022,12 @@ size_t row_index) {
     return DataBindResult{ true, {} };
 }
 
-std::optional<std::string> first_data_token_in (const nlohmann::json& value,
+std::optional<std::string> first_deferrable_token_in (const nlohmann::json& value,
 const vayu::http::BoundColumnNames& bound_columns) {
     if (value.is_string ()) {
         const auto split = vayu::http::split_tokens (
         value.get<std::string> (), [&bound_columns] (const std::string& name) {
-            return vayu::http::is_data_variable_name (name) ||
+            return keeps_deferrable_credential_namespace (name) ||
             vayu::http::is_bound_column_name (name, bound_columns);
         });
         if (split.names.empty ()) {
@@ -1033,7 +1037,7 @@ const vayu::http::BoundColumnNames& bound_columns) {
     }
     if (value.is_object () || value.is_array ()) {
         for (const auto& child : value) {
-            if (auto found = first_data_token_in (child, bound_columns)) {
+            if (auto found = first_deferrable_token_in (child, bound_columns)) {
                 return found;
             }
         }
@@ -1041,13 +1045,13 @@ const vayu::http::BoundColumnNames& bound_columns) {
     return std::nullopt;
 }
 
-std::optional<std::string> first_oauth2_data_token (const vayu::http::Auth& auth,
+std::optional<std::string> first_oauth2_deferrable_token (const vayu::http::Auth& auth,
 const vayu::http::BoundColumnNames& bound_columns) {
     const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth);
     if (oauth2 == nullptr) {
         return std::nullopt;
     }
-    return first_data_token_in (oauth2->config, bound_columns);
+    return first_deferrable_token_in (oauth2->config, bound_columns);
 }
 
 DataBindResult apply_iteration_template (vayu::Request& request,

@@ -65,6 +65,7 @@
 namespace {
 
 using nlohmann::json;
+using vayu::core::apply_auth_data_template;
 using vayu::core::bind_auth_row;
 using vayu::core::bind_data_row;
 using vayu::http::routes::plan_send_row_auth;
@@ -163,7 +164,7 @@ TEST (SendWithRowAuth, StaticCredentialsResolveInTheBuild) {
     const json payload{ { "auth",
     { { "mode", "basic" }, { "username", "ada" }, { "password", "s3cret" } } } };
 
-    const auto plan = plan_send_row_auth (payload, true);
+    const auto plan = plan_send_row_auth (payload);
     EXPECT_TRUE (plan.ok);
     EXPECT_TRUE (plan.credentials.empty ());
     EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
@@ -172,7 +173,7 @@ TEST (SendWithRowAuth, StaticCredentialsResolveInTheBuild) {
 TEST (SendWithRowAuth, AbsentAuthResolvesInTheBuild) {
     for (const auto& payload :
     { json{ { "url", "http://x/" } }, json{ { "auth", nullptr } } }) {
-        const auto plan = plan_send_row_auth (payload, true);
+        const auto plan = plan_send_row_auth (payload);
         EXPECT_TRUE (plan.ok);
         EXPECT_TRUE (plan.credentials.empty ());
         EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
@@ -186,25 +187,59 @@ TEST (SendWithRowAuth, CredentialTokenDefersTheAuth) {
     const json payload{ { "auth",
     { { "mode", "basic" }, { "username", "{{data.user}}" }, { "password", "s3cret" } } } };
 
-    const auto plan = plan_send_row_auth (payload, true);
+    const auto plan = plan_send_row_auth (payload);
     ASSERT_TRUE (plan.ok);
     EXPECT_FALSE (plan.credentials.empty ());
     EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Defer);
     EXPECT_EQ (plan.credentials.first_data_token ().value_or (""), "{{data.user}}");
 }
 
-/// Without a row there is nothing to bind against, so the token keeps the
-/// behaviour it has always had here rather than becoming a refusal or a
-/// deferral that never applies - a deferred build whose auth is never applied
-/// would send the request unauthenticated.
-TEST (SendWithRowAuth, NoRowNeverDefers) {
+/// A data token with no row defers and is then **refused by name** at the bind
+/// (issue #1055), which is what the same token in the URL has always done. It
+/// used to be answered here, unparsed, as `Apply` - so the credential went out
+/// as base64 of its own literal text while the URL beside it was a 400.
+///
+/// The deferral is safe precisely because the bind is unconditional: a deferred
+/// build whose auth was never applied would send the request unauthenticated,
+/// so the refusal below is what stands in place of that.
+TEST (SendWithRowAuth, ADataTokenWithNoRowDefersAndIsRefusedByName) {
     const json payload{ { "auth",
     { { "mode", "basic" }, { "username", "{{data.user}}" }, { "password", "s3cret" } } } };
 
-    const auto plan = plan_send_row_auth (payload, false);
-    EXPECT_TRUE (plan.ok);
-    EXPECT_TRUE (plan.credentials.empty ());
-    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
+    const auto plan = plan_send_row_auth (payload);
+    ASSERT_TRUE (plan.ok) << plan.error;
+    EXPECT_FALSE (plan.credentials.empty ());
+    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Defer);
+
+    vayu::Request request;
+    const vayu::core::IterationBinding no_row{ nullptr, 0, vayu::core::IterationIdentity{} };
+    const auto bound = bind_auth_row (request, plan.auth, plan.credentials, no_row);
+    EXPECT_FALSE (bound.ok) << "a credential naming a column no row can answer "
+                               "must be refused, never sent as its own text";
+    EXPECT_NE (bound.error.find ("{{data.user}}"), std::string::npos) << bound.error;
+}
+
+/// The identity needs no row at all, which is the whole of issue #1055: a
+/// single send is a run of one, so `{{$vu}}` answers `1` here rather than
+/// reaching the wire base64-encoded as written.
+TEST (SendWithRowAuth, AnIdentityTokenDefersWithNoRowAndBindsToTheRunOfOne) {
+    const json payload{ { "auth",
+    { { "mode", "basic" }, { "username", "user-{{$vu}}" }, { "password", "s3cret" } } } };
+
+    const auto plan = plan_send_row_auth (payload);
+    ASSERT_TRUE (plan.ok) << plan.error;
+    EXPECT_FALSE (plan.credentials.empty ())
+    << "an identity token in a credential must defer the build";
+    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Defer);
+
+    vayu::Request request;
+    const vayu::core::IterationBinding no_row{ nullptr, 0, vayu::core::IterationIdentity{} };
+    auto auth = plan.auth;
+    const auto bound = apply_auth_data_template (auth, plan.credentials, no_row);
+    ASSERT_TRUE (bound.ok) << bound.error;
+    const auto* basic = std::get_if<vayu::http::BasicAuth> (&auth);
+    ASSERT_NE (basic, nullptr);
+    EXPECT_EQ (basic->username, "user-1");
 }
 
 /// An ordinary `{{user}}` is not a data token - it is a variable composition
@@ -212,7 +247,7 @@ TEST (SendWithRowAuth, NoRowNeverDefers) {
 TEST (SendWithRowAuth, OrdinaryVariableIsNotADataToken) {
     const json payload{ { "auth", { { "mode", "bearer" }, { "token", "{{apiToken}}" } } } };
 
-    const auto plan = plan_send_row_auth (payload, true);
+    const auto plan = plan_send_row_auth (payload);
     EXPECT_TRUE (plan.ok);
     EXPECT_TRUE (plan.credentials.empty ());
     EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
@@ -228,7 +263,7 @@ TEST (SendWithRowAuth, Oauth2DataTokenIsRefusedByName) {
     { { "grantType", "client_credentials" }, { "clientId", "{{data.client}}" },
     { "tokenUrl", "https://issuer.example/token" } } } } } };
 
-    const auto plan = plan_send_row_auth (payload, true);
+    const auto plan = plan_send_row_auth (payload);
     ASSERT_FALSE (plan.ok);
     EXPECT_NE (plan.error.find ("{{data.client}}"), std::string::npos);
     EXPECT_NE (plan.error.find ("OAuth 2.0"), std::string::npos);
@@ -242,7 +277,7 @@ TEST (SendWithRowAuth, Oauth2DataTokenIsRefusedByName) {
 /// endpoint as the literal text `{{client}}`, which is the silent wrong request
 /// the prefixed spelling has been refused for since #591.
 ///
-/// Mutation-check: drop `bound_columns` from `first_oauth2_data_token` and this
+/// Mutation-check: drop `bound_columns` from `first_oauth2_deferrable_token` and this
 /// send is accepted.
 TEST (SendWithRowAuth, ABoundColumnInAnOauth2ConfigIsRefusedToo) {
     const json payload{ { "auth",
@@ -251,7 +286,7 @@ TEST (SendWithRowAuth, ABoundColumnInAnOauth2ConfigIsRefusedToo) {
     { { "grantType", "client_credentials" }, { "clientId", "{{client}}" },
     { "tokenUrl", "https://issuer.example/token" } } } } } };
 
-    const auto plan = plan_send_row_auth (payload, true, { "client" });
+    const auto plan = plan_send_row_auth (payload, { "client" });
     ASSERT_FALSE (plan.ok);
     EXPECT_NE (plan.error.find ("{{client}}"), std::string::npos) << plan.error;
     EXPECT_NE (plan.error.find ("OAuth 2.0"), std::string::npos) << plan.error;
@@ -259,7 +294,7 @@ TEST (SendWithRowAuth, ABoundColumnInAnOauth2ConfigIsRefusedToo) {
     // And the same config with no row bound to that name is untouched: the
     // refusal is about a column reaching a block that cannot defer, not about
     // every `{{name}}` in an oauth2 config.
-    const auto unbound = plan_send_row_auth (payload, true);
+    const auto unbound = plan_send_row_auth (payload);
     EXPECT_TRUE (unbound.ok) << unbound.error;
 }
 
@@ -272,7 +307,7 @@ TEST (SendWithRowAuth, Oauth2WithoutADataTokenIsNotRefused) {
     { { "grantType", "client_credentials" }, { "clientId", "static-client" },
     { "tokenUrl", "https://issuer.example/token" } } } } } };
 
-    const auto plan = plan_send_row_auth (payload, true);
+    const auto plan = plan_send_row_auth (payload);
     EXPECT_TRUE (plan.ok);
     EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
 }
@@ -329,7 +364,7 @@ class SendWithRowTest : public ::testing::Test {
     static RowSend build_with_row (const json& payload, const json& row) {
         RowSend out;
 
-        const auto plan = plan_send_row_auth (payload, true);
+        const auto plan = plan_send_row_auth (payload);
         if (!plan.ok) {
             return RowSend{ false, plan.error, {} };
         }
@@ -342,7 +377,9 @@ class SendWithRowTest : public ::testing::Test {
 
         auto bound = bind_data_row (out.request, row, 0);
         if (bound.ok) {
-            bound = bind_auth_row (out.request, plan.auth, plan.credentials, row, 0);
+            const vayu::core::IterationBinding binding{ &row, 0,
+                vayu::core::IterationIdentity{} };
+            bound = bind_auth_row (out.request, plan.auth, plan.credentials, binding);
         }
         out.ok    = bound.ok;
         out.error = bound.error;

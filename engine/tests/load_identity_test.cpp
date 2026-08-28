@@ -52,6 +52,7 @@
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/encoding.hpp"
 
 namespace {
 
@@ -85,11 +86,11 @@ class RecordingServer {
         // readable off the wire rather than inferred from a counter the test
         // also owns.
         svr.Get (R"(/i/(.*))", [this] (const httplib::Request& req, httplib::Response& res) {
-            record ("/i/" + req.matches[1].str ());
+            record (req, "/i/" + req.matches[1].str ());
             res.set_content ("{}", "application/json");
         });
-        svr.Get ("/plain", [this] (const httplib::Request&, httplib::Response& res) {
-            record ("/plain");
+        svr.Get ("/plain", [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/plain");
             res.set_content ("{}", "application/json");
         });
 
@@ -117,10 +118,20 @@ class RecordingServer {
         return paths_;
     }
 
+    /// Every `Authorization` answered, in arrival order. Read off the wire for
+    /// the reason `load_data_test.cpp`'s listener is: a credential is only
+    /// correct once `apply_auth` has encoded it, and base64 is where a bind in
+    /// the wrong order hides.
+    [[nodiscard]] std::vector<std::string> authorizations () const {
+        std::lock_guard<std::mutex> lock (paths_mtx_);
+        return authorizations_;
+    }
+
     private:
-    void record (const std::string& path) {
+    void record (const httplib::Request& req, const std::string& path) {
         std::lock_guard<std::mutex> lock (paths_mtx_);
         paths_.push_back (path);
+        authorizations_.push_back (req.get_header_value ("Authorization"));
     }
 
     httplib::Server svr;
@@ -128,6 +139,7 @@ class RecordingServer {
     int port = 0;
     mutable std::mutex paths_mtx_;
     std::vector<std::string> paths_;
+    std::vector<std::string> authorizations_;
 };
 
 constexpr const char* TEST_DB_PATH = "test_load_identity.db";
@@ -166,13 +178,14 @@ class LoadIdentityTest : public ::testing::Test {
         payload, stock_limits (), /*is_scenario=*/false);
         ASSERT_TRUE (read.ok) << read.error;
 
-        auto built = vayu::http::build_request (payload, db_.get (), /*timeout_ms=*/5000,
-        read.set ? read.set->auth_resolution () : vayu::http::AuthResolution::Apply);
+        auto built = vayu::http::build_request (
+        payload, db_.get (), /*timeout_ms=*/5000, read.auth.auth_resolution ());
         ASSERT_TRUE (built.ok) << built.error_message;
 
         auto context =
         std::make_shared<vayu::core::RunContext> ("test-load-identity", payload);
         context->load_data     = std::move (read.set);
+        context->load_auth     = std::move (read.auth);
         context->load_template = tokenize_bindable_fields (built.request);
         context->test_script   = payload.value ("tests", std::string ());
         vayu::http::EventLoopConfig loop_config;
@@ -403,6 +416,78 @@ TEST_F (LoadIdentityTest, ARunWithoutTheTokensCarriesAnEmptyTemplate) {
     << "a request naming neither token must leave nothing for the executor to "
        "walk per submission";
     EXPECT_EQ (server.paths ().size (), 2u);
+}
+
+// ============================================================================
+// The identity inside a credential (issue #1055)
+// ============================================================================
+
+// The headline: a basic-auth username carrying `{{$vu}}` on a run with **no
+// data set at all**. Read base64-decoded off the wire, because that encoding is
+// exactly what used to hide the literal token text going out.
+TEST_F (LoadIdentityTest, ACredentialBindsTheIdentityOnARunWithNoDataSet) {
+    RecordingServer server;
+    json payload    = iterations_payload (server.url ("/plain"), 3);
+    payload["auth"] = { { "mode", "basic" },
+        { "username", "user-{{$iteration}}" }, { "password", "pw" } };
+
+    run (payload);
+
+    std::vector<std::string> sent = server.authorizations ();
+    std::sort (sent.begin (), sent.end ());
+    ASSERT_EQ (sent.size (), 3u);
+    for (size_t i = 0; i < sent.size (); ++i) {
+        EXPECT_EQ (sent[i],
+        "Basic " + vayu::utils::base64_encode ("user-" + std::to_string (i) + ":pw"))
+        << "iteration "
+        << i << " must reach the wire bound, on a run that carries no rows to defer for";
+    }
+}
+
+// The other half of the same rule, and the one the old behaviour got right by
+// accident: a run whose credentials carry no token must still resolve its auth
+// in the build. Asserted rather than assumed, because this is the throughput
+// guard - a run that started deferring here would pay `apply_auth` per
+// submission for nothing.
+TEST_F (LoadIdentityTest, StaticCredentialsStillResolveInTheBuild) {
+    RecordingServer server;
+    json payload = iterations_payload (server.url ("/plain"), 2);
+    payload["auth"] = { { "mode", "basic" }, { "username", "ada" }, { "password", "pw" } };
+
+    run (payload);
+
+    EXPECT_TRUE (context_->load_auth.credentials.empty ())
+    << "credentials naming no token must leave nothing for the executor to "
+       "join";
+    EXPECT_EQ (context_->load_auth.auth_resolution (), vayu::http::AuthResolution::Apply);
+    EXPECT_TRUE (context_->load_template.empty ());
+
+    const auto sent = server.authorizations ();
+    ASSERT_EQ (sent.size (), 2u);
+    for (const auto& authorization : sent) {
+        EXPECT_EQ (authorization, "Basic " + vayu::utils::base64_encode ("ada:pw"))
+        << "the build's own encoding must still be what goes out";
+    }
+}
+
+// An identity token in an oauth2 config is refused by name, for the reason a
+// data column is: the token is acquired against the token endpoint once, before
+// any iteration exists, so no bind can ever reach it.
+TEST_F (LoadIdentityTest, AnIdentityTokenInAnOAuth2ConfigIsRefusedByName) {
+    const json payload = { { "url", "https://example.test/" },
+        { "auth",
+        { { "mode", "oauth2" },
+        { "config",
+        { { "grantType", "client_credentials" }, { "clientId", "client-{{$vu}}" },
+        { "tokenUrl", "https://issuer.example/token" } } } } } };
+
+    const auto read = vayu::http::routes::read_load_data_set (payload, stock_limits (),
+    /*is_scenario=*/false);
+
+    EXPECT_FALSE (read.ok);
+    EXPECT_NE (read.error.find ("{{$vu}}"), std::string::npos)
+    << "the refusal must name the token that cannot be served: " << read.error;
+    EXPECT_NE (read.error.find ("OAuth 2.0"), std::string::npos) << read.error;
 }
 
 // What a deferred `tests` script is told about the response it is grading. Both

@@ -101,9 +101,11 @@ struct ScenarioStep {
     ///
     /// **Non-empty means this step's auth was deferred**: `request` carries no
     /// credential yet, and an executor must call `bind_step_auth` before
-    /// sending or the request goes out unauthenticated. Deferral only ever
-    /// happens in a run that has rows - a data token with no data set is
-    /// refused when the plan resolves - so an executor always has a row for it.
+    /// sending or the request goes out unauthenticated. An executor does *not*
+    /// always have a row for it: since issue #1055 a credential carrying only
+    /// the `{{$vu}}` / `{{$iteration}}` identity defers too, and the identity
+    /// needs no data set. A data token with no data set is still refused when
+    /// the plan resolves, so a row is there whenever a token wants one.
     StepDataTemplate auth_template{};
 };
 

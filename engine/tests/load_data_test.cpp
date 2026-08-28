@@ -179,13 +179,14 @@ class LoadDataTest : public ::testing::Test {
         auto read = read_load_data_set (payload, stock_limits (), /*is_scenario=*/false);
         ASSERT_TRUE (read.ok) << read.error;
 
-        auto built = vayu::http::build_request (payload, db_.get (), /*timeout_ms=*/5000,
-        read.set ? read.set->auth_resolution () : vayu::http::AuthResolution::Apply);
+        auto built = vayu::http::build_request (
+        payload, db_.get (), /*timeout_ms=*/5000, read.auth.auth_resolution ());
         ASSERT_TRUE (built.ok) << built.error_message;
 
         auto context =
         std::make_shared<vayu::core::RunContext> ("test-load-data", payload);
         context->load_data = std::move (read.set);
+        context->load_auth = std::move (read.auth);
         context->load_template = vayu::core::tokenize_bindable_fields (built.request);
         vayu::http::EventLoopConfig loop_config;
         loop_config.max_concurrent = 100;
@@ -258,7 +259,7 @@ TEST (ReadLoadDataSet, RowsAreKeptInPayloadOrder) {
     ASSERT_EQ (read.set->rows.size (), 2u);
     EXPECT_EQ (read.set->rows[0]["id"], "a");
     EXPECT_EQ (read.set->rows[1]["id"], "b");
-    EXPECT_EQ (read.set->auth_resolution (), vayu::http::AuthResolution::Apply)
+    EXPECT_EQ (read.auth.auth_resolution (), vayu::http::AuthResolution::Apply)
     << "static credentials must still be applied by the build, exactly as they "
        "were before rows existed";
 }
@@ -332,8 +333,8 @@ TEST (ReadLoadDataSet, CredentialsCarryingATokenDeferTheBuild) {
     const auto read = read_load_data_set (payload, stock_limits (), false);
     ASSERT_TRUE (read.ok) << read.error;
     ASSERT_NE (read.set, nullptr);
-    EXPECT_FALSE (read.set->credentials.empty ());
-    EXPECT_EQ (read.set->auth_resolution (), vayu::http::AuthResolution::Defer)
+    EXPECT_FALSE (read.auth.credentials.empty ());
+    EXPECT_EQ (read.auth.auth_resolution (), vayu::http::AuthResolution::Defer)
     << "a credential carrying a row value must not be encoded by the build - "
        "after `apply_auth` the token is base64 of its own literal text";
 }
