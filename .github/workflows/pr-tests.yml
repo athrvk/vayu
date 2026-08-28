@@ -178,10 +178,10 @@ jobs:
               # bare one covers a root-level file, the `**/` one covers nested.
               - '!*.md'
               - '!**/*.md'
-            # The two pages `script-typedefs.docs-compile.test.ts` compiles.
-            # They are prose, so `!**/*.md` above rejects them and `code`
-            # rejects them twice over (`!docs/**` *and* `!**/*.md`) - and they
-            # are also app test *input*, in the same sense
+            # The pages under `docs/` that a suite in `app/` reads and asserts
+            # against. They are prose, so `!**/*.md` above rejects them and
+            # `code` rejects them twice over (`!docs/**` *and* `!**/*.md`) - and
+            # they are also app test *input*, in the same sense
             # `engine/tests/fixtures/script-typedefs.d.ts` is, so editing one
             # can turn `pnpm test` red exactly the way a source file can. A gate
             # whose own inputs cannot trigger it is #887's defect again (#1118),
@@ -190,13 +190,35 @@ jobs:
             # `some-with-excludes` is final, so a positive rule listed after
             # `!**/*.md` is dead - it cannot include back what a `!` rejected.
             #
-            # This list is not free-standing. `DOC_PATHS` in that test names the
-            # same two files, and `routes every page it compiles` there fails if
-            # the two lists disagree - adding a third page to the guard is red
-            # until it is routed here as well.
+            # Four guards contribute, not the one #1118 routed: the typedefs
+            # compile, plus the design-token, renderer-state and row-persistence
+            # doc guards #1121 found in the same shape. One list rather than four
+            # filters, because the job condition is the same OR for all of them
+            # and a second filter would be a second thing to forget. The name
+            # stays `app_doc_fixtures` - every page here is an app test fixture
+            # that happens to be prose, which is as true of eight pages as of two.
+            #
+            # Only the pages a guard actually reads are listed. Routing `docs/**`
+            # wholesale would be one line that cannot miss an input, and would
+            # run the four-runner app matrix on every prose edit in the
+            # repository - the cost `!**/*.md` exists to avoid.
+            #
+            # This list is not free-standing. `DOC_READING_GUARDS` in
+            # `app/src/lib/routed-docs.testkit.ts` names the same pages, and
+            # `routes every page a guard reads, and no other`
+            # (`app/src/lib/routed-docs.test.ts`) compares this block against the
+            # union of the four guards' lists - so adding a page to a guard is
+            # red until it is routed here, and routing a page no guard reads is
+            # red too.
             app_doc_fixtures:
               - 'docs/engine/scripting.md'
               - 'docs/app/pm-api-compatibility.md'
+              - 'docs/design-system.md'
+              - 'docs/app/state-management.md'
+              - 'docs/app/architecture.md'
+              - 'docs/app/api-integration.md'
+              - 'docs/app/data-driven-runs.md'
+              - 'docs/app/COMPONENTS.md'
             engine:
               - 'engine/**'
               - 'VERSION'
@@ -315,13 +337,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     needs: changes
     # The second clause is the one job the doc fixtures need: this is where
-    # `pnpm test` runs, so it is where the guard that compiles them runs. It is
-    # an OR rather than another entry in `app` because `code` rejects a
-    # documentation path too, and `code && app` would answer false on the `code`
-    # half however the area filter were written. `quality` deliberately keeps
-    # the plain condition - eslint reads TS/TSX, prettier's domain is `app/` and
-    # tsc reads neither page, so nothing it runs can change colour over a
-    # Markdown edit.
+    # `pnpm test` runs, so it is where every guard that reads one of those pages
+    # runs. It is an OR rather than another entry in `app` because `code` rejects
+    # a documentation path too, and `code && app` would answer false on the
+    # `code` half however the area filter were written. `quality` deliberately
+    # keeps the plain condition - eslint reads TS/TSX, prettier's domain is
+    # `app/` and tsc reads none of those pages, so nothing it runs can change
+    # colour over a Markdown edit.
     if: (needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true') || needs.changes.outputs.app_doc_fixtures == 'true'
     permissions:
       contents: read

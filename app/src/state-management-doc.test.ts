@@ -34,16 +34,12 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { DOC_READING_GUARDS, repoRoot } from "@/lib/routed-docs.testkit";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..", "..");
 
-/** The docs whose identifiers this guards. */
-const DOCS = [
-	"docs/app/state-management.md",
-	"docs/app/architecture.md",
-	"docs/app/api-integration.md",
-];
+/** The docs whose identifiers this guards, held where CI can route them. */
+const DOCS = DOC_READING_GUARDS.rendererState.pages;
 
 /**
  * Identifiers the docs name that are declared outside `app/src`, with the file
