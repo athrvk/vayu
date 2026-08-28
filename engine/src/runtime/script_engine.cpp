@@ -25,6 +25,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <format>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -990,13 +991,29 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
     if (tag != b_tag) {
         return 0;
     }
+    // Both branches below render each side through script the test author may
+    // have written - an own `toJSON`, an overridden `toString` - and both
+    // renderers answer "" when that throws, leaving the exception pending. Two
+    // empty renderings compare *equal*, so a pair of throwing Dates used to
+    // report a pass. Asking the context settles either branch: a comparison
+    // that ran script and left an error behind has no verdict to give.
     if (tag == "[object Date]") {
         // JSON renders a Date as its ISO instant, which is the comparison chai
         // makes (and keeps millisecond resolution, unlike toString).
-        return js_to_json (ctx, a) == js_to_json (ctx, b) ? 1 : 0;
+        const std::string a_json = js_to_json (ctx, a);
+        const std::string b_json = js_to_json (ctx, b);
+        if (JS_HasException (ctx)) {
+            return -1;
+        }
+        return a_json == b_json ? 1 : 0;
     }
     if (tag == "[object RegExp]") {
-        return js_to_string (ctx, a) == js_to_string (ctx, b) ? 1 : 0;
+        const std::string a_source = js_to_string (ctx, a);
+        const std::string b_source = js_to_string (ctx, b);
+        if (JS_HasException (ctx)) {
+            return -1;
+        }
+        return a_source == b_source ? 1 : 0;
     }
     if (tag != "[object Object]" && tag != "[object Array]" && tag != "[object Error]") {
         // Map, Set, typed arrays and the like hold their contents somewhere a
@@ -1006,25 +1023,45 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
         return 0;
     }
 
+    // Every read below can run script: a getter the author wrote, or a Proxy
+    // trap - `IsArray` unwraps a proxy, so a proxy of an array reaches this
+    // branch and even its `length` goes through a trap. A read that throws
+    // leaves the exception pending and hands back the exception sentinel, which
+    // is neither a number nor an object, so comparing it reports an ordinary
+    // "not deeply equal" about a read that never happened - #959's shape, one
+    // level down. Each pair stops at the *first* side that throws, because
+    // reading the second would run more script and could replace the error the
+    // script author is owed.
     if (tag == "[object Array]") {
-        JSValue a_len_val = JS_GetPropertyStr (ctx, a, "length");
-        JSValue b_len_val = JS_GetPropertyStr (ctx, b, "length");
+        ScopedValue a_len_val (ctx, JS_GetPropertyStr (ctx, a, "length"));
+        if (JS_IsException (a_len_val.get ())) {
+            return -1;
+        }
+        ScopedValue b_len_val (ctx, JS_GetPropertyStr (ctx, b, "length"));
+        if (JS_IsException (b_len_val.get ())) {
+            return -1;
+        }
         uint32_t a_len = 0, b_len = 0;
-        JS_ToUint32 (ctx, &a_len, a_len_val);
-        JS_ToUint32 (ctx, &b_len, b_len_val);
-        JS_FreeValue (ctx, a_len_val);
-        JS_FreeValue (ctx, b_len_val);
+        if (JS_ToUint32 (ctx, &a_len, a_len_val.get ()) < 0 ||
+        JS_ToUint32 (ctx, &b_len, b_len_val.get ()) < 0) {
+            return -1;
+        }
         if (a_len != b_len) {
             return 0;
         }
         for (uint32_t i = 0; i < a_len; i++) {
-            JSValue a_elem = JS_GetPropertyUint32 (ctx, a, i);
-            JSValue b_elem = JS_GetPropertyUint32 (ctx, b, i);
+            ScopedValue a_elem (ctx, JS_GetPropertyUint32 (ctx, a, i));
+            if (JS_IsException (a_elem.get ())) {
+                return -1;
+            }
+            ScopedValue b_elem (ctx, JS_GetPropertyUint32 (ctx, b, i));
+            if (JS_IsException (b_elem.get ())) {
+                return -1;
+            }
             path.emplace_back (a_id, b_id);
-            const int same = js_deep_equal (ctx, a_elem, b_elem, depth + 1, path, zeros);
+            const int same =
+            js_deep_equal (ctx, a_elem.get (), b_elem.get (), depth + 1, path, zeros);
             path.pop_back ();
-            JS_FreeValue (ctx, a_elem);
-            JS_FreeValue (ctx, b_elem);
             if (same != 1) {
                 return same;
             }
@@ -1045,13 +1082,20 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
         if (std::find (b_keys.begin (), b_keys.end (), key) == b_keys.end ()) {
             return 0;
         }
-        JSValue a_val = JS_GetPropertyStr (ctx, a, key.c_str ());
-        JSValue b_val = JS_GetPropertyStr (ctx, b, key.c_str ());
+        // Same rule as the array branch above: a key backed by a throwing
+        // getter is a read that did not happen, not a mismatch.
+        ScopedValue a_val (ctx, JS_GetPropertyStr (ctx, a, key.c_str ()));
+        if (JS_IsException (a_val.get ())) {
+            return -1;
+        }
+        ScopedValue b_val (ctx, JS_GetPropertyStr (ctx, b, key.c_str ()));
+        if (JS_IsException (b_val.get ())) {
+            return -1;
+        }
         path.emplace_back (a_id, b_id);
-        const int same = js_deep_equal (ctx, a_val, b_val, depth + 1, path, zeros);
+        const int same =
+        js_deep_equal (ctx, a_val.get (), b_val.get (), depth + 1, path, zeros);
         path.pop_back ();
-        JS_FreeValue (ctx, a_val);
-        JS_FreeValue (ctx, b_val);
         if (same != 1) {
             return same;
         }
@@ -2843,6 +2887,20 @@ std::string describe_body (const std::string& body) {
     return "'" + body.substr (0, cut) + "...' (" + std::to_string (body.size ()) + " bytes)";
 }
 
+// A number as a message quotes it back. `std::format` gives the shortest
+// spelling that round-trips (`200`, not `200.000000`; `200.5`, not
+// `200.500000`), and the three values it spells in C are given JavaScript's
+// names, because the script author is reading their own source back.
+std::string describe_number (double value) {
+    if (std::isnan (value)) {
+        return "NaN";
+    }
+    if (std::isinf (value)) {
+        return value > 0 ? "Infinity" : "-Infinity";
+    }
+    return std::format ("{}", value);
+}
+
 JSValue js_response_have_status (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 1) {
         return JS_ThrowTypeError (ctx, "status() requires an expected status code");
@@ -2868,13 +2926,27 @@ JSValue js_response_have_status (JSContext* ctx, JSValueConst this_val, int argc
         return JS_UNDEFINED;
     }
 
-    int32_t expected_status;
-    if (JS_ToInt32 (ctx, &expected_status, argv[0]) < 0) {
-        return JS_ThrowTypeError (ctx, "status() expects a number");
+    // A code is compared as the script wrote it. `JS_ToInt32` truncated toward
+    // zero, so `status(200.5)` compared as 200 and passed against a 200 - the
+    // same coercion the string arm above stopped making. No response can carry
+    // a fractional or non-finite code, so an assertion written that way is not
+    // a statement about the response at all; it is refused the way `body(5)` is
+    // rather than reported as a verdict, which would name the status the author
+    // got and leave the mistake in their own text unmentioned.
+    double expected_code = 0;
+    if (JS_ToFloat64 (ctx, &expected_code, argv[0]) < 0) {
+        // The conversion's own error - a Symbol, a `valueOf` that throws - is
+        // the script's, and QuickJS has already named it. A message of ours
+        // here would discard what the author actually wrote.
+        return JS_EXCEPTION;
+    }
+    if (!std::isfinite (expected_code) || std::trunc (expected_code) != expected_code) {
+        return JS_ThrowTypeError (ctx, "status() expects an integer status code, got %s",
+        describe_number (expected_code).c_str ());
     }
 
-    if (data->response->status_code != expected_status) {
-        std::string msg = "Expected status code " + std::to_string (expected_status) +
+    if (static_cast<double> (data->response->status_code) != expected_code) {
+        std::string msg = "Expected status code " + describe_number (expected_code) +
         " but got " + std::to_string (data->response->status_code);
         return throw_assertion_failure (ctx, msg);
     }

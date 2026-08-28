@@ -342,8 +342,9 @@ nlohmann::json get_script_completions () {
     { "detail", "pm.response.to.have.status(code: number | string)" },
     { "documentation",
     "Assert that the response has a specific HTTP status code, or - given a "
-    "string - the reason phrase pm.response.reason() "
-    "answers.\n\nExample:\npm.response.to.have.status(200);\npm.response.to."
+    "string - the reason phrase pm.response.reason() answers. A number that is "
+    "not a whole finite code is refused rather than truncated."
+    "\n\nExample:\npm.response.to.have.status(200);\npm.response.to."
     "have.status('OK');" },
     { "sortText", "1_pm_response_to_have_status" } });
 
