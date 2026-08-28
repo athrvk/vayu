@@ -289,7 +289,9 @@ these:
 .to.equal(v)      .to.eql(v) / .to.eqls(v)             .to.deep.equal(v)
 .to.exist         .to.be.true       .to.be.false
 .to.be.null       .to.be.undefined  .to.be.ok          .to.be.empty
+.to.be.NaN
 .to.be.above(n)   .to.be.below(n)   .to.be.at.least(n) .to.be.at.most(n)
+                  (each takes a number or a Date on both sides, never a coercion)
 .to.be.closeTo(v, delta)            .to.be.oneOf([…])
 .to.be.a(type)    .to.be.an(type)   .to.be.instanceOf(Ctor)
 .to.have.property(name[, v])        .to.have.nested.property('a.b[0].c'[, v])
@@ -297,7 +299,8 @@ these:
 .to.have.keys(…) / .to.have.key(k)  .to.have.members([…])
 .to.include(v)    .to.contain(v)    .to.have.string(sub)
 .to.match(/regex/)                  .to.satisfy(fn)
-.to.throw([msg | /regex/]) / .to.throws(…)
+.to.throw([Ctor | msg | /regex/][, msg | /regex/]) / .to.throws(…)
+                  (a string or pattern is matched against err.message)
 .to.not …         (sets the negation for the rest of the chain; a second
                    .not in one chain is a no-op, not a double negative)
 .deep …           (deep comparison for equal / include / property / members / oneOf)
@@ -310,7 +313,29 @@ these:
 `expect({a:1}).to.equal({a:1})` **fails** - different references - and
 `expect({a:1,b:2}).to.eql({b:2,a:1})` **passes**: key order is not part of deep
 equality. `include`, `property(name, value)`, `members` and `oneOf` compare
-strictly too, unless a `deep` appears in the chain.
+strictly too, unless a `deep` appears in the chain. The one place the two
+libraries Vayu answers for disagree is the pair `+0` / `-0`: `eql` separates
+them (deep-eql's `1/x` rule) while the response assertions in the table above
+compare them equal, because chai-postman runs on lodash `_.isEqual`.
+
+**`include` on an object target is a subset match**, as in chai: every key of
+the argument must be on the target with an equal value. Any target other than a
+string or an array takes an *object* argument, so `expect({a:1}).to.include('a')`
+and `expect(5).to.include('x')` are both a `TypeError` - the combination chai
+refuses rather than answers. Vayu is stricter than chai in three places, each
+because chai's answer there is a silent non-assertion or a quiet wrong verdict:
+an expectation carrying no own enumerable keys is refused (`to.include({})`, a
+`Date`, a `RegExp`, a function - chai passes all of them, in both directions,
+having compared nothing); a getter that throws is reported rather than read as
+"these differ"; and a `Map`, `Set` or boxed `String` target is refused rather
+than answered, since deep equality here does not inspect the first two.
+
+**A wrong-typed value is a `TypeError` where chai raises an `AssertionError`** -
+`expect('5').to.be.above(3)`, `expect(5).to.include('x')`. Deliberate, and the
+same choice `pm.response.to.have.body` made for a wrong-typed argument (#998):
+the rule below is that a mistake in the script text stays a `TypeError` because
+nothing was asserted. Both throw, so a test fails either way; `e.name` is what
+differs.
 
 **The second argument is chai's failure message.** `pm.expect(value, 'context')`
 prefixes `context: ` to whatever the failing matcher reports, so an assertion
@@ -339,7 +364,12 @@ QuickJS has no `AssertionError` class, so this is an `Error` carrying that
 gets, and there is no `AssertionError` global to reference (chai's lives on the
 `chai` module, which Vayu does not ship). **A mistake in the script text stays a
 `TypeError`** - a matcher called with no argument, a name nothing implements -
-because nothing was asserted, the call itself was wrong.
+because nothing was asserted, the call itself was wrong. That covers
+**property-style members too** (issue #999): `pm.expect(x).to.be.NaN` is an
+expression statement, so an unimplemented name used to evaluate to `undefined`
+and report PASS whatever the value was. Every name the chain does not carry -
+a typo, or a chai matcher Vayu lacks (`.finite`, `.sealed`, `.frozen`,
+`.extensible`) - now raises a `TypeError` naming itself.
 
 `have.keys` asserts *exactly* those keys. `Map` / `Set` / typed arrays are
 reported unequal by `eql` rather than compared (their contents are not
@@ -600,7 +630,8 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
 - The `tests["name"] = bool` legacy assertion style (use `pm.test`)
 - Chai matchers outside the list above: `.include.keys` (the subset form),
   `.any.keys`, `.change`/`.increase`/`.decrease`, `.own.property`, `.respondTo`,
-  and the `require()`-able libraries (`chai`, `lodash`, `moment`, …). Each throws
+  the property-style `.finite` / `.sealed` / `.frozen` / `.extensible`, and the
+  `require()`-able libraries (`chai`, `lodash`, `moment`, …). Each throws
   a `TypeError` rather than reporting a pass
 
 ---

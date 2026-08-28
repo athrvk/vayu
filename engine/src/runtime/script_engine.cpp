@@ -562,7 +562,65 @@ struct ExpectState {
     // `create_expectation`'s two-field aggregate init, which assigns this
     // separately, out of -Wmissing-field-initializers.
     std::string message{};
+    // Whether the unknown-member hook is live. `create_expectation` installs
+    // every member first and sets this last, because defining a property looks
+    // up the existing own property, so a hook armed from the moment the object
+    // existed would reject the chain's own members as they are installed.
+    bool armed = false;
 };
+
+// Names the engine itself probes on an arbitrary value. Answering "no own
+// property" for them keeps JSON.stringify and promise resolution working;
+// reporting them as misspelled assertions would make console.log of an
+// assertion object throw. They are not on Object.prototype, so the prototype
+// check below does not cover them.
+constexpr const char* chain_passthrough_members[] = { "toJSON", "then" };
+
+/**
+ * @brief The body every assertion chain's unknown-member hook shares.
+ *
+ * A name the object does not implement is a misspelled or unimplemented
+ * assertion and throws naming @p path; the plumbing a JS runtime probes on an
+ * arbitrary value goes on resolving. Answers QuickJS's `get_own_property`
+ * convention: 0 to continue the normal lookup, -1 with a pending exception.
+ *
+ * One copy for both chains rather than two: `pm.response.to` and
+ * `pm.expect(...)` differ only in how each says it is armed and in the path it
+ * names, and a second copy of the passthrough rules would be the one that
+ * misses the next fix.
+ */
+int report_unknown_chain_member (JSContext* ctx, JSValueConst obj, JSAtom prop, const char* path) {
+    // Symbol keys (Symbol.toPrimitive, Symbol.toStringTag) are plumbing too.
+    JSValue key              = JS_AtomToValue (ctx, prop);
+    const bool is_string_key = JS_IsString (key);
+    JS_FreeValue (ctx, key);
+    if (!is_string_key) {
+        return 0;
+    }
+
+    const char* name_cstr = JS_AtomToCString (ctx, prop);
+    const std::string name (name_cstr ? name_cstr : "<unknown>");
+    JS_FreeCString (ctx, name_cstr);
+
+    for (const char* passthrough : chain_passthrough_members) {
+        if (name == passthrough) {
+            return 0;
+        }
+    }
+
+    // Anything the prototype answers (toString, hasOwnProperty) is not an
+    // assertion either; let the normal lookup continue to it.
+    JSValue proto = JS_GetPrototype (ctx, obj);
+    const int on_proto = JS_IsObject (proto) ? JS_HasProperty (ctx, proto, prop) : 0;
+    JS_FreeValue (ctx, proto);
+    if (on_proto != 0) {
+        return on_proto < 0 ? -1 : 0;
+    }
+
+    const std::string msg = std::string (path) + "." + name + " is not a supported assertion";
+    JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    return -1;
+}
 
 JSClassID expect_class_id = 0;
 
@@ -581,11 +639,46 @@ void expect_gc_mark (JSRuntime* rt, JSValueConst val, JS_MarkFunc* mark_func) {
     }
 }
 
+/**
+ * @brief Turns an unrecognised member of an expectation into a throw.
+ *
+ * `pm.expect(x).to.be.NaN` is an expression statement, so a member nothing
+ * implements evaluates to `undefined` and asserts nothing - the test reports
+ * PASS whatever the value is, which for a matcher that was *meant* to check
+ * something is the worst answer an assertion library can give. `pm.response.to`
+ * has thrown by name since #487; this is the same rule for the other chain, and
+ * it covers every matcher chai has and Vayu does not, present and future, plus
+ * every typo.
+ *
+ * The state's `armed` flag is what keeps `create_expectation` able to install
+ * the chain's own members: defining a property looks the existing one up first,
+ * so a hook live from the moment the object existed would reject them.
+ */
+int expect_unknown_member (JSContext* ctx, JSPropertyDescriptor* desc, JSValueConst obj, JSAtom prop) {
+    (void)desc;
+    const auto* state =
+    static_cast<const ExpectState*> (JS_GetOpaque (obj, expect_class_id));
+    if (!state || !state->armed) {
+        return 0;
+    }
+    return report_unknown_chain_member (ctx, obj, prop, "pm.expect(...)");
+}
+
+// Value-initialized and then assigned rather than written as a designated
+// initializer, for the reason spelled out at `response_chain_exotic`: naming one
+// of the struct's seven hooks leaves the other six as
+// -Wmissing-field-initializers warnings.
+JSClassExoticMethods expect_exotic = [] {
+    JSClassExoticMethods exotic{};
+    exotic.get_own_property = expect_unknown_member;
+    return exotic;
+}();
+
 JSClassDef expect_class = { .class_name = "Expectation",
     .finalizer                          = expect_finalizer,
     .gc_mark                            = expect_gc_mark,
     .call                               = nullptr,
-    .exotic                             = nullptr };
+    .exotic                             = &expect_exotic };
 
 /**
  * @brief Throw a failed assertion the way chai does - as an `AssertionError`.
@@ -789,6 +882,14 @@ constexpr int kDeepEqualMaxDepth = 64;
 // by identity, which is what a cycle is.
 using DeepEqualPath = std::vector<std::pair<void*, void*>>;
 
+// Whether a deep comparison separates `+0` from `-0`, which is the one rule the
+// two libraries Vayu answers for do not share: chai's `.eql` runs on deep-eql,
+// whose number rule is `x === y && (x !== 0 || 1/x === 1/y)`, while the response
+// assertions match chai-postman, which runs on lodash `_.isEqual` and compares
+// the two as equal. Stated by the caller rather than picked once for both, so
+// neither contract has to be the one that is quietly wrong.
+enum class ZeroRule { SameValueZero, Signed };
+
 // Own enumerable string-keyed property names, in insertion order.
 bool js_own_enumerable_keys (JSContext* ctx, JSValueConst obj, std::vector<std::string>& out) {
     JSPropertyEnum* tab = nullptr;
@@ -816,7 +917,7 @@ bool js_own_enumerable_keys (JSContext* ctx, JSValueConst obj, std::vector<std::
 // implementation used: stringify is key-order sensitive ({a:1,b:2} vs {b:2,a:1}
 // compare unequal), silently drops `undefined` members, and cannot see a value
 // it fails to serialise.
-int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, DeepEqualPath& path) {
+int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, DeepEqualPath& path, ZeroRule zeros) {
     if (depth > kDeepEqualMaxDepth) {
         JS_ThrowRangeError (ctx,
         "deep equality gave up after %d levels - the compared values are "
@@ -827,7 +928,18 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
     }
 
     if (js_strict_equal (ctx, a, b)) {
-        return 1;
+        // `+0 === -0`, so strict equality does not settle a signed-zero pair for
+        // a caller reading deep-eql's rule.
+        if (zeros == ZeroRule::SameValueZero || !JS_IsNumber (a)) {
+            return 1;
+        }
+        double lhs = 0, rhs = 0;
+        JS_ToFloat64 (ctx, &lhs, a);
+        JS_ToFloat64 (ctx, &rhs, b);
+        if (lhs != 0) {
+            return 1;
+        }
+        return std::signbit (lhs) == std::signbit (rhs) ? 1 : 0;
     }
 
     // Two NaNs are strictly unequal but deeply equal, as in chai.
@@ -905,7 +1017,7 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
             JSValue a_elem = JS_GetPropertyUint32 (ctx, a, i);
             JSValue b_elem = JS_GetPropertyUint32 (ctx, b, i);
             path.emplace_back (a_id, b_id);
-            const int same = js_deep_equal (ctx, a_elem, b_elem, depth + 1, path);
+            const int same = js_deep_equal (ctx, a_elem, b_elem, depth + 1, path, zeros);
             path.pop_back ();
             JS_FreeValue (ctx, a_elem);
             JS_FreeValue (ctx, b_elem);
@@ -932,7 +1044,7 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
         JSValue a_val = JS_GetPropertyStr (ctx, a, key.c_str ());
         JSValue b_val = JS_GetPropertyStr (ctx, b, key.c_str ());
         path.emplace_back (a_id, b_id);
-        const int same = js_deep_equal (ctx, a_val, b_val, depth + 1, path);
+        const int same = js_deep_equal (ctx, a_val, b_val, depth + 1, path, zeros);
         path.pop_back ();
         JS_FreeValue (ctx, a_val);
         JS_FreeValue (ctx, b_val);
@@ -950,7 +1062,7 @@ int js_compare_for_chain (JSContext* ctx, JSValueConst a, JSValueConst b, bool d
         return js_strict_equal (ctx, a, b) ? 1 : 0;
     }
     DeepEqualPath path;
-    return js_deep_equal (ctx, a, b, 0, path);
+    return js_deep_equal (ctx, a, b, 0, path, ZeroRule::Signed);
 }
 
 JSValue expect_to_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -1111,9 +1223,98 @@ JSValue expect_false (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     return expect_chained (ctx, this_val);
 }
 
-JSValue expect_above (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+/**
+ * @brief The value an ordering matcher compares, or nothing.
+ *
+ * chai orders numbers and Dates, and **type-asserts both sides** rather than
+ * coercing: `expect("5").to.be.above(3)` is an error there, not a pass. Vayu
+ * ran both sides through `ToNumber`, which reads "5" as 5, `true` as 1, `[5]`
+ * as 5 and `null` as 0 - so a comparison the script never meant returned a
+ * verdict, in whichever direction the coercion happened to fall.
+ *
+ * A Date is read as its instant, which is what `ToNumber` on one answers. The
+ * kind comes back with the value because chai compares a number with a number
+ * and a Date with a Date, and refuses the mixed pair rather than reading the
+ * Date as milliseconds.
+ *
+ * @p failed is set when *reading* the value raised, and the exception is left
+ * pending for the caller. That is #959's rule, written 400 lines above for the
+ * deep compare: a value that could not be read must not be reported as "not a
+ * number", because the two are different answers and only one of them is true.
+ */
+enum class OrderingKind { NotOrderable, Number, Date };
+
+struct OrderingValue {
+    OrderingKind kind = OrderingKind::NotOrderable;
+    double value      = 0;
+};
+
+const char* ordering_kind_name (OrderingKind kind) {
+    return kind == OrderingKind::Date ? "a Date" : "a number";
+}
+
+OrderingValue js_ordering_value (JSContext* ctx, JSValueConst value, bool& failed) {
+    OrderingKind kind = OrderingKind::NotOrderable;
+    if (JS_IsNumber (value)) {
+        kind = OrderingKind::Number;
+    } else if (JS_IsObject (value)) {
+        bool tag_failed       = false;
+        const std::string tag = js_class_tag (ctx, value, &tag_failed);
+        if (tag_failed) {
+            failed = true;
+            return {};
+        }
+        if (tag == "[object Date]") {
+            kind = OrderingKind::Date;
+        }
+    }
+    if (kind == OrderingKind::NotOrderable) {
+        return {};
+    }
+
+    OrderingValue out{ kind, 0 };
+    if (JS_ToFloat64 (ctx, &out.value, value) < 0) {
+        failed = true;
+        return {};
+    }
+    return out;
+}
+
+// The four ordering matchers differ in one comparison and one word, so they are
+// one function reached by magic rather than four copies - the type assertion
+// above is the same rule in all four, and a fourth copy of it is the one a later
+// fix would miss.
+struct OrderingMatcher {
+    const char* name;
+    const char* relation;
+};
+constexpr OrderingMatcher ordering_matchers[] = { { "above", "above" },
+    { "below", "below" }, { "least", "at least" }, { "most", "at most" } };
+
+// The magic a matcher is registered with is its index in that table, and this
+// switch reads the same index. A fifth entry appended to the table would run as
+// `at.most` through the default arm and read past the table in the lookup, so
+// the count is asserted here rather than trusted: an ordering matcher that
+// silently answered the wrong comparison is the failure this file exists to
+// stop.
+static_assert (std::size (ordering_matchers) == 4,
+"add an arm to ordering_holds and a case below before growing this table");
+
+bool ordering_holds (size_t which, double actual, double expected) {
+    switch (which) {
+    case 0: return actual > expected;
+    case 1: return actual < expected;
+    case 2: return actual >= expected;
+    case 3: return actual <= expected;
+    default: return false;
+    }
+}
+
+JSValue
+expect_ordering (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    const auto& matcher = ordering_matchers[static_cast<size_t> (magic)];
     if (argc < 1) {
-        return JS_ThrowTypeError (ctx, "above() requires an argument");
+        return JS_ThrowTypeError (ctx, "%s() requires an argument", matcher.name);
     }
 
     auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
@@ -1121,54 +1322,100 @@ JSValue expect_above (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
 
-    double actual, expected;
-    if (JS_ToFloat64 (ctx, &actual, state->actual) < 0 ||
-    JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
-        return JS_ThrowTypeError (ctx, "above() requires numeric values");
+    bool failed                = false;
+    const OrderingValue actual = js_ordering_value (ctx, state->actual, failed);
+    const OrderingValue expected =
+    failed ? OrderingValue{} : js_ordering_value (ctx, argv[0], failed);
+    if (failed) {
+        return JS_EXCEPTION;
+    }
+    if (actual.kind == OrderingKind::NotOrderable) {
+        return JS_ThrowTypeError (ctx, "%s() expects the target to be a number or a Date, got %s",
+        matcher.name, js_type_name (ctx, state->actual));
+    }
+    if (expected.kind == OrderingKind::NotOrderable) {
+        return JS_ThrowTypeError (ctx, "%s() expects a number or a Date, got %s",
+        matcher.name, js_type_name (ctx, argv[0]));
+    }
+    // chai orders like with like: a Date read as milliseconds against a number
+    // is a comparison neither side asked for, so the mixed pair is refused
+    // rather than answered.
+    if (actual.kind != expected.kind) {
+        return JS_ThrowTypeError (ctx,
+        "%s() compares a number with a number and a Date with a "
+        "Date, got %s and %s",
+        matcher.name, ordering_kind_name (actual.kind),
+        ordering_kind_name (expected.kind));
     }
 
-    bool above = actual > expected;
-    bool pass  = state->negated ? !above : above;
+    const bool holds =
+    ordering_holds (static_cast<size_t> (magic), actual.value, expected.value);
+    const bool pass = state->negated ? !holds : holds;
 
     if (!pass) {
-        std::string msg = state->negated ? "Expected " + std::to_string (actual) +
-        " to not be above " + std::to_string (expected) :
-                                           "Expected " +
-        std::to_string (actual) + " to be above " + std::to_string (expected);
+        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
+        (state->negated ? " to not be " : " to be ") + matcher.relation + " " +
+        js_describe (ctx, argv[0]);
         return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
 }
 
-JSValue expect_below (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    if (argc < 1) {
-        return JS_ThrowTypeError (ctx, "below() requires an argument");
+/**
+ * @brief chai's `.include` against an object target: subset matching.
+ *
+ * Every own enumerable key of @p expected must be present on @p target holding
+ * an equal value, by the chain's comparison rule - `include` is strict per key,
+ * `deep.include` deep. Answers 1, 0, or -1 with a pending exception.
+ *
+ * A target that is not an object holds no key, so it matches nothing. That is
+ * the verdict chai reaches for the same pair by a longer route (it runs a
+ * property assertion per key against the primitive), and it keeps this helper
+ * out of `JS_HasProperty` on a value that is not an object.
+ *
+ * The caller has already refused an expectation with no keys, so "every key
+ * matched" is never vacuous here.
+ */
+int expect_object_subset (JSContext* ctx, JSValueConst target, JSValueConst expected, bool deep) {
+    std::vector<std::string> keys;
+    if (!js_own_enumerable_keys (ctx, expected, keys)) {
+        return -1;
+    }
+    if (!JS_IsObject (target)) {
+        return 0;
     }
 
-    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
-    if (!state) {
-        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    for (const auto& key : keys) {
+        JSAtom atom       = JS_NewAtom (ctx, key.c_str ());
+        const int present = JS_HasProperty (ctx, target, atom);
+        JS_FreeAtom (ctx, atom);
+        if (present < 0) {
+            return -1;
+        }
+        if (present == 0) {
+            return 0;
+        }
+
+        // A getter that throws is not a mismatch, it is a read that did not
+        // happen: the exception is left pending and reported, rather than
+        // answered as "these differ" - which under `.not` would have been a
+        // pass. Same rule the deep compare states for a class tag it could not
+        // read (#959).
+        ScopedValue held (ctx, JS_GetPropertyStr (ctx, target, key.c_str ()));
+        if (JS_IsException (held.get ())) {
+            return -1;
+        }
+        ScopedValue wanted (ctx, JS_GetPropertyStr (ctx, expected, key.c_str ()));
+        if (JS_IsException (wanted.get ())) {
+            return -1;
+        }
+        const int same = js_compare_for_chain (ctx, held.get (), wanted.get (), deep);
+        if (same != 1) {
+            return same;
+        }
     }
-
-    double actual, expected;
-    if (JS_ToFloat64 (ctx, &actual, state->actual) < 0 ||
-    JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
-        return JS_ThrowTypeError (ctx, "below() requires numeric values");
-    }
-
-    bool below = actual < expected;
-    bool pass  = state->negated ? !below : below;
-
-    if (!pass) {
-        std::string msg = state->negated ? "Expected " + std::to_string (actual) +
-        " to not be below " + std::to_string (expected) :
-                                           "Expected " +
-        std::to_string (actual) + " to be below " + std::to_string (expected);
-        return throw_expect_failure (ctx, state, msg);
-    }
-
-    return expect_chained (ctx, this_val);
+    return 1;
 }
 
 JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -1214,6 +1461,44 @@ JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValue
             }
             includes = (same == 1);
         }
+    } else if (JS_IsObject (argv[0])) {
+        // chai's `.include` on anything that is not a string, an array or one of
+        // the containers it inspects is subset matching. This branch answered
+        // false for every object pair, so `.include({...})` always failed and
+        // `.not.include({...})` always passed - a verdict, silently, whatever
+        // the target held.
+        //
+        // An expectation with no own enumerable keys is refused rather than
+        // matched. chai walks its keys and, finding none, asserts nothing and
+        // passes in *both* directions; a computed subset that came out empty is
+        // then a green test that compared nothing, which is the defect this
+        // whole change exists to remove. A Date, a RegExp and a function all
+        // land here, and each of them reads as an assertion while carrying no
+        // key to check.
+        std::vector<std::string> keys;
+        if (!js_own_enumerable_keys (ctx, argv[0], keys)) {
+            return JS_EXCEPTION;
+        }
+        if (keys.empty ()) {
+            return JS_ThrowTypeError (ctx,
+            "include() was given %s with no properties to match, "
+            "which would assert nothing",
+            js_describe (ctx, argv[0]).c_str ());
+        }
+
+        const int same =
+        expect_object_subset (ctx, state->actual, argv[0], state->deep);
+        if (same < 0) {
+            return JS_EXCEPTION;
+        }
+        includes = (same == 1);
+    } else {
+        // chai refuses this combination rather than answering it, and so does
+        // this: `expect(5).to.include("x")` asserted nothing here, which under
+        // `.not` is a pass no script author asked for.
+        return JS_ThrowTypeError (ctx,
+        "include() expects an object argument when the target is %s, got %s",
+        js_type_name (ctx, state->actual), js_type_name (ctx, argv[0]));
     }
 
     bool pass = state->negated ? !includes : includes;
@@ -1434,65 +1719,39 @@ JSValue expect_empty_getter (JSContext* ctx, JSValueConst this_val, int argc, JS
     return JS_DupValue (ctx, this_val);
 }
 
+/**
+ * `.NaN` - chai's rule is `value !== value`, which only a NaN number satisfies.
+ *
+ * Deliberately not `ToNumber(value)` is NaN: chai reports `expect("foo").to.be
+ * .NaN` as a failure, and a matcher that coerced would pass for every string
+ * that is not a number. It is a getter rather than a call because chai's is one,
+ * which is exactly why its absence was silent - `.to.be.NaN` on an object with
+ * no such member is an expression statement evaluating to `undefined`.
+ */
+JSValue expect_nan_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    double value      = 0;
+    const bool is_nan = JS_IsNumber (state->actual) &&
+    JS_ToFloat64 (ctx, &value, state->actual) >= 0 && std::isnan (value);
+    const bool pass = state->negated ? !is_nan : is_nan;
+
+    if (!pass) {
+        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
+        (state->negated ? " to not be NaN" : " to be NaN");
+        return throw_expect_failure (ctx, state, msg);
+    }
+
+    return JS_DupValue (ctx, this_val);
+}
+
 // Callable matchers documented in pm-api-compatibility.md but previously absent.
-
-JSValue expect_least (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    if (argc < 1) {
-        return JS_ThrowTypeError (ctx, "least() requires an argument");
-    }
-
-    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
-    if (!state) {
-        return JS_ThrowInternalError (ctx, "Invalid expectation state");
-    }
-
-    double actual, expected;
-    if (JS_ToFloat64 (ctx, &actual, state->actual) < 0 ||
-    JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
-        return JS_ThrowTypeError (ctx, "least() requires numeric values");
-    }
-
-    bool at_least = actual >= expected;
-    bool pass     = state->negated ? !at_least : at_least;
-
-    if (!pass) {
-        std::string msg = "Expected " + std::to_string (actual) +
-        (state->negated ? " to not be at least " : " to be at least ") +
-        std::to_string (expected);
-        return throw_expect_failure (ctx, state, msg);
-    }
-
-    return expect_chained (ctx, this_val);
-}
-
-JSValue expect_most (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    if (argc < 1) {
-        return JS_ThrowTypeError (ctx, "most() requires an argument");
-    }
-
-    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
-    if (!state) {
-        return JS_ThrowInternalError (ctx, "Invalid expectation state");
-    }
-
-    double actual, expected;
-    if (JS_ToFloat64 (ctx, &actual, state->actual) < 0 ||
-    JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
-        return JS_ThrowTypeError (ctx, "most() requires numeric values");
-    }
-
-    bool at_most = actual <= expected;
-    bool pass    = state->negated ? !at_most : at_most;
-
-    if (!pass) {
-        std::string msg = "Expected " + std::to_string (actual) +
-        (state->negated ? " to not be at most " : " to be at most ") +
-        std::to_string (expected);
-        return throw_expect_failure (ctx, state, msg);
-    }
-
-    return expect_chained (ctx, this_val);
-}
+// `least` and `most` are the other two arms of `expect_ordering` above.
 
 JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 1) {
@@ -1777,6 +2036,60 @@ JSValue expect_members (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     return expect_chained (ctx, this_val);
 }
 
+// What chai matches a string or a regular expression against: an `Error`'s
+// `message`, and the thrown value itself for a script that threw something that
+// is not one. `String(err)` - what this used to compare - is "TypeError: bad
+// input", name included, so `.to.throw("Error")` passed for every Error thrown
+// whatever it said, and `.to.throw("TypeError")` passed on a message that
+// merely mentioned the word.
+std::string thrown_message (JSContext* ctx, JSValueConst error) {
+    if (JS_IsObject (error)) {
+        ScopedValue message (ctx, JS_GetPropertyStr (ctx, error, "message"));
+        if (JS_IsString (message.get ())) {
+            return js_to_string (ctx, message.get ());
+        }
+    }
+    // A thrown string is its own message and anything else has none, which is
+    // chai's `check-error.getMessage`. Stringifying the rest instead would make
+    // `.to.throw("4")` pass on `throw 42`.
+    if (JS_IsString (error)) {
+        return js_to_string (ctx, error);
+    }
+    return {};
+}
+
+// A function's `name`, for a message that has to say which constructor it was
+// given. One definition rather than two: `instanceOf` reads it the same way.
+std::string js_function_name (JSContext* ctx, JSValueConst fn) {
+    ScopedValue name (ctx, JS_GetPropertyStr (ctx, fn, "name"));
+    return js_to_string (ctx, name.get ());
+}
+
+// Whether a thrown message satisfies chai's message matcher - a substring or a
+// regular expression. 1 matched, 0 not, -1 with a pending exception.
+int matches_thrown_message (JSContext* ctx, JSValueConst matcher, const std::string& message) {
+    if (JS_IsString (matcher)) {
+        return message.find (js_to_string (ctx, matcher)) != std::string::npos ? 1 : 0;
+    }
+
+    ScopedValue test_fn (ctx,
+    JS_IsObject (matcher) ? JS_GetPropertyStr (ctx, matcher, "test") : JS_UNDEFINED);
+    if (!JS_IsFunction (ctx, test_fn.get ())) {
+        JS_ThrowTypeError (ctx,
+        "throw() accepts an error constructor, a message "
+        "substring or a regular expression");
+        return -1;
+    }
+
+    ScopedValue subject (ctx, JS_NewString (ctx, message.c_str ()));
+    JSValue subject_arg = subject.get ();
+    ScopedValue tested (ctx, JS_Call (ctx, test_fn.get (), matcher, 1, &subject_arg));
+    if (JS_IsException (tested.get ())) {
+        return -1;
+    }
+    return JS_ToBool (ctx, tested.get ()) == 1 ? 1 : 0;
+}
+
 JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
     if (!state) {
@@ -1788,46 +2101,55 @@ JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
 
     JSValue result   = JS_Call (ctx, state->actual, JS_UNDEFINED, 0, nullptr);
     const bool threw = JS_IsException (result);
-    std::string thrown;
-    if (threw) {
-        JSValue exc = JS_GetException (ctx);
-        thrown      = js_to_string (ctx, exc);
-        JS_FreeValue (ctx, exc);
-    }
     JS_FreeValue (ctx, result);
+    ScopedValue thrown (ctx, threw ? JS_GetException (ctx) : JS_UNDEFINED);
+    const std::string message =
+    threw ? thrown_message (ctx, thrown.get ()) : std::string ();
 
-    bool matches = threw;
-    if (threw && argc >= 1 && !JS_IsUndefined (argv[0])) {
-        if (JS_IsString (argv[0])) {
-            matches = thrown.find (js_to_string (ctx, argv[0])) != std::string::npos;
-        } else {
-            JSValue test_fn = JS_GetPropertyStr (ctx, argv[0], "test");
-            if (!JS_IsFunction (ctx, test_fn)) {
-                JS_FreeValue (ctx, test_fn);
-                return JS_ThrowTypeError (ctx,
-                "throw() accepts a message substring or a regular expression");
-            }
-            JSValue subject = JS_NewString (ctx, thrown.c_str ());
-            JSValue tested  = JS_Call (ctx, test_fn, argv[0], 1, &subject);
-            JS_FreeValue (ctx, subject);
-            JS_FreeValue (ctx, test_fn);
-            if (JS_IsException (tested)) {
-                JS_FreeValue (ctx, tested);
-                return JS_EXCEPTION;
-            }
-            matches = JS_ToBool (ctx, tested) == 1;
-            JS_FreeValue (ctx, tested);
+    bool matches      = threw;
+    int matcher_index = 0;
+    // chai reads a function argument as the error constructor the throw must be
+    // an instance of, and takes an optional message matcher after it. Vayu
+    // refused a constructor outright ("accepts a message substring or a regular
+    // expression"), so `expect(fn).to.throw(TypeError)` - ordinary chai, and
+    // what imported scripts carry - was an error rather than an assertion.
+    if (threw && argc >= 1 && JS_IsFunction (ctx, argv[0])) {
+        const int is_instance = JS_IsInstanceOf (ctx, thrown.get (), argv[0]);
+        if (is_instance < 0) {
+            return JS_EXCEPTION;
         }
+        matches       = (is_instance == 1);
+        matcher_index = 1;
+    }
+
+    // The message matcher, whether it is the only argument or the one after a
+    // constructor. A second argument is read rather than dropped: a script that
+    // states the message means it to be checked.
+    if (matches && argc > matcher_index && !JS_IsUndefined (argv[matcher_index])) {
+        const int matched = matches_thrown_message (ctx, argv[matcher_index], message);
+        if (matched < 0) {
+            return JS_EXCEPTION;
+        }
+        matches = (matched == 1);
     }
 
     const bool pass = state->negated ? !matches : matches;
     if (!pass) {
+        // The message names what was expected, because with an argument the
+        // bare form contradicts itself: "expected the function to throw, but it
+        // threw RangeError: bad" reads as an engine fault when what failed was
+        // the constructor the script named.
         std::string msg = state->negated ?
         "Expected the function to not throw" :
         "Expected the function to throw";
-        if (threw) {
-            msg += ", but it threw " + thrown;
+        if (matcher_index == 1) {
+            msg += " " + js_function_name (ctx, argv[0]);
         }
+        if (argc > matcher_index && !JS_IsUndefined (argv[matcher_index])) {
+            msg += " with a message matching " + js_describe (ctx, argv[matcher_index]);
+        }
+        msg += threw ? ", but it threw " + js_to_string (ctx, thrown.get ()) :
+                       ", but it did not throw";
         return throw_expect_failure (ctx, state, msg);
     }
 
@@ -1851,9 +2173,7 @@ JSValue expect_instance_of (JSContext* ctx, JSValueConst this_val, int argc, JSV
 
     const bool pass = state->negated ? (is_instance == 0) : (is_instance == 1);
     if (!pass) {
-        JSValue name_val            = JS_GetPropertyStr (ctx, argv[0], "name");
-        const std::string ctor_name = js_to_string (ctx, name_val);
-        JS_FreeValue (ctx, name_val);
+        const std::string ctor_name = js_function_name (ctx, argv[0]);
         const std::string msg = "Expected " + js_describe (ctx, state->actual) +
         (state->negated ? " to not be an instance of " : " to be an instance of ") + ctor_name;
         return throw_expect_failure (ctx, state, msg);
@@ -2024,9 +2344,9 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
         JSCFunction* fn;
     };
     const TerminalGetter terminals[] = { { "exist", expect_exist },
-        { "true", expect_true }, { "false", expect_false },
-        { "null", expect_null_getter }, { "undefined", expect_undefined_getter },
-        { "ok", expect_ok_getter }, { "empty", expect_empty_getter } };
+        { "true", expect_true }, { "false", expect_false }, { "null", expect_null_getter },
+        { "undefined", expect_undefined_getter }, { "ok", expect_ok_getter },
+        { "empty", expect_empty_getter }, { "NaN", expect_nan_getter } };
     for (const auto& t : terminals) {
         JSAtom atom = JS_NewAtom (ctx, t.name);
         JS_DefinePropertyGetSet (
@@ -2056,10 +2376,13 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     ctx, obj, "satisfy", JS_NewCFunction (ctx, expect_satisfy, "satisfy", 1));
     JS_SetPropertyStr (
     ctx, obj, "string", JS_NewCFunction (ctx, expect_string, "string", 1));
-    JS_SetPropertyStr (ctx, obj, "above", JS_NewCFunction (ctx, expect_above, "above", 1));
-    JS_SetPropertyStr (ctx, obj, "below", JS_NewCFunction (ctx, expect_below, "below", 1));
-    JS_SetPropertyStr (ctx, obj, "least", JS_NewCFunction (ctx, expect_least, "least", 1));
-    JS_SetPropertyStr (ctx, obj, "most", JS_NewCFunction (ctx, expect_most, "most", 1));
+    int ordering_magic = 0;
+    for (const auto& matcher : ordering_matchers) {
+        JS_SetPropertyStr (ctx, obj, matcher.name,
+        JS_NewCFunctionMagic (ctx, expect_ordering, matcher.name, 1,
+        JS_CFUNC_generic_magic, ordering_magic));
+        ordering_magic++;
+    }
     JS_SetPropertyStr (
     ctx, obj, "include", JS_NewCFunction (ctx, expect_include, "include", 1));
     JS_SetPropertyStr (
@@ -2074,6 +2397,9 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     JS_SetPropertyStr (ctx, obj, "property",
     JS_NewCFunction (ctx, expect_have_property, "property", 2));
 
+    // Last, once every member above is in place: from here a name this object
+    // does not carry is a throw rather than `undefined`.
+    state->armed = true;
     return obj;
 }
 
@@ -2678,7 +3004,7 @@ JSValue js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, 
     }
 
     DeepEqualPath path;
-    const int same = js_deep_equal (ctx, json, argv[0], 0, path);
+    const int same = js_deep_equal (ctx, json, argv[0], 0, path, ZeroRule::SameValueZero);
     JS_FreeValue (ctx, json);
     if (same < 0) {
         return JS_EXCEPTION;
@@ -2751,7 +3077,8 @@ JSValue js_response_have_jsonBody (JSContext* ctx, JSValueConst this_val, int ar
     // silent false pass #998 was filed for.
     if (argc >= 2) {
         DeepEqualPath path;
-        const int same = js_deep_equal (ctx, current, argv[1], 0, path);
+        const int same =
+        js_deep_equal (ctx, current, argv[1], 0, path, ZeroRule::SameValueZero);
         if (same < 0) {
             JS_FreeValue (ctx, current);
             JS_FreeValue (ctx, json);
@@ -2882,13 +3209,6 @@ JSValue js_response_be_with_body (JSContext* ctx, JSValueConst this_val, int arg
 // the hook runs, so it only ever sees names nothing implements.
 JSClassID response_chain_class_id = 0;
 
-// Names the engine itself probes on an arbitrary value. Answering "no own
-// property" for them keeps JSON.stringify and promise resolution working;
-// reporting them as misspelled assertions would make console.log(pm.response)
-// throw. They are not on Object.prototype, so the prototype check below does
-// not cover them.
-constexpr const char* response_chain_passthrough[] = { "toJSON", "then" };
-
 int response_chain_unknown_member (JSContext* ctx,
 JSPropertyDescriptor* desc,
 JSValueConst obj,
@@ -2905,36 +3225,7 @@ JSAtom prop) {
         return 0;
     }
 
-    // Symbol keys (Symbol.toPrimitive, Symbol.toStringTag) are plumbing too.
-    JSValue key              = JS_AtomToValue (ctx, prop);
-    const bool is_string_key = JS_IsString (key);
-    JS_FreeValue (ctx, key);
-    if (!is_string_key) {
-        return 0;
-    }
-
-    const char* name_cstr = JS_AtomToCString (ctx, prop);
-    const std::string name (name_cstr ? name_cstr : "<unknown>");
-    JS_FreeCString (ctx, name_cstr);
-
-    for (const char* passthrough : response_chain_passthrough) {
-        if (name == passthrough) {
-            return 0;
-        }
-    }
-
-    // Anything the prototype answers (toString, hasOwnProperty) is not an
-    // assertion either; let the normal lookup continue to it.
-    JSValue proto = JS_GetPrototype (ctx, obj);
-    const int on_proto = JS_IsObject (proto) ? JS_HasProperty (ctx, proto, prop) : 0;
-    JS_FreeValue (ctx, proto);
-    if (on_proto != 0) {
-        return on_proto < 0 ? -1 : 0;
-    }
-
-    const std::string msg = std::string (path) + "." + name + " is not a supported assertion";
-    JS_ThrowTypeError (ctx, "%s", msg.c_str ());
-    return -1;
+    return report_unknown_chain_member (ctx, obj, prop, path);
 }
 
 // Value-initialized and then assigned rather than written as a designated
@@ -6415,12 +6706,15 @@ void setup_pm_object (JSContext* ctx) {
     JSValue pm     = JS_NewObject (ctx);
 
     // A class registered with JS_NewClass has no prototype until one is set, so
-    // without this the pm.response.to.* objects would answer nothing but their
-    // own members - toString, hasOwnProperty and friends would reach the
-    // unknown-member hook and throw.
+    // without this the pm.response.to.* and pm.expect(...) objects would answer
+    // nothing but their own members - toString, hasOwnProperty and friends would
+    // reach the unknown-member hook and throw. Both chains are armed, so both
+    // need it; `JS_SetClassProto` takes ownership of the value it is given, so
+    // the first call gets a reference of its own.
     JSValue plain        = JS_NewObject (ctx);
     JSValue object_proto = JS_GetPrototype (ctx, plain);
     JS_FreeValue (ctx, plain);
+    JS_SetClassProto (ctx, expect_class_id, JS_DupValue (ctx, object_proto));
     JS_SetClassProto (ctx, response_chain_class_id, object_proto);
 
     // `pm.request.url` inherits from **String.prototype**, which is the whole

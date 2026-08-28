@@ -213,7 +213,13 @@ engine/
   translation unit. `docs/engine/building.md` carries the command.
 - Formatter: clang-format, **19 exactly** (`.clang-format` at repo root; the
   version is pinned because 39 of the 285 engine sources format differently
-  under 18). **A difference is a failure now** (#886): the `Engine formatting`
+  under 18). **A patch-level difference inside 19 is enough to matter**: Ubuntu
+  24.04's 19.1.1 and the CI runner's later 19.1.x disagree about three
+  continuation lines in `script_engine.cpp`, so `clang-format -i` over a whole
+  file rewrites regions the change never touched and the gate fails on them.
+  Format, then read `git diff` for reindentation you did not intend and put it
+  back - the tree as committed is what CI's binary accepts.
+  **A difference is a failure now** (#886): the `Engine formatting`
   job in `pr-tests.yml` runs `--dry-run -Werror` over the whole of
   `engine/{src,include,tests}` - whole tree, unlike the clang-tidy gate, because
   the bulk-format commit left no backlog to grandfather. `scripts/pre-commit`
