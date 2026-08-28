@@ -61,6 +61,7 @@ jobs:
     outputs:
       code: ${{ steps.code.outputs.code }}
       app: ${{ steps.area.outputs.app }}
+      app_doc_fixtures: ${{ steps.area.outputs.app_doc_fixtures }}
       engine: ${{ steps.area.outputs.engine }}
       installer: ${{ steps.area.outputs.installer }}
       build_script: ${{ steps.area.outputs.build_script }}
@@ -177,6 +178,25 @@ jobs:
               # bare one covers a root-level file, the `**/` one covers nested.
               - '!*.md'
               - '!**/*.md'
+            # The two pages `script-typedefs.docs-compile.test.ts` compiles.
+            # They are prose, so `!**/*.md` above rejects them and `code`
+            # rejects them twice over (`!docs/**` *and* `!**/*.md`) - and they
+            # are also app test *input*, in the same sense
+            # `engine/tests/fixtures/script-typedefs.d.ts` is, so editing one
+            # can turn `pnpm test` red exactly the way a source file can. A gate
+            # whose own inputs cannot trigger it is #887's defect again (#1118),
+            # so they get their own union, ORed into the `app` job's condition
+            # below. Not folded into `app` above: an exclusion in
+            # `some-with-excludes` is final, so a positive rule listed after
+            # `!**/*.md` is dead - it cannot include back what a `!` rejected.
+            #
+            # This list is not free-standing. `DOC_PATHS` in that test names the
+            # same two files, and `routes every page it compiles` there fails if
+            # the two lists disagree - adding a third page to the guard is red
+            # until it is routed here as well.
+            app_doc_fixtures:
+              - 'docs/engine/scripting.md'
+              - 'docs/app/pm-api-compatibility.md'
             engine:
               - 'engine/**'
               - 'VERSION'
@@ -214,7 +234,7 @@ jobs:
               - 'scripts/pre-commit'
               - '.github/workflows/pr-tests.yml'
 
-      # The routing, said out loud. Every job below is gated on these five
+      # The routing, said out loud. Every job below is gated on these six
       # booleans, and until this step existed the only way to answer "why did
       # the engine matrix run on a change that touched no engine source" was to
       # re-evaluate the globs by hand - which is how the doc-routing defect
@@ -294,7 +314,15 @@ jobs:
     name: App on ${{ matrix.os }}${{ matrix.shard && format(' (shard {0})', matrix.shard) || '' }}
     runs-on: ${{ matrix.os }}
     needs: changes
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true'
+    # The second clause is the one job the doc fixtures need: this is where
+    # `pnpm test` runs, so it is where the guard that compiles them runs. It is
+    # an OR rather than another entry in `app` because `code` rejects a
+    # documentation path too, and `code && app` would answer false on the `code`
+    # half however the area filter were written. `quality` deliberately keeps
+    # the plain condition - eslint reads TS/TSX, prettier's domain is `app/` and
+    # tsc reads neither page, so nothing it runs can change colour over a
+    # Markdown edit.
+    if: (needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true') || needs.changes.outputs.app_doc_fixtures == 'true'
     permissions:
       contents: read
     strategy:
