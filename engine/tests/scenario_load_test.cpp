@@ -1079,9 +1079,16 @@ TEST_F (ScenarioLoadTest, AQuoteBearingCellReachesTheWireAsValidJson) {
 }
 
 // Issue #995, on the scenario path and across virtual users: every send
-// generates its own value, and the sends are on the executor's worker threads,
-// so a generator with shared unsynchronised state would show up here as a
-// repeated or torn id rather than as a clean set.
+// generates its own value, so an id shared between two virtual users' iterations
+// - or between two iterations of one - shows up here as a short set rather than
+// as eight distinct paths.
+//
+// What this does *not* test is a data race, and the distinction is worth
+// keeping: a run binds on its own driver thread, which is the event loop's sole
+// producer, so the generators run there rather than on the transfer workers.
+// Two runs at once are two driver threads, and what makes that safe is the
+// `thread_local` engine `request_composer.cpp`'s table has always drawn from -
+// unchanged here, and already load-bearing for concurrent `POST /compose`.
 TEST_F (ScenarioLoadTest, EveryIterationOfEveryUserGeneratesItsOwnValue) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/row/{{$randomUUID}}") });
