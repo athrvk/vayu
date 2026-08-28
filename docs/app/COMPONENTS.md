@@ -1385,10 +1385,28 @@ substitution that does not happen. `referencedVariables` (`lib/referenced-variab
 now returns each name with the syntax that found it - `pm` or `template` - and
 `pm` wins when a name is written both ways, because the script does read it.
 Template chips are muted, spelled `{{name}}`, and carry `TEMPLATE_IN_SCRIPT_NOTE`
-as their tooltip; `pm` chips keep the resolved/unresolved pair. The collection's
-Pre-request and Post-request tabs (`CollectionDetail/ScriptTab`) read the same
-helper and follow the same rule - they had also printed every name as `{{name}}`,
-including the ones the script reads through `pm`.
+as their tooltip; `pm` chips keep the resolved/unresolved pair, except for the
+column reads below. The collection's Pre-request and Post-request tabs
+(`CollectionDetail/ScriptTab`) read the same helper and split `pm` from
+`template` the same way - they had also printed every name as `{{name}}`,
+including the ones the script reads through `pm`. They do **not** paint the
+column tones: that half is the request panel's alone (issue #1075).
+
+**A reference carries what its accessor can see, not only how it was spelled**
+(issue #1063). `referencedVariables` matched three accessors and left
+`pm.variables` and `pm.iterationData` out, so a name read through either was
+chipped nowhere at all - the quiet half of the written-but-never-read defect,
+and the half no colour assertion catches. Each reference now also carries a
+`reads` of `scope`, `merged` or `row`, because since #1007 a bound row answers
+bare column names through `pm.variables`: the same name through
+`pm.environment.get` is a variable read and through `pm.variables.get` may be a
+column one, so the syntax alone can no longer decide what a chip may claim. The
+decision is `describeColumnReference`'s, beside the helper, and it resolves to
+`describeDataToken`'s own tones - a `row` read is a column in every state it can
+be in, including "no contract declared", while a `merged` read is a column only
+while the name is a declared column no scope defines, which is the line
+`VariableInput` already draws for a bare `{{email}}`. Everything else keeps the
+paint it had.
 
 **A run-time token receives pointer events; the overlay does not.** The overlay
 is `pointer-events: none` so clicks reach the transparent input underneath and

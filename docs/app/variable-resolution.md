@@ -241,10 +241,16 @@ run with a mismatched file is still the user's to start. Declared columns are
 also completed: `{{data.` offers them in the request fields and the body editors,
 and `pm.iterationData.get("` offers them in the script editors (see below).
 
-The script panel's **"Referenced:" chips** read the same three states (issue
-#604). They used to paint a name red whenever no scope defined it, which for a
-`data.*` name is always - the reading that made a working column look broken in
-a row whose whole job is to say whether a name resolves.
+The script panel's **"Names mentioned:" chips** read the same three states
+(issue #604). They used to paint a name red whenever no scope defined it, which
+for a `data.*` name is always - the reading that made a working column look
+broken in a row whose whole job is to say whether a name resolves. A column
+reached by its **bare** name gets that same paint (issue #1063): a script reads
+one through `pm.iterationData.get("email")`, or through `pm.variables.get("email")`
+while no scope defines `email`, and both are the column `{{data.email}}` names.
+The accessor is what decides, not the spelling - `pm.environment.get("email")`
+cannot see the row whatever the collection declares, so it stays an ordinary
+variable chip.
 
 The **audit** in the Data tab is the same comparison in the other direction -
 the declared columns against the tokens the collection's requests actually
@@ -736,7 +742,8 @@ Three rules make the offered set match what the call can actually read:
 - **The accessor picks the scope.** `pm.environment.get` lists environment
   variables only, because that is the one scope it reads - a collection
   variable offered there would be a name that returns `undefined`. Only the
-  merged `pm.variables.get` lists all three.
+  merged `pm.variables.get` lists all three, and it alone also lists the
+  declared columns (below), because it alone reads both.
 - **Collection variables come from the active tab.** Collection scope is
   explicit-only (see *Collection scope is explicit only* above) and a Monaco
   completion provider is registered once per *language*, not per editor, so it
@@ -760,6 +767,18 @@ Three rules make the offered set match what the call can actually read:
   surface is `undefined` outside a data-driven run or a send-with-row, and its own documentation
   tells scripts to guard before calling. Nothing is offered when the chain
   declares no contract.
+- **`pm.variables` completes both, because it reads both.** A bound row answers
+  bare column names through the merged accessor, above every scope (issue
+  #1007), so the declared columns are blended into its list beside the
+  variables (issue #1063) - as bare names inside `get("…")` / `has("…")`, and
+  as `{{column}}` tokens inside `replaceIn`, which resolves them from the same
+  row. They carry the field icon and name their declaring collection, so a
+  column is distinguishable from a variable at a glance, and a name that is
+  both is offered twice on purpose: the row wins while one is bound and the
+  scope answers when none is. The single-scope accessors never see the row, so
+  no column is offered there. The prefixed `{{data.column}}` spelling is not in
+  this list: `pm.variables.get` does not read it at all, and it is completed
+  where its own accessor is.
 - **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a
   template and interpolates it, so it gets brace-style completion including
   `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no

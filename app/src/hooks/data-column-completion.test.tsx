@@ -191,13 +191,63 @@ describe('`pm.iterationData.get("` in a script', () => {
 		expect(inScript('pm.iterationData.get("')).toEqual([]);
 	});
 
-	it("does not bleed into a variable accessor, whose names are a different set", () => {
+	it("does not bleed into a single-scope accessor, whose names are a different set", () => {
 		contract.current = declared;
 		// `pm.environment.get("email")` reads the environment; a column offered
 		// there is a name that returns `undefined` at run time.
 		expect(inScript('pm.environment.get("')).toEqual([]);
-		// `replaceIn` interpolates variables, and the data pass is a different
-		// pass over the composed request - a column is not one of its names.
-		expect(inScript('pm.variables.replaceIn("{{').map((s) => s.label)).not.toContain("email");
+		expect(inScript("pm.globals.get('")).toEqual([]);
+		expect(inScript('pm.collectionVariables.get("')).toEqual([]);
+	});
+});
+
+/**
+ * The merged accessor's list is the union of both sources (issue #1063).
+ *
+ * `pm.variables` is the one accessor that reads a bound row's bare column names
+ * *and* the three scopes (issue #1007), so a column is genuinely one of the
+ * names it can return - and it was the only such name the list withheld, which
+ * makes a declared column something you have to already know to use.
+ */
+describe('`pm.variables.get("` in a script', () => {
+	it("offers the declared columns, which the call really can return", () => {
+		contract.current = declared;
+		expect(inScript('pm.variables.get("').map((s) => s.label)).toEqual(["id", "email"]);
+	});
+
+	it("offers them to `.has` and to a guarded call too", () => {
+		contract.current = declared;
+		expect(inScript("pm.variables.has('").map((s) => s.label)).toEqual(["id", "email"]);
+		expect(inScript('pm.variables?.get("').map((s) => s.label)).toEqual(["id", "email"]);
+	});
+
+	it("inserts a bare name - the argument is a name, not a template", () => {
+		contract.current = declared;
+		const column = inScript('pm.variables.get("').find((s) => s.label === "email")!;
+		expect(column.insertText).toBe("email");
+		expect(column.detail).toContain("Checkout flow");
+	});
+
+	it("offers nothing extra when the chain declares no contract", () => {
+		contract.current = undefined;
+		expect(inScript('pm.variables.get("')).toEqual([]);
+	});
+
+	/*
+	 * `replaceIn` resolves a bare `{{email}}` from the bound row through the same
+	 * `resolve_template_with_data` the merged `get` reads (issue #1007), so its
+	 * list carries the columns too - as tokens, because that argument is a
+	 * template. This case asserted the opposite until #1063: it was written at
+	 * #600, when the row answered only `{{data.*}}` and a bare column really was
+	 * not one of `replaceIn`'s names.
+	 */
+	it("offers them to replaceIn as tokens, which is what that argument takes", () => {
+		contract.current = declared;
+		const column = inScript('pm.variables.replaceIn("{{').find((s) => s.label === "email");
+		expect(column, "replaceIn resolves a bare column from the bound row").toBeTruthy();
+		// Braces on both, the way every other entry in *this* list spells them -
+		// they share one `wrap`, so a column cannot drift from a variable here.
+		expect(column!.insertText).toBe("{{email}}");
+		expect(column!.filterText).toBe("{{email}}");
 	});
 });
