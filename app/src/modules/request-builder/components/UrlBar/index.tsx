@@ -49,7 +49,6 @@
 import { useEffect, useState } from "react";
 
 import { useRequestBuilderContext } from "../../context";
-import { useSendWithRow } from "../../hooks/useSendWithRow";
 import { useDashboardStore, useTabsStore } from "@/stores";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { formatChord, type Chord } from "@/lib/platform";
@@ -101,42 +100,12 @@ export default function UrlBar() {
 		executeRequest,
 		startLoadTest,
 		canStartLoadTest,
-		dataColumns,
-		dataFileMaxRows,
+		sendWithRow: rows,
+		lastRowIndex,
+		rememberRowIndex,
 	} = useRequestBuilderContext();
 	const isLoadTestRunning = useDashboardStore((s) => s.isStreaming);
 	const openTab = useTabsStore((s) => s.openTab);
-
-	/*
-	 * Send-with-row (issue #601): the rows this request could bind, and the one
-	 * it was last sent with.
-	 *
-	 * The index lives here, in plain state, because it is a property of *this
-	 * editing session* - "the row I am iterating on" - and not of the request.
-	 * Persisting it would point a saved number at a file whose rows are
-	 * deliberately not saved, so a later session would bind a different row
-	 * under the same index.
-	 *
-	 * Keyed by request, though (issue #659 item 1). Switching request tabs does
-	 * not remount this component - `Shell` renders `<RequestBuilder />` at the
-	 * same position for every request tab, so React keeps the instance and its
-	 * state - and a single number therefore followed the user from one request
-	 * to the next. The highlight, and the row a re-send would bind, belonged to
-	 * whichever request happened to pick one last. A map is the fix "per
-	 * request" always meant; it is still session-lived, and still thrown away
-	 * with the builder.
-	 */
-	const rows = useSendWithRow(dataColumns, dataFileMaxRows);
-	const [rowIndexByRequest, setRowIndexByRequest] = useState<Record<string, number>>({});
-	/*
-	 * An unsaved request has no id and cannot be switched away from and back to
-	 * as itself, so every one of them shares this key. They can never collide:
-	 * a request tab holds exactly one draft.
-	 */
-	const rowMemoryKey = request.id ?? "__unsaved__";
-	const lastRowIndex = rowIndexByRequest[rowMemoryKey] ?? null;
-	const rememberRowIndex = (index: number) =>
-		setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index }));
 
 	/*
 	 * A step of a collection run pointed here (issue #730): "Repro row 501"
@@ -163,13 +132,10 @@ export default function UrlBar() {
 		/* eslint-disable-next-line react-hooks/set-state-in-effect -- the target
 		   is state handed over from a navigation, not derived from a prop: it
 		   arrives before this tab renders and is consumed once. */
-		setRowIndexByRequest((previous) => ({
-			...previous,
-			[dataRowTarget.requestId]: dataRowTarget.rowIndex,
-		}));
+		rememberRowIndex(dataRowTarget.rowIndex);
 		if (canBindRows) setRowMenuOpen(true);
 		clearDataRowTarget();
-	}, [dataRowTarget, request.id, canBindRows, clearDataRowTarget]);
+	}, [dataRowTarget, request.id, canBindRows, clearDataRowTarget, rememberRowIndex]);
 
 	const canExecute = !isExecuting && request.url.trim().length > 0;
 	const viewRunningTest = () => openTab({ type: "dashboard", entityId: null });

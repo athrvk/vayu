@@ -11,9 +11,15 @@
  * Provides functions to resolve {{variables}} in strings using the current
  * variable context (globals, collection chain, active environment).
  *
- * Resolution priority (highest wins): Environment > Collection chain (leaf → root) > Global
+ * Resolution priority (highest wins): Bound data row (bare column names, only
+ * while one is picked) > Environment > Collection chain (leaf → root) > Global
  * Within the collection chain, variables closer to the leaf override those closer to the root.
  * Cached per (collectionId, environmentId) via useMemo.
+ *
+ * The row tier is the one a caller opts into with `boundRow` (issue #1062).
+ * Without it the preview is composition's, where a bound column keeps its
+ * braces for the per-row bind; with it the preview is composition *and* that
+ * bind, which is what a Send-with-row actually puts on the wire.
  *
  * A `{{$name}}` nothing defines is generated from the dynamic-variable table
  * (`lib/dynamic-variables.ts`) rather than looked up - see `resolveString`.
@@ -39,11 +45,26 @@ import { walkAncestors } from "@/modules/collections/tree-utils";
 import {
 	coerceVariableValue,
 	isEnabledDefinition,
+	renderDataValue,
 	resolveTemplate,
+	resolveTemplateWithRow,
+	type DataRowCells,
 } from "@/lib/variable-resolution";
+import type { DataFileRow } from "@/services/data-files";
 
 interface UseVariableResolverOptions {
 	collectionId?: string;
+	/**
+	 * The data row this preview is bound to, if one is picked (issue #1062).
+	 *
+	 * Only a Send-with-row has one. Composition never does - a payload is
+	 * composed once and a row is bound per iteration - so a caller without one
+	 * previews exactly what it always did, and the token a run will bind keeps
+	 * its braces. A caller *with* one previews the bind as well as the
+	 * composition, which is the whole difference: the row's cell answers a bare
+	 * column name above the environment, as it will on the wire.
+	 */
+	boundRow?: DataFileRow;
 }
 
 interface UseVariableResolverReturn {
@@ -200,6 +221,20 @@ export function useVariableResolver(
 	);
 
 	/**
+	 * The bound row's cells as the text each substitutes, rendered once rather
+	 * than per token. Undefined - not an empty map - when no row is bound, so
+	 * `resolveString` below can tell "no row" from "a row with no columns".
+	 */
+	const boundRow = options?.boundRow;
+	const rowCells = useMemo<DataRowCells | undefined>(
+		() =>
+			boundRow
+				? new Map(Object.entries(boundRow).map(([column, cell]) => [column, renderDataValue(cell)]))
+				: undefined,
+		[boundRow]
+	);
+
+	/**
 	 * Scopes first, then the dynamic-variable table.
 	 *
 	 * The order is the compatible one: a collection that already defines a
@@ -214,10 +249,18 @@ export function useVariableResolver(
 	 * it visible in the request, and `EditableVariable` keeps painting the token
 	 * as unresolved. Since issue #1009 an ordinary unknown name is the same
 	 * rule - the preview shows the token the engine will send.
+	 *
+	 * With a row bound the preview is the bind as well as the composition
+	 * (issue #1062): the row's cell answers a bare column name above every
+	 * scope, and `{{data.column}}` answers from the same row, because they are
+	 * one bind and the send would be a lie about the other one.
 	 */
 	const resolveString = useCallback(
-		(input: string): string => resolveTemplate(input, (name) => variableMap[name]?.value),
-		[variableMap]
+		(input: string): string =>
+			rowCells
+				? resolveTemplateWithRow(input, (name) => variableMap[name]?.value, rowCells)
+				: resolveTemplate(input, (name) => variableMap[name]?.value),
+		[variableMap, rowCells]
 	);
 
 	const resolveObject = useCallback(
