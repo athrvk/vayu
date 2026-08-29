@@ -8,6 +8,7 @@
  */
 
 #include <chrono>
+#include <cstdint>
 #include <expected>
 #include <functional>
 #include <memory>
@@ -127,7 +128,7 @@ struct TrashOutcome {
 /// Why a restore did not happen. `NotFound` is a 404 - nothing in the trash
 /// carries that id; `OwnerGone` is a 409 - a request whose collection is itself
 /// deleted or missing, which has no root to come back to.
-enum class RestoreRefusal { NotFound, OwnerGone };
+enum class RestoreRefusal : std::uint8_t { NotFound, OwnerGone };
 
 /// A refused restore, as the route reports it (issue #988).
 struct RestoreFailure {
@@ -793,7 +794,7 @@ class Database {
 
         private:
         Database& db_;
-        bool held_;
+        bool held_ = false;
     };
 
     // Config Entries - Structured configuration with metadata

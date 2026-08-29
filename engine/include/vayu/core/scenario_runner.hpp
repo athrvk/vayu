@@ -203,7 +203,7 @@ struct ScenarioStepIndex {
 
 /** Where a `setNextRequest` target points, or why it points nowhere. */
 struct NextStepResolution {
-    enum class Kind {
+    enum class Kind : std::uint8_t {
         Unresolved,  ///< Nothing answers to the target; `error` says why.
         Step,        ///< Continue the iteration at `index`.
         EndIteration ///< The target was the stop form; this iteration is over.

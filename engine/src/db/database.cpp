@@ -2772,7 +2772,7 @@ int64_t prune_backup_files (const fs::path& directory, int keep) {
 
 } // namespace
 
-Database::BackupSlot::BackupSlot (Database& db) : db_ (db), held_ (false) {
+Database::BackupSlot::BackupSlot (Database& db) : db_ (db) {
     bool expected = false;
     held_ = db_.impl_->backup_running.compare_exchange_strong (expected, true);
 }

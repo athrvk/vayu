@@ -570,7 +570,11 @@ struct MockConfig {
  * route table's answer.
  *
  * A free function rather than the handler lambda itself so the responder each
- * listener installs is one line, and this reads as what a mock answers with.
+ * listener installs stays small, and this reads as what a mock answers with.
+ *
+ * **Reads the method and the path only.** It is installed as a pre-routing
+ * handler (see `MockServerManager::start`), which cpp-httplib runs before it
+ * reads the request body - `req.body` is empty here whatever the client sent.
  */
 void serve_mock_request (const MockConfig& mock,
 const httplib::Request& req,
@@ -672,20 +676,34 @@ const MockStartRequest& request) {
     [] (const MockRoute& route) { return !route.has_response; }));
 
     MockServer* raw = server.get ();
-    httplib::Server::Handler responder =
-    [config = MockConfig{ server->latency_ms, server->error_rate_pct,
-     raw->routes, raw->served }] (const httplib::Request& req,
-    httplib::Response& res) { serve_mock_request (config, req, res); };
 
     httplib::Server& svr = server->listener.server ();
     // Every method cpp-httplib routes, on every path: the route table decides
-    // what answers, not httplib's own matcher.
-    svr.Get (".*", responder); // also serves HEAD
-    svr.Post (".*", responder);
-    svr.Put (".*", responder);
-    svr.Patch (".*", responder);
-    svr.Delete (".*", responder);
-    svr.Options (".*", responder);
+    // what answers, not httplib's own matcher. A pre-routing handler is how
+    // that stays true, rather than the `.*` route per method it replaces:
+    // since cpp-httplib 0.53.1 a regex route refuses outright any path longer
+    // than CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH (256) before it reaches
+    // std::regex_match, so `.*` turned a long mocked path into a 404 that
+    // never saw `resolve_mock_route` (issue #1139). Raising that limit is the
+    // wrong lever: `.*` is precisely the quantified pattern whose
+    // per-character backtracking the limit exists to bound, and this listener
+    // answers whatever a collection's requests spell.
+    //
+    // Pre-routing also widens the method set to every one httplib parses -
+    // CONNECT, TRACE and PRI drew httplib's own 400 as unroutable before and
+    // now reach the route table, which answers its own miss for them. That is
+    // the sentence above meant literally, not a second change.
+    //
+    // It runs ahead of the body read, which is why `serve_mock_request` may
+    // read the method and the path and nothing else. An unconsumed framed
+    // body is drained by httplib after the response, so keep-alive is
+    // unaffected.
+    svr.set_pre_routing_handler (
+    [config = MockConfig{ server->latency_ms, server->error_rate_pct, raw->routes,
+     raw->served }] (const httplib::Request& req, httplib::Response& res) {
+        serve_mock_request (config, req, res);
+        return httplib::Server::HandlerResponse::Handled;
+    });
 
     const auto started =
     server->listener.start ("127.0.0.1", request.port, "mock server " + server->id);
