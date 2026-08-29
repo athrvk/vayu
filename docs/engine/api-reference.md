@@ -3885,7 +3885,9 @@ with specific codes:
   a buffered send answers `statusCode: 0` with an `errorCode` of
   `INTERNAL_ERROR` carrying the message, exactly as the pre-send gate does,
   while a streaming send - which has not answered yet - is a `400` with this
-  same code and fails its run row.
+  same code and fails its run row. A script's own `pm.sendRequest` refuses it
+  as well, with the call named in front of the same wording, because it too
+  rebuilds a header map and a resolved name is a different key (issue #1067).
 - `400` `{"error": {"code": "empty_header_name", "message": "..."}}` - a header
   name resolved to the empty string, so the line would go out under no name at
   all. `{{blank}}: acme` with `blank` holding `""` is not a header the caller
