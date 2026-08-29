@@ -224,16 +224,17 @@ loses the cascade - write the pair `bg-card surface-card`
 
 **A test that reads a file outside `app/` registers it in
 `src/lib/routed-inputs.testkit.ts`** - a page under `docs/` in
-`DOC_READING_GUARDS`, an engine source or fixture in `ENGINE_READING_GUARDS`.
-CI routes only the paths named there: every area filter excludes Markdown, and
-`app` matches nothing under `engine/` - so a guard whose input is unrouted never
-runs on the edit that breaks it, and fails later on an unrelated change to
-`app/` as if that change were the cause (#1118, #1121 for the docs, #1122 for
-the engine). Those lists and the `app_doc_fixtures` / `app_engine_inputs`
-filters in `pr-tests.yml` are compared by `routed-inputs.test.ts`, which fails
-if either side changes alone. Take the path from the registry rather than
-spelling it again in the guard - a second copy is the drift the registry exists
-to end.
+`DOC_READING_GUARDS`, an engine source or fixture in `ENGINE_READING_GUARDS`, a
+repository-root file in `ROOT_READING_GUARDS`. CI routes only the paths named
+there: every area filter excludes Markdown, `app` matches nothing under
+`engine/`, and `install.sh` belongs to the installer's filters alone - so a
+guard whose input is unrouted never runs on the edit that breaks it, and fails
+later on an unrelated change to `app/` as if that change were the cause (#1118,
+#1121 for the docs, #1122 for the engine, #1130 for the root). Those lists and
+the `app_doc_fixtures` / `app_engine_inputs` / `app_root_inputs` filters in
+`pr-tests.yml` are compared by `routed-inputs.test.ts`, which fails if either
+side changes alone. Take the path from the registry rather than spelling it
+again in the guard - a second copy is the drift the registry exists to end.
 
 Module READMEs carry the _why_ for their feature and are easy to miss:
 `app/src/modules/README.md`, plus one each for `welcome/`, `request-builder/`

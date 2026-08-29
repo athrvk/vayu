@@ -10,13 +10,14 @@
  * have to route them.
  *
  * Guards under `app/` assert against files the app does not own - pages under
- * `docs/`, sources and fixtures under `engine/` - which makes each of those
- * files a test input in the same sense a source file under `app/src` is: edit
- * it and `pnpm test` can go red. The area filters in `pr-tests.yml` route on
- * `app/**` and exclude Markdown, so until #1118 none of those edits ran the job
- * that would catch them: the failure surfaced on the next unrelated change
- * under `app/`, attributed to that change. #1118 routed one guard's two pages,
- * #1121 the other doc guards', #1122 the engine half.
+ * `docs/`, sources and fixtures under `engine/`, files at the repository root -
+ * which makes each of those files a test input in the same sense a source file
+ * under `app/src` is: edit it and `pnpm test` can go red. The area filters in
+ * `pr-tests.yml` route on `app/**` and exclude Markdown, so until #1118 none of
+ * those edits ran the job that would catch them: the failure surfaced on the
+ * next unrelated change under `app/`, attributed to that change. #1118 routed
+ * one guard's two pages, #1121 the other doc guards', #1122 the engine half,
+ * #1130 the two root files.
  *
  * The lists live here, not in the guards, for the reason the routing exists at
  * all: two copies of a path list drift. A guard imports the paths it reads, the
@@ -176,6 +177,32 @@ export const ENGINE_READING_GUARDS = {
 	},
 } as const satisfies Record<string, ReadingGuard>;
 
+/**
+ * Every guard that reads a file at the repository root, with the files it reads.
+ *
+ * The third route to the same defect (#1130). These two are neither prose the
+ * `app` filter excludes nor engine sources it never matched: `README.md` is
+ * rejected by `!*.md` *and* twice over by `code`, so a README-only pull request
+ * runs no job at all, and `install.sh` matches `installer` and `scripts` - which
+ * run the installer suite and shellcheck, and not the one guard holding the
+ * Electron side to the shell's layout.
+ *
+ * Both guards exist because a value lives in two places that cannot share a
+ * constant: the macOS update command in the README and in `updater.ts`, the
+ * Linux install layout in `install.sh` and in `appimage-stamp.ts`. Routing them
+ * is what makes the edit to the copy outside `app/` run the guard.
+ */
+export const ROOT_READING_GUARDS = {
+	macUpdateCommand: {
+		reader: "app/electron/updater.test.ts",
+		paths: ["README.md"],
+	},
+	appImageLayout: {
+		reader: "app/electron/appimage-stamp.layout.test.ts",
+		paths: ["install.sh"],
+	},
+} as const satisfies Record<string, ReadingGuard>;
+
 function union(guards: Record<string, ReadingGuard>): readonly string[] {
 	return [...new Set(Object.values(guards).flatMap((guard) => guard.paths))];
 }
@@ -186,19 +213,22 @@ function union(guards: Record<string, ReadingGuard>): readonly string[] {
  */
 export const ROUTED_DOC_PAGES = union(DOC_READING_GUARDS);
 export const ROUTED_ENGINE_PATHS = union(ENGINE_READING_GUARDS);
+export const ROUTED_ROOT_PATHS = union(ROOT_READING_GUARDS);
 
 export const WORKFLOW_PATH = fromRepoRoot(".github/workflows/pr-tests.yml");
 
 /**
  * The filters in that workflow whose whole job is to route the paths above, and
- * the guards each one answers for. One table rather than two comparisons: the
+ * the guards each one answers for. One table rather than three comparisons: the
  * engine half arrived a fix later than the doc half (#1122 after #1118 and
- * #1121), and a third kind of input should cost an entry here, not a fourth
- * copy of the same assertions.
+ * #1121) and the root half later still (#1130), and the table is what made the
+ * third kind of input cost an entry here rather than a third copy of the same
+ * assertions.
  */
 export const ROUTED_INPUTS = [
 	{ filter: "app_doc_fixtures", guards: DOC_READING_GUARDS, routed: ROUTED_DOC_PAGES },
 	{ filter: "app_engine_inputs", guards: ENGINE_READING_GUARDS, routed: ROUTED_ENGINE_PATHS },
+	{ filter: "app_root_inputs", guards: ROOT_READING_GUARDS, routed: ROUTED_ROOT_PATHS },
 ] as const;
 
 /**

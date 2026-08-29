@@ -63,6 +63,7 @@ jobs:
       app: ${{ steps.area.outputs.app }}
       app_doc_fixtures: ${{ steps.area.outputs.app_doc_fixtures }}
       app_engine_inputs: ${{ steps.area.outputs.app_engine_inputs }}
+      app_root_inputs: ${{ steps.area.outputs.app_root_inputs }}
       engine: ${{ steps.area.outputs.engine }}
       installer: ${{ steps.area.outputs.installer }}
       build_script: ${{ steps.area.outputs.build_script }}
@@ -272,6 +273,38 @@ jobs:
               - 'engine/tests/fixtures/variable-resolution-conformance.json'
               - 'engine/tests/fixtures/set-cookie-conformance.json'
               - 'engine/tests/fixtures/import-conformance.json'
+            # The files at the repository root that a suite in `app/` reads.
+            # Same defect again, by a third route (#1130): each of these holds
+            # one half of a value the app cannot share a constant with - the
+            # macOS update command lives in `README.md` and in `updater.ts`, the
+            # Linux install layout in `install.sh` and in `appimage-stamp.ts` -
+            # and the guard that holds the two halves together runs only in the
+            # app job.
+            #
+            # Neither reaches it on its own. `README.md` is rejected by `!*.md`
+            # in `app` and twice over by `code` (`!*.md` *and* `!**/*.md`), so a
+            # README-only pull request runs **no job at all** and a reworded
+            # macOS section lands green. `install.sh` matches `installer` and
+            # `scripts`, never `app`, so an installer-only pull request runs the
+            # installer suite and shellcheck and skips the one guard that holds
+            # the Electron side to the shell's layout.
+            #
+            # Naming what this costs, as the block above does: a README-only
+            # pull request now runs the four-runner app matrix (~23 runner-
+            # minutes) where it previously ran nothing. That is the deliberate
+            # trade - the alternative is a guard that cannot fire on its own
+            # input - and it is bounded by how rare those pull requests are and
+            # by the list being two literal paths rather than a glob.
+            #
+            # Not free-standing either. `ROOT_READING_GUARDS` in
+            # `app/src/lib/routed-inputs.testkit.ts` names the same two files,
+            # and the table that holds the two lists above to their guards holds
+            # this one to its own - which is what #1122's generalisation bought:
+            # a third kind of input costs an entry, not a third copy of the
+            # assertions.
+            app_root_inputs:
+              - 'README.md'
+              - 'install.sh'
             engine:
               - 'engine/**'
               - 'VERSION'
@@ -389,18 +422,20 @@ jobs:
     name: App on ${{ matrix.os }}${{ matrix.shard && format(' (shard {0})', matrix.shard) || '' }}
     runs-on: ${{ matrix.os }}
     needs: changes
-    # The second and third clauses are the one job those inputs need: this is
-    # where `pnpm test` runs, so it is where every guard that reads one of those
-    # files runs. The doc clause is an OR rather than another entry in `app`
-    # because `code` rejects a documentation path too, and `code && app` would
-    # answer false on the `code` half however the area filter were written. The
-    # engine clause could have been ANDed with `code` - every path it lists is
-    # source or fixture, never Markdown, so `code` is true whenever it is - and
-    # is left bare to read as the clause beside it. `quality` deliberately keeps
-    # the plain condition: eslint reads TS/TSX, prettier's domain is `app/` and
-    # tsc reads none of these files, so nothing it runs can change colour over
-    # an edit to one.
-    if: (needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true') || needs.changes.outputs.app_doc_fixtures == 'true' || needs.changes.outputs.app_engine_inputs == 'true'
+    # The second, third and fourth clauses are the one job those inputs need:
+    # this is where `pnpm test` runs, so it is where every guard that reads one
+    # of those files runs. The doc clause is an OR rather than another entry in
+    # `app` because `code` rejects a documentation path too, and `code && app`
+    # would answer false on the `code` half however the area filter were
+    # written. The engine clause could have been ANDed with `code` - every path
+    # it lists is source or fixture, never Markdown, so `code` is true whenever
+    # it is - and is left bare to read as the clause beside it. The root clause
+    # must be bare: half of it is `README.md`, which `code` rejects, so an AND
+    # there would restore exactly the hole it closes. `quality` deliberately
+    # keeps the plain condition: eslint reads TS/TSX, prettier's domain is
+    # `app/` and tsc reads none of these files, so nothing it runs can change
+    # colour over an edit to one.
+    if: (needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true') || needs.changes.outputs.app_doc_fixtures == 'true' || needs.changes.outputs.app_engine_inputs == 'true' || needs.changes.outputs.app_root_inputs == 'true'
     permissions:
       contents: read
     strategy:
