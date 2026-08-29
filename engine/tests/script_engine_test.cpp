@@ -1802,6 +1802,27 @@ TEST_F (ScriptEngineTest, ResponseHeaderValueComparisonIsStrict) {
     EXPECT_TRUE (result.tests[3].passed) << result.tests[3].error_message;
 }
 
+// The name a script asks for and the name the wire sent are matched the way
+// HTTP matches header names - without case (#1127). The fixture stores
+// `Content-Type`; a script that asks in any other casing gets the same answer,
+// and its value comes back for the two-argument form.
+TEST_F (ScriptEngineTest, ResponseHeaderLookupIgnoresTheCaseTheWireUsed) {
+    auto result = engine.execute_test (R"(
+        pm.test("lower-cased name finds it", function() { pm.response.to.have.header("content-type"); });
+        pm.test("upper-cased name carries its value", function() { pm.response.to.have.header("CONTENT-TYPE", "application/json"); });
+        pm.test("mixed-cased name carries its value", function() { pm.response.to.have.header("cOnTeNt-TyPe", "application/json"); });
+        pm.test("a name no casing can reach still fails", function() { pm.response.to.have.header("content-length"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 4u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+    EXPECT_TRUE (result.tests[2].passed) << result.tests[2].error_message;
+    EXPECT_FALSE (result.tests[3].passed)
+    << "case-insensitive is not the same as matching anything";
+}
+
 TEST_F (ScriptEngineTest, HeadersHasChecksTheValueWhenItIsGivenOne) {
     response.headers["X-Count"] = "5";
 

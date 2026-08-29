@@ -28,7 +28,6 @@
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/status.hpp"
-#include "vayu/utils/ascii_case.hpp"
 
 #include <curl/curl.h>
 
@@ -203,21 +202,24 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
  * either way, because headers arrive before the first byte of body.
  */
 std::optional<unsigned long long> declared_content_length (const Headers& headers) {
-    for (const auto& [key, value] : headers) {
-        if (!vayu::utils::ascii_lower_equal (key, "content-length")) {
-            continue;
-        }
-        try {
-            size_t consumed                   = 0;
-            const unsigned long long declared = std::stoull (value, &consumed);
-            // A trailing-garbage or empty value is no declaration at all; the
-            // caller says so rather than reporting a number the server did not.
-            return consumed == value.size () ? std::optional{ declared } : std::nullopt;
-        } catch (const std::exception&) {
-            return std::nullopt;
-        }
+    // `Headers` orders by `CaseInsensitiveLess`, so this lookup already answers
+    // every casing the wire can spell the name in, and the map holds one value
+    // per name - there is no second `content-length` for a first-match rule to
+    // choose between.
+    const auto declaration = headers.find ("content-length");
+    if (declaration == headers.end ()) {
+        return std::nullopt;
     }
-    return std::nullopt;
+    const std::string& value = declaration->second;
+    try {
+        size_t consumed                   = 0;
+        const unsigned long long declared = std::stoull (value, &consumed);
+        // A trailing-garbage or empty value is no declaration at all; the
+        // caller says so rather than reporting a number the server did not.
+        return consumed == value.size () ? std::optional{ declared } : std::nullopt;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
 }
 
 /**

@@ -18,7 +18,6 @@
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/routes.hpp"
-#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -143,13 +142,13 @@ const Result<Response>& result) {
         resp.error_message.empty () ? "connection error" : resp.error_message;
         return { 502, error_body (502, "Failed to fetch: " + detail) };
     }
-    std::string content_type = "application/octet-stream";
-    for (const auto& [key, value] : resp.headers) {
-        if (vayu::utils::ascii_lower_equal (key, "content-type")) {
-            content_type = value;
-            break;
-        }
-    }
+    // `Headers` compares without case, so one lookup covers every casing the
+    // upstream can have spelled the name in, and the map holds one value per
+    // name - there is no earlier duplicate this could be shadowing.
+    const auto declared            = resp.headers.find ("content-type");
+    const std::string content_type = declared == resp.headers.end () ?
+    std::string ("application/octet-stream") :
+    declared->second;
 
     return { 200, nlohmann::json{ { "content", resp.body }, { "contentType", content_type } } };
 }

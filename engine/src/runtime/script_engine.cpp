@@ -3313,21 +3313,17 @@ JSValue js_response_have_header (JSContext* ctx, JSValueConst this_val, int argc
 
     std::string header_name = js_to_string (ctx, argv[0]);
 
-    // Case-insensitive header lookup
-    bool found = false;
-    std::string found_value;
-    for (const auto& [key, value] : data->response->headers) {
-        if (vayu::utils::ascii_lower_equal (key, header_name)) {
-            found       = true;
-            found_value = value;
-            break;
-        }
-    }
-
-    if (!found) {
+    // `Headers` orders by `CaseInsensitiveLess`, so this lookup answers the
+    // case-insensitive match HTTP header names take - a script may ask for
+    // `content-type` against a `Content-Type` the wire sent. The map holds one
+    // value per name, so there is no earlier duplicate this could shadow.
+    const auto& headers = data->response->headers;
+    const auto found    = headers.find (header_name);
+    if (found == headers.end ()) {
         std::string msg = "Expected response to have header '" + header_name + "'";
         return throw_assertion_failure (ctx, msg);
     }
+    const std::string& found_value = found->second;
 
     // A header value is a string on the wire, and chai-postman compares the
     // expected value against it strictly. Coercing the expectation instead let
