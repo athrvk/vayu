@@ -52,8 +52,10 @@
  *
  * ## Where the rule is enforced
  *
- * Three layers, one rule, each naming what it alone knows - the shape
- * `header_text.hpp` describes for its own:
+ * One rule, enforced wherever a name is bound or resolved, each layer naming
+ * what it alone knows - the shape `header_text.hpp` describes for its own. The
+ * bullets are the count: a number spelled above them goes stale the next time a
+ * layer is added, as this one did when `pm.sendRequest` became the fourth.
  *
  * - **A bound data cell** (`core/scenario_data.cpp`, issue #732) refuses at
  *   bind time, naming the column and the row. It words its own message because
@@ -96,9 +98,11 @@
  * that catches beyond a produced name is a caller that built the payload
  * itself.
  *
- * **Every layer that can leave a header nameless refuses it** (issue #1095),
- * which is one layer more than the collision rule has and one reach wider at
- * the residual pass:
+ * **Every layer that can leave a header nameless refuses it** (issue #1095) -
+ * the same four the collision rule is enforced in. What differs is the wording
+ * and the reach rather than the count: all four spell this rule in the one
+ * wording below, where the collision rule's bind layer words its own, and the
+ * residual pass reads wider for this rule than it does for that one:
  *
  * - **A bound data cell** refuses it at bind time, in these words with the row
  *   in front of them - a blank cell is an ordinary thing for a data file to
@@ -145,10 +149,11 @@ struct HeaderNameCollision {
  * @brief The refusal a header name that resolved to nothing reads as.
  *
  * One wording for four layers - the three above and the bind, which is one more
- * than the collision rule reaches - on the same reasoning: a caller meeting this
- * at composition, again at execute time and again from a data row is meeting one
- * rule, and four spellings of it would read as four. A layer may name itself in
- * front of the wording, never inside it.
+ * than the *wording* above reaches, both rules being enforced in four - on the
+ * same reasoning: a caller meeting this at composition, again at execute time
+ * and again from a data row is meeting one rule, and four spellings of it would
+ * read as four. A layer may name itself in front of the wording, never inside
+ * it.
  *
  * @param written the name as the request carries it, before resolution. It is
  *        the whole of what the message can name - what the name produced is

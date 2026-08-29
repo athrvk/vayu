@@ -556,12 +556,14 @@ what this refuses is the collision that is invisible until the request comes
 back wrong. The distinction is the one [data-driven
 runs](./data-driven-runs.md) already draw for a bound row.
 
-The rule has three layers too, one definition
+The rule is layered too, one definition
 (`engine/include/vayu/http/header_names.hpp`): the bind-time one naming the
-column and the row, composition's `400`, and the execute-time residual pass -
-which rebuilds the same map after a pre-request script has run, and so can meet
-a collision composition never saw. It refuses in the same words, as a failed
-send rather than a rejected payload. The pre-send gate is deliberately *not* the
+column and the row, composition's `400`, the execute-time residual pass - which
+rebuilds the same map after a pre-request script has run, and so can meet a
+collision composition never saw, refusing in the same words as a failed send
+rather than a rejected payload - and a script's own `pm.sendRequest` (#1067),
+which builds a map of its own and throws those same words with the call named in
+front of them. The pre-send gate is deliberately *not* the
 backstop here, and cannot be: by the time it sees a request the erased header is
 already missing, with nothing left to notice.
 
