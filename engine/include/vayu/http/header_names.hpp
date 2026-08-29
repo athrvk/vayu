@@ -7,8 +7,13 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <map>
 #include <string>
 #include <string_view>
+
+// For `Headers`, whose comparison `HeaderNameOrigins` is keyed by rather than
+// naming a second one of its own.
+#include "vayu/types.hpp"
 
 /**
  * @file header_names.hpp
@@ -130,6 +135,28 @@ struct HeaderNameCollision {
     /// The one name they both landed on.
     std::string produced;
 };
+
+/**
+ * @brief Each name resolution produced, against the name as written that
+ * produced it.
+ *
+ * What a layer rebuilding a header map keeps beside the map, because the
+ * rebuilt `Headers` remembers only the spelling that got there first and a
+ * collision has to be named with both. It is what makes `emplace` the whole of
+ * the detection: the name that fails to go in has already found the one it
+ * would have erased, and the value that was there says how that one was
+ * written.
+ *
+ * Keyed by `Headers`' own comparison rather than by a comparator named again
+ * here, because the collision this finds is the one *that* map will make - the
+ * two cannot come to disagree about which two names are one. It is deliberately
+ * not a `Headers` itself: its value is a header name, never a header value.
+ *
+ * The bind-time layer keeps none, and that is the distinction rather than an
+ * omission - its message names only the surviving key, which the rebuilt
+ * `Headers` already holds (`core/scenario_data.cpp`).
+ */
+using HeaderNameOrigins = std::map<std::string, std::string, Headers::key_compare>;
 
 /**
  * @brief The refusal a header-name collision reads as.

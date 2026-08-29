@@ -20,7 +20,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <map>
 #include <utility>
 
 #include "vayu/http/client.hpp"
@@ -412,10 +411,8 @@ const vayu::http::VariableValues& vars) {
         return std::nullopt;
     }
     vayu::Headers resolved;
-    // Each resolved name against the name as written that produced it, so a
-    // refusal can name both spellings - `resolved` alone remembers only the
-    // one that got there first.
-    std::map<std::string, std::string, vayu::CaseInsensitiveLess> produced;
+    // Kept beside `resolved` so a refusal can name both spellings.
+    vayu::http::HeaderNameOrigins produced;
     for (const auto& [name, value] : headers) {
         std::string resolved_name = vayu::http::resolve_template (name, vars);
         // Both refusals are reported with the map untouched: the caller refuses
