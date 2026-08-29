@@ -66,6 +66,16 @@ class MockSpecServer {
             res.set_content (std::string (large_bytes, 'x'), "application/octet-stream");
         });
 
+        // The name spelled the way a server is free to send it. httplib
+        // supplies its own `Content-Type` only when the response carries none
+        // under any casing, so setting it here lower-cased is what reaches the
+        // wire - which is what makes the route's lookup a case-insensitive one
+        // to assert (#1127).
+        svr_.Get ("/lowercased-type", [] (const httplib::Request&, httplib::Response& res) {
+            res.body = R"({"openapi":"3.0.0"})";
+            res.set_header ("content-type", "application/json");
+        });
+
         // No Content-Length at all, so only the write callback can stop it.
         svr_.Get ("/chunked", [this] (const httplib::Request&, httplib::Response& res) {
             res.set_chunked_content_provider ("application/octet-stream",
@@ -143,6 +153,16 @@ TEST (ImportFetch, ProxiesSuccessfully) {
     vayu::http::routes::import_fetch (body, vayu::http::TransportPolicy{});
     EXPECT_EQ (status, 200);
     EXPECT_EQ (json["content"].get<std::string> (), R"({"openapi":"3.0.0"})");
+}
+
+TEST (ImportFetch, ReportsTheContentTypeWhateverCaseTheUpstreamSpelledIt) {
+    MockSpecServer mock;
+    auto [status, json] = vayu::http::routes::import_fetch (
+    fetch_body (mock.url ("/lowercased-type")), vayu::http::TransportPolicy{});
+    EXPECT_EQ (status, 200);
+    // A case-sensitive lookup would miss the header and report the
+    // `application/octet-stream` fallback instead.
+    EXPECT_EQ (json["contentType"].get<std::string> (), "application/json");
 }
 
 TEST (ImportFetch, ReturnsBadGatewayOnFetchFailure) {
