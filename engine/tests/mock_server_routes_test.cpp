@@ -492,6 +492,75 @@ TEST_F (MockServerTest, AStartedMockServesItsExamplesAndReportsItsTable) {
     EXPECT_FALSE (manager.routes ("mock_nope").has_value ());
 }
 
+TEST_F (MockServerTest, APathPastTheRegexRouteLimitStillReachesTheRouteTable) {
+    // cpp-httplib 0.53.1 refuses a regex route outright for any path longer
+    // than CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH (256), rather than risk
+    // std::regex_match's per-character recursion. The `.*` route per method
+    // this listener used to register was subject to that, so a long mocked
+    // path drew httplib's own 404 and never reached `resolve_mock_route`
+    // (issue #1139). Put those registrations back in place of the pre-routing
+    // handler and both halves of this test go red.
+    const std::string long_path = "/" + std::string (300, 'a');
+    ASSERT_GT (long_path.size (), 256u)
+    << "the path must clear the limit to test it";
+
+    seed_request ("req_long", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}" + long_path, "Long path");
+    seed_example ("exa_long", "req_long", 200, R"({"long":true})");
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const auto served = client.Get (long_path);
+    ASSERT_TRUE (served) << "no response from the mock";
+    EXPECT_EQ (served->status, 200);
+    EXPECT_EQ (served->body, R"({"long":true})");
+
+    // A miss at the same length is the route table's own answer rather than
+    // httplib's - the distinction a refused regex route cannot make, since
+    // both of its outcomes are the same bare 404.
+    const auto missed = client.Get ("/" + std::string (300, 'b'));
+    ASSERT_TRUE (missed);
+    EXPECT_EQ (missed->status, 404);
+    EXPECT_EQ (json::parse (missed->body)["error"]["code"], "mock_no_route");
+}
+
+TEST_F (MockServerTest, AMethodThePerMethodRoutesNeverCarriedReachesTheRouteTable) {
+    // Pre-routing sees every method cpp-httplib parses, where the six `.*`
+    // registrations covered GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS and left
+    // TRACE, CONNECT and PRI unroutable - httplib answered those 400. The
+    // route table answers its own miss for them now, which is what "the route
+    // table decides what answers" was always supposed to mean. Reverting the
+    // handler turns this back into that 400.
+    seed_pet_store ();
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    httplib::Request traced;
+    traced.method       = "TRACE";
+    traced.path         = "/pets";
+    const auto answered = client.send (traced);
+    ASSERT_TRUE (answered) << "no response from the mock";
+    EXPECT_EQ (answered->status, 404);
+    // The body is the tell: a bare httplib 404 carries no JSON at all.
+    EXPECT_EQ (json::parse (answered->body)["error"]["code"], "mock_method_mismatch");
+}
+
 TEST_F (MockServerTest, LatencyAndTheTwoExactErrorRates) {
     seed_pet_store ();
     MockServerManager manager;
