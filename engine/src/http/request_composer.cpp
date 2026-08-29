@@ -12,7 +12,6 @@
 #include <cctype>
 #include <chrono>
 #include <ctime>
-#include <map>
 #include <random>
 #include <regex>
 #include <string_view>
@@ -1071,12 +1070,13 @@ const VariableValues& vars,
 const BoundColumnNames& bound_columns,
 DynamicResolution dynamic) {
     ResolvedHeaders out;
-    // Each resolved name, against the name as written that produced it. The
-    // second half is what separates a collision resolution *made* from two
-    // names the author typed themselves: those are two lines they can see side
-    // by side, and composition has always let the later one win. This refusal
-    // is for the one that is invisible until the request comes back wrong.
-    std::map<std::string, std::string, vayu::CaseInsensitiveLess> produced;
+    // The written name it keeps is load-bearing here rather than only in the
+    // message: it is what separates a collision resolution *made* from two
+    // names the author typed themselves, which are two lines they can see side
+    // by side and which composition has always let the later one win. This
+    // refusal is for the one that is invisible until the request comes back
+    // wrong.
+    vayu::http::HeaderNameOrigins produced;
     for (const auto& [key, value] : headers.items ()) {
         const std::string name =
         resolve_header_template (key, vars, bound_columns, dynamic, out.unspellable);
