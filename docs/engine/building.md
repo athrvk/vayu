@@ -302,9 +302,9 @@ difference is worth keeping straight:
   `crypto/hashtable/hashtable.c` entry is this kind.
 - **A real race in code that is not ours.** `std::ctype<char>::narrow` fills a
   mutable cache on the process-wide locale without synchronization, and
-  cpp-httplib reaches it by building a `std::regex` per response. That is a
-  genuine race; it simply has no engine frame anywhere in the stack and cannot
-  be fixed from here. Tracked in #967.
+  cpp-httplib reaches it by constructing a `std::regex` to parse a status line.
+  That is a genuine race; it simply has no engine frame anywhere in the stack
+  and cannot be fixed from here. Tracked in #967.
 
 **Never suppress engine code.** A finding in `engine/src` or `engine/include` is
 the thing the run exists to surface. Every entry must carry the report it
@@ -376,10 +376,18 @@ tracking issue.
   propagating the exception. See [Cycle detection, not a depth
   cap](#cycle-detection-not-a-depth-cap) below.
 - **#967** - a data race in libstdc++'s locale narrowing cache, reached through
-  the `std::regex` cpp-httplib builds per response in `parse_status_line`. No
-  engine frame anywhere in the stack, so it is **suppressed** in `tsan.supp`
-  with its trace and that issue number. It only became visible once #957 was
-  fixed - before that the crash masked it.
+  the `std::regex` cpp-httplib constructs in `parse_status_line`. No engine
+  frame anywhere in the stack, so it is **suppressed** in `tsan.supp` with its
+  trace and that issue number. It only became visible once #957 was fixed -
+  before that the crash masked it. **Still open, and re-measured at `3d2a6a7`
+  rather than assumed:** cpp-httplib 0.53.0 made that regex `thread_local`, so
+  the window is one construction per thread instead of one per response, but
+  deleting the entry and running `ctest --preset linux-tsan` still fails
+  `TransportPolicyPaths.LoadRunTraversesManualProxy` on the race - twice out of
+  two runs, both sides of the report being pool threads parsing their first
+  response - against 2796/2796 with the entry in place. That test alone
+  reproduces it 10 times out of 10, which is the cheap way to re-measure this
+  one. What is left is upstream in libstdc++.
 
 The matrix has therefore paid for itself twice over: two engine-side defects
 found and fixed, one of them a race the ordinary suite is structurally unable
