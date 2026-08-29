@@ -479,8 +479,10 @@ a typo, or a chai matcher Vayu lacks (`.finite`, `.sealed`, `.frozen`,
 
 **`pm.expect.fail([message])` throws that same `AssertionError` on demand**
 (issue #1004), defaulting to chai's own `expect.fail()` text. Inside a
-`pm.test` it fails that test; outside one it is the difference between an
-assertion and an error, since a thrown `Error` there aborts the script.
+`pm.test` it fails that test; outside one it aborts the script, the way any
+uncaught throw does. What it changes there is the shape of the verdict, not
+whether the script stops: the run is reported as a failed assertion carrying
+this message, rather than as the `TypeError` a misuse reports.
 chai's `fail(actual, expected, message, operator)` form is **not** supported -
 this `AssertionError` has nowhere to carry the two compared values, so a second
 argument is refused by name rather than `actual` being reported as the failure
