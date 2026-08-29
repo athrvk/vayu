@@ -130,7 +130,13 @@ jobs:
           # `runner.os`; it only ever runs on ubuntu, so those are the same
           # string. Normalise that one difference, require exact equality for
           # everything else.
-          files=(release.yml pr-tests.yml codeql.yml cache-warm.yml)
+          # sanitizers.yml and engine-tidy-scan.yml carry the same pin and were
+          # outside this list until the 0.24.0 baseline bump found them: a bump
+          # that updated only the guarded four would have left them checking out
+          # an older vcpkg while resolving against the new manifest baseline,
+          # which is the exact divergence the second half of this step rejects.
+          files=(release.yml pr-tests.yml codeql.yml cache-warm.yml \
+                 sanitizers.yml engine-tidy-scan.yml)
           keys=() commits=()
           for f in "${files[@]}"; do
             p=".github/workflows/$f"
@@ -155,7 +161,7 @@ jobs:
           done
           echo "All ${#files[@]} workflows agree."
 
-          # The four workflows agreeing with each other is only half of it.
+          # The workflows agreeing with each other is only half of it.
           # The commit they check vcpkg out at must also be the commit
           # `engine/vcpkg.json` resolves dependency versions against - they are
           # the same number written in two places, and nothing compared them
@@ -307,7 +313,7 @@ jobs:
       # job above fails the build if they drift. `SCCACHE_GHA_ENABLED` selects
       # the ref-scoped GHA backend, so the entries this compile produces land in
       # the master scope a tag build reads - the whole point of warming here.
-      VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
+      VCPKG_COMMIT: '114d9fe62faf35856b45cf55cb93b57028a45d63'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       SCCACHE_GHA_ENABLED: 'true'
 

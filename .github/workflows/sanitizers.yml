@@ -113,7 +113,7 @@ jobs:
       # library), so their archives are the same artifacts those workflows
       # build and this reads them out of the master scope rather than
       # recompiling OpenSSL weekly.
-      VCPKG_COMMIT: '94a541197763a4f449a1b91478df48c0584a6256'
+      VCPKG_COMMIT: '114d9fe62faf35856b45cf55cb93b57028a45d63'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       # No sccache, on purpose. The engine's own objects compile with sanitizer
       # flags, so they hash differently from every other workflow's - sharing
