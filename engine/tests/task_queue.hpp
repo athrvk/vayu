@@ -21,8 +21,11 @@
 
 #include <httplib.h>
 
+#include <atomic>
 #include <cstddef>
 #include <functional>
+#include <memory>
+#include <utility>
 
 namespace vayu::tests {
 
@@ -37,6 +40,86 @@ inline std::function<httplib::TaskQueue*()> pooled_task_queue (std::size_t threa
         // comment above.
         // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
         return new httplib::ThreadPool (threads);
+    };
+}
+
+namespace detail {
+
+/**
+ * @brief Holds a mock server's live-connection count up for one task.
+ *
+ * A guard rather than a pair of statements, so a handler that throws past
+ * httplib cannot leave the count high for the rest of the test.
+ */
+class ConnectionScope {
+    public:
+    explicit ConnectionScope (std::shared_ptr<std::atomic<int>> live)
+    : live_ (std::move (live)) {
+        live_->fetch_add (1, std::memory_order_relaxed);
+    }
+    ~ConnectionScope () {
+        live_->fetch_sub (1, std::memory_order_relaxed);
+    }
+    ConnectionScope (const ConnectionScope&)            = delete;
+    ConnectionScope& operator= (const ConnectionScope&) = delete;
+    ConnectionScope (ConnectionScope&&)                 = delete;
+    ConnectionScope& operator= (ConnectionScope&&)      = delete;
+
+    private:
+    std::shared_ptr<std::atomic<int>> live_;
+};
+
+/**
+ * @brief A pooled task queue that also counts the connections open right now.
+ *
+ * httplib runs a whole connection - its accept, every keep-alive request on it,
+ * and its close - as ONE queued task, so tasks in flight is exactly the number
+ * of connections the server is holding open. `httplib::ThreadPool` is `final`,
+ * so this wraps one instead of deriving from it.
+ */
+class CountingTaskQueue final : public httplib::TaskQueue {
+    public:
+    CountingTaskQueue (std::size_t threads, std::shared_ptr<std::atomic<int>> live)
+    : pool_ (threads), live_ (std::move (live)) {
+    }
+    ~CountingTaskQueue () override                          = default;
+    CountingTaskQueue (const CountingTaskQueue&)            = delete;
+    CountingTaskQueue& operator= (const CountingTaskQueue&) = delete;
+    CountingTaskQueue (CountingTaskQueue&&)                 = delete;
+    CountingTaskQueue& operator= (CountingTaskQueue&&)      = delete;
+
+    bool enqueue (std::function<void ()> fn) override {
+        return pool_.enqueue ([live = live_, task = std::move (fn)] () {
+            const ConnectionScope open (live);
+            task ();
+        });
+    }
+
+    void shutdown () override {
+        pool_.shutdown ();
+    }
+
+    private:
+    httplib::ThreadPool pool_;
+    std::shared_ptr<std::atomic<int>> live_;
+};
+
+} // namespace detail
+
+/**
+ * @brief `pooled_task_queue`, with @p live tracking the connections held open.
+ *
+ * The count is a `shared_ptr` because httplib owns the queue and shuts it down
+ * from inside `listen()`; a counter borrowed from the fixture would outlive its
+ * reader only by luck.
+ */
+inline std::function<httplib::TaskQueue*()>
+counting_task_queue (std::size_t threads, std::shared_ptr<std::atomic<int>> live) {
+    return [threads, live = std::move (live)] () -> httplib::TaskQueue* {
+        // httplib owns and deletes what this factory returns; see the file
+        // comment above.
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
+        return new detail::CountingTaskQueue (threads, live);
     };
 }
 

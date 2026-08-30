@@ -100,6 +100,7 @@ add_executable(vayu_tests
     run_route_test.cpp
     run_stop_test.cpp
     run_shutdown_test.cpp
+    run_retention_release_test.cpp
     run_config_validation_test.cpp
     run_row_seed_test.cpp
     transient_execute_test.cpp
@@ -341,6 +342,7 @@ set(vayu_scratch_database_suites
     RequestsRouteTest
     ResourceWriteRouteTest
     ResponseCaptureTest
+    RunRetentionReleaseTest
     RunShutdownTest
     RunStopAccountingTest
     RunsRouteTest
