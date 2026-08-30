@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -27,7 +28,7 @@ class SlowMockServer {
         // concurrent /slow requests, and the worker drains active transfers on
         // stop(). A thread-starved mock would serialize them and make teardown
         // take tens of seconds (a harness artifact, not engine behavior).
-        svr.new_task_queue = vayu::tests::pooled_task_queue (128);
+        svr.new_task_queue = vayu::tests::counting_task_queue (128, live_connections);
 
         svr.Get ("/slow", [] (const httplib::Request&, httplib::Response& res) {
             std::this_thread::sleep_for (std::chrono::milliseconds (500));
@@ -147,11 +148,23 @@ class SlowMockServer {
         return scrapes.load ();
     }
 
+    /// Connections the server is holding open right now - one per task in
+    /// flight (see `counting_task_queue`). A client that keeps its connections
+    /// alive after its last request, as libcurl's connection cache does, is
+    /// counted until it closes them or the fixture goes away.
+    int live_connection_count () const {
+        return live_connections->load (std::memory_order_relaxed);
+    }
+
     httplib::Server svr;
     std::thread thread;
     int port = 0;
     std::atomic<bool> released{ false };
     std::atomic<int> scrapes{ 0 };
+    /// Read through `live_connection_count()`. Shared with the task queue
+    /// httplib owns, which is why it is not a plain member.
+    std::shared_ptr<std::atomic<int>> live_connections =
+    std::make_shared<std::atomic<int>> (0);
 };
 
 } // namespace vayu::tests
