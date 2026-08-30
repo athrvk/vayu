@@ -206,6 +206,17 @@ one app instance may drive it:
   the disconnected state until one answers. MCP still starts after the window,
   for its own reason - it reads a config file, and a corrupt one must not cost
   the user a window.
+- **MCP is *loaded* after the window too, not merely started there.** Placing the
+  start call late does nothing about the import: the main process is unbundled,
+  so Node's ESM loader walks `main.ts`'s static import graph and evaluates every
+  module in it before `app.whenReady` fires at all. Reaching through the
+  `mcp/index.js` barrel for anything therefore evaluated the MCP SDK, zod and a
+  7,300-line tool registry - ~250-300 ms ahead of the window on every launch,
+  including the ones where MCP is switched off, since the barrel also carried the
+  preference that decides. `main.ts` now imports the three self-contained modules
+  it needs at startup (`mcp/config`, `mcp/store`, `mcp/connect`) and pulls the
+  barrel through a cached dynamic `import()` inside `startMcp()`, behind the
+  enabled check. `startup-import-graph.test.ts` holds the graph to that.
 
 **Development vs Production:**
 - **Development**: Engine binary at `engine/build/vayu-engine`
