@@ -36,21 +36,32 @@ import { createSaveFlusher } from "./save-flush.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
+/*
+ * MCP is imported by weight, not through its barrel.
+ *
+ * `mcp/index.js` re-exports `toolCatalog` from the 7,300-line tool registry and
+ * constructs its facade over `http.js`, so importing *anything* runtime from it
+ * evaluates the MCP SDK, zod and all 67 tool schemas - ~250-300ms of serial
+ * main-process evaluation, before `app.whenReady` and therefore ahead of the
+ * window, on every launch including the ones where MCP is switched off.
+ *
+ * `config`, `store` and `connect` reach none of that (`electron-store` and
+ * `node:child_process` are their heaviest dependencies), so the startup gate and
+ * the Settings IPC read them directly and for free. The two symbols that do pull
+ * the SDK - the service and the tool catalog - are loaded on demand by
+ * `loadMcp()` below.
+ */
+import { resolveSafetyConfig, sanitizeSafetyInput, type McpSafetyConfig } from "./mcp/config.js";
 import {
-	VayuMcpService,
-	resolveSafetyConfig,
-	sanitizeSafetyInput,
 	loadPersistedSafety,
 	savePersistedSafety,
 	effectiveSafety,
 	loadMcpEnabled,
 	saveMcpEnabled,
-	connectClient,
-	toolCatalog,
-	type McpConnectClient,
-	type McpDataChangedEvent,
-	type McpSafetyConfig,
-} from "./mcp/index.js";
+} from "./mcp/store.js";
+import { connectClient, type McpConnectClient } from "./mcp/connect.js";
+import type { McpDataChangedEvent } from "./mcp/tools.js";
+import type { VayuMcpService } from "./mcp/index.js";
 import {
 	DOCS_URL,
 	SCRIPTING_DOCS_URL,
@@ -556,14 +567,34 @@ async function startEngine() {
 	}
 }
 
+/**
+ * The MCP barrel - the SDK, the tool registry - loaded at most once, on demand.
+ *
+ * The promise is cached rather than the module, so concurrent callers (a launch
+ * starting the server while Settings asks for the catalog) share one evaluation.
+ * A rejection is cached with it: the module is a file inside the asar, so a
+ * failure to load it is a broken install rather than something a retry fixes,
+ * and every caller here already reports or swallows one.
+ */
+type McpModule = typeof import("./mcp/index.js");
+let mcpModule: Promise<McpModule> | null = null;
+
+function loadMcp(): Promise<McpModule> {
+	mcpModule ??= import("./mcp/index.js");
+	return mcpModule;
+}
+
 async function startMcp() {
 	try {
 		// Inside the try, not ahead of it: this is the first thing in the whole app
 		// to touch the persisted MCP config, so it is where a store failure lands.
+		// It also gates the import below, so a disabled launch never evaluates the
+		// SDK or the tool registry at all.
 		if (!loadMcpEnabled()) {
 			console.log("[Main] MCP server disabled by preference; not starting.");
 			return;
 		}
+		const { VayuMcpService } = await loadMcp();
 		mcpService = new VayuMcpService({
 			engineBaseUrl: `http://${ENGINE_HOST}:${ENGINE_PORT}`,
 			host: MCP_HOST,
@@ -710,31 +741,37 @@ function setupIpcHandlers() {
 	});
 
 	// The tool catalog (name/description/category) for the Settings tool list.
-	ipcMain.handle("mcp:getTools", () => toolCatalog());
+	// Async because the registry is loaded on demand - opening Settings is the
+	// place to pay for it, not launching the app.
+	ipcMain.handle("mcp:getTools", async () => (await loadMcp()).toolCatalog());
 
 	// Apply and persist a safety-config change from Settings. The renderer input
 	// is sanitized here (never trusted), applied live to the running server, and
 	// written to disk so it survives a restart. Returns the resolved config.
-	ipcMain.handle("mcp:updateSafety", (_event, partial: unknown): McpSafetyConfig => {
-		const clean = sanitizeSafetyInput((partial ?? {}) as Partial<McpSafetyConfig>);
-		// Drop unknown tool names so a stale/hand-edited disabled list can't
-		// accumulate junk (the sanitizer can't see the registry).
-		if (clean.disabledTools) {
-			const known = new Set(toolCatalog().map((t) => t.name));
-			clean.disabledTools = clean.disabledTools.filter((name) => known.has(name));
-		}
-		if (mcpService) {
-			mcpService.updateSafety(clean);
-			const resolved = mcpService.getSafety();
+	ipcMain.handle(
+		"mcp:updateSafety",
+		async (_event, partial: unknown): Promise<McpSafetyConfig> => {
+			const clean = sanitizeSafetyInput((partial ?? {}) as Partial<McpSafetyConfig>);
+			// Drop unknown tool names so a stale/hand-edited disabled list can't
+			// accumulate junk (the sanitizer can't see the registry). The registry is
+			// loaded only on this branch: a caps- or allowlist-only change never needs it.
+			if (clean.disabledTools) {
+				const known = new Set((await loadMcp()).toolCatalog().map((t) => t.name));
+				clean.disabledTools = clean.disabledTools.filter((name) => known.has(name));
+			}
+			if (mcpService) {
+				mcpService.updateSafety(clean);
+				const resolved = mcpService.getSafety();
+				savePersistedSafety(resolved);
+				return resolved;
+			}
+			// MCP server never came up (e.g. port in use) - still persist so the
+			// change takes effect on the next launch.
+			const resolved = resolveSafetyConfig({ ...loadPersistedSafety(), ...clean });
 			savePersistedSafety(resolved);
 			return resolved;
 		}
-		// MCP server never came up (e.g. port in use) - still persist so the
-		// change takes effect on the next launch.
-		const resolved = resolveSafetyConfig({ ...loadPersistedSafety(), ...clean });
-		savePersistedSafety(resolved);
-		return resolved;
-	});
+	);
 
 	// Theme management
 	ipcMain.handle("theme:get", () => {

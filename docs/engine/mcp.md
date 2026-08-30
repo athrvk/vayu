@@ -1379,12 +1379,25 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `cli.ts`           | Standalone stdio server (env-configured).                                   |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
 | `store.ts`         | Persist safety config + enabled preference (`electron-store`).              |
-| `index.ts`         | `VayuMcpService` facade consumed by `main.ts`.                              |
+| `index.ts`         | `VayuMcpService` facade consumed by `main.ts`, loaded on demand.            |
 
 ### Lifecycle & IPC
 
 `main.ts` starts the server in `app.whenReady()` (skipped if disabled), stops it
-on quit, and exposes IPC the Settings panel uses:
+on quit, and exposes IPC the Settings panel uses.
+
+**`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
+`connect.ts` are self-contained (`electron-store` and `node:child_process` are
+their heaviest dependencies), so they are ordinary static imports. Everything
+reachable from `index.ts` - the SDK, zod, `tools.ts` and its 67 schemas built at
+module scope - is loaded by a cached dynamic `import()` instead, inside
+`startMcp()` after the enabled check and inside the two IPC handlers that need
+the tool catalog. The main process is unbundled, so a static import here is
+evaluated before `app.whenReady` and cost every launch ~250-300 ms ahead of the
+window, MCP switched off or not (#1145). A disabled launch now evaluates none of
+it; opening the Settings tool list is what pays for the registry.
+
+The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
