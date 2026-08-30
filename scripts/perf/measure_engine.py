@@ -308,7 +308,7 @@ def run_status(base_url: str, run_id: str) -> str:
 class Recorder:
     """Collects samples and knows when the process stopped answering."""
 
-    sampler: Callable[[int], tuple[int, int, float]]
+    sampler: Callable[[int], tuple[int, Optional[int], float]]
     pid: int
     origin: float = field(default_factory=time.monotonic)
     samples: list[Sample] = field(default_factory=list)

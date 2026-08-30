@@ -40,10 +40,13 @@ on:
       - 'scripts/perf/**'
 
 concurrency:
-  # Not cancel-in-progress: a cancelled measurement is a wasted half-hour of
-  # runner time that measured nothing (cache-warm.yml makes the same call).
   group: perf-measure-${{ github.ref }}
-  cancel-in-progress: false
+  # A cron or dispatch run is data and is never thrown away half-taken
+  # (cache-warm.yml makes the same call). A pull_request run is only proving
+  # this machinery still works, and only the newest commit's answer counts -
+  # left uncancelled, every push during a fix cycle stacks another three-OS
+  # engine build alongside the ones already running.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
