@@ -1360,11 +1360,24 @@ offset 0 and duplicate every tick already plotted.
 
 ### Health Checking
 
-The app polls `/health` endpoint to verify engine connectivity:
+The app polls `/health` endpoint to verify engine connectivity, at one of two
+speeds depending on whether the last poll succeeded:
 
 ```typescript
-useHealthQuery() // Polls every TIMING.HEALTH_CHECK_INTERVAL_MS (30s)
+useHealthQuery() // TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS (1s) while erroring,
+                 // TIMING.HEALTH_CHECK_INTERVAL_MS (30s) once connected
 ```
+
+The window loads alongside the engine rather than after it, so an ordinary
+launch spends its first seconds disconnected; polling that state at the 30s
+cadence could leave a launch reading disconnected for half a minute after the
+engine was already serving. A poll that succeeds right after one that failed
+also triggers `queryClient.invalidateQueries()` once - collections, runs and
+config gave up after two retries while the engine was down, a connection
+refused by a closed port is a plain `Error` rather than an `ApiError`, and
+`refetchOnReconnect` only fires on the browser's online/offline event, which
+localhost never changes - so nothing else would ever revisit their error state
+once the engine came back.
 
 **Health Response:**
 ```typescript
@@ -1397,8 +1410,11 @@ than being announced as whichever branch came last.
 ### Engine Startup
 
 The Electron main process (`electron/sidecar.ts`) manages engine lifecycle:
-- Spawns engine process on app start
-- Monitors health via `/health` endpoint
+- Spawns engine process on app start, alongside creating the window rather than
+  before it - first paint does not wait on the engine
+- Monitors health via `/health` endpoint, on a ramped poll that leaves a
+  live-but-slow engine to the renderer's own health poll instead of quitting
+  the app
 - Handles graceful shutdown on app quit
 
 ## Best Practices

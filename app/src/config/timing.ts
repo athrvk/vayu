@@ -94,6 +94,19 @@ export const TIMING = {
 	HEALTH_CHECK_INTERVAL_MS: 30_000,
 
 	/**
+	 * Engine health poll interval while the engine is *not* answering.
+	 *
+	 * The window now loads alongside the engine rather than after it, so the
+	 * first seconds of an ordinary launch are spent disconnected and the poll
+	 * that ends that state is on the startup path. At the 30s cadence a launch
+	 * could sit disconnected for half a minute after the engine was already
+	 * serving. Disconnected is an abnormal state the user wants left, and a
+	 * refused connection to a closed localhost port costs almost nothing, so it
+	 * is polled hard and only until it answers.
+	 */
+	HEALTH_RECONNECT_POLL_INTERVAL_MS: 1_000,
+
+	/**
 	 * How often the two local-service lists (webhook inboxes, OAuth issuers) are
 	 * re-read.
 	 *

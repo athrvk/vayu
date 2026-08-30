@@ -18,7 +18,7 @@ import {
 } from "electron";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
-import { EngineSidecar } from "./sidecar.js";
+import { EngineSidecar, EngineNotReadyError } from "./sidecar.js";
 import { resolveAppPaths } from "./app-paths.js";
 import { readDataFile } from "./data-file.js";
 import { readSpecFile } from "./spec-file.js";
@@ -535,6 +535,16 @@ async function startEngine() {
 		await engineSidecar.start();
 		console.log("[Main] Engine started successfully at", engineSidecar.getApiUrl());
 	} catch (error) {
+		// A slow engine is not a failed one, and it is not ours to kill. The
+		// process is alive and still working through its startup housekeeping; the
+		// window is up, the renderer is showing the disconnected state, and its
+		// health poll adopts the engine the moment it answers. Quitting here ended
+		// launches that were about to succeed.
+		if (error instanceof EngineNotReadyError) {
+			console.warn(`[Main] ${error.message}; leaving it to the renderer's health poll.`);
+			return;
+		}
+
 		console.error("[Main] Failed to start engine:", error);
 		// Show error dialog to user
 		const { dialog } = await import("electron");
@@ -948,22 +958,32 @@ app.whenReady().then(async () => {
 	// One registration for the process, ahead of any window - see the function.
 	installThemeBridge();
 
-	// Start the engine
-	await startEngine();
-
-	// Then create the window. Nothing below this line may sit between the engine
-	// and the window: the MCP server used to, and because it reads a config file
-	// at that point, a corrupt one left the app with a headless engine and no
-	// window at all. MCP is an optional convenience with no UI depending on it,
-	// so it starts after everything the user can see is up and wired.
+	// The window first, and the engine alongside it. The renderer does not need
+	// the engine to boot - its health query polls `/health` over HTTP and simply
+	// retries, and the Dock renders the disconnected state until it answers - so
+	// nothing was gained by making the user watch an empty screen for the length
+	// of the handshake. What was lost was everything: `db.init()` runs orphan
+	// reconciliation, inbox cleanup and a page-reclaim rewrite before the engine
+	// listens at all, and that whole window was blank screen.
+	//
+	// Nothing may sit between here and the engine that can fail on its own: the
+	// MCP server used to, and because it reads a config file at that point, a
+	// corrupt one left the app with a headless engine and no window. MCP is an
+	// optional convenience with no UI depending on it, so it still starts after
+	// everything the user can see is up and wired.
 	createWindow();
 
-	// Bridge the OS proxy into the engine (#708). *After* the window, and fire
-	// and forget, for the reason the line above states: nothing may sit between
-	// the engine and the window, and this is one more thing that talks to the
-	// engine at startup. It never throws and never blocks on the network - the
-	// resolution is local to Chromium - so the window has its proxy row a
-	// moment later, and the settings screen refreshes it on arrival anyway.
+	// Awaited, not fired and forgotten: the proxy bridge below talks to the
+	// engine, and the updater and MCP both read state the engine owns. The window
+	// is already loading throughout, which was the point.
+	await startEngine();
+
+	// Bridge the OS proxy into the engine (#708). Fire and forget: it never
+	// throws and never blocks on the network - the resolution is local to
+	// Chromium - so the window has its proxy row a moment later, and the settings
+	// screen refreshes it on arrival anyway. A slow engine is why this is not
+	// awaited: `startEngine` above returns without one, and the settings refresh
+	// is the backstop for the row this call then fails to fill.
 	void refreshSystemProxy(proxyResolution());
 
 	// Waking on a different network is the common way a laptop's proxy changes
