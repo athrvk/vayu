@@ -573,15 +573,16 @@ async function startEngine() {
  * The promise is cached rather than the module, so concurrent callers (a launch
  * starting the server while Settings asks for the catalog) share one evaluation.
  * A rejection is cached with it: the module is a file inside the asar, so a
- * failure to load it is a broken install rather than something a retry fixes,
- * and every caller here already reports or swallows one.
+ * failure to load it is a broken install rather than something a retry fixes.
+ * `startMcp` logs one and continues without MCP; the two IPC handlers let it
+ * reject, which reaches Settings as the failed call it is.
  */
 type McpModule = typeof import("./mcp/index.js");
-let mcpModule: Promise<McpModule> | null = null;
+let mcpModulePromise: Promise<McpModule> | null = null;
 
 function loadMcp(): Promise<McpModule> {
-	mcpModule ??= import("./mcp/index.js");
-	return mcpModule;
+	mcpModulePromise ??= import("./mcp/index.js");
+	return mcpModulePromise;
 }
 
 async function startMcp() {
