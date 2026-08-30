@@ -58,19 +58,25 @@ function stubPlatform(platform: NodeJS.Platform) {
 }
 
 /**
- * A fake OS process table: which PIDs are alive, and which of those we may
- * signal. `process.kill` is the probe under test on the aliveness half, so it
- * is stubbed rather than pointed at a real process - a real live PID we are
- * allowed to signal is exactly what a test cannot conjure portably.
+ * A fake OS process table: which PIDs are alive, and what the signal-0 probe
+ * is told about the ones it may not touch. `process.kill` is the probe under
+ * test on the aliveness half, so it is stubbed rather than pointed at a real
+ * process - a real live PID we are allowed to signal is exactly what a test
+ * cannot conjure portably.
+ *
+ * `refused` carries the error code the probe comes back with for a process it
+ * cannot open: Unix reports `EPERM`, and Windows an `OpenProcess` denial that
+ * libuv translates as `EACCES`. Both mean "could not tell", never "gone".
  */
-function stubProcessTable(table: { alive?: number[]; aliveButForeign?: number[] } = {}) {
+function stubProcessTable(table: { alive?: number[]; refused?: [number, string][] } = {}) {
 	const alive = new Set(table.alive ?? []);
-	const foreign = new Set(table.aliveButForeign ?? []);
+	const refused = new Map(table.refused ?? []);
 
 	return vi.spyOn(process, "kill").mockImplementation((pid: number) => {
 		if (alive.has(pid)) return true;
-		const err: NodeJS.ErrnoException = new Error(foreign.has(pid) ? "EPERM" : "ESRCH");
-		err.code = foreign.has(pid) ? "EPERM" : "ESRCH";
+		const code = refused.get(pid) ?? "ESRCH";
+		const err: NodeJS.ErrnoException = new Error(code);
+		err.code = code;
 		throw err;
 	});
 }
@@ -178,10 +184,24 @@ describe("engine aliveness probe - the name half", () => {
 
 	it("verifies a process it is not allowed to signal rather than assuming either way", () => {
 		stubPlatform("linux");
-		stubProcessTable({ aliveButForeign: [LIVE_PID] });
+		stubProcessTable({ refused: [[LIVE_PID, "EPERM"]] });
 		stubProcessName("vayu-engine\n");
 
 		// EPERM says something holds the PID; only the name says whose it is.
+		expect(defaultSidecarSystem.isEngineProcessAlive(LIVE_PID)).toBe(true);
+		expect(execSync).toHaveBeenCalledOnce();
+	});
+
+	it("does not read a Windows access denial as a dead engine", () => {
+		stubPlatform("win32");
+		// libuv sends an OpenProcess denial back through the generic Win32 error
+		// translation, so it arrives as EACCES and not the EPERM the Unix branch
+		// sees. Only ESRCH is proof of death - anything else pays the subprocess,
+		// which is what the old tasklist-only path did unconditionally.
+		stubProcessTable({ refused: [[LIVE_PID, "EACCES"]] });
+		stubProcessName(ENGINE_ROW);
+
+		// Reading this as "dead" would delete a live engine's lock file.
 		expect(defaultSidecarSystem.isEngineProcessAlive(LIVE_PID)).toBe(true);
 		expect(execSync).toHaveBeenCalledOnce();
 	});

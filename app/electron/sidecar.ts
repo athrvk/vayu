@@ -120,7 +120,7 @@ function isPlausiblePid(pid: number): boolean {
 }
 
 /**
- * Does *anything* hold this PID?
+ * Can we rule out this PID without spawning anything?
  *
  * Signal 0 delivers nothing - it is an existence-and-permission probe, and
  * libuv implements it on Windows too (`OpenProcess` plus an exit-code check, so
@@ -133,15 +133,21 @@ function isPlausiblePid(pid: number): boolean {
  * spawning cmd.exe + tasklist - 52.5 ms median, measured, on the main-process
  * event loop, every launch.
  *
- * `EPERM` is alive-but-not-ours: something is running under that PID, and the
- * name check is what decides whether it is our engine.
+ * Only `ESRCH` is proof, and the asymmetry is deliberate. Every other failure
+ * means we could not tell - `EPERM` for a process we may not signal, and on
+ * Windows an `OpenProcess` denial that libuv reports as `EACCES` rather than
+ * `EPERM`, since it comes back through the generic Win32 error translation.
+ * Reading "could not tell" as "gone" would let a *running* engine be declared
+ * stale, its lock deleted underneath it; so an unclear answer costs a
+ * subprocess and lets the name check decide, which is what the old
+ * tasklist-only Windows path did in every case.
  */
-function isPidAlive(pid: number): boolean {
+function isPidCertainlyDead(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
-		return true;
+		return false;
 	} catch (err) {
-		return (err as NodeJS.ErrnoException).code === "EPERM";
+		return (err as NodeJS.ErrnoException).code === "ESRCH";
 	}
 }
 
@@ -182,7 +188,7 @@ function isEngineProcessName(pid: number): boolean {
  */
 function isVayuEngineRunning(pid: number): boolean {
 	if (!isPlausiblePid(pid)) return false;
-	if (!isPidAlive(pid)) return false;
+	if (isPidCertainlyDead(pid)) return false;
 	return isEngineProcessName(pid);
 }
 
