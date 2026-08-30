@@ -5,8 +5,15 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useState } from "react";
-import { useTabsStore, useSaveStore, useLayoutStore, type Tab, type DrawerView } from "@/stores";
+import { lazy, Suspense, useEffect, useState } from "react";
+import {
+	useTabsStore,
+	useSaveStore,
+	useLayoutStore,
+	type Tab,
+	type TabType,
+	type DrawerView,
+} from "@/stores";
 import { isModalOpen } from "@/lib/modal";
 import type { Chord } from "@/lib/platform";
 import {
@@ -25,15 +32,48 @@ import { Dock } from "./Dock";
 import { ContextBar } from "./ContextBar";
 import { TabStrip } from "./TabStrip";
 import { tabElementId, tabPanelElementId } from "./tab-aria";
-import RequestBuilder from "@/modules/request-builder";
-import CollectionDetail from "@/modules/collections/CollectionDetail";
-import LoadTestDashboard from "@/modules/dashboard";
-import { HistoryDetail } from "@/modules/history/main";
-import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
-import { SettingsMain } from "@/modules/settings";
-import VariablesMain from "@/modules/variables/main/VariablesMain";
-import InboxView from "@/modules/inbox";
 import { CommandPalette } from "@/modules/palette";
+import { DetailSkeleton } from "@/components/shared/DetailSkeleton";
+import RequestBuilder from "@/modules/request-builder";
+
+/*
+ * One tab's surface is mounted at a time, so every surface but the one on
+ * screen was 5.5MB of module graph parsed before the window could appear
+ * (#1146). Each is its own chunk now, fetched when its tab is first opened.
+ *
+ * RequestBuilder stays eager: it is what the app opens into for anyone with a
+ * request tab restored, so deferring it would trade paint time for a skeleton
+ * on the surface most likely to be first.
+ */
+const CollectionDetail = lazy(() => import("@/modules/collections/CollectionDetail"));
+const LoadTestDashboard = lazy(() => import("@/modules/dashboard"));
+/*
+ * Both of these are the component's own file rather than its module barrel,
+ * and that is what makes them split at all: a barrel is one module, so
+ * `@/modules/settings` would be pulled in eagerly anyway by `Drawer`'s
+ * `SettingsCategoryTree` import - and the Drawer is mounted on every tab.
+ */
+const HistoryDetail = lazy(() => import("@/modules/history/main/HistoryDetail"));
+const WelcomeScreen = lazy(() => import("@/modules/welcome/WelcomeScreen"));
+const SettingsMain = lazy(() => import("@/modules/settings/main/SettingsMain"));
+const VariablesMain = lazy(() => import("@/modules/variables/main/VariablesMain"));
+const InboxView = lazy(() => import("@/modules/inbox"));
+
+/**
+ * What the skeleton says while a surface's chunk loads. Named per tab type
+ * rather than a bare "Loading" - which pane is arriving is the one thing the
+ * placeholder knows and a screen reader cannot see.
+ */
+const LOADING_LABEL: Record<TabType, string> = {
+	welcome: "Loading welcome screen",
+	request: "Loading request",
+	collection: "Loading collection",
+	dashboard: "Loading load test dashboard",
+	run: "Loading run",
+	variables: "Loading variables",
+	settings: "Loading settings",
+	inbox: "Loading inbox",
+};
 
 function renderTabContent(tab: Tab | null): React.ReactNode {
 	if (!tab) return <WelcomeScreen />;
@@ -262,7 +302,22 @@ export default function Shell() {
 								aria-labelledby={activeTab ? tabElementId(activeTab.id) : undefined}
 								className="flex flex-1 flex-col min-w-0 overflow-hidden"
 							>
-								{renderTabContent(activeTab)}
+								{/*
+								 * One boundary around the panel, not one per surface: only
+								 * one surface is mounted at a time, and a boundary inside
+								 * each branch would be the same fallback written eight
+								 * times. It sits inside the panel div so the tab's aria
+								 * relationship holds while its chunk is still loading.
+								 */}
+								<Suspense
+									fallback={
+										<DetailSkeleton
+											label={LOADING_LABEL[activeTab?.type ?? "welcome"]}
+										/>
+									}
+								>
+									{renderTabContent(activeTab)}
+								</Suspense>
 							</div>
 						</main>
 						<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />

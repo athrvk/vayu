@@ -11,7 +11,12 @@ import { DEFAULT_DRAWER_WIDTH } from "@/constants/layout";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
-import { SettingsCategoryTree } from "@/modules/settings";
+// The tree's own file, not `@/modules/settings`: that barrel also exports
+// `SettingsMain`, so importing it here - the Drawer is mounted on every tab -
+// would pull the settings surface back into the eager graph and undo the split
+// `Shell` makes of it (#1146). The sibling trees above are deep imports for the
+// same reason.
+import SettingsCategoryTree from "@/modules/settings/sidebar/SettingsCategoryTree";
 import { ServicesPanel } from "@/modules/services";
 import { TrashList } from "@/modules/trash";
 

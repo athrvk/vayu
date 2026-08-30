@@ -40,6 +40,17 @@ vi.mock("@monaco-editor/react", () => ({
 	},
 }));
 
+/*
+ * `CodeEditor` gates rendering `<Editor>` on `useLoadedMonaco` since #1146,
+ * showing a loading skeleton until it resolves. This suite is about chord
+ * registration, not that loading boundary, so the loader is mocked resolved
+ * and the editor mounts synchronously.
+ */
+vi.mock("@/lib/monaco-loader", () => ({
+	useLoadedMonaco: () => monaco,
+	ensureMonaco: () => Promise.resolve(monaco),
+}));
+
 describe("CodeEditor keyboard wiring", () => {
 	it("registers the send and load-test chords on every instance", () => {
 		addCommand.mockClear();

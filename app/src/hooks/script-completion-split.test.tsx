@@ -50,7 +50,12 @@ const monacoStub = {
 	},
 };
 
-vi.mock("@monaco-editor/react", () => ({ useMonaco: () => monacoStub }));
+// `CodeEditor` gates rendering on `useLoadedMonaco` since #1146, and these
+// hooks moved to it too - so the mock moves from `useMonaco` to the loader.
+vi.mock("@/lib/monaco-loader", () => ({
+	useLoadedMonaco: () => monacoStub,
+	ensureMonaco: () => Promise.resolve(monacoStub),
+}));
 
 const variables: Record<string, { value: string; scope: string }> = {};
 

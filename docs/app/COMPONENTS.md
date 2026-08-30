@@ -111,6 +111,7 @@ Main layout: tab-centric with resizable drawer, split/overlay context bar, and d
 - **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U/S/T (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab). Every one of them is a `Chord` in `constants/shortcuts.ts`, matched by `matchesChord` - the same registry the Dock's tooltips advertise from, so no surface can claim a chord the handler does not listen for. They were fourteen hand-rolled comparisons until #938, which is how AltGr (Ctrl+Alt on European Windows layouts) came to fire Save and close tabs, and how ⌘1-9 came to be dead on AZERTY. ⌘K (command palette) is **not** in this map - it is owned by `CommandPalette`, on the capture phase, because Monaco swallows the key on the bubble.
 - **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
 - **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
+- **Every surface but `RequestBuilder` is `React.lazy`** (#1146), behind one Suspense boundary inside the tab panel whose fallback is a `DetailSkeleton` naming the pane. Only one surface is mounted at a time, so a boundary per branch would be the same fallback written eight times. `RequestBuilder` stays eager because it is what most sessions open into. Two consequences worth knowing: a surface must be imported from its own file rather than its module barrel (`@/modules/settings` also exports the Drawer's `SettingsCategoryTree`, so importing the barrel here would put the settings surface back in the entry chunk), and a lazy branch is still one component per tab type - the boundary does not remount tab content, which `shell-tab-identity.test.tsx` holds.
 - **Drawer-view sync:** an effect points the Drawer at the view matching the active tab - `variables`→variables, `settings`→settings, `request`/`collection`→collections - and opens it.
 - **ContextBar mode:** picks "push" (≥1200px width) or "overlay" based on window width. It renders on the tab types the section registry has entries for - request, collection and run - and nothing on the other four. `relative` sits on the main+context row rather than on the outer one, so the overlay stops at the tab strip instead of covering the tabs it belongs to.
 - **The content region is the strip's tab panel.** A `role="tabpanel"` div inside `main` (not on `main`, which is a landmark and carries only `role="main"`), carrying the active tab's panel id and naming that tab with `aria-labelledby`. → `shell-tab-identity.test.tsx`.
@@ -292,7 +293,7 @@ Shared, Monaco-independent modules that power the GraphQL body mode.
 | `variables-schema.ts` | Derives a JSON Schema from the query's `$variable` definitions + the introspected schema via `getVariablesJSONSchema`, then applies it to the variables editor through `monaco.json.jsonDefaults` so variable values are validated and autocompleted. The query is masked before it is parsed - one `{{token}}` anywhere used to cost the pane the schema for every variable the query declares - and the schema is registered against the pane's masked twin as well as the pane itself. |
 | `variables-diagnostics.ts` | What the Variables pane's JSON markers are computed from: a hidden twin model holding the pane's text with every out-of-string token masked to a same-length JSON string. Monaco's JSON worker validates the twin, and its markers are republished on the visible model minus the ones that land on a token - so a `{{token}}` no longer reads as a syntax error while a genuine mistake beside it, which the aborted parse used to swallow, now does. Filtering the worker's markers on the pane itself cannot do this: one token also earns an `End of file expected.` on the character *after* it. |
 
-`lib/monaco-setup.ts` (sibling of `lib/graphql/`) configures `@monaco-editor/react` to use the locally bundled `monaco-editor` instead of the jsDelivr CDN, wires language web workers via Vite `?worker` imports, and calls `registerGraphqlProviders`. It is a side-effecting module imported once at the top of `main.tsx`.
+`lib/monaco-setup.ts` (sibling of `lib/graphql/`) configures `@monaco-editor/react` to use the locally bundled `monaco-editor` instead of the jsDelivr CDN, wires language web workers via Vite `?worker` imports, and calls `registerGraphqlProviders`. It is a side-effecting module, and `lib/monaco-loader.ts` is its only importer: `ensureMonaco()` pulls it in when the first `CodeEditor` mounts rather than at startup, and `CodeEditor` renders a placeholder until it resolves (#1146). That order is the requirement, not an optimisation - `loader.init()` running before `loader.config({ monaco })` sends the app to the CDN for a copy it already ships. Anything that needs the instance without wanting to load it (the `pm.*`, `{{variable}}` and script-type providers registered from `App`) subscribes with `useLoadedMonaco()`.
 
 ## Collections (`modules/collections/`)
 
@@ -1611,6 +1612,15 @@ beside a plain textarea.
    http(s) only, and strips `script` and `style` whole rather than unwrapping
    their text onto the screen. Guarded by the benign and hostile blocks in
    `markdown-view.test.tsx`, which are also what pin the plugin order.
+
+The pipeline itself - `react-markdown`, the plugins, the schema and the
+component overrides - lives in `markdown-renderer.tsx`, which `MarkdownView`
+loads through `React.lazy` (#1146). `MarkdownView` reaches the entry chunk
+through the `ui` barrel, so an eager parser chain here was ~300KB parsed on
+every cold start for a panel most sessions never open. The three rules above
+are unchanged by that: they live with the pipeline. What it changes is the
+tests - a case that asserts rendered output has to let the chunk arrive first
+(`markdown-view.test.tsx`'s `renderView` helper is the shape).
 
 `MarkdownEditor`'s rule is **focus, not dirtiness**: rendered while unfocused,
 source the moment you click in. The caret goes to the end - mapping a rendered

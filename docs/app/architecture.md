@@ -127,7 +127,8 @@ src/
 │   └── ui/             # UI primitives (Radix UI)
 ├── lib/                # Shared libraries
 │   ├── graphql/        # GraphQL support: diagnostics, introspection, schema cache, Monaco providers, variables JSON Schema, explorer tree + insertion
-│   ├── monaco-setup.ts # Monaco local-bundle config + GraphQL provider registration (imported once in main.tsx)
+│   ├── monaco-setup.ts # Monaco local-bundle config + GraphQL provider registration (loaded on the first editor mount)
+│   ├── monaco-loader.ts # The lazy boundary in front of it: ensureMonaco() / useLoadedMonaco()
 │   └── utils.ts        # General utilities (cn, etc.)
 ├── modules/            # Feature modules
 │   ├── request-builder/  # API request editor and execution
@@ -317,7 +318,8 @@ The preload script (`electron/preload.ts`) exposes a minimal, context-isolated A
 
 ## Performance Optimizations
 
-- **Code Splitting**: React vendor and charts split into separate chunks
+- **Code Splitting**: React vendor and charts have their own chunks (`vite.config.ts`), and the rest of the app loads on demand. `Shell` mounts every tab surface except `RequestBuilder` through `React.lazy` behind one Suspense boundary; Monaco (`lib/monaco-loader.ts`), the markdown pipeline (`ui/markdown-renderer.tsx`) and the GraphQL body pane each sit behind their own boundary. The entry chunk is what the window needs in order to appear - everything else arrives with the tab, editor or description that wants it (#1146)
+- **Monaco loads with the first editor, not at startup**: nothing imports `lib/monaco-setup.ts` statically. `ensureMonaco()` brings it in when a `CodeEditor` mounts, which is also what keeps `loader.config({ monaco })` ahead of `@monaco-editor/react`'s `loader.init()` - an `init()` that runs first fetches Monaco from the jsDelivr CDN instead of using the bundled copy. The app-level completion providers subscribe through `useLoadedMonaco()`, which never triggers the load
 - **Query Caching**: TanStack Query caches server responses
 - **Optimistic Updates**: UI updates immediately, syncs with server
 - **Debounced Saves**: Auto-save waits for user to stop typing
