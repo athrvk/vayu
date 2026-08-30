@@ -161,9 +161,17 @@ jobs:
         working-directory: app
         run: pnpm run build
 
-      # Go ships with all three runner images, but no workflow here has used it
-      # before - so print the version, which turns a missing toolchain into a
-      # named failure rather than a confusing `go: command not found` later.
+      # Not left to the runner image: the first run of this workflow died here
+      # with `go: command not found` on macos-latest. Go is documented as
+      # preinstalled on all three images and is not actually on PATH for every
+      # one of them, and the mock server is the load phase's target - without it
+      # there is no measurement at all. `stable` rather than a pin because
+      # mock-server.go is plain net/http with no go.mod and no version floor.
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+
       - name: Build the mock server
         shell: bash
         run: |
