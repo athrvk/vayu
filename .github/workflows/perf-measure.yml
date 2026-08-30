@@ -203,9 +203,17 @@ jobs:
         shell: bash
         working-directory: app
         run: |
-          sandbox="$(dirname "$(node -p "require('electron')")")/chrome-sandbox"
+          # tail -n 1 because requiring electron can print "Downloading Electron
+          # binary..." to stdout ahead of the path, and the whole two-line
+          # capture then gets handed to chown as one filename.
+          sandbox="$(dirname "$(node -p "require('electron')" | tail -n 1)")/chrome-sandbox"
+          if [ ! -f "$sandbox" ]; then
+            echo "::warning::no chrome-sandbox at $sandbox - the startup leg will report unavailable"
+            exit 0
+          fi
           sudo chown root:root "$sandbox"
           sudo chmod 4755 "$sandbox"
+          ls -l "$sandbox"
 
       - name: Measure the app
         shell: bash
