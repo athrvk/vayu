@@ -83,7 +83,9 @@ def app_rows(data: Optional[dict]) -> list[tuple[str, str]]:
         ("renderer dist total", mib(bundle.get("totalDistBytes"))),
         ("renderer dist files", str(bundle.get("fileCount", "-"))),
         ("startup method", str(startup.get("method", "-"))),
-        ("ready-to-show (median)", num(startup.get("medianMs"), " ms", 0)),
+        ("window ready-to-show, blank (median)", num(startup.get("blankMedianMs"), " ms", 0)),
+        ("window ready-to-show, built renderer (median)", num(startup.get("medianMs"), " ms", 0)),
+        ("renderer module graph (the delta)", num(startup.get("rendererGraphMs"), " ms", 0)),
     ]
     if startup.get("note"):
         rows.append(("startup note", str(startup["note"])))

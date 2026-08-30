@@ -153,11 +153,12 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
-      - name: Build the app
+      # The renderer only. The startup harness loads dist/ into a window of its
+      # own and never touches the compiled main process, so electron:compile
+      # would be build time nothing here reads.
+      - name: Build the renderer
         working-directory: app
-        run: |
-          pnpm run electron:compile
-          pnpm run build
+        run: pnpm run build
 
       # Go ships with all three runner images, but no workflow here has used it
       # before - so print the version, which turns a missing toolchain into a
