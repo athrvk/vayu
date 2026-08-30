@@ -107,64 +107,83 @@ async function requestEngineShutdown(port: number): Promise<boolean> {
 }
 
 /**
- * Check if a process is still running by PID and verify it's vayu-engine
- * Cross-platform implementation with process name verification
+ * A number we are willing to hand to `process.kill`.
  *
- * This prevents PID reuse issues where a different process might have
- * reused the same PID that was previously held by vayu-engine.
+ * The PID comes out of a lock file on disk, so it is whatever that file says.
+ * Zero and negatives are not PIDs: `process.kill` reads them as *process
+ * group* targets on Unix, so a truncated or garbled lock file would aim the
+ * probe - and, through `killVayuEngineProcess`, a SIGKILL - at this app's own
+ * process group.
  */
-function isVayuEngineRunning(pid: number): boolean {
+function isPlausiblePid(pid: number): boolean {
+	return Number.isInteger(pid) && pid > 0;
+}
+
+/**
+ * Does *anything* hold this PID?
+ *
+ * Signal 0 delivers nothing - it is an existence-and-permission probe, and
+ * libuv implements it on Windows too (`OpenProcess` plus an exit-code check, so
+ * a process that has terminated while someone still holds a handle to it
+ * reports `ESRCH` rather than "alive"). That makes it the cheap first half of
+ * the question on every platform, which matters because the dominant case at
+ * startup is a leftover lock file naming a PID that is long gone: the engine
+ * only releases its lock on a clean shutdown and never unlinks the file, so
+ * every ordinary boot asks about a dead PID. Windows used to answer that by
+ * spawning cmd.exe + tasklist - 52.5 ms median, measured, on the main-process
+ * event loop, every launch.
+ *
+ * `EPERM` is alive-but-not-ours: something is running under that PID, and the
+ * name check is what decides whether it is our engine.
+ */
+function isPidAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		return (err as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+/**
+ * Does the OS agree that this live PID is a vayu-engine?
+ *
+ * The subprocess half, and the only half that costs anything - reached only
+ * once something is known to be alive under the PID. Failure to read the name
+ * is not evidence of an engine, so it answers no.
+ */
+function isEngineProcessName(pid: number): boolean {
 	try {
 		if (process.platform === "win32") {
-			// On Windows, use tasklist to check if process exists and verify name
-			try {
-				const output = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, {
-					encoding: "utf-8",
-				});
-
-				// Check if output contains vayu-engine.exe
-				// Format: "vayu-engine.exe","12345","Console","1","12,345 K"
-				if (!output || output.includes("INFO: No tasks are running")) {
-					return false;
-				}
-
-				// Verify the process name is vayu-engine.exe
-				return output.toLowerCase().includes("vayu-engine.exe");
-			} catch {
-				return false;
-			}
-		} else {
-			// On Unix (macOS, Linux), first check if process exists with signal 0
-			try {
-				process.kill(pid, 0);
-			} catch (err) {
-				// ESRCH means process doesn't exist
-				if ((err as NodeJS.ErrnoException).code === "ESRCH") {
-					return false;
-				}
-				// EPERM means process exists but we don't have permission
-				// Continue to verify process name
-				if ((err as NodeJS.ErrnoException).code !== "EPERM") {
-					return false;
-				}
-			}
-
-			// Process exists, now verify it's vayu-engine
-			try {
-				const output = execSync(`ps -p ${pid} -o comm=`, {
-					encoding: "utf-8",
-				}).trim();
-
-				// Process name should contain "vayu-engine"
-				return output.includes("vayu-engine");
-			} catch {
-				// If ps fails, assume process doesn't exist or is inaccessible
-				return false;
-			}
+			// Format: "vayu-engine.exe","12345","Console","1","12,345 K" - and
+			// "INFO: No tasks are running..." when the PID filter matches nothing,
+			// which fails the same name test.
+			const output = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, {
+				encoding: "utf-8",
+				windowsHide: true,
+			});
+			return output.toLowerCase().includes("vayu-engine.exe");
 		}
+
+		return execSync(`ps -p ${pid} -o comm=`, { encoding: "utf-8" }).includes("vayu-engine");
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Check if a process is still running by PID and verify it's vayu-engine
+ *
+ * Cheap first, subprocess second: a PID nothing holds is answered by the signal-0
+ * probe alone, and only a live PID is worth paying a `tasklist` / `ps` for. The
+ * name check is not optional politeness - it prevents PID reuse issues where a
+ * different process might have reused the same PID that was previously held by
+ * vayu-engine.
+ */
+function isVayuEngineRunning(pid: number): boolean {
+	if (!isPlausiblePid(pid)) return false;
+	if (!isPidAlive(pid)) return false;
+	return isEngineProcessName(pid);
 }
 
 /**
@@ -182,7 +201,7 @@ function killVayuEngineProcess(pid: number): boolean {
 
 	try {
 		if (process.platform === "win32") {
-			execSync(`taskkill /PID ${pid} /F /T`, { stdio: "ignore" });
+			execSync(`taskkill /PID ${pid} /F /T`, { stdio: "ignore", windowsHide: true });
 		} else {
 			process.kill(pid, "SIGKILL");
 		}
