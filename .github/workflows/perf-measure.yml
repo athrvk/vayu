@@ -1,0 +1,247 @@
+name: Perf Measure
+
+# Per-platform performance measurement for the #1143 program (filed as #1162).
+#
+# The 2026-08-30 sweep could only measure Linux, so every per-platform magnitude
+# in that program's sub-issues is code-derived. This runs the same method on the
+# Windows and macOS runners the repo already pays for, and doubles as the
+# standing harness #1143's exit criterion needs ("startup re-measured after the
+# #1144-#1149 cluster lands, per platform").
+#
+# It measures; it does not gate. There are no thresholds, nothing here fails a
+# build on a number, and no ordinary pull request runs it - humans compare runs.
+#
+# Deliberately out of scope, so nobody looks for it here:
+#   - Deep power measurement for #1161's idle-timer question (powercfg /energy,
+#     ETW). Shared CI runners cannot measure it meaningfully; that half of #1161
+#     stays honestly unmeasured, and #1161 says so.
+#   - The CURLSSLOPT_NATIVE_CA handshake delta - it needs a TLS target and the
+#     mock server has no TLS mode, which is where #1143 records it.
+#   - The real app's end-to-end cold start, which cannot be launched unpackaged
+#     (#1165). The startup figure here is the renderer graph alone.
+
+on:
+  schedule:
+    # Weekly, Monday. 14:00 UTC keeps clear of the other crons competing for the
+    # runner pool: cache-warm and codeql at 06:00, sanitizers 09:00, tidy 11:00.
+    - cron: '0 14 * * 1'
+  workflow_dispatch:
+  # A measurement workflow has no business running on ordinary PRs, and this
+  # trigger does not: it is scoped to this workflow's own machinery. Without it
+  # the first evidence that any of this works arrives after merge, on a cron, as
+  # a red master - a workflow cannot be dispatched before it exists on the
+  # default branch. Same pattern, same reason, as sanitizers.yml and
+  # engine-tidy-scan.yml.
+  pull_request:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/perf-measure.yml'
+      - 'scripts/perf/**'
+
+concurrency:
+  group: perf-measure-${{ github.ref }}
+  # A cron or dispatch run is data and is never thrown away half-taken
+  # (cache-warm.yml makes the same call). A pull_request run is only proving
+  # this machinery still works, and only the newest commit's answer counts -
+  # left uncancelled, every push during a fix cycle stacks another three-OS
+  # engine build alongside the ones already running.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: Measure on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # The engine build dominates: pr-tests.yml budgets 90 for build + ctest, and
+    # this trades ctest for ~6 min of sampling. A runaway guard, not a budget.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            preset: linux-prod
+            engine: engine/build-release/vayu-engine
+            mock: ./mock-server
+          - os: windows-latest
+            preset: windows-prod
+            engine: engine/build-release/vayu-engine.exe
+            mock: ./mock-server.exe
+          - os: macos-latest
+            preset: macos-prod
+            engine: engine/build-release/vayu-engine
+            mock: ./mock-server
+    env:
+      VCPKG_COMMIT: '114d9fe62faf35856b45cf55cb93b57028a45d63'
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+      SCCACHE_GHA_ENABLED: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            build-essential \
+            pkg-config \
+            ca-certificates \
+            autoconf \
+            autoconf-archive \
+            automake \
+            libtool \
+            xvfb
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          command -v ninja || brew install ninja
+          for pkg in autoconf autoconf-archive automake libtool; do
+            brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
+          done
+
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
+          vcpkgJsonGlob: 'engine/vcpkg.json'
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Configure sccache compiler launcher
+        shell: bash
+        run: |
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+
+      # The production preset, not dev. A debug engine's CPU figures are
+      # inflated - the caveat the sweep had to carry, and the reason this exists.
+      - name: Build engine (production preset)
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          configurePreset: ${{ matrix.preset }}
+          buildPreset: ${{ matrix.preset }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      # The renderer only. The startup harness loads dist/ into a window of its
+      # own and never touches the compiled main process, so electron:compile
+      # would be build time nothing here reads.
+      - name: Build the renderer
+        working-directory: app
+        run: pnpm run build
+
+      # Not left to the runner image: the first run of this workflow died here
+      # with `go: command not found` on macos-latest. Go is documented as
+      # preinstalled on all three images and is not actually on PATH for every
+      # one of them, and the mock server is the load phase's target - without it
+      # there is no measurement at all. `stable` rather than a pin because
+      # mock-server.go is plain net/http with no go.mod and no version floor.
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+
+      - name: Build the mock server
+        shell: bash
+        run: |
+          go version
+          go build -o "${{ matrix.mock }}" scripts/test/mock-server.go
+
+      - name: Measure the engine
+        shell: bash
+        run: |
+          python scripts/perf/measure_engine.py \
+            --engine "${{ matrix.engine }}" \
+            --mock "${{ matrix.mock }}" \
+            --data-dir "$RUNNER_TEMP/perf-data" \
+            --log-dir perf-logs \
+            --out perf-engine.json
+
+      # Electron ships its SUID sandbox helper without the ownership it needs,
+      # and npm cannot set it - so on the Linux runner every launch aborts with
+      # "The SUID sandbox helper binary was found, but is not configured
+      # correctly", which cost this workflow its Linux startup figure on the
+      # first green run. This is the remedy that error itself prescribes, and
+      # it keeps the sandbox: --no-sandbox would also work and would be turning
+      # off a security boundary to make a measurement convenient.
+      - name: Configure Electron's sandbox helper (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: app
+        run: |
+          # tail -n 1 because requiring electron can print "Downloading Electron
+          # binary..." to stdout ahead of the path, and the whole two-line
+          # capture then gets handed to chown as one filename.
+          sandbox="$(dirname "$(node -p "require('electron')" | tail -n 1)")/chrome-sandbox"
+          if [ ! -f "$sandbox" ]; then
+            echo "::warning::no chrome-sandbox at $sandbox - the startup leg will report unavailable"
+            exit 0
+          fi
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          ls -l "$sandbox"
+
+      - name: Measure the app
+        shell: bash
+        env:
+          # xvfb on the Linux runner, which has no display; the Windows and
+          # macOS runners have a desktop session and launch the app directly.
+          LAUNCHER: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }}
+        run: $LAUNCHER node scripts/perf/measure-app.mjs --out perf-app.json
+
+      - name: Summarize
+        if: always()
+        shell: bash
+        run: |
+          python scripts/perf/summarize.py \
+            --os "${{ matrix.os }}" \
+            --engine-json perf-engine.json \
+            --app-json perf-app.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-measure-${{ matrix.os }}
+          path: |
+            perf-engine.json
+            perf-app.json
+            perf-logs/
+          # The child logs are why perf-logs/ is here: when a leg fails, the
+          # engine's own stdout is the only diagnostic the runner keeps.
+          if-no-files-found: error
+          retention-days: 90

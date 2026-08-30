@@ -250,6 +250,27 @@ guard-proved values are no-ops without it.
   missing module in `resolve.test.ts` passed CI while breaking
   `python build.py --dev`
 
+## Measuring what a build costs
+
+`.github/workflows/perf-measure.yml` records the built renderer's entry-chunk
+size, its total `dist/` size, and how long a window takes to become showable
+with that bundle in it - per platform, weekly and on demand. It is a
+measurement, not a gate: nothing there fails a build on a number.
+
+`scripts/perf/measure-app.mjs` is what produces those figures and runs locally
+the same way, against an existing `pnpm run build`:
+
+```bash
+node scripts/perf/measure-app.mjs --out perf-app.json   # from the repo root
+```
+
+The startup figure comes from `scripts/perf/startup-harness.cjs`, a small
+Electron main script that loads `app/dist/index.html` into one window - not the
+Vayu app, which cannot start unpackaged (it resolves its engine under
+`process.resourcesPath`). So the number covers the renderer's module graph and
+its render-blocking fetches, and not the main process's own startup work. That
+file's header states the boundary in full; read it before quoting the number.
+
 ## Vite Configuration
 
 Key settings in `vite.config.ts`:

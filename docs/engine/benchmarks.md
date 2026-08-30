@@ -512,6 +512,32 @@ For load testing this class of target on this machine:
 | `dbSynchronous` | 0 (Off) | Already optimal by default |
 | measurement method | standalone engine | Worth ~9% versus running through the app |
 
+## Per-platform measurement in CI
+
+The numbers above are throughput on one machine. What the engine *costs* while
+it runs - resident memory, threads and CPU at idle, under load, and in the
+minute after a run finishes - is measured per platform by
+[`.github/workflows/perf-measure.yml`](https://github.com/athrvk/vayu/blob/master/.github/workflows/perf-measure.yml),
+weekly and on demand, on the same Windows, macOS and Linux runners the test
+matrix uses. It is the source for those figures, and the standing harness the
+app-performance program (#1143) re-runs to compare before and after.
+
+It builds the engine on the `-prod` preset, so its CPU figures carry no
+debug-build caveat, spawns it with the same `--verbose 1` the app's sidecar
+uses, then samples through a 60 s idle phase, one 8-VU 30 s
+`constant_concurrency` run against the same `scripts/test/mock-server.go` used
+here, and 60 s of post-run retention. Each run writes a JSON artifact per OS and
+a table to the run summary. It measures rather than gates: there are no
+thresholds, and nothing in it fails a build on a number. The sampling itself
+lives in `scripts/perf/measure_engine.py` and runs the same way locally:
+
+```bash
+go build -o mock-server scripts/test/mock-server.go
+python scripts/perf/measure_engine.py \
+    --engine engine/build-release/vayu-engine \
+    --mock ./mock-server --out perf-engine.json
+```
+
 ## Reproduce it
 
 ```bash
