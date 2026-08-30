@@ -68,7 +68,8 @@ class Sample:
     phase: str
     elapsed_s: float
     rss_bytes: int
-    threads: int
+    # None where the platform gives no reliable count - see _darwin_thread_count.
+    threads: Optional[int]
     cpu_seconds: float
 
     def to_json(self) -> dict:
@@ -90,9 +91,9 @@ class PhaseStats:
     rss_min_bytes: int
     rss_max_bytes: int
     rss_last_bytes: int
-    threads_min: int
-    threads_max: int
-    threads_last: int
+    threads_min: Optional[int]
+    threads_max: Optional[int]
+    threads_last: Optional[int]
     cpu_percent_of_one_core: Optional[float]
 
     def to_json(self) -> dict:
@@ -174,21 +175,30 @@ def _sample_darwin(pid: int) -> tuple[int, int, float]:
         raise MeasurementError(f"engine pid {pid} is gone (ps rc={proc.returncode})")
     rss_kb, _, cpu_time = line.split(None, 1)
 
-    threads_proc = subprocess.run(
+    return int(rss_kb) * 1024, _darwin_thread_count(pid), _parse_ps_cpu_time(cpu_time.strip())
+
+
+def _darwin_thread_count(pid: int) -> Optional[int]:
+    """Thread count from `ps -M`, or None when it cannot be read.
+
+    macOS has no `nlwp` column - `ps -M` listing one line per thread after a
+    header is the only spelling - and it is the one call in this file that
+    could not be tried before CI ran it. So it is best-effort by design: None
+    when the output is not what it should be, never a fabricated 0, and never
+    fatal. Whether the process is alive is settled by the RSS read above, which
+    is authoritative and strict; losing a cosmetic count is not a reason to
+    throw away a measurement that took three minutes to take.
+    """
+    proc = subprocess.run(
         ["ps", "-M", "-p", str(pid)],
         capture_output=True,
         text=True,
         check=False,
     )
-    # One header line, then one line per thread. Checked rather than trusted:
-    # if the engine dies between these two calls, an unchecked parse would
-    # report threads=0 beside a real RSS - a sample that looks valid and is not.
-    thread_lines = [ln for ln in threads_proc.stdout.splitlines() if ln.strip()]
-    if threads_proc.returncode != 0 or len(thread_lines) < 2:
-        raise MeasurementError(f"engine pid {pid} is gone (ps -M rc={threads_proc.returncode})")
-    threads = len(thread_lines) - 1
-
-    return int(rss_kb) * 1024, threads, _parse_ps_cpu_time(cpu_time.strip())
+    if proc.returncode != 0:
+        return None
+    lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    return len(lines) - 1 if len(lines) >= 2 else None
 
 
 def _powershell() -> str:
@@ -350,14 +360,18 @@ def summarize(samples: list[Sample]) -> PhaseStats:
     cpu_delta = samples[-1].cpu_seconds - samples[0].cpu_seconds
     cpu_percent = round(cpu_delta / span * 100.0, 3) if span > 0 else None
 
+    # Threads are optional per platform, so aggregate only what was read. An
+    # absent count stays absent rather than becoming a 0 that reads as a fact.
+    counts = [s.threads for s in samples if s.threads is not None]
+
     return PhaseStats(
         samples=len(samples),
         seconds=round(span, 3),
         rss_min_bytes=min(s.rss_bytes for s in samples),
         rss_max_bytes=max(s.rss_bytes for s in samples),
         rss_last_bytes=samples[-1].rss_bytes,
-        threads_min=min(s.threads for s in samples),
-        threads_max=max(s.threads for s in samples),
+        threads_min=min(counts) if counts else None,
+        threads_max=max(counts) if counts else None,
         threads_last=samples[-1].threads,
         cpu_percent_of_one_core=cpu_percent,
     )
@@ -469,6 +483,24 @@ def measure(args: argparse.Namespace) -> dict:
         terminate(mock, "mock-server")
 
 
+def print_engine_log_tail(log_dir: Path, lines: int = 20) -> None:
+    """Echo the end of the engine's own log when a measurement fails.
+
+    The log is in the run's artifact either way, but a failing CI step is read
+    from its own output first, and a job log cannot be paged to the middle -
+    so a failure that says only what threw costs a whole cycle to diagnose.
+    """
+    log = log_dir / "engine.log"
+    if not log.exists():
+        print(f"[perf] no engine log at {log}", file=sys.stderr)
+        return
+
+    tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]
+    print(f"[perf] last {len(tail)} lines of {log}:", file=sys.stderr)
+    for line in tail:
+        print(f"[perf]   {line}", file=sys.stderr)
+
+
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--engine", required=True, help="path to the vayu-engine binary")
@@ -499,6 +531,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         result = measure(args)
     except (MeasurementError, urllib.error.URLError, OSError, KeyError, ValueError) as exc:
         print(f"[perf] measurement failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print_engine_log_tail(Path(args.log_dir))
         return 1
 
     Path(args.out).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

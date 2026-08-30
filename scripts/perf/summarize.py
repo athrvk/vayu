@@ -47,6 +47,11 @@ def num(value: Optional[float], suffix: str = "", digits: int = 1) -> str:
     return "-" if value is None else f"{value:,.{digits}f}{suffix}"
 
 
+def count(value: Optional[int]) -> str:
+    """A thread count, or "-" where the platform gave none (see measure_engine)."""
+    return "-" if value is None else str(value)
+
+
 def engine_rows(data: Optional[dict]) -> list[tuple[str, str]]:
     if data is None:
         return [("engine leg", "**did not produce a result**")]
@@ -57,7 +62,7 @@ def engine_rows(data: Optional[dict]) -> list[tuple[str, str]]:
         ("engine workers", str(data.get("engineWorkers", "-"))),
         ("idle RSS (last / max)", f"{mib(idle['rssLastBytes'])} / {mib(idle['rssMaxBytes'])}"),
         ("idle CPU", num(idle["cpuPercentOfOneCore"], "% of one core", 2)),
-        ("idle threads", str(idle["threadsLast"])),
+        ("idle threads", count(idle["threadsLast"])),
         (
             f"load: {load['vus']} VU / {load['durationSeconds']}s avg RPS",
             num(load.get("avgRps"), "", 0),
@@ -66,7 +71,7 @@ def engine_rows(data: Optional[dict]) -> list[tuple[str, str]]:
         ("load RSS peak", mib(load["rssMaxBytes"])),
         ("load RSS at run end", mib(load["rssLastBytes"])),
         ("load CPU", num(load["cpuPercentOfOneCore"], "% of one core", 1)),
-        ("load threads (max)", str(load["threadsMax"])),
+        ("load threads (max)", count(load["threadsMax"])),
         ("post-run RSS after 60s", mib(retention["rssLastBytes"])),
         ("post-run residual vs pre-run", mib(retention["residualBytes"])),
         ("data dir after the run", mib(data.get("dataDirBytes"))),
