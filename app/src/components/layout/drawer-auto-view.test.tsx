@@ -49,16 +49,16 @@ vi.mock("@/modules/dashboard", () => ({
 	default: () => <div data-testid="dashboard" />,
 }));
 
-vi.mock("@/modules/history/main", () => ({
-	HistoryDetail: () => <div data-testid="history-detail" />,
+vi.mock("@/modules/history/main/HistoryDetail", () => ({
+	default: () => <div data-testid="history-detail" />,
 }));
 
 vi.mock("@/modules/welcome/WelcomeScreen", () => ({
 	default: () => <div data-testid="welcome-screen" />,
 }));
 
-vi.mock("@/modules/settings", () => ({
-	SettingsMain: () => <div data-testid="settings-main" />,
+vi.mock("@/modules/settings/main/SettingsMain", () => ({
+	default: () => <div data-testid="settings-main" />,
 }));
 
 vi.mock("@/modules/variables/main/VariablesMain", () => ({

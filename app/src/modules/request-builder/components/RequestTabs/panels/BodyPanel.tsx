@@ -71,6 +71,10 @@ import { useResizable } from "@/hooks/useResizable";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
 import { cn } from "@/lib/utils";
+import { switchContentType, withoutContentType } from "./body/content-type";
+import { ContentTypeNotice } from "./body/ContentTypeNotice";
+import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
+
 /*
  * The GraphQL pane is the entry chunk's largest optional passenger: the
  * `graphql` package plus `graphql-language-service` and the variables schema
@@ -78,9 +82,6 @@ import { cn } from "@/lib/utils";
  * `bodyMode === "graphql"`, so it loads then (#1146).
  */
 const GraphQLBody = lazy(() => import("./body/GraphQLBody"));
-import { switchContentType, withoutContentType } from "./body/content-type";
-import { ContentTypeNotice } from "./body/ContentTypeNotice";
-import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
 
 const BODY_MODES: { value: BodyMode; label: string; contentType: string | null }[] = [
 	{ value: "none", label: "None", contentType: null },

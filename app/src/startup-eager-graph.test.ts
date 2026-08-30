@@ -91,6 +91,21 @@ describe("the always-mounted chrome does not defeat the split", () => {
 		expect(drawer).toContain("@/modules/settings/sidebar/SettingsCategoryTree");
 		expect(drawer).not.toMatch(/from "@\/modules\/settings";/);
 	});
+
+	it("the settings registry the tree reads holds data, not panels", () => {
+		const registry = read("modules", "settings", "main", "app-panels.ts");
+
+		// Avoiding the barrel was not enough on its own: the category tree reads
+		// this registry for labels and icons, and a `Component` field here
+		// imported all eight panels into the entry chunk from an always-mounted
+		// Drawer - a lazy `SettingsMain` around code that had already arrived.
+		// The components live in `app-panel-components.ts`, which only
+		// `SettingsMain` and its drift guard import.
+		expect(registry).not.toMatch(/from "\.\/panels\//);
+		expect(read("modules", "settings", "main", "app-panel-components.ts")).toMatch(
+			/from "\.\/panels\//
+		);
+	});
 });
 
 describe("the markdown pipeline is lazy", () => {

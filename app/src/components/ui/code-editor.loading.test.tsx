@@ -83,6 +83,11 @@ describe("the editor waits for Monaco", () => {
 		// `init()`-before-`config()` CDN fetch the gate exists to prevent.
 		expect(screen.queryByTestId("editor")).toBeNull();
 		expect(screen.getByRole("status", { name: "Loading editor" })).toBeInTheDocument();
+
+		// The assertions above are the point of the case and belong before the
+		// load lands. Flushing it afterwards is what keeps the state update it
+		// causes inside `act` instead of arriving during teardown as a warning.
+		await act(async () => {});
 	});
 
 	it("swaps the placeholder for the editor once Monaco is there", async () => {

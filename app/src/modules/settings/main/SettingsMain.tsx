@@ -47,6 +47,7 @@ import { cn } from "@/lib/utils";
 import ClientSettingsPanel from "./panels/ClientSettingsPanel";
 import { DefaultValueLine, NumberSettingRow, SelectSettingRow } from "./panels/SettingControls";
 import { DEFAULT_SAVE_NOTE, getAppPanel, isClientCategory } from "./app-panels";
+import { APP_PANEL_COMPONENTS } from "./app-panel-components";
 import { getEngineCategory } from "../engine-categories";
 import { appEditorFor } from "../engine-settings-edited-in-app";
 import { useRevealedSetting } from "../useRevealedSetting";
@@ -417,7 +418,7 @@ export default function SettingsMain() {
 	// the shared shell (no Save/Reset bar - these prefs auto-persist).
 	const appPanel = getAppPanel(selectedCategory);
 	if (appPanel) {
-		const Panel = appPanel.Component;
+		const Panel = APP_PANEL_COMPONENTS[appPanel.id];
 		return (
 			<ClientSettingsPanel
 				title={appPanel.label}

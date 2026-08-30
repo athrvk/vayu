@@ -42,9 +42,13 @@ vi.mock("@/modules/collections/ImportModal", () => ({
 }));
 vi.mock("@/modules/collections/CollectionDetail", () => ({ default: () => null }));
 vi.mock("@/modules/dashboard", () => ({ default: () => null }));
-vi.mock("@/modules/history/main", () => ({ HistoryDetail: () => null }));
+vi.mock("@/modules/history/main/HistoryDetail", () => ({
+	default: () => null,
+}));
 vi.mock("@/modules/welcome/WelcomeScreen", () => ({ default: () => null }));
-vi.mock("@/modules/settings", () => ({ SettingsMain: () => null }));
+vi.mock("@/modules/settings/main/SettingsMain", () => ({
+	default: () => null,
+}));
 vi.mock("@/modules/variables/main/VariablesMain", () => ({ default: () => null }));
 
 /** Stands in for the request builder, holding the state an unsaved body is. */
