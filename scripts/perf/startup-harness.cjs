@@ -16,8 +16,8 @@
  * built `dist/` - the app resolves its engine under `process.resourcesPath`,
  * which exists only in a packaged build, so an unpackaged launch on a runner
  * never reaches `ready-to-show` at all. Measuring the packaged app end to end
- * needs electron-builder in this workflow and is filed separately; this is the
- * fallback #1162 names for exactly that case ("the blank-window baseline vs
+ * needs electron-builder in this workflow and is #1165; this is the fallback
+ * #1162 names for exactly that case ("the blank-window baseline vs
  * full-renderer delta - the sweep's method").
  *
  * What it therefore does NOT measure, so nobody reads more into the number:

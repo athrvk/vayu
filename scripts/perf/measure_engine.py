@@ -180,9 +180,13 @@ def _sample_darwin(pid: int) -> tuple[int, int, float]:
         text=True,
         check=False,
     )
-    # One header line, then one line per thread.
+    # One header line, then one line per thread. Checked rather than trusted:
+    # if the engine dies between these two calls, an unchecked parse would
+    # report threads=0 beside a real RSS - a sample that looks valid and is not.
     thread_lines = [ln for ln in threads_proc.stdout.splitlines() if ln.strip()]
-    threads = max(len(thread_lines) - 1, 0)
+    if threads_proc.returncode != 0 or len(thread_lines) < 2:
+        raise MeasurementError(f"engine pid {pid} is gone (ps -M rc={threads_proc.returncode})")
+    threads = len(thread_lines) - 1
 
     return int(rss_kb) * 1024, threads, _parse_ps_cpu_time(cpu_time.strip())
 
@@ -488,10 +492,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"[perf] {label} binary not found: {value}", file=sys.stderr)
             return 2
 
+    # The engine answering something unexpected - a 400 from POST /runs, a
+    # report missing a key - is a measurement failure like any other, and
+    # deserves the same one-line reason rather than a traceback.
     try:
         result = measure(args)
-    except MeasurementError as exc:
-        print(f"[perf] measurement failed: {exc}", file=sys.stderr)
+    except (MeasurementError, urllib.error.URLError, OSError, KeyError, ValueError) as exc:
+        print(f"[perf] measurement failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
     Path(args.out).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

@@ -136,7 +136,7 @@ jobs:
           # an older vcpkg while resolving against the new manifest baseline,
           # which is the exact divergence the second half of this step rejects.
           files=(release.yml pr-tests.yml codeql.yml cache-warm.yml \
-                 sanitizers.yml engine-tidy-scan.yml)
+                 sanitizers.yml engine-tidy-scan.yml perf-measure.yml)
           keys=() commits=()
           for f in "${files[@]}"; do
             p=".github/workflows/$f"

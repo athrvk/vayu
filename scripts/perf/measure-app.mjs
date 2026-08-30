@@ -4,9 +4,9 @@
  * tasklist-spawn cost of the built Electron app.
  *
  * Written for `.github/workflows/perf-measure.yml` (issue #1162), which runs
- * this after `pnpm run electron:compile && pnpm run build` in `app/`. Output
- * is JSON matching the exact shape `scripts/perf/summarize.py`'s `app_rows()`
- * reads - that function is the contract, this script is what fills it.
+ * this after `pnpm run build` in `app/`. Output is JSON matching the exact
+ * shape `scripts/perf/summarize.py`'s `app_rows()` reads - that function is
+ * the contract, this script is what fills it.
  *
  * Three independent measurements, none of which needs the other two to run:
  *
@@ -24,7 +24,7 @@
  *
  * Deliberately does not:
  *   - Measure a packaged installer, or the real app's end-to-end cold start.
- *     Both need electron-builder in this workflow; filed separately.
+ *     Both need electron-builder in this workflow - #1165.
  *   - Retry a failed launch. A flaky Electron launch on a shared runner is
  *     recorded as `"method": "unavailable"` with the actual reason in `note`,
  *     not smoothed over by trying again.

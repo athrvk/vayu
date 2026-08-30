@@ -64,6 +64,7 @@ def engine_rows(data: Optional[dict]) -> list[tuple[str, str]]:
         ),
         ("load requests / error rate", f"{num(load.get('totalRequests'), '', 0)} / {num(load.get('errorRate'), '', 4)}"),
         ("load RSS peak", mib(load["rssMaxBytes"])),
+        ("load RSS at run end", mib(load["rssLastBytes"])),
         ("load CPU", num(load["cpuPercentOfOneCore"], "% of one core", 1)),
         ("load threads (max)", str(load["threadsMax"])),
         ("post-run RSS after 60s", mib(retention["rssLastBytes"])),
