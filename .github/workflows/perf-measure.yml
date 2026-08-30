@@ -191,6 +191,22 @@ jobs:
             --log-dir perf-logs \
             --out perf-engine.json
 
+      # Electron ships its SUID sandbox helper without the ownership it needs,
+      # and npm cannot set it - so on the Linux runner every launch aborts with
+      # "The SUID sandbox helper binary was found, but is not configured
+      # correctly", which cost this workflow its Linux startup figure on the
+      # first green run. This is the remedy that error itself prescribes, and
+      # it keeps the sandbox: --no-sandbox would also work and would be turning
+      # off a security boundary to make a measurement convenient.
+      - name: Configure Electron's sandbox helper (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: app
+        run: |
+          sandbox="$(dirname "$(node -p "require('electron')")")/chrome-sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+
       - name: Measure the app
         shell: bash
         env:
