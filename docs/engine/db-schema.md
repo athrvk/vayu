@@ -135,8 +135,9 @@ Three things worth knowing about where it sits:
   it found it.
 
 The outcome is logged at info level (`Reclaimed N KB of freed database pages`), because the cost
-is paid on the startup path - `db.init()` returns before `/health` answers, and the app gives the
-engine 45 seconds to come up. A rewrite slow enough to matter is one this line explains.
+is paid on the startup path - `db.init()` returns before `/health` answers, and the app's readiness
+poll budgets 45 seconds against it before handing the engine to the renderer's own health poll. A
+rewrite slow enough to matter is one this line explains.
 Best-effort like the sweeps before it: a failure is a warning, never a daemon that will not start.
 `auto_vacuum` was rejected as the alternative - switching an existing database's mode requires a
 full `VACUUM` anyway, and it changes page bookkeeping for every write thereafter.

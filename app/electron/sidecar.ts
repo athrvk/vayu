@@ -18,8 +18,9 @@ import net from "net";
 import {
 	ENGINE_PORT,
 	ENGINE_LOCK_FILE,
-	ENGINE_HEALTH_MAX_ATTEMPTS,
-	ENGINE_HEALTH_POLL_INTERVAL_MS,
+	ENGINE_HEALTH_POLL_BUDGET_MS,
+	ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS,
+	ENGINE_HEALTH_POLL_MAX_INTERVAL_MS,
 	ENGINE_HEALTH_REQUEST_TIMEOUT_MS,
 	ENGINE_SHUTDOWN_REQUEST_TIMEOUT_MS,
 	ENGINE_GRACEFUL_EXIT_TIMEOUT_MS,
@@ -306,6 +307,22 @@ type SpawnFailure =
 	| { kind: "exit"; code: number | null; signal: NodeJS.Signals | null; stderr: string[] }
 	| { kind: "error"; message: string };
 
+/**
+ * Raised when the readiness budget is spent but the engine is still alive.
+ *
+ * Distinct from every other start failure because it is the one that is not a
+ * failure of the engine: a large run history, a cold disk or an antivirus scan
+ * can push `db.init()` past the budget on a machine where the engine then comes
+ * up perfectly well. The launch path treats it as "not yet", not as "never" -
+ * quitting here killed engines that were seconds from answering.
+ */
+export class EngineNotReadyError extends Error {
+	constructor(budgetMs: number) {
+		super(`Engine did not answer /health within ${budgetMs / 1000} seconds`);
+		this.name = "EngineNotReadyError";
+	}
+}
+
 /** The user-facing half of a `SpawnFailure`; ends up in a `showErrorBox`. */
 function describeSpawnFailure(failure: SpawnFailure): string {
 	if (failure.kind === "error") {
@@ -590,9 +607,23 @@ export class EngineSidecar {
 	 * `spawnFailure` reports what the child we just spawned did instead of coming
 	 * up, and is the loop's early exit: polling out the remaining attempts against
 	 * a process that has already gone only delays the error the user needs.
+	 *
+	 * The gap between probes ramps rather than sitting flat, because the first
+	 * probe cannot succeed - nothing is listening microseconds after `spawn()`
+	 * returns - so a flat interval made its own length the floor on every healthy
+	 * launch. Spending the budget as `ENGINE_HEALTH_POLL_BUDGET_MS` of accumulated
+	 * waiting rather than as a fixed attempt count keeps that ceiling exactly
+	 * where the engine's own startup housekeeping is priced against it, while
+	 * letting the early attempts be cheap.
+	 *
+	 * Throws `EngineNotReadyError` when the budget is spent and the child is
+	 * still alive; the caller decides what a slow engine costs.
 	 */
 	private async waitForEngine(spawnFailure: () => SpawnFailure | null): Promise<void> {
-		for (let i = 0; i < ENGINE_HEALTH_MAX_ATTEMPTS; i++) {
+		let waited = 0;
+		let interval = ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS;
+
+		for (;;) {
 			// A quit arriving mid-startup must not be held for the rest of the
 			// ceiling: the child is already tracked, so the quit path kills it and
 			// this loop's only remaining job is to stop waiting.
@@ -611,11 +642,14 @@ export class EngineSidecar {
 				return;
 			}
 
-			await this.system.sleep(ENGINE_HEALTH_POLL_INTERVAL_MS);
-		}
+			if (waited >= ENGINE_HEALTH_POLL_BUDGET_MS) {
+				throw new EngineNotReadyError(ENGINE_HEALTH_POLL_BUDGET_MS);
+			}
 
-		const ceilingSeconds = (ENGINE_HEALTH_MAX_ATTEMPTS * ENGINE_HEALTH_POLL_INTERVAL_MS) / 1000;
-		throw new Error(`Engine failed to start within ${ceilingSeconds} seconds`);
+			await this.system.sleep(interval);
+			waited += interval;
+			interval = Math.min(interval * 2, ENGINE_HEALTH_POLL_MAX_INTERVAL_MS);
+		}
 	}
 
 	/** Throw if the app is shutting down, so no caller spawns into a quit. */

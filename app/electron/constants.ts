@@ -46,8 +46,29 @@ export const MCP_PATH = "/mcp";
 export const MCP_ENDPOINT_URL = `http://${MCP_HOST}:${MCP_PORT}${MCP_PATH}`;
 
 // Engine lifecycle
-export const ENGINE_HEALTH_MAX_ATTEMPTS = 90;
-export const ENGINE_HEALTH_POLL_INTERVAL_MS = 500;
+/**
+ * How long the readiness poll waits for a freshly spawned engine to answer
+ * `/health` before it stops watching and leaves the engine to the renderer.
+ *
+ * Budget of *waiting*, not wall clock: the probes themselves are not charged
+ * against it, exactly as the attempt count it replaces was not. The engine's
+ * own startup housekeeping is priced against this number - see
+ * `reclaim_freed_pages` in `engine/src/db/database.cpp`.
+ */
+export const ENGINE_HEALTH_POLL_BUDGET_MS = 45000;
+/**
+ * First gap between health probes, doubling to `ENGINE_HEALTH_POLL_MAX_INTERVAL_MS`.
+ *
+ * A flat 500ms was the entire startup cost of a healthy engine: the first probe
+ * necessarily misses (nothing can be listening microseconds after `spawn()`
+ * returns), so every launch paid one full quantum before the second probe could
+ * succeed. Ramping spends that budget where the engine actually comes up -
+ * within tens of milliseconds - while still backing off to a cheap poll for the
+ * cold-cache, large-history case that needs the seconds.
+ */
+export const ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS = 50;
+/** Ceiling the ramped poll interval doubles up to. */
+export const ENGINE_HEALTH_POLL_MAX_INTERVAL_MS = 500;
 export const ENGINE_HEALTH_REQUEST_TIMEOUT_MS = 2000;
 export const ENGINE_SHUTDOWN_REQUEST_TIMEOUT_MS = 2000;
 export const ENGINE_GRACEFUL_EXIT_TIMEOUT_MS = 5000;

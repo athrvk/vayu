@@ -154,7 +154,9 @@ See [Engine API Reference](engine/api-reference.md) for complete endpoint docume
 
 The Engine runs as a separate process managed by the Electron main process:
 
-1. **Engine Startup**: Electron spawns the `vayu-engine` binary on app launch
+1. **Engine Startup**: Electron spawns the `vayu-engine` binary on app launch,
+   alongside creating the window rather than before it - first paint does not
+   wait on the engine
 2. **Health Monitoring**: Manager polls `/health` endpoint to verify connectivity
 3. **Graceful Shutdown**: Engine is stopped when Electron app quits
 
@@ -186,12 +188,24 @@ one app instance may drive it:
   report itself listening. It never falls back to another port: the app and CLI
   both address the engine at a fixed one, so an engine on a different port would
   be a quieter failure than no engine at all.
-- **A startup that cannot succeed fails immediately.** The readiness poll allows
-  45 seconds, but it watches the spawned child as well as the port: an engine
-  that exits first - a missing shared library, a lock it could not acquire -
-  fails the launch at once, naming the exit code or signal and the engine's last
-  stderr lines. The window is created after startup, so the ceiling would
-  otherwise be 45 seconds of an empty screen.
+- **A startup that cannot succeed fails immediately; one that is merely slow
+  does not.** The readiness poll spends a 45-second budget watching the spawned
+  child as well as the port: an engine that exits first - a missing shared
+  library, a lock it could not acquire - fails the launch at once, naming the
+  exit code or signal and the engine's last stderr lines. An engine still alive
+  when that budget runs out is not killed for it: the launch path logs
+  `EngineNotReadyError` and leaves it to the renderer's health poll, which
+  adopts it the moment it answers. Quitting there used to end launches that
+  were seconds from succeeding.
+- **The window is created alongside the engine, not after it.** First paint must
+  not wait on a process whose own startup housekeeping is allowed to run for 45
+  seconds - `db.init()` does orphan reconciliation, inbox cleanup and a
+  page-reclaim rewrite before the engine listens at all, and that whole window
+  used to be blank screen. Nothing is lost by overlapping them: the renderer
+  tolerates an absent engine by design, polling `/health` itself and rendering
+  the disconnected state until one answers. MCP still starts after the window,
+  for its own reason - it reads a config file, and a corrupt one must not cost
+  the user a window.
 
 **Development vs Production:**
 - **Development**: Engine binary at `engine/build/vayu-engine`

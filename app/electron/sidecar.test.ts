@@ -57,8 +57,14 @@ vi.mock("electron", () => ({
 	},
 }));
 
-import { EngineSidecar, type SidecarSystem } from "./sidecar";
-import { ENGINE_LOCK_FILE, ENGINE_PORT_RELEASE_DELAY_MS } from "./constants";
+import { EngineSidecar, EngineNotReadyError, type SidecarSystem } from "./sidecar";
+import {
+	ENGINE_HEALTH_POLL_BUDGET_MS,
+	ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS,
+	ENGINE_HEALTH_POLL_MAX_INTERVAL_MS,
+	ENGINE_LOCK_FILE,
+	ENGINE_PORT_RELEASE_DELAY_MS,
+} from "./constants";
 
 const TEST_PORT = 39876;
 const ADOPTED_PID = 4242;
@@ -398,9 +404,72 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 		spawnsAndDies(state, system, () => {});
 		const sidecar = new EngineSidecar(TEST_PORT, system);
 
-		await expect(sidecar.start()).rejects.toThrow(/failed to start within 45 seconds/);
+		await expect(sidecar.start()).rejects.toThrow(EngineNotReadyError);
 		// The early exit must not have shortened the wait for a live engine.
 		expect(vi.mocked(system.probeHealth).mock.calls.length).toBeGreaterThan(50);
+	});
+
+	it("separates a slow engine from a dead one by error type, not by message", async () => {
+		// The launch path branches on this distinction to decide whether to quit,
+		// so the two failures must not be one type: a dead engine is fatal, a slow
+		// one is the renderer's problem and the app stays up (see main.ts).
+		const slow = fakeSystem();
+		spawnsAndDies(slow.state, slow.system, () => {});
+		await expect(new EngineSidecar(TEST_PORT, slow.system).start()).rejects.toBeInstanceOf(
+			EngineNotReadyError
+		);
+
+		const dead = fakeSystem();
+		spawnsAndDies(dead.state, dead.system, (child) => {
+			queueMicrotask(() => child.emit("exit", 127, null));
+		});
+		await expect(new EngineSidecar(TEST_PORT, dead.system).start()).rejects.not.toBeInstanceOf(
+			EngineNotReadyError
+		);
+	});
+
+	it("ramps the health poll so a fast engine is not held for a full quantum", async () => {
+		const { system, state } = fakeSystem();
+		spawnsAndDies(state, system, () => {});
+		// The engine comes up during the first gap between probes. The probe
+		// before it cannot succeed - nothing is listening microseconds after
+		// spawn() returns - which is exactly why a flat interval made its own
+		// length the floor on every healthy launch.
+		vi.mocked(system.sleep).mockImplementation(async () => {
+			state.healthy = true;
+		});
+
+		await new EngineSidecar(TEST_PORT, system).start();
+
+		// The one sleep it paid is the ramp's first step, not the 500ms ceiling.
+		// Revert the ramp and this reads 500.
+		expect(vi.mocked(system.sleep).mock.calls).toEqual([
+			[ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS],
+		]);
+		expect(ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS).toBeLessThan(
+			ENGINE_HEALTH_POLL_MAX_INTERVAL_MS
+		);
+	});
+
+	it("doubles the poll interval up to the ceiling and spends the whole budget", async () => {
+		const { system, state } = fakeSystem();
+		spawnsAndDies(state, system, () => {});
+
+		await expect(new EngineSidecar(TEST_PORT, system).start()).rejects.toBeInstanceOf(
+			EngineNotReadyError
+		);
+
+		const slept = vi.mocked(system.sleep).mock.calls.map(([ms]) => ms as number);
+		expect(slept.slice(0, 4)).toEqual([50, 100, 200, 400]);
+		expect(slept.every((ms) => ms <= ENGINE_HEALTH_POLL_MAX_INTERVAL_MS)).toBe(true);
+		expect(slept[slept.length - 1]).toBe(ENGINE_HEALTH_POLL_MAX_INTERVAL_MS);
+		// The ceiling the engine's own startup housekeeping is priced against is
+		// unchanged by the ramp: it is a budget of waiting, not an attempt count.
+		const total = slept.reduce((sum, ms) => sum + ms, 0);
+		expect(total).toBeGreaterThanOrEqual(ENGINE_HEALTH_POLL_BUDGET_MS);
+		expect(total).toBeLessThan(
+			ENGINE_HEALTH_POLL_BUDGET_MS + ENGINE_HEALTH_POLL_MAX_INTERVAL_MS
+		);
 	});
 });
 
