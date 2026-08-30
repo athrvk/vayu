@@ -161,7 +161,7 @@ def _parse_ps_cpu_time(value: str) -> float:
     return days * 86400.0 + seconds
 
 
-def _sample_darwin(pid: int) -> tuple[int, int, float]:
+def _sample_darwin(pid: int) -> tuple[int, Optional[int], float]:
     """`ps` for RSS and CPU time, `ps -M` for the thread count macOS ps has no
     column for (there is no `nlwp` outside Linux)."""
     proc = subprocess.run(
@@ -173,7 +173,7 @@ def _sample_darwin(pid: int) -> tuple[int, int, float]:
     line = proc.stdout.strip()
     if proc.returncode != 0 or not line:
         raise MeasurementError(f"engine pid {pid} is gone (ps rc={proc.returncode})")
-    rss_kb, _, cpu_time = line.split(None, 1)
+    rss_kb, cpu_time = line.split(None, 1)
 
     return int(rss_kb) * 1024, _darwin_thread_count(pid), _parse_ps_cpu_time(cpu_time.strip())
 
@@ -234,7 +234,7 @@ def _sample_windows(pid: int) -> tuple[int, int, float]:
     return int(payload["rss"]), int(payload["threads"]), float(payload["cpu"])
 
 
-def resolve_sampler() -> Callable[[int], tuple[int, int, float]]:
+def resolve_sampler() -> Callable[[int], tuple[int, Optional[int], float]]:
     if sys.platform.startswith("linux"):
         return _sample_linux
     if sys.platform == "darwin":
