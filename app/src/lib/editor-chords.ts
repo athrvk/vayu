@@ -23,6 +23,7 @@
  */
 
 import type * as Monaco from "monaco-editor";
+import type { MonacoApi } from "./monaco-api";
 import { SEND_CHORD, LOAD_TEST_CHORD } from "@/constants/shortcuts";
 import { isMac, type Chord } from "@/lib/platform";
 
@@ -34,7 +35,7 @@ import { isMac, type Chord } from "@/lib/platform";
  * asked for and looks like it worked, which is the failure mode this whole
  * issue is about.
  */
-export function chordKeybinding(chord: Chord, monaco: typeof Monaco): number | null {
+export function chordKeybinding(chord: Chord, monaco: MonacoApi): number | null {
 	const code = keyCodeFor(chord.key, monaco);
 	if (code === null) return null;
 	let binding = 0;
@@ -46,7 +47,7 @@ export function chordKeybinding(chord: Chord, monaco: typeof Monaco): number | n
 	return binding | code;
 }
 
-function keyCodeFor(key: string, monaco: typeof Monaco): number | null {
+function keyCodeFor(key: string, monaco: MonacoApi): number | null {
 	if (key === "↵") return monaco.KeyCode.Enter;
 	if (/^[A-Za-z]$/.test(key)) return monaco.KeyCode.KeyA + (key.toUpperCase().charCodeAt(0) - 65);
 	if (/^[1-9]$/.test(key)) return monaco.KeyCode.Digit1 + (key.charCodeAt(0) - 49);
@@ -76,7 +77,7 @@ export function dispatchChord(chord: Chord): void {
  */
 export function registerEditorChords(
 	editor: Monaco.editor.IStandaloneCodeEditor,
-	monaco: typeof Monaco
+	monaco: MonacoApi
 ): void {
 	for (const chord of [SEND_CHORD, LOAD_TEST_CHORD]) {
 		const binding = chordKeybinding(chord, monaco);

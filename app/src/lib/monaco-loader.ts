@@ -31,12 +31,10 @@
  */
 
 import { useSyncExternalStore } from "react";
-import type * as Monaco from "monaco-editor";
+import type { MonacoApi } from "./monaco-api";
 
-type MonacoModule = typeof Monaco;
-
-let loaded: MonacoModule | null = null;
-let loading: Promise<MonacoModule> | null = null;
+let loaded: MonacoApi | null = null;
+let loading: Promise<MonacoApi> | null = null;
 const subscribers = new Set<() => void>();
 
 /**
@@ -44,7 +42,7 @@ const subscribers = new Set<() => void>();
  * a rejected one is cleared so a later editor mount can retry rather than
  * inheriting a failure from a transient chunk-load error.
  */
-export function ensureMonaco(): Promise<MonacoModule> {
+export function ensureMonaco(): Promise<MonacoApi> {
 	loading ??= import("./monaco-setup").then(
 		({ monaco }) => {
 			loaded = monaco;
@@ -66,7 +64,7 @@ function subscribe(onStoreChange: () => void): () => void {
 	};
 }
 
-function getSnapshot(): MonacoModule | null {
+function getSnapshot(): MonacoApi | null {
 	return loaded;
 }
 
@@ -75,6 +73,6 @@ function getSnapshot(): MonacoModule | null {
  * then. A passive subscriber: it never starts the load itself (rule 2 above),
  * so an effect guarded on it simply runs later, when the first editor arrives.
  */
-export function useLoadedMonaco(): MonacoModule | null {
+export function useLoadedMonaco(): MonacoApi | null {
 	return useSyncExternalStore(subscribe, getSnapshot);
 }

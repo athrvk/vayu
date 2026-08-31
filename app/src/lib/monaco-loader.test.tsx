@@ -29,9 +29,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, act } from "@testing-library/react";
 
+import type { MonacoApi } from "./monaco-api";
+
 /** How many times the setup module has been evaluated. */
 let setupEvaluations = 0;
-const fakeMonaco = { languages: {} } as unknown as typeof import("monaco-editor");
+const fakeMonaco = { languages: {} } as unknown as MonacoApi;
 
 type Loader = typeof import("./monaco-loader");
 

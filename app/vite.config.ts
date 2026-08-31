@@ -54,26 +54,18 @@ export default defineConfig({
 	build: {
 		outDir: "dist",
 		emptyOutDir: true,
-		// Vite 8 / Rolldown: rolldownOptions replaces rollupOptions, and
-		// manualChunks is replaced by codeSplitting.groups (test matches the
-		// module id; [\\/] keeps it cross-platform for Windows CI builds).
-		rolldownOptions: {
-			output: {
-				codeSplitting: {
-					groups: [
-						{
-							name: "react-vendor",
-							test: /node_modules[\\/](react|react-dom)[\\/]/,
-							priority: 20,
-						},
-						{
-							name: "charts",
-							test: /node_modules[\\/]uplot[\\/]/,
-							priority: 15,
-						},
-					],
-				},
-			},
-		},
+		// **No `rolldownOptions.output.codeSplitting` groups, deliberately**
+		// (#1147). What defers a chunk here is a dynamic import - `React.lazy`
+		// on the tab surfaces, `ensureMonaco()` on the editor (#1146) - never a
+		// manual group, and in a packaged app loading from asar there is no
+		// cross-release HTTP cache for a vendor chunk to hit either. The two
+		// groups that used to sit here (`react-vendor`, `charts`/uplot) were
+		// measured against rolldown's own chunking and moved nothing: same 132
+		// chunks, same 14.9MB total, same modules behind the same lazy
+		// boundaries. Adding one for monaco was worse than inert - the named
+		// group turned the 3.7MB editor chunk into a `modulepreload` in
+		// `index.html`, putting back on the startup path exactly what #1146
+		// took off it. Measure before adding a group here, and measure
+		// `dist/index.html`'s preload list, not just chunk sizes.
 	},
 });
