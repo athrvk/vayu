@@ -279,6 +279,9 @@ Key settings in `vite.config.ts`:
 - **Port**: 5173 (dev server)
 - **Aliases**: Path shortcuts (`@/components`, `@/stores`, etc.)
 - **Code Splitting**: React vendor and charts in separate chunks
+- **`vayu:woff2-only`**: strips the legacy `.woff` source from the
+  `@fontsource` stylesheets, which Chromium never asks for but Vite would
+  otherwise emit alongside every woff2 (36 unreachable files, 769KB)
 
 ## Dependencies
 
@@ -292,6 +295,8 @@ Key settings in `vite.config.ts`:
 - **Tailwind CSS**: Styling
 - **Monaco Editor**: Code editing
 - **uPlot**: Charts
+- **@fontsource** (Space Grotesk, Inter, JetBrains Mono, Fira Code, IBM Plex
+  Mono, Space Mono): bundled font faces, imported from `src/fonts.css`
 
 ### Development Dependencies
 

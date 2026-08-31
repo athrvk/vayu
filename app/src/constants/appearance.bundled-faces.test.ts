@@ -78,7 +78,9 @@ describe("the bundled faces", () => {
 	it("are declared before any rule, as CSS requires of an @import", () => {
 		// An `@import` after a rule is dropped, which would leave every
 		// declaration in fonts.css unread while the file itself still scans fine.
-		const beforeOurImport = indexCss.slice(0, indexCss.indexOf('@import "./fonts.css";'));
+		const at = indexCss.indexOf('@import "./fonts.css";');
+		expect(at).toBeGreaterThanOrEqual(0);
+		const beforeOurImport = indexCss.slice(0, at);
 		expect(beforeOurImport.replace(/@import [^;]+;|\/\*[\s\S]*?\*\/|\s+/g, "")).toBe("");
 	});
 
@@ -92,5 +94,32 @@ describe("the bundled faces", () => {
 
 	it("are files, not fetches - fonts.css pulls nothing from the network", () => {
 		expect(fontsCss).not.toMatch(/url\(\s*["']?https?:/);
+	});
+
+	it("each declare the range they cover, so only the needed file is read", () => {
+		/*
+		 * The trap this exists for. `@fontsource` also ships per-subset entry
+		 * points (`latin-400.css`, `latin-ext-400.css`), and those declare their
+		 * `@font-face` with no `unicode-range` at all - so nothing tells the
+		 * browser which file holds which characters, and every subset face for a
+		 * rendered weight is read whether a character needs it or not. Measured on
+		 * the built app, painting the shell read four Space Grotesk files that way
+		 * where the weight files read two, which with every subset bundled is
+		 * seven times the font bytes on the first-paint path. Typography still
+		 * looks right (the browser falls back within the family per character), so
+		 * nothing else would catch it. Read from `node_modules` because the
+		 * declarations are the dependency's, not ours, and that is where the
+		 * mistake would land.
+		 */
+		const imports = [...fontsCss.matchAll(/@import "(@fontsource\/[^"]+)";/g)].map((m) => m[1]);
+		expect(imports.length).toBeGreaterThan(0);
+
+		const rangeless = imports.filter((specifier) => {
+			const css = read(`../../node_modules/${specifier}`);
+			const faces = css.match(/@font-face/g)?.length ?? 0;
+			const ranges = css.match(/unicode-range:/g)?.length ?? 0;
+			return faces === 0 || faces !== ranges;
+		});
+		expect(rangeless).toEqual([]);
 	});
 });

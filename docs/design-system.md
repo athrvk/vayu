@@ -831,18 +831,36 @@ only desaturated option.
 
 | Role | Family | Import |
 |------|--------|--------|
-| UI / body | Space Grotesk | Google Fonts |
-| Code / mono | JetBrains Mono | Google Fonts |
+| UI / body default | Space Grotesk | Bundled (`@fontsource`) |
+| UI / body alternate | Inter | Bundled (`@fontsource`) |
+| Code / mono default | JetBrains Mono | Bundled (`@fontsource`) |
+| Code / mono option | Fira Code | Bundled (`@fontsource`) |
+| Code / mono option | IBM Plex Mono | Bundled (`@fontsource`) |
+| Code / mono option | Space Mono | Bundled (`@fontsource`) |
 
-```html
-<!-- app/index.html -->
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+```css
+/* app/src/index.css */
+@import "./fonts.css";
 ```
+
+`app/src/fonts.css` holds the `@fontsource` `@import` lines for all six
+families - the weights bundled, the subsets, and why.
 
 ```css
 body { font-family: var(--font-sans); } /* default: "Space Grotesk", system-ui, sans-serif */
 /* mono via font-mono Tailwind class, or .font-code utility */
 ```
+
+The faces are bundled rather than fetched because a stylesheet in
+`index.html`'s head is render-blocking and the window is only shown on first
+paint, so the fetch delayed the window appearing at all - measured at ~12.8s
+on a network that black-holes the request. Nothing about how the app renders
+changed with the move: the weights bundled are exactly the ones the old css2
+URL asked for, so `font-mono font-bold` stays browser-synthesised for JetBrains
+Mono, Fira Code and IBM Plex Mono, same as before. Every subset each family
+ships is bundled too, which is what Google served on demand; behind their
+`unicode-range` a file is still only read when a character needs it, so the
+subsets beyond latin cost installer bytes and no startup work.
 
 **User-selectable UI font + scale.** Settings → Appearance → Interface lets the
 user pick the sans/body face (Space Grotesk / Inter / System / JetBrains Mono)
@@ -2177,7 +2195,8 @@ opt-out.
 |------|---------|
 | `app/src/index.css` | All CSS custom properties, keyframes, utility classes |
 | `app/tailwind.config.js` | Color mapping, font families, keyframes, animation aliases |
-| `app/index.html` | Google Fonts preconnect + link tags |
+| `app/index.html` | Pre-paint appearance script; no font `<link>` (see `fonts.css`) |
+| `app/src/fonts.css` | Bundled `@fontsource` imports for all six font families |
 | `app/src/components/layout/Shell.tsx` | Root layout - resizable sidebar + drag handle + main |
 | `app/src/components/layout/Sidebar.tsx` | ActivityBar + SidebarPanel |
 | `app/src/hooks/useResizable.ts` | Drag-to-resize hook (delta-based, horizontal/vertical) |
