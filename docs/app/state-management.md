@@ -78,8 +78,10 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   keeps a tab that could have closed, under-matching loses work. Nothing is
   flushed *during* eviction; the predicate already refused the tab
 - Response eviction: `closeTabsForEntities` clears each id's entry in
-  `response-store`. Both callers reach it after a delete, and nothing else
-  evicts from that map
+  `response-store`. Both callers reach it after a delete - the map's own LRU
+  bound would get there eventually, but a response nothing can reach again
+  should go at the delete, not twenty-four sends later. `MAX_OPEN_TABS` is
+  exported for that bound: the cache retains twice it
 - Focus recency: `tabFocusedAt` stamps `openTab` and `focusTab`, and is read by
   the command palette, which lists open tabs most-recently-used first. It cannot
   come from `openTabs`, which is insertion order - the tab you were just in sits
@@ -575,7 +577,8 @@ In-memory storage of responses per request ID, persisted across view/tab switche
 **State:**
 ```typescript
 {
-  responses: Map<string, StoredResponse>
+  responses: Map<string, StoredResponse>,
+  lru: string[]  // request ids, least-recently-written first
 }
 ```
 
@@ -586,11 +589,22 @@ In-memory storage of responses per request ID, persisted across view/tab switche
 const { setResponse, getResponse, clearResponse, clearAll } = useResponseStore();
 ```
 
-**Eviction:** `clearResponse` runs from `useDeleteRequestMutation` (the delete is
-what makes the response unreachable) and from `tabs-store`'s
+**Eviction by identity:** `clearResponse` runs from `useDeleteRequestMutation`
+(the delete is what makes the response unreachable) and from `tabs-store`'s
 `closeTabsForEntities` (the collection cascade, which knows every descendant id).
-Nothing else drops an entry, so a map with no eviction at all grew for the whole
-session - each entry holds a body plus its raw copy.
+
+**Eviction by count:** `RESPONSE_CACHE_MAX_ENTRIES` (24) bounds the map (#1156).
+Those two delete seams were once the only ones, so the map grew with every
+distinct request a session sent - each entry a body plus its raw copy - until
+the app quit. The cap is twice `tabs-store`'s `MAX_OPEN_TABS`: the open tabs
+plus an equal tail, so a tab a session is working in still re-opens on its
+full-fidelity body. Order comes from `lru`, not from `executedAt`, which a
+restored response carries from the run that produced it and which therefore
+says nothing about when this session last touched the entry; `setResponse` is
+the only writer, and it moves a re-sent request back to the recent end, so the
+entry just stored is never the one evicted. Past the tail nothing is lost, only
+unabridged: the request re-opens against the backend's stored run, whose body
+the engine truncated at `maxTraceBodyBytes`.
 
 **Non-persisted** (responses are reloadable from backend).
 
@@ -1971,7 +1985,7 @@ restore) and `save-request-name.test.ts` (the payload).
 4. Request is transformed (frontend → backend format) and sent via HTTP
 5. Response is stored in `useResponseStore()` keyed by request ID
 6. Response viewer component reads the response and displays it
-7. On **request tab switch**, the response persists in `response-store` and is displayed if the user returns
+7. On **request tab switch**, the response persists in `response-store` and is displayed if the user returns - for the 24 most recently sent requests, past which the store's LRU bound has dropped the entry and the backend's stored run answers instead
 8. If any script ran, the environment / globals / collection query families are invalidated so values the script wrote are visible in the variables editor and the resolver. The gate is `scriptsMayWriteVariables(pre, post)` (`request-builder/utils/execute-mapping.ts`), shared by the builder's send path and the History run view's resend. **Both** script kinds count: `pm.environment.set` and friends persist engine-side from a Tests-tab script exactly as from a pre-request one, and with `refetchOnWindowFocus: false` nothing else is coming to correct a stale value
 
 ### Starting a Load Test Run

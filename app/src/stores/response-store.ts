@@ -14,6 +14,15 @@
  *
  * Response data is stored in memory (not persisted to localStorage)
  * since responses can be large and we can reload from backend.
+ *
+ * The map is bounded by `RESPONSE_CACHE_MAX_ENTRIES` (#1156): before the cap,
+ * the only evictions were the two delete seams (`useDeleteRequestMutation` and
+ * `closeTabsForEntities`), so a session retained every distinct request it had
+ * ever sent - a body plus its raw copy each - until the app quit. The bound is
+ * write recency, not open-tab identity: this store cannot ask `tabs-store` what
+ * is open (that store imports *this* one, and the cycle is the wrong shape), so
+ * the cap is set to twice `MAX_OPEN_TABS` instead, and `response-store.test.ts`
+ * holds the two constants together.
  */
 
 import { create } from "zustand";
@@ -52,9 +61,27 @@ export interface StoredResponse {
 	executedAt?: number;
 }
 
+/**
+ * How many responses the map retains, twice `tabs-store`'s `MAX_OPEN_TABS`: the
+ * open tabs plus an equal tail, so switching back to any tab a session is
+ * actually working in still finds its full-fidelity body. Beyond the tail the
+ * response is not lost, only its unabridged copy - the request re-opens against
+ * the backend's stored run, whose body the engine truncates at
+ * `maxTraceBodyBytes`.
+ */
+export const RESPONSE_CACHE_MAX_ENTRIES = 24;
+
 interface ResponseStoreState {
 	// Map of requestId -> response
 	responses: Map<string, StoredResponse>;
+	/**
+	 * Request ids least-recently-written first. Every key of `responses`
+	 * appears here exactly once, and this list - not `executedAt` - is what
+	 * eviction reads: a response restored from a stored run carries the
+	 * execution's own timestamp, which says nothing about when this session
+	 * last touched it.
+	 */
+	lru: string[];
 
 	// Actions
 	setResponse: (requestId: string, response: StoredResponse) => void;
@@ -63,16 +90,45 @@ interface ResponseStoreState {
 	clearAll: () => void;
 }
 
+/**
+ * The one place an entry is written, so the map and the recency list can never
+ * disagree about which keys exist. Shaped after `schema-cache.ts`'s
+ * `withEntry`, the codebase's other keyed LRU.
+ */
+function withResponse(
+	state: Pick<ResponseStoreState, "responses" | "lru">,
+	requestId: string,
+	response: StoredResponse
+): Pick<ResponseStoreState, "responses" | "lru"> {
+	const responses = new Map(state.responses);
+	responses.set(requestId, {
+		...response,
+		executedAt: response.executedAt || Date.now(),
+	});
+
+	// Re-writing a request moves it back to the most-recent end rather than
+	// leaving it where it first landed - a request being re-sent is the one
+	// least likely to want evicting.
+	const lru = [...state.lru.filter((id) => id !== requestId), requestId];
+
+	// The write that pushed the map over the cap is the request on screen, so
+	// the victim is always some other request: taking from the front cannot
+	// take what was just stored.
+	while (lru.length > RESPONSE_CACHE_MAX_ENTRIES) {
+		const victim = lru.shift();
+		if (victim === undefined) break;
+		responses.delete(victim);
+	}
+
+	return { responses, lru };
+}
+
 export const useResponseStore = create<ResponseStoreState>((set, get) => ({
 	responses: new Map(),
+	lru: [],
 
 	setResponse: (requestId, response) => {
-		const newResponses = new Map(get().responses);
-		newResponses.set(requestId, {
-			...response,
-			executedAt: response.executedAt || Date.now(),
-		});
-		set({ responses: newResponses });
+		set(withResponse(get(), requestId, response));
 	},
 
 	getResponse: (requestId) => {
@@ -80,12 +136,17 @@ export const useResponseStore = create<ResponseStoreState>((set, get) => ({
 	},
 
 	clearResponse: (requestId) => {
-		const newResponses = new Map(get().responses);
+		const { responses, lru } = get();
+		if (!responses.has(requestId)) return;
+		const newResponses = new Map(responses);
 		newResponses.delete(requestId);
-		set({ responses: newResponses });
+		set({
+			responses: newResponses,
+			lru: lru.filter((id) => id !== requestId),
+		});
 	},
 
 	clearAll: () => {
-		set({ responses: new Map() });
+		set({ responses: new Map(), lru: [] });
 	},
 }));
