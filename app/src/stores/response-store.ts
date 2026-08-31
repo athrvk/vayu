@@ -62,12 +62,14 @@ export interface StoredResponse {
 }
 
 /**
- * How many responses the map retains, twice `tabs-store`'s `MAX_OPEN_TABS`: the
- * open tabs plus an equal tail, so switching back to any tab a session is
- * actually working in still finds its full-fidelity body. Beyond the tail the
- * response is not lost, only its unabridged copy - the request re-opens against
- * the backend's stored run, whose body the engine truncates at
- * `maxTraceBodyBytes`.
+ * How many responses the map retains. The order is write recency, so what this
+ * number buys is headroom rather than a guarantee about open tabs: at twice
+ * `MAX_OPEN_TABS` a full set of tabs can each be re-sent, and every one of them
+ * still finds its full-fidelity body on the way back. A tab held open without
+ * being re-sent while twenty-four other requests are - a dirty tab, which tab
+ * eviction exempts - does lose its entry, and loses only the unabridged copy:
+ * the request re-opens against the backend's stored run, whose body the engine
+ * truncated at `maxTraceBodyBytes`.
  */
 export const RESPONSE_CACHE_MAX_ENTRIES = 24;
 

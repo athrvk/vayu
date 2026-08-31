@@ -134,6 +134,43 @@ describe("the cap covers the tabs a session works in", () => {
 			expect(getResponse(id)?.body).toBe(`body of ${id}`);
 		}
 	});
+
+	it("re-sending the open tabs keeps them ahead of any tail, however long", () => {
+		const openTabRequests = Array.from({ length: MAX_OPEN_TABS }, (_, i) => `open_${i}`);
+		for (const id of openTabRequests) {
+			useResponseStore.getState().setResponse(id, aResponse(`body of ${id}`));
+		}
+
+		// Twice what the previous case sends, with the tabs worked in between:
+		// recency is what the cap buys, so a tab being *used* stays regardless of
+		// how much else the session sends.
+		for (let round = 0; round < 2; round++) {
+			send(RESPONSE_CACHE_MAX_ENTRIES - MAX_OPEN_TABS, `tail_${round}`);
+			for (const id of openTabRequests) {
+				useResponseStore.getState().setResponse(id, aResponse(`body of ${id}`));
+			}
+		}
+
+		const { getResponse } = useResponseStore.getState();
+		for (const id of openTabRequests) {
+			expect(getResponse(id)?.body).toBe(`body of ${id}`);
+		}
+	});
+
+	/*
+	 * The honest edge of the bound, stated as a test rather than left for
+	 * someone to discover: recency is write recency, so a tab held open without
+	 * being re-sent is not protected by being open. Tab eviction only allows
+	 * that for a dirty tab, and the entry it loses is the unabridged copy - the
+	 * request re-opens against the backend's stored run.
+	 */
+	it("does not protect a tab that stays open without being re-sent", () => {
+		useResponseStore.getState().setResponse("untouched_open_tab", aResponse());
+
+		send(RESPONSE_CACHE_MAX_ENTRIES);
+
+		expect(useResponseStore.getState().getResponse("untouched_open_tab")).toBeNull();
+	});
 });
 
 describe("the delete seams still evict by identity", () => {
@@ -148,13 +185,14 @@ describe("the delete seams still evict by identity", () => {
 
 	it("clearing an id it does not hold changes nothing", () => {
 		send(2);
-		const before = useResponseStore.getState().responses;
+		const { responses: mapBefore, lru: lruBefore } = useResponseStore.getState();
 
 		useResponseStore.getState().clearResponse("never-sent");
 
-		// Same map object: an absent id is not worth a new reference, which
-		// every subscriber would re-render for.
-		expect(useResponseStore.getState().responses).toBe(before);
+		// The same objects, not merely equal ones: an absent id is not worth a
+		// new reference, which every subscriber would re-render for.
+		expect(useResponseStore.getState().responses).toBe(mapBefore);
+		expect(useResponseStore.getState().lru).toBe(lruBefore);
 		expect(retained()).toEqual(["req_0", "req_1"]);
 	});
 

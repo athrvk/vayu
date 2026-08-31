@@ -596,15 +596,20 @@ const { setResponse, getResponse, clearResponse, clearAll } = useResponseStore()
 **Eviction by count:** `RESPONSE_CACHE_MAX_ENTRIES` (24) bounds the map (#1156).
 Those two delete seams were once the only ones, so the map grew with every
 distinct request a session sent - each entry a body plus its raw copy - until
-the app quit. The cap is twice `tabs-store`'s `MAX_OPEN_TABS`: the open tabs
-plus an equal tail, so a tab a session is working in still re-opens on its
-full-fidelity body. Order comes from `lru`, not from `executedAt`, which a
-restored response carries from the run that produced it and which therefore
-says nothing about when this session last touched the entry; `setResponse` is
-the only writer, and it moves a re-sent request back to the recent end, so the
-entry just stored is never the one evicted. Past the tail nothing is lost, only
-unabridged: the request re-opens against the backend's stored run, whose body
-the engine truncated at `maxTraceBodyBytes`.
+the app quit. What the map holds is the 24 most recently *sent* requests, not
+the open tabs: this store cannot ask `tabs-store` what is open, since that
+store imports this one. The cap is twice `MAX_OPEN_TABS` so that recency covers
+tab reach in practice - a full set of tabs can each be re-sent and every one of
+them still re-opens on its full-fidelity body. The gap is a tab held open
+without being re-sent while 24 other requests are, which tab eviction allows
+only for a dirty tab; it falls back like any older request. Order comes from
+`lru`, not from `executedAt`, which a restored response carries from the run
+that produced it and which therefore says nothing about when this session last
+touched the entry; `setResponse` is the only writer, and it moves a re-sent
+request back to the recent end, so the entry just stored is never the one
+evicted. Past the cap nothing is lost, only unabridged: the request re-opens
+against the backend's stored run, whose body the engine truncated at
+`maxTraceBodyBytes`.
 
 **Non-persisted** (responses are reloadable from backend).
 
