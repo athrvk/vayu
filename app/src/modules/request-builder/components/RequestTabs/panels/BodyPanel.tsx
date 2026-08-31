@@ -47,7 +47,7 @@
  * alongside, so the two share one full-width surface.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { OnMount } from "@monaco-editor/react";
 import {
 	Select,
@@ -57,6 +57,7 @@ import {
 	SelectValue,
 	Button,
 	CodeEditor,
+	Skeleton,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
@@ -70,10 +71,17 @@ import { useResizable } from "@/hooks/useResizable";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
 import { cn } from "@/lib/utils";
-import GraphQLBody from "./body/GraphQLBody";
 import { switchContentType, withoutContentType } from "./body/content-type";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
 import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
+
+/*
+ * The GraphQL pane is the entry chunk's largest optional passenger: the
+ * `graphql` package plus `graphql-language-service` and the variables schema
+ * work, none of which a REST request ever touches. It renders only for
+ * `bodyMode === "graphql"`, so it loads then (#1146).
+ */
+const GraphQLBody = lazy(() => import("./body/GraphQLBody"));
 
 const BODY_MODES: { value: BodyMode; label: string; contentType: string | null }[] = [
 	{ value: "none", label: "None", contentType: null },
@@ -443,18 +451,30 @@ export default function BodyPanel() {
 						className="overflow-hidden rounded-md border border-input"
 						style={{ height: editorHeight }}
 					>
-						<GraphQLBody
-							body={request.body || ""}
-							onBodyChange={(b) => updateField("body", b)}
-							requestId={request.id ?? null}
-							schemaTarget={gqlSchemaTarget}
-							onEditorMount={handleEditorMount}
-							variablesDraft={ownVariablesDraft(
-								getVariablesDraft(),
-								request.id ?? null
-							)}
-							onVariablesDraftChange={handleVariablesDraftChange}
-						/>
+						<Suspense
+							fallback={
+								<div
+									className="h-full w-full p-2"
+									role="status"
+									aria-label="Loading GraphQL editor"
+								>
+									<Skeleton className="h-full w-full rounded-md" />
+								</div>
+							}
+						>
+							<GraphQLBody
+								body={request.body || ""}
+								onBodyChange={(b) => updateField("body", b)}
+								requestId={request.id ?? null}
+								schemaTarget={gqlSchemaTarget}
+								onEditorMount={handleEditorMount}
+								variablesDraft={ownVariablesDraft(
+									getVariablesDraft(),
+									request.id ?? null
+								)}
+								onVariablesDraftChange={handleVariablesDraftChange}
+							/>
+						</Suspense>
 					</div>
 					<ResizeHandle
 						onMouseDown={startResizing}

@@ -51,7 +51,7 @@
  */
 
 import { useEffect } from "react";
-import { useMonaco } from "@monaco-editor/react";
+import { useLoadedMonaco } from "@/lib/monaco-loader";
 import type * as Monaco from "monaco-editor";
 import { useVariableResolver } from "./useVariableResolver";
 import { useActiveCollectionId } from "./useActiveCollectionId";
@@ -88,7 +88,10 @@ const DATA_SORT_GROUP = 7;
 const DYNAMIC_SORT_GROUP = 8;
 
 export function useScriptVariableCompletionProvider() {
-	const monaco = useMonaco();
+	// Passive by design: null until an editor has loaded Monaco, so registration
+	// happens then. `@monaco-editor/react`'s `useMonaco` would load it from here,
+	// at startup, and from the CDN - see `lib/monaco-loader.ts` (#1146).
+	const monaco = useLoadedMonaco();
 	/*
 	 * The active tab's collection, since a provider registered per language has
 	 * no request builder context to take one from and the resolver offers no

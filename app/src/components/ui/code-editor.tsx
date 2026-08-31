@@ -11,6 +11,14 @@
  * Single wrapper around the Monaco editor. All shared editor configuration
  * (default options, theme, font size) lives here so it only has to change in
  * one place. Consumers pass only what varies (language, value, height, etc.).
+ *
+ * **This is also where Monaco is loaded.** `ensureMonaco()` pulls the editor
+ * and its language services in on the first mount rather than at startup
+ * (#1146), and nothing renders `<Editor>` until that resolves - mounting it
+ * earlier would call `loader.init()` before `loader.config({ monaco })` and
+ * send @monaco-editor/react to the jsdelivr CDN for a copy the app already
+ * ships. A skeleton stands in meanwhile; a failed load says so rather than
+ * leaving a placeholder that never resolves.
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -18,6 +26,9 @@ import { Editor, type EditorProps, type OnMount } from "@monaco-editor/react";
 import { useClientSettingsStore } from "@/stores";
 import { selectMonoStack } from "@/stores/client-settings-store";
 import { registerEditorChords } from "@/lib/editor-chords";
+import { ensureMonaco, useLoadedMonaco } from "@/lib/monaco-loader";
+import { Skeleton } from "./skeleton";
+import { cn } from "@/lib/utils";
 
 type EditorOptions = NonNullable<EditorProps["options"]>;
 
@@ -121,6 +132,21 @@ export function CodeEditor({
 	const isDark = useDarkMode();
 	const editor = useClientSettingsStore((s) => s.editor);
 	const monoStack = useClientSettingsStore(selectMonoStack);
+	const monaco = useLoadedMonaco();
+	const [loadFailed, setLoadFailed] = useState(false);
+
+	useEffect(() => {
+		let active = true;
+		void ensureMonaco().catch((error: unknown) => {
+			// Loud, not silent: without this the skeleton below would sit there
+			// forever looking like a slow load.
+			console.error("Monaco failed to load", error);
+			if (active) setLoadFailed(true);
+		});
+		return () => {
+			active = false;
+		};
+	}, []);
 
 	/*
 	 * Every editor gets the window chords Monaco would otherwise eat, here
@@ -147,6 +173,34 @@ export function CodeEditor({
 		lineNumbers: editor.lineNumbers ? "on" : "off",
 		tabSize: editor.tabSize,
 	};
+
+	if (loadFailed) {
+		return (
+			<div
+				role="alert"
+				style={{ height }}
+				className={cn(
+					"flex items-center justify-center p-3 text-xs text-destructive-text",
+					className
+				)}
+			>
+				Editor failed to load. Reopen the app to try again.
+			</div>
+		);
+	}
+
+	if (!monaco) {
+		return (
+			<div
+				role="status"
+				aria-label="Loading editor"
+				style={{ height }}
+				className={cn("p-2", className)}
+			>
+				<Skeleton className="h-full w-full rounded-md" />
+			</div>
+		);
+	}
 
 	return (
 		<Editor

@@ -35,7 +35,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { BODY_LANGUAGES } from "@/hooks/useVariableCompletionProvider";
 import { RequestBuilderContext } from "../../../../context";
@@ -56,7 +56,16 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 
 const { default: BodyPanel } = await import("../BodyPanel");
 
-function renderMode(bodyMode: BodyMode, overrides: Partial<RequestState> = {}) {
+/*
+ * `GraphQLBody` is lazy since #1146, so BodyPanel first renders it as the
+ * Suspense fallback - no editors, nothing to find - and only mounts the real
+ * component once the chunk resolves. The chunk itself is loaded here rather
+ * than left for the first render to discover, so only React's own one-tick
+ * retry is left; the `act` flush below is what commits it.
+ */
+await import("./GraphQLBody");
+
+async function renderMode(bodyMode: BodyMode, overrides: Partial<RequestState> = {}) {
 	const request = { ...createDefaultRequestState(), bodyMode, ...overrides };
 	const value = {
 		request,
@@ -73,13 +82,15 @@ function renderMode(bodyMode: BodyMode, overrides: Partial<RequestState> = {}) {
 		updateVariable: () => {},
 	} as unknown as RequestBuilderContextValue;
 
-	return render(
+	const result = render(
 		<TooltipProvider>
 			<RequestBuilderContext.Provider value={value}>
 				<BodyPanel />
 			</RequestBuilderContext.Provider>
 		</TooltipProvider>
 	);
+	await act(async () => {});
+	return result;
 }
 
 beforeEach(() => {
@@ -91,8 +102,8 @@ describe("the languages the body editors mount with", () => {
 		["json", 1],
 		["text", 1],
 		["graphql", 2], // the query pane and the variables pane
-	] as const)("%s is one the completion provider is registered for", (bodyMode, count) => {
-		renderMode(bodyMode);
+	] as const)("%s is one the completion provider is registered for", async (bodyMode, count) => {
+		await renderMode(bodyMode);
 
 		// A mode that mounted no editor would pass a `.every()` vacuously.
 		expect(mounted).toHaveLength(count);
@@ -101,12 +112,12 @@ describe("the languages the body editors mount with", () => {
 		}
 	});
 
-	it("covers the whole list between them, so no entry is dead", () => {
+	it("covers the whole list between them, so no entry is dead", async () => {
 		// The mirror of the check above: `BODY_LANGUAGES` must not accumulate
 		// languages nothing mounts, which is how the list would start drifting.
 		const seen = new Set<string>();
 		for (const bodyMode of ["json", "text", "graphql"] as const) {
-			renderMode(bodyMode);
+			await renderMode(bodyMode);
 			mounted.forEach((l) => seen.add(l));
 			mounted.length = 0;
 		}
@@ -117,8 +128,8 @@ describe("the languages the body editors mount with", () => {
 describe("the modes with no code editor", () => {
 	it.each(["form-data", "x-www-form-urlencoded"] as const)(
 		"%s uses the key/value table, whose cells complete variables themselves",
-		(bodyMode) => {
-			renderMode(bodyMode, {
+		async (bodyMode) => {
+			await renderMode(bodyMode, {
 				formData: [{ id: "1", key: "merchant", value: "{{merchant}}", enabled: true }],
 				urlEncoded: [{ id: "1", key: "merchant", value: "{{merchant}}", enabled: true }],
 			});
@@ -129,8 +140,8 @@ describe("the modes with no code editor", () => {
 		}
 	);
 
-	it("mounts nothing for none, which sends no body", () => {
-		renderMode("none");
+	it("mounts nothing for none, which sends no body", async () => {
+		await renderMode("none");
 		expect(mounted).toHaveLength(0);
 	});
 });

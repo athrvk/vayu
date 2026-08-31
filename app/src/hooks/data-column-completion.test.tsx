@@ -43,16 +43,21 @@ interface ProviderLike {
 
 const registered: Array<{ language: string; provider: ProviderLike }> = [];
 
-vi.mock("@monaco-editor/react", () => ({
-	useMonaco: () => ({
-		languages: {
-			CompletionItemKind: { Variable: 4, Function: 1, Field: 3 },
-			registerCompletionItemProvider: (language: string, provider: ProviderLike) => {
-				registered.push({ language, provider });
-				return { dispose: () => {} };
-			},
+const monacoStub = {
+	languages: {
+		CompletionItemKind: { Variable: 4, Function: 1, Field: 3 },
+		registerCompletionItemProvider: (language: string, provider: ProviderLike) => {
+			registered.push({ language, provider });
+			return { dispose: () => {} };
 		},
-	}),
+	},
+};
+
+// `CodeEditor` gates rendering on `useLoadedMonaco` since #1146, and these
+// hooks moved to it too - so the mock moves from `useMonaco` to the loader.
+vi.mock("@/lib/monaco-loader", () => ({
+	useLoadedMonaco: () => monacoStub,
+	ensureMonaco: () => Promise.resolve(monacoStub),
 }));
 
 /** No variables at all, so every suggestion below can only be a column. */
