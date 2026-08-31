@@ -128,16 +128,12 @@ export function rankPalette(items: PaletteItem[], query: string): RankedPalette 
 	}
 
 	const scores = new Map<string, number>();
-	const kept = items.filter((item) => {
+	const kept: PaletteItem[] = [];
+	for (const item of items) {
 		const score = scoreItem(item, needle);
 		scores.set(item.id, score);
-		// A deep source took the query and matched it itself, against a corpus
-		// this scorer cannot see - the engine matched a run on stored snapshot
-		// text that no row prints. Its rows are matches by the time they arrive;
-		// the score only decides where among them they sit. An escape row is not
-		// a result at all, so no floor applies to it either.
-		return item.escape || item.preMatched === true || score >= MATCH_FLOOR;
-	});
+		if (survives(item, score)) kept.push(item);
+	}
 
 	const promoted = bestMatch(kept, scores);
 	const rest = promoted ? kept.filter((item) => item.id !== promoted.id) : kept;
@@ -150,6 +146,19 @@ export function rankPalette(items: PaletteItem[], query: string): RankedPalette 
 		groups,
 		total: countItems(groups) + (promoted ? 1 : 0),
 	};
+}
+
+/**
+ * Whether a row renders at all.
+ *
+ * A deep source took the query and matched it itself, against a corpus this
+ * scorer cannot see - the engine matched a run on stored snapshot text that no
+ * row prints. Its rows are matches by the time they arrive; the score only
+ * decides where among them they sit. An escape row is not a result at all, so
+ * no floor applies to it either.
+ */
+function survives(item: PaletteItem, score: number): boolean {
+	return item.escape === true || item.preMatched === true || score >= MATCH_FLOOR;
 }
 
 /** Where each kind sits on screen, for breaking a tie the way the eye would. */
