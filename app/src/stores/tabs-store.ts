@@ -27,7 +27,12 @@ export interface Tab {
 	entityId: string | null; // requestId, collectionId, runId - null for singletons
 }
 
-const MAX_OPEN_TABS = 12;
+/**
+ * Exported because `response-store`'s cache bound is derived from it: that
+ * store retains the open tabs' responses plus an equal tail, and a guard there
+ * fails if the two numbers drift apart.
+ */
+export const MAX_OPEN_TABS = 12;
 
 /**
  * Singletons: only one tab of this type can exist at a time.
@@ -358,8 +363,10 @@ export const useTabsStore = create<TabsState>()(
 
 				// A delete that can name a request takes its response with it: the
 				// collection tree reaches here after deleting a request or a whole
-				// collection, nothing else evicts from that map, and each entry
-				// holds a body plus its raw copy. Skipped for a `type`-scoped sweep
+				// collection, and each entry holds a body plus its raw copy. The
+				// map's own LRU bound (#1156) only puts a ceiling on the session -
+				// a response nothing can reach again should go now, not in
+				// twenty-four sends' time. Skipped for a `type`-scoped sweep
 				// that is not about requests - `"run"` ids cannot key a response, so
 				// walking them would only look like it meant something. Done before
 				// the early return below, since a deleted request with no open tab
