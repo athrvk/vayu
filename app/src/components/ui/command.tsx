@@ -92,14 +92,28 @@ const CommandDialog = ({
 				<DialogDescription className="sr-only">{description}</DialogDescription>
 				<Command
 					shouldFilter={shouldFilter}
-					/* `py-2` rows (~36px), not `py-3` (~44px): a launcher is read by
-					   scanning, and at 44px a 300px list showed about six rows,
-					   so anything past the second section was below the fold with
-					   nothing on screen saying it existed (#1177). The list's own
-					   cap is the other half of that, and belongs to whoever
-					   renders the list. Group headings carry no typography here -
-					   `CommandGroup` draws them with `Eyebrow`. */
-					className="[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-2 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5"
+					/*
+					 * No row overrides here at all any more (#1177). This
+					 * string used to force `px-2 py-3` and 20px icons onto every
+					 * row, which made a 32px row a 44px one - about six of them
+					 * in a 300px list, so anything past the second section was
+					 * below the fold with nothing on screen saying it existed.
+					 * `CommandItem`'s own `px-2 py-1.5` is the 32px single-line
+					 * row this app draws everywhere else, which is also the
+					 * launcher metric, so the fix is to stop overriding it.
+					 *
+					 * The icon sizes went the same way and were never doing what
+					 * they said: `[&_[cmdk-item]_svg]:h-5` outranks the `h-3.5`
+					 * a row writes on its own icon - one class, one attribute
+					 * and a type against one class - so every palette row drew a
+					 * 20px icon beside the 14px rail meant to match it.
+					 *
+					 * The list's cap is the other half of the density and
+					 * belongs to whoever renders the list. Group headings carry
+					 * no typography here either - `CommandGroup` draws them with
+					 * `Eyebrow`.
+					 */
+					className="[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12"
 				>
 					{children}
 				</Command>

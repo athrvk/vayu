@@ -50,7 +50,10 @@ export const TOP_RESULT_LABEL = "Top result";
 /** The heading over the rows the user touched most recently. */
 export const RECENTS_LABEL = "Recents";
 
-/** The heading over the verbs the palette offers on an empty query. */
+/**
+ * The heading over the verbs the palette offers: on an empty query, and again
+ * when a typed query matched nothing.
+ */
 export const QUICK_ACTIONS_LABEL = "Quick actions";
 
 /**

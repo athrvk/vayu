@@ -851,9 +851,10 @@ it (#1176), and both are built here rather than by a source of their own:
   tabs again as they are used; persisting focus time to lengthen the list would rank a restored
   strip by yesterday's attention, which is the thing that rationale refuses.
 - **`Quick actions`** - the `command` rows. The verbs are what an empty palette is *for*, and they
-  sat fifth of eight sections, under a fold that shows about six rows. Typed, they rank as the
-  `Commands` section they have always been, so the heading follows the query rather than the
-  section moving around.
+  sat fifth of eight sections, under a fold that showed about six rows before #1177 raised it.
+  Typed, they rank as the `Commands` section they have always been, so the heading follows the
+  query rather than the section moving around - except on a query that matched nothing, where they
+  come back as the offer (#1177, below).
 
 Both **lift** their rows out of the sections below rather than copying them into the new ones -
 the same rule the top result follows, and for the same reason: two rows carrying one cmdk `value`
@@ -928,15 +929,20 @@ Three things the rows and the frame say (#1176):
 
 Three about the frame itself (#1177):
 
-- **Density is a launcher's, not a menu's.** `CommandDialog` draws rows at `py-2` (~36px) and
-  `PaletteResults` caps its `CommandList` at `min(400px, 60vh)`, so about eleven rows are on
-  screen where the primitive's 44px rows in a 300px list showed six. Six rows plus a heading is
-  two sections, which is why the Settings group a query named could sit below the fold with
-  nothing on screen saying it existed - the search fix (#1175) put the right row first, and this
-  is what makes the rest of the answer visible. The `60vh` half is what keeps the panel inside
-  its own `max-h-[85vh]` on a short window once the input and the hints are counted; the
-  autocompletes that share these primitives keep the 300px default, their popups being anchored
-  under an input rather than centred.
+- **Density is a launcher's, not a menu's.** `CommandDialog` no longer overrides row padding or
+  icon size at all, so a row is `CommandItem`'s own `px-2 py-1.5` - the 30px single-line row this
+  app draws everywhere else - and `PaletteResults` caps its `CommandList` at `min(400px, 60vh)`.
+  Measured in Chromium: **eleven rows and two headings on screen at a 768px or taller window,
+  nine at 600px**, where the old `py-3` rows in a 300px list showed about six. Six rows plus a
+  heading is two sections, which is why the Settings group a query named could sit below the fold
+  with nothing on screen saying it existed - the search fix (#1175) put the right row first, and
+  this is what makes the rest of the answer visible. The `60vh` half keeps the whole panel inside
+  its own `max-h-[85vh]` on a short window once the input and the hints are counted (435px of a
+  600px viewport, measured); the autocompletes that share these primitives keep the 300px
+  default, their popups being anchored under an input rather than centred. The icon override went
+  because it never did what it read as: `[&_[cmdk-item]_svg]:h-5` outranks the `h-3.5` a row
+  writes on its own icon, so every palette row drew a 20px icon beside the 14px method rail
+  written to match it.
 - **The chrome sits on a declared surface, so its dividers can be `border-rule`.** `Command`
   declares `bg-card surface-card` - `--popover` and `--card` are the same three numbers in both
   themes, and only one of them has a surface class to declare, so this is a rename rather than a

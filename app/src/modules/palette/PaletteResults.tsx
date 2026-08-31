@@ -98,9 +98,15 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 	/*
 	 * Nothing the query could match. The ranking answers that by handing back
 	 * the verbs (#1177), so the line below introduces them rather than ending
-	 * the palette on "No matches." - and it is a line rather than cmdk's
-	 * `CommandEmpty`, which renders only when the list has no rows at all and
-	 * the verbs are rows.
+	 * the palette on "No matches."
+	 *
+	 * It is a line of its own rather than either primitive for the job, and
+	 * both were considered: cmdk's `CommandEmpty` renders only when the list
+	 * has no rows at all, and the verbs under this are rows; `EmptyState`'s
+	 * `inline` variant is a centred `p-8` block that owns the space it sits in,
+	 * and overriding it to a tight left-aligned lead-in would leave nothing of
+	 * it but `text-sm text-muted-foreground`. This is not an empty state - the
+	 * list below it is full.
 	 */
 	const nothingMatched = query.trim() !== "" && total === 0;
 

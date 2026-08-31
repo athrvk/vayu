@@ -116,12 +116,26 @@ describe("the command list's surface and its dividers", () => {
 });
 
 describe("the command list's density", () => {
-	it("draws rows at py-2, the launcher metric, not the shadcn py-3", () => {
-		const cls = tokens(renderPalette());
-		// The padding reaches the rows through a descendant selector here, so
-		// this is where it can be read - the item itself carries neither value.
-		expect(cls).toContain("[&_[cmdk-item]]:py-2");
-		expect(cls).not.toContain("[&_[cmdk-item]]:py-3");
+	it("leaves a row at the primitive's 32px rather than padding it to 44px", () => {
+		const root = renderPalette();
+		const row = root.querySelector("[cmdk-item]");
+		expect(row, "a row should render").toBeTruthy();
+		// 14px of text in `py-1.5` is the 32px single-line row this app draws
+		// everywhere else, and the launcher metric besides.
+		expect(tokens(row!)).toContain("py-1.5");
+		// The dialog used to override that to `py-3` from up here, where no
+		// scan of the row itself would ever see it.
+		for (const forced of ["[&_[cmdk-item]]:py-3", "[&_[cmdk-item]]:py-2"]) {
+			expect(tokens(root)).not.toContain(forced);
+		}
+	});
+
+	it("lets a row size its own icon, which the old override silently won over", () => {
+		const root = renderPalette();
+		// `[&_[cmdk-item]_svg]:h-5` is a class, an attribute and a type against
+		// the row's single class, so it won - and every row drew a 20px icon
+		// beside the 14px rail written to match it.
+		expect(tokens(root)).not.toContain("[&_[cmdk-item]_svg]:h-5");
 	});
 });
 
