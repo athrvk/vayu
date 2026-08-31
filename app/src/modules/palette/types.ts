@@ -82,6 +82,13 @@ export interface PaletteItem {
 	 * `/the/most/expensive/endpoint` by finding five letters in five places.
 	 * Nobody fuzzy-searches a URL - they type a piece of one - so it is matched
 	 * the way it is used.
+	 *
+	 * The piece has to be contiguous, and that is the cost: `v1/charges` finds
+	 * the row, `v1charges` no longer does. No floor could have bought that back
+	 * - a URL is all separators, so the scorer reads a query scattered across
+	 * its segments as a series of *word* jumps, which is what scored the soup
+	 * 0.51 in the first place. A query that skips a separator is
+	 * indistinguishable from one that matches nothing.
 	 */
 	substringKeywords?: string[];
 	icon?: LucideIcon;

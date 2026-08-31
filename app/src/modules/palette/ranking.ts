@@ -137,6 +137,18 @@ export function rankPalette(items: PaletteItem[], query: string): RankedPalette 
 
 	const promoted = bestMatch(kept, scores);
 	const rest = promoted ? kept.filter((item) => item.id !== promoted.id) : kept;
+	/*
+	 * Within a section, score decides and the source's own order is the stable
+	 * tiebreak - `Array.prototype.sort` is specified as stable, so rows that
+	 * score alike keep the order their source produced (recency for runs,
+	 * `searchSettings`' rank for settings, scope order for variables).
+	 *
+	 * A `preMatched` row is sorted on what it *prints*, which can be nothing:
+	 * a run the engine matched on snapshot text sinks below one whose URL says
+	 * what was typed, and among equals stays newest-first. That is a change for
+	 * runs alone, and a deliberate one - their old order came of stuffing the
+	 * query into every row's keywords, which scored them all alike.
+	 */
 	const byScore = (ofKind: PaletteItem[]) =>
 		[...ofKind].sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0));
 	const groups = groupsOf(rest, byScore);

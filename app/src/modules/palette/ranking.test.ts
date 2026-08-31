@@ -79,6 +79,15 @@ describe("substring keywords", () => {
 		expect(rendered([request], "theme")).toEqual([]);
 	});
 
+	it("wants the separators too - the cost of not being a subsequence matcher", () => {
+		// A URL is all separators, so a scorer reads a query scattered across
+		// its segments as a series of *word* jumps and scores it highly - which
+		// is the soup. There is no threshold that keeps "mostexpensive" and
+		// drops "theme", so a skipped separator is a miss. Recorded, not fixed.
+		expect(rendered([request], "most/expensive")).toEqual(["r1"]);
+		expect(rendered([request], "mostexpensive")).toEqual([]);
+	});
+
 	it("loses to a row whose name actually says what was typed", () => {
 		const setting = item({ id: "s1", kind: "settings", title: "Refunds", preMatched: true });
 		expect(rankPalette([request, setting], "refunds").top.map((i) => i.id)).toEqual(["s1"]);
@@ -96,6 +105,31 @@ describe("a deep source's word", () => {
 
 	it("does not make it the top result - there is nothing on screen to justify one", () => {
 		expect(rankPalette([run], "checkout").top).toEqual([]);
+	});
+
+	it("orders its rows by what they print, keeping the source's order among equals", () => {
+		// Four runs the engine matched. Two print the query, two matched on
+		// snapshot text no row prints. Inside the section the visible ones lead,
+		// and the pair that prints nothing keeps the order the engine sent -
+		// newest first - because the sort is stable. All four still render: a
+		// deep source's word is what got them in, and only their order is ours.
+		const run = (id: string, title: string) =>
+			item({ id, kind: "run", title, preMatched: true });
+		const items = [
+			run("hidden-newer", "Nothing alike"),
+			run("hidden-older", "Nothing alike"),
+			run("weak", "Old checkout attempt"),
+			run("best", "checkout"),
+		];
+
+		const ranked = rankPalette(items, "checkout");
+		// The strongest is promoted out of the section entirely.
+		expect(ranked.top.map((i) => i.id)).toEqual(["best"]);
+		expect(ranked.groups.find((g) => g.kind === "run")?.items.map((i) => i.id)).toEqual([
+			"weak",
+			"hidden-newer",
+			"hidden-older",
+		]);
 	});
 
 	it("is a property of the row, not of its kind", () => {

@@ -842,15 +842,23 @@ typed, four rules apply:
   than copied into the new one: two rows carrying the same `value` would both read as selected.
   Ties go to the earlier section. Below it, groups render in the same fixed order as ever (Tabs,
   Requests, Collections, Views, Commands, Settings, Variables, Runs) so the list does not reshuffle
-  as you type; within a section, rows are ordered by score. Settings is its own group rather than
-  more Commands: twelve sections would bury the handful of things the palette can actually *do*.
+  as you type; within a section, rows are ordered by score, with the source's own order as the
+  stable tiebreak. A deep row is sorted on what it *prints*, which can be nothing - a run the
+  engine matched on snapshot text sinks below one whose URL says what was typed, and among equals
+  stays newest-first. That is a change for Runs alone, and a deliberate one: their old order came
+  of stuffing the query into every row's keywords, which scored them all alike. Settings is its own
+  group rather than more Commands: twelve sections would bury the handful of things the palette can
+  actually *do*.
 - **A row must clear `MATCH_FLOOR` (0.1) to render.** cmdk keeps every score above zero, so a
   0.0008 match used to render exactly like a 0.99 one. The floor sits just under `commandScore`'s
   `SCORE_CHARACTER_JUMP` (0.17), which is what a match beginning mid-word scores - so "oken" still
   finds "Issue token", and a query reached only by two or more scattered jumps does not.
 - **`substringKeywords` are matched literally, not fuzzily.** A URL is the case this exists for:
   to a subsequence scorer any path is character soup, and "theme" scores 0.51 against
-  `/the/most/expensive/endpoint`. A request's URL is the one field that uses this.
+  `/the/most/expensive/endpoint`. A request's URL is the one field that uses this. The piece typed
+  has to be contiguous, and that is the cost - `v1/charges` finds the row, `v1charges` does not. No
+  floor could buy that back: a URL is all separators, so a query scattered across its segments
+  reads as a series of *word* jumps, which is what scores the soup so highly to begin with.
 - **The announced count is the rendered count.** The `aria-live` line reports what the ranking
   kept, which nothing downstream can hide.
 
