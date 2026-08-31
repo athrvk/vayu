@@ -1,0 +1,93 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/*
+ * The faces the app can render, bundled rather than fetched.
+ *
+ * These six families used to arrive through one `fonts.googleapis.com`
+ * stylesheet in the head of `index.html`. A stylesheet in the head is
+ * render-blocking, and the window is only shown on `ready-to-show` - first
+ * paint, with no fallback timer (`electron/main.ts`) - so the window's
+ * appearance waited on that round trip: a revalidation on any launch after a
+ * day away, and ~12.8s of blank window on a network that black-holes the
+ * request rather than refusing it. Bundling the faces removes the renderer's
+ * only startup network dependency and makes typography identical offline.
+ *
+ * Each `@import` is one `@font-face` from the `@fontsource` package, so the
+ * `unicode-range`, `font-display: swap` and the woff2 itself stay the
+ * package's business and a version bump carries its own corrections. The
+ * families keep their real names ("Inter", not "Inter Variable"), which is why
+ * every stack in `index.css`, `tailwind.config.js`, `constants/appearance.ts`
+ * and the uPlot themes reads exactly as it did.
+ *
+ * Two axes are deliberately narrow, and both mirror what the old css2 URL
+ * asked for rather than what the packages offer:
+ *
+ * - Weights: the set each family was fetched at. `font-mono font-bold` has
+ *   always been browser-synthesised for JetBrains Mono, Fira Code and IBM Plex
+ *   Mono - none of them was ever loaded at 700 - and it still is. Adding the
+ *   real face would change how ~15 rendered call sites look, which is not this
+ *   change's business.
+ * - Subsets: latin and latin-ext. Google served the other subsets (cyrillic,
+ *   greek, vietnamese) on demand behind a `unicode-range`; bundled, they would
+ *   be installer weight every user pays for, so text outside these two subsets
+ *   falls back to the system stack that follows each family.
+ *
+ * A face added here needs a reader: it is selectable only if
+ * `constants/appearance.ts` names it in a stack.
+ * `constants/appearance.bundled-faces.test.ts` holds the two files together and
+ * fails in both directions - a family the app can select but nothing bundles,
+ * and a family bundled that nothing can select.
+ */
+
+/* Space Grotesk - the UI default (`--font-sans`). */
+@import "@fontsource/space-grotesk/latin-400.css";
+@import "@fontsource/space-grotesk/latin-500.css";
+@import "@fontsource/space-grotesk/latin-600.css";
+@import "@fontsource/space-grotesk/latin-700.css";
+@import "@fontsource/space-grotesk/latin-ext-400.css";
+@import "@fontsource/space-grotesk/latin-ext-500.css";
+@import "@fontsource/space-grotesk/latin-ext-600.css";
+@import "@fontsource/space-grotesk/latin-ext-700.css";
+
+/* Inter - the alternate UI face. */
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-700.css";
+@import "@fontsource/inter/latin-ext-400.css";
+@import "@fontsource/inter/latin-ext-500.css";
+@import "@fontsource/inter/latin-ext-600.css";
+@import "@fontsource/inter/latin-ext-700.css";
+
+/* JetBrains Mono - the code default (`--font-mono`), and a UI option. */
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-500.css";
+@import "@fontsource/jetbrains-mono/latin-600.css";
+@import "@fontsource/jetbrains-mono/latin-400-italic.css";
+@import "@fontsource/jetbrains-mono/latin-ext-400.css";
+@import "@fontsource/jetbrains-mono/latin-ext-500.css";
+@import "@fontsource/jetbrains-mono/latin-ext-600.css";
+@import "@fontsource/jetbrains-mono/latin-ext-400-italic.css";
+
+/* Fira Code - a code option. */
+@import "@fontsource/fira-code/latin-400.css";
+@import "@fontsource/fira-code/latin-500.css";
+@import "@fontsource/fira-code/latin-ext-400.css";
+@import "@fontsource/fira-code/latin-ext-500.css";
+
+/* IBM Plex Mono - a code option. */
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-ext-400.css";
+@import "@fontsource/ibm-plex-mono/latin-ext-500.css";
+
+/* Space Mono - a code option, and the one mono face with a real bold. */
+@import "@fontsource/space-mono/latin-400.css";
+@import "@fontsource/space-mono/latin-700.css";
+@import "@fontsource/space-mono/latin-ext-400.css";
+@import "@fontsource/space-mono/latin-ext-700.css";

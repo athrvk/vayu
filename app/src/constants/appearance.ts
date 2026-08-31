@@ -12,9 +12,10 @@
  * persisted to localStorage and applied to the document. This file is the
  * single source of truth: types, the settings controls, and the runtime guards
  * all derive from the arrays (font, radius) and the scale range below. Font
- * stacks reference faces already loaded by index.html (Space Grotesk, Inter and
- * the four mono faces) or system fonts, so switching never triggers a network
- * fetch.
+ * stacks reference faces bundled by src/fonts.css (Space Grotesk, Inter and the
+ * four mono faces) or system fonts, so switching never triggers a network
+ * fetch - and since #1149 that is true offline too, the faces being files in
+ * the app rather than a Google Fonts stylesheet.
  */
 
 export interface FontOption {
@@ -71,8 +72,9 @@ export type UiFontChoice = UiFont | "custom";
 /**
  * Monospace (code) font - applied by overriding the `--font-mono` custom
  * property (Tailwind's `font-mono` utilities read it) and passed to the Monaco
- * editor's `fontFamily`. Stacks reference faces already loaded by index.html
- * (JetBrains Mono) or system fonts, so switching never triggers a fetch.
+ * editor's `fontFamily`. Stacks reference faces bundled by src/fonts.css
+ * (JetBrains Mono, Fira Code, IBM Plex Mono, Space Mono) or system fonts, so
+ * switching never triggers a fetch.
  */
 export const MONO_FONTS = [
 	{

@@ -89,12 +89,12 @@
 				}
 			})();
 		</script>
-		<link rel="preconnect" href="https://fonts.googleapis.com" />
-		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-		<link
-			href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Fira+Code:wght@400;500&family=IBM+Plex+Mono:wght@400;500&family=Space+Mono:wght@400;700&display=swap"
-			rel="stylesheet"
-		/>
+		<!--
+			No font <link> here on purpose. The six faces are bundled and declared
+			in src/fonts.css: a stylesheet in this head is render-blocking, and the
+			window is shown on ready-to-show, so a fetch here is a fetch the window
+			waits for. See src/fonts.css.
+		-->
 	</head>
 	<body>
 		<div id="root"></div>

@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/* The bundled faces behind every stack below - see fonts.css for what and why. */
+@import "./fonts.css";
 @config "../tailwind.config.js";
 
 /* Tailwind 4 theme configuration for custom colors */
