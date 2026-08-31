@@ -17,6 +17,7 @@ import { describe, it, expect } from "vitest";
 import type { LoadTestMetrics } from "@/types";
 import {
 	detectAnomalies,
+	createAnomalyDetector,
 	BASELINE_TICKS,
 	LATENCY_SPIKE_FACTOR,
 	MIN_CONSECUTIVE_TICKS,
@@ -235,5 +236,361 @@ describe("detectAnomalies - the cap", () => {
 		// Still in time order after the triage, so the list reads as a timeline.
 		const times = found.map((a) => a.startSeconds);
 		expect([...times].sort((a, b) => a - b)).toEqual(times);
+	});
+});
+
+/*
+ * The incremental detector (#1151). Two things have to hold and neither is
+ * visible from the rule tests above: that it answers exactly what a from-scratch
+ * pass answers for the same buffer, and that it gets there without re-deriving
+ * the buffer it already derived. The first is proved by equivalence over a
+ * randomized append/trim sequence, the second by counting the work - a
+ * trailing-median sort and a status-map scan - that the caching exists to avoid.
+ */
+
+/** Seeded so a failure names one reproducible sequence rather than "sometimes". */
+function mulberry32(seed: number): () => number {
+	let a = seed;
+	return () => {
+		a = (a + 0x6d2b79f5) | 0;
+		let t = Math.imul(a ^ (a >>> 15), 1 | a);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+/**
+ * A run that trips every rule repeatedly, so equivalence is checked on findings
+ * rather than on two empty lists agreeing.
+ *
+ * Degradations arrive as episodes of several ticks, not as independent per-tick
+ * rolls: every rule here needs {@link MIN_CONSECUTIVE_TICKS} in a row, so a
+ * coin flip per tick produces a series that is technically random and
+ * practically clean.
+ */
+function noisyRun(ticks: number, rand: () => number): LoadTestMetrics[] {
+	const out: LoadTestMetrics[] = [];
+	const kinds = ["spike", "burst", "drop"] as const;
+	let completed = 0;
+	let failed = 0;
+	let serverErrors = 0;
+	let episode: (typeof kinds)[number] | null = null;
+	let remaining = 0;
+
+	for (let i = 0; i < ticks; i++) {
+		if (remaining === 0) {
+			episode = rand() < 0.25 ? kinds[Math.floor(rand() * kinds.length)] : null;
+			remaining = 2 + Math.floor(rand() * 5);
+		}
+		remaining--;
+
+		const rps = episode === "drop" ? 150 : 480 + Math.round(rand() * 40);
+		completed += rps;
+		if (episode === "burst") failed += Math.round(rps * 0.05);
+		if (i > 60 && rand() < 0.01) serverErrors += 3;
+
+		out.push(
+			tick(i, {
+				latency_p99_ms:
+					episode === "spike"
+						? 400 + Math.round(rand() * 300)
+						: 100 + Math.round(rand() * 10),
+				current_rps: rps,
+				current_concurrency: 50,
+				requests_completed: completed,
+				requests_failed: failed,
+				status_codes:
+					serverErrors > 0
+						? { "200": completed - serverErrors, "503": serverErrors }
+						: { "200": completed },
+			})
+		);
+	}
+	return out;
+}
+
+/**
+ * Replay a run through the store's own buffer discipline - append a batch, drop
+ * the front past the time window, then past the hard cap - checking after every
+ * commit that the detector and a from-scratch pass say the same thing.
+ */
+function replay(
+	source: LoadTestMetrics[],
+	rand: () => number,
+	windowSeconds: number,
+	cap: number
+): { commits: number; kinds: Set<string> } {
+	const detector = createAnomalyDetector();
+	let buffer: LoadTestMetrics[] = [];
+	let next = 0;
+	let commits = 0;
+	const kinds = new Set<string>();
+
+	while (next < source.length) {
+		const batch = 1 + Math.floor(rand() * 6);
+		buffer = [...buffer, ...source.slice(next, next + batch)];
+		next += batch;
+
+		const cutoff = buffer[buffer.length - 1].elapsed_seconds - windowSeconds;
+		let start = 0;
+		while (start < buffer.length && buffer[start].elapsed_seconds < cutoff) start++;
+		if (start > 0) buffer = buffer.slice(start);
+		if (buffer.length > cap) buffer = buffer.slice(-cap);
+
+		const found = detector.detect(buffer);
+		expect(found).toEqual(detectAnomalies(buffer));
+		for (const a of found) kinds.add(a.kind);
+		commits++;
+	}
+	return { commits, kinds };
+}
+
+/**
+ * The sorts and status-map scans one call costs. Both are what the from-scratch
+ * pass spent per tick of retained history and what the detector is supposed to
+ * spend per tick of *new* history, so counting them is the mutation check:
+ * revert the caching and the incremental numbers rise to the from-scratch ones.
+ */
+function measure<T>(fn: () => T): { result: T; sorts: number; statusScans: number } {
+	type SortFn = typeof Array.prototype.sort;
+	const realSort = Array.prototype.sort;
+	const realEntries = Object.entries;
+	let sorts = 0;
+	let statusScans = 0;
+
+	Array.prototype.sort = function (this: unknown[], ...args: unknown[]) {
+		sorts++;
+		return Reflect.apply(realSort, this, args) as unknown[];
+	} as unknown as SortFn;
+	Object.entries = ((value: object) => {
+		statusScans++;
+		return realEntries(value);
+	}) as typeof Object.entries;
+
+	try {
+		const result = fn();
+		return { result, sorts, statusScans };
+	} finally {
+		Array.prototype.sort = realSort;
+		Object.entries = realEntries;
+	}
+}
+
+describe("createAnomalyDetector - the same answer as a from-scratch pass", () => {
+	it("agrees over a randomized append/trim sequence on a tight window", () => {
+		// A cap smaller than the run means every commit trims, so the clip path -
+		// windows going quiet as the history they rested on rolls out - is the
+		// common case here rather than an edge one.
+		const rand = mulberry32(20260831);
+		const { commits, kinds } = replay(noisyRun(900, rand), rand, 30, 40);
+		expect(commits).toBeGreaterThan(100);
+		// An agreement on nothing is not an agreement: the sequence has to have
+		// actually produced findings of every kind for the equivalence to mean
+		// anything.
+		expect([...kinds].sort()).toEqual([
+			"error_burst",
+			"first_5xx",
+			"latency_spike",
+			"throughput_drop",
+		]);
+	});
+
+	it("agrees over a randomized append/trim sequence on a window wide enough to hold whole windows", () => {
+		const rand = mulberry32(31082026);
+		const { commits, kinds } = replay(noisyRun(900, rand), rand, 200, 5000);
+		expect(commits).toBeGreaterThan(100);
+		expect([...kinds].sort()).toEqual([
+			"error_burst",
+			"first_5xx",
+			"latency_spike",
+			"throughput_drop",
+		]);
+	});
+
+	it("falls silent for a window whose lead-in has rolled out, exactly as a rescan does", () => {
+		// The spike at ticks 20-21 rests on a baseline taken from ticks 5-19. Trim
+		// past those and the rule can no longer speak for it, so both the detector
+		// and a rescan of the shortened buffer report nothing - a detector that
+		// remembered its own finding would keep reporting it.
+		const run = healthyRun(40, (i) => (i === 20 || i === 21 ? { latency_p99_ms: 480 } : {}));
+		const detector = createAnomalyDetector();
+
+		expect(detector.detect(run.slice(0, 30))).toHaveLength(1);
+		const trimmed = run.slice(10, 30);
+		expect(detectAnomalies(trimmed)).toEqual([]);
+		expect(detector.detect(trimmed)).toEqual([]);
+	});
+
+	it("starts over on a buffer that is not a continuation of the last one", () => {
+		// A second run, a replay, a remount: the ticks are different objects, so
+		// there is no alignment to find and the answer has to come from scratch.
+		const detector = createAnomalyDetector();
+		detector.detect(healthyRun(40));
+
+		const second = healthyRun(40, (i) => (i === 25 || i === 26 ? { latency_p99_ms: 500 } : {}));
+		expect(detector.detect(second)).toEqual(detectAnomalies(second));
+	});
+
+	it("answers the same buffer twice with the same result", () => {
+		// React renders twice under StrictMode, so `detect` is called twice with
+		// one array; the second call must be served from the memo and not
+		// re-ingest ticks the detector has already taken.
+		const run = healthyRun(40, (i) => (i === 20 || i === 21 ? { latency_p99_ms: 480 } : {}));
+		const detector = createAnomalyDetector();
+
+		const first = detector.detect(run);
+		const { result, sorts } = measure(() => detector.detect(run));
+		expect(result).toBe(first);
+		expect(sorts).toBe(0);
+	});
+});
+
+describe("createAnomalyDetector - what a commit costs", () => {
+	it("pays for the ticks that arrived, not for the ones it is still holding", () => {
+		const run = healthyRun(1000);
+		const detector = createAnomalyDetector();
+		detector.detect(run.slice(0, 900));
+
+		// Three trailing-median series (p99, rps, concurrency) over 10 new ticks,
+		// plus the report's own ordering sort. The from-scratch pass below pays
+		// the same three sorts for every tick it is holding - which is the whole
+		// of #1151, and what reverting the per-tick cache would restore here.
+		const incremental = measure(() => detector.detect(run.slice(0, 910)));
+		expect(incremental.sorts).toBeLessThanOrEqual(3 * 10 + 1);
+
+		const scratch = measure(() => detectAnomalies(run.slice(0, 910)));
+		expect(scratch.sorts).toBeGreaterThan(3 * (910 - BASELINE_TICKS));
+		expect(incremental.result).toEqual(scratch.result);
+	});
+
+	it("reads each tick's status map once, and none at all once the first 5xx is known", () => {
+		const clean = healthyRun(1000);
+		const detector = createAnomalyDetector();
+		detector.detect(clean.slice(0, 900));
+
+		// Ten new status maps, not nine hundred.
+		expect(measure(() => detector.detect(clean.slice(0, 910))).statusScans).toBe(10);
+
+		// Once the onset is found the rest of the run's maps are never opened.
+		const dirty = healthyRun(1000, (i) => (i >= 100 ? { status_codes: { "503": 4 } } : {}));
+		const known = createAnomalyDetector();
+		known.detect(dirty.slice(0, 900));
+		expect(measure(() => known.detect(dirty.slice(0, 910))).statusScans).toBe(0);
+	});
+
+	it("resumes the search when the tick the first 5xx landed on rolls out", () => {
+		// Two separate onsets. Trim past the first and the answer becomes the
+		// second - and the scan resumes at the new front rather than restarting,
+		// so it re-reads nothing it had already cleared.
+		const run = healthyRun(
+			80,
+			(i): Partial<LoadTestMetrics> =>
+				i >= 20 && i < 40
+					? { status_codes: { "503": 4 } }
+					: i >= 60
+						? { status_codes: { "500": 9 } }
+						: {}
+		);
+		const detector = createAnomalyDetector();
+
+		expect(detector.detect(run.slice(0, 70))[0]).toMatchObject({
+			kind: "first_5xx",
+			startSeconds: 20,
+			label: "first 503 response",
+		});
+
+		const trimmed = run.slice(50);
+		expect(detector.detect(trimmed)).toEqual(detectAnomalies(trimmed));
+		expect(detector.detect(trimmed)[0]).toMatchObject({
+			kind: "first_5xx",
+			startSeconds: 60,
+			label: "first 500 response",
+		});
+	});
+});
+
+describe("createAnomalyDetector - the edges of recognising the next buffer", () => {
+	it("refuses a buffer whose head is a different tick at the same elapsed time", () => {
+		// Aligning on elapsed time alone would accept this: the times line up and
+		// the tail is shared, so only object identity says the head is not the tick
+		// the detector already took. Ingesting it as if it were rolls the burst's
+		// onset a tick early - a wrong answer, silently.
+		const run = healthyRun(60, (i) => ({ requests_failed: i * 30 }));
+		const detector = createAnomalyDetector();
+		detector.detect(run);
+
+		const spliced = run.slice(20);
+		spliced[0] = { ...run[20], requests_failed: run[21].requests_failed };
+
+		expect(detector.detect(spliced)).toEqual(detectAnomalies(spliced));
+		expect(detector.detect(spliced).filter((a) => a.kind === "error_burst")[0]).toMatchObject({
+			startSeconds: 22,
+		});
+	});
+
+	it("refuses a buffer that shares only its first tick with the last one", () => {
+		// The offset is confirmed at both ends because confirming it in full would
+		// be the O(n) pass the detector exists to avoid. Sharing a head is not
+		// enough: everything behind it can still be a different run's ticks, whose
+		// values would then never be ingested at all.
+		const run = healthyRun(60);
+		const detector = createAnomalyDetector();
+		detector.detect(run);
+
+		const relabelled = [
+			run[20],
+			...run
+				.slice(21)
+				.map((m, i) => ({ ...m, latency_p99_ms: i === 20 || i === 21 ? 900 : 100 })),
+		];
+		expect(detector.detect(relabelled)).toEqual(detectAnomalies(relabelled));
+		expect(detector.detect(relabelled).filter((a) => a.kind === "latency_spike")).toHaveLength(
+			1
+		);
+	});
+
+	it("walks an open recovery tail once, not once per commit", () => {
+		/*
+		 * A degradation that opens and then stalls above the recovery factor keeps
+		 * its window open for the rest of the run, so the tail is the one thing in
+		 * the detector that grows without bound while a commit is being served.
+		 * It has to be resumed from where the last commit left it; restarting it at
+		 * the run's end would re-read the whole tail twice a second, which is the
+		 * shape of the cost #1151 is about.
+		 */
+		// Flat at 100ms, 6x for two ticks at t=100, then stalled at 2.5x forever:
+		// the window opens and never closes, and the risen baseline behind it keeps
+		// any second window from opening.
+		const source = Array.from({ length: 800 }, (_, i) =>
+			tick(i, {
+				latency_p99_ms: i < 100 ? 100 : i < 102 ? 600 : 250,
+				current_rps: 500,
+				current_concurrency: 50,
+				requests_completed: i * 500,
+			})
+		);
+		let p99Reads = 0;
+		const run = source.map((m) => ({
+			...m,
+			get latency_p99_ms() {
+				p99Reads++;
+				return m.latency_p99_ms;
+			},
+		}));
+
+		const detector = createAnomalyDetector();
+		const held = run.slice(0, 700);
+		const open = detector.detect(held).filter((a) => a.kind === "latency_spike");
+		// The window really is still open at the buffer's end - otherwise there is
+		// no tail for the assertion below to be about.
+		expect(open).toHaveLength(1);
+		expect(open[0].endSeconds).toBe(699);
+
+		p99Reads = 0;
+		detector.detect(run.slice(0, 710));
+		// Ten new ticks: a trailing median reads BASELINE_TICKS values each, the
+		// rule reads one more, and the tail advances by ten. Restarting the tail
+		// at the run's end instead would add ~600 reads on top.
+		expect(p99Reads).toBeLessThan(10 * (BASELINE_TICKS + 2) + 50);
 	});
 });
