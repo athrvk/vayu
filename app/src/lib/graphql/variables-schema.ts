@@ -11,7 +11,7 @@
  * editor, so it validates/autocompletes against what the query actually expects.
  */
 
-import type * as Monaco from "monaco-editor";
+import type { MonacoApi } from "../monaco-api";
 import type { GraphQLSchema } from "graphql";
 import {
 	getOperationFacts,
@@ -60,7 +60,7 @@ export function buildVariablesJsonSchema(
  * against the visible one would validate nothing the user ever sees.
  */
 export function applyVariablesSchema(
-	monaco: typeof Monaco,
+	monaco: MonacoApi,
 	variablesModelUri: string,
 	query: string,
 	schema: GraphQLSchema | null

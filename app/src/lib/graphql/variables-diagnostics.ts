@@ -43,6 +43,7 @@
  */
 
 import type * as Monaco from "monaco-editor";
+import type { MonacoApi } from "../monaco-api";
 import { maskJsonTemplatesInPlace, rangesOverlap, type TemplateSpan } from "./templates";
 
 /**
@@ -73,7 +74,7 @@ export function markersOutsideTemplates<T extends TemplateSpan>(
  * long as the returned handle is not disposed.
  */
 export function attachVariablesDiagnostics(
-	monaco: typeof Monaco,
+	monaco: MonacoApi,
 	model: Monaco.editor.ITextModel
 ): Monaco.IDisposable {
 	const twinUri = monaco.Uri.parse(templateTwinUri(model.uri.toString()));

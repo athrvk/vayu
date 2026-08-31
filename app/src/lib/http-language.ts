@@ -32,7 +32,7 @@
  * survives being quoted, reflowed, and read out of order.
  */
 
-import type * as Monaco from "monaco-editor";
+import type { MonacoApi } from "./monaco-api";
 
 export const HTTP_LANGUAGE_ID = "http";
 
@@ -74,7 +74,7 @@ export function markLines(text: string, marker: string): string {
 		.join("\n");
 }
 
-export function registerHttpLanguage(monaco: typeof Monaco): void {
+export function registerHttpLanguage(monaco: MonacoApi): void {
 	// Registering twice would stack a second tokenizer on the same id; harmless
 	// in the app (this module is imported once) but not in tests, which import
 	// setup modules per file.

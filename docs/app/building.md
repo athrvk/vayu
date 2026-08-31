@@ -278,7 +278,30 @@ Key settings in `vite.config.ts`:
 - **Base**: `./` (relative paths for Electron)
 - **Port**: 5173 (dev server)
 - **Aliases**: Path shortcuts (`@/components`, `@/stores`, etc.)
-- **Code Splitting**: React vendor and charts in separate chunks
+- **Code Splitting**: no manual chunk groups, deliberately (#1147). What defers
+  a chunk here is a dynamic import - `React.lazy` on the tab surfaces,
+  `ensureMonaco()` on the editor - and rolldown's own chunking does the rest.
+  The `react-vendor` and `charts` groups that used to sit here were measured
+  against it and moved nothing: same 132 chunks, same 14.9MB total, the same
+  modules behind the same lazy boundaries. A packaged app loads from asar, so
+  there is no cross-release HTTP cache for a vendor chunk to hit either. Adding
+  a group for monaco was worse than inert - the named group turned the 3.7MB
+  editor chunk into a `modulepreload` in `dist/index.html`, back onto the
+  startup path #1146 had taken it off. Read `dist/index.html`'s preload list,
+  not just chunk sizes, before adding a group here
+- **Monaco's entry is composed, not the package root** (`src/lib/monaco-setup.ts`):
+  the editor core, the two language services the app drives, and one Monarch
+  grammar per language id it can open - rather than `editor.main`'s ~85
+  grammars and four language services. The CSS and HTML language services
+  reach their workers through `new Worker(new URL(…))` in monaco's own
+  `workerManager`, so importing the root shipped `css.worker` (1.0MB) and
+  `html.worker` (0.7MB) in every installer that nothing could reach. Composing
+  the entry took `dist/` from 17.2MB to 14.9MB with startup unchanged: those
+  two workers are 1.8MB of the 2.2MB, the rest being the ~79 unused Monarch
+  grammars, the non-worker halves of the CSS and HTML language services, and
+  the LSP client.
+  `src/lib/monaco-setup.contributions.test.ts` builds a fixture from that
+  file's own import list and asserts the emitted worker set (#1147)
 - **`vayu:woff2-only`** (`vite-plugins/woff2-only.ts`): strips the legacy
   `.woff` source from the `@fontsource` stylesheets, which Chromium never asks
   for but Vite would otherwise emit alongside every woff2 (90 unreachable
