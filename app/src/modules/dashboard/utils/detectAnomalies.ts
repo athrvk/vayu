@@ -317,12 +317,14 @@ interface SpikeRun extends Run {
 	 * while it was still happening.
 	 */
 	base: number;
+	/** Highest p99 over the hot ticks `[startAbs, endAbs]`. */
+	hotPeak: number;
 	/** Last tick of the window including its recovery tail. */
 	tailAbs: number;
 	/** True once a tick has ended the tail, which it then cannot re-open. */
 	tailClosed: boolean;
-	/** Peak p99 over `[startAbs, tailAbs]`. */
-	peak: number;
+	/** Highest p99 over the tail ticks `(endAbs, tailAbs]`. */
+	tailPeak: number;
 	window: Anomaly | null;
 }
 
@@ -331,17 +333,41 @@ function createSpikeDetector(): RuleDetector {
 	const runs: SpikeRun[] = [];
 	let clipped = false;
 
-	/** Reset everything a clipped start invalidates: the frozen baseline, the tail, the peak. */
+	/**
+	 * Re-derive what a clipped start invalidates. The clip took hot ticks off the
+	 * front, one of which may have been the peak, and moved the baseline the whole
+	 * window is measured against - so the frozen base, the peak and the reach of
+	 * the recovery tail are all in question.
+	 *
+	 * Re-walking the tail is the expensive part, and it is avoidable whenever the
+	 * clip left the baseline where it was - which is the usual case, and the one
+	 * that matters, since a window aging out of the buffer is clipped on every
+	 * commit for as many commits as its hot span is long.
+	 */
 	function reseat(run: SpikeRun, history: LoadTestMetrics[], firstAbs: number): void {
 		// The clipped start is the oldest tick this rule can speak for, so it
 		// arrived with a full lead-in and its baseline is there.
-		run.base = baselines.at(run.startAbs) ?? 0;
-		run.tailAbs = run.endAbs;
-		run.tailClosed = false;
-		run.peak = 0;
+		const base = baselines.at(run.startAbs) ?? 0;
+
+		// The hot span is the spike itself, so this is short whatever the tail did.
+		run.hotPeak = 0;
 		for (let abs = run.startAbs; abs <= run.endAbs; abs++) {
-			run.peak = Math.max(run.peak, readP99(history[abs - firstAbs]));
+			run.hotPeak = Math.max(run.hotPeak, readP99(history[abs - firstAbs]));
 		}
+
+		if (base !== run.base) {
+			// The threshold the walk measured itself against has moved, so the walk
+			// has to happen again. Salvaging it would mean re-justifying every tick
+			// it accepted *and* the tick that ended it against the new threshold -
+			// more subtlety than the saving is worth, because a clip usually does not
+			// move the baseline at all: it advances the start by one tick through a
+			// window whose lead-in is mostly unchanged.
+			run.tailAbs = run.endAbs;
+			run.tailClosed = false;
+			run.tailPeak = 0;
+		}
+
+		run.base = base;
 		run.window = null;
 	}
 
@@ -357,7 +383,7 @@ function createSpikeDetector(): RuleDetector {
 				break;
 			}
 			end++;
-			run.peak = Math.max(run.peak, next);
+			run.tailPeak = Math.max(run.tailPeak, next);
 		}
 		if (end !== run.tailAbs) {
 			run.tailAbs = end;
@@ -382,13 +408,17 @@ function createSpikeDetector(): RuleDetector {
 				startAbs: abs,
 				endAbs: abs,
 				base,
+				hotPeak: p99,
 				tailAbs: abs,
 				tailClosed: false,
-				peak: p99,
+				tailPeak: 0,
 				window: null,
 			}));
-			if (abs > run.tailAbs) run.tailAbs = abs;
-			run.peak = Math.max(run.peak, p99);
+			// A hot tick can only ever extend a run whose tail is empty: the walk
+			// only covers ticks the rule already found cold, and a tick's hotness
+			// never comes back. So the tail ends where the hot span does.
+			run.tailAbs = run.endAbs;
+			run.hotPeak = Math.max(run.hotPeak, p99);
 			run.window = null;
 		},
 
@@ -406,7 +436,7 @@ function createSpikeDetector(): RuleDetector {
 				advanceTail(run, history, firstAbs);
 				consumedThrough = run.tailAbs;
 				if (!run.window) {
-					const magnitude = run.peak / run.base;
+					const magnitude = Math.max(run.hotPeak, run.tailPeak) / run.base;
 					run.window = {
 						kind: "latency_spike",
 						startSeconds: elapsedAt(history, firstAbs, run.startAbs),

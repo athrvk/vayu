@@ -25,6 +25,7 @@ import {
 	ERROR_BURST_RATE,
 	THROUGHPUT_DROP_FACTOR,
 } from "./detectAnomalies";
+import { detectAnomaliesFromScratch } from "./detectAnomalies.testkit";
 
 function tick(elapsed: number, partial: Partial<LoadTestMetrics> = {}): LoadTestMetrics {
 	return {
@@ -338,7 +339,10 @@ function replay(
 		if (buffer.length > cap) buffer = buffer.slice(-cap);
 
 		const found = detector.detect(buffer);
-		expect(found).toEqual(detectAnomalies(buffer));
+		expect(found).toEqual(detectAnomaliesFromScratch(buffer));
+		// The one-shot has to answer the oracle too - it is what the history view
+		// calls, and it is now a wrapper over the same rules.
+		expect(detectAnomalies(buffer)).toEqual(found);
 		for (const a of found) kinds.add(a.kind);
 		commits++;
 	}
@@ -417,7 +421,7 @@ describe("createAnomalyDetector - the same answer as a from-scratch pass", () =>
 
 		expect(detector.detect(run.slice(0, 30))).toHaveLength(1);
 		const trimmed = run.slice(10, 30);
-		expect(detectAnomalies(trimmed)).toEqual([]);
+		expect(detectAnomaliesFromScratch(trimmed)).toEqual([]);
 		expect(detector.detect(trimmed)).toEqual([]);
 	});
 
@@ -428,7 +432,7 @@ describe("createAnomalyDetector - the same answer as a from-scratch pass", () =>
 		detector.detect(healthyRun(40));
 
 		const second = healthyRun(40, (i) => (i === 25 || i === 26 ? { latency_p99_ms: 500 } : {}));
-		expect(detector.detect(second)).toEqual(detectAnomalies(second));
+		expect(detector.detect(second)).toEqual(detectAnomaliesFromScratch(second));
 	});
 
 	it("answers the same buffer twice with the same result", () => {
@@ -458,7 +462,7 @@ describe("createAnomalyDetector - what a commit costs", () => {
 		const incremental = measure(() => detector.detect(run.slice(0, 910)));
 		expect(incremental.sorts).toBeLessThanOrEqual(3 * 10 + 1);
 
-		const scratch = measure(() => detectAnomalies(run.slice(0, 910)));
+		const scratch = measure(() => detectAnomaliesFromScratch(run.slice(0, 910)));
 		expect(scratch.sorts).toBeGreaterThan(3 * (910 - BASELINE_TICKS));
 		expect(incremental.result).toEqual(scratch.result);
 	});
@@ -500,7 +504,7 @@ describe("createAnomalyDetector - what a commit costs", () => {
 		});
 
 		const trimmed = run.slice(50);
-		expect(detector.detect(trimmed)).toEqual(detectAnomalies(trimmed));
+		expect(detector.detect(trimmed)).toEqual(detectAnomaliesFromScratch(trimmed));
 		expect(detector.detect(trimmed)[0]).toMatchObject({
 			kind: "first_5xx",
 			startSeconds: 60,
@@ -522,7 +526,7 @@ describe("createAnomalyDetector - the edges of recognising the next buffer", () 
 		const spliced = run.slice(20);
 		spliced[0] = { ...run[20], requests_failed: run[21].requests_failed };
 
-		expect(detector.detect(spliced)).toEqual(detectAnomalies(spliced));
+		expect(detector.detect(spliced)).toEqual(detectAnomaliesFromScratch(spliced));
 		expect(detector.detect(spliced).filter((a) => a.kind === "error_burst")[0]).toMatchObject({
 			startSeconds: 22,
 		});
@@ -543,7 +547,7 @@ describe("createAnomalyDetector - the edges of recognising the next buffer", () 
 				.slice(21)
 				.map((m, i) => ({ ...m, latency_p99_ms: i === 20 || i === 21 ? 900 : 100 })),
 		];
-		expect(detector.detect(relabelled)).toEqual(detectAnomalies(relabelled));
+		expect(detector.detect(relabelled)).toEqual(detectAnomaliesFromScratch(relabelled));
 		expect(detector.detect(relabelled).filter((a) => a.kind === "latency_spike")).toHaveLength(
 			1
 		);
@@ -583,10 +587,90 @@ describe("createAnomalyDetector - the edges of recognising the next buffer", () 
 				expect({ seed, next, found: detector.detect(buffer) }).toEqual({
 					seed,
 					next,
-					found: detectAnomalies(buffer),
+					found: detectAnomaliesFromScratch(buffer),
 				});
 			}
 		}
+	});
+
+	it("does not re-walk an open recovery tail each time a trim clips the window", () => {
+		/*
+		 * The two costly things meeting: a window still open at the buffer's end,
+		 * and a trim clipping its start a tick at a time as it ages out. The clip
+		 * moves the baseline the window is frozen against, so the walk cannot just
+		 * be kept - but it can be re-justified, because the walk recorded the
+		 * lowest p99 it accepted and a threshold still under that takes no tick
+		 * back out. Without that, every one of these commits re-read the whole
+		 * tail: measured at ~2,000 reads each across six consecutive commits.
+		 */
+		const source = Array.from({ length: 2040 }, (_, i) =>
+			tick(i, {
+				latency_p99_ms: i < 20 ? 100 : i < 30 ? 600 : 250,
+				current_rps: 500,
+				current_concurrency: 50,
+				requests_completed: i * 500,
+			})
+		);
+		let p99Reads = 0;
+		const run = source.map((m) => ({
+			...m,
+			get latency_p99_ms() {
+				p99Reads++;
+				return m.latency_p99_ms;
+			},
+		}));
+
+		const detector = createAnomalyDetector();
+		const open = detector.detect(run).filter((a) => a.kind === "latency_spike");
+		// The window is open at the buffer's end, so there is a tail to re-walk.
+		expect(open).toHaveLength(1);
+		expect(open[0].endSeconds).toBe(2039);
+
+		let worst = 0;
+		for (let dropped = 1; dropped <= 12; dropped++) {
+			const buffer = run.slice(dropped);
+			p99Reads = 0;
+			const found = detector.detect(buffer);
+			worst = Math.max(worst, p99Reads);
+			expect(found).toEqual(detectAnomaliesFromScratch(buffer));
+		}
+		// Bounded by the hot span the clip is eating through, not by the tail.
+		expect(worst).toBeLessThan(50);
+	});
+
+	it("re-walks the tail when a clip does move the baseline the window is frozen against", () => {
+		/*
+		 * The other half of the clip: an escalating spike - each tick several times
+		 * the last, the shape of a system going over rather than wobbling - stays
+		 * hot long enough that its own ticks reach the trailing median. Once they
+		 * do, clipping the start moves the frozen baseline, the recovery threshold
+		 * moves with it, and a tail walked against the old one is no longer the
+		 * window. Keeping it would report a degradation running to the end of the
+		 * buffer that ended twenty seconds ago.
+		 */
+		const run = Array.from({ length: 80 }, (_, i) =>
+			tick(i, {
+				latency_p99_ms: i < 20 ? 100 : i < 35 ? 100 * 4 ** (i - 19) : 300,
+				current_rps: 500,
+				current_concurrency: 50,
+				requests_completed: i * 500,
+			})
+		);
+		const detector = createAnomalyDetector();
+
+		const before = detector.detect(run).filter((a) => a.kind === "latency_spike");
+		expect(before).toHaveLength(1);
+		// Against the pre-spike baseline of 100 the 300ms plateau clears the 1.5x
+		// recovery threshold, so the window runs to the end of the buffer.
+		expect(before[0]).toMatchObject({ startSeconds: 20, endSeconds: 79 });
+
+		// Clip far enough in that the spike's own ticks are the trailing median.
+		const trimmed = run.slice(13);
+		const after = detector.detect(trimmed);
+		expect(after).toEqual(detectAnomaliesFromScratch(trimmed));
+		// The baseline moved off 100, so the plateau no longer clears the threshold
+		// and the window ends with the spike instead of running on.
+		expect(after.filter((a) => a.kind === "latency_spike")[0].endSeconds).toBeLessThan(79);
 	});
 
 	it("walks an open recovery tail once, not once per commit", () => {
