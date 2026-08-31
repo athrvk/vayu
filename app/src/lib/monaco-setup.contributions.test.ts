@@ -27,7 +27,7 @@
  * `fonts-woff2-only.test.ts` proves what `dist/` gets rather than reasoning
  * about the CSS that requests it.
  *
- * Four things are guarded here, each catching a different way the
+ * Five things are guarded here, each catching a different way the
  * composition could regress:
  *
  * 1. The two `as unknown as` casts in `monaco-setup.ts` are honest - the
@@ -35,14 +35,19 @@
  *    what the call sites (`variables-schema.ts`,
  *    `useScriptTypeDefinitions.ts`) read.
  * 2. Every language id the app can put in an editor model has a grammar
- *    imported. This is the important one, and the mirror of this codebase's
- *    most repeated defect - a field written and never read: here it would be
- *    a language id asked for and never registered, which renders as silent
- *    plain text with nothing telling anyone it happened.
- * 3. The three things that pull `css.worker` / `html.worker` back in - the
+ *    imported. This is the mirror of this codebase's most repeated defect - a
+ *    field written and never read: here it would be a language id asked for
+ *    and never registered, which renders as silent plain text with nothing
+ *    telling anyone it happened.
+ * 3. Those languages are registered and actually tokenize, loading the app's
+ *    real setup module and colorizing a snippet in each. This is the one that
+ *    answers #1147's "highlighting verified working" criterion: 2 proves the
+ *    file asks for a grammar, only this proves one arrived, since the failure
+ *    mode is a silent fall back to plain text rather than a throw.
+ * 4. The three things that pull `css.worker` / `html.worker` back in - the
  *    bare package root, and the CSS and HTML language *services* (not their
  *    Monarch grammars, which stay) - are absent from the file.
- * 4. The emitted worker set, from an actual build, is exactly what
+ * 5. The emitted worker set, from an actual build, is exactly what
  *    `getWorker` in `monaco-setup.ts` constructs: editor, json, ts.
  */
 
@@ -204,6 +209,87 @@ describe("every language id the viewer or an editor can open has a grammar impor
 	});
 });
 
+/**
+ * One snippet per id, keyed so that a new language cannot be added without
+ * one: a missing key fails the coverage case below rather than quietly
+ * skipping that language in the colorize case.
+ */
+const COLORIZE_SAMPLES: Record<string, string> = {
+	css: "body { color: red; }",
+	graphql: "query Q { field }",
+	html: '<p class="x">hi</p>',
+	javascript: "const a = 1;",
+	json: '{ "a": 1 }',
+	markdown: "# Title\n\n**bold**",
+	xml: '<a b="c" />',
+};
+
+/** The distinct `mtkN` token classes monaco's colorizer put on a snippet. */
+function tokenClasses(colorized: string): Set<string> {
+	return new Set([...colorized.matchAll(/mtk\d+/g)].map((match) => match[0]));
+}
+
+/**
+ * `json`'s tokenizer is not a Monarch grammar - it arrives from the JSON
+ * language service's mode, which only comes up behind a live editor, so
+ * `colorize` returns plain text for it headlessly. Measured against the OLD
+ * package-root import at `ca9ee66`, before this change: json colorized to 1
+ * class there too, while css=4, html=5, xml=4, markdown=2, javascript=3 and
+ * graphql=4 - the same counts the composed entry produces now. So this is the
+ * environment, identical either side of the change, not a language the
+ * composition dropped. Registration is still asserted for it below, and
+ * `jsonDefaults` is exercised for real in the first describe.
+ */
+const COLORIZE_EXEMPT = new Set(["json"]);
+
+const COLORIZED_IDS = MONACO_LANGUAGE_IDS.filter((id) => !COLORIZE_EXEMPT.has(id));
+
+/**
+ * The check the import scan above cannot make. An id with no grammar
+ * registered does not throw - Monaco silently falls back to plain text, which
+ * is the whole failure mode being guarded, so the only way to tell the two
+ * apart is to tokenize something and look at what came back.
+ */
+describe("the composed entry registers those languages and really tokenizes them", () => {
+	it("has a colorize sample for every id the scan derived", () => {
+		expect(MONACO_LANGUAGE_IDS.length).toBeGreaterThan(0);
+		// Nothing may be exempted without still having a sample: the exemption
+		// only skips the tokenizing assertion, never the coverage bookkeeping.
+		for (const id of MONACO_LANGUAGE_IDS) {
+			expect(COLORIZE_SAMPLES[id], `no colorize sample for "${id}"`).toBeTypeOf("string");
+		}
+		expect(COLORIZED_IDS.length).toBeGreaterThan(0);
+	});
+
+	// Loads the app's real setup module, which transforms monaco's editor core
+	// plus the grammars cold. Measured 8-11s locally; 40s is roughly 4x that for
+	// a slower or shared-core CI runner.
+	it("colorizes each into more than one token class", { timeout: 40_000 }, async () => {
+		const { monaco } = await import("./monaco-setup");
+
+		const registered = new Set(monaco.languages.getLanguages().map((language) => language.id));
+		for (const id of MONACO_LANGUAGE_IDS) {
+			expect(registered, `"${id}" is not a registered language`).toContain(id);
+		}
+
+		// The control. `plaintext` has no tokenizer, so it is exactly what an id
+		// with a dropped grammar degrades into - one class for the whole snippet.
+		// Without this the assertion below could pass on a Monaco that had
+		// stopped emitting `mtk` classes at all.
+		const plain = await monaco.editor.colorize(COLORIZE_SAMPLES.css, "plaintext", {});
+		expect(tokenClasses(plain).size).toBe(1);
+
+		for (const id of COLORIZED_IDS) {
+			const colorized = await monaco.editor.colorize(COLORIZE_SAMPLES[id], id, {});
+			const classes = tokenClasses(colorized);
+			expect(
+				classes.size,
+				`"${id}" colorized to ${classes.size} token class(es)`
+			).toBeGreaterThan(1);
+		}
+	});
+});
+
 describe("the barrel and the two worker-pulling language services stay out", () => {
 	it("never imports the bare monaco-editor package root", () => {
 		// The bare root is `editor.main`: every Monarch grammar, all four
@@ -256,8 +342,8 @@ describe("the emitted worker set, from a real build", () => {
 
 	const specifiers = extractMonacoSpecifiers(monacoSetupCode);
 
-	// Measured 5.6-5.9s locally for this exact fixture (13 specifiers, ~1055
-	// modules transformed). 30s is roughly 5x that, for a slower or
+	// Measured 5.6-7.4s locally for this exact fixture (13 specifiers, ~1055
+	// modules transformed). 30s is roughly 4x the upper end, for a slower or
 	// shared-core CI runner.
 	it("emits exactly editor/json/ts workers, never css or html", { timeout: 30_000 }, async () => {
 		// Guards everything below against a fixture that had no imports to

@@ -295,8 +295,11 @@ Key settings in `vite.config.ts`:
   grammars and four language services. The CSS and HTML language services
   reach their workers through `new Worker(new URL(…))` in monaco's own
   `workerManager`, so importing the root shipped `css.worker` (1.0MB) and
-  `html.worker` (0.7MB) in every installer that nothing could reach; dropping
-  them took `dist/` from 17.2MB to 14.9MB with startup unchanged.
+  `html.worker` (0.7MB) in every installer that nothing could reach. Composing
+  the entry took `dist/` from 17.2MB to 14.9MB with startup unchanged: those
+  two workers are 1.8MB of the 2.2MB, the rest being the ~79 unused Monarch
+  grammars, the non-worker halves of the CSS and HTML language services, and
+  the LSP client.
   `src/lib/monaco-setup.contributions.test.ts` builds a fixture from that
   file's own import list and asserts the emitted worker set (#1147)
 - **`vayu:woff2-only`** (`vite-plugins/woff2-only.ts`): strips the legacy
