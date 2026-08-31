@@ -281,7 +281,7 @@ Key settings in `vite.config.ts`:
 - **Code Splitting**: React vendor and charts in separate chunks
 - **`vayu:woff2-only`**: strips the legacy `.woff` source from the
   `@fontsource` stylesheets, which Chromium never asks for but Vite would
-  otherwise emit alongside every woff2 (36 unreachable files, 769KB)
+  otherwise emit alongside every woff2 (90 unreachable files, 1.18MB)
 
 ## Dependencies
 

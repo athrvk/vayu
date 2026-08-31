@@ -829,14 +829,14 @@ only desaturated option.
 
 ### Fonts
 
-| Role | Family | Import |
-|------|--------|--------|
-| UI / body default | Space Grotesk | Bundled (`@fontsource`) |
-| UI / body alternate | Inter | Bundled (`@fontsource`) |
-| Code / mono default | JetBrains Mono | Bundled (`@fontsource`) |
-| Code / mono option | Fira Code | Bundled (`@fontsource`) |
-| Code / mono option | IBM Plex Mono | Bundled (`@fontsource`) |
-| Code / mono option | Space Mono | Bundled (`@fontsource`) |
+| Role | Family | Weights bundled | Source |
+|------|--------|-----------------|--------|
+| UI / body default | Space Grotesk | 400, 500, 600, 700 | `@fontsource`, in the app |
+| UI / body alternate | Inter | 400, 500, 600, 700 | `@fontsource`, in the app |
+| Code / mono default | JetBrains Mono | 400, 500, 600, 400 italic | `@fontsource`, in the app |
+| Code / mono option | Fira Code | 400, 500 | `@fontsource`, in the app |
+| Code / mono option | IBM Plex Mono | 400, 500 | `@fontsource`, in the app |
+| Code / mono option | Space Mono | 400, 700 | `@fontsource`, in the app |
 
 ```css
 /* app/src/index.css */

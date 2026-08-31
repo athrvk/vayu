@@ -20,7 +20,8 @@ const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, "./package.j
  * Each of their `@font-face` rules lists woff2 first and a `.woff` after it for
  * browsers that predate woff2. Chromium takes the woff2 and never asks for the
  * sibling - but Vite emits every `url()` a stylesheet names, so importing the
- * packages as they ship put 36 unreachable files (769KB) in `dist/assets`.
+ * packages as they ship put 90 unreachable files (1.18MB) in `dist/assets`,
+ * measured by building with this plugin off.
  *
  * Stripping the second source here rather than hand-writing our own
  * `@font-face` blocks is deliberate: those blocks would copy each face's
