@@ -156,6 +156,28 @@ function rowsUnder(heading: string): string[] {
 	);
 }
 
+/**
+ * Every result row on screen, in visible order.
+ *
+ * The unit a group used to be: since the best match is promoted into its own
+ * "Top result" section, a row that matched well is deliberately no longer under
+ * the heading its kind would put it under.
+ */
+function resultRows(): string[] {
+	return (
+		[...document.querySelectorAll("[cmdk-item]")]
+			// An escape row is not a result. Its group is the one with no heading,
+			// which is what renders it as an aside to the section above it.
+			.filter((el) => el.closest("[cmdk-group]")?.querySelector("[cmdk-group-heading]"))
+			.map((el) => el.querySelector("span.flex-1")?.textContent ?? "")
+	);
+}
+
+/** One row's whole element, to read what it prints beside its title. */
+function rowByTitle(title: string): Element {
+	return screen.getByText(title).closest("[cmdk-item]")!;
+}
+
 /** Pick one row by its visible title - `pressEnter` takes whatever cmdk highlighted. */
 function pickRow(title: string) {
 	fireEvent.click(screen.getByText(title));
@@ -239,7 +261,9 @@ describe("settings entries", () => {
 		// "Theme Mode" lives in Appearance; "dark mode" is in its keywords only.
 		typeQuery("dark mode");
 
-		expect(rowsUnder("Settings")).toContain("Theme Mode");
+		// Across the list, not under "Settings": matching this well is exactly
+		// what gets a row promoted out of its own section.
+		expect(resultRows()).toContain("Theme Mode");
 	});
 
 	it("does not list a panel twice - the registry already offers every section", () => {
@@ -250,7 +274,7 @@ describe("settings entries", () => {
 
 		// One row for the Appearance section (the registry's command), and no
 		// second one from the index's `panel` entries.
-		const appearanceRows = rowsUnder("Settings").filter((row) => row === "Appearance");
+		const appearanceRows = resultRows().filter((row) => row === "Appearance");
 		expect(appearanceRows).toHaveLength(1);
 	});
 
@@ -267,10 +291,13 @@ describe("settings entries", () => {
 
 		typeQuery("zzTimeoutSetting");
 
-		const rows = rowsUnder("Settings");
-		expect(rows).toHaveLength(DEEP_GROUP_LIMIT);
-		// The escape row lives in its own group, below the results, so cmdk's
-		// score sort cannot lift it above them.
+		// The cap is on what the source contributes, so it is counted across the
+		// list: the best of the seven is promoted into "Top result" and the
+		// other six stay under "Settings".
+		expect(resultRows()).toHaveLength(DEEP_GROUP_LIMIT);
+		expect(rowsUnder("Settings")).toHaveLength(DEEP_GROUP_LIMIT - 1);
+		// The escape row is not a result: it is never promoted, never counted,
+		// and sits in its own group below the section it is a way out of.
 		const escape = screen.getByText(/^Search settings for/);
 		expect(escape).toBeInTheDocument();
 
@@ -323,9 +350,8 @@ describe("variables", () => {
 
 		typeQuery("retryBudget");
 
-		const group = groupByHeading("Variables")!;
-		expect(group.textContent).toContain("retryBudget");
-		expect(group.textContent).toContain("Globals");
+		const row = rowByTitle("retryBudget");
+		expect(row.textContent).toContain("Globals");
 	});
 
 	it("finds an environment by its own name", () => {
@@ -349,8 +375,8 @@ describe("variables", () => {
 
 		expect(screen.getByText("apiToken")).toBeInTheDocument();
 		expect(document.body.textContent).not.toContain("s3cr3t-bearer-value");
-		// The searchable half of this invariant cannot be asserted here - cmdk
-		// filters the rendered list again, so an indexed value would be
+		// The searchable half of this invariant cannot be asserted here - the
+		// palette ranks the rendered list, so an indexed value would be
 		// invisible on screen and still be in the items. `useVariableItems.test.ts`
 		// holds that half, against what the source returns.
 	});
@@ -375,7 +401,7 @@ describe("runs", () => {
 		open();
 
 		typeQuery("checkout");
-		expect(rowsUnder("Runs")).toEqual(["https://api.example/checkout"]);
+		expect(resultRows()).toEqual(["https://api.example/checkout"]);
 
 		pickRow("https://api.example/checkout");
 		expect(useTabsStore.getState().openTabs[0]).toMatchObject({

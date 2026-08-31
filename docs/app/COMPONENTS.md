@@ -787,7 +787,7 @@ run any command by name. Mounted once by `Shell`, alongside `ImportModal`.
   (`useLayoutStore.paletteOpen` / `setPaletteOpen`, deliberately not persisted), and the host
   for the dialogs its commands open (see `useCommandSurfaces.ts` below).
 - **`sources/`** - one hook per family, each returning `PaletteItem[]`. Two shapes of source:
-  the **shallow** ones return everything they know and let cmdk filter it - `useTabItems` (open
+  the **shallow** ones return everything they know and let the ranking narrow it - `useTabItems` (open
   tabs), `useEntityItems` (requests + collections), `useViewItems` (drawer views and singleton
   tabs) - while the **deep** ones take the query, because their corpus is too large to render:
   `useSettingsItems` (every app setting and engine entry, through the shared settings index),
@@ -801,9 +801,11 @@ run any command by name. Mounted once by `Shell`, alongside `ImportModal`.
   also merges the surfaces a *mounted feature* contributes (the request builder's live draft,
   for "Load test …") - see [Command Registry](#command-registry-libcommands).
 - **`types.ts`** - the `PaletteItem` shape, the fixed group order, and `rankForEmptyQuery`.
-- **`PaletteResults.tsx`** - grouping and rendering. **Mounted only while the palette is open**,
-  the same cost rule the context bar applies to a collapsed section: a shut palette holds no
-  query observers on collections, requests or run history.
+- **`ranking.ts`** - what renders and in what order, decided once. See Ranking below.
+- **`PaletteResults.tsx`** - grouping and rendering, and nothing else: it asks `ranking.ts` what
+  to draw. **Mounted only while the palette is open**, the same cost rule the context bar applies
+  to a collapsed section: a shut palette holds no query observers on collections, requests or run
+  history.
 
 Three things about it are load-bearing:
 
@@ -822,12 +824,43 @@ Three things about it are load-bearing:
 - **Tab rows are named by `components/layout/tab-descriptors.ts`**, the same hook `TabStrip`
   uses. A tab must not read "GET /v1/orders" in the strip and "Request" in the palette.
 
-Ranking: cmdk's own match score once anything is typed; on the empty query, `rankForEmptyQuery`
-puts the most recent first - focus time for tabs (`tabFocusedAt` in `tabs-store`, session-scoped),
-last-run time for requests (from the run history already in cache). Groups render in a fixed
-order (Tabs, Requests, Collections, Views, Commands, Settings, Variables, Runs) so the list does
-not reshuffle as you type. Settings is its own group rather than more Commands: twelve sections
-would bury the handful of things the palette can actually *do*.
+Ranking lives in `ranking.ts` and happens **once**. The palette declares `shouldFilter={false}`,
+so cmdk scores nothing a second time; the scorer is still cmdk's own (`defaultFilter`, the
+`commandScore` it would have filtered with), applied by the palette where the result can also
+decide the top result, the floor and the announced count. Before #1175 both matched: each deep
+source pre-selected with a ranking of its own and cmdk re-scored every rendered row, and neither
+was in charge - searching "theme" surfaced 0.01-scored requests over the 0.99-scored Theme Mode
+setting, because sections render in a fixed order that cmdk's cross-group re-sort cannot cross
+(each is wrapped in a `div` its `appendChild` cannot reach past).
+
+On the empty query, `rankForEmptyQuery` puts the most recent first - focus time for tabs
+(`tabFocusedAt` in `tabs-store`, session-scoped), last-run time for requests (from the run history
+already in cache) - and nothing is promoted, because nothing has been asked for. Once something is
+typed, four rules apply:
+
+- **The best match is promoted to a `Top result` section**, lifted out of its own section rather
+  than copied into the new one: two rows carrying the same `value` would both read as selected.
+  Ties go to the earlier section. Below it, groups render in the same fixed order as ever (Tabs,
+  Requests, Collections, Views, Commands, Settings, Variables, Runs) so the list does not reshuffle
+  as you type; within a section, rows are ordered by score, with the source's own order as the
+  stable tiebreak. A deep row is sorted on what it *prints*, which can be nothing - a run the
+  engine matched on snapshot text sinks below one whose URL says what was typed, and among equals
+  stays newest-first. That is a change for Runs alone, and a deliberate one: their old order came
+  of stuffing the query into every row's keywords, which scored them all alike. Settings is its own
+  group rather than more Commands: twelve sections would bury the handful of things the palette can
+  actually *do*.
+- **A row must clear `MATCH_FLOOR` (0.1) to render.** cmdk keeps every score above zero, so a
+  0.0008 match used to render exactly like a 0.99 one. The floor sits just under `commandScore`'s
+  `SCORE_CHARACTER_JUMP` (0.17), which is what a match beginning mid-word scores - so "oken" still
+  finds "Issue token", and a query reached only by two or more scattered jumps does not.
+- **`substringKeywords` are matched literally, not fuzzily.** A URL is the case this exists for:
+  to a subsequence scorer any path is character soup, and "theme" scores 0.51 against
+  `/the/most/expensive/endpoint`. A request's URL is the one field that uses this. The piece typed
+  has to be contiguous, and that is the cost - `v1/charges` finds the row, `v1charges` does not. No
+  floor could buy that back: a URL is all separators, so a query scattered across its segments
+  reads as a series of *word* jumps, which is what scores the soup so highly to begin with.
+- **The announced count is the rendered count.** The `aria-live` line reports what the ranking
+  kept, which nothing downstream can hide.
 
 Four rules govern the deep sources, and each exists because of a way the naive version fails:
 
@@ -840,18 +873,21 @@ Four rules govern the deep sources, and each exists because of a way the naive v
   other filters the escape resets so a stale one cannot hide what was just promised). The row
   appears only when there *is* more. Variables has none: no surface browses variables across
   scopes, so it would have nowhere to go.
-- **An escape row renders in a group of its own**, below the results. cmdk re-sorts a group's
-  items by score, and an escape row has to carry the query verbatim to survive that filter -
-  which would score it above every result it is an escape from. A separate group has its own
-  item container, so nothing sorts across the boundary.
-- **A deep row carries what matched in its `keywords`**, because cmdk filters the rendered list
-  a second time and would otherwise drop rows the source already matched - decisively so for
-  runs, where the engine matched against stored snapshot text that no row prints.
+- **An escape row renders in a group of its own**, below the results. It is not a result: it is
+  never scored, never promoted to the top, and never counted. It echoes the query by construction,
+  which is exactly what would otherwise score it above every result it is an escape from.
+- **A deep row says `preMatched`**, and the ranking takes it at its word rather than forming a
+  second opinion from less evidence - decisively so for runs, where the engine matched against
+  stored snapshot text that no row prints. It is a property of the row and not of its `kind`: the
+  command registry contributes `settings` rows too, one per panel, and those are ordinary shallow
+  rows that must clear the floor. Before #1175 the same end was reached by stuffing the keywords -
+  with a whole description sentence for settings, and with the query itself for runs, which scored
+  every run as an exact match and outranked everything else.
 
 Two invariants are tested rather than commented. **A variable's value is never indexed**, secret
 or not (`secret` is a masking hint, so trusting it would leak every token nobody flagged) - held
-in `sources/useVariableItems.test.ts` against the source's output, because cmdk's second filter
-would hide an indexed value from any DOM assertion. And **an engine that is down hides the Runs
+in `sources/useVariableItems.test.ts` against the source's output, because the ranking would hide
+an indexed value from any DOM assertion. And **an engine that is down hides the Runs
 group silently**: typing is idle input, and idle input must never raise a toast.
 
 **Entry points:** the chord, and the `Search` tile on the welcome Launcher. The title bar's

@@ -14,11 +14,14 @@
  * query observers on any of it.
  *
  * Two shapes of source meet here. The shallow ones return everything they know
- * and let cmdk filter it; the deep ones (settings, variables, runs) search
- * corpora too large to render - so they take the query, rank and cap it
+ * and let the ranking narrow it; the deep ones (settings, variables, runs)
+ * search corpora too large to render - so they take the query, rank and cap it
  * themselves, and offer an escape row into the surface that browses the rest.
- * An escape row renders in a group of its own below the results, which is what
- * keeps cmdk's score sort from lifting it above them - see `PaletteItem.escape`.
+ *
+ * What this file does *not* do is match. `ranking.ts` decides what renders and
+ * in what order, once, and the palette tells cmdk not to score anything a
+ * second time (`shouldFilter={false}` in `CommandPalette`). So the order below
+ * is the order on screen: a promoted top result, then the fixed sections.
  */
 
 import { useMemo } from "react";
@@ -31,7 +34,8 @@ import {
 } from "@/components/ui";
 import { getMethodColor } from "@/utils";
 import type { CommandContext } from "@/lib/commands";
-import { PALETTE_GROUPS, PALETTE_GROUP_LABELS, rankForEmptyQuery, type PaletteItem } from "./types";
+import { PALETTE_GROUP_LABELS, type PaletteItem } from "./types";
+import { rankPalette, TOP_RESULT_LABEL } from "./ranking";
 import { useTabItems } from "./sources/useTabItems";
 import { useEntityItems } from "./sources/useEntityItems";
 import { useViewItems } from "./sources/useViewItems";
@@ -62,34 +66,23 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 	const variables = useVariableItems(query);
 	const runs = useRunItems(query);
 
-	const grouped = useMemo(() => {
-		const all = [
-			...tabs,
-			...entities,
-			...views,
-			...commands,
-			...settings,
-			...variables,
-			...runs,
-		];
-		return PALETTE_GROUPS.map((kind) => {
-			const ofKind = all.filter((item) => item.kind === kind);
-			return {
-				kind,
-				items: rankForEmptyQuery(ofKind.filter((item) => !item.escape)),
-				escapes: ofKind.filter((item) => item.escape),
-			};
-		}).filter((group) => group.items.length > 0 || group.escapes.length > 0);
-	}, [tabs, entities, views, commands, settings, variables, runs]);
+	const ranked = useMemo(
+		() =>
+			rankPalette(
+				[...tabs, ...entities, ...views, ...commands, ...settings, ...variables, ...runs],
+				query
+			),
+		[tabs, entities, views, commands, settings, variables, runs, query]
+	);
 
 	/*
-	 * cmdk hides a group whose items all filter out, so the count has to come
-	 * from the rendered list rather than from `grouped`. `aria-live="polite"`
-	 * on an sr-only line is the announcement: a listbox that silently swaps its
+	 * The count is exact because the ranking decided it: every row it kept is a
+	 * row this renders, so nothing can hide one afterwards. `aria-live="polite"`
+	 * on an sr-only line is the announcement - a listbox that silently swaps its
 	 * contents as you type tells a screen-reader user nothing about whether the
 	 * query narrowed anything.
 	 */
-	const total = grouped.reduce((n, group) => n + group.items.length, 0);
+	const { total } = ranked;
 
 	return (
 		<>
@@ -98,18 +91,27 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 			</span>
 			<CommandList>
 				<CommandEmpty>No matches.</CommandEmpty>
-				{grouped.map((group, index) => (
+				{/* The best match across every section, lifted out of its own
+				    section rather than copied into this one: two rows carrying
+				    the same `value` would both read as selected. */}
+				{ranked.top.length > 0 && (
+					<CommandGroup heading={TOP_RESULT_LABEL}>
+						{ranked.top.map((item) => (
+							<PaletteRow key={item.id} item={item} onPick={onPick} />
+						))}
+					</CommandGroup>
+				)}
+				{ranked.groups.map((group, index) => (
 					<div key={group.kind}>
-						{index > 0 && <CommandSeparator />}
+						{(index > 0 || ranked.top.length > 0) && <CommandSeparator />}
 						<CommandGroup heading={PALETTE_GROUP_LABELS[group.kind]}>
 							{group.items.map((item) => (
 								<PaletteRow key={item.id} item={item} onPick={onPick} />
 							))}
 						</CommandGroup>
-						{/* Its own group, not the last row of the one above: cmdk
-						    sorts a group's items by score, and an escape row has
-						    to carry the query verbatim to survive the filter -
-						    which would score it above every result it escapes. */}
+						{/* Its own group, not the last row of the one above: an
+						    escape row leaves the palette, and reads as an aside
+						    to the section rather than the least of its results. */}
 						{group.escapes.length > 0 && (
 							<CommandGroup>
 								{group.escapes.map((item) => (
@@ -128,10 +130,10 @@ function PaletteRow({ item, onPick }: { item: PaletteItem; onPick: (item: Palett
 	const Icon = item.icon;
 	return (
 		<CommandItem
-			// cmdk matches against `value` plus `keywords`, so the value is what
-			// the row *reads* as and the keywords are what else should find it.
-			// The id is deliberately not in either: it is a uuid, and a query of
-			// "b7" would then match rows at random.
+			// cmdk no longer matches on these - `ranking.ts` does, against the
+			// same two fields - but `value` is still how cmdk tells one row from
+			// another for selection and keyboard navigation, so it stays what
+			// the row *reads* as.
 			value={[item.title, item.subtitle].filter(Boolean).join(" ")}
 			keywords={item.keywords}
 			onSelect={() => onPick(item)}

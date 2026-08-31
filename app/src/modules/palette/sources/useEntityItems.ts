@@ -97,7 +97,14 @@ export function useEntityItems(): PaletteItem[] {
 				// The URL finds a request whose name says nothing about it - and
 				// it is a keyword rather than the subtitle because the collection
 				// is what the eye needs to tell two "Get user"s apart.
-				keywords: [request.method, request.url],
+				//
+				// It is matched literally rather than fuzzily: a path is character
+				// soup to a subsequence scorer, and this one line was the palette's
+				// noise generator - almost any five-letter query found its letters
+				// scattered through some URL, and that request then outranked the
+				// setting the user was actually looking for.
+				keywords: [request.method],
+				substringKeywords: [request.url],
 				method: request.method,
 				...(lastSent.has(request.id) ? { recencyAt: lastSent.get(request.id) } : {}),
 				perform: () => openTab({ type: "request", entityId: request.id }),

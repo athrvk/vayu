@@ -121,6 +121,8 @@ export function useVariableItems(query: string): PaletteItem[] {
 						item: {
 							id: `variable-scope:${scope.key}`,
 							kind: "variable",
+							// Matched by `matchRank` above - see `PaletteItem.preMatched`.
+							preMatched: true,
 							title: scope.label,
 							subtitle: "Environment",
 							keywords: ["environment", "env", "scope"],
@@ -141,6 +143,8 @@ export function useVariableItems(query: string): PaletteItem[] {
 					item: {
 						id: `variable:${scope.key}:${variableKey}`,
 						kind: "variable",
+						// Matched by `matchRank` above - see `PaletteItem.preMatched`.
+						preMatched: true,
 						title: variableKey,
 						subtitle: scope.label,
 						keywords: ["variable", `{{${variableKey}}}`],
