@@ -8,8 +8,12 @@
 import type { Plugin } from "vite";
 
 /**
- * A `.woff` listed after a woff2 in the same `src:`, and the file it names.
- * `@fontsource` writes every face that way for browsers older than woff2.
+ * A `.woff` listed *after* another source in the same `src:`, and the file it
+ * names. Every `@fontsource` face is written that way - woff2 first, the legacy
+ * file behind it - and the leading comma is what says the browser had a better
+ * option before reaching this one. A stylesheet that ever lists the `.woff`
+ * first is left alone rather than left broken: nothing would then be stripped,
+ * and the build grows by the files, which `fonts-woff2-only.test.ts` reads.
  */
 const LEGACY_WOFF_SOURCE = /,\s*url\(([^)]+\.woff)\)\s*format\(["']woff["']\)/g;
 
