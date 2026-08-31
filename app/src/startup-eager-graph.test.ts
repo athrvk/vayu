@@ -92,6 +92,16 @@ describe("the always-mounted chrome does not defeat the split", () => {
 		expect(drawer).not.toMatch(/from "@\/modules\/settings";/);
 	});
 
+	it("the context bar loads its GraphQL section rather than importing it", () => {
+		const registry = read("components", "layout", "context-bar", "registry.ts");
+
+		// The bar is mounted on every tab, and this section is the only one that
+		// reaches the `graphql` package - the parser and the type system, ~320KB
+		// of source, for a section most sessions never expand.
+		expect(registry).toContain('import("./GraphQLSection")');
+		expect(registry).not.toMatch(/^import \{ GraphQLSection \}/m);
+	});
+
 	it("the settings registry the tree reads holds data, not panels", () => {
 		const registry = read("modules", "settings", "main", "app-panels.ts");
 

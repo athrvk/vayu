@@ -19,6 +19,7 @@
  * persisted per section id in `layout-store`, beside `contextBarWidth`.
  */
 
+import { Suspense } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PanelResizeHandle } from "./PanelResizeHandle";
@@ -27,7 +28,7 @@ import { DEFAULT_CONTEXT_BAR_WIDTH } from "@/constants/layout";
 import { TooltipIconButton } from "@/components/ui";
 import { contextBarHasContent } from "./context-bar-content";
 import { sectionsForTab } from "./context-bar/registry";
-import { ContextBarSectionFrame } from "./context-bar/Section";
+import { ContextBarSectionFrame, SectionLoading } from "./context-bar/Section";
 
 interface ContextBarProps {
 	mode?: "push" | "overlay";
@@ -106,7 +107,14 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 						expanded={!contextBarCollapsedSections.includes(id)}
 						onToggle={() => toggleContextBarSection(id)}
 					>
-						<Component tab={tab} />
+						{/* Per section, not around the list: a section whose code
+						    is still arriving must not blank the ones already on
+						    screen. `SectionLoading` is what a section shows while
+						    its own query is in flight, so a loading chunk reads the
+						    same as loading data - which, to the reader, it is. */}
+						<Suspense fallback={<SectionLoading />}>
+							<Component tab={tab} />
+						</Suspense>
 					</ContextBarSectionFrame>
 				))}
 			</div>

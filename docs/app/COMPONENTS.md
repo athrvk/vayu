@@ -150,6 +150,8 @@ Resize handle on the right edge (double-click resets to defaults). Visibility to
 
 **A section's component is mounted only while its section is expanded** (`context-bar/Section.tsx`), which is the whole cost model: the bar is open on every tab that has sections, so a collapsed section must register no queries. Collapse state persists per section id in `layout-store` (`contextBarCollapsedSections`, collapsed-by-exception).
 
+**Mounting late is not the same as loading late.** A registry entry is imported when the registry is, and the bar is on every tab - so the GraphQL section, the one entry that reaches the `graphql` package (~320KB of source, through `parseGraphQLBody` and the schema cache), is a `React.lazy` component and arrives when it first renders (#1146). `ContextBar` wraps each section in its own Suspense boundary with `SectionLoading` as the fallback, so a section still loading looks like a section still fetching and cannot blank the ones beside it. Every other section is app code and Radix, and stays eager; a new one only needs the lazy form if it drags a parser-sized dependency in with it.
+
 Sections are leaf components over the existing query layer - no bar-wide shared state - each with its own loading and empty body (`SectionEmpty`, `SectionLoading`).
 
 **Request tab**

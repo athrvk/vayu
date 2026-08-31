@@ -18,6 +18,7 @@
  * else - no framework change, which is what the registry was for.
  */
 
+import { lazy } from "react";
 import type { Tab } from "@/stores";
 import { AuthContextSection } from "./AuthContextSection";
 import { CodeSection } from "./CodeSection";
@@ -27,12 +28,31 @@ import { CollectionLastRunSection } from "./CollectionLastRunSection";
 import { CollectionVariablesSection } from "./CollectionVariablesSection";
 import { CookiesSection } from "./CookiesSection";
 import { EnvironmentSection } from "./EnvironmentSection";
-import { GraphQLSection } from "./GraphQLSection";
 import { RecentSendsSection } from "./RecentSendsSection";
 import { RunConfigSection } from "./RunConfigSection";
 import { RunSourceSection } from "./RunSourceSection";
 import { VariablesSection } from "./VariablesSection";
 import type { ContextBarSection } from "./types";
+
+/**
+ * The one section that is not imported with the rest (#1146).
+ *
+ * Every other section here is app code and Radix. This one reaches the
+ * `graphql` package - `parseGraphQLBody` and `documentOutline` need the parser,
+ * and the schema cache builds a client schema - which is ~320KB of source, and
+ * the context bar is mounted on every tab, so that arrived before the window
+ * could appear for everyone who has never opened a GraphQL request. `lazy`
+ * rather than a narrower `appliesTo` because when the section applies is a
+ * product question this registry deliberately does not ask (see the entry
+ * below); when its code loads is not.
+ *
+ * `ContextBar` renders each section inside a Suspense boundary, so this needs
+ * nothing else from the registry's shape - a `LazyExoticComponent` is a
+ * `ComponentType`.
+ */
+const GraphQLSection = lazy(() =>
+	import("./GraphQLSection").then((m) => ({ default: m.GraphQLSection }))
+);
 
 const onRequestTab = (tab: Tab) => tab.type === "request";
 

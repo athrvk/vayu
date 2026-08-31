@@ -27,6 +27,11 @@ import type { Tab, TabType } from "@/stores";
 
 const ENTITY_TYPES: TabType[] = ["request", "collection", "run"];
 
+/** True for a plain component and for a `React.lazy` one, which is an object. */
+function isRenderableComponent(value: unknown): boolean {
+	return typeof value === "function" || (typeof value === "object" && value !== null);
+}
+
 /**
  * The tab types whose sections are gated on the tab being open on something -
  * `appliesTo` in the registry. The request tab predates that gate and is
@@ -109,7 +114,12 @@ describe("the context-bar section registry", () => {
 	it("gives every section a title and a component", () => {
 		for (const section of CONTEXT_BAR_SECTIONS) {
 			expect(section.title.length).toBeGreaterThan(0);
-			expect(typeof section.Component).toBe("function");
+			// A plain component is a function; a `React.lazy` one - the GraphQL
+			// section, kept out of the startup chunk (#1146) - is an object
+			// carrying `$$typeof`. Both are renderable, which is what this
+			// asserts; `typeof === "function"` alone would forbid the lazy form
+			// rather than catch anything.
+			expect(isRenderableComponent(section.Component)).toBe(true);
 		}
 	});
 
