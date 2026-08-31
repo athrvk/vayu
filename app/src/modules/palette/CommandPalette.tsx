@@ -136,6 +136,12 @@ export function CommandPalette() {
 				title="Command palette"
 				description="Search open tabs, requests, collections, views, commands, settings, variables and past runs."
 				className="max-w-xl"
+				/* Matching belongs to `ranking.ts`, which needs to decide the top
+				   result, the relevance floor and the announced count from one
+				   pass. cmdk scoring the rendered rows again would be a second
+				   authority over the same question - and the one that used to win,
+				   since a section it could not re-order outranked any score. */
+				shouldFilter={false}
 			>
 				<CommandInput
 					value={query}
