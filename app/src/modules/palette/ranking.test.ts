@@ -286,3 +286,51 @@ describe("the empty query's lead sections", () => {
 		expect(ranked.groups.map((g) => g.kind)).toContain("command");
 	});
 });
+
+/**
+ * What a query that matched nothing gets (#1177): the verbs, as an offer rather
+ * than a result. The palette used to end on one line of type, which is the one
+ * state a launcher has nothing to say in and the one where the user most needs
+ * it to.
+ */
+describe("a query that matched nothing", () => {
+	it("offers the verbs, without counting them as results", () => {
+		const items = [
+			item({ id: "verb", kind: "command", title: "Import collection" }),
+			item({ id: "request", kind: "request", title: "Charge card" }),
+		];
+		const ranked = rankPalette(items, "zzzzz");
+
+		expect(ranked.quickActions.map((i) => i.id)).toEqual(["verb"]);
+		// Suggestions, not results: the count answers "did what I typed narrow
+		// anything", and the honest answer here is that it narrowed everything.
+		expect(ranked.total).toBe(0);
+		expect(ranked.top).toEqual([]);
+	});
+
+	it("keeps the escape rows that survived, and offers the verbs beside them", () => {
+		const items = [
+			item({ id: "verb", kind: "command", title: "Import collection" }),
+			item({ id: "esc", kind: "run", title: "Search runs for zzzzz", escape: true }),
+		];
+		const ranked = rankPalette(items, "zzzzz");
+
+		expect(ranked.groups.flatMap((g) => g.escapes.map((i) => i.id))).toEqual(["esc"]);
+		expect(ranked.quickActions.map((i) => i.id)).toEqual(["verb"]);
+		// An escape row is navigation, so the count stays at nothing-matched.
+		expect(ranked.total).toBe(0);
+	});
+
+	it("says nothing extra when the query did match something", () => {
+		const items = [
+			item({ id: "verb", kind: "command", title: "Import collection" }),
+			item({ id: "request", kind: "request", title: "Charge card" }),
+		];
+		const ranked = rankPalette(items, "charge");
+
+		// One hit is a hit: offering the verbs on top of it would push the
+		// answer down the list the palette just found.
+		expect(ranked.quickActions).toEqual([]);
+		expect(ranked.total).toBe(1);
+	});
+});

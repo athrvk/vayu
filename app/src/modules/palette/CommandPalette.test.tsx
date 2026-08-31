@@ -246,11 +246,22 @@ describe("searching", () => {
 		expect(screen.getByText("Payments / Auth")).toBeInTheDocument();
 	});
 
-	it("says so when nothing matches", async () => {
+	/*
+	 * Saying so is half of it. A launcher that matched nothing offers what it
+	 * can still do (#1177) - drop the verbs from the no-match branch of
+	 * `ranking.ts` and the palette is a dead end again, which is what the second
+	 * half of this asserts.
+	 */
+	it("says nothing matched, and offers the verbs instead of a dead end", async () => {
 		renderPalette();
 		open();
 		typeQuery("zzzzz");
-		expect(screen.getByText("No matches.")).toBeInTheDocument();
+
+		expect(screen.getByText(/No matches for “zzzzz”/)).toBeInTheDocument();
+		expect(rowsUnder("Quick actions")).toContain("Import collection");
+		// Suggestions are not results: the announcement still says the query
+		// narrowed everything away.
+		expect(screen.getByText(/searchable results$/).textContent).toBe("0 searchable results");
 	});
 
 	/*
@@ -543,6 +554,26 @@ describe("the launcher sections", () => {
 		// Inside `CommandList` the hints would scroll away with the results
 		// they describe - which is the whole reason the band exists (#773).
 		expect(footer.closest('[data-slot="command-list"]')).toBeNull();
+	});
+});
+
+/**
+ * How much of the list is on screen (#1177). The primitive's 300px showed about
+ * six rows at the old density, so the Settings section a query named sat below
+ * the fold with nothing saying it was there - the search fix put the right row
+ * first, and this is what makes the rest of the answer visible.
+ */
+describe("the list's height", () => {
+	it("caps the list at about eleven rows, and at 60vh before that", () => {
+		renderPalette();
+		open();
+
+		const list = document.querySelector('[data-slot="command-list"]')!;
+		const cls = (list.getAttribute("class") ?? "").split(/\s+/);
+		expect(cls).toContain("max-h-[min(400px,60vh)]");
+		// tailwind-merge has to have dropped the primitive's own cap, or both
+		// declarations ship and the smaller one wins on source order.
+		expect(cls).not.toContain("max-h-[300px]");
 	});
 });
 

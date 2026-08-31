@@ -388,9 +388,19 @@ their own. Resolved colour is a computed-style question and is checked in the
 browser.
 
 Definitions live in `app/src/index.css` under "Surfaces, and the rule colour that
-reads on each". Adopted by the response-viewer family and the import dialog
-(`ImportModal.surface-rule.test.tsx` guards the latter's declarations); the rest
-of the app still uses explicit tokens and can migrate as it is touched.
+reads on each". Adopted by the response-viewer family, the import dialog
+(`ImportModal.surface-rule.test.tsx` guards the latter's declarations) and the
+command list, whose `Command` root declares `bg-card surface-card` so the
+input's divider, the section separators and the footer can all say `border-rule`
+(`command.chrome.test.tsx`); the rest of the app still uses explicit tokens and
+can migrate as it is touched.
+
+A surface a component only *looks* like it has is the case the command list
+answers: it painted `bg-popover`, which no surface class declares. `--popover`
+and `--card` hold the same three numbers in both themes, and their foregrounds
+do too, so it declares the card rather than gaining a `surface-popover` that
+would be a second definition with nothing behind it. Check the values before
+copying that move - two tokens that merely look alike are two surfaces.
 
 One trap the import dialog documents: `surface-card` **cannot simply replace**
 a background utility that a primitive already sets. The surface classes live in
@@ -1575,7 +1585,12 @@ Opting out of the band does not opt out of the shape. The command palette's
 keyboard hints are a `CommandFooter` - `shrink-0`, a sibling of `CommandList`
 and never a row inside it - because the rule is about what scrolls, not about
 which primitive names it: hints that scroll away with the results they describe
-are hints nobody reads.
+are hints nobody reads. Nor does opting out excuse the cap: the list that
+scrolls in place of a band owns one of its own, and the palette's is
+`min(400px, 60vh)` (#1177) rather than a bare pixel value, so the input, the
+list and the hints together stay inside the panel's `85vh` on a short window
+instead of being clipped by the `overflow-hidden` that keeps the list's scroll
+the only one.
 
 ---
 
@@ -1694,6 +1709,13 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
   Section Title
 </p>
 ```
+
+That string has one home: the `Eyebrow` primitive
+(`app/src/components/ui/eyebrow.tsx`), which is what a section label should
+render - it was extracted because the class was hand-typed in about a dozen
+components and two of them had already drifted, and `eyebrow.test.ts` fails on a
+second copy of the literal. The command palette's group headings are an
+`Eyebrow` inside the element cmdk labels the group by.
 
 ### Status Badges / Pills
 

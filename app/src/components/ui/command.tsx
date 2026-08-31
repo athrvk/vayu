@@ -14,13 +14,34 @@ import { Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Eyebrow } from "@/components/ui/eyebrow";
+
+/**
+ * The surface every command list sits on, and the reason it is `card` rather
+ * than `popover`.
+ *
+ * A divider inside this tree - the input's, the footer's, the separator between
+ * two sections - has to say `border-rule` to read on both themes, and
+ * `border-rule` resolves through the nearest declared surface. `--popover` had
+ * no surface class to declare, and adding a `surface-popover` that duplicated
+ * `surface-card` would be a second definition with nothing behind it:
+ * `--popover` and `--card` are the same three numbers in both themes, as are
+ * their foregrounds. So this root declares the surface it already painted, and
+ * every divider below it inherits the rule that reads on it.
+ *
+ * The pair `bg-card surface-card` rather than `surface-card` alone, per the
+ * rule in `app/CLAUDE.md`: this element already carried a background utility,
+ * and a surface class alone loses that cascade.
+ */
+const COMMAND_SURFACE = "bg-card surface-card text-card-foreground";
 
 function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
 	return (
 		<CommandPrimitive
 			data-slot="command"
 			className={cn(
-				"flex h-full w-full flex-col overflow-hidden rounded-lg bg-popover text-popover-foreground",
+				"flex h-full w-full flex-col overflow-hidden rounded-lg",
+				COMMAND_SURFACE,
 				className
 			)}
 			{...props}
@@ -71,7 +92,14 @@ const CommandDialog = ({
 				<DialogDescription className="sr-only">{description}</DialogDescription>
 				<Command
 					shouldFilter={shouldFilter}
-					className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5"
+					/* `py-2` rows (~36px), not `py-3` (~44px): a launcher is read by
+					   scanning, and at 44px a 300px list showed about six rows,
+					   so anything past the second section was below the fold with
+					   nothing on screen saying it existed (#1177). The list's own
+					   cap is the other half of that, and belongs to whoever
+					   renders the list. Group headings carry no typography here -
+					   `CommandGroup` draws them with `Eyebrow`. */
+					className="[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-2 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5"
 				>
 					{children}
 				</Command>
@@ -85,7 +113,7 @@ function CommandInput({
 	...props
 }: React.ComponentProps<typeof CommandPrimitive.Input>) {
 	return (
-		<div className="flex items-center border-b px-3" cmdk-input-wrapper="">
+		<div className="flex items-center border-b border-rule px-3" cmdk-input-wrapper="">
 			<Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
 			<CommandPrimitive.Input
 				data-slot="command-input"
@@ -118,16 +146,17 @@ function CommandList({ className, ...props }: React.ComponentProps<typeof Comman
  * sits outside `DialogBody` in every other dialog. `shrink-0` keeps it a band
  * rather than the first thing a full panel squashes.
  *
- * `border-t` rather than `border-rule`: nothing in this tree declares a
- * surface, and `border-rule` under none falls back to the invisible default.
- * The input's divider one band up is the same token for the same reason.
+ * `border-rule`, which the `Command` root's `surface-card` resolves - the same
+ * token the input's divider one band up and the separators between sections
+ * now use. It read `border-t` alone while nothing in this tree declared a
+ * surface, since `border-rule` under none falls back to the invisible default.
  */
 function CommandFooter({ className, ...props }: React.ComponentProps<"div">) {
 	return (
 		<div
 			data-slot="command-footer"
 			className={cn(
-				"flex shrink-0 items-center gap-3 border-t px-3 py-2 text-[10px] text-muted-foreground",
+				"flex shrink-0 items-center gap-3 border-t border-rule px-3 py-2 text-[10px] text-muted-foreground",
 				className
 			)}
 			{...props}
@@ -147,13 +176,27 @@ function CommandEmpty(props: React.ComponentProps<typeof CommandPrimitive.Empty>
 
 function CommandGroup({
 	className,
+	heading,
 	...props
 }: React.ComponentProps<typeof CommandPrimitive.Group>) {
 	return (
 		<CommandPrimitive.Group
 			data-slot="command-group"
+			/*
+			 * A section label is an `Eyebrow` here as it is everywhere else in
+			 * the app, rather than a third spelling of the same eleven pixels -
+			 * the primitive exists because that string was hand-typed in about a
+			 * dozen components and two of them had already drifted.
+			 *
+			 * Wrapped only when the heading is text: a caller passing its own
+			 * node owns its typography, and a block element inside `Eyebrow`'s
+			 * `<p>` would be invalid markup. cmdk still renders the wrapper it
+			 * labels the group by, so the element every test and every
+			 * `aria-labelledby` reaches for is unchanged.
+			 */
+			heading={typeof heading === "string" ? <Eyebrow>{heading}</Eyebrow> : heading}
 			className={cn(
-				"overflow-hidden p-1 text-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground",
+				"overflow-hidden p-1 text-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5",
 				className
 			)}
 			{...props}
@@ -168,7 +211,11 @@ function CommandSeparator({
 	return (
 		<CommandPrimitive.Separator
 			data-slot="command-separator"
-			className={cn("-mx-1 h-px bg-border", className)}
+			// `border-t border-rule`, not a 1px `bg-border` slab: the same one
+			// pixel, in the colour the `Command` root's surface declares. On a
+			// card `--border` is the card's own background in dark, so the old
+			// version drew a divider that was simply absent there.
+			className={cn("-mx-1 border-t border-rule", className)}
 			{...props}
 		/>
 	);
