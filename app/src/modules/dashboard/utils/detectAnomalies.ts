@@ -263,6 +263,27 @@ function clipRunsFront(runs: Run[], minStartAbs: number): boolean {
 }
 
 /**
+ * The windows a rule reports, one per run long enough to count, built once and
+ * kept on the run until its bounds move.
+ *
+ * The spike rule does not use this: its windows extend past their own hot run
+ * and swallow the ones behind them, which is a fold over the runs rather than a
+ * map across them. Burst and drop are maps, and were the same eight lines twice.
+ */
+function collectWindows<R extends Run & { window: Anomaly | null }>(
+	runs: R[],
+	build: (run: R) => Anomaly
+): Anomaly[] {
+	const out: Anomaly[] = [];
+	for (const run of runs) {
+		if (runLength(run) < MIN_CONSECUTIVE_TICKS) continue;
+		if (!run.window) run.window = build(run);
+		out.push(run.window);
+	}
+	return out;
+}
+
+/**
  * One rule's incremental state. `trim` and `push` are the ingest half - called
  * once per commit and once per arriving tick - and `windows` is the read half,
  * which materialises what the rule currently says about the buffer it is given.
@@ -471,21 +492,13 @@ function createBurstDetector(): RuleDetector {
 			if (clipped && runs.length > 0) reseat(runs[0]);
 			clipped = false;
 
-			const out: Anomaly[] = [];
-			for (const run of runs) {
-				if (runLength(run) < MIN_CONSECUTIVE_TICKS) continue;
-				if (!run.window) {
-					run.window = {
-						kind: "error_burst",
-						startSeconds: elapsedAt(history, firstAbs, run.startAbs),
-						endSeconds: elapsedAt(history, firstAbs, run.endAbs),
-						magnitude: run.peak / ERROR_BURST_RATE,
-						label: `errors ${(run.peak * 100).toFixed(1)}% of requests for ${spanOf(history, firstAbs, run.startAbs, run.endAbs)}`,
-					};
-				}
-				out.push(run.window);
-			}
-			return out;
+			return collectWindows(runs, (run) => ({
+				kind: "error_burst",
+				startSeconds: elapsedAt(history, firstAbs, run.startAbs),
+				endSeconds: elapsedAt(history, firstAbs, run.endAbs),
+				magnitude: run.peak / ERROR_BURST_RATE,
+				label: `errors ${(run.peak * 100).toFixed(1)}% of requests for ${spanOf(history, firstAbs, run.startAbs, run.endAbs)}`,
+			}));
 		},
 	};
 }
@@ -554,24 +567,18 @@ function createDropDetector(): RuleDetector {
 			if (clipped && runs.length > 0) reseat(runs[0], history, firstAbs);
 			clipped = false;
 
-			const out: Anomaly[] = [];
-			for (const run of runs) {
-				if (runLength(run) < MIN_CONSECUTIVE_TICKS) continue;
-				if (!run.window) {
-					const share = run.trough / run.base;
-					run.window = {
-						kind: "throughput_drop",
-						startSeconds: elapsedAt(history, firstAbs, run.startAbs),
-						endSeconds: elapsedAt(history, firstAbs, run.endAbs),
-						// trough can be 0 (throughput stopped entirely) - report that as
-						// the worst possible multiple rather than as Infinity.
-						magnitude: share > 0 ? 1 / share : Number.MAX_SAFE_INTEGER,
-						label: `throughput ${Math.round(share * 100)}% of baseline for ${spanOf(history, firstAbs, run.startAbs, run.endAbs)}`,
-					};
-				}
-				out.push(run.window);
-			}
-			return out;
+			return collectWindows(runs, (run) => {
+				const share = run.trough / run.base;
+				return {
+					kind: "throughput_drop",
+					startSeconds: elapsedAt(history, firstAbs, run.startAbs),
+					endSeconds: elapsedAt(history, firstAbs, run.endAbs),
+					// trough can be 0 (throughput stopped entirely) - report that as the
+					// worst possible multiple rather than as Infinity.
+					magnitude: share > 0 ? 1 / share : Number.MAX_SAFE_INTEGER,
+					label: `throughput ${Math.round(share * 100)}% of baseline for ${spanOf(history, firstAbs, run.startAbs, run.endAbs)}`,
+				};
+			});
 		},
 	};
 }

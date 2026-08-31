@@ -62,8 +62,8 @@ arrives:
 - **`detectAnomalies(history)`** is the one-shot, pure over the whole series.
   `LoadTestDetail` uses it: a stored run's series arrives once, complete.
 - **`createAnomalyDetector()`** holds its derivation across calls, for a caller
-  handing over the same growing buffer again and again. `MetricsView` uses it,
-  in a ref. The live buffer's array identity changes on every store commit
+  handing over the same growing buffer again and again. `MetricsView` holds one
+  for the run's life. The live buffer's array identity changes on every commit
   (twice a second by default), so a from-scratch pass re-derived a trailing
   median per tick per series over the whole retained window - ~9,000
   fifteen-element sorts twice a second at the default 5-minute window, up to

@@ -107,7 +107,9 @@ function MetricsView({
 	 * window (#1151). Handed the same buffer again it takes only what arrived.
 	 * It answers exactly what the one-shot `detectAnomalies` would, including for
 	 * a buffer that is not a continuation (a second run, a remount), which it
-	 * starts over on - so nothing here depends on the ref surviving.
+	 * starts over on - so nothing here depends on the instance surviving. Held in
+	 * `useState` rather than a ref because the state initialiser is the one hook
+	 * that runs exactly once without reading anything during render.
 	 */
 	const [detector] = useState(createAnomalyDetector);
 	const anomalies = useMemo(() => detector.detect(chartWindow), [detector, chartWindow]);
