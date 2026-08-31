@@ -60,7 +60,9 @@ The Electron sidecar (`app/electron/sidecar.ts`) automatically handles stale loc
 
 1. **Checks lock file** before starting the engine
 2. **Reads PID** from lock file
-3. **Verifies process** is still running
+3. **Verifies process** is still running - cheap first, subprocess second: a
+   signal-0 probe answers a PID nothing holds, and only a live PID is worth a
+   `tasklist` / `ps` call to verify the name
 4. **Removes stale lock** if process is dead
 5. **Logs warnings** for debugging
 
@@ -100,7 +102,7 @@ rm ~/Library/Application\ Support/vayu/vayu.lock
 
 ### Electron Sidecar
 - Function: `checkLockFile()` - checks lock file and verifies PID
-- Function: `isVayuEngineRunning()` - cross-platform process check with process name verification
+- Function: `isVayuEngineRunning()` - cross-platform process check with process name verification. `process.kill(pid, 0)` first on every platform (no subprocess, and the stale-lock case ends there), then `tasklist` / `ps` to verify the name against PID reuse
 - Automatic cleanup in `start()` method
 - File: `app/electron/sidecar.ts`
 

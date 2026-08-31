@@ -227,7 +227,12 @@ Manages the lifecycle of load test runs:
   **tick topic** (ring of wire-ready metric snapshots) per run
 - **Retained finished runs**: Completed/failed/stopped runs are moved to a separate retained
   map rather than unregistered immediately, so a late SSE client still receives the full metric
-  series. A TTL sweep evicts them after `liveRetentionMs` (default 60s).
+  series. A TTL sweep evicts them after `liveRetentionMs` (default 60s). **The tick topic is
+  what is retained, not the machinery that filled it**: the move releases the run's event loop -
+  its curl handle pools, its multi handles and the connections they cache against the target,
+  its submission queues - along with the bound data rows and the scenario plan, so a finished
+  run holds none of them for the window (issue #1154). The counters and histograms behind the
+  summary stay, because the report and a late `/live` consumer read them.
 - **Stop discards, completion drains (with a deadline)**: a stopped run throws away its queued
   backlog and cancels in-flight transfers, so a stop is not paced by the upstream; a run that
   reaches the end of its duration waits for genuine in-flight requests, but no longer than
@@ -710,8 +715,9 @@ continue-on-failure policy** beyond "an errored step ends its iteration".
 9. Client streams ticks via SSE (/runs/:runId/live), replayed
    from the oldest retained tick then tailed to the `complete` event
    ↓
-10. On completion: batch-write results to DB; run retained (TTL) so
-    late clients still get the full series
+10. On completion: batch-write results to DB; event loop, data rows
+    and plan released; run retained (TTL) so late clients still get
+    the full series
 ```
 
 The metrics thread's exit is gated on `is_running`, not on `should_stop`. A stop

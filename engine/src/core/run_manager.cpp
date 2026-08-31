@@ -699,13 +699,24 @@ void RunManager::unregister_run (const std::string& run_id) {
 }
 
 void RunManager::retain_run (const std::string& run_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
-    auto it = active_runs_.find (run_id);
-    if (it == active_runs_.end ())
-        return;
-    it->second->completed_at_ms.store (now_ms ());
-    retained_runs_[run_id] = it->second;
-    active_runs_.erase (it);
+    std::shared_ptr<RunContext> retained;
+    {
+        std::lock_guard<std::mutex> lock (mutex_);
+        auto it = active_runs_.find (run_id);
+        if (it == active_runs_.end ())
+            return;
+        it->second->completed_at_ms.store (now_ms ());
+        retained               = it->second;
+        retained_runs_[run_id] = it->second;
+        active_runs_.erase (it);
+    }
+    // Retention is for the tick topic, not for the machinery that filled it:
+    // a finished run held its curl handle pools, its cached connections to the
+    // target, its submission queues and its bound rows for the whole window
+    // (issue #1154). Freed here, after the map move and with `mutex_` dropped,
+    // because closing thousands of sockets under it would stall /health, the
+    // runs poll and a starting run for the length of the teardown.
+    retained->release_execution_resources ();
 }
 
 std::shared_ptr<RunContext> RunManager::get_run_or_retained (const std::string& run_id) {

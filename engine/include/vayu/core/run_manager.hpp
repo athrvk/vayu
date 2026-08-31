@@ -209,6 +209,33 @@ struct RunContext {
         return event_loop ? event_loop->active_count () : 0;
     }
 
+    /// Let go of everything the run needed only while it was sending: the
+    /// event loop - with its per-worker curl handle pools, its multi handles
+    /// and the TCP/TLS connections those hold open against the target, and the
+    /// 512KB submission queues - the bound CSV rows, and the scenario plan.
+    /// What retention exists for is untouched: the tick topic, `closed`, the
+    /// summary counters and the collector behind them (issue #1154).
+    ///
+    /// Called once, by `RunManager::retain_run`, so no exit path can forget
+    /// it. By then the run's own thread has made its last read of these
+    /// members - the strategy has returned, `event_loop->stop` has drained,
+    /// and `join_aux_threads` has joined the metrics thread, the one other
+    /// reader of the loop.
+    ///
+    /// The loop is moved out under `event_loop_mtx` and destroyed after it is
+    /// dropped: `active_transfer_count` answers 0 from the swap on, and the
+    /// frees - which close sockets - never run with a lock held.
+    void release_execution_resources () {
+        std::unique_ptr<vayu::http::EventLoop> loop;
+        {
+            std::lock_guard<std::mutex> lock (event_loop_mtx);
+            loop = std::move (event_loop);
+        }
+        load_data.reset ();
+        scenario.reset ();
+        // `loop` frees here, outside the critical section above.
+    }
+
     // The run's worker thread is NOT owned here: it holds a shared_ptr to this
     // context, so a context whose last reference is dropped by its own worker
     // (a retained run swept while the worker is still unwinding) would join
@@ -845,7 +872,8 @@ class RunManager {
     // Background TTL sweeper. Without this, retained runs only get evicted when
     // /metrics/live or start_run fires - headless API users (POST /run +
     // GET /run/:id/report) never trigger either, and retained RunContexts
-    // (full tick_buffer, HdrHistogram, counters) accumulate indefinitely.
+    // (tick_buffer, HdrHistogram, counters - the execution machinery is
+    // already released by retain_run) accumulate indefinitely.
     std::thread sweeper_thread_;
     std::mutex sweeper_mtx_;
     std::condition_variable sweeper_cv_;
@@ -907,6 +935,9 @@ class RunManager {
     // On completion a run is MOVED from active_runs_ to retained_runs_ so its
     // in-memory tick topic survives for late/instant consumers. active_count()
     // and get_all_active_runs() keep their exact meaning (active only).
+    // The topic is all that survives: the move calls
+    // RunContext::release_execution_resources(), so the event loop, the bound
+    // rows and the plan are freed here rather than at the sweep (issue #1154).
     void retain_run (const std::string& run_id);
     // Active OR retained-within-window. Used only by /metrics/live.
     std::shared_ptr<RunContext> get_run_or_retained (const std::string& run_id);

@@ -283,6 +283,43 @@ TEST (RunManagerRetention, RetainMovesOutOfActiveButKeepsLookup) {
     EXPECT_GT (found->completed_at_ms.load (), 0);
 }
 
+// Retention is for the tick topic, and since #1154 that is all it holds: the
+// event loop (curl handle pools, the connections cached against the target,
+// the submission queues), the bound rows and the plan are released as the run
+// is retained, not 60-90s later when the sweeper drops the last reference.
+TEST (RunManagerRetention, RetainReleasesTheMachineryAndKeepsTheTopic) {
+    RunManager mgr;
+    nlohmann::json cfg;
+    auto ctx = std::make_shared<RunContext> ("run_y", cfg);
+
+    vayu::http::EventLoopConfig loop_cfg;
+    loop_cfg.num_workers    = 1;
+    loop_cfg.max_concurrent = 1;
+    ctx->publish_event_loop (std::make_unique<vayu::http::EventLoop> (loop_cfg));
+    ctx->load_data = std::make_unique<LoadDataSet> ();
+    ctx->scenario  = std::make_shared<const ScenarioExecution> ();
+    ctx->append_tick ("tick-0");
+    ctx->closed.store (true);
+    mgr.register_run ("run_y", ctx);
+
+    mgr.retain_run ("run_y");
+
+    auto found = mgr.get_run_or_retained ("run_y");
+    ASSERT_NE (found, nullptr);
+    EXPECT_EQ (found->event_loop, nullptr);
+    EXPECT_EQ (found->load_data, nullptr);
+    EXPECT_EQ (found->scenario, nullptr);
+    // The one accessor a reader could still be inside answers for a released
+    // loop rather than reading through it.
+    EXPECT_EQ (found->active_transfer_count (), 0u);
+
+    // What a late consumer of /runs/:id/live reads is untouched.
+    ASSERT_EQ (found->ticks_since (0).payloads.size (), 1u);
+    EXPECT_EQ (found->ticks_since (0).payloads[0], "tick-0");
+    EXPECT_EQ (found->published_count.load (), 1u);
+    EXPECT_TRUE (found->closed.load ());
+}
+
 TEST (BuildTickPayload, WrapsStatsAsSseEventWithOffsetId) {
     nlohmann::json stats;
     stats["totalRequests"] = 42;
