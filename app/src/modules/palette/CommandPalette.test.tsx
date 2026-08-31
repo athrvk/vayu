@@ -147,6 +147,13 @@ function pressEnter() {
 	fireEvent.keyDown(input(), { key: "Enter" });
 }
 
+/** Every result row on screen, in visible order. Escape rows are not results. */
+function visibleRows(): string[] {
+	return [...document.querySelectorAll("[cmdk-item]")]
+		.filter((el) => el.closest("[cmdk-group]")?.querySelector("[cmdk-group-heading]"))
+		.map((el) => el.querySelector("span.flex-1")?.textContent ?? "");
+}
+
 beforeEach(() => {
 	// cmdk scrolls the highlighted row into view; jsdom has no such method.
 	Element.prototype.scrollIntoView = vi.fn();
@@ -228,6 +235,58 @@ describe("searching", () => {
 		open();
 		typeQuery("zzzzz");
 		expect(screen.getByText("No matches.")).toBeInTheDocument();
+	});
+
+	/*
+	 * The reported symptom (#1175), end to end. "theme" scores Theme Mode at
+	 * 0.99 and the request rows at 0.01-0.10, and the user saw the requests:
+	 * the sections rendered in a fixed order no score could cross. Put the
+	 * wrapper back in charge - drop the promotion in `ranking.ts` - and the
+	 * first row is a request again.
+	 */
+	it("puts the setting a query names first, above better-placed sections", async () => {
+		renderPalette();
+		open();
+
+		typeQuery("theme");
+
+		expect(visibleRows()[0]).toBe("Theme Mode");
+		const headings = [...document.querySelectorAll("[cmdk-group-heading]")].map(
+			(el) => el.textContent
+		);
+		expect(headings[0]).toBe("Top result");
+	});
+
+	/*
+	 * The floor. Every request here matches "theme" only as scattered
+	 * subsequence noise through a URL, which is how they outranked the setting
+	 * in the first place - so none of them may render at all.
+	 */
+	it("does not render a row that matched only as subsequence noise", async () => {
+		renderPalette();
+		open();
+
+		typeQuery("theme");
+
+		expect(screen.queryByText("Charge card")).not.toBeInTheDocument();
+		expect(screen.queryByText("Refund")).not.toBeInTheDocument();
+		expect(screen.queryByText("Issue token")).not.toBeInTheDocument();
+	});
+
+	/*
+	 * The announced count is the rendered count. It used to be summed from the
+	 * pre-filter groups, so a typed query announced every row the sources had
+	 * produced - the comment above it said as much and the line below did the
+	 * opposite.
+	 */
+	it("announces the number of rows it actually rendered", async () => {
+		renderPalette();
+		open();
+
+		typeQuery("theme");
+
+		const announced = screen.getByText(/searchable results$/).textContent ?? "";
+		expect(announced).toBe(`${visibleRows().length} searchable results`);
 	});
 
 	it("switches to an open tab rather than opening a second one", async () => {
