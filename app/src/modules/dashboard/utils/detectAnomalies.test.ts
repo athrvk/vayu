@@ -549,6 +549,46 @@ describe("createAnomalyDetector - the edges of recognising the next buffer", () 
 		);
 	});
 
+	it("agrees through resets, near-total trims and repeated elapsed times", () => {
+		/*
+		 * The replays above drive the store's ordinary discipline. This one drives
+		 * what the store does at a run's edges - clearing the buffer between runs,
+		 * trimming it down to a single tick, handing over ticks whose elapsed times
+		 * repeat because two scrapes landed in the same second - which is where
+		 * recognising the next buffer either holds or quietly reports the wrong
+		 * run's windows. Sixty seeds, because these paths are reached by
+		 * coincidence rather than by design.
+		 */
+		for (let seed = 1; seed <= 60; seed++) {
+			const rand = mulberry32(seed);
+			const source = noisyRun(300, rand).map((m, i, all) =>
+				// Two scrapes in the same second: the search that finds the buffer's
+				// new head can no longer assume elapsed times are distinct.
+				i > 0 && rand() < 0.15 ? { ...m, elapsed_seconds: all[i - 1].elapsed_seconds } : m
+			);
+
+			const detector = createAnomalyDetector();
+			let buffer: LoadTestMetrics[] = [];
+			let next = 0;
+			while (next < source.length) {
+				buffer = [...buffer, ...source.slice(next, next + 1 + Math.floor(rand() * 8))];
+				next += 1 + Math.floor(rand() * 8);
+
+				const roll = rand();
+				if (roll < 0.15) buffer = [];
+				else if (roll < 0.3) buffer = buffer.slice(-1);
+				else if (roll < 0.5) buffer = buffer.slice(Math.floor(rand() * 5));
+				else if (roll < 0.6) buffer = buffer.slice(-Math.max(1, Math.floor(rand() * 25)));
+
+				expect({ seed, next, found: detector.detect(buffer) }).toEqual({
+					seed,
+					next,
+					found: detectAnomalies(buffer),
+				});
+			}
+		}
+	});
+
 	it("walks an open recovery tail once, not once per commit", () => {
 		/*
 		 * A degradation that opens and then stalls above the recovery factor keeps
