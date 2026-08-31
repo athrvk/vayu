@@ -1571,6 +1571,12 @@ is already a self-scrolling list (`CommandDialog`) opts out at the call site wit
 the reason written there; `dialog-height-band.test.tsx` holds that list closed,
 so a new dialog cannot skip the band silently.
 
+Opting out of the band does not opt out of the shape. The command palette's
+keyboard hints are a `CommandFooter` - `shrink-0`, a sibling of `CommandList`
+and never a row inside it - because the rule is about what scrolls, not about
+which primitive names it: hints that scroll away with the results they describe
+are hints nobody reads.
+
 ---
 
 ## Layout Structure

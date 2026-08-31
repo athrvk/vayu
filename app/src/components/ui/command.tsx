@@ -59,11 +59,13 @@ const CommandDialog = ({
 			{/* No corner close button: it would land on top of the search field,
 			    and Escape or a click outside is how a palette is dismissed.
 
-			    No `DialogBody` either (issue #773): a palette is its input plus
-			    `CommandList`, which caps and scrolls itself, so the band that
-			    would claim the leftover height already exists one level in. The
-			    panel's cap still applies, and `overflow-hidden` keeps the list's
-			    own scroll the only one. */}
+			    No `DialogBody` either (issue #773): a palette is its input,
+			    `CommandList` and a footer of hints, and the list caps and
+			    scrolls itself - so the band that would claim the leftover
+			    height already exists one level in, and the two around it are
+			    `shrink-0` rather than growing. The panel's cap still applies,
+			    and `overflow-hidden` keeps the list's own scroll the only
+			    one. */}
 			<DialogContent showClose={false} className={cn("overflow-hidden p-0", className)}>
 				<DialogTitle className="sr-only">{title}</DialogTitle>
 				<DialogDescription className="sr-only">{description}</DialogDescription>
@@ -102,6 +104,32 @@ function CommandList({ className, ...props }: React.ComponentProps<typeof Comman
 		<CommandPrimitive.List
 			data-slot="command-list"
 			className={cn("max-h-[300px] overflow-y-auto overflow-x-hidden", className)}
+			{...props}
+		/>
+	);
+}
+
+/**
+ * The band under the list, for keyboard hints.
+ *
+ * Outside `CommandList` on purpose, and that is the whole rule: the list is the
+ * one thing that scrolls here (issue #773), so hints placed inside it would
+ * scroll away with the results they describe - the same reason `DialogFooter`
+ * sits outside `DialogBody` in every other dialog. `shrink-0` keeps it a band
+ * rather than the first thing a full panel squashes.
+ *
+ * `border-t` rather than `border-rule`: nothing in this tree declares a
+ * surface, and `border-rule` under none falls back to the invisible default.
+ * The input's divider one band up is the same token for the same reason.
+ */
+function CommandFooter({ className, ...props }: React.ComponentProps<"div">) {
+	return (
+		<div
+			data-slot="command-footer"
+			className={cn(
+				"flex shrink-0 items-center gap-3 border-t px-3 py-2 text-[10px] text-muted-foreground",
+				className
+			)}
 			{...props}
 		/>
 	);
@@ -164,6 +192,7 @@ export {
 	CommandDialog,
 	CommandInput,
 	CommandList,
+	CommandFooter,
 	CommandEmpty,
 	CommandGroup,
 	CommandItem,

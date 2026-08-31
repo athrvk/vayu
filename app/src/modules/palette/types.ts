@@ -15,6 +15,7 @@
  */
 
 import type { LucideIcon } from "lucide-react";
+import type { Chord } from "@/lib/platform";
 
 /**
  * Which group a result renders under. The order here is the order on screen:
@@ -94,6 +95,12 @@ export interface PaletteItem {
 	icon?: LucideIcon;
 	/** HTTP method, drawn as the same colour rail the tab strip uses. */
 	method?: string;
+	/**
+	 * The chord that already runs this row, drawn as key caps on its trailing
+	 * edge. Carried from the command registry, which holds the one definition
+	 * the handler also reads (#938) - never matched against, only printed.
+	 */
+	shortcut?: Chord;
 	/**
 	 * When this last mattered to the user, in epoch ms; `undefined` when
 	 * nothing knows. Orders the empty query - see `rankForEmptyQuery`.

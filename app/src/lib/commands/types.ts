@@ -21,6 +21,7 @@
  */
 
 import type { LucideIcon } from "lucide-react";
+import type { Chord } from "@/lib/platform";
 import type { Tab } from "@/stores";
 import type { Collection } from "@/types";
 
@@ -98,6 +99,16 @@ export interface Command {
 	icon: LucideIcon;
 	/** Where the row says this action already lives, when that is not obvious. */
 	subtitle?: string;
+	/**
+	 * The chord that already runs this action, for a surface that advertises it.
+	 *
+	 * The `Chord` object from `constants/shortcuts.ts` and never a second
+	 * spelling of it (#938): a row printing "⌘W" that the handler does not
+	 * listen for is exactly the drift that file exists to end. Present only
+	 * where a chord genuinely runs *this* command - most commands have none, and
+	 * inventing one for them would put a key on screen that does nothing.
+	 */
+	shortcut?: Chord;
 	/**
 	 * Whether this command can run at all right now. Omitted means always -
 	 * spelled that way rather than `() => true` so the roster reads as "these
