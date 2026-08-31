@@ -8,6 +8,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { woff2Only } from "./vite-plugins/woff2-only";
 import path from "path";
 import { readFileSync } from "fs";
 
@@ -21,7 +22,10 @@ export default defineConfig({
 	// `from` option to `postcss.parse`" on every dev CSS transform. As a Vite
 	// plugin its output is re-parsed with a real `from`, so no fromless nodes.
 	// Autoprefixer stays in postcss.config.cjs, so vendor prefixing is unchanged.
-	plugins: [react(), tailwindcss()],
+	// `woff2Only` drops the legacy `.woff` sibling `@fontsource` names next to
+	// every woff2 - 90 files, 1.18MB, that Chromium never asks for. See the
+	// plugin for why it works on the bundle rather than in a transform.
+	plugins: [react(), tailwindcss(), woff2Only()],
 	define: {
 		__VAYU_VERSION__: JSON.stringify(packageJson.version),
 	},
