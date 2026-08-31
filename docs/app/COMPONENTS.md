@@ -835,8 +835,31 @@ setting, because sections render in a fixed order that cmdk's cross-group re-sor
 
 On the empty query, `rankForEmptyQuery` puts the most recent first - focus time for tabs
 (`tabFocusedAt` in `tabs-store`, session-scoped), last-run time for requests (from the run history
-already in cache) - and nothing is promoted, because nothing has been asked for. Once something is
-typed, four rules apply:
+already in cache) - and nothing is promoted, because nothing has been asked for. Two sections lead
+it (#1176), and both are built here rather than by a source of their own:
+
+- **`Recents`** - the dated rows across every kind, newest first, capped at `RECENT_LIMIT` (6,
+  about what the list shows without scrolling). It reads the same `recencyAt` the within-section
+  order reads, so nothing re-derives a recency and the two cannot disagree. In practice that is
+  open tabs and requests that have been sent: the deep sources contribute nothing to an empty
+  query at all, so a past run reaches the list only once something is typed - where it is a
+  search result rather than a recent, which is the distinction being drawn. How far back it
+  reaches follows the data. Tab focus times are session-scoped by `tabs-store`'s documented
+  design, so after a restart Recents is the requests the run history remembers, and fills with
+  tabs again as they are used; persisting focus time to lengthen the list would rank a restored
+  strip by yesterday's attention, which is the thing that rationale refuses.
+- **`Quick actions`** - the `command` rows. The verbs are what an empty palette is *for*, and they
+  sat fifth of eight sections, under a fold that shows about six rows. Typed, they rank as the
+  `Commands` section they have always been, so the heading follows the query rather than the
+  section moving around.
+
+Both **lift** their rows out of the sections below rather than copying them into the new ones -
+the same rule the top result follows, and for the same reason: two rows carrying one cmdk `value`
+would both read as selected, and both would be counted. A row past the Recents cap is still
+reachable in the section it was not lifted from. Neither section is a `PaletteKind`: no source
+produces one, so a kind for it would be a shape nothing returns.
+
+Once something is typed, four rules apply:
 
 - **The best match is promoted to a `Top result` section**, lifted out of its own section rather
   than copied into the new one: two rows carrying the same `value` would both read as selected.
@@ -884,6 +907,25 @@ Four rules govern the deep sources, and each exists because of a way the naive v
   with a whole description sentence for settings, and with the query itself for runs, which scored
   every run as an exact match and outranked everything else.
 
+Three things the rows and the frame say (#1176):
+
+- **A row's trailing edge tells you what already runs it.** A command bound to a chord prints that
+  chord's key-caps - one `Kbd` per key, through `chordKeys`, from the `Chord` in
+  `constants/shortcuts.ts` that the handler itself matches (#938) and never a second spelling of
+  one. The registry carries it as `Command.shortcut`, and three commands have one; every other row
+  prints nothing, because a plausible key that answers to nothing is worse than no key at all. A
+  `Recents` row prints its age there instead, that being the reason it is in the section.
+- **The keyboard hints sit outside the band that scrolls.** `CommandFooter`
+  (`components/ui/command.tsx`) is a sibling of `CommandList`, not a row in it: the list is the
+  one scroller here, so hints placed inside it would scroll away with the results they describe -
+  the same reason `DialogFooter` sits outside `DialogBody` in every other dialog (#773). It draws
+  `border-t` rather than `border-rule`, because nothing in this tree declares a surface and
+  `border-rule` under none falls back to the invisible default. All three keys it names are real:
+  the arrows and Enter are cmdk's, Escape is the dialog's.
+- **The placeholder does not advertise the chord that opened the palette.** By the time anyone
+  reads it the dialog is open, so the one thing the suffix could teach has just been used. The
+  title bar's search bar carries ⌘K, where it is still worth knowing.
+
 Two invariants are tested rather than commented. **A variable's value is never indexed**, secret
 or not (`secret` is a masking hint, so trusting it would leak every token nobody flagged) - held
 in `sources/useVariableItems.test.ts` against the source's output, because the ranking would hide
@@ -901,9 +943,12 @@ a command, never a second definition of one. Before this, "open settings" existe
 the native-menu bridge, the Dock, the settings sidebar and a keydown case, and nothing kept them
 in step or could enumerate them.
 
-- **`types.ts`** - `Command` (`id`, `title`, `keywords`, `group`, `icon`, `available?`,
-  `perform`) and `CommandContext`. A `title` may be a function of the context, which is how a
-  contextual command names its target: `Run "payments"`, not `Run collection`.
+- **`types.ts`** - `Command` (`id`, `title`, `keywords`, `group`, `icon`, `shortcut?`,
+  `available?`, `perform`) and `CommandContext`. A `title` may be a function of the context, which
+  is how a contextual command names its target: `Run "payments"`, not `Run collection`. A
+  `shortcut` is the `Chord` from `constants/shortcuts.ts` that already runs this command - the
+  object the handler matches, so a surface printing it cannot advertise a key nothing answers
+  (#938) - and is present only where such a chord genuinely exists.
 - **`registry.ts`** - the roster. Actions (new request, import, run collection, load test, close
   tab, toggle theme, open settings) plus one command per settings section, **generated** from
   `app-panels.ts` and `engine-categories.ts` so a section added there appears here without an
@@ -1571,7 +1616,9 @@ close button, positioned against the panel, does not scroll away with the
 content. `ImportModal` and `CommandDialog` opt out because each already has a
 self-scrolling band of its own, and `DeleteConfirmDialog` has no middle at all;
 every other call site takes the band, which `dialog-height-band.test.tsx`
-enforces. The rules and the measurements are in
+enforces. `command` keeps the shape without the primitive: `CommandFooter` is a
+`shrink-0` sibling of `CommandList`, so the palette's hints sit outside the one
+thing that scrolls. The rules and the measurements are in
 [design-system.md](../design-system.md).
 
 The `cva` definitions for `badge`, `button` and `toast` live in sibling

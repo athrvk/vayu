@@ -16,18 +16,20 @@
 
 import { describe, it, expect } from "vitest";
 
-import { rankPalette, scoreItem, MATCH_FLOOR } from "./ranking";
+import { rankPalette, scoreItem, MATCH_FLOOR, RECENT_LIMIT } from "./ranking";
 import type { PaletteItem, PaletteKind } from "./types";
 
 function item(overrides: Partial<PaletteItem> & { id: string; kind: PaletteKind }): PaletteItem {
 	return { title: overrides.id, perform: () => {}, ...overrides };
 }
 
-/** Every row that renders, in visible order, top result first. */
+/** Every row that renders, in visible order: the lead sections, then the rest. */
 function rendered(items: PaletteItem[], query: string): string[] {
 	const ranked = rankPalette(items, query);
 	return [
 		...ranked.top.map((i) => i.id),
+		...ranked.recents.map((i) => i.id),
+		...ranked.quickActions.map((i) => i.id),
 		...ranked.groups.flatMap((g) => [...g.items, ...g.escapes].map((i) => i.id)),
 	];
 }
@@ -207,5 +209,80 @@ describe("the announced total", () => {
 		const ranked = rankPalette(items, "theme");
 		expect(ranked.total).toBe(rendered(items, "theme").length);
 		expect(ranked.total).toBe(1);
+	});
+
+	it("counts a lifted row once, not once per section it could be in", () => {
+		const items = [
+			item({ id: "tab", kind: "tab", recencyAt: 2000 }),
+			item({ id: "verb", kind: "command" }),
+			item({ id: "undated", kind: "request" }),
+		];
+		const ranked = rankPalette(items, "");
+		expect(ranked.total).toBe(3);
+		expect(rendered(items, "")).toEqual(["tab", "verb", "undated"]);
+	});
+});
+
+/**
+ * The two sections the empty query leads with.
+ *
+ * Both hold rows lifted out of the sections below rather than copied into them:
+ * a copy would render the same cmdk `value` twice, and both copies would read
+ * as selected - the hazard that made the top result a lift in the first place.
+ */
+describe("the empty query's lead sections", () => {
+	it("lifts the dated rows into Recents, newest first", () => {
+		const items = [
+			item({ id: "older", kind: "tab", recencyAt: 1000 }),
+			item({ id: "newest", kind: "request", recencyAt: 3000 }),
+			item({ id: "undated", kind: "request" }),
+		];
+		const ranked = rankPalette(items, "");
+		expect(ranked.recents.map((i) => i.id)).toEqual(["newest", "older"]);
+		// And the sections they came from do not list them a second time.
+		expect(ranked.groups.flatMap((g) => g.items.map((i) => i.id))).toEqual(["undated"]);
+	});
+
+	it("keeps the newest when there are more dated rows than the cap", () => {
+		const items = Array.from({ length: RECENT_LIMIT + 1 }, (_, i) =>
+			item({ id: `t${i}`, kind: "tab", recencyAt: 1000 + i })
+		);
+		const ranked = rankPalette(items, "");
+		expect(ranked.recents).toHaveLength(RECENT_LIMIT);
+		expect(ranked.recents[0]?.id).toBe(`t${RECENT_LIMIT}`);
+		// The one over the cap is still reachable in the section it came from.
+		expect(ranked.groups.flatMap((g) => g.items.map((i) => i.id))).toEqual(["t0"]);
+	});
+
+	it("never lifts an escape row, which is not a result", () => {
+		// An escape row with a recency has no business leading the list: it is
+		// the way out of a section, and it belongs under the one it escapes.
+		const items = [item({ id: "esc", kind: "run", recencyAt: 9000, escape: true })];
+		const ranked = rankPalette(items, "");
+		expect(ranked.recents).toEqual([]);
+		expect(ranked.groups[0]?.escapes.map((i) => i.id)).toEqual(["esc"]);
+	});
+
+	it("lifts the commands into Quick actions, in registry order", () => {
+		const items = [
+			item({ id: "first", kind: "command" }),
+			item({ id: "second", kind: "command" }),
+			item({ id: "panel", kind: "settings" }),
+		];
+		const ranked = rankPalette(items, "");
+		expect(ranked.quickActions.map((i) => i.id)).toEqual(["first", "second"]);
+		expect(ranked.groups.map((g) => g.kind)).toEqual(["settings"]);
+	});
+
+	it("has neither section once something is typed", () => {
+		const items = [
+			item({ id: "verb", kind: "command", title: "Import collection" }),
+			item({ id: "tab", kind: "tab", title: "Import collection", recencyAt: 3000 }),
+		];
+		const ranked = rankPalette(items, "import");
+		expect(ranked.recents).toEqual([]);
+		expect(ranked.quickActions).toEqual([]);
+		// Typed, a command ranks as the Commands section it has always been.
+		expect(ranked.groups.map((g) => g.kind)).toContain("command");
 	});
 });

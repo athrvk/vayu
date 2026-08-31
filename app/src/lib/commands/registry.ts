@@ -27,6 +27,7 @@
 // `Zap` is the load-test mark throughout the app - the dashboard tab, a finished
 // load run in the strip (`tab-descriptors.ts`). The palette uses the same bolt.
 import { Download, Play, Plus, Settings, SunMoon, X, Zap } from "lucide-react";
+import { CLOSE_TAB_CHORD, LOAD_TEST_CHORD, SETTINGS_CHORD } from "@/constants/shortcuts";
 import { useImportModalStore, useTabsStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
@@ -93,6 +94,9 @@ const ACTION_COMMANDS: readonly Command[] = [
 		keywords: ["load", "benchmark", "stress", "performance", "rps", "throughput", "start"],
 		group: "action",
 		icon: Zap,
+		// The builder's window handler matches this chord and calls the very
+		// `startLoadTest` below - the one the mounted builder contributes.
+		shortcut: LOAD_TEST_CHORD,
 		/*
 		 * The one surface no host can mount for itself. Starting a load test needs
 		 * the request builder's live draft, so the mounted builder contributes the
@@ -109,6 +113,8 @@ const ACTION_COMMANDS: readonly Command[] = [
 		keywords: ["dismiss", "shut"],
 		group: "action",
 		icon: X,
+		// The Shell's handler closes the same active tab on this chord.
+		shortcut: CLOSE_TAB_CHORD,
 		available: (ctx) => ctx.activeTab !== null,
 		perform: (ctx) => {
 			if (ctx.activeTab) useTabsStore.getState().closeTab(ctx.activeTab.id);
@@ -129,6 +135,8 @@ const ACTION_COMMANDS: readonly Command[] = [
 		keywords: ["preferences", "options", "config"],
 		group: "action",
 		icon: Settings,
+		// The Shell's handler opens the same tab on ⌘, - see `openSettingsTab`.
+		shortcut: SETTINGS_CHORD,
 		perform: openSettingsTab,
 	},
 ];

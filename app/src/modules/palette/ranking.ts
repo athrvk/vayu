@@ -47,6 +47,22 @@ export const MATCH_FLOOR = 0.1;
 /** The heading over the promoted best match. */
 export const TOP_RESULT_LABEL = "Top result";
 
+/** The heading over the rows the user touched most recently. */
+export const RECENTS_LABEL = "Recents";
+
+/** The heading over the verbs the palette offers on an empty query. */
+export const QUICK_ACTIONS_LABEL = "Quick actions";
+
+/**
+ * How many rows Recents holds.
+ *
+ * The list shows about six rows without scrolling, and the section's whole job
+ * is to answer "what was I just doing" before the user reaches for the wheel.
+ * A seventh row is one nobody sees and one more thing between the query and the
+ * sections below.
+ */
+export const RECENT_LIMIT = 6;
+
 /**
  * What a row is matched against: what it reads as, plus its extra terms.
  *
@@ -101,7 +117,17 @@ export interface RankedGroup {
 export interface RankedPalette {
 	/** The promoted best match, or empty - never more than one row. */
 	top: PaletteItem[];
-	/** The familiar fixed order, minus whatever was promoted. */
+	/**
+	 * The most recent rows across every kind, newest first. Empty query only:
+	 * once something is typed, what matches has to beat what is merely recent.
+	 */
+	recents: PaletteItem[];
+	/**
+	 * The verbs the palette offers, at the head of the empty query. Empty query
+	 * only - typed, they rank as the `command` section they have always been.
+	 */
+	quickActions: PaletteItem[];
+	/** The familiar fixed order, minus whatever was promoted or lifted. */
 	groups: RankedGroup[];
 	/**
 	 * How many result rows render. Escape rows are navigation, not results, and
@@ -119,12 +145,30 @@ export interface RankedPalette {
  * promote because nothing has been asked for yet. Once something is typed the
  * score decides - a result that matches better has to win over one that is
  * merely more recent, or typing stops feeling like searching.
+ *
+ * The empty query answers that question with two sections of its own, above the
+ * fixed order: Recents, and the verbs. Both are *lifted* out of the sections
+ * their rows belong to rather than copied into the new ones - the same rule the
+ * top result follows, and for the same reason: two rows carrying the same cmdk
+ * `value` would both read as selected.
  */
 export function rankPalette(items: PaletteItem[], query: string): RankedPalette {
 	const needle = query.trim();
 	if (needle === "") {
-		const groups = groupsOf(items, (ofKind) => rankForEmptyQuery(ofKind));
-		return { top: [], groups, total: countItems(groups) };
+		const quickActions = items.filter((item) => item.kind === "command" && !item.escape);
+		const recents = recentsOf(items);
+		const lifted = new Set([...quickActions, ...recents].map((item) => item.id));
+		const groups = groupsOf(
+			items.filter((item) => !lifted.has(item.id)),
+			(ofKind) => rankForEmptyQuery(ofKind)
+		);
+		return {
+			top: [],
+			recents,
+			quickActions,
+			groups,
+			total: countItems(groups) + recents.length + quickActions.length,
+		};
 	}
 
 	const scores = new Map<string, number>();
@@ -155,9 +199,35 @@ export function rankPalette(items: PaletteItem[], query: string): RankedPalette 
 
 	return {
 		top: promoted ? [promoted] : [],
+		recents: [],
+		quickActions: [],
 		groups,
 		total: countItems(groups) + (promoted ? 1 : 0),
 	};
+}
+
+/**
+ * The rows the user touched most recently, newest first, across every kind.
+ *
+ * Built from `recencyAt` alone, which every source that knows one already
+ * stamps - so this needs no store of its own and cannot disagree with the
+ * within-section order that reads the same field. A row that knows no time is
+ * not recent, it is merely undated, and belongs in its own section.
+ *
+ * In practice that is open tabs and requests that have been sent: the deep
+ * sources contribute nothing to an empty query at all, so a past run reaches
+ * Recents only once something is typed - and then it is a search result rather
+ * than a recent, which is the distinction the empty query is drawing.
+ *
+ * How far back it reaches follows the data. Tab focus times are session-scoped
+ * by `tabs-store`'s documented design, so after a restart Recents is the
+ * requests the run history remembers, and fills with tabs again as they are
+ * used. Persisting focus time to lengthen this list would rank a restored strip
+ * by yesterday's attention, which is the thing that rationale refuses.
+ */
+function recentsOf(items: PaletteItem[]): PaletteItem[] {
+	const dated = items.filter((item) => item.recencyAt !== undefined && !item.escape);
+	return rankForEmptyQuery(dated).slice(0, RECENT_LIMIT);
 }
 
 /**

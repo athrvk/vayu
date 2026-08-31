@@ -34,7 +34,10 @@ import { CommandPalette } from "./CommandPalette";
 import { useImportModalStore, useLayoutStore, useTabsStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useLiveCommandSurfaceStore } from "@/lib/commands";
-import { isMac } from "@/lib/platform";
+import { CLOSE_TAB_CHORD } from "@/constants/shortcuts";
+import { chordKeys, isMac } from "@/lib/platform";
+import { formatRelativeTime } from "@/utils";
+import { RECENT_LIMIT } from "./ranking";
 
 /**
  * The primary modifier as this platform sends it.
@@ -145,6 +148,19 @@ function typeQuery(text: string) {
 /** Enter on the highlighted row - cmdk handles the key on its root. */
 function pressEnter() {
 	fireEvent.keyDown(input(), { key: "Enter" });
+}
+
+/** The rows under one heading, in visible order. */
+function rowsUnder(heading: string): string[] {
+	const group = screen.getByText(heading).closest("[cmdk-group]")!;
+	return [...group.querySelectorAll("[cmdk-item]")].map(
+		(el) => el.querySelector("span.flex-1")?.textContent ?? ""
+	);
+}
+
+/** Every group heading on screen, in visible order. */
+function headings(): string[] {
+	return [...document.querySelectorAll("[cmdk-group-heading]")].map((el) => el.textContent ?? "");
 }
 
 /** Every result row on screen, in visible order. Escape rows are not results. */
@@ -325,11 +341,10 @@ describe("the empty query", () => {
 		renderPalette();
 		open();
 
-		const tabsGroup = screen.getByText("Tabs").closest("[cmdk-group]")!;
-		const labels = [...tabsGroup.querySelectorAll("[cmdk-item]")].map(
-			(el) => el.querySelector("span.flex-1")?.textContent
-		);
-		expect(labels).toEqual(["Inbox", "Variables", "Settings"]);
+		// Recency is what Recents is ordered by, and a dated row is lifted into
+		// it - so this is where the attention order shows, rather than inside
+		// Tabs as it did before the section existed.
+		expect(rowsUnder("Recents")).toEqual(["Inbox", "Variables", "Settings"]);
 	});
 
 	it("puts the most recently sent request first", async () => {
@@ -344,12 +359,10 @@ describe("the empty query", () => {
 		renderPalette();
 		open();
 
-		const group = screen.getByText("Requests").closest("[cmdk-group]")!;
-		const labels = [...group.querySelectorAll("[cmdk-item]")].map(
-			(el) => el.querySelector("span.flex-1")?.textContent
-		);
-		// Tree order is Charge card, Refund, Issue token; Refund ran last.
-		expect(labels[0]).toBe("Refund");
+		// Tree order is Charge card, Refund, Issue token; Refund ran last, and
+		// Issue token has never run, so it is not recent at all.
+		expect(rowsUnder("Recents")).toEqual(["Refund", "Charge card"]);
+		expect(rowsUnder("Requests")).toEqual(["Issue token"]);
 	});
 
 	it("keeps the groups in a fixed order", async () => {
@@ -362,17 +375,174 @@ describe("the empty query", () => {
 		open();
 
 		expect(screen.getByText("Tabs")).toBeInTheDocument();
-		const headings = [...document.querySelectorAll("[cmdk-group-heading]")].map(
-			(el) => el.textContent
-		);
-		expect(headings).toEqual([
+		// Nothing here is dated - no focus time, no runs - so Recents is absent
+		// and the verbs lead. "Commands" does not appear: on an empty query its
+		// rows are Quick actions.
+		expect(headings()).toEqual([
+			"Quick actions",
 			"Tabs",
 			"Requests",
 			"Collections",
 			"Views",
-			"Commands",
 			"Settings",
 		]);
+	});
+});
+
+/**
+ * The launcher affordances (#1176): the two sections the empty query leads
+ * with, the chord chips, and the hints under the list.
+ *
+ * The thing each of these is guarding is the same one the top result guards -
+ * a section above the fixed order holds rows *lifted* out of the sections
+ * below, never copied into it. Two rows carrying the same cmdk `value` both
+ * read as selected, and both would be counted.
+ */
+describe("the launcher sections", () => {
+	/** Three tabs and two sent requests: five dated rows, one short of the cap. */
+	function withRecentActivity() {
+		useTabsStore.setState({
+			openTabs: [
+				{ id: "t1", type: "settings", entityId: null },
+				{ id: "t2", type: "inbox", entityId: null },
+				{ id: "t3", type: "variables", entityId: null },
+			],
+			activeTabId: "t1",
+			tabFocusedAt: { t1: 9000, t2: 8000, t3: 7000 },
+		});
+		runPages = [
+			{
+				data: [
+					{ id: "run2", requestId: "r2", startTime: 5000 },
+					{ id: "run1", requestId: "r1", startTime: 1000 },
+				],
+			},
+		];
+	}
+
+	it("leads with Recents, then the verbs, above the fixed order", () => {
+		withRecentActivity();
+		renderPalette();
+		open();
+
+		expect(headings().slice(0, 2)).toEqual(["Recents", "Quick actions"]);
+	});
+
+	it("lifts a recent row out of its own section rather than copying it", () => {
+		withRecentActivity();
+		renderPalette();
+		open();
+
+		const rows = visibleRows();
+		// A lifted row appears exactly once in the whole list. Only the request
+		// names are asserted this way: a tab reads as its view does ("Inbox" is
+		// both an open tab and the drawer view), so a count would be testing
+		// that coincidence rather than the lift.
+		for (const label of ["Refund", "Charge card"]) {
+			expect(rows.filter((row) => row === label)).toHaveLength(1);
+		}
+		// The section a row was lifted from no longer lists it - and with every
+		// tab dated, Tabs has nothing left to render at all.
+		expect(screen.queryByText("Tabs")).not.toBeInTheDocument();
+		expect(rowsUnder("Requests")).toEqual(["Issue token"]);
+	});
+
+	it("counts a lifted row once in the announcement", () => {
+		withRecentActivity();
+		renderPalette();
+		open();
+
+		const announced = screen.getByText(/^\d+ results$/).textContent ?? "";
+		expect(announced).toBe(`${visibleRows().length} results`);
+	});
+
+	it("caps Recents, keeping the newest", () => {
+		useTabsStore.setState({
+			openTabs: Array.from({ length: RECENT_LIMIT + 2 }, (_, i) => ({
+				id: `t${i}`,
+				type: "settings" as const,
+				entityId: null,
+			})),
+			activeTabId: "t0",
+			// t0 is the oldest, so the two oldest fall off the end of the cap.
+			tabFocusedAt: Object.fromEntries(
+				Array.from({ length: RECENT_LIMIT + 2 }, (_, i) => [`t${i}`, 1000 + i])
+			),
+		});
+		renderPalette();
+		open();
+
+		expect(rowsUnder("Recents")).toHaveLength(RECENT_LIMIT);
+		// The two that did not fit are still reachable, in the section they
+		// were lifted from - a cap must not make a row unreachable.
+		expect(rowsUnder("Tabs")).toHaveLength(2);
+	});
+
+	it("says how long ago a recent row was touched", () => {
+		const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+		runPages = [{ data: [{ id: "run2", requestId: "r2", startTime: fiveMinutesAgo }] }];
+		renderPalette();
+		open();
+
+		const row = screen.getByText("Refund").closest("[cmdk-item]")!;
+		expect(row.textContent).toContain(formatRelativeTime(fiveMinutesAgo));
+	});
+
+	it("offers the verbs on an empty query and ranks them as Commands on a typed one", () => {
+		renderPalette();
+		open();
+
+		expect(rowsUnder("Quick actions")).toContain("Import collection");
+		expect(screen.queryByText("Commands")).not.toBeInTheDocument();
+
+		typeQuery("import");
+		expect(screen.queryByText("Quick actions")).not.toBeInTheDocument();
+		expect(screen.queryByText("Recents")).not.toBeInTheDocument();
+		expect(visibleRows()).toContain("Import collection");
+	});
+
+	/*
+	 * Nothing here asserts a platform, for the reason `KeyboardShortcutsPanel`'s
+	 * tests give: `chordKeys` answers differently on macOS and elsewhere, and the
+	 * rule being held is that the row reads the chord the handler matches rather
+	 * than spelling one of its own. So the caps are compared to what `chordKeys`
+	 * returns for that same chord, which fails on a hardcoded string, on
+	 * `formatChord`'s single joined cap, and on the wrong chord.
+	 */
+	it("prints a row's chord as key-caps, one Kbd per key", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "inbox", entityId: null }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		renderPalette();
+		open();
+
+		const row = screen.getByText('Close "Inbox"').closest("[cmdk-item]")!;
+		const caps = [...row.querySelectorAll("kbd")].map((el) => el.textContent);
+		expect(caps).toEqual(chordKeys(CLOSE_TAB_CHORD));
+	});
+
+	it("prints no caps on a row no chord runs", () => {
+		renderPalette();
+		open();
+
+		// The registry binds no chord to importing - and a made-up one on screen
+		// is worse than none, since nothing would answer it.
+		const row = screen.getByText("Import collection").closest("[cmdk-item]")!;
+		expect(row.querySelectorAll("kbd")).toHaveLength(0);
+	});
+
+	it("puts the keyboard hints outside the band that scrolls", () => {
+		renderPalette();
+		open();
+
+		const footer = document.querySelector('[data-slot="command-footer"]')!;
+		expect(footer).toBeInTheDocument();
+		expect(footer.textContent).toContain("navigate");
+		// Inside `CommandList` the hints would scroll away with the results
+		// they describe - which is the whole reason the band exists (#773).
+		expect(footer.closest('[data-slot="command-list"]')).toBeNull();
 	});
 });
 

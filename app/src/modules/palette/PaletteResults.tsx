@@ -21,7 +21,9 @@
  * What this file does *not* do is match. `ranking.ts` decides what renders and
  * in what order, once, and the palette tells cmdk not to score anything a
  * second time (`shouldFilter={false}` in `CommandPalette`). So the order below
- * is the order on screen: a promoted top result, then the fixed sections.
+ * is the order on screen: the lead sections the ranking lifted rows into - a
+ * promoted top result when something is typed, Recents and the verbs when
+ * nothing is - and then the fixed sections.
  */
 
 import { useMemo } from "react";
@@ -31,11 +33,13 @@ import {
 	CommandItem,
 	CommandList,
 	CommandSeparator,
+	Kbd,
 } from "@/components/ui";
-import { getMethodColor } from "@/utils";
+import { formatRelativeTime, getMethodColor } from "@/utils";
+import { chordKeys } from "@/lib/platform";
 import type { CommandContext } from "@/lib/commands";
 import { PALETTE_GROUP_LABELS, type PaletteItem } from "./types";
-import { rankPalette, TOP_RESULT_LABEL } from "./ranking";
+import { QUICK_ACTIONS_LABEL, RECENTS_LABEL, rankPalette, TOP_RESULT_LABEL } from "./ranking";
 import { useTabItems } from "./sources/useTabItems";
 import { useEntityItems } from "./sources/useEntityItems";
 import { useViewItems } from "./sources/useViewItems";
@@ -84,6 +88,19 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 	 */
 	const { total } = ranked;
 
+	/*
+	 * The sections above the fixed order, in the order they render. Each holds
+	 * rows lifted out of the sections below rather than copied into it - two
+	 * rows carrying the same `value` would both read as selected - so at most
+	 * one of these is ever populated at a time: the top result answers a typed
+	 * query, Recents and the verbs answer an empty one.
+	 */
+	const lead: LeadSection[] = [
+		{ key: "top", heading: TOP_RESULT_LABEL, items: ranked.top },
+		{ key: "recents", heading: RECENTS_LABEL, items: ranked.recents, withRecency: true },
+		{ key: "quick-actions", heading: QUICK_ACTIONS_LABEL, items: ranked.quickActions },
+	].filter((section) => section.items.length > 0);
+
 	return (
 		<>
 			<span aria-live="polite" className="sr-only">
@@ -91,19 +108,24 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 			</span>
 			<CommandList>
 				<CommandEmpty>No matches.</CommandEmpty>
-				{/* The best match across every section, lifted out of its own
-				    section rather than copied into this one: two rows carrying
-				    the same `value` would both read as selected. */}
-				{ranked.top.length > 0 && (
-					<CommandGroup heading={TOP_RESULT_LABEL}>
-						{ranked.top.map((item) => (
-							<PaletteRow key={item.id} item={item} onPick={onPick} />
-						))}
-					</CommandGroup>
-				)}
+				{lead.map((section, index) => (
+					<div key={section.key}>
+						{index > 0 && <CommandSeparator />}
+						<CommandGroup heading={section.heading}>
+							{section.items.map((item) => (
+								<PaletteRow
+									key={item.id}
+									item={item}
+									onPick={onPick}
+									showRecency={section.withRecency}
+								/>
+							))}
+						</CommandGroup>
+					</div>
+				))}
 				{ranked.groups.map((group, index) => (
 					<div key={group.kind}>
-						{(index > 0 || ranked.top.length > 0) && <CommandSeparator />}
+						{(index > 0 || lead.length > 0) && <CommandSeparator />}
 						<CommandGroup heading={PALETTE_GROUP_LABELS[group.kind]}>
 							{group.items.map((item) => (
 								<PaletteRow key={item.id} item={item} onPick={onPick} />
@@ -126,8 +148,30 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 	);
 }
 
-function PaletteRow({ item, onPick }: { item: PaletteItem; onPick: (item: PaletteItem) => void }) {
+/** One of the sections that render above the fixed group order. */
+interface LeadSection {
+	key: string;
+	heading: string;
+	items: PaletteItem[];
+	/** Print each row's age. Only Recents, where the age is the reason it is there. */
+	withRecency?: boolean;
+}
+
+function PaletteRow({
+	item,
+	onPick,
+	showRecency = false,
+}: {
+	item: PaletteItem;
+	onPick: (item: PaletteItem) => void;
+	showRecency?: boolean;
+}) {
 	const Icon = item.icon;
+	// Only where the section asked for it *and* the row knows one: a row with no
+	// recency in Recents cannot happen (that is what put it there), and the
+	// check is what keeps it from printing an epoch date if it ever did.
+	const recency =
+		showRecency && item.recencyAt !== undefined && formatRelativeTime(item.recencyAt);
 	return (
 		<CommandItem
 			// cmdk no longer matches on these - `ranking.ts` does, against the
@@ -153,6 +197,24 @@ function PaletteRow({ item, onPick }: { item: PaletteItem; onPick: (item: Palett
 			{item.subtitle && (
 				<span className="ml-auto shrink-0 truncate pl-3 text-xs text-muted-foreground">
 					{item.subtitle}
+				</span>
+			)}
+			{/* One cap per key, the `Kbd` docstring's own chord form, drawn from
+			    the chord the handler matches rather than a second spelling of
+			    it (#938). A row without a bound chord prints nothing: an empty
+			    slot is honest, a made-up key is not. */}
+			{item.shortcut && (
+				<span className="ml-auto flex shrink-0 items-center gap-1 pl-3">
+					{chordKeys(item.shortcut).map((cap) => (
+						<Kbd key={cap} size="sm">
+							{cap}
+						</Kbd>
+					))}
+				</span>
+			)}
+			{recency && (
+				<span className="ml-auto shrink-0 pl-3 text-xs text-muted-foreground">
+					{recency}
 				</span>
 			)}
 		</CommandItem>
