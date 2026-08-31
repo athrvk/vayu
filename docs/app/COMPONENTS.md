@@ -399,7 +399,7 @@ The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run con
 
 **`utils/`** - `metricsTransforms.ts` (SSE history → chart series), `reportToDerived.ts` (stored `RunReport` → the same `DashboardDerived` shape, so history reuses the live components), `computeBreakpoint.ts`, `detectAnomalies.ts`, `computeEta.ts`, `chartGeometry.ts`. `types.ts` holds the shared dashboard types (`DashboardDerived`, etc.).
 
-`detectAnomalies.ts` is the run's degradation windows - latency spikes, error bursts, throughput drops and the first 5xx - scanned out of the same per-tick series the charts plot, with fixed factors over a trailing median and nothing tunable. It is derived once per view (`MetricsView` live, `LoadTestDetail` for a stored run) and passed down, so no card or chart re-derives it. Two readings of one detection: the charts shade the windows, and the history Overview's `RunEvents` card states them in words. Both are absent for a clean run.
+`detectAnomalies.ts` names the run's degradation windows. It is derived once per view - `MetricsView` for the live buffer, `LoadTestDetail` for a stored run - and passed down, so no card or chart re-derives it. The rules, the two entry points (a pure one-shot for a series that arrives whole, an incremental detector for a buffer handed over on a timer) and the invariant that keeps them in agreement are in `app/src/modules/dashboard/README.md`.
 
 ## History (`modules/history/`)
 

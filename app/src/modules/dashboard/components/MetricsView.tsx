@@ -21,7 +21,7 @@
  * derives - it does not render metric chrome inline.
  */
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import { formatNumber } from "@/utils";
 import { useDashboardStore } from "@/stores";
@@ -39,7 +39,7 @@ import {
 	buildStatusOverTime,
 	latestThroughputMbps,
 } from "../utils/metricsTransforms";
-import { detectAnomalies } from "../utils/detectAnomalies";
+import { createAnomalyDetector } from "../utils/detectAnomalies";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
 import {
@@ -99,8 +99,20 @@ function MetricsView({
 	 * tick and not on the whole history array, so folding a history-wide scan into
 	 * it would rebuild it at 10 Hz and defeat the React.memo on HeroRow /
 	 * ModeStatsRow. The charts are the consumers, and they take it directly.
+	 *
+	 * The detector is held across commits rather than re-run from scratch on each
+	 * one. `chartWindow`'s identity changes every time the store appends a batch,
+	 * so a pure derivation re-derived the whole retained buffer twice a second -
+	 * a trailing-median sort per tick per series, ~9,000 of them at the default
+	 * window (#1151). Handed the same buffer again it takes only what arrived.
+	 * It answers exactly what the one-shot `detectAnomalies` would, including for
+	 * a buffer that is not a continuation (a second run, a remount), which it
+	 * starts over on - so nothing here depends on the instance surviving. Held in
+	 * `useState` rather than a ref because the state initialiser is the one hook
+	 * that runs exactly once without reading anything during render.
 	 */
-	const anomalies = useMemo(() => detectAnomalies(chartWindow), [chartWindow]);
+	const [detector] = useState(createAnomalyDetector);
+	const anomalies = useMemo(() => detector.detect(chartWindow), [detector, chartWindow]);
 
 	// Read the monotonic aggregates from the store - they are folded into running
 	// values on each tick in addMetricsBatch, so this is O(1) per render instead

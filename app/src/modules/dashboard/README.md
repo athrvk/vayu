@@ -47,3 +47,33 @@ consumes it.
   `components/stats/ModeStatsRow.tsx` decides which four cards each mode shows,
   and its file comment tabulates them. Add a mode there, next to the branch that
   renders it.
+
+## Anomaly detection (`utils/detectAnomalies.ts`)
+
+The run's degradation windows - latency spikes, error bursts, throughput drops
+and the first 5xx - scanned out of the same per-tick series the charts plot,
+with fixed factors over a trailing median and nothing tunable. Two readings of
+one detection: the charts shade the windows, and the history Overview's
+`RunEvents` card states them in words. Both are absent for a clean run.
+
+It has two entry points, and which one a view wants depends on how its series
+arrives:
+
+- **`detectAnomalies(history)`** is the one-shot, pure over the whole series.
+  `LoadTestDetail` uses it: a stored run's series arrives once, complete.
+- **`createAnomalyDetector()`** holds its derivation across calls, for a caller
+  handing over the same growing buffer again and again. `MetricsView` holds one
+  for the run's life. The live buffer's array identity changes on every commit
+  (twice a second by default), so a from-scratch pass re-derived a trailing
+  median per tick per series over the whole retained window - ~9,000
+  fifteen-element sorts twice a second at the default 5-minute window, up to
+  ~150,000 during a full-run soak, on the renderer's main thread (#1151).
+
+The two answer identically for the same buffer, and the rule that keeps them
+that way is in the file's header comment: what a tick and its predecessors
+decide is cached once under an index no trim renumbers, and what a tick's
+_position in the buffer_ decides is re-applied when the buffer is trimmed. A new
+rule that reads a tick's position without honouring the second half will pass
+its own unit test and disagree with the one-shot the first time the window
+fills; `detectAnomalies.test.ts` replays randomized append/trim sequences
+against a from-scratch pass to catch exactly that.
