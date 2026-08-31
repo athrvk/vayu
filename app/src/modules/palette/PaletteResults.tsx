@@ -199,7 +199,12 @@ function PaletteRow({
 					{item.subtitle}
 				</span>
 			)}
-			{/* One cap per key, the `Kbd` docstring's own chord form, drawn from
+			{/* The two trailing slots below are mutually exclusive by
+			    construction, which is why neither guards against the other: a
+			    chord belongs to a command, and no command source stamps a
+			    recency.
+
+			    One cap per key, the `Kbd` docstring's own chord form, drawn from
 			    the chord the handler matches rather than a second spelling of
 			    it (#938). A row without a bound chord prints nothing: an empty
 			    slot is honest, a made-up key is not. */}
