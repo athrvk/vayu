@@ -23,18 +23,12 @@
  * second time (`shouldFilter={false}` in `CommandPalette`). So the order below
  * is the order on screen: the lead sections the ranking lifted rows into - a
  * promoted top result when something is typed, Recents and the verbs when
- * nothing is - and then the fixed sections.
+ * nothing is, the verbs again when what was typed matched nothing - and then
+ * the fixed sections.
  */
 
 import { useMemo } from "react";
-import {
-	CommandEmpty,
-	CommandGroup,
-	CommandItem,
-	CommandList,
-	CommandSeparator,
-	Kbd,
-} from "@/components/ui";
+import { CommandGroup, CommandItem, CommandList, CommandSeparator, Kbd } from "@/components/ui";
 import { formatRelativeTime, getMethodColor } from "@/utils";
 import { chordKeys } from "@/lib/platform";
 import type { CommandContext } from "@/lib/commands";
@@ -101,13 +95,36 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 		{ key: "quick-actions", heading: QUICK_ACTIONS_LABEL, items: ranked.quickActions },
 	].filter((section) => section.items.length > 0);
 
+	/*
+	 * Nothing the query could match. The ranking answers that by handing back
+	 * the verbs (#1177), so the line below introduces them rather than ending
+	 * the palette on "No matches."
+	 *
+	 * It is a line of its own rather than either primitive for the job, and
+	 * both were considered: cmdk's `CommandEmpty` renders only when the list
+	 * has no rows at all, and the verbs under this are rows; `EmptyState`'s
+	 * `inline` variant is a centred `p-8` block that owns the space it sits in,
+	 * and overriding it to a tight left-aligned lead-in would leave nothing of
+	 * it but `text-sm text-muted-foreground`. This is not an empty state - the
+	 * list below it is full.
+	 */
+	const nothingMatched = query.trim() !== "" && total === 0;
+
 	return (
 		<>
 			<span aria-live="polite" className="sr-only">
 				{query ? `${total} searchable results` : `${total} results`}
 			</span>
-			<CommandList>
-				<CommandEmpty>No matches.</CommandEmpty>
+			{/* The list caps itself at 400px, and at 60vh before that: about
+			    eleven rows where the primitive's 300px showed six, and never
+			    more than the dialog panel's own 85vh has room for once the
+			    input and the hints are counted (#1177). */}
+			<CommandList className="max-h-[min(400px,60vh)]">
+				{nothingMatched && (
+					<p className="px-3 pb-1 pt-3 text-sm text-muted-foreground">
+						No matches for “{query.trim()}”. Try one of these:
+					</p>
+				)}
 				{lead.map((section, index) => (
 					<div key={section.key}>
 						{index > 0 && <CommandSeparator />}

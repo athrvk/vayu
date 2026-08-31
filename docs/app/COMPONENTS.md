@@ -838,8 +838,10 @@ On the empty query, `rankForEmptyQuery` puts the most recent first - focus time 
 already in cache) - and nothing is promoted, because nothing has been asked for. Two sections lead
 it (#1176), and both are built here rather than by a source of their own:
 
-- **`Recents`** - the dated rows across every kind, newest first, capped at `RECENT_LIMIT` (6,
-  about what the list shows without scrolling). It reads the same `recencyAt` the within-section
+- **`Recents`** - the dated rows across every kind, newest first, capped at `RECENT_LIMIT` (6, a
+  glance at what you were just doing). The cap stayed at six when the list grew taller (#1177):
+  the extra height went to the sections *under* Recents, which were the ones nobody could see, and
+  a longer list of recents would take it straight back. It reads the same `recencyAt` the within-section
   order reads, so nothing re-derives a recency and the two cannot disagree. In practice that is
   open tabs and requests that have been sent: the deep sources contribute nothing to an empty
   query at all, so a past run reaches the list only once something is typed - where it is a
@@ -849,9 +851,10 @@ it (#1176), and both are built here rather than by a source of their own:
   tabs again as they are used; persisting focus time to lengthen the list would rank a restored
   strip by yesterday's attention, which is the thing that rationale refuses.
 - **`Quick actions`** - the `command` rows. The verbs are what an empty palette is *for*, and they
-  sat fifth of eight sections, under a fold that shows about six rows. Typed, they rank as the
-  `Commands` section they have always been, so the heading follows the query rather than the
-  section moving around.
+  sat fifth of eight sections, under a fold that showed about six rows before #1177 raised it.
+  Typed, they rank as the `Commands` section they have always been, so the heading follows the
+  query rather than the section moving around - except on a query that matched nothing, where they
+  come back as the offer (#1177, below).
 
 Both **lift** their rows out of the sections below rather than copying them into the new ones -
 the same rule the top result follows, and for the same reason: two rows carrying one cmdk `value`
@@ -918,13 +921,43 @@ Three things the rows and the frame say (#1176):
 - **The keyboard hints sit outside the band that scrolls.** `CommandFooter`
   (`components/ui/command.tsx`) is a sibling of `CommandList`, not a row in it: the list is the
   one scroller here, so hints placed inside it would scroll away with the results they describe -
-  the same reason `DialogFooter` sits outside `DialogBody` in every other dialog (#773). It draws
-  `border-t` rather than `border-rule`, because nothing in this tree declares a surface and
-  `border-rule` under none falls back to the invisible default. All three keys it names are real:
-  the arrows and Enter are cmdk's, Escape is the dialog's.
+  the same reason `DialogFooter` sits outside `DialogBody` in every other dialog (#773). All three
+  keys it names are real: the arrows and Enter are cmdk's, Escape is the dialog's.
 - **The placeholder does not advertise the chord that opened the palette.** By the time anyone
   reads it the dialog is open, so the one thing the suffix could teach has just been used. The
   title bar's search bar carries ⌘K, where it is still worth knowing.
+
+Three about the frame itself (#1177):
+
+- **Density is a launcher's, not a menu's.** `CommandDialog` no longer overrides row padding or
+  icon size at all, so a row is `CommandItem`'s own `px-2 py-1.5` - the 30px single-line row this
+  app draws everywhere else - and `PaletteResults` caps its `CommandList` at `min(400px, 60vh)`.
+  Measured in Chromium: **eleven rows and two headings on screen at a 768px or taller window,
+  nine at 600px**, where the old `py-3` rows in a 300px list showed about six. Six rows plus a
+  heading is two sections, which is why the Settings group a query named could sit below the fold
+  with nothing on screen saying it existed - the search fix (#1175) put the right row first, and
+  this is what makes the rest of the answer visible. The `60vh` half keeps the whole panel inside
+  its own `max-h-[85vh]` on a short window once the input and the hints are counted (435px of a
+  600px viewport, measured); the autocompletes that share these primitives keep the 300px
+  default, their popups being anchored under an input rather than centred. The icon override went
+  because it never did what it read as: `[&_[cmdk-item]_svg]:h-5` outranks the `h-3.5` a row
+  writes on its own icon, so every palette row drew a 20px icon beside the 14px method rail
+  written to match it.
+- **The chrome sits on a declared surface, so its dividers can be `border-rule`.** `Command`
+  declares `bg-card surface-card` - `--popover` and `--card` are the same three numbers in both
+  themes, and only one of them has a surface class to declare, so this is a rename rather than a
+  repaint. With it declared, the input's divider, the separators between sections and the footer's
+  `border-t` all resolve through the surface instead of the canvas token that is the card's own
+  background in dark. Section headings are the `Eyebrow` primitive, wrapped inside the element
+  cmdk labels the group by, rather than a third hand-typed copy of its eleven pixels.
+  `command.chrome.test.tsx` pins the declaration, the absence of the canvas tokens, and the
+  density - `border-rule` classes on their own prove nothing.
+- **A query that matched nothing gets an offer, not a dead end.** `ranking.ts` hands the verbs
+  back as `quickActions` when a typed query keeps no result, and the list says
+  `No matches for “…”. Try one of these:` above them. They are suggestions, not results: the
+  announced total stays at zero, which is what "did what I typed narrow anything" asks. cmdk's
+  own `CommandEmpty` is unused here for the same reason - it renders only when the list has no
+  rows at all, and the verbs are rows.
 
 Two invariants are tested rather than commented. **A variable's value is never indexed**, secret
 or not (`secret` is a masking hint, so trusting it would leak every token nobody flagged) - held

@@ -50,16 +50,20 @@ export const TOP_RESULT_LABEL = "Top result";
 /** The heading over the rows the user touched most recently. */
 export const RECENTS_LABEL = "Recents";
 
-/** The heading over the verbs the palette offers on an empty query. */
+/**
+ * The heading over the verbs the palette offers: on an empty query, and again
+ * when a typed query matched nothing.
+ */
 export const QUICK_ACTIONS_LABEL = "Quick actions";
 
 /**
  * How many rows Recents holds.
  *
- * The list shows about six rows without scrolling, and the section's whole job
- * is to answer "what was I just doing" before the user reaches for the wheel.
- * A seventh row is one nobody sees and one more thing between the query and the
- * sections below.
+ * The section's whole job is to answer "what was I just doing" before the user
+ * reaches for the wheel, and six is a glance. It stays six now that the list is
+ * taller (#1177): the extra height went to the sections *under* Recents, which
+ * were the ones nobody could see, and a longer list of recents would take it
+ * straight back.
  */
 export const RECENT_LIMIT = 6;
 
@@ -123,8 +127,9 @@ export interface RankedPalette {
 	 */
 	recents: PaletteItem[];
 	/**
-	 * The verbs the palette offers, at the head of the empty query. Empty query
-	 * only - typed, they rank as the `command` section they have always been.
+	 * The verbs the palette offers: at the head of the empty query, and again
+	 * when a typed query matched nothing at all. In between - a query with
+	 * results - they rank as the `command` section they have always been.
 	 */
 	quickActions: PaletteItem[];
 	/** The familiar fixed order, minus whatever was promoted or lifted. */
@@ -155,7 +160,7 @@ export interface RankedPalette {
 export function rankPalette(items: PaletteItem[], query: string): RankedPalette {
 	const needle = query.trim();
 	if (needle === "") {
-		const quickActions = items.filter((item) => item.kind === "command" && !item.escape);
+		const quickActions = verbsOf(items);
 		const recents = recentsOf(items);
 		const lifted = new Set([...quickActions, ...recents].map((item) => item.id));
 		const groups = groupsOf(
@@ -196,14 +201,33 @@ export function rankPalette(items: PaletteItem[], query: string): RankedPalette 
 	const byScore = (ofKind: PaletteItem[]) =>
 		[...ofKind].sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0));
 	const groups = groupsOf(rest, byScore);
+	const total = countItems(groups) + (promoted ? 1 : 0);
+
+	/*
+	 * Nothing matched, so the palette offers what it can still do rather than
+	 * one dead-end line (#1177). The verbs come back as *suggestions*, not
+	 * results: `total` stays 0, which is what the announcement counts and what
+	 * tells the list to say that nothing matched. Whatever survives in `groups`
+	 * at this point is escape rows - a row that is navigation rather than a
+	 * result is why the count can be zero with rows on screen - and no verb can
+	 * be among them, since none of them cleared the floor.
+	 */
+	if (total === 0) {
+		return { top: [], recents: [], quickActions: verbsOf(items), groups, total };
+	}
 
 	return {
 		top: promoted ? [promoted] : [],
 		recents: [],
 		quickActions: [],
 		groups,
-		total: countItems(groups) + (promoted ? 1 : 0),
+		total,
 	};
+}
+
+/** The commands the palette offers as verbs - every command row that is not an escape. */
+function verbsOf(items: PaletteItem[]): PaletteItem[] {
+	return items.filter((item) => item.kind === "command" && !item.escape);
 }
 
 /**
