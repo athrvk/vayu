@@ -21,7 +21,8 @@
  * the engine's scenario loop is sequential with no pacing, so a local or fast
  * target returns hundreds of steps per second - well above the 10 Hz the load
  * path already considered worth throttling - and each one committed a store
- * write that copied the whole step list and re-rendered the run tab.
+ * write that copied the whole step list and re-rendered the run tab. The
+ * mechanism itself lives in `throttled-batcher.ts`, which both services use.
  */
 
 import { sseClient } from "./sse-client";
@@ -29,15 +30,14 @@ import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { useScenarioRunStore } from "@/stores/scenario-run-store";
-import { useClientSettingsStore } from "@/stores";
-import { METRICS_UI_THROTTLE_MS } from "@/config/metrics";
+import { createThrottledBatcher } from "./throttled-batcher";
 import type { ScenarioStepEvent } from "@/types";
 
 class ScenarioRunService {
 	private activeRunId: string | null = null;
-	private pendingSteps: ScenarioStepEvent[] = [];
-	private lastStepPushTime = 0;
-	private throttleTimer: ReturnType<typeof setTimeout> | null = null;
+	private stepBatcher = createThrottledBatcher<ScenarioStepEvent>((batch) =>
+		useScenarioRunStore.getState().addSteps(batch)
+	);
 
 	/** Attach to a scenario run's stream and push its steps into the store. */
 	startMonitoring(runId: string): void {
@@ -67,45 +67,17 @@ class ScenarioRunService {
 	/**
 	 * Buffer a step, and commit the buffer no more often than the cadence.
 	 *
-	 * The leading edge commits immediately - the first step of a run is the one
-	 * a reader is waiting on, and holding it back would make a fast run look
-	 * slow to start - and a trailing timer commits whatever arrives inside the
-	 * window. Identical to `LoadTestService.handleMetrics`, on the same setting,
-	 * because the two are the same problem: a stream the renderer cannot commit
-	 * per event.
+	 * The batcher holds the mechanism - `LoadTestService` puts the same one on
+	 * its ticks, because the two are the same problem: a stream the renderer
+	 * cannot commit per event.
 	 */
 	private handleStep(step: ScenarioStepEvent): void {
-		this.pendingSteps.push(step);
-		const elapsed = Date.now() - this.lastStepPushTime;
-		const throttleMs =
-			useClientSettingsStore.getState().liveRefreshMs || METRICS_UI_THROTTLE_MS;
-		if (elapsed >= throttleMs || this.lastStepPushTime === 0) {
-			this.flushSteps();
-		} else if (!this.throttleTimer) {
-			this.throttleTimer = setTimeout(() => {
-				this.throttleTimer = null;
-				this.flushSteps();
-			}, throttleMs - elapsed);
-		}
-	}
-
-	/** Commit the buffered steps as one batch. */
-	private flushSteps(): void {
-		if (this.pendingSteps.length === 0) return;
-		this.lastStepPushTime = Date.now();
-		const batch = this.pendingSteps;
-		this.pendingSteps = [];
-		useScenarioRunStore.getState().addSteps(batch);
+		this.stepBatcher.push(step);
 	}
 
 	/** Drop the buffer and its pending commit, for steps nothing will show. */
 	private discardPending(): void {
-		if (this.throttleTimer) {
-			clearTimeout(this.throttleTimer);
-			this.throttleTimer = null;
-		}
-		this.pendingSteps = [];
-		this.lastStepPushTime = 0;
+		this.stepBatcher.discard();
 	}
 
 	/*
@@ -124,7 +96,7 @@ class ScenarioRunService {
 		// notice explaining why no more will be. A buffered batch stranded here
 		// would be the run's last steps, silently missing from a list the reader
 		// is now being told is incomplete.
-		this.flushSteps();
+		this.stepBatcher.flush();
 		useScenarioRunStore.getState().setError(error.message);
 	}
 
@@ -140,7 +112,7 @@ class ScenarioRunService {
 		// stored rows supersede them a moment later, but only if the report
 		// fetch below succeeds - and a run that ended without one is exactly the
 		// case where the live rows are all the reader will ever have.
-		this.flushSteps();
+		this.stepBatcher.flush();
 		this.discardPending();
 		useScenarioRunStore.getState().setStreaming(false);
 		if (!runId) return;

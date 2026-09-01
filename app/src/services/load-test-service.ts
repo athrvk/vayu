@@ -18,23 +18,26 @@ import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { QUERY_CACHE } from "@/config/cache";
-import { useDashboardStore, useClientSettingsStore } from "@/stores";
+import { useDashboardStore } from "@/stores";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
 // Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
-// We throttle UI commits to keep render cost bounded, but BUFFER every tick the
-// engine sends so historicalMetrics keeps the full 10 Hz signal.
-import { METRICS_UI_THROTTLE_MS } from "@/config/metrics";
+// The batcher throttles UI commits to keep render cost bounded, but every tick
+// the engine sends is BUFFERED, so historicalMetrics keeps the full 10 Hz signal.
+import { createThrottledBatcher } from "./throttled-batcher";
 
 class LoadTestService {
 	private activeRunId: string | null = null;
 	private isConnected: boolean = false;
-	private lastMetricsPushTime = 0;
-	private pendingBuffer: LoadTestMetrics[] = [];
+	/** Ticks, buffered and committed on the live-refresh cadence. */
+	private metricsBatcher = createThrottledBatcher<LoadTestMetrics>((batch) =>
+		this.commitBatch(batch)
+	);
 	// Scrapes ride the same throttle as the ticks: they arrive on the same
 	// stream and are drawn on the same chart row, so committing them separately
 	// would render the overlay a frame out of step with the series under it.
+	// They stay this service's own buffer - the batcher carries one list, and
+	// which lists ride a flush together is a caller's decision.
 	private pendingMonitor: MonitorSample[] = [];
-	private throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
 	/**
 	 * Start monitoring a load test run
@@ -86,13 +89,8 @@ class LoadTestService {
 			return;
 		}
 
-		if (this.throttleTimer) {
-			clearTimeout(this.throttleTimer);
-			this.throttleTimer = null;
-		}
-		this.pendingBuffer = [];
+		this.metricsBatcher.discard();
 		this.pendingMonitor = [];
-		this.lastMetricsPushTime = 0;
 		this.activeRunId = null;
 		this.isConnected = false;
 		sseClient.disconnect();
@@ -118,20 +116,7 @@ class LoadTestService {
 	// --- Private handlers ---
 
 	private handleMetrics(metrics: LoadTestMetrics): void {
-		this.pendingBuffer.push(metrics);
-		const now = Date.now();
-		const elapsed = now - this.lastMetricsPushTime;
-		// User-configurable live refresh rate (falls back to the module default).
-		const throttleMs =
-			useClientSettingsStore.getState().liveRefreshMs || METRICS_UI_THROTTLE_MS;
-		if (elapsed >= throttleMs || this.lastMetricsPushTime === 0) {
-			this.flushMetrics();
-		} else if (!this.throttleTimer) {
-			this.throttleTimer = setTimeout(() => {
-				this.throttleTimer = null;
-				this.flushMetrics();
-			}, throttleMs - elapsed);
-		}
+		this.metricsBatcher.push(metrics);
 	}
 
 	private handleMonitorSample(sample: MonitorSample): void {
@@ -142,16 +127,26 @@ class LoadTestService {
 		// whatever the last tick left behind.
 	}
 
-	private flushMetrics(): void {
-		if (this.pendingBuffer.length === 0 && this.pendingMonitor.length === 0) return;
-		this.lastMetricsPushTime = Date.now();
-		const batch = this.pendingBuffer;
+	/** Commit a batch of ticks together with whatever scrapes arrived beside it. */
+	private commitBatch(batch: LoadTestMetrics[]): void {
 		const monitor = this.pendingMonitor;
-		this.pendingBuffer = [];
 		this.pendingMonitor = [];
 		const store = useDashboardStore.getState();
 		store.addMetricsBatch(batch);
 		store.addMonitorSamples(monitor);
+	}
+
+	/**
+	 * Commit everything buffered, on either list.
+	 *
+	 * A scrape can outlive the last tick it would have ridden - the run ends
+	 * between ticks - and the batcher commits nothing for an empty buffer, so
+	 * that case commits the scrapes beside an empty tick batch, which is what
+	 * this did before the batcher was extracted.
+	 */
+	private flushPending(): void {
+		this.metricsBatcher.flush();
+		if (this.pendingMonitor.length > 0) this.commitBatch([]);
 	}
 
 	private handleError(error: Error): void {
@@ -162,11 +157,7 @@ class LoadTestService {
 
 	private async handleClose(): Promise<void> {
 		const runId = this.activeRunId;
-		if (this.throttleTimer) {
-			clearTimeout(this.throttleTimer);
-			this.throttleTimer = null;
-		}
-		this.flushMetrics();
+		this.flushPending();
 		this.isConnected = false;
 		const store = useDashboardStore.getState();
 		store.setStreaming(false);

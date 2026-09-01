@@ -783,7 +783,7 @@ It holds **one** run. A scenario is sequential and the app starts one at a time,
 }
 ```
 
-**A batch per flush, not a commit per event** (issue #1153). `ScenarioRunService` buffers arriving `step` events and commits what it collected on the user's `liveRefreshMs` cadence, the same throttle `LoadTestService` puts on its ticks. The premise for having none - that a scenario's step rate is bounded by request latency - does not hold: the engine's scenario loop is sequential with no pacing, so a local target returns hundreds of steps per second, and each one used to cost a full copy of the step list, a store notify and a re-render of the run tab. The buffer is committed on the leading edge of a window and again on a trailing timer, and drained when the stream closes or fails; a run replaced mid-flight discards whatever it left buffered, since those rows belong to a list the store has already cleared.
+**A batch per flush, not a commit per event** (issue #1153). `ScenarioRunService` buffers arriving `step` events and commits what it collected on the user's `liveRefreshMs` cadence, the same throttle `LoadTestService` puts on its ticks. The premise for having none - that a scenario's step rate is bounded by request latency - does not hold: the engine's scenario loop is sequential with no pacing, so a local target returns hundreds of steps per second, and each one used to cost a full copy of the step list, a store notify and a re-render of the run tab. The buffer is committed on the leading edge of a window and again on a trailing timer, and drained when the stream closes or fails; a run replaced mid-flight discards whatever it left buffered, since those rows belong to a list the store has already cleared. That mechanism - buffer, leading edge, trailing timer, and the `liveRefreshMs` read behind it - is one implementation, `services/throttled-batcher.ts` (issue #1206); when to flush and when to discard stay each service's own, because the two lifecycles genuinely differ.
 
 Steps are folded in by `foldStepEvents` (`modules/history/main/scenario-steps.ts`), which keys on `(iteration, stepIndex)` rather than arrival order: the engine's SSE ring replays from `Last-Event-ID`, so a reconnect re-delivers events already rendered and an append-only list would double every row it re-saw. A whole batch costs one array copy, and the fold returns the state it was given when every event in the batch was an idempotent replay, so a reconnect's replay does not re-render the list.
 
@@ -1647,7 +1647,11 @@ loadTestService.stopMonitoring();
   charts rather than starting blank.
 - Every tick is buffered; commits into `useDashboardStore().addMetricsBatch()`
   are throttled to `METRICS_UI_THROTTLE_MS` so `historicalMetrics` keeps the
-  full 10 Hz signal while renders stay bounded.
+  full 10 Hz signal while renders stay bounded. The buffer, the leading edge and
+  the trailing timer are `services/throttled-batcher.ts`, shared with
+  `ScenarioRunService` (issue #1206) - a monitor scrape has no timer of its own
+  and rides the next tick's flush, which is why that second buffer stays in the
+  service rather than moving into the batcher.
 - The engine sends an explicit `complete` event, so a `CLOSED` readyState is a
   genuine failure. **There is no custom reconnect**: `EventSource` cannot set
   `Last-Event-ID` on a fresh connection, so a manual reconnect would replay the
