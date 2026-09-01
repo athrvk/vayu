@@ -943,8 +943,7 @@ RunManager& manager) {
         // run unreproducible. A step of a collection run is a design-mode send,
         // so it reads the design-mode bound (issue #1157).
         const auto max_response_bytes =
-        static_cast<size_t> (db.get_config_int ("maxDesignResponseBodyBytes",
-        static_cast<int> (constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES)));
+        vayu::http::routes::design_response_body_bound (db);
         ScenarioStepStore store (
         static_cast<size_t> (db.get_config_int ("maxScenarioStoredSteps",
         static_cast<int> (constants::scenario::MAX_STORED_STEPS))));

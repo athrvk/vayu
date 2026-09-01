@@ -41,6 +41,11 @@ int64_t exchange_now_ms () {
 
 } // namespace
 
+size_t design_response_body_bound (vayu::db::Database& db) {
+    return static_cast<size_t> (db.get_config_int ("maxDesignResponseBodyBytes",
+    static_cast<int> (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES)));
+}
+
 nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response) {
     nlohmann::json trace;

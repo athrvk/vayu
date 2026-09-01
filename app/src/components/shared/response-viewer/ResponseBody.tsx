@@ -76,10 +76,20 @@ export default function ResponseBody({
 	const bodyLength = Math.max(body.length, bodyRaw?.length ?? 0);
 	const isLargeBody = bodyLength > LARGE_BODY_BYTES;
 
-	// Detect body type from content and headers
+	/*
+	 * Detect body type from content and headers.
+	 *
+	 * Above the gate the *content* half is skipped, because it is itself a pass
+	 * over the whole string: with no content-type header - or a generic
+	 * `text/plain` one - `detectBodyType` trims the body, `JSON.parse`s it and
+	 * lower-cases it looking for markup, which for a 32MB body is the freeze
+	 * this threshold exists to prevent, paid before the gate below is even
+	 * reached. The header still decides where there is one; an unlabelled large
+	 * body reads as text, which is what the pane renders it as either way.
+	 */
 	const detectedType = useMemo(
-		() => detectBodyType(headers, bodyRaw || body),
-		[headers, bodyRaw, body]
+		() => detectBodyType(headers, isLargeBody ? "" : bodyRaw || body),
+		[headers, bodyRaw, body, isLargeBody]
 	);
 
 	// Check if preview is available
@@ -300,7 +310,7 @@ export default function ResponseBody({
 					<Callout severity="info" title="Large response">
 						This body is {formatSize(bodyLength)}. Formatting is off and only the first{" "}
 						{formatSize(LARGE_BODY_BYTES)} is shown here, so the pane stays responsive.
-						{actions ? " Download saves the whole body." : ""}
+						{actions ? " Download saves the body the app received." : ""}
 					</Callout>
 				</div>
 			)}

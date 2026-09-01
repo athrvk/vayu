@@ -366,4 +366,16 @@ ScriptVariableScopes& scopes,
 ExchangeInputs inputs,
 bool verbose);
 
+/**
+ * What this database is configured to let a design-mode send read
+ * (`maxDesignResponseBodyBytes`, issue #1157).
+ *
+ * One function rather than the same `get_config_int` at each of the two call
+ * sites - `POST /execute` and the scenario runner - because a key spelled twice
+ * is a key one of them can spell wrong, and a wrong spelling here falls back to
+ * the compiled-in default silently: the Settings control would go on reading as
+ * though it worked. This is what a test can call.
+ */
+[[nodiscard]] size_t design_response_body_bound (vayu::db::Database& db);
+
 } // namespace vayu::http::routes

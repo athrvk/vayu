@@ -96,14 +96,31 @@ describe("above the threshold", () => {
 		expect(screen.queryByRole("radiogroup", { name: /Body view mode/i })).toBeNull();
 	});
 
+	it("does not sniff the type from the body, which is a whole-string pass", () => {
+		// `detectBodyType` falls through to `body.trim()` + `JSON.parse` +
+		// `toLowerCase` whenever the content-type is missing or generic. That
+		// runs before the gate below it, so a large unlabelled body would freeze
+		// the pane on the way to the notice that exists to stop exactly that.
+		render(
+			<ResponseBody body={big} bodyRaw={big} headers={{ "content-type": "text/plain" }} />
+		);
+
+		// The toolbar's type label is what the sniff would have changed: with the
+		// body handed to it, `text/plain` JSON is promoted to `json`. Asserting
+		// the editor's language would prove nothing here - the gate forces
+		// `plaintext` either way.
+		expect(screen.getByText("text")).toBeInTheDocument();
+		expect(screen.queryByText("json")).toBeNull();
+	});
+
 	it("promises Download only where there is one", () => {
 		// `ResponseBody` is shared with the history viewer, which passes no
 		// `actions` slot and so has no Download button on screen.
 		renderBody(big);
-		expect(screen.queryByText(/Download saves the whole body/i)).toBeNull();
+		expect(screen.queryByText(/Download saves the body the app received/i)).toBeNull();
 
 		renderBody(big, <button type="button">Download</button>);
-		expect(screen.getByText(/Download saves the whole body/i)).toBeInTheDocument();
+		expect(screen.getByText(/Download saves the body the app received/i)).toBeInTheDocument();
 	});
 });
 

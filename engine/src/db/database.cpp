@@ -4084,10 +4084,14 @@ void Database::seed_default_config () {
     // =========================================================================
     // LIMITS (limits) - added by #703
     // The sizes and counts a run or a collection may not exceed. Every entry
-    // here is arrived at from a rejection message that names the setting, which
-    // is why they deserve one shelf instead of hiding among infrastructure -
-    // and why none of them truncates: each refuses the oversized input and says
-    // which knob refused it.
+    // here is arrived at from a message that names the setting, which is why
+    // they deserve one shelf instead of hiding among infrastructure. All but
+    // one refuse the oversized input outright and say which knob refused it;
+    // `maxDesignResponseBodyBytes` (issue #1157) is the exception and belongs
+    // here anyway, because what it bounds is a read in flight rather than
+    // anything kept on disk - it stops reading at the bound and the response
+    // viewer says the rest was never read. A bound on what is *stored* is the
+    // shelf above.
     // =========================================================================
 
     upsert_config (ConfigEntry{ "maxScenarioSteps",
