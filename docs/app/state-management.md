@@ -1235,6 +1235,20 @@ are how the app sees what got stamped (`queries/trash.ts`).
     a user ten pages deep drove ~10 engine requests per tick. Only page 1 can
     gain rows (`start_time DESC`) anyway; a paged list refreshes on the next
     mutation or invalidation instead of on a timer.
+  - **Only a surface that renders runs mounts it.** The interval belongs to the
+    hook, so it runs for as long as *any* observer is mounted - and the App root
+    used to be one, which kept the poll alive with History closed, nothing
+    running and nothing at the root reading the result (#1150). The root now
+    calls **`usePrefetchRuns()`** instead: one `prefetchInfiniteQuery` over
+    `runsListInfiniteOptions()`, which warms the same cache entry without
+    observing it. `HistoryList`, `WelcomeScreen` and the palette's
+    `useEntityItems` observe the key while they are visible and drive the
+    cadence themselves.
+  - **`runsListInfiniteOptions(q?, pinnedOnly?)`** - the key, fetcher and page
+    params, shared by the hook and the warm-up so the entry one writes is the
+    entry the other reads. `prefetchInfiniteQuery`, not `prefetchQuery`: the
+    readers are infinite queries and the cache entry has to be in `InfiniteData`
+    shape.
   - **`flattenRunPages(data)`** - flatten the pages into a de-duped `Run[]`
     (dedupe by id guards the momentary double-row a head insertion can cause
     across two refetched pages). **`runsTotal(data)`** - the server's total from
@@ -1473,6 +1487,12 @@ key rather than a stale entry under this one.
   is keyed as `queryKeys.prefetch.allRequests()` rather than an inline key, so
   creating a collection can invalidate it - it succeeds once at startup and
   would otherwise never re-run for a collection created mid-session.
+- **...but warming a *polled* list must not be a query.** `usePrefetchRuns` is a
+  one-shot `prefetchInfiniteQuery` on mount, not an observer, because
+  `useRunsQuery` carries a `refetchInterval` and observing it from the root
+  bought the warm cache at the price of a poll that never stopped (#1150). An
+  invalidation of `runs.lists()` then marks the warm entry stale without
+  refetching it, which is the wanted behaviour: nothing is displaying it.
 
 **Writes from outside the renderer: `mcp:data-changed`.** An MCP tool call
 mutates the engine from the Electron **main** process, so no mutation runs here
@@ -2066,4 +2086,4 @@ starts the engine at import time.
 
 10. **Variable resolution priority:** Always resolve variables in priority order: environment > collection > global. Use `useVariableResolver({ collectionId })` to scope a preview to a collection; the active environment comes from the session store and is not a parameter.
 
-11. **Lazy loading and prefetch:** Use `usePrefetchCollectionsAndRequests()` on app init to warm up caches. Lazily fetch environments, globals, and run reports only when needed to reduce initial bundle size and API load.
+11. **Lazy loading and prefetch:** Use `usePrefetchCollectionsAndRequests()` and `usePrefetchRuns()` on app init to warm up caches. Lazily fetch environments, globals, and run reports only when needed to reduce initial bundle size and API load. Warm a *polled* list with a prefetch, never by mounting its hook at the root - an observer that lives for the session polls for the session (#1150).

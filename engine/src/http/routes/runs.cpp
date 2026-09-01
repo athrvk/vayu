@@ -11,6 +11,7 @@
  */
 
 #include "vayu/http/routes.hpp"
+#include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
@@ -549,7 +550,11 @@ ReportExtras& extras) {
 // Serialize one run into a list row: identity + status + the compact summary,
 // deliberately *without* the full config_snapshot (that is what makes the list
 // cheap). Mirrors the camelCase keys vayu::json::serialize(Run) emits.
-nlohmann::json serialize_run_row (const vayu::db::Run& run) {
+//
+// The summary is passed in rather than built here, so each caller decides where
+// it comes from: the polled list takes it from the run-summary cache, and the
+// one-row baseline response - which no client polls - builds it directly.
+nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summary) {
     nlohmann::json row;
     row["id"]        = run.id;
     row["type"]      = vayu::to_string (run.type);
@@ -562,7 +567,7 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run) {
     nlohmann::json (*run.environment_id) :
     nlohmann::json (nullptr);
     row["baseline"]      = run.baseline;
-    row["summary"]       = build_run_summary (run.config_snapshot);
+    row["summary"]       = std::move (summary);
     return row;
 }
 
@@ -580,6 +585,13 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run) {
  * design run's row also carries `resultSummary` (statusCode + latencyMs), which
  * is what a reader would otherwise fetch a report per row to learn.
  *
+ * `summaries` spares the poll the work it would otherwise repeat: this is the
+ * endpoint a visible history surface re-asks every 5s, and each call used to
+ * re-parse every row's immutable `config_snapshot` to rebuild the summary the
+ * previous call had already built (#1150). It is a parameter rather than a
+ * detail of this function so a caller - a test included - owns the cache's
+ * lifetime and two of them never share one.
+ *
  * Extracted so the envelope shape, clamping and filtering are covered without
  * an in-process HTTP server - see runs_route_test.cpp. Exceptions propagate to
  * the route's try/catch (500).
@@ -587,7 +599,8 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run) {
 std::pair<int, nlohmann::json> get_runs_response (vayu::db::Database& db,
 const vayu::db::RunFilter& filter,
 int64_t limit,
-int64_t offset) {
+int64_t offset,
+vayu::http::RunSummaryCache& summaries) {
     const int64_t total = db.count_runs (filter);
     auto runs           = db.get_runs_paginated (filter, limit, offset);
 
@@ -606,7 +619,9 @@ int64_t offset) {
 
     nlohmann::json data = nlohmann::json::array ();
     for (const auto& run : runs) {
-        auto row = serialize_run_row (run);
+        auto row = serialize_run_row (run, summaries.summary_for (run.id, [&run] {
+            return build_run_summary (run.config_snapshot);
+        }));
         if (const auto found = outcomes.find (run.id); found != outcomes.end ()) {
             row["resultSummary"]["statusCode"] = found->second.status_code;
             row["resultSummary"]["latencyMs"]  = found->second.latency_ms;
@@ -792,7 +807,7 @@ const std::string& body) {
     if (!updated) {
         return { 404, error_body (404, "Run not found") };
     }
-    return { 200, serialize_run_row (*updated) };
+    return { 200, serialize_run_row (*updated, build_run_summary (updated->config_snapshot)) };
 }
 
 /**
@@ -1330,11 +1345,18 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
             filter.baseline = false;
     }
 
-    vayu::utils::log_info ("GET /runs - Listing runs (limit=" + std::to_string (limit) +
+    // Debug, not info: this is the polled endpoint, and at the production
+    // verbosity the app spawns the engine with (`--verbose 1`) an info line
+    // here was flushed to stdout every 5s, through a pipe the Electron main
+    // process reads, splits and logs - a third process woken per tick by an
+    // idle app (#1150). The file sink defaults to `debug`, so the line is not
+    // lost, only taken off the console's poll cadence.
+    vayu::utils::log_debug ("GET /runs - Listing runs (limit=" + std::to_string (limit) +
     ", offset=" + std::to_string (offset) + ")");
     try {
-        auto [status, body] = get_runs_response (ctx.db, filter, limit, offset);
-        res.status          = status;
+        auto [status, body] =
+        get_runs_response (ctx.db, filter, limit, offset, ctx.run_summary_cache);
+        res.status = status;
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
         vayu::utils::log_error ("GET /runs - Error: " + std::string (e.what ()));

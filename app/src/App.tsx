@@ -15,7 +15,7 @@ import {
 	useConfigQuery,
 	useHealthQuery,
 	usePrefetchCollectionsAndRequests,
-	useRunsQuery,
+	usePrefetchRuns,
 } from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
 import { useActiveEnvironmentRestore } from "./hooks/useActiveEnvironmentRestore";
@@ -52,7 +52,11 @@ function App() {
 
 	// Prefetch collections and all their requests (TanStack handles caching automatically)
 	usePrefetchCollectionsAndRequests();
-	useRunsQuery();
+	// Warm the runs list once, rather than observing it from here: History,
+	// Welcome and the palette poll it themselves while they are mounted, and a
+	// root observer polled it for the app's whole life with nobody reading the
+	// result (#1150).
+	usePrefetchRuns();
 
 	// Keep engine config warm - proxied call timeouts derive from its
 	// defaultTimeout setting (see services/api.ts proxiedRequestTimeoutMs)

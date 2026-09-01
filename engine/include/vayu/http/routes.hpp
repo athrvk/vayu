@@ -33,6 +33,7 @@
 // shared with the scenario runner and therefore declared where `vayu_core` can
 // see it. Included here so route TUs keep naming it through routes.hpp.
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/run_summary_cache.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::core {
@@ -1092,6 +1093,10 @@ struct RouteContext {
     /// The streaming consumers (issue #573). Owned by Server; started by
     /// `/execute`, read by `/runs/:id/events`, stopped by `/runs/:id/stop`.
     vayu::http::SseStreamManager& sse_manager;
+    /// The `GET /runs` row summaries (issue #1150). Owned by Server; read by
+    /// `/runs` alone, which is the one endpoint a visible history surface
+    /// polls. See run_summary_cache.hpp for why a run id keys it exactly.
+    vayu::http::RunSummaryCache& run_summary_cache;
 };
 
 // Route registration functions (implemented in separate files)
