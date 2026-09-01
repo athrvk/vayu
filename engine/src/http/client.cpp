@@ -633,8 +633,18 @@ Result<Response> Client::send (const Request& request) {
     raw_request_from_wire (
     transfer_debug.last_header_out, vayu::http::wire_body_bytes (request.body));
 
+    // The bound was reached and this caller asked to keep what was read
+    // (issue #1157). Everything the transfer did produce before the write
+    // callback cut it - the status line, the headers, the prefix - is real, so
+    // the response is assembled by the ordinary path below rather than
+    // discarded; `body_truncated` is what says it is a prefix. Only the
+    // completion is synthetic: curl reports the short count as
+    // CURLE_WRITE_ERROR, which is this engine stopping the transfer on purpose
+    // and not a failure to report.
+    const bool keep_truncated_body = sink.limit_exceeded && impl_->config.truncate_over_limit;
+
     // Check for errors
-    if (res != CURLE_OK) {
+    if (res != CURLE_OK && !keep_truncated_body) {
         // A refused body is not a network failure, and curl's own word for it
         // says nothing a caller can act on: the write callback's short count
         // surfaces as a generic CURLE_WRITE_ERROR. So it is recognized here and
@@ -669,9 +679,15 @@ Result<Response> Client::send (const Request& request) {
     }
     response.error_code = ErrorCode::None; // Explicitly set to None for successful requests
 
-    // Set body
-    response.body      = std::move (sink.body);
-    response.body_size = response.body.size ();
+    // Set body. `body_size` stays what is held rather than what the server
+    // declared, here as everywhere else it is written: a caller reading it as
+    // the length of `body` is right, and the length of the body that *would*
+    // have arrived is a number this transfer never measured - the declared
+    // length, when there was one, is still on the headers for a reader that
+    // wants it.
+    response.body           = std::move (sink.body);
+    response.body_size      = response.body.size ();
+    response.body_truncated = keep_truncated_body;
 
     return response;
 }

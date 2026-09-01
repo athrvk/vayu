@@ -147,6 +147,29 @@ TEST (ExecutionTrace, EmptyHttpVersionStoredNotOmitted) {
     EXPECT_EQ (trace["response"]["httpVersion"], "");
 }
 
+// The read cap travels with the exchange (issue #1157), so History says about
+// a response what the live pane said: this body is a prefix, and re-sending
+// under the same setting reads the same prefix. Stored under
+// trace["response"], beside the body it describes.
+TEST (ExecutionTrace, ResponseCarriesTheReadCapFlagWhenTheBodyWasCut) {
+    auto response           = make_response ();
+    response.body_truncated = true;
+
+    auto trace = build_result_trace (make_request (), response);
+
+    ASSERT_TRUE (trace["response"].contains ("bodyCapped"));
+    EXPECT_TRUE (trace["response"]["bodyCapped"].get<bool> ());
+}
+
+// Written only when true, unlike the live body's always-present key: absent is
+// what every row stored before this field means, and it means the same thing -
+// nothing was cut. A reader that treats absent as false is right about both.
+TEST (ExecutionTrace, AnUncutResponseStoresNoReadCapFlag) {
+    auto trace = build_result_trace (make_request (), make_response ());
+
+    EXPECT_FALSE (trace["response"].contains ("bodyCapped"));
+}
+
 // Same invariant style as the timing test above: whatever key
 // serialize(Response) puts on the live /execute wire for httpVersion is also
 // what the stored trace carries.

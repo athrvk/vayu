@@ -1496,8 +1496,12 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     inputs.request_id   = send.run.request_id;
     inputs.request_name = send.script_request_name;
     // Read at the point of use, so a settings change applies to the next
-    // send without a restart (issue #705).
+    // send without a restart (issue #705). The body bound is read the same way
+    // and for the same reason (issue #1157).
     inputs.transport = vayu::http::resolve_transport_policy (ctx.db);
+    inputs.max_response_bytes =
+    static_cast<size_t> (ctx.db.get_config_int ("maxDesignResponseBodyBytes",
+    static_cast<int> (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES)));
     if (send.data_row) {
         inputs.iteration_data = &*send.data_row;
         // Row 0 of 1: a send-with-row *is* an iteration, and the one it is

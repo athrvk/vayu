@@ -635,6 +635,7 @@ governs what a run measures rather than what it keeps:
 |---------------------|-----------|--------------|--------|
 | `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
 | `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
+| `maxDesignResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **design-mode** send - `POST /execute`, and each step of a collection run - reads into memory. A bigger response is read up to this point and answered with `bodyCapped: true` (see `POST /execute`) rather than failing, because someone is watching for it. Separate from `maxResponseBodyBytes` above, which is the load path's and refuses instead. |
 | `maxSampleBodyBytes` | `32768`  | 0–104857600  | Largest response body kept for a single captured **load-run** sample. Bigger bodies are stored truncated and marked. Deliberately far below `maxTraceBodyBytes`: a design run stores one exchange the user asked for, a load run stores tens nobody asked for individually. `0` keeps headers and metadata and no body. |
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
 | `phaseHistograms`   | `true`    | boolean      | Record DNS/connect/TLS/first-byte/download times for **every** load-test completion into five HdrHistograms, so the report can carry `timingBreakdown.phases` percentiles instead of averages over the retained trace sample. Costs five atomic histogram writes per completion; see [benchmarks](benchmarks.md). |
@@ -4238,6 +4239,7 @@ run-shaped way of stating the same field, not a second store.
   "body": { "id": 1, "name": "John" },
   "bodyRaw": "{\"id\":1,\"name\":\"John\"}",
   "bodySize": 20,
+  "bodyCapped": false,
   "httpVersion": "HTTP/1.1",
   "httpVersionDowngraded": true,
   "timing": {
@@ -4279,6 +4281,25 @@ run-shaped way of stating the same field, not a second store.
   }
 }
 ```
+
+**`bodyCapped` says the body is a prefix** (issue #1157). A design-mode send
+reads at most `maxDesignResponseBodyBytes` (Settings → Limits, default 32MB);
+a response past that stops being read there, and `body` / `bodyRaw` /
+`bodySize` describe what arrived rather than what was sent. The status and the
+headers are the server's own - they arrive before the body - so this is a
+successful response carrying a flag, not a transport failure. The field is
+always present, so a client can tell "not capped" from an engine too old to
+say, and re-sending under the same setting reads the same amount: raise the
+setting to read more. Two consequences worth stating, since both follow from
+reading less: a cut JSON body no longer parses, so `body` is `null` and a test
+script's `pm.response.json()` throws, and `validation` below reports
+`checked: false` with `body_not_json` rather than inventing a schema failure.
+
+This is **not** the stored trace's `bodyTruncated` (see `GET /runs/:id`), which
+is `maxTraceBodyBytes` shortening a body for storage after the whole of it was
+read and shown - a re-send recovers from that one. A design run whose live
+response was capped stores `trace_data.response.bodyCapped`, so a restored
+response says what the live one said.
 
 **`validation` is what the response was against the schema its contract
 declares** (issue #628), and it is **absent entirely** for a request whose
@@ -5471,8 +5492,14 @@ concurrency; a response past the cap **fails that request** rather than being
 buffered. It is reported like any other transport failure - `statusCode: 0`
 with an `errorCode` of `INTERNAL_ERROR` and a message naming
 `maxResponseBodyBytes` - and the truncated prefix is kept as the body. Design
-mode (`POST /execute`) is **not** capped: it sends one request at a time, and
-truncating a response the user asked to see would be the wrong trade.
+mode (`POST /execute`, and each step of a collection run) has **its own cap and
+its own answer**: `maxDesignResponseBodyBytes`, also 32MB, reached by a send
+that keeps what it read and reports `bodyCapped: true` on an otherwise ordinary
+response. It sends one request at a time, so the concurrency argument above
+does not apply to it - what does is that the body crosses to the app and is
+held there as well, and that failing a response the user asked to see would be
+the wrong trade where showing them the first 32MB of it is not. Neither setting
+reads the other: raising the load cap does not change what a Send reads.
 
 **Wire method and body.** A body is sent with whatever method the request
 names: a `GET` carrying one stays a `GET` on the wire (Elasticsearch-style

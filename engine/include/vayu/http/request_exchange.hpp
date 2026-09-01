@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/transport_policy.hpp"
@@ -237,6 +238,22 @@ struct ExchangeInputs {
     /// callers that do (the design route and the scenario runner) resolve it
     /// once and hand it down.
     vayu::http::TransportPolicy transport;
+    /**
+     * @brief Largest response body this exchange's send reads into memory,
+     *        0 = unbounded (issue #1157).
+     *
+     * Carried here for the reason @ref transport is: the bound is
+     * `maxDesignResponseBodyBytes`, `execute_exchange` holds no `Database` to
+     * read it from, and both callers that do - `POST /execute` and the
+     * scenario runner, whose steps are design-mode sends too - resolve it once
+     * per run and hand it down. The default is the constant rather than 0 so
+     * that a caller which resolves nothing is still bounded; a test that wants
+     * the old unbounded read sets it to 0 deliberately.
+     *
+     * Reaching it keeps the prefix rather than failing the send
+     * (`ClientConfig::truncate_over_limit`).
+     */
+    size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
 };
 
 /** What one exchange produced. */
