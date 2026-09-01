@@ -283,7 +283,7 @@ jobs:
 
       - name: Upload the scan
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: engine-tidy-scan-${{ matrix.os }}
           path: |
@@ -318,7 +318,7 @@ jobs:
       # table, which is the whole of what a reader needs.
       - name: File or update the tidy-scan-failure issue
         if: ${{ failure() && github.event_name != 'pull_request' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           RUNNER_PICKED: ${{ matrix.os }}
         with:
