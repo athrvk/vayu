@@ -89,7 +89,10 @@ describe("live-dot animation resolves to a real keyframe", () => {
 		expect(css.length).toBeGreaterThan(0);
 		expect(config.length).toBeGreaterThan(0);
 
-		expect(css).toContain("@keyframes vayu-pulse");
-		expect(config).toContain('"vayu-pulse"');
+		// Anchored, not a substring: `toContain("@keyframes vayu-pulse")` is
+		// satisfied by `@keyframes vayu-pulse-DELETED`, which is the rename this
+		// case exists to catch.
+		expect(css).toMatch(/@keyframes\s+vayu-pulse\s*\{/);
+		expect(config).toMatch(/["']vayu-pulse["']\s*:/);
 	});
 });
