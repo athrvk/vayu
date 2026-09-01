@@ -52,7 +52,9 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 
 ### `App` (`App.tsx`)
 
-Root component. Renders `<TitleBar />` over `<Shell />`. On mount it wires up app-wide concerns via hooks/queries: OS/Electron theme sync (`useElectronTheme`), engine health polling (`useHealthQuery`), and prefetching of server state (`usePrefetchCollectionsAndRequests`, `useRunsQuery`, `useScriptCompletionsQuery`).
+Root component. Renders `<TitleBar />` over `<Shell />`. On mount it wires up app-wide concerns via hooks/queries: OS/Electron theme sync (`useElectronTheme`), engine health polling (`useHealthQuery`), and prefetching of server state (`usePrefetchCollectionsAndRequests`, `usePrefetchRuns`, `useScriptCompletionsQuery`).
+
+Those three are prefetches in the literal sense - they fill a cache once and do not observe it. The root deliberately mounts no polled query but `useHealthQuery`: an observer here lives for the whole session, so mounting `useRunsQuery` for its cache-warming side effect kept a 5s runs poll running with History closed and nothing at the root reading the result (#1150).
 
 ### The two chrome rows
 
