@@ -638,6 +638,7 @@ governs what a run measures rather than what it keeps:
 | `maxDesignResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **design-mode** send - `POST /execute`, and each step of a collection run - reads into memory. A bigger response is read up to this point and answered with `bodyCapped: true` (see `POST /execute`) rather than failing, because someone is watching for it. Separate from `maxResponseBodyBytes` above, which is the load path's and refuses instead. |
 | `maxSampleBodyBytes` | `32768`  | 0–104857600  | Largest response body kept for a single captured **load-run** sample. Bigger bodies are stored truncated and marked. Deliberately far below `maxTraceBodyBytes`: a design run stores one exchange the user asked for, a load run stores tens nobody asked for individually. `0` keeps headers and metadata and no body. |
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
+| `maxResponseSampleBytes` | `268435456` | 0–1073741824 | Total response-body bytes one load run may hold for its post-run test scripts and schema checks. Two orders of magnitude above `maxSampleBytes` because these bodies are kept **whole** - a truncated one would fail a check the target passed - so past the budget whole samples are dropped instead, counted as `sampling.responseSamplesDropped`. `0` retains no sample that has a body. |
 | `phaseHistograms`   | `true`    | boolean      | Record DNS/connect/TLS/first-byte/download times for **every** load-test completion into five HdrHistograms, so the report can carry `timingBreakdown.phases` percentiles instead of averages over the retained trace sample. Costs five atomic histogram writes per completion; see [benchmarks](benchmarks.md). |
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
@@ -5318,6 +5319,7 @@ default, and whose message names the offending field and why the bound exists:
 | `success_sample_rate` | `1`-`100000` | It is a sampling *period* (keep 1 in N), used as `counter % rate`. A `0` was a division by zero that killed the daemon mid-run. |
 | `response_sample_rate` | `1`-`100000` | Same modulo, same crash. |
 | `max_response_samples` | `0`-`1000000` | Each retained sample holds a full response body, and the vector is reserved up front; a negative value casts to ~1.8e19. |
+| `max_response_sample_bytes` | `0`-`1073741824` | The whole-run budget for those bodies, held in memory for the run *and* its retention window. The count cap above bounds the store only for a target whose bodies are small - at 1 MiB each, 1000 samples is ~1 GB. `0` retains no sample that has a body. Defaults to the `maxResponseSampleBytes` setting. |
 | `max_success_results` | `0`-`1000000` | Each retained record holds a serialised timing breakdown, and the store is reserved up front. `0` means unlimited. |
 | `max_slow_results` | `0`-`1000000` | Same store, same reserve, separate budget. `0` means unlimited. |
 | `slow_threshold_ms` | `0`-`86400000` ms | `0` disables outlier capture; a negative threshold would mark **every** completion an outlier and fill the slow store with the whole run. |
@@ -5365,7 +5367,7 @@ independent budgets:
 |--------|-----------|------------|
 | Sampled timing traces | 1 in `success_sample_rate` completions, only while `save_timing_breakdown` is on | `max_success_results` |
 | Slow-request traces | any completion at or past `slow_threshold_ms`, **regardless** of `save_timing_breakdown` | `max_slow_results` |
-| Response samples (post-run test scripts) | 1 in `response_sample_rate` completions | `max_response_samples` |
+| Response samples (post-run test scripts) | 1 in `response_sample_rate` completions | `max_response_samples`, **and** `max_response_sample_bytes` |
 | Per-status exemplars (captured responses) | the first three completions of each distinct status code **that no other budget already stored** | `max_exemplar_results` |
 
 None of these budgets bound the report's `timingBreakdown.phases`: the per-phase
@@ -6505,6 +6507,19 @@ describes.
 count means they are a **uniform sample of the whole run** (reservoir retention)
 rather than a truncated prefix of it. The section is absent on a run recorded
 before it was reported, which is not the same claim as "nothing was dropped".
+
+`responseSamplesDropped` counts responses the post-run test scripts and schema
+checks never saw, for either of the two bounds on that store: the count cap
+(`max_response_samples`), and the byte budget (`max_response_sample_bytes`) that
+drops a whole sample once the run's retained bodies would exceed it. Both mean
+the same thing to a reader - this response was not validated - and neither ever
+stores a *cut* body, because a deferred check reading one reports a failure the
+target never produced. They differ in one way worth knowing: the count cap
+displaces an incumbent, so the tested set stays a uniform sample of the run,
+while an exhausted byte budget stops admitting - a run that spends it is graded
+on the part of the run whose bodies fit. The counter cannot say which bound
+applied, so the app's retention note states the uniform case for both; issue
+#1192 is that gap.
 
 Three of its keys are about captured responses rather than retention:
 `responseBodiesCaptured` is how many exchanges the run stored (see

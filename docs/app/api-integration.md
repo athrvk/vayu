@@ -1202,7 +1202,13 @@ under its own notice. Both are about *rendering* cost, not about what arrived.
 `report.sampling` carries what each of the run's bounded stores thinned away -
 `successTracesDropped` / `slowTracesDropped` for the trace records behind
 `report.results`, and `responseSamplesDropped` for the buffer post-run test
-scripts are graded on. The renderer treats a non-zero count as "this list is a
+scripts are graded on. That buffer is bounded twice, and one counter reports
+both: by count (`max_response_samples`), which displaces an incumbent and so
+keeps the graded set uniform over the run, and by bytes
+(`max_response_sample_bytes`), which stops admitting once the retained bodies
+fill it. The renderer cannot tell which applied, which is why the note's
+uniformity sentence is not always true - issue #1192.
+The renderer treats a non-zero count as "this list is a
 *sample* of a larger set": `SampleRetentionNote` (shared) renders under the
 dashboard's Sampled Requests, the history Samples tab and the Test Validation
 card, and the sample-count badges say **shown** rather than *captured*, since

@@ -918,6 +918,9 @@ const vayu::core::MonitorLimits& monitor_limits) {
     { "response_sample_rate", 1, 100000, "It is a sampling period (keep 1 in N), and 0 is a division by zero." },
     { "max_response_samples", 0, limits::MAX_RESPONSE_SAMPLES,
     "Each retained sample holds a full response body." },
+    { "max_response_sample_bytes", 0, limits::MAX_RESPONSE_SAMPLE_BYTES,
+    "It is the whole-run budget for those bodies, held in memory for the "
+    "run and its retention window; 0 retains no sample that has a body." },
     { "max_success_results", 0, limits::MAX_RETAINED_RESULTS,
     "Each retained record holds a serialised timing breakdown, and the "
     "store is reserved up front." },

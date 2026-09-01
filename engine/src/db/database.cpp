@@ -4016,6 +4016,19 @@ void Database::seed_default_config () {
     "1073741824", // 1GB
     std::nullopt, now }));
 
+    upsert_config (unit ("bytes") (ConfigEntry{ "maxResponseSampleBytes",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES),
+    "integer", "Load-Run Validation Sample Budget",
+    "How much response-body data one load run may hold for its post-run test "
+    "scripts and schema checks. These bodies are kept whole - a truncated one "
+    "would fail a check the target passed - so past the budget whole samples "
+    "are dropped instead, and the report counts them. Lower it for a target "
+    "with large responses; raise it to validate more of them.",
+    "data_retention", std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES),
+    "0",          // 0 retains no sample that has a body
+    "1073741824", // 1GB
+    std::nullopt, now }));
+
     upsert_config (ConfigEntry{ "maxScenarioStoredSteps",
     std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS),
     "integer", "Max Stored Scenario Steps",

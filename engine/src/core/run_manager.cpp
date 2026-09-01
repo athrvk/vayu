@@ -635,9 +635,15 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
     capture_response_bodies = mc_config.capture_response_bodies;
 
-    // Configure response sampling for script validation
+    // Configure response sampling for script validation. Bounded twice: in
+    // count here, and in bytes by the budget below - a retained sample holds a
+    // whole response body, so the count alone bounds the store's memory only
+    // for a target whose bodies are small (issue #1155).
     mc_config.max_response_samples =
     static_cast<size_t> (config.value ("max_response_samples", 1000));
+    mc_config.max_response_sample_bytes =
+    static_cast<size_t> (config.value ("max_response_sample_bytes",
+    static_cast<int64_t> (engine_defaults.max_response_sample_bytes)));
     mc_config.response_sample_rate =
     static_cast<size_t> (config.value ("response_sample_rate", 100));
 
@@ -945,6 +951,9 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         engine_defaults.max_sample_bytes =
         static_cast<size_t> (db.get_config_int ("maxSampleBytes",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES)));
+        engine_defaults.max_response_sample_bytes =
+        static_cast<size_t> (db.get_config_int ("maxResponseSampleBytes",
+        static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES)));
         // The same two settings the design path's stream reads, so a user who
         // tightened them once has tightened them for both (issue #576).
         engine_defaults.stream_max_duration_ms =

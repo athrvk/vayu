@@ -155,6 +155,12 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
 struct EngineDefaults {
     size_t max_sample_body_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES;
     size_t max_sample_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES;
+    /// Config key `maxResponseSampleBytes`. The whole-run budget for the
+    /// script-validation reservoir's bodies, which are kept untruncated - so
+    /// this is the setting that decides how much of a large-bodied target's
+    /// traffic a run can validate.
+    size_t max_response_sample_bytes =
+    constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES;
     /// Config key `phaseHistograms`. Whether the run feeds the five per-phase
     /// histograms behind the report's `timingBreakdown.phases`.
     bool phase_histograms = constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS;
@@ -212,9 +218,12 @@ struct RunContext {
     /// Let go of everything the run needed only while it was sending: the
     /// event loop - with its per-worker curl handle pools, its multi handles
     /// and the TCP/TLS connections those hold open against the target, and the
-    /// 512KB submission queues - the bound CSV rows, and the scenario plan.
+    /// 512KB submission queues - the bound CSV rows, the scenario plan, and the
+    /// response bodies the deferred passes have already read (issue #1155).
     /// What retention exists for is untouched: the tick topic, `closed`, the
-    /// summary counters and the collector behind them (issue #1154).
+    /// summary counters and the collector behind them (issue #1154) - including
+    /// `response_samples_dropped`, so the report still says what was thinned
+    /// after the samples themselves are gone.
     ///
     /// Called once, by `RunManager::retain_run`, so no exit path can forget
     /// it. By then the run's own thread has made its last read of these
@@ -233,6 +242,14 @@ struct RunContext {
         }
         load_data.reset ();
         scenario.reset ();
+        // The sample reservoirs, but not the collector: the two deferred passes
+        // that read them have run by now - both finish before the summary is
+        // written, and the paths that reach retention without them are the ones
+        // that failed before a response existed to sample - while the counters
+        // beside them are read for the whole retention window.
+        if (metrics_collector) {
+            metrics_collector->release_response_samples ();
+        }
         // `loop` frees here, outside the critical section above.
     }
 
