@@ -42,13 +42,14 @@ describe("MethodBadge - badge variant is a fixed-width column", () => {
 		expect(badge.className).toContain(WIDTH_CLASS);
 	});
 
-	it("renders GET and DELETE with an identical box", () => {
-		// Method colour is an inline style, so the class list is the whole box:
-		// identical classes including the fixed width means identical width.
-		const get = renderBadge(<MethodBadge method="GET" />);
-		const del = renderBadge(<MethodBadge method="DELETE" />);
-		expect(get.className).toBe(del.className);
-		expect(get.className).toContain(WIDTH_CLASS);
+	it("gives every method the same box, however many letters it has", () => {
+		// Method colour is an inline style, so the class list is the whole box.
+		// Asserting the two class lists are *equal* would pass without the fix -
+		// the badge's classes never depended on the method - so what each one has
+		// to carry is the fixed width itself.
+		for (const method of ["GET", "POST", "DELETE", "OPTIONS", "PROPPATCH"]) {
+			expect(renderBadge(<MethodBadge method={method} />).className).toContain(WIDTH_CLASS);
+		}
 	});
 
 	it("uses the same width class at both sizes", () => {
