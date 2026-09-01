@@ -165,6 +165,10 @@ constexpr int64_t MAX_SAMPLE_BODY_BYTES = 104857600; // 100MB
 /// Upper bound on `max_sample_bytes` (the whole-run capture budget). Every
 /// byte under it is held in memory until the run flushes.
 constexpr int64_t MAX_SAMPLE_BYTES = 1073741824; // 1GB
+/// Upper bound on `max_response_sample_bytes` (the whole-run budget for the
+/// script-validation reservoir). Every byte under it is held in memory for the
+/// run *and* its retention window, so the ceiling is the capture budget's.
+constexpr int64_t MAX_RESPONSE_SAMPLE_BYTES = 1073741824; // 1GB
 /// Upper bound on `max_exemplar_results`. Each retained exemplar holds a
 /// captured exchange, bounded in turn by the two budgets above.
 constexpr int64_t MAX_EXEMPLAR_RESULTS = 100000;
@@ -468,6 +472,17 @@ constexpr size_t DEFAULT_MAX_SAMPLE_BODY_BYTES = 32768;
 /// MetricsCollector::sample_bodies_dropped so the UI can say the set is
 /// incomplete rather than showing a silently biased subset.
 constexpr size_t DEFAULT_MAX_SAMPLE_BYTES = size_t{ 2 } * 1024 * 1024;
+/// Whole-run budget for the script-validation reservoir's bodies (config key
+/// `maxResponseSampleBytes`). Two orders of magnitude above the capture budget
+/// beside it because the two stores answer different questions: a captured
+/// exchange is an exhibit a person reads, truncated to 32 KiB, while a retained
+/// sample is the *input* to a deferred script or schema check and is kept whole
+/// - truncating it would make that check report a failure the target never
+/// produced. So the budget drops whole samples instead, and this is where it
+/// starts: against a target answering 1 MiB bodies the count cap alone
+/// (`max_response_samples`, 1000) allowed ~1 GB resident, held through the
+/// retention window after the run (issue #1155).
+constexpr size_t DEFAULT_MAX_RESPONSE_SAMPLE_BYTES = size_t{ 256 } * 1024 * 1024;
 /// How many exemplars of each distinct status code a run guarantees to retain.
 /// Small on purpose: exemplars answer "what does a 503 from this target look
 /// like", which the first few answer as well as the first few hundred.

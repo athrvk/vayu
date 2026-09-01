@@ -2269,6 +2269,19 @@ The **language** is current; what is missing is the **host environment**:
   response displaces a uniformly chosen incumbent, so a target that starts
   failing halfway through is graded on those failures rather than on the healthy
   window before them
+- A second bound applies to the same store: `max_response_sample_bytes`
+  (`maxResponseSampleBytes`, 256 MiB by default) is the whole-run budget for the
+  retained bodies, because each is kept **whole** and a target answering 1 MiB
+  responses would otherwise put ~1 GB in that store. Past it a sample is dropped
+  entire rather than truncated - a script reading a cut body would fail a
+  response the target got right - and the drop is counted the same way, in
+  `sampling.responseSamplesDropped`
+- **A run that spends that budget is graded on the part of it that fit**, not on
+  a uniform sample: the count cap displaces incumbents and stays uniform, while
+  an exhausted byte budget simply stops admitting. Only a target whose retained
+  bodies average more than ~256 KiB reaches it at the defaults; raise
+  `maxResponseSampleBytes`, or lower `max_response_samples` so fewer, later
+  responses share the budget, if that matters for the run you are grading
 - `samplesTested` in the report (`TestsSampled`) is the **size of that sample**,
   not the run's request count, and `sampling.responseSamplesDropped` beside it
   says how many responses the bound thinned away

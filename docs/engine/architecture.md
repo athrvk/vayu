@@ -998,7 +998,11 @@ row exists - and the executor is the only thing that differs.
   samples the last step of a long plan. The run's `max_response_samples` budget
   is split evenly across the steps that carry a script (not across every step),
   floored at one apiece; a step with no script is never sampled and never
-  counted as a thinned sample. A `pre_script` runs nowhere: it would have to run
+  counted as a thinned sample. The byte budget beside it
+  (`max_response_sample_bytes`) is deliberately *not* split: those bodies are
+  resident in one process, so a forty-step plan must not multiply the ceiling by
+  forty, and a step that drops a sample over it is counted like any other thinned
+  one. A `pre_script` runs nowhere: it would have to run
   before a send this mode never pauses for. `pm.execution` still throws in a
   load run for the reason the flow-control section gives, and there is
   deliberately no inline-script path on the load hot path.

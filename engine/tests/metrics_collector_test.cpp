@@ -1000,6 +1000,141 @@ TEST (MetricsCollectorRetention, ResponseSamplesStayBoundedUnderConcurrentWriter
 }
 
 // ============================================================================
+// Response-sample byte budget (issue #1155)
+// ============================================================================
+
+namespace {
+
+/// A reservoir sized in both dimensions, which is the whole subject here: the
+/// count cap alone bounds the store's memory only for a target whose bodies
+/// are small.
+MetricsCollectorConfig reservoir_config (size_t capacity, size_t budget_bytes) {
+    MetricsCollectorConfig config;
+    config.expected_requests         = 1000;
+    config.response_sample_rate      = 1;
+    config.max_response_samples      = capacity;
+    config.max_response_sample_bytes = budget_bytes;
+    return config;
+}
+
+vayu::Response response_with_body (size_t body_bytes) {
+    vayu::Response response;
+    response.status_code     = 200;
+    response.body            = std::string (body_bytes, 'x');
+    response.timing.total_ms = 1.0;
+    return response;
+}
+
+} // namespace
+
+// The finding itself: the store was bounded in count only, so a target
+// answering 1MB bodies put ~1GB in this one vector at the defaults. Past the
+// budget a whole sample is dropped - never a truncated one, because a deferred
+// script or schema check reading a cut body reports a failure the target never
+// produced. Remove the gate in claim_response_sample_bytes and this reddens:
+// all ten are retained.
+TEST (MetricsCollectorSampleBudget, ASpentBudgetDropsWholeSamplesAndCountsThem) {
+    MetricsCollector collector ("run_sample_budget", reservoir_config (1000, 250));
+
+    for (int i = 0; i < 10; ++i) {
+        collector.record_response_sample (response_with_body (100));
+    }
+
+    EXPECT_EQ (collector.response_samples ().size (), 2u); // 250 / 100, floored
+    EXPECT_EQ (collector.response_samples_dropped (), 8u);
+    EXPECT_EQ (collector.response_sample_bytes (), 200u);
+    for (const auto& sample : collector.response_samples ()) {
+        EXPECT_EQ (sample.body.size (), 100u)
+        << "a retained sample was truncated, which is what would make a "
+           "deferred script or schema check fail a response the target passed";
+    }
+}
+
+// The budget is what is *held*, not what has been offered: a displaced sample
+// gives its bytes back. Without the refund the charge grows with every
+// candidate the reservoir accepts (~k ln(n/k) of them) while the store still
+// holds k, and the budget eventually freezes a reservoir nowhere near it -
+// which reads as "validation stopped covering the run" and as nothing else.
+// Drop the release in the displaced arm and this reddens: the held figure
+// climbs to the budget and stays there.
+TEST (MetricsCollectorSampleBudget, DisplacedSamplesGiveTheirBytesBack) {
+    MetricsCollector collector ("run_sample_refund", reservoir_config (4, 800));
+
+    for (int i = 0; i < 200; ++i) {
+        collector.record_response_sample (response_with_body (100));
+    }
+
+    ASSERT_EQ (collector.response_samples ().size (), 4u);
+    EXPECT_EQ (collector.response_sample_bytes (), 400u)
+    << "the budget is charged for samples the store no longer holds";
+    // Every candidate is either retained or counted; nothing vanishes.
+    EXPECT_EQ (
+    collector.response_samples ().size () + collector.response_samples_dropped (), 200u);
+}
+
+// Feature-off in the only sense this budget has one: a run whose bodies are
+// ordinary never reaches it, so the retained set is exactly what the count cap
+// alone would have kept.
+TEST (MetricsCollectorSampleBudget, OrdinaryBodiesAreUnaffectedAtTheDefault) {
+    MetricsCollectorConfig config;
+    config.expected_requests    = 1000;
+    config.response_sample_rate = 1;
+    config.max_response_samples = 100;
+    MetricsCollector collector ("run_sample_default", config);
+
+    for (int i = 0; i < 100; ++i) {
+        collector.record_response_sample (response_with_body (4096));
+    }
+
+    EXPECT_EQ (collector.response_samples ().size (), 100u);
+    EXPECT_EQ (collector.response_samples_dropped (), 0u);
+    EXPECT_EQ (collector.response_sample_bytes (), 100u * 4096u);
+}
+
+// One run, one budget: a plan's per-step reservoirs are resident in the same
+// process, so a hot step's bodies spend against the same ceiling. Give each
+// step its own and a forty-step plan multiplies the ceiling by forty.
+TEST (MetricsCollectorSampleBudget, StepReservoirsShareTheRunsBudget) {
+    MetricsCollector collector ("run_step_budget", reservoir_config (10, 250));
+    collector.configure_step_samples ({ true, true });
+
+    for (int i = 0; i < 5; ++i) {
+        collector.record_step_response_sample (response_with_body (100), 0, {});
+        collector.record_step_response_sample (response_with_body (100), 1, {});
+    }
+
+    const size_t retained = collector.step_response_samples (0).size () +
+    collector.step_response_samples (1).size ();
+    EXPECT_EQ (retained, 2u) << "each step was given a budget of its own";
+    EXPECT_EQ (collector.response_sample_bytes (), 200u);
+    EXPECT_EQ (collector.response_samples_dropped (), 8u);
+}
+
+// #1154's deferred half: the retention window keeps the tick topic and the
+// summary counters, not the bodies the deferred passes have already read. A
+// run against a large-bodied target used to hold its whole sample budget
+// resident for `liveRetentionMs` after it stopped sending.
+TEST (MetricsCollectorSampleBudget, ReleasingSamplesFreesTheirBytesAndKeepsTheCounters) {
+    MetricsCollector collector ("run_sample_release", reservoir_config (2, 1000));
+    collector.configure_step_samples ({ true });
+
+    for (int i = 0; i < 5; ++i) {
+        collector.record_response_sample (response_with_body (100));
+        collector.record_step_response_sample (response_with_body (100), 0, {});
+    }
+    const size_t dropped_before = collector.response_samples_dropped ();
+    ASSERT_GT (collector.response_sample_bytes (), 0u);
+
+    collector.release_response_samples ();
+
+    EXPECT_TRUE (collector.response_samples ().empty ());
+    EXPECT_TRUE (collector.step_response_samples (0).empty ());
+    EXPECT_EQ (collector.response_sample_bytes (), 0u);
+    EXPECT_EQ (collector.response_samples_dropped (), dropped_before)
+    << "the report still has to say what the run thinned away";
+}
+
+// ============================================================================
 // Per-Phase Histograms (issue #476)
 // ============================================================================
 

@@ -201,6 +201,16 @@ struct MetricsCollectorConfig {
     /// Maximum response samples to store for script validation
     size_t max_response_samples = constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLES;
 
+    /// Whole-run byte budget for those samples' bodies, shared by the run-level
+    /// reservoir and every per-step one. A sample whose body would exceed what
+    /// is left is dropped **whole** and counted by response_samples_dropped();
+    /// nothing here is ever truncated, because a deferred script or schema
+    /// check reading a cut body reports a failure the target never produced.
+    /// The figure is what is currently *held*, so a displaced sample gives its
+    /// bytes back - see MetricsCollector::response_sample_bytes.
+    size_t max_response_sample_bytes =
+    constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES;
+
     /// Sample rate for response storage (1 = all, 100 = 1%, etc.)
     size_t response_sample_rate = constants::metrics_collector::DEFAULT_RESPONSE_SAMPLE_RATE;
 
@@ -427,6 +437,22 @@ class MetricsCollector {
     SampleIdentity identity);
 
     /**
+     * @brief Let go of every retained response sample and its bytes.
+     *
+     * Called once the run is retained: the deferred passes that read these
+     * stores have already run (they are what the samples exist for), and the
+     * retention window keeps the tick topic and the summary counters, not the
+     * bodies behind them (issue #1154's deferred half). Without this a run
+     * against a 1 MiB endpoint held its whole sample budget resident for
+     * `liveRetentionMs` after it stopped sending.
+     *
+     * Takes each store's lock rather than assuming the run has drained: a
+     * stopped run's last completions can still be landing when the retention
+     * hand-off happens.
+     */
+    void release_response_samples ();
+
+    /**
      * @brief Record a failed request
      * Thread-safe. The error counters and the status-code distribution always
      * see every error; the individual record is stored only while the store is
@@ -461,9 +487,26 @@ class MetricsCollector {
         return slow_dropped_.load (std::memory_order_relaxed);
     }
 
-    /** @brief Response samples dropped or displaced by the reservoir. */
+    /**
+     * @brief Response samples dropped or displaced by the reservoir.
+     *
+     * Two budgets end a sample here and both count the same way, because both
+     * mean the same thing to a reader: this response was not validated. The
+     * count cap (`max_response_samples`) refuses or displaces a candidate; the
+     * byte budget (`max_response_sample_bytes`) drops one whose body no longer
+     * fits. Neither ever stores a truncated body - see the config field.
+     */
     [[nodiscard]] size_t response_samples_dropped () const {
         return response_dropped_.load (std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Body bytes the retained response samples currently hold.
+     * The figure `max_response_sample_bytes` is spent against, across the
+     * run-level reservoir and every per-step one.
+     */
+    [[nodiscard]] size_t response_sample_bytes () const {
+        return response_sample_bytes_.load (std::memory_order_relaxed);
     }
 
     /**
@@ -928,6 +971,13 @@ class MetricsCollector {
     std::atomic<size_t> response_sample_counter_{ 0 };
     std::atomic<size_t> response_seen_{ 0 };
     std::atomic<size_t> response_dropped_{ 0 };
+    /// Body bytes the retained samples hold, run-level store and every step
+    /// store together - one budget for one run's memory. Kept exact rather
+    /// than monotonic: a displaced sample gives its bytes back, because
+    /// otherwise a long run's charge grows with the *candidates* the reservoir
+    /// accepted (~k ln(n/k) of them) while what is held stays at k, and the
+    /// budget would eventually freeze a reservoir that is nowhere near it.
+    std::atomic<size_t> response_sample_bytes_{ 0 };
 
     /**
      * @brief One reservoir per plan step, for a scenario load run's deferred
@@ -979,6 +1029,19 @@ class MetricsCollector {
      * being reported.
      */
     [[nodiscard]] CapturedExchange capture_exchange (const Response& response);
+
+    /**
+     * @brief Charge @p bytes to the run's response-sample budget.
+     *
+     * Answers false when the budget cannot cover them, having charged nothing;
+     * the caller then drops the whole sample. Called after the reservoir slot
+     * is claimed and *before* the body is copied, so a refusal costs neither
+     * the copy nor the store's mutex.
+     */
+    [[nodiscard]] bool claim_response_sample_bytes (size_t bytes);
+
+    /** @brief Give @p bytes back - a displaced incumbent, or a refused insert. */
+    void release_response_sample_bytes (size_t bytes);
 
     // Helper for atomic double addition
     void atomic_add_double (std::atomic<double>& target, double value);

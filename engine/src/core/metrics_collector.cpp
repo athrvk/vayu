@@ -41,6 +41,20 @@ uint64_t next_random () {
 }
 
 /**
+ * @brief What applying a reservoir slot did with the candidate.
+ *
+ * Three outcomes rather than "did it cost a record": every caller counts a drop
+ * for the two that are not `Appended`, but a caller holding a byte budget also
+ * has to know *whose* bytes to give back - the incumbent's on `Displaced`, the
+ * candidate's own on `Refused`.
+ */
+enum class SlotOutcome : std::uint8_t {
+    Appended,  ///< stored in a store that had room
+    Displaced, ///< stored over an incumbent, which the caller now holds
+    Refused    ///< not stored; the store was full with no slot to take
+};
+
+/**
  * Apply a reservoir slot to a bounded store. Requires the store's mutex.
  *
  * The slot is claimed outside the lock (that is what keeps the copy off the
@@ -49,26 +63,53 @@ uint64_t next_random () {
  * slot's own append flag. Anything that lands on an occupied index displaces
  * the incumbent, which the caller counts as a drop.
  *
- * @return true if the insert cost a record - an incumbent displaced, or this
- *         candidate dropped because the store was full with no slot to take.
+ * @param value taken by reference and **swapped** on `Displaced`, so the caller
+ *        is handed the record that left the store rather than having it
+ *        destroyed here - which is the only place its size can still be read.
+ *        Moved from on `Appended`, untouched on `Refused`.
  */
 template <typename T>
-bool insert_at_slot (std::vector<T>& store, size_t capacity, const ReservoirSlot& slot, T&& value) {
-    // `std::forward`, not `std::move`: `T&&` beside a `std::vector<T>&` is a
-    // forwarding reference, and spelling the transfer as an unconditional move
-    // is what would silently gut an lvalue the day the parameter stops being
-    // deduced from the store's element type.
+SlotOutcome
+insert_at_slot (std::vector<T>& store, size_t capacity, const ReservoirSlot& slot, T& value) {
     if (store.size () < capacity) {
-        store.push_back (std::forward<T> (value));
-        return false;
+        store.push_back (std::move (value));
+        return SlotOutcome::Appended;
     }
     if (slot.index < store.size ()) {
-        store[slot.index] = std::forward<T> (value);
-        return true;
+        std::swap (store[slot.index], value);
+        return SlotOutcome::Displaced;
     }
     // Capacity is full and the slot points past the end: nothing to replace
     // without growing past the bound, so the candidate is dropped.
-    return true;
+    return SlotOutcome::Refused;
+}
+
+/**
+ * Body bytes a settled insert gives back to the run's sample budget.
+ *
+ * The candidate was charged before it was copied, so what is released depends
+ * on which record actually left the retained set: the incumbent `insert_at_slot`
+ * swapped out on `Displaced`, and the candidate's own bytes on `Refused`. One
+ * function because getting that backwards leaks budget in one direction and
+ * double-refunds it in the other, and neither shows up as a wrong number until
+ * a long run stops sampling.
+ */
+/// Body bytes a store of retained samples holds. Requires the store's mutex.
+size_t held_body_bytes (const std::vector<ResponseSample>& samples) {
+    size_t total = 0;
+    for (const auto& sample : samples) {
+        total += sample.body.size ();
+    }
+    return total;
+}
+
+size_t reclaimed_bytes (SlotOutcome outcome, size_t candidate_bytes, const ResponseSample& leftover) {
+    switch (outcome) {
+    case SlotOutcome::Displaced: return leftover.body.size ();
+    case SlotOutcome::Refused: return candidate_bytes;
+    case SlotOutcome::Appended: return 0;
+    }
+    return 0;
 }
 } // namespace
 
@@ -399,12 +440,12 @@ const Timing* phases) {
         record.capture = capture_exchange (*capture);
     }
 
-    bool displaced = false;
+    SlotOutcome outcome = SlotOutcome::Refused;
     {
         std::lock_guard<std::mutex> lock (success_mutex_);
-        displaced = insert_at_slot (store, capacity, slot, std::move (record));
+        outcome = insert_at_slot (store, capacity, slot, record);
     }
-    if (displaced) {
+    if (outcome != SlotOutcome::Appended) {
         dropped.fetch_add (1, std::memory_order_relaxed);
     }
 }
@@ -441,18 +482,29 @@ SampleIdentity identity) {
         return;
     }
 
+    // The run's byte budget, charged before the body-sized copy for the same
+    // reason the slot is claimed before it. A body that no longer fits drops
+    // the *whole* sample: truncating it here would hand the deferred script or
+    // schema pass a cut body and have it report a failure the target never
+    // produced (issue #1155).
+    const size_t bytes = response.body.size ();
+    if (!claim_response_sample_bytes (bytes)) {
+        response_dropped_.fetch_add (1, std::memory_order_relaxed);
+        return;
+    }
+
     ResponseSample sample (response, now_ms ());
     sample.iteration      = identity.iteration;
     sample.vu             = identity.vu;
     sample.data_row_index = identity.data_row_index;
 
-    bool displaced = false;
+    SlotOutcome outcome = SlotOutcome::Refused;
     {
         std::lock_guard<std::mutex> lock (response_samples_mutex_);
-        displaced =
-        insert_at_slot (response_samples_, capacity, slot, std::move (sample));
+        outcome = insert_at_slot (response_samples_, capacity, slot, sample);
     }
-    if (displaced) {
+    if (outcome != SlotOutcome::Appended) {
+        release_response_sample_bytes (reclaimed_bytes (outcome, bytes, sample));
         response_dropped_.fetch_add (1, std::memory_order_relaxed);
     }
 }
@@ -515,19 +567,69 @@ SampleIdentity identity) {
         return;
     }
 
+    // One budget for the whole run, not one per step: a plan's steps share the
+    // process the samples are resident in, so a hot step's bodies have to be
+    // spendable against the same ceiling the run-level store spends against.
+    const size_t bytes = response.body.size ();
+    if (!claim_response_sample_bytes (bytes)) {
+        response_dropped_.fetch_add (1, std::memory_order_relaxed);
+        return;
+    }
+
     ResponseSample sample (response, now_ms ());
     sample.iteration      = identity.iteration;
     sample.vu             = identity.vu;
     sample.data_row_index = identity.data_row_index;
 
-    bool displaced = false;
+    SlotOutcome outcome = SlotOutcome::Refused;
     {
         std::lock_guard<std::mutex> lock (store.mutex);
-        displaced =
-        insert_at_slot (store.samples, store.capacity, slot, std::move (sample));
+        outcome = insert_at_slot (store.samples, store.capacity, slot, sample);
     }
-    if (displaced) {
+    if (outcome != SlotOutcome::Appended) {
+        release_response_sample_bytes (reclaimed_bytes (outcome, bytes, sample));
         response_dropped_.fetch_add (1, std::memory_order_relaxed);
+    }
+}
+
+bool MetricsCollector::claim_response_sample_bytes (size_t bytes) {
+    // fetch_add-then-refund rather than a CAS loop, exactly as the capture
+    // budget does it (see capture_exchange): the overshoot is bounded by one
+    // body per concurrent writer, and a run that briefly reads its own budget
+    // as fuller than it is drops one more sample, which the counter discloses.
+    const size_t before =
+    response_sample_bytes_.fetch_add (bytes, std::memory_order_relaxed);
+    if (before + bytes > config_.max_response_sample_bytes) {
+        response_sample_bytes_.fetch_sub (bytes, std::memory_order_relaxed);
+        return false;
+    }
+    return true;
+}
+
+void MetricsCollector::release_response_sample_bytes (size_t bytes) {
+    if (bytes == 0) {
+        return;
+    }
+    response_sample_bytes_.fetch_sub (bytes, std::memory_order_relaxed);
+}
+
+void MetricsCollector::release_response_samples () {
+    // Each store gives back exactly what it held, rather than the budget being
+    // zeroed: a store zeroed here and a completion still unwinding its own
+    // refund would take the counter below zero, and a size_t below zero is a
+    // budget of 1.8e19 - the bound off, silently, in the one window where
+    // nothing else would notice.
+    {
+        std::lock_guard<std::mutex> lock (response_samples_mutex_);
+        release_response_sample_bytes (held_body_bytes (response_samples_));
+        response_samples_.clear ();
+        response_samples_.shrink_to_fit ();
+    }
+    for (auto& store : step_samples_) {
+        std::lock_guard<std::mutex> lock (store->mutex);
+        release_response_sample_bytes (held_body_bytes (store->samples));
+        store->samples.clear ();
+        store->samples.shrink_to_fit ();
     }
 }
 
