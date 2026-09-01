@@ -13,13 +13,20 @@
  *
  * `queries/health.ts` writes `engineError` on every failed poll - ECONNREFUSED,
  * a timeout, a TLS failure - and nothing in the app read the field. The two
- * connection surfaces render `isEngineConnected` alone, so all three causes
- * printed the same word and the difference was only visible in devtools. That
+ * connection surfaces rendered the bare connection flag alone, so all three
+ * causes printed the same word and the difference was only visible in devtools.
+ * That
  * is the write-only defect class CLAUDE.md calls this codebase's most repeated.
  *
  * Rendered, not source-scanned: the reason arrives through a store binding, and
  * a scan cannot see a value that is not a literal in the file (the badge-hover
  * guard missed both real instances for exactly that reason).
+ *
+ * The other half of the file is the state that must *not* say why (#1164). Since
+ * the window paints alongside the engine, every launch spends its first seconds
+ * not connected, and one boolean gave that ordinary condition the crash's
+ * wording and its error affordance from first paint. `starting` is quiet;
+ * `unreachable` is the one that owes an explanation.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -53,7 +60,7 @@ const renderDock = () => {
 
 beforeEach(() => {
 	cleanup();
-	useEngineStore.setState({ isEngineConnected: false, engineError: null });
+	useEngineStore.setState({ engineStatus: "unreachable", engineError: null });
 });
 
 describe("the engine status indicator", () => {
@@ -66,7 +73,7 @@ describe("the engine status indicator", () => {
 
 	it("carries the health-poll error, reachable by keyboard", async () => {
 		useEngineStore.setState({
-			isEngineConnected: false,
+			engineStatus: "unreachable",
 			engineError: "fetch failed: ECONNREFUSED 127.0.0.1:9876",
 		});
 		renderDock();
@@ -90,7 +97,7 @@ describe("the engine status indicator", () => {
 		// error. The tooltip wraps; nothing here clips it to a fixed length.
 		const long =
 			"request to http://127.0.0.1:9876/health failed, reason: connect ETIMEDOUT after 5000ms";
-		useEngineStore.setState({ isEngineConnected: false, engineError: long });
+		useEngineStore.setState({ engineStatus: "unreachable", engineError: long });
 		renderDock();
 
 		fireEvent.focus(screen.getByText("Disconnected").closest("[tabindex='0']")!);
@@ -100,9 +107,35 @@ describe("the engine status indicator", () => {
 	it("keeps the connected state a plain label", () => {
 		// A stale error must not follow the engine back up: `health.ts` clears it
 		// on success, and the indicator only offers the tooltip while down.
-		useEngineStore.setState({ isEngineConnected: true, engineError: null });
+		useEngineStore.setState({ engineStatus: "connected", engineError: null });
 		renderDock();
 		expect(screen.getByText("Connected")).toBeTruthy();
 		expect(screen.getByText("Connected").closest("[tabindex='0']")).toBeNull();
+	});
+
+	it("says Starting on first paint, not Disconnected", () => {
+		// The store's own initial value, which is what a launch renders before any
+		// poll has been answered or refused. Reverting the third state puts the
+		// crash's word on every ordinary launch, which is what this fails on.
+		useEngineStore.setState({ engineStatus: "starting", engineError: null });
+		renderDock();
+		expect(screen.getByText("Starting…")).toBeTruthy();
+		expect(screen.queryByText("Disconnected")).toBeNull();
+	});
+
+	it("offers no reason while the engine is merely starting", () => {
+		// The case #1164 exists for: an error string reaching the store during the
+		// grace window must not become a failure affordance. `health.ts` does not
+		// write one there - this asserts the indicator would not show it either,
+		// so the two halves of the rule cannot drift apart.
+		useEngineStore.setState({
+			engineStatus: "starting",
+			engineError: "fetch failed: ECONNREFUSED 127.0.0.1:9876",
+		});
+		renderDock();
+
+		expect(screen.getByText("Starting…").closest("[tabindex='0']")).toBeNull();
+		expect(document.querySelector("[tabindex='0'] .lucide-info")).toBeNull();
+		expect(screen.queryByText("fetch failed: ECONNREFUSED 127.0.0.1:9876")).toBeNull();
 	});
 });

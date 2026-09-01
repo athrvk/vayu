@@ -429,7 +429,7 @@ Merged store managing engine connection status and restart-required notification
 **State:**
 ```typescript
 {
-  isEngineConnected: boolean
+  engineStatus: EngineStatus  // "starting" | "connected" | "unreachable"
   engineError: string | null
   recovery: EngineRecovery | null  // What the engine's startup did to the database
   pendingRestart: boolean
@@ -440,7 +440,7 @@ Merged store managing engine connection status and restart-required notification
 **Key Methods:**
 ```typescript
 const {
-  isEngineConnected, setEngineConnected,
+  engineStatus, setEngineStatus,
   engineError, setEngineError,
   recovery, setEngineRecovery,
   pendingRestart, addRestartRequiredKey, clearRestartRequired,
@@ -452,10 +452,15 @@ written by the same poll that writes `engineError` and read by `RecoveryBanner`.
 `null` is a clean start; a value means the engine restored the database from its
 backup or deleted it as unrecoverable.
 
-`engineError` is what the failed health poll recorded (`queries/health.ts`), and
-the Dock's connection indicator renders it in a tooltip when the engine is down -
-"Disconnected" alone read the same for a refused connection, a timeout and a TLS
-failure.
+`engineStatus` is `starting` while no poll has yet succeeded and the launch is
+still inside its grace window, `connected` once a poll has answered `ok`, and
+`unreachable` once a poll fails past that window or an engine that had
+answered stops answering. `engineError` is what the failed health poll
+recorded (`queries/health.ts`), and it is `null` in every state but
+`unreachable`: a launch still inside its grace window has no failure to report.
+The Dock's connection indicator renders it in a tooltip, for `unreachable`
+alone - "Disconnected" on its own read the same for a refused connection, a
+timeout and a TLS failure.
 
 **Non-persisted** (cleared on app restart).
 
@@ -1346,8 +1351,9 @@ into a pane that can never load on every restart.
 #### Engine Health, Config & OAuth
 
 - **`useHealthQuery()`** - Health check, polled every
-  `TIMING.HEALTH_CHECK_INTERVAL_MS`; it is what sets `isEngineConnected` /
-  `engineError` on `engine-store`, so the connection indicator follows it
+  `TIMING.HEALTH_CHECK_INTERVAL_MS`; it is what sets `engineStatus` /
+  `engineError` on `engine-store`, and is where the starting-vs-unreachable
+  decision gets made, so the connection indicator follows it
 - **`useConfigQuery()`** / **`useUpdateConfigMutation()`** - Engine configuration
   (`QUERY_CACHE.CONFIG_STALE_TIME_MS`); also the home of the live chart window,
   which is engine config rather than a renderer preference

@@ -62,7 +62,7 @@ vi.mock("@/stores", async (importOriginal) => {
 	return {
 		...actual,
 		useEngineStore: () => ({
-			isEngineConnected: true,
+			engineStatus: "connected",
 			pendingRestart: false,
 			restartRequiredKeys: [],
 			addRestartRequiredKey: vi.fn(),

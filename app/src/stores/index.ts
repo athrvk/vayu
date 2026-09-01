@@ -6,7 +6,7 @@
  */
 
 // Engine store
-export { useEngineStore } from "./engine-store";
+export { useEngineStore, type EngineStatus } from "./engine-store";
 
 // Domain stores
 export { useDashboardStore } from "./dashboard-store";

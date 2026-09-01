@@ -99,7 +99,7 @@ vi.mock("@/modules/settings/settings-store", () => ({
 const showToast = vi.fn();
 vi.mock("@/stores", () => ({
 	useEngineStore: () => ({
-		isEngineConnected: true,
+		engineStatus: "connected",
 		pendingRestart: false,
 		restartRequiredKeys: [],
 		addRestartRequiredKey: vi.fn(),

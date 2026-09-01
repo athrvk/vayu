@@ -126,9 +126,9 @@ beforeEach(() => {
 	listMockIssuers.mockReset().mockResolvedValue([]);
 	listMockServers.mockReset().mockResolvedValue([]);
 	useLayoutStore.setState({ drawerOpen: true, drawerView: "collections" });
-	// The count is gated on this, and the store's own default is `false` - a
+	// The count is gated on this, and the store's own default is `starting` - a
 	// list that answered at all came from an engine that was up.
-	useEngineStore.setState({ isEngineConnected: true, engineError: null });
+	useEngineStore.setState({ engineStatus: "connected", engineError: null });
 });
 
 describe("the services drawer switcher", () => {
@@ -232,7 +232,7 @@ describe("the running-services indicator", () => {
 		// The cache is warm first, so this proves the gate and not a slow query.
 		expect(await screen.findByText("2 services")).toBeInTheDocument();
 
-		useEngineStore.setState({ isEngineConnected: false });
+		useEngineStore.setState({ engineStatus: "unreachable" });
 		await waitFor(() => expect(screen.queryByText(/service/i)).not.toBeInTheDocument());
 		expect(screen.getByText("Disconnected")).toBeInTheDocument();
 	});

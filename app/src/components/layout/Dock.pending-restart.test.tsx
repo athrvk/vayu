@@ -50,7 +50,7 @@ beforeEach(() => {
 	cleanup();
 	vi.clearAllMocks();
 	useEngineStore.setState({
-		isEngineConnected: true,
+		engineStatus: "connected",
 		engineError: null,
 		pendingRestart: false,
 		restartRequiredKeys: [],

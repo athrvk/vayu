@@ -107,6 +107,22 @@ export const TIMING = {
 	HEALTH_RECONNECT_POLL_INTERVAL_MS: 1_000,
 
 	/**
+	 * How long a launch's first poll failures mean "still starting" rather than
+	 * "unreachable".
+	 *
+	 * The same number the main process spends waiting for a cold engine
+	 * (`ENGINE_HEALTH_POLL_BUDGET_MS` in `electron/constants.ts`), because it is
+	 * the same question asked from the other side: below it the engine is doing
+	 * its startup housekeeping - orphan reconciliation, inbox cleanup, a
+	 * page-reclaim rewrite - and above it something is actually wrong. The two
+	 * files share no module graph, so `health.test.ts` holds them together.
+	 *
+	 * Shorter would be tidier on screen and dishonest: it would put a failure
+	 * affordance on launches that go on to succeed, which is the whole of #1164.
+	 */
+	ENGINE_STARTUP_GRACE_MS: 45_000,
+
+	/**
 	 * How often the two local-service lists (webhook inboxes, OAuth issuers) are
 	 * re-read.
 	 *

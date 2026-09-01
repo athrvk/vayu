@@ -31,11 +31,13 @@ import { useInboxesQuery, useMockIssuersQuery, useMockServersQuery } from "@/que
 import { useEngineStore } from "@/stores";
 
 export function useRunningServiceCount(): number {
-	const isEngineConnected = useEngineStore((s) => s.isEngineConnected);
+	const engineStatus = useEngineStore((s) => s.engineStatus);
 	const { data: inboxes = [] } = useInboxesQuery();
 	const { data: issuers = [] } = useMockIssuersQuery();
 	const { data: mocks = [] } = useMockServersQuery();
 
-	if (!isEngineConnected) return 0;
+	// Both of the not-connected states gate the same way: an engine that has not
+	// answered yet is running no more than one that stopped answering.
+	if (engineStatus !== "connected") return 0;
 	return inboxes.filter((inbox) => inbox.running).length + issuers.length + mocks.length;
 }

@@ -25,6 +25,9 @@ import {
 	useSaveStore,
 	useTabsStore,
 	type DrawerView,
+	// Aliased: `EngineStatus` is the component below, and the type is what it
+	// switches on.
+	type EngineStatus as EngineConnectionStatus,
 } from "@/stores";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { contextBarHasContent } from "./context-bar-content";
@@ -175,6 +178,19 @@ function DockButton({ active, onClick, label, shortcut, children }: DockButtonPr
 }
 
 /**
+ * What each engine state is called in the strip.
+ *
+ * "Disconnected" stays the word for `unreachable` - it is what the state has
+ * always been called here and in the docs, and the new state is the one that
+ * needed a name of its own.
+ */
+const ENGINE_STATUS_LABEL: Record<EngineConnectionStatus, string> = {
+	starting: "Starting…",
+	connected: "Connected",
+	unreachable: "Disconnected",
+};
+
+/**
  * The connection light - and, when it is out, why.
  *
  * `engineError` is written on every failed health poll (`queries/health.ts`)
@@ -187,9 +203,16 @@ function DockButton({ active, onClick, label, shortcut, children }: DockButtonPr
  *
  * The trigger is focusable, so the reason is reachable by keyboard and not only
  * by hover, and the icon exists to say there is something to hover at all.
+ *
+ * Only `unreachable` gets that affordance. The window paints while the engine is
+ * still starting (#1144), so the first seconds of every launch are spent not
+ * connected - and rendering a red flag and a transport error there described a
+ * failure that had not happened (#1164). "Starting…" is a state of its own,
+ * quiet by design, and the store turns it into `unreachable` on its own budget
+ * so an engine that never comes up still ends up saying why.
  */
 function EngineStatus() {
-	const isEngineConnected = useEngineStore((s) => s.isEngineConnected);
+	const engineStatus = useEngineStore((s) => s.engineStatus);
 	const engineError = useEngineStore((s) => s.engineError);
 
 	/*
@@ -201,16 +224,16 @@ function EngineStatus() {
 	 */
 	const className = cn(
 		"flex items-center gap-1 text-xs",
-		isEngineConnected ? "text-success-text" : "text-muted-foreground"
+		engineStatus === "connected" ? "text-success-text" : "text-muted-foreground"
 	);
 	const label = (
 		<>
 			<span className="w-1.5 h-1.5 rounded-full bg-current" />
-			{isEngineConnected ? "Connected" : "Disconnected"}
+			{ENGINE_STATUS_LABEL[engineStatus]}
 		</>
 	);
 
-	if (isEngineConnected || !engineError) {
+	if (engineStatus !== "unreachable" || !engineError) {
 		return <span className={className}>{label}</span>;
 	}
 
@@ -272,8 +295,9 @@ function PendingRestart() {
  * light because that is this strip's ambient-status region, and because these
  * are the same kind of fact: what the engine is doing on the user's behalf.
  *
- * **Nothing renders when nothing runs** - and a disconnected engine is running
- * nothing, which `useRunningServiceCount` is what decides (it holds the gate,
+ * **Nothing renders when nothing runs** - and an engine that is not connected,
+ * starting or unreachable alike, is running nothing, which
+ * `useRunningServiceCount` is what decides (it holds the gate,
  * so no reader has to remember the caveat). The Dock's middle is ambient, and a
  * standing "0 services" would spend a permanent line on the ordinary case.
  * Guarded by `Dock.services.test.tsx` - rendering it unconditionally fails.

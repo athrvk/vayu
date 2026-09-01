@@ -16,9 +16,34 @@
 import { create } from "zustand";
 import type { EngineRecovery } from "@/types/domain";
 
+/**
+ * Where the engine is, as the renderer's own health poll sees it.
+ *
+ * Three values rather than a boolean because since #1144 the window paints
+ * alongside the engine instead of after it, so "not answering" is an ordinary
+ * launch condition as well as a crash. One flag made both wear the crash's
+ * wording and its error affordance, from first paint, on every launch.
+ *
+ * - `starting` - no poll has ever succeeded, and the engine is still inside the
+ *   budget the main process gives a cold one. Says nothing is wrong yet.
+ * - `connected` - a poll answered `ok`.
+ * - `unreachable` - a poll failed after that budget was spent, or an engine that
+ *   had answered before stopped answering. This is the state that owes the user
+ *   a reason, and `engineError` carries it.
+ */
+export type EngineStatus = "starting" | "connected" | "unreachable";
+
 interface EngineState {
 	// Engine Connection
-	isEngineConnected: boolean;
+	engineStatus: EngineStatus;
+
+	/**
+	 * Why the engine is `unreachable`, as the transport reported it.
+	 *
+	 * `null` in every other state, `starting` included: a launch whose engine has
+	 * simply not answered yet has no failure to report, and a string written
+	 * there would be one the Dock deliberately does not render.
+	 */
 	engineError: string | null;
 
 	/**
@@ -37,7 +62,7 @@ interface EngineState {
 	restartRequiredKeys: string[]; // Keys of configs that were changed and require restart
 
 	// Connection actions
-	setEngineConnected: (connected: boolean) => void;
+	setEngineStatus: (status: EngineStatus) => void;
 	setEngineError: (error: string | null) => void;
 	setEngineRecovery: (recovery: EngineRecovery | null) => void;
 
@@ -47,15 +72,16 @@ interface EngineState {
 }
 
 export const useEngineStore = create<EngineState>()((set) => ({
-	// Initial state
-	isEngineConnected: false,
+	// Initial state. `starting`, not `unreachable`: this value is what the Dock
+	// renders on first paint, before any poll has been answered or refused.
+	engineStatus: "starting",
 	engineError: null,
 	recovery: null,
 	pendingRestart: false,
 	restartRequiredKeys: [],
 
 	// Connection actions
-	setEngineConnected: (connected) => set({ isEngineConnected: connected }),
+	setEngineStatus: (status) => set({ engineStatus: status }),
 	setEngineError: (error) => set({ engineError: error }),
 	setEngineRecovery: (recovery) => set({ recovery }),
 

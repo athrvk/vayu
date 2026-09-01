@@ -95,7 +95,7 @@ vi.mock("@/modules/settings/settings-store", () => ({
 
 vi.mock("@/stores", () => ({
 	useEngineStore: () => ({
-		isEngineConnected: true,
+		engineStatus: "connected",
 		pendingRestart: false,
 		restartRequiredKeys: [],
 		addRestartRequiredKey: vi.fn(),
