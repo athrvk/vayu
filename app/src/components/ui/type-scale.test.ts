@@ -98,17 +98,25 @@ describe("type scale", () => {
  * `font-semibold`, so the row was a claim about a component that did not match
  * it. Four other chips had copied the documented bold.
  *
- * Semibold is what the app can actually render: `fonts.css` bundles JetBrains
- * Mono at 400/500/600 and none of the mono families at 700, so `font-mono
- * font-bold` is a *synthesised* face - the same reason the fonts note in the
- * doc gives. The size guard above would not have caught any of it, because
- * every one of those chips was on the scale.
+ * Semibold is what the code font can actually render: `fonts.css` bundles
+ * JetBrains Mono - the default `--font-mono` - at 400/500/600, and only Space
+ * Mono of the four selectable code faces at 700. So `font-mono font-bold` is a
+ * *synthesised* face for everyone who has not picked that one, which is the
+ * same reason the fonts note in the doc gives. The size guard above would not
+ * have caught any of it, because every one of those chips was on the scale.
+ *
+ * The rule this enforces is a ceiling, not a single value: a weight *above* 600
+ * cannot render, while `font-medium` on a numeric readout is a real face and a
+ * deliberate emphasis (`TimingWaterfall`, `PhasePercentiles`).
  */
 const MICRO_MONO_SIZES = ["text-[10px]", "text-[11px]"] as const;
 const MICRO_MONO_WEIGHT = "font-semibold";
 
 /** Any Tailwind weight utility, `semibold` first so it wins over `bold`. */
 const WEIGHT_CLASS = /font-(semibold|extrabold|bold|medium|normal|light|thin|black)\b/;
+
+/** The weights above 600, which no code face but Space Mono can draw. */
+const HEAVIER_THAN_SEMIBOLD = new Set(["font-bold", "font-extrabold", "font-black"]);
 
 describe("the micro/badge step's weight", () => {
 	const docPath = fromRepoRoot(DOC_READING_GUARDS.typeScale.paths[0]);
@@ -176,14 +184,12 @@ describe("no chip at the micro/badge step asks for a face the app has not bundle
 			if (!MICRO_MONO_SIZES.some((size) => literal.includes(size))) continue;
 			found.push(`${relative(".", file)}  ${literal}`);
 			const weight = WEIGHT_CLASS.exec(literal)?.[0];
-			if (weight === undefined || weight === MICRO_MONO_WEIGHT) continue;
-			if (weight === "font-bold") {
-				offences.push(
-					`${relative(".", file)}  ${literal}\n  ` +
-						`font-bold at the micro/badge step is a synthesised 700 - no mono ` +
-						`family in fonts.css ships one. Use ${MICRO_MONO_WEIGHT}.`
-				);
-			}
+			if (weight === undefined || !HEAVIER_THAN_SEMIBOLD.has(weight)) continue;
+			offences.push(
+				`${relative(".", file)}  ${literal}\n  ` +
+					`${weight} at the micro/badge step is a synthesised face - the ` +
+					`default code font ships no weight above 600. Use ${MICRO_MONO_WEIGHT}.`
+			);
 		}
 	}
 
@@ -191,7 +197,7 @@ describe("no chip at the micro/badge step asks for a face the app has not bundle
 		expect(found.length).toBeGreaterThan(3);
 	});
 
-	it("uses no synthesised bold", () => {
+	it("uses no weight the code font cannot draw", () => {
 		expect(offences.join("\n")).toBe("");
 	});
 });

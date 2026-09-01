@@ -930,15 +930,21 @@ composes with page zoom.
 written as arbitrary values.** Everything else has a named step, and
 `type-scale.test.ts` fails on anything outside that set.
 
-**The micro/badge step is semibold because 600 is the heaviest mono face the app
-bundles.** `fonts.css` loads JetBrains Mono at 400/500/600 and no mono family at
-700, so `font-mono font-bold` on a chip asks the browser to synthesise a weight
-that does not exist - which is what this row used to specify while
-`MethodBadge`, the primitive that owns the step, shipped `font-semibold` (#1199).
-The same guard now reads this row and every 10-11px mono class string in `src`,
-so the two cannot part again. A chip that prints a *value* rather than a label -
-a column name, a cookie attribute - is the URL / path step and stays unweighted;
-the semibold rule is about labels.
+**The micro/badge step is semibold because 600 is the heaviest face the code
+font ships.** `fonts.css` loads JetBrains Mono - the default `--font-mono` - at
+400/500/600, and Fira Code and IBM Plex Mono at 400/500; only Space Mono, one of
+four selectable code faces, has a real 700. So `font-mono font-bold` on a chip
+renders a synthesised weight for every user who has not picked that one face -
+which is what this row used to specify while `MethodBadge`, the primitive that
+owns the step, shipped `font-semibold` (#1199). `type-scale.test.ts` now reads
+this row and every 10-11px mono class string in `src`, and fails on a weight
+above 600 in either, so the two cannot part again.
+
+Two things at this size deliberately carry no badge weight. A chip that prints a
+*value* rather than a label - a column name, a cookie attribute - is the URL /
+path step and stays unweighted. And a numeric readout may take `font-medium` to
+lift one figure above its unweighted siblings, as the timing waterfall and the
+phase percentiles do; that is emphasis inside a row, not a badge.
 
 The app had drifted to **182 arbitrary sizes across 11 distinct values**. Half
 duplicated a step that already existed - `text-[12px]` *is* `text-xs`,
