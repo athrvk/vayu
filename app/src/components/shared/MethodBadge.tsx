@@ -16,15 +16,47 @@
  *
  * Method colour is one of the app's strongest visual signals; it should mean the
  * same thing everywhere it appears.
+ *
+ * The `badge` variant is a fixed-width column, not a chip that grows with its
+ * letters. Sibling rows put the badge first and the name after it, so an
+ * intrinsic-width chip started `GET` names at one x, `POST` names at another and
+ * `DELETE`/`OPTIONS` further still - a ragged left edge down every list. Three
+ * decisions hold that column together:
+ *
+ * 1. **Width** is `BADGE_METHOD_CHARS` characters plus the chip's own padding
+ *    and border, expressed in `ch` so it tracks the mono font the chip already
+ *    uses and one class covers both sizes. Seven characters is the longest
+ *    standard method (`OPTIONS`, `CONNECT`), so no standard method truncates.
+ * 2. **The label is centred** inside the chip. Short methods in a wide chip read
+ *    better centred than left-aligned against the border, and it is the shape
+ *    every other client uses.
+ * 3. **Longer methods truncate** rather than widening the chip. `method` is not
+ *    bounded at runtime - a pasted `curl -X PROPPATCH` reaches this component
+ *    through a type assertion in the curl parser, and a stored run's method is
+ *    a plain `string` - so one exotic verb must not re-break the alignment of
+ *    every row around it. The full method stays available as the `title`.
+ *
+ * The width is not an opt-in prop: this component's own history (it "previously
+ * rendered seven different ways") is the argument for the primitive enforcing
+ * the rule. The `text` variant keeps its intrinsic width - it sits inline in
+ * running text (tabs), where a fixed column would punch holes, and a caller
+ * that wants a column there sets its own width.
  */
 
 import { getMethodColor } from "@/utils";
 import { cn } from "@/lib/utils";
 
+/**
+ * Longest standard HTTP method - `OPTIONS` and `CONNECT`. Kept in step with the
+ * `7ch` in the width class below, which Tailwind has to see as a literal.
+ */
+const BADGE_METHOD_CHARS = 7;
+
 interface MethodBadgeProps {
 	method: string;
 	/**
 	 * `badge` - tinted chip, for list rows and headers where it anchors a line.
+	 *   Fixed-width, so sibling labels align; see the note above.
 	 * `text` - colour only, for dense places (tabs) where chrome would crowd.
 	 */
 	variant?: "badge" | "text";
@@ -43,18 +75,27 @@ export function MethodBadge({
 	className,
 }: MethodBadgeProps) {
 	const c = getMethodColor(method);
+	const label = method.toUpperCase();
+	const isBadge = variant === "badge";
+	const isTruncated = isBadge && label.length > BADGE_METHOD_CHARS;
 
 	return (
 		<span
 			className={cn(
 				"font-mono font-semibold uppercase shrink-0 transition-opacity",
 				size === "sm" ? "text-[10px]" : "text-[11px]",
-				variant === "badge" && "rounded-md border px-1.5 py-0.5",
+				isBadge &&
+					// `7ch` of content plus this chip's own `px-1.5` and 1px border, so
+					// the box is exactly wide enough for OPTIONS at either size and the
+					// name after it starts at the same x for every method. `inline-flex`
+					// makes the width apply outside a flex row too, and centres the
+					// label on both axes.
+					"inline-flex items-center justify-center rounded-md border px-1.5 py-0.5 w-[calc(7ch+0.75rem+2px)]",
 				muted && "opacity-60",
 				className
 			)}
 			style={
-				variant === "badge"
+				isBadge
 					? {
 							color: `hsl(${c})`,
 							background: `hsl(${c} / 0.1)`,
@@ -62,8 +103,11 @@ export function MethodBadge({
 						}
 					: { color: `hsl(${c})` }
 			}
+			// Only when the chip cannot show the whole method: a native tooltip on
+			// every badge would fight the app's own tooltips on the same rows.
+			title={isTruncated ? label : undefined}
 		>
-			{method.toUpperCase()}
+			{isBadge ? <span className="min-w-0 truncate">{label}</span> : label}
 		</span>
 	);
 }

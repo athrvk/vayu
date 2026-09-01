@@ -664,6 +664,23 @@ colour.
 <MethodBadge method={m} variant="text" muted={!isActive} />    // secondary context
 ```
 
+**The `badge` variant is a fixed-width column, not a chip that grows with its
+letters.** Every list that shows one puts the badge first and the name after it,
+so an intrinsic-width chip started `GET` names at one x, `POST` names at another
+and `DELETE`/`OPTIONS` further still - a ragged left edge down the collections
+tree, the history sidebar and the welcome recents at once. The chip is `7ch`
+wide plus its own padding and border (`ch`, so one class serves both sizes and
+tracks the mono font it already uses), seven being the longest standard method -
+`OPTIONS` and `CONNECT`. The label is centred, and a longer method (the engine
+and a pasted `curl -X` both pass arbitrary strings) truncates inside the chip
+with the full method on the element's `title`, rather than widening it and
+re-breaking every row around it.
+
+The width is not an opt-in prop - the primitive enforces it, which is the whole
+reason this component exists. The `text` variant keeps its intrinsic width: it
+sits inline in running text, where a fixed column would punch holes, and a
+caller that wants a column there (the import preview) still sets its own.
+
 
 Method colors are design tokens, not hardcoded hex values. **They are
 mode-adaptive** - hue and saturation are identical in both themes, so a method
@@ -711,21 +728,15 @@ background: `hsl(${c} / 0.1)`
 borderColor: `hsl(${c} / 0.3)`
 ```
 
-**Method badge pattern** (inline `<span>`, not a `<Badge>` component - used in RunItem, DashboardHeader):
-
-```tsx
-const c = `var(--method-${method.toLowerCase()})`;
-<span
-  className="text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded"
-  style={{
-    color:      `hsl(${c})`,
-    background: `hsl(${c} / 0.1)`,
-    border:     `1px solid hsl(${c} / 0.3)`,
-  }}
->
-  {method}
-</span>
-```
+**Do not hand-roll that span for a method.** This section used to carry the
+badge's markup as a pattern to copy, naming `RunItem` and `DashboardHeader` as
+its users; both have rendered `MethodBadge` for some time, and the copy here had
+already drifted (`font-bold` against the primitive's `font-semibold`, `rounded`
+against `rounded-md`, and no fixed width at all - so a copy of it would have
+reintroduced the ragged left edge the primitive now prevents). A hand-rolled
+copy of a primitive does not receive the primitive's fixes. Render
+`MethodBadge`; the three `hsl()` forms above are how it, the tab strip and the
+method selector each build a colour from `getMethodColor`.
 
 **MethodSelector** used to carry its own `METHOD_COLORS` map of those utility
 classes - a second source of truth for the same seven colours, and the kind that
