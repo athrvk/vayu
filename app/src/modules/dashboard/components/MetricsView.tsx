@@ -33,11 +33,11 @@ import { STATUS_CLASS_SERIES, STATUS_CLASS_CSS_VAR } from "@/constants/http-stat
 import { useMode } from "../hooks/useMode";
 import {
 	isRateLimitedRun,
-	buildLatencyChartData,
 	buildRampOverlay,
-	buildPercentileChartData,
-	buildStatusOverTime,
+	hasPercentileSignal,
+	hasStatusCodes,
 	latestThroughputMbps,
+	spansMultipleBuckets,
 } from "../utils/metricsTransforms";
 import { createAnomalyDetector } from "../utils/detectAnomalies";
 import { HeroRow } from "./hero/HeroRow";
@@ -79,13 +79,18 @@ function MetricsView({
 	// uPlot (Canvas) renders the whole buffer cheaply, so it's gone.
 	const chartWindow = historicalMetrics;
 
-	const latencyChartData = useMemo(() => buildLatencyChartData(chartWindow), [chartWindow]);
-
-	const percentileChartData = useMemo(() => buildPercentileChartData(chartWindow), [chartWindow]);
-	const hasPercentileData = percentileChartData.some((d) => d.p99 > 0);
-
-	const statusChartData = useMemo(() => buildStatusOverTime(chartWindow), [chartWindow]);
-	const hasStatusData = statusChartData.length > 1;
+	// Which chart cards are worth rendering. Each chart builds its own series
+	// from `chartWindow` (it also needs the user's bucket width, which only it
+	// reads), so these gates ask the cheap question - is there more than one
+	// 0.5s bucket to plot - rather than building the series a second time here
+	// and throwing it away (#1152). Latency and percentiles share the count
+	// gate: both transforms bucket every tick, so they yield the same length.
+	const hasMultiplePoints = useMemo(() => spansMultipleBuckets(chartWindow), [chartWindow]);
+	const hasPercentileData = useMemo(() => hasPercentileSignal(chartWindow), [chartWindow]);
+	const hasStatusData = useMemo(
+		() => spansMultipleBuckets(chartWindow, hasStatusCodes),
+		[chartWindow]
+	);
 	const liveMbps = useMemo(() => latestThroughputMbps(chartWindow), [chartWindow]);
 
 	const rampOverlay = useMemo(
@@ -298,7 +303,7 @@ function MetricsView({
 			)}
 
 			{/* Row 2.5 - Latency over time (perceived vs wire, queue-wait gap) */}
-			{latencyChartData.length > 1 && (
+			{hasMultiplePoints && (
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
@@ -372,7 +377,7 @@ function MetricsView({
 							/>
 						</div>
 					)
-				: percentileChartData.length > 1 &&
+				: hasMultiplePoints &&
 					hasPercentileData && (
 						<div className="bg-card border border-border rounded-md p-3.5">
 							<div className="flex items-baseline justify-between mb-3">

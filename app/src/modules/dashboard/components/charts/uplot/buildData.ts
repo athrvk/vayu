@@ -72,5 +72,41 @@ export function rebucket(
 export const pickThroughput = (m: LoadTestMetrics): number => m.throughput ?? m.current_rps ?? 0;
 export const pickSendRate = (m: LoadTestMetrics): number => m.send_rate ?? 0;
 export const pickConcurrency = (m: LoadTestMetrics): number => m.current_concurrency ?? 0;
+export const pickLatencyP99 = (m: LoadTestMetrics): number => m.latency_p99_ms ?? 0;
 export const pickErrorRate = (m: LoadTestMetrics): number =>
 	m.requests_completed > 0 ? ((m.requests_failed || 0) / m.requests_completed) * 100 : 0;
+
+/**
+ * (concurrency, p99) points for the response-time-vs-concurrency scatter,
+ * bucketed to the shared chart width before they are sorted.
+ *
+ * The scatter used to map and sort every retained tick and hand uPlot one dot
+ * per tick, while every other chart here collapses ticks into buckets first -
+ * so a 5-minute window at the engine's 10Hz tick was ~3,000 dots redrawn on
+ * every flush, and a full-run window up to the store's 50,000-tick cap. Its
+ * per-flush cost is now the bucket count, like everything else on this canvas.
+ *
+ * Last sample in a bucket wins (that is {@link bucketColumns}), which keeps the
+ * elbow: the point a ramp step settles at is the one that survives, where an
+ * average over the bucket would round the knee off. `times` carries each
+ * point's bucket timestamp in the plotted order, so the focus channel still
+ * maps a dot to a moment - and now to the same instant the time charts key on.
+ */
+export function buildConcurrencyScatter(
+	history: LoadTestMetrics[],
+	bucketSeconds: number = DEFAULT_CHART_BUCKET_SECONDS
+): { concurrency: number[]; p99: number[]; times: number[] } {
+	const { times, cols } = bucketColumns(
+		history,
+		[pickConcurrency, pickLatencyP99],
+		bucketSeconds
+	);
+	// uPlot needs x ascending; concurrency rises over a ramp, but sort to be
+	// safe. Sorting an index permutation keeps each bucket's (x, y, t) together.
+	const order = times.map((_, i) => i).sort((a, b) => cols[0][a] - cols[0][b]);
+	return {
+		concurrency: order.map((i) => cols[0][i]),
+		p99: order.map((i) => cols[1][i]),
+		times: order.map((i) => times[i]),
+	};
+}

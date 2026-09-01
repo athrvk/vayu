@@ -7,7 +7,13 @@
 
 import { describe, it, expect } from "vitest";
 import type { LoadTestMetrics } from "@/types";
-import { bucketColumns, rebucket, pickThroughput, pickErrorRate } from "./buildData";
+import {
+	bucketColumns,
+	buildConcurrencyScatter,
+	rebucket,
+	pickThroughput,
+	pickErrorRate,
+} from "./buildData";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	return {
@@ -83,5 +89,71 @@ describe("rebucket", () => {
 		const { times: outT, cols } = rebucket(times, [[1, 2, 3]]);
 		expect(outT).toEqual([0, 0.5, 1]);
 		expect(cols[0]).toEqual([1, 2, 3]);
+	});
+});
+
+describe("buildConcurrencyScatter", () => {
+	it("plots one point per bucket, not one per tick", () => {
+		// A minute of the engine's 10Hz tick: 600 ticks over 0..59.9s, which
+		// round-to-nearest collapses into the 121 half-second buckets 0..60.
+		const history = Array.from({ length: 600 }, (_, i) =>
+			tick({
+				elapsed_seconds: i / 10,
+				current_concurrency: 10 + i,
+				latency_p99_ms: 50 + i,
+			})
+		);
+		const { concurrency, p99, times } = buildConcurrencyScatter(history);
+		expect(concurrency).toHaveLength(121);
+		expect(p99).toHaveLength(121);
+		expect(times).toHaveLength(121);
+		// The point of the change: cost follows the bucket count, so a window
+		// five times longer at the same tick rate is five times the dots, not
+		// 3,000 of them for every flush of a 5-minute window.
+		expect(concurrency.length).toBeLessThan(history.length / 4);
+	});
+
+	it("keeps the last sample in a bucket, so a ramp step's settled value survives", () => {
+		const history = [
+			tick({ elapsed_seconds: 0.1, current_concurrency: 10, latency_p99_ms: 90 }),
+			// Same bucket as above (0.0), and the one that wins.
+			tick({ elapsed_seconds: 0.2, current_concurrency: 12, latency_p99_ms: 95 }),
+			tick({ elapsed_seconds: 0.6, current_concurrency: 20, latency_p99_ms: 140 }),
+		];
+		const { concurrency, p99, times } = buildConcurrencyScatter(history);
+		expect(concurrency).toEqual([12, 20]);
+		expect(p99).toEqual([95, 140]);
+		expect(times).toEqual([0, 0.5]);
+	});
+
+	it("sorts by concurrency and carries each point's bucket time with it", () => {
+		// Concurrency falling over time - uPlot needs x ascending, and a dot's
+		// timestamp has to follow it into the sorted order or the focus channel
+		// highlights the wrong moment.
+		const history = [
+			tick({ elapsed_seconds: 0, current_concurrency: 30, latency_p99_ms: 300 }),
+			tick({ elapsed_seconds: 1, current_concurrency: 20, latency_p99_ms: 200 }),
+			tick({ elapsed_seconds: 2, current_concurrency: 10, latency_p99_ms: 100 }),
+		];
+		const { concurrency, p99, times } = buildConcurrencyScatter(history);
+		expect(concurrency).toEqual([10, 20, 30]);
+		expect(p99).toEqual([100, 200, 300]);
+		expect(times).toEqual([2, 1, 0]);
+	});
+
+	it("honours a wider bucket setting, and treats a missing p99 as zero", () => {
+		const history = [
+			tick({ elapsed_seconds: 0, current_concurrency: 5 }),
+			tick({ elapsed_seconds: 0.9, current_concurrency: 8, latency_p99_ms: 40 }),
+			tick({ elapsed_seconds: 2.0, current_concurrency: 9, latency_p99_ms: 60 }),
+		];
+		// 2s buckets: round(0/2)*2 = 0, round(0.9/2)*2 = 0, round(2/2)*2 = 2.
+		const { concurrency, p99 } = buildConcurrencyScatter(history, 2);
+		expect(concurrency).toEqual([8, 9]);
+		expect(p99).toEqual([40, 60]);
+	});
+
+	it("returns empty columns for an empty history", () => {
+		expect(buildConcurrencyScatter([])).toEqual({ concurrency: [], p99: [], times: [] });
 	});
 });
