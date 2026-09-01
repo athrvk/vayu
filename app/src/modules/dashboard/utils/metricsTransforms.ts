@@ -13,6 +13,16 @@
 
 import type { LoadTestMetrics } from "@/types";
 
+/**
+ * The bucket every series transform here rounds a tick's elapsed time to before
+ * plotting. Shared so the "is there anything to plot" predicates below bucket
+ * exactly as the transforms do - a second copy of `* 2) / 2` is how the two
+ * would drift apart.
+ */
+function halfSecondBucket(elapsedSeconds: number): number {
+	return Math.round(elapsedSeconds * 2) / 2;
+}
+
 /** A run is "rate limited" (can drop requests) only in constant_rps with a target. */
 export function isRateLimitedRun(mode: string | undefined, targetRps: number | undefined): boolean {
 	return mode === "constant_rps" && (targetRps ?? 0) > 0;
@@ -60,7 +70,7 @@ export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
 	const byBucket = new Map<number, ClassSums & { time: number }>();
 	for (const m of history) {
 		if (!m.status_codes) continue;
-		const t = Math.round(m.elapsed_seconds * 2) / 2;
+		const t = halfSecondBucket(m.elapsed_seconds);
 		byBucket.set(t, { time: t, ...classifyCumulative(m.status_codes) });
 	}
 	const cum = Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
@@ -106,7 +116,7 @@ export interface LatencyPoint {
 export function buildLatencyChartData(history: LoadTestMetrics[]): LatencyPoint[] {
 	const byBucket = new Map<number, LatencyPoint>();
 	for (const m of history) {
-		const t = Math.round(m.elapsed_seconds * 2) / 2;
+		const t = halfSecondBucket(m.elapsed_seconds);
 		const latency = m.avg_latency_ms ?? 0;
 		const queue = m.avg_queue_wait_ms ?? 0;
 		// Clamp wire >= 0 so wire <= latency always holds; this keeps the
@@ -154,7 +164,7 @@ export interface PercentilePoint {
 export function buildPercentileChartData(history: LoadTestMetrics[]): PercentilePoint[] {
 	const byBucket = new Map<number, PercentilePoint>();
 	for (const m of history) {
-		const t = Math.round(m.elapsed_seconds * 2) / 2;
+		const t = halfSecondBucket(m.elapsed_seconds);
 		byBucket.set(t, {
 			time: t,
 			p50: m.latency_p50_ms ?? 0,
@@ -182,7 +192,7 @@ export function buildRampOverlay(
 	const byBucket = new Map<number, RampPoint>();
 	let peak = 0;
 	for (const m of history) {
-		const t = Math.round(m.elapsed_seconds * 2) / 2;
+		const t = halfSecondBucket(m.elapsed_seconds);
 		const achieved = m.current_concurrency ?? 0;
 		if (achieved > peak) peak = achieved;
 		const configured =
@@ -207,4 +217,50 @@ export function buildRampOverlay(
 		peakAchieved: peak,
 		target,
 	};
+}
+
+/** A tick carrying the cumulative status map `buildStatusOverTime` reads. */
+export const hasStatusCodes = (m: LoadTestMetrics): boolean => Boolean(m.status_codes);
+
+/**
+ * True when `history` covers more than one 0.5s bucket - i.e. when the series
+ * transforms above would return more than one point.
+ *
+ * The dashboard renders a chart card only when its series has something to
+ * draw, and that question is a count, not a series: building the whole series
+ * to read `.length` meant the transform ran twice per flush, once in the card's
+ * gate and once inside the chart that actually plots it. This answers it
+ * directly, allocating nothing and stopping at the first tick that lands in a
+ * second bucket - two ticks, in the normal case.
+ *
+ * `include` narrows which ticks count, for a transform that skips some:
+ * `buildStatusOverTime` ignores ticks with no `status_codes` map.
+ */
+export function spansMultipleBuckets(
+	history: LoadTestMetrics[],
+	include?: (m: LoadTestMetrics) => boolean
+): boolean {
+	let first: number | null = null;
+	for (const m of history) {
+		if (include && !include(m)) continue;
+		const t = halfSecondBucket(m.elapsed_seconds);
+		if (first === null) first = t;
+		else if (t !== first) return true;
+	}
+	return false;
+}
+
+/**
+ * True when any tick reports a p99 above zero - the "is there latency to show"
+ * half of the percentile card's gate, read off the ticks rather than off a
+ * built series.
+ *
+ * Deliberately not bucket-aware. `buildPercentileChartData` keeps the last tick
+ * in each bucket, so a bucket whose final tick reported no completions reads 0
+ * there while an earlier tick in it did not. This predicate can therefore only
+ * be *more* permissive, and only while every such bucket is in that state - the
+ * chart's own two-point guard still decides whether anything is drawn.
+ */
+export function hasPercentileSignal(history: LoadTestMetrics[]): boolean {
+	return history.some((m) => (m.latency_p99_ms ?? 0) > 0);
 }

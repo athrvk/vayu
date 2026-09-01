@@ -6,7 +6,10 @@ import {
 	buildRampOverlay,
 	buildPercentileChartData,
 	buildStatusOverTime,
+	hasPercentileSignal,
+	hasStatusCodes,
 	latestThroughputMbps,
+	spansMultipleBuckets,
 } from "./metricsTransforms";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
@@ -206,3 +209,111 @@ describe("latestThroughputMbps", () => {
 		expect(latestThroughputMbps([tick({ bytes_received: 5 })])).toBe(0);
 	});
 });
+
+/*
+ * The chart cards' render gates. Each one used to build the whole series and
+ * read its length, so these prove the cheap predicate answers exactly what the
+ * discarded series answered - anything less and a card appears or disappears at
+ * a different moment than before.
+ */
+describe("spansMultipleBuckets", () => {
+	it("agrees with the built series' length over randomized histories", () => {
+		const rng = seeded(20260901);
+		let sawTrue = 0;
+		let sawFalse = 0;
+		for (let run = 0; run < 200; run++) {
+			const history = randomHistory(rng);
+			const spans = spansMultipleBuckets(history);
+			expect(spans).toBe(buildLatencyChartData(history).length > 1);
+			expect(spans).toBe(buildPercentileChartData(history).length > 1);
+			expect(spansMultipleBuckets(history, hasStatusCodes)).toBe(
+				buildStatusOverTime(history).length > 1
+			);
+			if (spans) sawTrue++;
+			else sawFalse++;
+		}
+		// The agreement above is worthless if every case landed on one side.
+		expect(sawTrue).toBeGreaterThan(20);
+		expect(sawFalse).toBeGreaterThan(20);
+	});
+
+	it("is false for ticks that share one 0.5s bucket, true once one leaves it", () => {
+		const sameBucket = [tick({ elapsed_seconds: 1.0 }), tick({ elapsed_seconds: 1.1 })];
+		expect(spansMultipleBuckets(sameBucket)).toBe(false);
+		expect(buildLatencyChartData(sameBucket)).toHaveLength(1);
+
+		const twoBuckets = [...sameBucket, tick({ elapsed_seconds: 1.4 })];
+		expect(spansMultipleBuckets(twoBuckets)).toBe(true);
+		expect(buildLatencyChartData(twoBuckets)).toHaveLength(2);
+	});
+
+	it("is false for an empty or single-tick history", () => {
+		expect(spansMultipleBuckets([])).toBe(false);
+		expect(spansMultipleBuckets([tick({ elapsed_seconds: 3 })])).toBe(false);
+	});
+
+	it("counts only the ticks `include` accepts", () => {
+		const history = [
+			tick({ elapsed_seconds: 1, status_codes: { "200": 5 } }),
+			tick({ elapsed_seconds: 2 }),
+			tick({ elapsed_seconds: 3 }),
+		];
+		// Three buckets, but only one tick carries the status map the stacked
+		// chart reads - the same tick `buildStatusOverTime` keeps.
+		expect(spansMultipleBuckets(history)).toBe(true);
+		expect(spansMultipleBuckets(history, hasStatusCodes)).toBe(false);
+		expect(buildStatusOverTime(history)).toHaveLength(1);
+	});
+});
+
+describe("hasPercentileSignal", () => {
+	it("is true when any tick reports a p99 above zero", () => {
+		expect(hasPercentileSignal([tick({ elapsed_seconds: 1, latency_p99_ms: 12 })])).toBe(true);
+		expect(hasPercentileSignal([tick({ elapsed_seconds: 1, latency_p99_ms: 0 })])).toBe(false);
+		expect(hasPercentileSignal([])).toBe(false);
+	});
+
+	it("agrees with the built series wherever a bucket's last tick carries the signal", () => {
+		const rng = seeded(4242);
+		let sawTrue = 0;
+		for (let run = 0; run < 200; run++) {
+			const history = randomHistory(rng);
+			const built = buildPercentileChartData(history).some((p) => p.p99 > 0);
+			if (built) {
+				// Documented direction: the predicate reads every tick, so it is
+				// true wherever the built series is, and may be true when a
+				// bucket's final tick alone reported nothing.
+				expect(hasPercentileSignal(history)).toBe(true);
+				sawTrue++;
+			}
+		}
+		expect(sawTrue).toBeGreaterThan(20);
+	});
+});
+
+/** Deterministic 0..1 generator - a fixed seed keeps a failure reproducible. */
+function seeded(seed: number): () => number {
+	let s = seed >>> 0;
+	return () => {
+		s = (s * 1664525 + 1013904223) >>> 0;
+		return s / 0x100000000;
+	};
+}
+
+/**
+ * A history with the shapes the gates actually meet: empty, one tick, several
+ * ticks inside one 0.5s bucket, ticks spanning buckets, ticks with and without
+ * a status map, and p99 zero on some ticks (a tick with no completions).
+ */
+function randomHistory(rng: () => number): LoadTestMetrics[] {
+	const n = Math.floor(rng() * 12);
+	let elapsed = rng() * 2;
+	return Array.from({ length: n }, () => {
+		elapsed += rng() * 0.4; // often the same bucket, sometimes the next
+		return tick({
+			elapsed_seconds: Math.round(elapsed * 100) / 100,
+			latency_p99_ms: rng() < 0.4 ? 0 : Math.round(rng() * 200),
+			status_codes: rng() < 0.5 ? undefined : { "200": Math.floor(rng() * 100) },
+		});
+	});
+}
