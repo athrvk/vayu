@@ -120,6 +120,27 @@ describe("a run-time token's tooltip", () => {
 
 		expect(await screen.findByRole("tooltip")).toHaveTextContent("declared: email");
 	});
+
+	it("stacks the description above a declared list of any length", async () => {
+		/*
+		 * Issue #1195, and this tooltip is the sharper case: the note is the
+		 * user's own column list, so it is unbounded, and beside a `break-all`
+		 * description a note that refused to shrink took the whole 320px cap.
+		 * jsdom cannot measure, so the class contract that decides the layout is
+		 * what is pinned - restore the one-row shape and this reds.
+		 */
+		const columns = ["customer_email_address", "shipping_postal_code", "order_reference"];
+		const { container } = renderInput("https://x/{{data.emial}}", columns);
+
+		hover(runtimeToken(container));
+
+		const tooltip = await screen.findByRole("tooltip");
+		const note = tooltip.querySelector(`[class*="text-primary-foreground/"]`);
+		expect(note).toBeTruthy();
+		expect(note!.textContent).toContain(columns.join(", "));
+		expect(note!.className).not.toContain("shrink-0");
+		expect(note!.parentElement?.className).toContain("flex-col");
+	});
 });
 
 describe("clicking a run-time token", () => {

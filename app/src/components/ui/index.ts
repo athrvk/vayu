@@ -80,7 +80,14 @@ export type { ToastVariantName } from "./toast";
 
 export { ToggleGroup, ToggleGroupItem } from "./toggle-group";
 export type { ToggleGroupProps } from "./toggle-group";
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipHint, TooltipProvider } from "./tooltip";
+export {
+	Tooltip,
+	TooltipTrigger,
+	TooltipContent,
+	TooltipHint,
+	TooltipValue,
+	TooltipProvider,
+} from "./tooltip";
 export { TooltipIconButton } from "./tooltip-icon-button";
 export type { TooltipIconButtonProps } from "./tooltip-icon-button";
 export { InfoChip } from "./info-chip";

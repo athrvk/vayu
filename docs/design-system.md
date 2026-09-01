@@ -814,6 +814,20 @@ out-read the label it is secondary to - white on `sunset` is the ceiling at
 3.6:1 - so the bar is 2.5:1 on every scheme, checked in
 `tooltip-hint-contrast.test.ts`.
 
+**A value and the hint that sources it stack; they never share a flex row.**
+`TooltipContent` is capped at `max-w-xs`, a value that wraps on `break-all` has
+a min-content width of about one character, and a hint has to keep its
+intrinsic width to stay readable - so a row of the two hands its whole width to
+the hint and leaves the value a vertical strip of letter fragments. It takes
+only a long environment name beside an unbroken value (issue #1195), or a note
+carrying the user's own data, such as a declared column list. `TooltipValue`
+holds the stacked shape and takes the hint as a prop, so a call site using it
+cannot express the row; the one-line alternative - `min-w-0 flex-1` on the
+value plus a truncated hint - was rejected, because a clipped source name loses
+the answer to "which environment". A short label beside a short one
+(`TooltipIconButton`'s shortcut hint) has neither ingredient and stays a row.
+→ `tooltip-value-layout.test.ts` reads every tooltip block for the shape.
+
 | Scheme | Light (`--primary` = `--primary-fill`) | Dark `--primary` | Dark `--primary-fill` |
 |--------|-----------|----------|----------|
 | `sunset` | `24 90% 46%` | `24 95% 58%` | `24 90% 46%` |

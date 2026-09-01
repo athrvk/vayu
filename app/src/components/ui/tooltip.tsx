@@ -54,4 +54,40 @@ function TooltipHint({ className, ...props }: React.ComponentProps<"span">) {
 	return <span className={cn("text-primary-foreground/80", className)} {...props} />;
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipHint, TooltipProvider };
+/**
+ * A tooltip's value line, with the hint that says where the value came from.
+ *
+ * **The two never share a flex row** (issue #1195). `TooltipContent` is capped
+ * at `max-w-xs`, a value wraps on `break-all` - a min-content width of about
+ * one character - and a hint has to keep its intrinsic width to stay readable,
+ * so a row of the two hands its whole width to the hint and leaves the value a
+ * vertical strip of letter fragments. That is not a rare shape: it needs only a
+ * long environment name beside an unbroken value, and it hid the URL-ish values
+ * these tooltips exist to show. Stacking them gives the value the full width
+ * whichever of the two is long, and costs a hint that is short today nothing
+ * but a line.
+ *
+ * The single-line alternative - `min-w-0 flex-1` on the value plus a truncated
+ * hint - was rejected: a clipped source name loses the answer to "which
+ * environment", which is half of what the reader hovered for.
+ */
+function TooltipValue({
+	hint,
+	className,
+	children,
+}: {
+	/** Where the value came from - an environment, a bound row, a contract. */
+	hint?: React.ReactNode;
+	/** Classes for the value itself: its typeface, or the muted italic states. */
+	className?: string;
+	children: React.ReactNode;
+}) {
+	return (
+		<span className="flex flex-col gap-0.5">
+			<span className={cn("break-all", className)}>{children}</span>
+			{hint ? <TooltipHint>{hint}</TooltipHint> : null}
+		</span>
+	);
+}
+
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipHint, TooltipValue, TooltipProvider };

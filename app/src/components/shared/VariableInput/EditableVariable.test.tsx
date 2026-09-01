@@ -66,6 +66,43 @@ function renderToken(props: Partial<React.ComponentProps<typeof EditableVariable
 	);
 }
 
+/**
+ * Issue #1195. jsdom has no layout, so the assertion is the class contract that
+ * decides the layout rather than a measurement: the value and its hint are
+ * stacked (`flex-col`), and the hint no longer refuses to shrink beside a
+ * `break-all` value. Under the one-row shape those two classes were the reason
+ * a long source name took the whole 320px cap and left the value a vertical
+ * strip of letter fragments - so restoring that shape reds this.
+ *
+ * Radix renders the content twice while open; the first match is the visible
+ * copy and the hidden one carries the same markup.
+ */
+function expectStacked(valueText: string, hintText: string) {
+	const value = screen.getAllByText(valueText)[0];
+	const hint = screen.getAllByText(hintText)[0];
+	expect(value.parentElement).toBe(hint.parentElement);
+	expect(value.parentElement?.className).toContain("flex-col");
+	expect(hint.className).not.toContain("shrink-0");
+}
+
+describe("a long value stays readable beside a long source name", () => {
+	// The reported pair: an unbroken domain, and an environment named in prose.
+	const LONG_VALUE = "acme-eu-storefront-staging.myshopify.com";
+	const LONG_SOURCE = "Staging - EU storefront integration";
+
+	it("stacks the value above its source rather than sharing one row", () => {
+		renderToken({ value: LONG_VALUE, sourceName: LONG_SOURCE });
+		expectStacked(LONG_VALUE, LONG_SOURCE);
+	});
+
+	it("still prints both, in full", () => {
+		// The layout must not have bought its width by clipping either one.
+		renderToken({ value: LONG_VALUE, sourceName: LONG_SOURCE });
+		expect(screen.getAllByText(LONG_VALUE).length).toBeGreaterThan(0);
+		expect(screen.getAllByText(LONG_SOURCE).length).toBeGreaterThan(0);
+	});
+});
+
 describe("the hover preview", () => {
 	it("shows the resolved value without opening anything", () => {
 		renderToken();
@@ -180,6 +217,13 @@ describe("a bound row's column answers the token", () => {
 		renderToken();
 		expect(screen.getAllByText("mrc_8813").length).toBeGreaterThan(0);
 		expect(screen.queryByText("Bound row")).not.toBeInTheDocument();
+	});
+
+	it("stacks the cell above its Bound row hint too", () => {
+		// The bound-row branch is the second copy of the layout below, and it was
+		// the second copy of the defect.
+		renderToken({ name: "email", value: "staging@acme.io", variables: withRow });
+		expectStacked("alice@acme.io", "Bound row");
 	});
 
 	it("never lets a row's cell reveal a secret variable's value", () => {
