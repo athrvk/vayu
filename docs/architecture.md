@@ -203,7 +203,7 @@ one app instance may drive it:
   page-reclaim rewrite before the engine listens at all, and that whole window
   used to be blank screen. Nothing is lost by overlapping them: the renderer
   tolerates an absent engine by design, polling `/health` itself and rendering
-  the disconnected state until one answers. MCP still starts after the window,
+  the starting state until one answers. MCP still starts after the window,
   for its own reason - it reads a config file, and a corrupt one must not cost
   the user a window.
 - **MCP is *loaded* after the window too, not merely started there.** Placing the

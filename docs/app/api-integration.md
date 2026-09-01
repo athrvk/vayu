@@ -1402,15 +1402,28 @@ useHealthQuery() // TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS (1s) while erroring
 ```
 
 The window loads alongside the engine rather than after it, so an ordinary
-launch spends its first seconds disconnected; polling that state at the 30s
-cadence could leave a launch reading disconnected for half a minute after the
-engine was already serving. A poll that succeeds right after one that failed
-also triggers `queryClient.invalidateQueries()` once - collections, runs and
-config gave up after two retries while the engine was down, a connection
+launch spends its first seconds starting rather than connected; polling that
+state at the 30s cadence could leave a launch showing it for half a minute
+after the engine was already serving. A poll that succeeds right after one that
+failed also triggers `queryClient.invalidateQueries()` once - collections, runs
+and config gave up after two retries while the engine was down, a connection
 refused by a closed port is a plain `Error` rather than an `ApiError`, and
 `refetchOnReconnect` only fires on the browser's online/offline event, which
 localhost never changes - so nothing else would ever revisit their error state
 once the engine came back.
+
+A failed poll does not mean `engineStatus` becomes `unreachable` outright:
+`engineStatusAfterFailedPoll` (`queries/health.ts`) reads `starting` for a
+launch whose engine has never yet answered and is still inside
+`TIMING.ENGINE_STARTUP_GRACE_MS` (45s) of its own mount, and `unreachable`
+otherwise - past that window, or after an engine that had answered stops
+answering. That 45s is the same budget the main process spends on a cold
+engine before it gives up and logs `EngineNotReadyError`
+(`ENGINE_HEALTH_POLL_BUDGET_MS` in `electron/constants.ts`) - it is the same
+question asked from the other side of the process boundary - and since the
+two files' tsconfigs share no module graph, `health.test.ts` reads the
+constant out of `electron/constants.ts`'s source text and asserts it equals
+`TIMING.ENGINE_STARTUP_GRACE_MS`, so the two cannot drift apart unnoticed.
 
 **Health Response:**
 ```typescript

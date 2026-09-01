@@ -34,12 +34,55 @@ export function healthPollIntervalMs(status: "error" | "pending" | "success"): n
 }
 
 /**
+ * What a failed poll means, given the launch it failed on.
+ *
+ * A refused connection is the same transport error either way, so the failure
+ * itself cannot tell a cold start from a dead engine - only its place in the
+ * session can. An engine that answered once and stopped is unreachable
+ * immediately, with no grace: it proved it could serve, so its silence is news.
+ *
+ * Derived here rather than pushed from the main process. `sidecar.ts` knows more
+ * precisely - it holds the child handle and raises `EngineNotReadyError` on the
+ * same budget - but `preload.ts` exposes no engine-status channel, and adding
+ * one to say something the renderer's own poll already knows would be a second
+ * source of truth for one label.
+ */
+export function engineStatusAfterFailedPoll(
+	hasEverConnected: boolean,
+	msSinceMount: number
+): "starting" | "unreachable" {
+	if (hasEverConnected) return "unreachable";
+	return msSinceMount < TIMING.ENGINE_STARTUP_GRACE_MS ? "starting" : "unreachable";
+}
+
+/**
  * Engine health check with automatic polling
  * Updates engine store with connection status
  */
 export function useHealthQuery() {
-	const { setEngineConnected, setEngineError, setEngineRecovery } = useEngineStore();
+	const { setEngineStatus, setEngineError, setEngineRecovery } = useEngineStore();
 	const queryClient = useQueryClient();
+
+	/**
+	 * When this session started counting, and whether the engine has ever
+	 * answered it - the two facts that separate a cold start from a dead engine.
+	 *
+	 * Mount is the right zero: the hook is mounted once by `App`, at first paint,
+	 * which is when the main process spawned the engine and started spending its
+	 * own budget on the same wait. Stamped in an effect rather than in the render
+	 * that declares the ref, because a clock read during render is impure
+	 * (`react-hooks/purity`) - and nothing can have polled before this runs,
+	 * provided this effect stays declared ahead of the sync effect below. In the
+	 * other order a launch's first failure would measure against zero, land far
+	 * past the grace window, and report the failure this issue exists to hide -
+	 * which is what "records no reason…" in `health.test.ts` catches.
+	 */
+	const mountedAt = useRef(0);
+	const hasEverConnected = useRef(false);
+
+	useEffect(() => {
+		mountedAt.current = Date.now();
+	}, []);
 
 	/**
 	 * Set by a poll that failed, cleared by the recovery it earns.
@@ -65,7 +108,8 @@ export function useHealthQuery() {
 	// Sync query state with app store
 	useEffect(() => {
 		if (query.isSuccess && query.data?.status === "ok") {
-			setEngineConnected(true);
+			hasEverConnected.current = true;
+			setEngineStatus("connected");
 			setEngineError(null);
 			// Absent means a clean start, so it clears rather than being left
 			// alone - the engine that answered this poll is the authority on
@@ -89,7 +133,17 @@ export function useHealthQuery() {
 			}
 		} else if (query.isError) {
 			sawDisconnect.current = true;
-			setEngineConnected(false);
+			const status = engineStatusAfterFailedPoll(
+				hasEverConnected.current,
+				Date.now() - mountedAt.current
+			);
+			setEngineStatus(status);
+			// A launch still inside the grace window has nothing to report yet, and
+			// the poll that ends the window carries the reason with it.
+			if (status === "starting") {
+				setEngineError(null);
+				return;
+			}
 			const errorMessage =
 				query.error instanceof Error ? query.error.message : "Cannot connect to engine";
 			setEngineError(errorMessage);
@@ -99,7 +153,7 @@ export function useHealthQuery() {
 		query.isError,
 		query.data,
 		query.error,
-		setEngineConnected,
+		setEngineStatus,
 		setEngineError,
 		setEngineRecovery,
 		queryClient,
