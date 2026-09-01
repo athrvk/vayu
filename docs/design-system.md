@@ -923,12 +923,28 @@ composes with page zoom.
 | Title / small heading | 15px | semibold | `text-md font-semibold` |
 | Body / default | 13px | regular | `text-sm` |
 | Small label | 12px | medium | `text-xs font-medium` |
-| Micro / badge | 10–11px | mono bold | `text-[10px] font-mono font-bold` |
+| Micro / badge | 10–11px | mono semibold | `text-[10px] font-mono font-semibold` |
 | URL / path | 12–13px | mono | `text-xs font-mono` |
 
 **Only `text-[10px]`, `text-[11px]`, `text-[22px]` and `text-[34px]` may be
 written as arbitrary values.** Everything else has a named step, and
 `type-scale.test.ts` fails on anything outside that set.
+
+**The micro/badge step is semibold because 600 is the heaviest face the code
+font ships.** `fonts.css` loads JetBrains Mono - the default `--font-mono` - at
+400/500/600, and Fira Code and IBM Plex Mono at 400/500; only Space Mono, one of
+four selectable code faces, has a real 700. So `font-mono font-bold` on a chip
+renders a synthesised weight for every user who has not picked that one face -
+which is what this row used to specify while `MethodBadge`, the primitive that
+owns the step, shipped `font-semibold` (#1199). `type-scale.test.ts` now reads
+this row and every 10-11px mono class string in `src`, and fails on a weight
+above 600 in either, so the two cannot part again.
+
+Two things at this size deliberately carry no badge weight. A chip that prints a
+*value* rather than a label - a column name, a cookie attribute - is the URL /
+path step and stays unweighted. And a numeric readout may take `font-medium` to
+lift one figure above its unweighted siblings, as the timing waterfall and the
+phase percentiles do; that is emphasis inside a row, not a badge.
 
 The app had drifted to **182 arbitrary sizes across 11 distinct values**. Half
 duplicated a step that already existed - `text-[12px]` *is* `text-xs`,
@@ -1895,7 +1911,7 @@ for, so interrupting what they are reading is the wrong trade.
 
 ```tsx
 <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel shrink-0">
-  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-bold text-[11px] */}
+  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-semibold text-[11px] */}
   <UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-[13px] font-mono focus:border-primary focus:outline-none transition-colors" />
 
   {/* Primary action */}

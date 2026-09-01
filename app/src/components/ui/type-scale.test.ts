@@ -31,6 +31,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, globSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
 // This file sits in `src/components/ui`, so `src/` is two levels up.
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -86,6 +87,118 @@ describe("type scale", () => {
 			}
 		}
 		expect(half.join("\n")).toBe("");
+	});
+});
+
+/**
+ * The weight half of the same table, which nothing checked until #1199.
+ *
+ * `docs/design-system.md` said the micro/badge step was `font-mono font-bold`
+ * and the primitive that owns the step - `MethodBadge` - had always rendered
+ * `font-semibold`, so the row was a claim about a component that did not match
+ * it. Four other chips had copied the documented bold.
+ *
+ * Semibold is what the code font can actually render: `fonts.css` bundles
+ * JetBrains Mono - the default `--font-mono` - at 400/500/600, and only Space
+ * Mono of the four selectable code faces at 700. So `font-mono font-bold` is a
+ * *synthesised* face for everyone who has not picked that one, which is the
+ * same reason the fonts note in the doc gives. The size guard above would not
+ * have caught any of it, because every one of those chips was on the scale.
+ *
+ * The rule this enforces is a ceiling, not a single value: a weight *above* 600
+ * cannot render, while `font-medium` on a numeric readout is a real face and a
+ * deliberate emphasis (`TimingWaterfall`, `PhasePercentiles`).
+ */
+const MICRO_MONO_SIZES = ["text-[10px]", "text-[11px]"] as const;
+const MICRO_MONO_WEIGHT = "font-semibold";
+
+/** Any Tailwind weight utility, `semibold` first so it wins over `bold`. */
+const WEIGHT_CLASS = /font-(semibold|extrabold|bold|medium|normal|light|thin|black)\b/;
+
+/** The weights above 600, which no code face but Space Mono can draw. */
+const HEAVIER_THAN_SEMIBOLD = new Set(["font-bold", "font-extrabold", "font-black"]);
+
+describe("the micro/badge step's weight", () => {
+	const docPath = fromRepoRoot(DOC_READING_GUARDS.typeScale.paths[0]);
+	const doc = readFileSync(docPath, "utf8");
+
+	/**
+	 * The Type Scale Conventions table, as `| Use | Size | Weight | Class |`
+	 * rows. Parsed rather than grepped so a row that moves is still found, and
+	 * so the count below is a real proof the table was located.
+	 */
+	const rows = doc
+		.slice(doc.indexOf("### Type Scale Conventions"))
+		.split("\n")
+		.filter((line) => line.startsWith("|") && !/^\|[-|\s]+\|$/.test(line))
+		.map((line) =>
+			line
+				.split("|")
+				.slice(1, -1)
+				.map((cell) => cell.trim())
+		)
+		.filter((cells) => cells.length === 4 && cells[0] !== "Use");
+
+	it("read the table", () => {
+		// The scan this whole block rests on: a heading that moved, or a table
+		// rewritten into another shape, must fail here rather than pass by
+		// matching nothing.
+		expect(doc.length).toBeGreaterThan(1000);
+		expect(rows.length).toBeGreaterThanOrEqual(8);
+	});
+
+	it("is documented as the weight the app renders", () => {
+		const micro = rows.find((cells) => cells[0].startsWith("Micro / badge"));
+		expect(micro, "no 'Micro / badge' row in the Type Scale Conventions table").toBeDefined();
+		const [, , weight, klass] = micro as string[];
+
+		// Both cells, because they drifted as a pair: the Weight cell is what a
+		// contributor reads and the Class cell is what they paste. `semibold`
+		// leads the alternation so it is not read as the `bold` inside it.
+		expect(/\b(semibold|extrabold|bold|medium|regular|normal|light)\b/.exec(weight)?.[1]).toBe(
+			"semibold"
+		);
+		expect(klass).toContain(MICRO_MONO_WEIGHT);
+		expect(klass).toContain("font-mono");
+	});
+});
+
+describe("no chip at the micro/badge step asks for a face the app has not bundled", () => {
+	/**
+	 * Every class string that puts a mono utility and a 10-11px size together.
+	 * A weight named here must be the documented one; a string that names no
+	 * weight is fine - it is either inheriting `Badge`'s own `font-semibold` or
+	 * printing a value, which the URL/path step leaves unweighted.
+	 *
+	 * This sees a class only where it is written as a literal beside the size.
+	 * `MethodBadge` composes the two through `cn()` in separate arguments, so
+	 * the step's own primitive is pinned by rendering it instead
+	 * (`MethodBadge.test.tsx`), not here.
+	 */
+	const found: string[] = [];
+	const offences: string[] = [];
+
+	for (const file of files) {
+		const source = readFileSync(join(srcRoot, file), "utf8");
+		for (const [literal] of source.matchAll(/"[^"\n]*font-mono[^"\n]*"/g)) {
+			if (!MICRO_MONO_SIZES.some((size) => literal.includes(size))) continue;
+			found.push(`${relative(".", file)}  ${literal}`);
+			const weight = WEIGHT_CLASS.exec(literal)?.[0];
+			if (weight === undefined || !HEAVIER_THAN_SEMIBOLD.has(weight)) continue;
+			offences.push(
+				`${relative(".", file)}  ${literal}\n  ` +
+					`${weight} at the micro/badge step is a synthesised face - the ` +
+					`default code font ships no weight above 600. Use ${MICRO_MONO_WEIGHT}.`
+			);
+		}
+	}
+
+	it("scans a real set of chips", () => {
+		expect(found.length).toBeGreaterThan(3);
+	});
+
+	it("uses no weight the code font cannot draw", () => {
+		expect(offences.join("\n")).toBe("");
 	});
 });
 

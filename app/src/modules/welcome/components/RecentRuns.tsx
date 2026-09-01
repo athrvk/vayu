@@ -77,7 +77,7 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 							className="group flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						>
 							<span className="flex min-w-0 flex-1 items-center gap-2">
-								<span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase">
+								<span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase">
 									{run.type === "load" ? "Load" : "Design"}
 								</span>
 								{method && <MethodBadge method={method} size="sm" />}

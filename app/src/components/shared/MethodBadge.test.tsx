@@ -122,6 +122,25 @@ describe("MethodBadge - the text variant is unchanged", () => {
 	});
 });
 
+describe("MethodBadge - the micro/badge weight", () => {
+	/*
+	 * This chip *is* the micro/badge step of the type scale, and the step's
+	 * weight is semibold: `fonts.css` bundles no mono family at 700, so
+	 * `font-bold` here would be a synthesised face (#1199). The doc row and
+	 * every chip written as one literal are pinned by `type-scale.test.ts`;
+	 * this badge composes the weight and the size through `cn()` in separate
+	 * arguments, which no source scan can pair up - so it is rendered here.
+	 */
+	it("renders semibold at both sizes, never a synthesised bold", () => {
+		for (const size of ["sm", "md"] as const) {
+			const badge = renderBadge(<MethodBadge method="GET" size={size} />);
+			expect(badge.className).toContain("font-semibold");
+			expect(badge.className).not.toContain("font-bold");
+			expect(badge.className).toContain("font-mono");
+		}
+	});
+});
+
 describe("MethodBadge - existing behaviour", () => {
 	it("upper-cases the method and keeps the muted dimming", () => {
 		const badge = renderBadge(<MethodBadge method="post" muted />);
