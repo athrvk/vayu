@@ -17,13 +17,14 @@ import type { LoadTestMetrics, RunReport } from "@/types";
 import { type Breakpoint } from "../../../utils/computeBreakpoint";
 import { useClientSettingsStore } from "@/stores";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
-import { pickConcurrency } from "./buildData";
+import { buildConcurrencyScatter } from "./buildData";
 import { axisMs, fmtMs } from "./formatters";
 
 /**
- * Response time vs concurrency - a scatter of per-tick (concurrency, p99). The
- * flat-left headroom, the elbow (breakpoint) and the steep-right saturation read
- * against the origin. Amber marker at the SLO-crossing concurrency.
+ * Response time vs concurrency - a scatter of (concurrency, p99), one point per
+ * chart bucket. The flat-left headroom, the elbow (breakpoint) and the
+ * steep-right saturation read against the origin. Amber marker at the
+ * SLO-crossing concurrency.
  */
 export function ResponseTimeVsConcurrencyChart({
 	history,
@@ -38,22 +39,18 @@ export function ResponseTimeVsConcurrencyChart({
 	 *  dot for that tick, and hovering a dot moves the time charts' cursor. */
 	syncKey?: string;
 }) {
+	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const { data, focusTimes } = useMemo(() => {
-		// uPlot needs x ascending; concurrency rises over a ramp, but sort to be safe.
-		// Keep each point's timestamp aligned to the sorted order so the focus
-		// channel can map a dot ↔ a moment in time.
-		const pts = history
-			.map((m) => ({
-				c: pickConcurrency(m),
-				p99: m.latency_p99_ms ?? 0,
-				t: m.elapsed_seconds,
-			}))
-			.sort((a, b) => a.c - b.c);
+		// Bucketed to the same width as every other chart here, so a dot is a
+		// bucket rather than a tick and the redraw cost stops following the
+		// retention window. `times` keeps each point's moment for the focus
+		// channel, which maps a dot ↔ the time charts' cursor.
+		const { concurrency, p99, times } = buildConcurrencyScatter(history, bucketSeconds);
 		return {
-			data: [pts.map((p) => p.c), pts.map((p) => p.p99)] as uPlot.AlignedData,
-			focusTimes: pts.map((p) => p.t),
+			data: [concurrency, p99] as uPlot.AlignedData,
+			focusTimes: times,
 		};
-	}, [history]);
+	}, [history, bucketSeconds]);
 
 	const series: UPlotSeriesSpec[] = [
 		// `categorical`, not `primary`: `--primary` tracks the user's accent theme,
