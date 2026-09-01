@@ -28,12 +28,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SRC, tooltipBlocks } from "./tooltip-blocks.testkit";
 
 const uiDir = dirname(fileURLToPath(import.meta.url));
-const SRC = join(uiDir, "..", "..");
 const css = readFileSync(join(SRC, "index.css"), "utf8");
 const tooltip = readFileSync(join(uiDir, "tooltip.tsx"), "utf8");
 
@@ -134,31 +134,16 @@ describe("a tooltip hint on the tooltip's own fill", () => {
  * rendered-class guard in `tooltip-icon-button.test.tsx` exists alongside it.
  * The two catch different halves and neither is sufficient.
  */
-function tsxFiles(dir: string): string[] {
-	const out: string[] = [];
-	for (const entry of readdirSync(dir, { withFileTypes: true })) {
-		if (entry.name === "node_modules" || entry.name === "dist") continue;
-		const full = join(dir, entry.name);
-		if (entry.isDirectory()) out.push(...tsxFiles(full));
-		else if (entry.name.endsWith(".tsx") && !entry.name.includes(".test.")) out.push(full);
-	}
-	return out;
-}
-
-/** `<TooltipContent …>…</TooltipContent>`, comments stripped so prose about the
- *  rule does not read as a violation of it. */
-const TOOLTIP_BLOCK = /<TooltipContent\b[^>]*>[\s\S]*?<\/TooltipContent>/g;
-
 /** The foregrounds tuned for the canvas: muted, plain, and the `-text` tier. */
 const CANVAS_FOREGROUND = /\btext-(?:muted-foreground|foreground|[a-z]+-text)\b/;
 
-const blocks = tsxFiles(SRC).flatMap((file) =>
-	[
-		...readFileSync(file, "utf8")
-			.replace(/\/\*[\s\S]*?\*\//g, "")
-			.matchAll(TOOLTIP_BLOCK),
-	].map((m) => ({ file, source: m[0] }))
-);
+/**
+ * The walk itself is `tooltip-blocks.testkit.ts`, shared with the layout guard
+ * (issue #1195). It was written here first and copied there, which is the shape
+ * this repo has a rule about: widening the block regex, or changing which
+ * directories it skips, has to reach both scans.
+ */
+const blocks = tooltipBlocks;
 
 describe("every tooltip in the app, not only the three this fix touched", () => {
 	it("found the tooltips to scan", () => {

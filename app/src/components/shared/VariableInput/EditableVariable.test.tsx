@@ -83,6 +83,10 @@ function expectStacked(valueText: string, hintText: string) {
 	expect(value.parentElement).toBe(hint.parentElement);
 	expect(value.parentElement?.className).toContain("flex-col");
 	expect(hint.className).not.toContain("shrink-0");
+	// The other half of the contract, and the half the stack exists to make
+	// safe: a value long enough to need it still wraps mid-token rather than
+	// widening the tooltip past its cap or spilling out of it.
+	expect(value.className).toContain("break-all");
 }
 
 describe("a long value stays readable beside a long source name", () => {
