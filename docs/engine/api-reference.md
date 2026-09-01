@@ -5896,6 +5896,17 @@ List test runs (design mode, load tests and collection runs), newest first
 `summary` rather than the full `configSnapshot`, so the polled history sidebar
 stays cheap as history grows.
 
+Each row's `summary` is derived from that run's `config_snapshot`, and the
+derivation is **cached per run id** (issue #1150): a snapshot is written once,
+when the run is created, so a repeated poll re-serves what the previous one
+built instead of re-parsing up to 500 snapshots a tick. The cache is bounded and
+holds nothing a request cannot rebuild, so it changes no answer - a run deleted
+between polls is gone from the list because the query no longer returns it, not
+because anything was invalidated. This route also logs at **debug**, not info: it
+is the one endpoint a visible client polls, and an info line here reached the
+console of every engine started at the default app verbosity, every five
+seconds.
+
 **Query parameters** (passing **any** of them opts into the paginated envelope):
 - `limit` - page size (default 50, invalid/&le;0 falls back to 50, capped at 500).
 - `offset` - rows to skip (default 0, negative floored to 0).

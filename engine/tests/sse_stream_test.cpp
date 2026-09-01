@@ -34,6 +34,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/server.hpp"
 #include "vayu/http/sse_stream.hpp"
 
@@ -727,7 +728,7 @@ class RelayTest : public ::testing::Test {
         ctx_     = std::make_unique<vayu::http::routes::RouteContext> (
         vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, false,
         nullptr, authorize_manager_, cookie_jar_, mock_issuer_manager_,
-        inbox_manager_, mock_server_manager_, *manager_ });
+        inbox_manager_, mock_server_manager_, *manager_, run_summary_cache_ });
         vayu::http::routes::register_event_stream_routes (*ctx_);
         svr_.set_write_timeout (60, 0);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
@@ -794,6 +795,7 @@ class RelayTest : public ::testing::Test {
     vayu::http::MockIssuerManager mock_issuer_manager_;
     vayu::http::InboxManager inbox_manager_;
     vayu::http::MockServerManager mock_server_manager_;
+    vayu::http::RunSummaryCache run_summary_cache_;
     /// Held by pointer so `TearDown` can join its workers *before* the
     /// database they write through goes away - see the note there (#646).
     std::unique_ptr<SseStreamManager> manager_;
@@ -913,7 +915,7 @@ class StreamExecuteTest : public ::testing::Test {
         ctx_     = std::make_unique<vayu::http::routes::RouteContext> (
         vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, false,
         nullptr, authorize_manager_, cookie_jar_, mock_issuer_manager_,
-        inbox_manager_, mock_server_manager_, *manager_ });
+        inbox_manager_, mock_server_manager_, *manager_, run_summary_cache_ });
         vayu::http::routes::register_execution_routes (*ctx_);
         vayu::http::routes::register_event_stream_routes (*ctx_);
         svr_.set_write_timeout (60, 0);
@@ -1037,6 +1039,7 @@ class StreamExecuteTest : public ::testing::Test {
     vayu::http::MockIssuerManager mock_issuer_manager_;
     vayu::http::InboxManager inbox_manager_;
     vayu::http::MockServerManager mock_server_manager_;
+    vayu::http::RunSummaryCache run_summary_cache_;
     /// Held by pointer so `TearDown` can join its workers *before* the
     /// database they write through goes away - see the note there (#646).
     std::unique_ptr<SseStreamManager> manager_;

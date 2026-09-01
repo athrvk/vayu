@@ -102,6 +102,11 @@ class Server {
     InboxManager inbox_manager_;
     MockServerManager mock_server_manager_;
     SseStreamManager sse_manager_;
+    /// Read only by the `/runs` handler, which runs on the httplib thread pool
+    /// - so it needs no place in the shutdown ordering above, unlike the
+    /// managers that own listeners or transfers. It holds derived data and can
+    /// be dropped at any point without losing anything (see #1150).
+    RunSummaryCache run_summary_cache_;
     httplib::Server server_;
     std::thread server_thread_;
     std::atomic<bool> is_running_{ false };
