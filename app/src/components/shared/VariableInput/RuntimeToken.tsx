@@ -32,7 +32,7 @@
  * tooltip that says where the value will come from.
  */
 
-import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from "@/components/ui";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipValue } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { DataTokenTone } from "@/lib/data-contract";
 import { DATA_TOKEN_TONE_CLASS } from "@/lib/data-token-tone";
@@ -72,10 +72,12 @@ export default function RuntimeToken({
 				</span>
 			</TooltipTrigger>
 			<TooltipContent side="bottom" className="max-w-xs">
-				<span className="flex items-baseline gap-2">
-					<span className="break-all">{description}</span>
-					<TooltipHint className="shrink-0">{note}</TooltipHint>
-				</span>
+				{/*
+				 * The same stacked shape as `EditableVariable`, and for a sharper
+				 * reason: this note carries the declared column list, so it is the
+				 * user's own data and unbounded in length (issue #1195).
+				 */}
+				<TooltipValue hint={note}>{description}</TooltipValue>
 			</TooltipContent>
 		</Tooltip>
 	);
