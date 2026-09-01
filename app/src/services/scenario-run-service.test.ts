@@ -23,21 +23,25 @@
  * network is never touched.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockSetStreaming = vi.fn();
 const mockSetError = vi.fn();
 const mockStartRun = vi.fn();
-const mockAddStep = vi.fn();
+const mockAddSteps = vi.fn();
 vi.mock("@/stores/scenario-run-store", () => ({
 	useScenarioRunStore: {
 		getState: () => ({
 			startRun: mockStartRun,
-			addStep: mockAddStep,
+			addSteps: mockAddSteps,
 			setStreaming: mockSetStreaming,
 			setError: mockSetError,
 		}),
 	},
+}));
+// The one thing the service reads from the settings store is the cadence.
+vi.mock("@/stores", () => ({
+	useClientSettingsStore: { getState: () => ({ liveRefreshMs: FLUSH_MS }) },
 }));
 vi.mock("./sse-client", () => ({ sseClient: { connect: vi.fn() } }));
 vi.mock("./api", () => ({ apiService: { getRunReport: vi.fn() } }));
@@ -47,15 +51,55 @@ import { sseClient } from "./sse-client";
 import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
+import type { ScenarioStepEvent } from "@/types";
+
+/** The live-refresh cadence these cases run at. */
+const FLUSH_MS = 500;
 
 /** `handleClose` is private; the SSE client is what calls it in production. */
 function closeStream(): Promise<void> {
 	return (scenarioRunService as unknown as { handleClose: () => Promise<void> }).handleClose();
 }
 
-/** Reset the service's `activeRunId` between cases without exporting it. */
+/** Likewise `handleError` - a transport failure is what calls it. */
+function failStream(message: string): void {
+	(scenarioRunService as unknown as { handleError: (e: Error) => void }).handleError(
+		new Error(message)
+	);
+}
+
+/**
+ * Deliver a step the way the stream does: through the handler the service
+ * handed `sseClient.connect`, so the wiring is under test alongside the
+ * buffering rather than reached around.
+ */
+function deliverStep(stepIndex: number): void {
+	const calls = vi.mocked(sseClient.connect).mock.calls;
+	const onStep = calls[calls.length - 1]?.[4];
+	if (!onStep) throw new Error("the service registered no step handler");
+	onStep({
+		iteration: 0,
+		stepIndex,
+		name: `Step ${stepIndex + 1}`,
+		outcome: "passed",
+		statusCode: 200,
+		latencyMs: 10,
+	});
+}
+
+/** Every step of every batch committed so far, in order. */
+function committedSteps(): ScenarioStepEvent[] {
+	return mockAddSteps.mock.calls.flatMap((call) => call[0] as ScenarioStepEvent[]);
+}
+
+/** Reset the service's private stream state between cases. */
 function resetService(): void {
-	(scenarioRunService as unknown as { activeRunId: string | null }).activeRunId = null;
+	const internals = scenarioRunService as unknown as {
+		activeRunId: string | null;
+		discardPending: () => void;
+	};
+	internals.activeRunId = null;
+	internals.discardPending();
 }
 
 const emptyReport = { results: [], scenario: { stepsExecuted: 2, stepsStored: 0 } };
@@ -122,6 +166,86 @@ describe("ScenarioRunService", () => {
 			queryKey: queryKeys.runs.lastCollectionRuns(),
 		});
 		invalidate.mockRestore();
+	});
+
+	/**
+	 * Issue #1153. The engine's scenario loop is sequential with no pacing, so a
+	 * local target returns steps faster than the renderer can commit them one at
+	 * a time. What is pinned here is that the number of store commits follows
+	 * the cadence and not the event rate - and that no step is lost to the
+	 * buffering on any path that ends a run.
+	 */
+	describe("buffering step events", () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("commits one batch per flush window rather than one per event", () => {
+			scenarioRunService.startMonitoring("run_5");
+
+			// The first step commits on the leading edge: a reader watching a run
+			// start should not wait a window to see it began.
+			deliverStep(0);
+			expect(mockAddSteps).toHaveBeenCalledTimes(1);
+
+			// Everything inside the window rides one trailing commit, however
+			// many arrive. Reverting the buffer makes this eight.
+			for (let i = 1; i <= 8; i += 1) deliverStep(i);
+			expect(mockAddSteps).toHaveBeenCalledTimes(1);
+
+			vi.advanceTimersByTime(FLUSH_MS);
+			expect(mockAddSteps).toHaveBeenCalledTimes(2);
+			expect(mockAddSteps.mock.calls[1][0]).toHaveLength(8);
+
+			// Nothing is dropped in exchange for the commits saved.
+			expect(committedSteps().map((s) => s.stepIndex)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+		});
+
+		it("commits the buffer when the stream closes, before anything reads the list as final", async () => {
+			scenarioRunService.startMonitoring("run_6");
+			vi.mocked(apiService.getRunReport).mockResolvedValue(
+				storedReport as unknown as Awaited<ReturnType<typeof apiService.getRunReport>>
+			);
+
+			deliverStep(0);
+			deliverStep(1);
+			// Still inside the window, so the second step is buffered: without a
+			// flush here it would be the run's last step, lost between the
+			// stream ending and the report arriving.
+			expect(committedSteps()).toHaveLength(1);
+
+			await closeStream();
+
+			expect(committedSteps().map((s) => s.stepIndex)).toEqual([0, 1]);
+		});
+
+		it("commits the buffer when the stream fails, under the notice explaining why it stopped", () => {
+			scenarioRunService.startMonitoring("run_7");
+
+			deliverStep(0);
+			deliverStep(1);
+			failStream("engine gone");
+
+			expect(committedSteps().map((s) => s.stepIndex)).toEqual([0, 1]);
+			expect(mockSetError).toHaveBeenCalledWith("engine gone");
+		});
+
+		it("drops what a replaced run left buffered rather than committing it into the next", () => {
+			scenarioRunService.startMonitoring("run_8");
+			deliverStep(0);
+			deliverStep(1);
+			mockAddSteps.mockClear();
+
+			// The store clears its rows for the new run, so the previous run's
+			// buffered step belongs to a list nothing will show.
+			scenarioRunService.startMonitoring("run_9");
+			vi.advanceTimersByTime(FLUSH_MS * 2);
+
+			expect(mockAddSteps).not.toHaveBeenCalled();
+		});
 	});
 
 	it("keeps the run visible when the report refetch fails", async () => {
