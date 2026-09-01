@@ -197,12 +197,12 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 
 	// One iteration is the common case and "Iteration 1" on every row is noise;
 	// more than one and which pass a step belongs to is the whole point.
-	const showIteration = summary.hasIteration;
+	const showIteration = summary.iterationSteps > 0;
 
 	// A run bound a data set if any step says which row it took. Read off the
 	// steps rather than the report so the sentence is right for a live run too -
 	// the `step` events carry `dataRowIndex` exactly as the stored rows do.
-	const dataBound = summary.hasDataRow;
+	const dataBound = summary.dataBoundSteps > 0;
 
 	const [expanded, setExpanded] = useState<string | null>(null);
 	/*

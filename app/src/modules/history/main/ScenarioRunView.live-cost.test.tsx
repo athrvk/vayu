@@ -57,6 +57,7 @@ vi.mock("./components/ScenarioStepCard", async (importOriginal) => {
 
 import ScenarioRunView from "./ScenarioRunView";
 import { useScenarioRunStore } from "@/stores";
+import { emptyStepSummary } from "./scenario-steps";
 
 const RUN: Run = { id: "run-1", type: "scenario", status: "running", startTime: 1, endTime: 0 };
 
@@ -88,11 +89,7 @@ beforeEach(() => {
 	useScenarioRunStore.setState({
 		runId: null,
 		steps: [],
-		summary: {
-			counts: { passed: 0, failed: 0, skipped: 0, errored: 0 },
-			hasIteration: false,
-			hasDataRow: false,
-		},
+		summary: emptyStepSummary(),
 		isStreaming: false,
 		error: null,
 	});

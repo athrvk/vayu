@@ -285,14 +285,34 @@ describe("foldStepEvents, a batch at a time", () => {
 
 	it("answers the two whole-list questions the header asks", () => {
 		const plain = foldStepEvents(empty(), [event(0, 0)]);
-		expect(plain.summary.hasIteration).toBe(false);
-		expect(plain.summary.hasDataRow).toBe(false);
+		expect(plain.summary.iterationSteps).toBe(0);
+		expect(plain.summary.dataBoundSteps).toBe(0);
 
 		// A second pass over the plan, and a run bound to a data set: the row
 		// says which iteration it belongs to and which row it took.
 		const richer = foldStepEvents(plain, [event(1, 0, "passed", { dataRowIndex: 3 })]);
-		expect(richer.summary.hasIteration).toBe(true);
-		expect(richer.summary.hasDataRow).toBe(true);
+		expect(richer.summary.iterationSteps).toBe(1);
+		expect(richer.summary.dataBoundSteps).toBe(1);
+	});
+
+	it("takes a replaced row's data binding back out with it", () => {
+		/*
+		 * The mutation this pins: latching those two as booleans instead of
+		 * counting them. A replay is compared on outcome, status, latency and
+		 * name - not on `dataRowIndex` - so a replacement that changes the
+		 * outcome and carries no data row is a replace, and a latched flag would
+		 * still claim the run bound a data set that no row on screen supports.
+		 * Nothing the engine sends does this today; the fold does not need to
+		 * assume that.
+		 */
+		const bound = foldStepEvents(empty(), [event(0, 0, "passed", { dataRowIndex: 3 })]);
+		expect(bound.summary.dataBoundSteps).toBe(1);
+
+		const unbound = foldStepEvents(bound, [event(0, 0, "failed")]);
+
+		expect(unbound.steps).toHaveLength(1);
+		expect(unbound.summary.dataBoundSteps).toBe(0);
+		expect(unbound.summary).toEqual(summarizeSteps(unbound.steps));
 	});
 
 	it("leaves an empty batch alone", () => {
@@ -613,8 +633,10 @@ describe("filterSteps", () => {
 	});
 
 	it("returns the same array when neither control narrows", () => {
-		// The growing window resets on a changed total, so an untouched view
-		// must hand it the list it already had rather than a copy.
+		// An untouched view hands the list on rather than a copy of it: the
+		// window is keyed on which list is shown, and the rows below are
+		// memoized on their identity, so a copy that only looks new costs a
+		// re-render of every card for nothing.
 		expect(filterSteps(steps, { outcome: null, query: "" })).toBe(steps);
 	});
 

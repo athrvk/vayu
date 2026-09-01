@@ -329,7 +329,7 @@ export function foldStepEvents(current: StepFold, events: readonly ScenarioStepE
 		next ??= { steps: [...current.steps], summary: cloneStepSummary(current.summary) };
 
 		if (replacing) {
-			uncountStepRow(next.summary, next.steps[at]);
+			applyStepRow(next.summary, next.steps[at], -1);
 			next.steps[at] = row;
 		} else if (at === next.steps.length) {
 			// Events arrive in plan order in the ordinary case, so this is an
@@ -339,7 +339,7 @@ export function foldStepEvents(current: StepFold, events: readonly ScenarioStepE
 		} else {
 			next.steps.splice(at, 0, row);
 		}
-		countStepRow(next.summary, row);
+		applyStepRow(next.summary, row, 1);
 	}
 
 	return next ?? current;
@@ -401,51 +401,53 @@ export interface StepListSummary {
 	 * false-pass class the run summary exists to avoid.
 	 */
 	counts: OutcomeCounts;
-	/** Any step past the first pass, so a row says which iteration it belongs to. */
-	hasIteration: boolean;
-	/** Any step recording the `data` row its iteration bound. */
-	hasDataRow: boolean;
+	/**
+	 * How many steps are past the first pass. `> 0` means a row should say
+	 * which iteration it belongs to.
+	 */
+	iterationSteps: number;
+	/** How many steps recorded the `data` row their iteration bound. */
+	dataBoundSteps: number;
 }
 
 /** The summary of a list with nothing in it. */
 export function emptyStepSummary(): StepListSummary {
 	return {
 		counts: { passed: 0, failed: 0, skipped: 0, errored: 0 },
-		hasIteration: false,
-		hasDataRow: false,
+		iterationSteps: 0,
+		dataBoundSteps: 0,
 	};
 }
 
 function cloneStepSummary(summary: StepListSummary): StepListSummary {
 	return {
 		counts: { ...summary.counts },
-		hasIteration: summary.hasIteration,
-		hasDataRow: summary.hasDataRow,
+		iterationSteps: summary.iterationSteps,
+		dataBoundSteps: summary.dataBoundSteps,
 	};
 }
 
-/** Add one row to `summary`. Mutates: callers own the object they pass. */
-function countStepRow(summary: StepListSummary, row: ScenarioStepRow): void {
+/**
+ * Add one row to `summary`, or take one back out. Mutates: callers own the
+ * object they pass.
+ *
+ * Every field is a count rather than a flag, and `sign` is what makes the fold
+ * reversible: a replay that replaces a row takes the old one out before putting
+ * the new one in. A latched boolean would be cheaper by two integers and wrong
+ * the moment a replacement stopped binding a data row - a replay is compared on
+ * outcome, status, latency and name, not on `dataRowIndex` - and knowing
+ * whether any *other* row still bound one would mean rescanning the list, which
+ * is the whole-list scan this summary exists to avoid. Counting instead means
+ * the incremental summary equals {@link summarizeSteps} for any sequence of
+ * events, with no assumption about what the engine does or does not replay.
+ */
+function applyStepRow(summary: StepListSummary, row: ScenarioStepRow, sign: 1 | -1): void {
 	// A row whose outcome the engine did not name must not silently land in one
 	// of the four buckets - `stepRowFromResult` has already decided what an
 	// unstamped row counts as.
-	if (row.outcome in summary.counts) summary.counts[row.outcome] += 1;
-	if (row.iteration > 0) summary.hasIteration = true;
-	if (row.dataRowIndex !== undefined) summary.hasDataRow = true;
-}
-
-/**
- * Take one row back out of `summary`, for a row a replay is about to replace.
- *
- * Only the counts are reversed. `hasIteration` cannot need it - a replacement
- * sorts equal to the row it replaces, so both carry the same iteration - and
- * `hasDataRow` is left latched: un-setting it would mean rescanning the list
- * for another row that binds one, which is the whole-list scan this summary
- * exists to avoid, over a case the engine does not produce (the same step
- * execution, replayed, naming a different data row).
- */
-function uncountStepRow(summary: StepListSummary, row: ScenarioStepRow): void {
-	if (row.outcome in summary.counts) summary.counts[row.outcome] -= 1;
+	if (row.outcome in summary.counts) summary.counts[row.outcome] += sign;
+	if (row.iteration > 0) summary.iterationSteps += sign;
+	if (row.dataRowIndex !== undefined) summary.dataBoundSteps += sign;
 }
 
 /**
@@ -457,7 +459,7 @@ function uncountStepRow(summary: StepListSummary, row: ScenarioStepRow): void {
  */
 export function summarizeSteps(steps: readonly ScenarioStepRow[]): StepListSummary {
 	const summary = emptyStepSummary();
-	for (const step of steps) countStepRow(summary, step);
+	for (const step of steps) applyStepRow(summary, step, 1);
 	return summary;
 }
 
@@ -469,7 +471,7 @@ export function summarizeSteps(steps: readonly ScenarioStepRow[]): StepListSumma
  * These are the **whole-run** counts - `report.scenario.passed/failed/...`,
  * written from every step the runner executed - not a tally of the stored rows.
  * The rows are thinned by `maxScenarioStoredSteps` and thinning drops only
- * passes, so `countOutcomes(steps)` undercounts `passed` on any run that filled
+ * passes, so counting the rows undercounts `passed` on any run that filled
  * its store: a 6,000-step run keeping 5,000 rows would read "4,990 passed"
  * beside a header claiming 6,000 steps. The stored-row count stays the list's
  * own disclosure line (`thinningDisclosure`); the chips read the truth here.

@@ -771,8 +771,8 @@ It holds **one** run. A scenario is sequential and the app starts one at a time,
 {
   runId: string | null       // The run being streamed, or null
   steps: ScenarioStepRow[]   // Reported so far, in plan order
-  summary: StepListSummary   // The four outcome counts, plus whether any step
-                             // names an iteration or binds a data row
+  summary: StepListSummary   // The four outcome counts, plus how many steps are
+                             // past the first pass and how many bound a data row
   isStreaming: boolean
   error: string | null       // A transport failure on the stream
 }
