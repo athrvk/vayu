@@ -9,24 +9,27 @@
  * The scenario step list, as data. Node-env: none of this needs a DOM.
  *
  * Each block here is mutation-checked - reverting the behaviour it describes
- * reddens it. The two that matter most are the replay case (the SSE ring
- * replays on reconnect, so an append-only list doubles rows) and the outcome
+ * reddens it. The three that matter most are the replay case (the SSE ring
+ * replays on reconnect, so an append-only list doubles rows), the outcome
  * counts (folding `skipped` into `passed` is the false-pass this summary exists
- * to prevent).
+ * to prevent), and the batch fold's summary, which is checked against a fresh
+ * count of the rows it produced rather than against itself.
  */
 
 import { describe, it, expect } from "vitest";
 import {
-	appendStepEvent,
-	countOutcomes,
 	emptyStepListReason,
+	emptyStepSummary,
+	foldStepEvents,
 	filterSteps,
 	outcomeCountsFromReport,
 	stepKey,
 	stepRowsFromReport,
+	summarizeSteps,
 	tallyTests,
 	thinningDisclosure,
 	type ScenarioStepRow,
+	type StepFold,
 } from "./scenario-steps";
 import type { RunReport, ScenarioStepEvent, StepOutcome } from "@/types";
 
@@ -90,67 +93,76 @@ function report(partial: Partial<RunReport>): RunReport {
 describe("the live schema verdict", () => {
 	it("rides the row it arrived on", () => {
 		const verdict = { checked: true, valid: false, failuresTotal: 2 } as const;
-		const steps = appendStepEvent([], event(0, 0, "passed", { validation: { ...verdict } }));
+		const steps = append([], event(0, 0, "passed", { validation: { ...verdict } }));
 		expect(steps[0].validation).toEqual(verdict);
 	});
 
 	it("is absent for a step of an unbound collection", () => {
 		// Absent, never `{checked: false}`: a response nobody judged against a
 		// contract did not fail to be judged by one.
-		expect(appendStepEvent([], event(0, 0))[0].validation).toBeUndefined();
+		expect(append([], event(0, 0))[0].validation).toBeUndefined();
 	});
 });
 
-describe("appendStepEvent", () => {
+/**
+ * One event at a time, which is how most of the placement cases below read
+ * best. The summary is thrown away here - {@link foldStepEvents}'s own block
+ * covers it - so only the rows are under test.
+ */
+function append(steps: ScenarioStepRow[], event: ScenarioStepEvent): ScenarioStepRow[] {
+	return foldStepEvents({ steps, summary: emptyStepSummary() }, [event]).steps;
+}
+
+describe("foldStepEvents, one event at a time", () => {
 	it("appends steps in the order they arrive", () => {
 		let steps: ScenarioStepRow[] = [];
-		steps = appendStepEvent(steps, event(0, 0));
-		steps = appendStepEvent(steps, event(0, 1));
+		steps = append(steps, event(0, 0));
+		steps = append(steps, event(0, 1));
 
 		expect(steps.map(stepKey)).toEqual(["0:0", "0:1"]);
 	});
 
 	it("does not duplicate a row when the stream replays an event", () => {
 		let steps: ScenarioStepRow[] = [];
-		steps = appendStepEvent(steps, event(0, 0));
-		steps = appendStepEvent(steps, event(0, 1));
+		steps = append(steps, event(0, 0));
+		steps = append(steps, event(0, 1));
 
 		// What a reconnect does: Last-Event-ID replays from the last id the
 		// browser saw, so events already rendered arrive a second time.
-		steps = appendStepEvent(steps, event(0, 0));
-		steps = appendStepEvent(steps, event(0, 1));
+		steps = append(steps, event(0, 0));
+		steps = append(steps, event(0, 1));
 
 		expect(steps).toHaveLength(2);
 		expect(steps.map(stepKey)).toEqual(["0:0", "0:1"]);
 	});
 
 	it("returns the same array when a replayed event changes nothing", () => {
-		const first = appendStepEvent([], event(0, 0));
-		const again = appendStepEvent(first, event(0, 0));
+		const first = append([], event(0, 0));
+		const again = append(first, event(0, 0));
 
 		expect(again).toBe(first);
 	});
 
 	it("keeps plan order when an event arrives out of order after a gap", () => {
 		let steps: ScenarioStepRow[] = [];
-		steps = appendStepEvent(steps, event(1, 0));
-		steps = appendStepEvent(steps, event(0, 2));
-		steps = appendStepEvent(steps, event(0, 0));
+		steps = append(steps, event(1, 0));
+		steps = append(steps, event(0, 2));
+		steps = append(steps, event(0, 0));
 
 		expect(steps.map(stepKey)).toEqual(["0:0", "0:2", "1:0"]);
 	});
 
 	it("keys on (iteration, stepIndex), so the same step in two iterations is two rows", () => {
 		let steps: ScenarioStepRow[] = [];
-		steps = appendStepEvent(steps, event(0, 0));
-		steps = appendStepEvent(steps, event(1, 0));
+		steps = append(steps, event(0, 0));
+		steps = append(steps, event(1, 0));
 
 		expect(steps).toHaveLength(2);
 	});
 
 	it("replaces a row when the replayed copy differs", () => {
-		let steps = appendStepEvent([], event(0, 0, "passed"));
-		steps = appendStepEvent(steps, event(0, 0, "failed"));
+		let steps = append([], event(0, 0, "passed"));
+		steps = append(steps, event(0, 0, "failed"));
 
 		expect(steps).toHaveLength(1);
 		expect(steps[0].outcome).toBe("failed");
@@ -166,7 +178,7 @@ describe("appendStepEvent", () => {
 	describe("placing a row without re-sorting the list", () => {
 		const many = (count: number) => {
 			let steps: ScenarioStepRow[] = [];
-			for (let i = 0; i < count; i += 1) steps = appendStepEvent(steps, event(0, i));
+			for (let i = 0; i < count; i += 1) steps = append(steps, event(0, i));
 			return steps;
 		};
 
@@ -177,7 +189,7 @@ describe("appendStepEvent", () => {
 
 		it("seats a row that belongs before every one already there", () => {
 			let steps = many(50);
-			steps = appendStepEvent(steps, event(0, 0, "failed", { name: "resumed" }));
+			steps = append(steps, event(0, 0, "failed", { name: "resumed" }));
 
 			// Replaced in place, not prepended as a 51st row.
 			expect(steps).toHaveLength(50);
@@ -186,7 +198,7 @@ describe("appendStepEvent", () => {
 
 		it("finds a replay in the middle of a long list rather than doubling it", () => {
 			let steps = many(200);
-			steps = appendStepEvent(steps, event(0, 97, "failed"));
+			steps = append(steps, event(0, 97, "failed"));
 
 			expect(steps).toHaveLength(200);
 			expect(steps[97].outcome).toBe("failed");
@@ -195,15 +207,121 @@ describe("appendStepEvent", () => {
 
 		it("inserts an out-of-order arrival mid-list, in its own place", () => {
 			let steps: ScenarioStepRow[] = [];
-			for (const index of [0, 1, 4, 5]) steps = appendStepEvent(steps, event(0, index));
-			steps = appendStepEvent(steps, event(0, 3));
+			for (const index of [0, 1, 4, 5]) steps = append(steps, event(0, index));
+			steps = append(steps, event(0, 3));
 
 			expect(steps.map(stepKey)).toEqual(["0:0", "0:1", "0:3", "0:4", "0:5"]);
 		});
 	});
 });
 
-describe("countOutcomes", () => {
+/**
+ * Issue #1153. The live path commits a batch per flush rather than a row per
+ * event, and carries the header's summary with it rather than letting the view
+ * recount the list. Both are only worth having if a batch says exactly what the
+ * same events said one at a time, and if the summary says exactly what a fresh
+ * count of the rows would - so that is what these pin, against
+ * {@link summarizeSteps} as an independent oracle rather than against another
+ * run of the fold itself.
+ */
+describe("foldStepEvents, a batch at a time", () => {
+	const empty = (): StepFold => ({ steps: [], summary: emptyStepSummary() });
+
+	it("folds a batch to the same rows the events would one at a time", () => {
+		const events = [event(0, 0), event(0, 1), event(1, 0, "failed"), event(1, 1, "skipped")];
+
+		const batched = foldStepEvents(empty(), events);
+		let oneAtATime: ScenarioStepRow[] = [];
+		for (const e of events) oneAtATime = append(oneAtATime, e);
+
+		expect(batched.steps).toEqual(oneAtATime);
+	});
+
+	it("carries a summary equal to a fresh count of the rows it produced", () => {
+		const batch = foldStepEvents(empty(), [
+			event(0, 0, "passed"),
+			event(0, 1, "failed"),
+			event(0, 2, "skipped"),
+			event(0, 3, "errored"),
+		]);
+
+		expect(batch.summary).toEqual(summarizeSteps(batch.steps));
+	});
+
+	it("keeps the summary right across batches, replays included", () => {
+		/*
+		 * The mutation this pins: dropping the decrement for a replaced row.
+		 * The second batch replays 0:1 with a different outcome, so a fold that
+		 * only ever adds would report the run as having both a passed and a
+		 * failed copy of one step - two outcomes from one execution, and a
+		 * `passed` count the four chips would show that no row supports.
+		 */
+		const first = foldStepEvents(empty(), [event(0, 0, "passed"), event(0, 1, "passed")]);
+		const second = foldStepEvents(first, [event(0, 1, "failed"), event(0, 2, "passed")]);
+
+		expect(second.summary).toEqual(summarizeSteps(second.steps));
+		expect(second.summary.counts).toEqual({ passed: 2, failed: 1, skipped: 0, errored: 0 });
+	});
+
+	it("returns the fold itself when every event in the batch is an idempotent replay", () => {
+		const first = foldStepEvents(empty(), [event(0, 0), event(0, 1)]);
+		const again = foldStepEvents(first, [event(0, 0), event(0, 1)]);
+
+		// Identity, not equality: the store reads this to commit nothing, so a
+		// fold that merely matched would still re-render the list on a
+		// reconnect's replay.
+		expect(again).toBe(first);
+		expect(again.steps).toBe(first.steps);
+	});
+
+	it("commits the whole batch when only part of it is a replay", () => {
+		const first = foldStepEvents(empty(), [event(0, 0)]);
+		const second = foldStepEvents(first, [event(0, 0), event(0, 1)]);
+
+		expect(second.steps).not.toBe(first.steps);
+		expect(second.steps.map(stepKey)).toEqual(["0:0", "0:1"]);
+		expect(second.summary).toEqual(summarizeSteps(second.steps));
+	});
+
+	it("answers the two whole-list questions the header asks", () => {
+		const plain = foldStepEvents(empty(), [event(0, 0)]);
+		expect(plain.summary.iterationSteps).toBe(0);
+		expect(plain.summary.dataBoundSteps).toBe(0);
+
+		// A second pass over the plan, and a run bound to a data set: the row
+		// says which iteration it belongs to and which row it took.
+		const richer = foldStepEvents(plain, [event(1, 0, "passed", { dataRowIndex: 3 })]);
+		expect(richer.summary.iterationSteps).toBe(1);
+		expect(richer.summary.dataBoundSteps).toBe(1);
+	});
+
+	it("takes a replaced row's data binding back out with it", () => {
+		/*
+		 * The mutation this pins: latching those two as booleans instead of
+		 * counting them. A replay is compared on outcome, status, latency and
+		 * name - not on `dataRowIndex` - so a replacement that changes the
+		 * outcome and carries no data row is a replace, and a latched flag would
+		 * still claim the run bound a data set that no row on screen supports.
+		 * Nothing the engine sends does this today; the fold does not need to
+		 * assume that.
+		 */
+		const bound = foldStepEvents(empty(), [event(0, 0, "passed", { dataRowIndex: 3 })]);
+		expect(bound.summary.dataBoundSteps).toBe(1);
+
+		const unbound = foldStepEvents(bound, [event(0, 0, "failed")]);
+
+		expect(unbound.steps).toHaveLength(1);
+		expect(unbound.summary.dataBoundSteps).toBe(0);
+		expect(unbound.summary).toEqual(summarizeSteps(unbound.steps));
+	});
+
+	it("leaves an empty batch alone", () => {
+		const first = foldStepEvents(empty(), [event(0, 0)]);
+		expect(foldStepEvents(first, [])).toBe(first);
+	});
+});
+
+describe("summarizeSteps", () => {
 	it("counts skipped separately from passed", () => {
 		const steps = [
 			{ ...event(0, 0, "passed") },
@@ -211,7 +329,7 @@ describe("countOutcomes", () => {
 			{ ...event(0, 2, "skipped") },
 		];
 
-		const counts = countOutcomes(steps);
+		const counts = summarizeSteps(steps).counts;
 
 		// The mutation this pins: folding `skipped` into `passed` would report
 		// 3 passed / 0 skipped, and a step that never ran would read as one that
@@ -228,7 +346,7 @@ describe("countOutcomes", () => {
 			{ ...event(0, 3, "errored") },
 		];
 
-		expect(countOutcomes(steps)).toEqual({
+		expect(summarizeSteps(steps).counts).toEqual({
 			passed: 1,
 			failed: 1,
 			skipped: 1,
@@ -237,7 +355,7 @@ describe("countOutcomes", () => {
 	});
 
 	it("is all zeros for an empty list", () => {
-		expect(countOutcomes([])).toEqual({ passed: 0, failed: 0, skipped: 0, errored: 0 });
+		expect(summarizeSteps([]).counts).toEqual({ passed: 0, failed: 0, skipped: 0, errored: 0 });
 	});
 });
 
@@ -515,8 +633,10 @@ describe("filterSteps", () => {
 	});
 
 	it("returns the same array when neither control narrows", () => {
-		// The growing window resets on a changed total, so an untouched view
-		// must hand it the list it already had rather than a copy.
+		// An untouched view hands the list on rather than a copy of it: the
+		// window is keyed on which list is shown, and the rows below are
+		// memoized on their identity, so a copy that only looks new costs a
+		// re-render of every card for nothing.
 		expect(filterSteps(steps, { outcome: null, query: "" })).toBe(steps);
 	});
 

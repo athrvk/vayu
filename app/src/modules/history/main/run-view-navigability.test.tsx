@@ -195,16 +195,18 @@ describe("a step's way back to its request", () => {
 		// the frame names the request (issue #831) and the row does not wait
 		// for the run's stored rows to be written.
 		useScenarioRunStore.getState().startRun("run-1");
-		useScenarioRunStore.getState().addStep({
-			iteration: 11,
-			stepIndex: 0,
-			name: "Checkout",
-			outcome: "failed",
-			statusCode: 500,
-			latencyMs: 3,
-			requestId: "req_checkout",
-			dataRowIndex: 11,
-		});
+		useScenarioRunStore.getState().addSteps([
+			{
+				iteration: 11,
+				stepIndex: 0,
+				name: "Checkout",
+				outcome: "failed",
+				statusCode: 500,
+				latencyMs: 3,
+				requestId: "req_checkout",
+				dataRowIndex: 11,
+			},
+		]);
 		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
 
 		fireEvent.click(screen.getByRole("button", { name: /row 12 selected/i }));
@@ -218,14 +220,16 @@ describe("a step's way back to its request", () => {
 		// A step whose plan entry has no stored request behind it. Absent, not
 		// disabled, on the same terms as the stored row above.
 		useScenarioRunStore.getState().startRun("run-1");
-		useScenarioRunStore.getState().addStep({
-			iteration: 0,
-			stepIndex: 0,
-			name: "Log in",
-			outcome: "failed",
-			statusCode: 500,
-			latencyMs: 3,
-		});
+		useScenarioRunStore.getState().addSteps([
+			{
+				iteration: 0,
+				stepIndex: 0,
+				name: "Log in",
+				outcome: "failed",
+				statusCode: 500,
+				latencyMs: 3,
+			},
+		]);
 		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
 
 		// The row is on screen - otherwise this asserts the absence of a link on

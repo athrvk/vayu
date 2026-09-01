@@ -46,6 +46,7 @@
  * be a promise this card cannot keep.
  */
 
+import { memo } from "react";
 import { ExternalLink } from "lucide-react";
 
 import { Badge, Button } from "@/components/ui";
@@ -95,11 +96,18 @@ export interface ScenarioStepCardProps {
 	/** True when the run ran more than one iteration, so the row says which. */
 	showIteration: boolean;
 	isExpanded: boolean;
-	onToggle: () => void;
+	/**
+	 * Told which step it was, rather than closing over it at the call site.
+	 *
+	 * The list holds one handler for all of its rows (issue #1153): a
+	 * per-row arrow would be a new prop on every render of the list, and the
+	 * memo below would never once hold.
+	 */
+	onToggle: (step: ScenarioStepRow) => void;
 	runId: string;
 }
 
-export default function ScenarioStepCard({
+function ScenarioStepCard({
 	step,
 	showIteration,
 	isExpanded,
@@ -221,7 +229,7 @@ export default function ScenarioStepCard({
 			error={error}
 			phases={phases}
 			isExpanded={isExpanded}
-			onToggle={onToggle}
+			onToggle={() => onToggle(step)}
 			className={cn(
 				"border border-rule",
 				step.outcome === "failed" || step.outcome === "errored"
@@ -294,3 +302,17 @@ export default function ScenarioStepCard({
 		</SampledExchange>
 	);
 }
+
+/**
+ * Memoized, because a live run re-renders the list around it (issue #1153).
+ *
+ * Up to 200 of these are mounted at once and a run streaming its steps
+ * re-renders the list several times a second, where all but the newest cards
+ * are rendering exactly what they rendered before. Every prop holds its
+ * identity across such a render: `step` rows are replaced only by an event for
+ * that same step, `onToggle` is one handler for the whole list, and the rest
+ * are primitives. The default shallow comparison is therefore the whole
+ * requirement - a custom comparator here would be a second copy of that fact,
+ * free to disagree with it.
+ */
+export default memo(ScenarioStepCard);

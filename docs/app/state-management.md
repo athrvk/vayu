@@ -762,21 +762,27 @@ the dashboard then shows no active test while one streams.
 
 #### `scenario-run-store.ts` - Live Collection-Run Steps
 
-The live half of a scenario (collection) run's tab. `ScenarioRunService` pushes each `step` SSE event in here and `ScenarioRunView` reads it, so the stream survives navigating away from the tab and back - the same split, for the same reason, as `LoadTestService` and `dashboard-store`.
+The live half of a scenario (collection) run's tab. `ScenarioRunService` pushes the `step` SSE events in here and `ScenarioRunView` reads them, so the stream survives navigating away from the tab and back - the same split, for the same reason, as `LoadTestService` and `dashboard-store`.
 
-It holds **one** run. A scenario is sequential and the app starts one at a time, so `startRun` replaces the previous run's steps rather than accumulating; a tab for an older run reads an empty list rather than whatever is streaming now. `addStep` drops an event that arrives with no run registered, because the stream is replayable and a step from a replaced run can still land on a socket that has not finished closing.
+It holds **one** run. A scenario is sequential and the app starts one at a time, so `startRun` replaces the previous run's steps rather than accumulating; a tab for an older run reads an empty list rather than whatever is streaming now. `addSteps` drops a batch that arrives with no run registered, because the stream is replayable and a step from a replaced run can still land on a socket that has not finished closing.
 
 **State:**
 ```typescript
 {
   runId: string | null       // The run being streamed, or null
   steps: ScenarioStepRow[]   // Reported so far, in plan order
+  summary: StepListSummary   // The four outcome counts, plus how many steps are
+                             // past the first pass and how many bound a data row
   isStreaming: boolean
   error: string | null       // A transport failure on the stream
 }
 ```
 
-Steps are folded in by `appendStepEvent` (`modules/history/main/scenario-steps.ts`), which keys on `(iteration, stepIndex)` rather than arrival order: the engine's SSE ring replays from `Last-Event-ID`, so a reconnect re-delivers events already rendered and an append-only list would double every row it re-saw. It returns the same array reference when a replayed event changes nothing, so an idempotent replay does not re-render the list.
+**A batch per flush, not a commit per event** (issue #1153). `ScenarioRunService` buffers arriving `step` events and commits what it collected on the user's `liveRefreshMs` cadence, the same throttle `LoadTestService` puts on its ticks. The premise for having none - that a scenario's step rate is bounded by request latency - does not hold: the engine's scenario loop is sequential with no pacing, so a local target returns hundreds of steps per second, and each one used to cost a full copy of the step list, a store notify and a re-render of the run tab. The buffer is committed on the leading edge of a window and again on a trailing timer, and drained when the stream closes or fails; a run replaced mid-flight discards whatever it left buffered, since those rows belong to a list the store has already cleared.
+
+Steps are folded in by `foldStepEvents` (`modules/history/main/scenario-steps.ts`), which keys on `(iteration, stepIndex)` rather than arrival order: the engine's SSE ring replays from `Last-Event-ID`, so a reconnect re-delivers events already rendered and an append-only list would double every row it re-saw. A whole batch costs one array copy, and the fold returns the state it was given when every event in the batch was an idempotent replay, so a reconnect's replay does not re-render the list.
+
+`summary` is maintained by that same fold rather than recounted by the view - the `dashboard-store` aggregate stance, for the same reason: a scan per commit is a scan over a list that grows for the length of the run. `ScenarioRunView` is its reader, for the four count chips and for the two whole-list questions its rows answer. It does **not** displace the report: once `report.scenario` can give the run's own totals those win, because thinning drops passes and the stored rows undercount them (see `docs/app/COMPONENTS.md`). `summarizeSteps` answers for the stored rows, which arrive complete, and is the oracle the incremental summary is tested against.
 
 Once a run reaches a terminal status its stored `results` rows are the complete record and the view reads those instead. `ScenarioRunService.handleClose` invalidates `runs.detail(runId)` and refetches `runs.report(runId)` through the query cache - the same keys the tab reads, so a bare fetch would leave the pane on the stale copy. It also invalidates `runs.lists()` (the History row still says "running") and `runs.lastCollectionRuns()` (the context bar's Last run section says it too, from its own family, and is not polled at all).
 
