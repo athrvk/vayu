@@ -74,6 +74,17 @@ constexpr const char* EOL_CHARS = "\r\n";
 constexpr double BURST_MULTIPLIER = 2.0;
 /// Cost of a single token in the rate limiter
 constexpr double TOKEN_COST = 1.0;
+/// Largest response body a design-mode send - `POST /execute` and every step
+/// of a collection run - reads into memory (issue #1157). Deliberately the
+/// same figure as the load path's `event_loop::MAX_RESPONSE_BODY_BYTES` and
+/// deliberately a *separate* one: a load run holds a body per in-flight
+/// request and refuses one past the bound, while a design send holds one at a
+/// time and is being watched by someone who asked to see it - so this one
+/// keeps the prefix it read and says the body was cut, rather than answering
+/// with nothing. What it bounds is the renderer's exposure as much as the
+/// daemon's: the whole body crosses to the app and is held there as a string.
+/// 0 = unbounded, which is what every caller that sets nothing still gets.
+constexpr size_t MAX_DESIGN_RESPONSE_BODY_BYTES = size_t{ 32 } * 1024 * 1024;
 } // namespace http
 
 /**

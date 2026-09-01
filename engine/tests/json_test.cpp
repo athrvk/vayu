@@ -162,6 +162,24 @@ TEST (JsonTest, SerializesUnnegotiatedResponseHttpVersionAsEmptyString) {
     EXPECT_EQ (json["httpVersion"], "");
 }
 
+// The live body's read cap (issue #1157). Always present, so a pane can tell
+// "not capped" from "this engine cannot say" - the same rule `httpVersion`
+// above is held to, and the one that decides whether a prefix is shown as the
+// whole response.
+TEST (JsonTest, SerializesTheBodyCapFlagOnEveryResponse) {
+    Response response;
+    response.status_code = 200;
+    response.body        = "{}";
+
+    auto json = serialize (response);
+
+    ASSERT_TRUE (json.contains ("bodyCapped"));
+    EXPECT_FALSE (json["bodyCapped"].get<bool> ());
+
+    response.body_truncated = true;
+    EXPECT_TRUE (serialize (response)["bodyCapped"].get<bool> ());
+}
+
 TEST (JsonTest, SerializesError) {
     Error error;
     error.code    = ErrorCode::Timeout;

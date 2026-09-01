@@ -235,13 +235,17 @@ function jsonResult(value: unknown): ToolResult {
 /**
  * How much of a body a tool result carries inline (issue #767).
  *
- * A tool-result budget, not an engine one. Neither engine cap fits: the config
- * entry that bounds a single response, `maxResponseBodyBytes`, documents itself
- * as load-only ("Design-mode sends are not affected"), and `maxTraceBodyBytes`
- * (5MB) is a storage bound sized for a human opening one full trace in the UI.
- * Between them a design send returns every byte it read - an ordinary page
- * fetch came back as 1.3M characters and exceeded the tool-result token limit
- * outright, with nothing in between the engine's answer and the agent.
+ * A tool-result budget, not an engine one. No engine cap fits. The config entry
+ * that bounds a single response, `maxResponseBodyBytes`, is still the load
+ * path's alone ("Design-mode sends are not affected"); `maxTraceBodyBytes`
+ * (5MB) is a storage bound sized for a human opening one full trace in the UI;
+ * and `maxDesignResponseBodyBytes` (32MB, issue #1157) does bound a design send
+ * - it is why an agent can no longer be handed an unbounded body - but 32MB is
+ * a "keep the engine's memory finite" number, three orders of magnitude past
+ * what a tool result can carry. Between them a design send returns every byte
+ * it read up to 32MB: an ordinary page fetch came back as 1.3M characters and
+ * exceeded the tool-result token limit outright, with nothing in between the
+ * engine's answer and the agent.
  *
  * 32KB is not a new number: it is `maxSampleBodyBytes`
  * (`DEFAULT_MAX_SAMPLE_BODY_BYTES`, engine `constants.hpp`), this codebase's own
@@ -315,6 +319,13 @@ function boundWireMessage(node: Record<string, unknown>): Record<string, unknown
  * `bodySize` is the engine's own byte count for this body and is exactly what a
  * truncation flag refers to, so it is used rather than recomputed; it is only
  * filled in when the engine sent no usable one.
+ *
+ * The engine's `bodyCapped` (issue #1157) is carried through untouched, and the
+ * two flags must stay distinguishable: `bodyTruncated` set here means this tool
+ * result is showing less than the engine returned, which the app's own history
+ * still has in full, while `bodyCapped` means the engine never read more than
+ * this - re-sending returns the same prefix, and only raising
+ * `maxDesignResponseBodyBytes` changes it. Both can be true of one response.
  */
 function boundExecuteResponse(value: unknown): unknown {
 	if (!isRecord(value)) return value;
@@ -3889,7 +3900,7 @@ export const TOOLS: McpTool[] = [
 		invalidates: ["run", "cookie"],
 		description:
 			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
-			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`.`,
+			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned.`,
 		annotations: {
 			title: "Send a request",
 			readOnlyHint: false,

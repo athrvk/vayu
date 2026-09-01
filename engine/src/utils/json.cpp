@@ -991,6 +991,18 @@ Json serialize (const Response& response) {
     }
     json["bodyRaw"] = response.body;
 
+    // Whether `body`/`bodyRaw` are a prefix, because the read stopped at
+    // `maxDesignResponseBodyBytes` (issue #1157). Always present, like the
+    // three fields above and for the same reason: a pane that cannot tell "not
+    // capped" from "this engine is too old to say" would have to guess, and
+    // guessing wrong shows a cut body as the whole response.
+    //
+    // Deliberately not called `bodyTruncated`: the stored trace already uses
+    // that name for `maxTraceBodyBytes` shortening a body for storage, which a
+    // re-send recovers from. This one a re-send reproduces, so the two are
+    // different facts and the app says different things about them.
+    json["bodyCapped"] = response.body_truncated;
+
     // Error information (for client-side failures)
     if (response.error_code != vayu::ErrorCode::None) {
         json["errorCode"]    = vayu::to_string (response.error_code);

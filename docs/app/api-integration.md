@@ -1116,6 +1116,7 @@ forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
   httpVersion: "HTTP/1.1",
   httpVersionDowngraded: false,
   clientCertificate: "",
+  bodyCapped: false,
   timing: { total: 150, dns: 10, connect: 20, ... },
   testResults: [
     { name: "Token was issued", passed: true, source: "pre" },
@@ -1171,6 +1172,32 @@ has to say which was used: two calls to what looks like the same API can differ
 only in which registry entry matched. The stored trace carries the same value
 under the same key, so `responseFromExecuteResult` and `responseFromRunResult`
 agree - see `client-certificate-funnels.test.ts`.
+
+`bodyCapped` says the engine stopped **reading** this response at
+`maxDesignResponseBodyBytes` (Settings → Limits, default 32MB), so `body`,
+`bodyRaw` and `bodySize` describe the prefix it read rather than what the server
+sent (issue #1157). The status and headers are the server's own, so this is a
+successful response carrying a flag. It is always present on the live body -
+absent means an engine too old to say, not "not capped" - and the stored trace
+carries the same key under `trace.response.bodyCapped`, written only when it
+happened, so `responseFromExecuteResult` normalises its `false` to `undefined`
+and the two funnels agree (`body-capped-funnels.test.ts`).
+
+The renderer keeps it strictly apart from `bodyTruncated`, which is
+`maxTraceBodyBytes` shortening a *stored* body after the whole of it was read:
+a re-send recovers from that one, while a capped read is reproduced by a
+re-send and only a bigger `maxDesignResponseBodyBytes` changes it. The response
+pane renders one `Callout` per fact and both can be on screen at once - "Body
+truncated for storage" tells the user to re-send, "Body capped while reading"
+tells them to raise the setting, and collapsing the two into one notice would
+give the wrong instruction to half the cases.
+
+A third limit is the renderer's alone and reaches no wire field:
+`LARGE_BODY_BYTES` (2MB, `shared/response-viewer/utils.ts`). Above it
+`responseFromExecuteResult` stops building the indented `body` copy - it hands
+back `bodyRaw`, which is what would be displayed anyway - and `ResponseBody`
+stops formatting, hides the view toggle and shows the first 2MB of the raw body
+under its own notice. Both are about *rendering* cost, not about what arrived.
 
 `report.sampling` carries what each of the run's bounded stores thinned away -
 `successTracesDropped` / `slowTracesDropped` for the trace records behind

@@ -431,6 +431,25 @@ struct Response {
     std::string raw_request; // Complete raw HTTP request
     std::string body;
     size_t body_size = 0;
+
+    /**
+     * @brief True when a read cap cut this body short, so `body` is a prefix
+     *        of what the server was sending (issue #1157).
+     *
+     * Set only where the cap keeps what it read - the design-mode send, which
+     * sets `ClientConfig::truncate_over_limit` - never on the paths that refuse
+     * an over-bound transfer outright (`/import/fetch`, the connection
+     * diagnostic, a load run), where there is no body left to describe.
+     *
+     * Kept apart from the stored trace's `bodyTruncated`, which is the same
+     * word for a different cut: that one is `maxTraceBodyBytes` shortening a
+     * body *for storage* after the whole of it was read and shown, and
+     * re-sending fetches all of it. This one is what was read at all, so
+     * re-sending under the same cap reads the same prefix - which is why the
+     * two reach the app as different fields.
+     */
+    bool body_truncated = false;
+
     Timing timing;
 
     /**

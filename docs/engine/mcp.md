@@ -340,10 +340,12 @@ Notes:
   contract, so an agent must branch on the key's presence rather than reading a
   zero as full non-coverage.
 - **Bodies are bounded before they reach an agent** (issue #767). `run_request`
-  and `get_run_report` were raw passthroughs, and neither engine cap covers this
+  and `get_run_report` were raw passthroughs, and no engine cap covers this
   case: `maxResponseBodyBytes` bounds load runs only ("Design-mode sends are not
-  affected") and `maxTraceBodyBytes` is 5 MB, sized for the database and a human
-  reading one full trace. So a single ordinary page fetch answered with 1.3 M
+  affected"), `maxTraceBodyBytes` is 5 MB, sized for the database and a human
+  reading one full trace, and `maxDesignResponseBodyBytes` (issue #1157) does
+  bound a design send but at 32 MB, three orders of magnitude past what a tool
+  result can carry. So a single ordinary page fetch answered with 1.3 M
   characters and blew the tool-result token limit outright. Both tools now cap a
   body at **32 KB** - `maxSampleBodyBytes`, the engine's own answer to how much
   of a body an automated reader gets, rather than a new number. What a cut looks
@@ -356,7 +358,14 @@ Notes:
   `null`, because the two carry the same payload and an intact `body` would
   return in full exactly what was just dropped. A trace the engine had already
   truncated keeps the original size the engine recorded. Under the bound,
-  nothing is added and nothing is changed. Load-run reports are unaffected: a
+  nothing is added and nothing is changed. **`bodyCapped` on a `run_request`
+  response is not this** (issue #1157): it is the engine's own flag, always
+  present, saying it stopped *reading* the response at
+  `maxDesignResponseBodyBytes`, so `bodySize` is the prefix it read and
+  re-sending returns the same amount - only raising that config entry changes
+  it, where `bodyTruncated` says the full body is still in the app's history.
+  It is passed through untouched and both can be true of one response.
+  Load-run reports are unaffected: a
   load run's results never go through `build_result_trace`, so they carry no
   trace node at all, and its captured bodies live behind
   `GET /runs/:id/samples`, which has always truncated and disclosed this way.

@@ -300,6 +300,12 @@ export function responseFromRunResult(
 		size: trace.response.bodyBytes ?? body.length,
 		bodyTruncated: trace.response.bodyTruncated,
 		bodyBytes: trace.response.bodyBytes,
+		// A second, separate fact about the same body (issue #1157): the live
+		// send this run recorded stopped *reading* at
+		// `maxDesignResponseBodyBytes`. Both can be true at once - the engine
+		// read a prefix, then storage shortened even that - and they are not the
+		// same notice, so neither is derived from the other.
+		bodyCapped: trace.response.bodyCapped,
 		time: result.latencyMs || 0,
 		timing: timingFromTrace(trace, result.latencyMs),
 		restoredFrom,

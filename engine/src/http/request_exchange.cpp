@@ -41,6 +41,11 @@ int64_t exchange_now_ms () {
 
 } // namespace
 
+size_t design_response_body_bound (vayu::db::Database& db) {
+    return static_cast<size_t> (db.get_config_int ("maxDesignResponseBodyBytes",
+    static_cast<int> (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES)));
+}
+
 nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response) {
     nlohmann::json trace;
@@ -109,6 +114,20 @@ const vayu::Response& response) {
         trace["response"] = { { "headers", response.headers },
             { "body", response.body }, { "httpVersion", response.http_version },
             { "httpVersionDowngraded", response.http_version_downgraded } };
+
+        // The read cap, carried so a restored response says what the live one
+        // said (issue #1157) - the same rule `clientCertificate` above states,
+        // and the one the app's two funnels are held to. Written only when it
+        // is true, unlike the live body's always-present key: every row stored
+        // before this field would otherwise be indistinguishable from one whose
+        // body was cut, and absent is what those rows mean - not capped.
+        //
+        // `bodyTruncated` on this same node is a different cut, added later by
+        // `cap_trace_bodies`: that one is this body being shortened for
+        // storage, which re-sending recovers from.
+        if (response.body_truncated) {
+            trace["response"]["bodyCapped"] = true;
+        }
     } else {
         trace["error_type"]    = to_string (response.error_code);
         trace["error_message"] = response.error_message;
@@ -550,6 +569,13 @@ bool verbose) {
         config.cookie_scope  = cookie_scope;
         config.cookie_writes = std::move (pre_cookie_writes);
         config.transport     = inputs.transport;
+        // Design mode's own bound, and the reading of it that keeps the prefix
+        // (issue #1157). A body past it stops being read here rather than
+        // being buffered whole and then found to be too large downstream - the
+        // renderer holds this string too, so the cost of an unbounded one is
+        // paid twice.
+        config.max_response_bytes  = inputs.max_response_bytes;
+        config.truncate_over_limit = true;
         vayu::http::Client client (config);
         outcome.response = client.send (outcome.request).value ();
     }

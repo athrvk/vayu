@@ -426,6 +426,24 @@ export default function ResponseViewer() {
 								</Callout>
 							</div>
 						)}
+						{/*
+						 * A different fact from the one above, and deliberately not
+						 * exclusive with it (issue #1157): that one is storage
+						 * shortening a body the user already saw whole, which a
+						 * re-send undoes. This one is the engine never having read
+						 * past `maxDesignResponseBodyBytes`, which a re-send
+						 * reproduces - so the remedy is the setting, not the button.
+						 */}
+						{shown.bodyCapped && (
+							<div className="px-4 pt-3 shrink-0">
+								<Callout severity="warning" title="Body capped while reading">
+									Only the first {formatSize(shown.size || shown.body.length)} of
+									this response was read - the engine stops a design-mode send
+									there, so re-sending reads the same amount. Raise Max Design
+									Response Body in Settings to read more.
+								</Callout>
+							</div>
+						)}
 						<div className="flex-1 min-h-0">
 							<SharedResponseBody
 								body={shown.body}
