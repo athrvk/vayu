@@ -446,9 +446,11 @@ class MetricsCollector {
      * against a 1 MiB endpoint held its whole sample budget resident for
      * `liveRetentionMs` after it stopped sending.
      *
-     * Takes each store's lock rather than assuming the run has drained: a
-     * stopped run's last completions can still be landing when the retention
-     * hand-off happens.
+     * Each store gives back exactly the bytes it held, under its own lock,
+     * rather than the budget being zeroed - that is what keeps the figure from
+     * going below zero, which for a size_t is a budget of 1.8e19. The locking
+     * is defensive rather than load-bearing: `retain_run` is a worker's last
+     * act, after the run has drained, so no completion is still landing.
      */
     void release_response_samples ();
 
@@ -504,6 +506,13 @@ class MetricsCollector {
      * @brief Body bytes the retained response samples currently hold.
      * The figure `max_response_sample_bytes` is spent against, across the
      * run-level reservoir and every per-step one.
+     *
+     * The run report carries the *drop count*, not this - what a reader needs
+     * to know is which responses went unvalidated, and a resident-byte figure
+     * for a store that no longer exists by the time the report is read would
+     * be one more number to explain. So this is the tests' seam, exactly as
+     * `captured_body_bytes()` beside it is: deliberately test-only, not a
+     * field that lost its reader.
      */
     [[nodiscard]] size_t response_sample_bytes () const {
         return response_sample_bytes_.load (std::memory_order_relaxed);
