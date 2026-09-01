@@ -15,11 +15,16 @@
  * Built on the DropdownMenu primitive rather than a hand-rolled popover so it
  * gets focus management, Escape-to-close and arrow-key navigation for free.
  *
- * The trigger carries `data-tree-menu`, so inside the collection tree the
- * Shift+F10 / Menu key path opens it (every control in a tree row is
- * tabIndex=-1 - see useRovingTreeFocus).
+ * **The open state is held here so a keyboard-dispatched click can open it**
+ * (#1212). Radix's trigger listens on `pointerdown` and on its own `keydown`,
+ * and neither hears `HTMLElement.click()` - which is exactly what the
+ * collection tree's Shift+F10 / Menu / Shift+Enter keys dispatch at
+ * `[data-tree-menu]` (`useRovingTreeFocus`). Every menu-only row action was
+ * mouse-only for as long as that went unnoticed. The `detail === 0` test below
+ * is what separates that click from a real one; see the handler.
  */
 
+import { useRef, useState } from "react";
 import { MoreVertical, type LucideIcon } from "lucide-react";
 import {
 	Button,
@@ -46,29 +51,64 @@ interface RowActionsMenuProps {
 	actions: RowAction[];
 	/** Extra classes for the trigger (sizing lives with the calling row). */
 	className?: string;
+	/**
+	 * Tab stop of the trigger. `0` by default, so an ordinary row's menu is
+	 * reachable by Tab like any other control. A roving-tabindex tree passes
+	 * `-1`: there the whole tree is one tab stop and the row's keys are the
+	 * path in.
+	 */
+	tabIndex?: number;
 }
 
-export function RowActionsMenu({ label, actions, className }: RowActionsMenuProps) {
+export function RowActionsMenu({ label, actions, className, tabIndex = 0 }: RowActionsMenuProps) {
+	const [open, setOpen] = useState(false);
+	const trigger = useRef<HTMLButtonElement>(null);
+
 	if (actions.length === 0) return null;
 
 	const firstDestructive = actions.findIndex((a) => a.destructive);
 
 	return (
-		<DropdownMenu>
+		<DropdownMenu open={open} onOpenChange={setOpen}>
 			<DropdownMenuTrigger asChild>
 				<Button
+					ref={trigger}
 					variant="rowAction"
 					size="icon"
-					tabIndex={-1}
+					tabIndex={tabIndex}
 					data-tree-menu
 					aria-label={label}
 					className={cn("h-6 w-6 shrink-0", className)}
-					onClick={(e) => e.stopPropagation()}
+					onClick={(e) => {
+						e.stopPropagation();
+						// A click with no pointer behind it - `.click()` from the
+						// tree's key handler, or an assistive-tech activation -
+						// reports `detail === 0`. A mouse click reports 1, and Radix
+						// has already toggled on its pointerdown by the time it
+						// arrives, so opening again here would close it on the way
+						// down. Keyboard focus on the trigger itself is Radix's
+						// keydown path, which preventDefaults and so never reaches
+						// this handler at all.
+						if (e.detail === 0) setOpen(true);
+					}}
 				>
 					<MoreVertical className="h-3 w-3" />
 				</Button>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="min-w-40">
+			<DropdownMenuContent
+				align="end"
+				className="min-w-40"
+				onCloseAutoFocus={(e) => {
+					// Radix hands focus back to the trigger. In a roving-tabindex
+					// tree that control is deliberately not a tab stop, so the row
+					// it belongs to is where focus has to land - otherwise Escape
+					// leaves the tree's one stop on something Tab cannot return to.
+					const row = trigger.current?.closest<HTMLElement>('[role="treeitem"]');
+					if (!row) return;
+					e.preventDefault();
+					row.focus();
+				}}
+			>
 				{actions.map((action, i) => (
 					<div key={action.label}>
 						{action.destructive && i === firstDestructive && i > 0 && (

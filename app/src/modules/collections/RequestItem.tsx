@@ -242,6 +242,9 @@ export default function RequestItem({
 			{!isRenaming && !isDeleting && (
 				<RowActionsMenu
 					label={`More actions for request ${request.name}`}
+					// The tree is one tab stop: the row holds it, and Shift+F10 /
+					// Menu / Shift+Enter are the way in from here.
+					tabIndex={-1}
 					className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 					actions={[
 						{
