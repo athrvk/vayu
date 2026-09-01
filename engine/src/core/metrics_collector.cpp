@@ -84,6 +84,15 @@ insert_at_slot (std::vector<T>& store, size_t capacity, const ReservoirSlot& slo
     return SlotOutcome::Refused;
 }
 
+/// Body bytes a store of retained samples holds. Requires the store's mutex.
+size_t held_body_bytes (const std::vector<ResponseSample>& samples) {
+    size_t total = 0;
+    for (const auto& sample : samples) {
+        total += sample.body.size ();
+    }
+    return total;
+}
+
 /**
  * Body bytes a settled insert gives back to the run's sample budget.
  *
@@ -94,15 +103,6 @@ insert_at_slot (std::vector<T>& store, size_t capacity, const ReservoirSlot& slo
  * double-refunds it in the other, and neither shows up as a wrong number until
  * a long run stops sampling.
  */
-/// Body bytes a store of retained samples holds. Requires the store's mutex.
-size_t held_body_bytes (const std::vector<ResponseSample>& samples) {
-    size_t total = 0;
-    for (const auto& sample : samples) {
-        total += sample.body.size ();
-    }
-    return total;
-}
-
 size_t reclaimed_bytes (SlotOutcome outcome, size_t candidate_bytes, const ResponseSample& leftover) {
     switch (outcome) {
     case SlotOutcome::Displaced: return leftover.body.size ();

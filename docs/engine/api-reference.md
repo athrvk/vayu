@@ -6517,7 +6517,9 @@ stores a *cut* body, because a deferred check reading one reports a failure the
 target never produced. They differ in one way worth knowing: the count cap
 displaces an incumbent, so the tested set stays a uniform sample of the run,
 while an exhausted byte budget stops admitting - a run that spends it is graded
-on the part of the run whose bodies fit.
+on the part of the run whose bodies fit. The counter cannot say which bound
+applied, so the app's retention note states the uniform case for both; issue
+#1192 is that gap.
 
 Three of its keys are about captured responses rather than retention:
 `responseBodiesCaptured` is how many exchanges the run stored (see
