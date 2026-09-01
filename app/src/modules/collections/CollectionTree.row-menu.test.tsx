@@ -96,31 +96,49 @@ describe("the three keys that open a row's menu", () => {
 		expect(screen.getByRole("menuitem", { name: /Export as OpenAPI/ })).toBeInTheDocument();
 	});
 
-	it("opens it on the Menu key", async () => {
-		renderTree();
+	// Every key against both row types. A folder row missing what a request row
+	// has is how the Delete key went dead here for months, so neither row type
+	// gets to stand in for the other.
+	const KEYS: [string, string, { shiftKey?: boolean }][] = [
+		["Shift+F10", "F10", { shiftKey: true }],
+		["the Menu key", "ContextMenu", {}],
+		["Shift+Enter", "Enter", { shiftKey: true }],
+	];
+	const ROWS: [string, () => HTMLElement][] = [
+		["a collection row", collectionRow],
+		["a request row", requestRow],
+	];
 
-		pressOnRow(collectionRow(), "ContextMenu");
+	for (const [rowName, row] of ROWS) {
+		for (const [keyName, key, init] of KEYS) {
+			it(`opens ${rowName}'s menu on ${keyName}`, async () => {
+				renderTree();
 
-		expect(await screen.findByRole("menu")).toBeInTheDocument();
-	});
+				pressOnRow(row(), key, init);
 
-	it("opens it on Shift+Enter, the Mac-reachable path, without opening the row", async () => {
-		renderTree();
+				expect(await screen.findByRole("menu")).toBeInTheDocument();
+				expect(screen.getAllByRole("menuitem").length).toBeGreaterThan(0);
+			});
+		}
+	}
 
-		pressOnRow(collectionRow(), "Enter", { shiftKey: true });
-
-		expect(await screen.findByRole("menu")).toBeInTheDocument();
-		// Shift+Enter is the menu, not a second way to activate the row.
-		expect(useTabsStore.getState().openTabs).toHaveLength(0);
-	});
-
-	it("opens a request row's menu too", async () => {
+	it("offers a request row the actions that have no chord", async () => {
 		renderTree();
 
 		pressOnRow(requestRow(), "F10", { shiftKey: true });
 
-		expect(await screen.findByRole("menu")).toBeInTheDocument();
+		await screen.findByRole("menu");
 		expect(screen.getByRole("menuitem", { name: /Duplicate/ })).toBeInTheDocument();
+	});
+
+	it("leaves the row shut when Shift+Enter opens the menu", async () => {
+		renderTree();
+
+		pressOnRow(collectionRow(), "Enter", { shiftKey: true });
+
+		await screen.findByRole("menu");
+		// Shift+Enter is the menu, not a second way to activate the row.
+		expect(useTabsStore.getState().openTabs).toHaveLength(0);
 	});
 });
 
@@ -148,6 +166,40 @@ describe("moving around the menu once it is open", () => {
 		// Not the trigger: it is `tabIndex={-1}` inside the tree's single tab
 		// stop, so focus resting there is focus the user cannot Tab back to.
 		await waitFor(() => expect(document.activeElement).toBe(row));
+	});
+
+	// Both row types, deliberately: a folder row missing a control the request
+	// row had is how the Delete key went dead here for months.
+	it("hands focus back to a request row too", async () => {
+		renderTree();
+		const row = requestRow();
+		pressOnRow(row, "F10", { shiftKey: true });
+		const menu = await screen.findByRole("menu");
+
+		fireEvent.keyDown(menu, { key: "Escape" });
+
+		await waitFor(() => expect(document.activeElement).toBe(row));
+	});
+});
+
+describe("an action that opens a dialog", () => {
+	/*
+	 * Returning focus to the row is a claim on focus the menu did not use to
+	 * make, and most row actions open a dialog. Radix runs the close's focus
+	 * restoration on a later tick than the dialog's own mount focus, so the row
+	 * would be claiming focus a dialog has already taken - and nothing in the
+	 * tree's tests asserted where focus lands, so this went unmeasured.
+	 */
+	it("leaves focus in the dialog, not on the row behind it", async () => {
+		renderTree();
+		const row = collectionRow();
+		pressOnRow(row, "F10", { shiftKey: true });
+		fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+
+		const dialog = await screen.findByRole("dialog");
+
+		await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+		expect(document.activeElement).not.toBe(row);
 	});
 });
 

@@ -90,6 +90,21 @@ describe("opening the menu", () => {
 		expect(screen.getAllByRole("menu")).toHaveLength(1);
 	});
 
+	it("closes again on the next mouse press, one toggle per click", async () => {
+		renderMenu();
+		// Held across the open: a modal menu marks everything outside it
+		// aria-hidden, so a role query cannot find the trigger while it is up.
+		const button = trigger();
+		mousePress(button);
+		expect(await screen.findByRole("menu")).toBeInTheDocument();
+
+		mousePress(button);
+
+		// Holding the open state here rather than leaving it to Radix must not
+		// cost the trigger its toggle.
+		await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+	});
+
 	it("renders nothing when the row has no actions", () => {
 		const { container } = render(<RowActionsMenu label={LABEL} actions={[]} />);
 		expect(container).toBeEmptyDOMElement();
