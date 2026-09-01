@@ -20,7 +20,7 @@ import LoadTestDashboard from "@/modules/dashboard";
 
 ## Code-quality gates
 
-Five rules this module holds to. Each names the file that owns it - that file is
+Seven rules this module holds to. Each names the file that owns it - that file is
 the authority, so a change belongs there rather than in the component that
 consumes it.
 
@@ -43,6 +43,22 @@ consumes it.
   one memoized `DashboardDerived` bundle (shape in `types.ts`) and passes it to
   `HeroRow` and `ModeStatsRow`, which stay pure presentational components that
   read what they need.
+- **A chart card's render gate asks a predicate, not a series.**
+  `utils/metricsTransforms.ts` owns both halves: the transform a chart plots,
+  and the `spansMultipleBuckets` / `hasPercentileSignal` predicates a card reads
+  to decide whether it is worth rendering. `MetricsView` used to build the
+  latency, percentile and status series purely to read `.length`, while the
+  chart inside that card built the identical series again from the identical
+  array - and the store hands down a new array on every batch, so neither memo
+  held and the three heaviest transforms were paid twice per flush (#1152). A
+  gate that needs a count builds nothing.
+- **Every chart buckets before it draws.**
+  `components/charts/uplot/buildData.ts` owns the reduction: `bucketColumns` and
+  `rebucket` for the time-series charts, `buildConcurrencyScatter` for the
+  ramp-up scatter, all at the user's `chartBucketSeconds`. This is the step that
+  makes `constants/live-window.ts`'s retention cap a memory bound rather than a
+  rendering one, and the scatter - one dot per tick, up to the 50,000-tick cap -
+  was the one chart that argument did not cover (#1152).
 - **The per-mode stat-card table lives with its router.**
   `components/stats/ModeStatsRow.tsx` decides which four cards each mode shows,
   and its file comment tabulates them. Add a mode there, next to the branch that

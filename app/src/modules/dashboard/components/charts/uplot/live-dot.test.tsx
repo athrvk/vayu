@@ -63,14 +63,11 @@ describe("live-dot animation resolves to a real keyframe", () => {
 
 		unmount();
 
-		// Definition half: read the app's actual CSS/config from disk and
-		// confirm the name the dot uses is one of the defined keyframes.
-		const cssPath = path.resolve(__dirname, "../../../../../index.css");
-		const configPath = path.resolve(__dirname, "../../../../../../tailwind.config.js");
-		const css = readFileSync(cssPath, "utf-8");
-		const config = readFileSync(configPath, "utf-8");
+		// Definition half: read the app's actual CSS from disk - the import a
+		// test sees is stubbed to "", which is how a guard like this passed for
+		// weeks while reading nothing.
+		const css = readFileSync(path.resolve(__dirname, "../../../../../index.css"), "utf-8");
 		expect(css.length).toBeGreaterThan(0);
-		expect(config.length).toBeGreaterThan(0);
 
 		const definedKeyframes = [...css.matchAll(/@keyframes\s+([a-zA-Z0-9-]+)/g)].map(
 			(m) => m[1]
@@ -78,5 +75,21 @@ describe("live-dot animation resolves to a real keyframe", () => {
 		expect(definedKeyframes.length).toBeGreaterThan(0);
 
 		expect(definedKeyframes).toContain(animationName);
+	});
+
+	it("keeps the shipped keyframe and the Tailwind config's copy in step", () => {
+		// `vayu-pulse` is defined twice - in index.css, which ships, and in
+		// tailwind.config.js, which backs the utility class. Reading one and
+		// asserting nothing about the other is how the two drift apart.
+		const css = readFileSync(path.resolve(__dirname, "../../../../../index.css"), "utf-8");
+		const config = readFileSync(
+			path.resolve(__dirname, "../../../../../../tailwind.config.js"),
+			"utf-8"
+		);
+		expect(css.length).toBeGreaterThan(0);
+		expect(config.length).toBeGreaterThan(0);
+
+		expect(css).toContain("@keyframes vayu-pulse");
+		expect(config).toContain('"vayu-pulse"');
 	});
 });
