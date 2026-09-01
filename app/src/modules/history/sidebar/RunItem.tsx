@@ -294,7 +294,7 @@ export default function RunItem({
 				{/* Request Info */}
 				{requestUrl && (
 					<div className="flex items-start gap-2 mb-1.5 min-w-0 flex-wrap">
-						{method && <MethodBadge method={method} className="h-5 items-center" />}
+						{method && <MethodBadge method={method} className="h-5" />}
 						<p
 							className="text-xs text-foreground font-medium break-words flex-1 min-w-0 leading-5"
 							title={requestUrl}
