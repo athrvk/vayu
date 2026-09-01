@@ -140,6 +140,11 @@ describe("a run-time token's tooltip", () => {
 		expect(note!.textContent).toContain(columns.join(", "));
 		expect(note!.className).not.toContain("shrink-0");
 		expect(note!.parentElement?.className).toContain("flex-col");
+		// And the description above it still wraps mid-token: a column name is
+		// one unbroken word, so without this it widens the tooltip instead.
+		const description = note!.previousElementSibling;
+		expect(description?.textContent).toContain("Not a declared column of");
+		expect(description?.className).toContain("break-all");
 	});
 });
 

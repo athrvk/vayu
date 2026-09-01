@@ -165,6 +165,14 @@ white-on-`--primary` never occurs because fills use `--primary-fill`).
   → `tooltip-hint-contrast.test.ts` (ratios per scheme, plus a scan of every
   tooltip block in `src`), `tooltip-icon-button.test.tsx` (the rendered class,
   which the scan cannot see)
+- **A tooltip's value and the hint sourcing it stack; they never share a flex
+  row.** `TooltipContent` is capped at `max-w-xs`, a `break-all` value has a
+  min-content width of about one character, and a `shrink-0` hint keeps its
+  intrinsic width - so one long source name takes the whole 320px and leaves
+  the value a vertical strip of letter fragments. Write `TooltipValue`, which
+  holds the stacked shape. → `tooltip-value-layout.test.ts` (the same block
+  scan, from `tooltip-blocks.testkit.ts`), plus rendered-class guards in
+  `VariableInput/`
 - **Adding an accent scheme:** `constants/color-schemes.ts` + `index.css`, both
   themes, nothing else. → `color-schemes.test.ts`
 - **A `Badge` that paints its own `bg-` must be `variant="chip"`.** Every other
