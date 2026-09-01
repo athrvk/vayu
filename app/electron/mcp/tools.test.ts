@@ -3710,6 +3710,30 @@ describe("inline body bounds", () => {
 		expect(await runRequest(executed(answer))).toEqual(answer);
 	});
 
+	test("run_request keeps the engine's bodyCapped distinct from its own cut", async () => {
+		// Two different facts about one body (issue #1157). `bodyTruncated` is
+		// this result showing less than the engine returned - the app's history
+		// still has the rest. `bodyCapped` is the engine never having read more,
+		// which a re-send reproduces. An agent that saw only the first flag would
+		// keep re-sending a request that cannot return more.
+		const out = await runRequest(
+			executed(executeAnswer({ bodyRaw: huge, bodySize: huge.length, bodyCapped: true }))
+		);
+
+		expect(out.bodyCapped).toBe(true);
+		expect(out.bodyTruncated).toBe(true);
+	});
+
+	test("run_request carries bodyCapped: false through untouched", async () => {
+		// Always present on the wire, so "not capped" must stay distinguishable
+		// from an engine too old to say. The bound must not eat the key.
+		const answer = executeAnswer({ bodyRaw: "{}", bodySize: 2, bodyCapped: false });
+		const out = await runRequest(executed(answer));
+
+		expect(out).toEqual(answer);
+		expect(out.bodyCapped).toBe(false);
+	});
+
 	test("the cut never splits a multi-byte character", async () => {
 		// Two-byte characters against a bound that is not a multiple of two:
 		// a naive byte slice would end mid-character and decode to U+FFFD.
@@ -3886,6 +3910,15 @@ describe("inline body bounds", () => {
 			expect(description).toContain(String(MAX_INLINE_BODY_BYTES));
 			expect(description).toMatch(/bodyTruncated/);
 		}
+	});
+
+	test("run_request's description tells the two body flags apart", () => {
+		// The flags are one word apart and mean opposite things about what a
+		// re-send would achieve, so the description has to name both and say
+		// which remedy belongs to which.
+		const description = TOOLS.find((t) => t.name === "run_request")!.description;
+		expect(description).toMatch(/bodyCapped/);
+		expect(description).toMatch(/maxDesignResponseBodyBytes/);
 	});
 
 	/**

@@ -203,11 +203,28 @@ export interface ResponseState {
 	 * Set when this response was restored from a stored run whose body the engine
 	 * truncated for storage (`maxTraceBodyBytes`). `body` then holds only the
 	 * stored slice, and `bodyBytes` is the original length. Drives the truncation
-	 * notice in the response viewer; re-sending fetches the full body.
+	 * notice in the response viewer; re-sending fetches the body again - up to
+	 * `maxDesignResponseBodyBytes`, which is the separate limit `bodyCapped`
+	 * below reports.
+	 *
+	 * Only the restore funnel sets it: a live send has nothing stored yet.
 	 */
 	bodyTruncated?: boolean;
 	/** The response body's original byte length, present only when truncated. */
 	bodyBytes?: number;
+	/**
+	 * The engine only ever *read* this much of the body, stopping at
+	 * `maxDesignResponseBodyBytes` (issue #1157).
+	 *
+	 * Both funnels set it - the live send from `bodyCapped` on the `/execute`
+	 * body, a restored one from `trace.response.bodyCapped` - and it is a
+	 * different fact from `bodyTruncated` above, so the two notices must not be
+	 * worded alike and are not exclusive. Storage truncation shortened a body
+	 * that was received whole, so re-sending recovers it; a capped read never
+	 * fetched the rest, so re-sending reproduces it and the remedy is raising
+	 * the limit.
+	 */
+	bodyCapped?: boolean;
 	time: number;
 	timing?: ResponseTiming;
 	/**

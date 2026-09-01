@@ -17,6 +17,10 @@
 
 import { describe, it, expect } from "vitest";
 import { buildExecBody, execIdentity, responseFromExecuteResult } from "./execute-mapping";
+// The threshold itself, not a second spelling of it: the mapping and the pane
+// share one number and a test that pinned its own would keep passing after a
+// change made the gate unreachable.
+import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
 import { createDefaultRequestState } from "./request-state";
 import type { SanityResult } from "@/types";
 import type { KeyValueItem } from "@/types";
@@ -55,6 +59,70 @@ describe("responseFromExecuteResult", () => {
 		const mapped = responseFromExecuteResult(result({ httpVersion: "" }));
 
 		expect(mapped.httpVersion).toBe("");
+	});
+
+	it("carries the engine's body cap onto the response state", () => {
+		// Without this the pane can never say the engine read only part of the
+		// body, and a re-send-to-fix notice would be the only thing on screen.
+		const mapped = responseFromExecuteResult(result({ bodyCapped: true }));
+
+		expect(mapped.bodyCapped).toBe(true);
+	});
+});
+
+/**
+ * The mapping used to build a second, indented copy of every body - the one the
+ * Pretty view reads - on the main thread, on the send path. Above
+ * `LARGE_BODY_BYTES` the pane never formats anything (`ResponseBody` shows a raw
+ * prefix instead), so that copy was multi-megabyte work whose output nothing
+ * rendered.
+ *
+ * The sub-threshold half of this is an acceptance criterion, not a nicety: the
+ * gate must be invisible for every body anyone actually reads.
+ */
+describe("responseFromExecuteResult, on a large body", () => {
+	/** A parsed body whose raw form is `bytes` characters, near enough. */
+	function jsonOfLength(bytes: number) {
+		const parsed = { pad: "x".repeat(bytes) };
+		const raw = JSON.stringify(parsed);
+		return { parsed, raw };
+	}
+
+	it("hands back the raw string rather than an indented copy", () => {
+		const { parsed, raw } = jsonOfLength(LARGE_BODY_BYTES + 1024);
+
+		const mapped = responseFromExecuteResult(
+			result({ body: parsed, bodyRaw: raw, bodySize: raw.length })
+		);
+
+		expect(mapped.body).toBe(raw);
+		// The distinguishing evidence: `JSON.stringify(x, null, 2)` of an object
+		// always contains a newline, and the raw string never does.
+		expect(mapped.body).not.toContain("\n");
+	});
+
+	it("leaves a body under the threshold byte-identical to the indented copy", () => {
+		const { parsed, raw } = jsonOfLength(1024);
+
+		const mapped = responseFromExecuteResult(
+			result({ body: parsed, bodyRaw: raw, bodySize: raw.length })
+		);
+
+		expect(mapped.body).toBe(JSON.stringify(parsed, null, 2));
+		expect(mapped.bodyRaw).toBe(raw);
+	});
+
+	it("leaves a large string body alone - it was never a second copy", () => {
+		// The gate belongs to the object branch only. A string body is already
+		// the string the pane shows, so swapping in `bodyRaw` here would change
+		// what is displayed to save work that was never being done.
+		const text = "y".repeat(LARGE_BODY_BYTES + 1024);
+
+		const mapped = responseFromExecuteResult(
+			result({ body: text, bodyRaw: "DIFFERENT", bodySize: text.length })
+		);
+
+		expect(mapped.body).toBe(text);
 	});
 });
 

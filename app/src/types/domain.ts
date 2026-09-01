@@ -1126,6 +1126,17 @@ export interface RunResultTrace {
 		 * than defaulted to `false` at the type level.
 		 */
 		httpVersionDowngraded?: boolean;
+		/**
+		 * The live send this trace records stopped reading at
+		 * `maxDesignResponseBodyBytes` - see {@link HttpResponse.bodyCapped}
+		 * (issue #1157). `build_result_trace` writes the key **only when the
+		 * body was cut**, so absent is "not capped" here, unlike on the live
+		 * response where it is always present.
+		 *
+		 * Distinct from `bodyTruncated` above: that one is storage shortening a
+		 * body the user already saw whole, and a re-send recovers from it.
+		 */
+		bodyCapped?: boolean;
 	};
 	/**
 	 * Present on a **streaming** design run's trace only (issue #573), which is
@@ -1568,6 +1579,22 @@ export interface HttpResponse {
 	 * an absent key would be an engine too old to say, not "no certificate".
 	 */
 	clientCertificate?: string;
+	/**
+	 * The engine stopped reading this body at `maxDesignResponseBodyBytes`
+	 * (Settings → Limits, default 32MB), so `body` / `bodyRaw` / `bodySize`
+	 * describe the prefix that was read rather than what the server sent
+	 * (issue #1157). Status and headers are the server's own - they arrive
+	 * first - so this is a successful response carrying a flag.
+	 *
+	 * Always present on a live body, like `clientCertificate` above and for the
+	 * same reason: an absent key is an engine too old to say, not "not capped".
+	 *
+	 * Not the same fact as the stored trace's `bodyTruncated`, which is
+	 * `maxTraceBodyBytes` shortening a body for storage *after* the whole of it
+	 * was read - a re-send recovers from that one, and re-sending under a
+	 * capped read reproduces the cap.
+	 */
+	bodyCapped?: boolean;
 }
 
 export interface TestResult {

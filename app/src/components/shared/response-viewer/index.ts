@@ -97,6 +97,10 @@ export {
 	detectBodyType,
 	formatBody,
 	formatSize,
+	// Where the pane stops formatting a body and shows a raw prefix. Exported
+	// because the mapping that builds `ResponseState` reads it too: above this
+	// size the indented copy it used to build is one nothing will ever render.
+	LARGE_BODY_BYTES,
 	// The response pane's own latency wording ("34 ms", "5.00 s"). Exported so a
 	// surface outside the viewer - the context bar's Recent sends rows - states
 	// a latency the way the pane states it, instead of growing a second rule for
