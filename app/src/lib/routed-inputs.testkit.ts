@@ -81,6 +81,17 @@ export const DOC_READING_GUARDS = {
 		reader: "app/src/design-system-doc.test.ts",
 		paths: ["docs/design-system.md"],
 	},
+	/*
+	 * The second reader of that page, and the one that reads its prose: the
+	 * Type Scale Conventions table names the weight of the micro/badge step,
+	 * which the components either match or do not (#1199). `design-system-doc`
+	 * checks the page's colour *values* against `index.css` and says so - a
+	 * table cell is not a value, and neither guard covers the other's half.
+	 */
+	typeScale: {
+		reader: "app/src/components/ui/type-scale.test.ts",
+		paths: ["docs/design-system.md"],
+	},
 	rendererState: {
 		reader: "app/src/state-management-doc.test.ts",
 		paths: [

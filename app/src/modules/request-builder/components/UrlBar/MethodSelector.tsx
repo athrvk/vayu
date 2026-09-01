@@ -42,7 +42,9 @@ export default function MethodSelector() {
 					// Borderless and transparent: the field around it draws the box.
 					// `w-auto` so the trigger is as wide as its verb.
 					"h-full w-auto shrink-0 gap-1.5 border-0 bg-transparent px-3 py-0 shadow-none",
-					"font-mono text-[11px] font-bold",
+					// Semibold, not bold: 600 is the heaviest JetBrains Mono face
+					// `fonts.css` bundles, so `font-bold` here is a synthesised 700.
+					"font-mono text-[11px] font-semibold",
 					/*
 					 * It had no hover state at all after moving in here - the old
 					 * standalone control got its affordance from a `bg-accent` box,
