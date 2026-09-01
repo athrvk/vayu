@@ -21,53 +21,29 @@
  * hand-written tooltip can reach for the same row exactly as they did. So the
  * rule is made **enumerable rather than impossible**, the way the border and
  * tooltip-contrast rules are - the mistake is one shape and every tooltip block
- * in `src` is read. `TooltipValue` is the cure: it stacks the pair, so a call
- * site that uses it cannot express the defect.
+ * in `src` is read.
  *
- * This scan sees only literal class strings. The rendered-class assertions in
+ * `TooltipValue` is the cure: it stacks the pair, so a call site that uses it
+ * cannot express the defect. That the primitive itself keeps its half of the
+ * bargain - the stack, and the `break-all` that makes a long value wrap at all
+ * - is pinned where a class can be read off a rendered element, in
  * `VariableInput/EditableVariable.test.tsx` and
- * `VariableInput/runtime-token-interaction.test.tsx` cover the other half.
+ * `VariableInput/runtime-token-interaction.test.tsx`. This scan sees only
+ * literal class strings; the two halves are not interchangeable.
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-
-function tsxFiles(dir: string): string[] {
-	const out: string[] = [];
-	for (const entry of readdirSync(dir, { withFileTypes: true })) {
-		if (entry.name === "node_modules" || entry.name === "dist") continue;
-		const full = join(dir, entry.name);
-		if (entry.isDirectory()) out.push(...tsxFiles(full));
-		else if (entry.name.endsWith(".tsx") && !entry.name.includes(".test.")) out.push(full);
-	}
-	return out;
-}
-
-/** `<TooltipContent …>…</TooltipContent>`, comments stripped so prose about the
- *  rule does not read as a violation of it. */
-const TOOLTIP_BLOCK = /<TooltipContent\b[^>]*>[\s\S]*?<\/TooltipContent>/g;
-
-const blocks = tsxFiles(SRC).flatMap((file) =>
-	[
-		...readFileSync(file, "utf8")
-			.replace(/\/\*[\s\S]*?\*\//g, "")
-			.matchAll(TOOLTIP_BLOCK),
-	].map((m) => ({ file, source: m[0] }))
-);
+import { tooltipBlocks } from "./tooltip-blocks.testkit";
 
 describe("every tooltip that prints a value", () => {
 	it("found the tooltips to scan", () => {
-		// A regex that stopped matching would make the case below vacuous - this
+		// A walk that stopped matching would make the case below vacuous - this
 		// repo has had a guard pass for weeks while reading an empty string.
-		expect(blocks.length).toBeGreaterThan(12);
+		expect(tooltipBlocks.length).toBeGreaterThan(12);
 	});
 
 	it("puts no unshrinkable label beside a value that wraps on any character", () => {
-		const offenders = blocks
+		const offenders = tooltipBlocks
 			.filter((b) => b.source.includes("break-all") && b.source.includes("shrink-0"))
 			.map((b) => b.file);
 		expect(offenders).toEqual([]);
