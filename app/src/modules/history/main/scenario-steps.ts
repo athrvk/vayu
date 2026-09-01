@@ -264,51 +264,85 @@ function planOrderIndex(steps: readonly ScenarioStepRow[], row: ScenarioStepRow)
 }
 
 /**
- * Fold a `step` event into the live list.
+ * Whether a replayed event says anything its row does not already say.
  *
- * Returns the same array reference when nothing changed, so a replayed event
- * cannot force a re-render of a list it did not alter. A later event for a key
- * already present replaces it rather than being dropped: the engine sends one
- * event per step execution, so a second one for the same key can only be a
- * replay of that execution, and the newer copy is the one to trust.
+ * The four fields a `step` event carries that can differ between the first
+ * delivery of an execution and a replay of it. Identity is not among them: two
+ * rows only reach this comparison when they sort equal, which is exactly when
+ * `stepKey` would match.
  */
-export function appendStepEvent(
-	steps: readonly ScenarioStepRow[],
-	event: ScenarioStepEvent
-): ScenarioStepRow[] {
-	const row: ScenarioStepRow = { ...event };
-	/*
-	 * One search answers both questions - "is this a replay?" and "where does a
-	 * new row go?" - because plan order *is* the identity order: two rows sort
-	 * equal exactly when `stepKey` would match. The scan this replaces walked
-	 * the whole list per event, which on a long run is the same cost as the
-	 * sort below it.
-	 */
-	const at = planOrderIndex(steps, row);
-	const existing = at < steps.length && byPlanOrder(steps[at], row) === 0 ? at : -1;
+function sameStepRow(current: ScenarioStepRow, row: ScenarioStepRow): boolean {
+	return (
+		current.outcome === row.outcome &&
+		current.statusCode === row.statusCode &&
+		current.latencyMs === row.latencyMs &&
+		current.name === row.name
+	);
+}
 
-	if (existing !== -1) {
-		const current = steps[existing];
-		if (
-			current.outcome === row.outcome &&
-			current.statusCode === row.statusCode &&
-			current.latencyMs === row.latencyMs &&
-			current.name === row.name
-		) {
-			return steps as ScenarioStepRow[];
+/**
+ * A live step list and the summary that describes it, folded together.
+ *
+ * They travel as one because the summary is only correct *for* these rows: the
+ * fold maintains it incrementally ({@link foldStepEvents}), so a caller holding
+ * one without the other holds a number nothing produced.
+ */
+export interface StepFold {
+	steps: ScenarioStepRow[];
+	summary: StepListSummary;
+}
+
+/**
+ * Fold a batch of `step` events into the live list and its summary.
+ *
+ * **One commit per batch, one copy per batch.** The list is rebuilt once here
+ * however many events the batch carries, where folding them one at a time cost
+ * a full array copy each - quadratic over a run, and the reason
+ * `ScenarioRunService` buffers rather than committing per event (issue #1153).
+ *
+ * Returns the `current` fold itself when no event changed anything, so a
+ * replayed batch cannot force a re-render of a list it did not alter. A later
+ * event for a key already present replaces it rather than being dropped: the
+ * engine sends one event per step execution, so a second one for the same key
+ * can only be a replay of that execution, and the newer copy is the one to
+ * trust.
+ */
+export function foldStepEvents(current: StepFold, events: readonly ScenarioStepEvent[]): StepFold {
+	// Null until an event actually changes something, which is what lets an
+	// all-replay batch return `current` and commit nothing.
+	let next: StepFold | null = null;
+
+	for (const event of events) {
+		const fold = next ?? current;
+		const row: ScenarioStepRow = { ...event };
+		/*
+		 * One search answers both questions - "is this a replay?" and "where
+		 * does a new row go?" - because plan order *is* the identity order: two
+		 * rows sort equal exactly when `stepKey` would match. The scan this
+		 * replaces walked the whole list per event, which on a long run is the
+		 * same cost as the sort below it.
+		 */
+		const at = planOrderIndex(fold.steps, row);
+		const replacing = at < fold.steps.length && byPlanOrder(fold.steps[at], row) === 0;
+		if (replacing && sameStepRow(fold.steps[at], row)) continue;
+
+		next ??= { steps: [...current.steps], summary: cloneStepSummary(current.summary) };
+
+		if (replacing) {
+			uncountStepRow(next.summary, next.steps[at]);
+			next.steps[at] = row;
+		} else if (at === next.steps.length) {
+			// Events arrive in plan order in the ordinary case, so this is an
+			// append; a gap-resume that lands one out of order still finds its
+			// seat below rather than sitting at the end.
+			next.steps.push(row);
+		} else {
+			next.steps.splice(at, 0, row);
 		}
-		const next = [...steps];
-		next[existing] = row;
-		return next;
+		countStepRow(next.summary, row);
 	}
 
-	// Placed on insert rather than sorted on render: events arrive in plan order
-	// in the ordinary case, so this is an append, and a gap-resume that lands one
-	// out of order still shows the sequence the run executed.
-	if (at === steps.length) return [...steps, row];
-	const next = [...steps];
-	next.splice(at, 0, row);
-	return next;
+	return next ?? current;
 }
 
 /**
@@ -352,21 +386,79 @@ export function stepRowsFromReport(report: RunReport | undefined): ScenarioStepR
 }
 
 /**
- * Count the four outcomes.
+ * Everything the run tab's header says about a step list.
  *
- * `skipped` is its own number and is never folded into `passed`. A step the
- * runner skipped did not assert anything, and reporting it as a pass is the
- * false-pass class the run summary exists to avoid.
+ * Held as one object because the live path maintains all three incrementally
+ * ({@link foldStepEvents}) rather than scanning the list per commit. Three
+ * loose fields would be three things a caller can hold half of; one is one.
  */
-export function countOutcomes(steps: readonly ScenarioStepRow[]): OutcomeCounts {
-	const counts: OutcomeCounts = { passed: 0, failed: 0, skipped: 0, errored: 0 };
-	for (const step of steps) {
-		// A row whose outcome the engine did not name must not silently land in
-		// one of the four buckets - `stepRowFromResult` has already decided what
-		// an unstamped row counts as.
-		if (step.outcome in counts) counts[step.outcome] += 1;
-	}
-	return counts;
+export interface StepListSummary {
+	/**
+	 * The four outcomes.
+	 *
+	 * `skipped` is its own number and is never folded into `passed`. A step the
+	 * runner skipped did not assert anything, and reporting it as a pass is the
+	 * false-pass class the run summary exists to avoid.
+	 */
+	counts: OutcomeCounts;
+	/** Any step past the first pass, so a row says which iteration it belongs to. */
+	hasIteration: boolean;
+	/** Any step recording the `data` row its iteration bound. */
+	hasDataRow: boolean;
+}
+
+/** The summary of a list with nothing in it. */
+export function emptyStepSummary(): StepListSummary {
+	return {
+		counts: { passed: 0, failed: 0, skipped: 0, errored: 0 },
+		hasIteration: false,
+		hasDataRow: false,
+	};
+}
+
+function cloneStepSummary(summary: StepListSummary): StepListSummary {
+	return {
+		counts: { ...summary.counts },
+		hasIteration: summary.hasIteration,
+		hasDataRow: summary.hasDataRow,
+	};
+}
+
+/** Add one row to `summary`. Mutates: callers own the object they pass. */
+function countStepRow(summary: StepListSummary, row: ScenarioStepRow): void {
+	// A row whose outcome the engine did not name must not silently land in one
+	// of the four buckets - `stepRowFromResult` has already decided what an
+	// unstamped row counts as.
+	if (row.outcome in summary.counts) summary.counts[row.outcome] += 1;
+	if (row.iteration > 0) summary.hasIteration = true;
+	if (row.dataRowIndex !== undefined) summary.hasDataRow = true;
+}
+
+/**
+ * Take one row back out of `summary`, for a row a replay is about to replace.
+ *
+ * Only the counts are reversed. `hasIteration` cannot need it - a replacement
+ * sorts equal to the row it replaces, so both carry the same iteration - and
+ * `hasDataRow` is left latched: un-setting it would mean rescanning the list
+ * for another row that binds one, which is the whole-list scan this summary
+ * exists to avoid, over a case the engine does not produce (the same step
+ * execution, replayed, naming a different data row).
+ */
+function uncountStepRow(summary: StepListSummary, row: ScenarioStepRow): void {
+	if (row.outcome in summary.counts) summary.counts[row.outcome] -= 1;
+}
+
+/**
+ * Summarize a whole list in one pass.
+ *
+ * The stored path reads its summary from here - the rows arrive complete, so
+ * there is nothing to fold incrementally - and it is the oracle the live
+ * path's incremental summary is checked against.
+ */
+export function summarizeSteps(steps: readonly ScenarioStepRow[]): StepListSummary {
+	const summary = emptyStepSummary();
+	for (const step of steps) countStepRow(summary, step);
+	return summary;
 }
 
 /**

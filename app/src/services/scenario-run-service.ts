@@ -14,9 +14,14 @@
  * client was attached to. That is the engine's model too (a run at a time from
  * this app), not a limitation introduced here.
  *
- * There is no throttling here and there is deliberately none: a load run emits
- * ticks at 10 Hz, while a scenario emits one event per step execution - a rate
- * bounded by how fast the requests themselves come back.
+ * Step events are buffered and committed on the live-refresh cadence, the same
+ * throttle `LoadTestService` puts on its ticks (issue #1153). This file used to
+ * say throttling was deliberately absent, on the premise that a scenario's step
+ * rate is bounded by how fast the requests come back. The premise does not hold:
+ * the engine's scenario loop is sequential with no pacing, so a local or fast
+ * target returns hundreds of steps per second - well above the 10 Hz the load
+ * path already considered worth throttling - and each one committed a store
+ * write that copied the whole step list and re-rendered the run tab.
  */
 
 import { sseClient } from "./sse-client";
@@ -24,14 +29,23 @@ import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { useScenarioRunStore } from "@/stores/scenario-run-store";
+import { useClientSettingsStore } from "@/stores";
+import { METRICS_UI_THROTTLE_MS } from "@/config/metrics";
+import type { ScenarioStepEvent } from "@/types";
 
 class ScenarioRunService {
 	private activeRunId: string | null = null;
+	private pendingSteps: ScenarioStepEvent[] = [];
+	private lastStepPushTime = 0;
+	private throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
 	/** Attach to a scenario run's stream and push its steps into the store. */
 	startMonitoring(runId: string): void {
 		if (this.activeRunId === runId) return;
 
+		// Whatever the previous run left buffered belongs to a list the store is
+		// about to clear, so it is dropped rather than flushed into this run's.
+		this.discardPending();
 		this.activeRunId = runId;
 		useScenarioRunStore.getState().startRun(runId);
 
@@ -46,8 +60,52 @@ class ScenarioRunService {
 			() => {},
 			this.handleError.bind(this),
 			this.handleClose.bind(this),
-			(step) => useScenarioRunStore.getState().addStep(step)
+			this.handleStep.bind(this)
 		);
+	}
+
+	/**
+	 * Buffer a step, and commit the buffer no more often than the cadence.
+	 *
+	 * The leading edge commits immediately - the first step of a run is the one
+	 * a reader is waiting on, and holding it back would make a fast run look
+	 * slow to start - and a trailing timer commits whatever arrives inside the
+	 * window. Identical to `LoadTestService.handleMetrics`, on the same setting,
+	 * because the two are the same problem: a stream the renderer cannot commit
+	 * per event.
+	 */
+	private handleStep(step: ScenarioStepEvent): void {
+		this.pendingSteps.push(step);
+		const elapsed = Date.now() - this.lastStepPushTime;
+		const throttleMs =
+			useClientSettingsStore.getState().liveRefreshMs || METRICS_UI_THROTTLE_MS;
+		if (elapsed >= throttleMs || this.lastStepPushTime === 0) {
+			this.flushSteps();
+		} else if (!this.throttleTimer) {
+			this.throttleTimer = setTimeout(() => {
+				this.throttleTimer = null;
+				this.flushSteps();
+			}, throttleMs - elapsed);
+		}
+	}
+
+	/** Commit the buffered steps as one batch. */
+	private flushSteps(): void {
+		if (this.pendingSteps.length === 0) return;
+		this.lastStepPushTime = Date.now();
+		const batch = this.pendingSteps;
+		this.pendingSteps = [];
+		useScenarioRunStore.getState().addSteps(batch);
+	}
+
+	/** Drop the buffer and its pending commit, for steps nothing will show. */
+	private discardPending(): void {
+		if (this.throttleTimer) {
+			clearTimeout(this.throttleTimer);
+			this.throttleTimer = null;
+		}
+		this.pendingSteps = [];
+		this.lastStepPushTime = 0;
 	}
 
 	/*
@@ -62,6 +120,11 @@ class ScenarioRunService {
 
 	private handleError(error: Error): void {
 		console.error("[ScenarioRunService] SSE error:", error);
+		// Before the error, so the steps that did arrive are on screen under the
+		// notice explaining why no more will be. A buffered batch stranded here
+		// would be the run's last steps, silently missing from a list the reader
+		// is now being told is incomplete.
+		this.flushSteps();
 		useScenarioRunStore.getState().setError(error.message);
 	}
 
@@ -73,6 +136,12 @@ class ScenarioRunService {
 	private async handleClose(): Promise<void> {
 		const runId = this.activeRunId;
 		this.activeRunId = null;
+		// The last window's steps, before anything reads the list as final. The
+		// stored rows supersede them a moment later, but only if the report
+		// fetch below succeeds - and a run that ended without one is exactly the
+		// case where the live rows are all the reader will ever have.
+		this.flushSteps();
+		this.discardPending();
 		useScenarioRunStore.getState().setStreaming(false);
 		if (!runId) return;
 
