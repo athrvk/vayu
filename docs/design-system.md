@@ -681,7 +681,6 @@ reason this component exists. The `text` variant keeps its intrinsic width: it
 sits inline in running text, where a fixed column would punch holes, and a
 caller that wants a column there (the import preview) still sets its own.
 
-
 Method colors are design tokens, not hardcoded hex values. **They are
 mode-adaptive** - hue and saturation are identical in both themes, so a method
 always reads as "its" colour; only lightness shifts.

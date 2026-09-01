@@ -80,6 +80,22 @@ describe("MethodBadge - methods longer than the column", () => {
 		expect(label.className).toContain("min-w-0");
 	});
 
+	it("starts truncating at exactly the width the chip was given", () => {
+		// The width lives in a Tailwind class, which has to be a literal, and the
+		// truncation threshold lives in a constant - two spellings of the same
+		// number, so pin them to each other. Read the character count back out of
+		// what was rendered rather than restating it here, or this test is just a
+		// third copy.
+		const chars = Number(
+			/(\d+)ch/.exec(renderBadge(<MethodBadge method="GET" />).className)?.[1]
+		);
+		expect(chars).toBeGreaterThan(0);
+		const fits = "M".repeat(chars);
+		const overflows = "M".repeat(chars + 1);
+		expect(renderBadge(<MethodBadge method={fits} />).title).toBe("");
+		expect(renderBadge(<MethodBadge method={overflows} />).title).toBe(overflows);
+	});
+
 	it("exposes the full method as a title only when it is truncated", () => {
 		// An unconditional title would fight the app's own tooltips on the same
 		// rows, so the absent case is as much of the contract as the present one.
