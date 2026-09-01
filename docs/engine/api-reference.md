@@ -5899,7 +5899,8 @@ stays cheap as history grows.
 Each row's `summary` is derived from that run's `config_snapshot`, and the
 derivation is **cached per run id** (issue #1150): a snapshot is written once,
 when the run is created, so a repeated poll re-serves what the previous one
-built instead of re-parsing up to 500 snapshots a tick. The cache is bounded and
+built instead of re-parsing one snapshot per row every tick - 50 at the default
+page size, up to 500 at the cap. The cache is bounded and
 holds nothing a request cannot rebuild, so it changes no answer - a run deleted
 between polls is gone from the list because the query no longer returns it, not
 because anything was invalidated. This route also logs at **debug**, not info: it

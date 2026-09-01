@@ -24,8 +24,9 @@ namespace vayu::http {
  * `GET /runs` is the polled endpoint (issue #1150): the history sidebar, the
  * welcome screen and the command palette each re-ask every 5 seconds while they
  * are on screen, and every call rebuilt the same nine-key summary for every row
- * by re-parsing that run's stored `config_snapshot` - up to 50 JSON parses a
- * tick, all producing what the previous tick already produced.
+ * by re-parsing that run's stored `config_snapshot` - one JSON parse per row, so
+ * 50 a tick at the default page size and up to 500 at the largest the route
+ * allows, all producing what the previous tick already produced.
  *
  * **Keyed by run id, and that is exact rather than merely likely.** A run's
  * `config_snapshot` is written once, by `Database::create_run`, from the two

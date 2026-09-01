@@ -17,12 +17,16 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstring>
+#include <filesystem>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
+#include "source_scan.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/spec_coverage.hpp"
@@ -419,6 +423,47 @@ TEST_F (RunsRouteTest, SummaryCacheStaysWithinCapacity) {
     EXPECT_EQ (body["data"].size (), 10u);
     EXPECT_EQ (small.build_count (), 10u);
     EXPECT_LE (small.size (), CAPACITY);
+}
+
+/*
+ * The other half of #1150's idle cost is a log line, and no behavioural test
+ * here can see it: the listing log lives in `handle_list_runs`, which needs an
+ * HTTP server, while everything else in this file covers the extracted core.
+ * At the verbosity the app spawns the engine with (`--verbose 1`) an info line
+ * reaches stdout, and the Electron main process reads, splits and logs every
+ * line of that pipe - so an info line on the polled route wakes a third
+ * process every five seconds. What the route *says* is the only observable, so
+ * it is scanned for, with the two disciplines source_scan.hpp asks of a scan:
+ * assert it read something, and plant a positive so a blanked input cannot
+ * pass for a clean file.
+ */
+TEST (RunsRouteLogging, TheListingLineIsDebugNotInfo) {
+    const std::filesystem::path route =
+    std::filesystem::path{ VAYU_ENGINE_SOURCE_DIR } / "src" / "http" / "routes" / "runs.cpp";
+    const std::string code =
+    vayu::tests::strip_comments (vayu::tests::read_source (route));
+    ASSERT_FALSE (code.empty ()) << route.string () << " read as empty";
+
+    constexpr std::string_view MESSAGE = "\"GET /runs - Listing runs (limit=\"";
+    const auto at                      = code.find (MESSAGE);
+    ASSERT_NE (at, std::string::npos)
+    << "the listing log line is gone or reworded - re-point this guard at it";
+
+    // The call opening the statement that holds the message.
+    const auto call = code.rfind ("vayu::utils::log_", at);
+    ASSERT_NE (call, std::string::npos);
+    EXPECT_EQ (code.compare (call, std::strlen ("vayu::utils::log_debug"), "vayu::utils::log_debug"), 0)
+    << "the polled /runs listing must log at debug, not info (#1150)";
+
+    // Planted positive: the matcher does find an info spelling when there is
+    // one, so the assertion above is reading the level rather than nothing.
+    const std::string planted =
+    "vayu::utils::log_info (\"GET /runs - Listing runs (limit=\"";
+    const auto planted_at = planted.find (MESSAGE);
+    ASSERT_NE (planted_at, std::string::npos);
+    EXPECT_NE (planted.compare (planted.rfind ("vayu::utils::log_", planted_at),
+               std::strlen ("vayu::utils::log_debug"), "vayu::utils::log_debug"),
+    0);
 }
 
 TEST_F (RunsRouteTest, FilterByType) {
