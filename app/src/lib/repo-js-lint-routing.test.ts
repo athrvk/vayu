@@ -46,7 +46,28 @@ function lintStep(): string {
 	return [lines[start], ...(end === -1 ? rest : rest.slice(0, end))].join("\n");
 }
 
+/**
+ * The job the lint step belongs to, from its own line back to the nearest job
+ * key. Which job it is matters as much as that some job names the filter: a
+ * clause that drifts onto another job's condition leaves the substring in the
+ * file and the lint step unreachable, which is the drift this file exists for.
+ */
+function jobRunningLint(): string {
+	const lines = workflow.split("\n");
+	const step = lines.findIndex((line) => line.trim() === `- name: ${STEP_NAME}`);
+	if (step === -1) return "";
+
+	const isJobKey = (line: string) => /^ {2}[A-Za-z0-9_-]+:$/.test(line);
+	const start = lines.slice(0, step).findLastIndex(isJobKey);
+	if (start === -1) return "";
+
+	const rest = lines.slice(start + 1);
+	const end = rest.findIndex(isJobKey);
+	return [lines[start], ...(end === -1 ? rest : rest.slice(0, end))].join("\n");
+}
+
 const step = lintStep();
+const job = jobRunningLint();
 
 /** `git ls-files -- '*.mjs' '*.cjs' '*.js'` - the extensions, as written. */
 const pathspec = [...step.matchAll(/'(\*\.[a-z]+)'/g)].map((match) => match[1]);
@@ -80,8 +101,9 @@ describe("JavaScript outside app/", () => {
 	 */
 	it("has something to scan", () => {
 		expect(step.length).toBeGreaterThan(200);
+		expect(job.length).toBeGreaterThan(step.length);
 		expect(pathspec.length).toBeGreaterThan(0);
-		expect(prefixesDropped).toEqual(["app/", "engine/vendor/"]);
+		expect([...prefixesDropped].sort()).toEqual(["app/", "engine/vendor/"]);
 		expect(lintedFiles().length).toBeGreaterThan(0);
 	});
 
@@ -102,18 +124,25 @@ describe("JavaScript outside app/", () => {
 	});
 
 	/*
-	 * A filter nothing reads routes nowhere. The lint runs in `App quality
-	 * checks`, so that job's condition is the one that has to name it.
+	 * A filter nothing reads routes nowhere, and a filter the wrong job reads
+	 * routes somewhere useless - so the condition asserted is the one belonging
+	 * to whichever job the step is written into, found from the step rather than
+	 * named here.
 	 */
 	it("is exported by the changes job and read by the job that lints", () => {
 		expect(workflow).toContain(`${FILTER}: \${{ steps.area.outputs.${FILTER} }}`);
-		expect(workflow).toContain(`needs.changes.outputs.${FILTER} == 'true'`);
+		expect(job).toMatch(
+			new RegExp(`^\\s*if: .*needs\\.changes\\.outputs\\.${FILTER} == 'true'`, "m")
+		);
 	});
 
 	/*
 	 * The config is the third thing that can drift: an extension linted and
 	 * routed, with no block in the config to give it a parser, is linted as
-	 * whatever ESLint defaults to rather than as what Node runs.
+	 * whatever ESLint defaults to rather than as what Node runs. Its `ignores`
+	 * are held to the step's own exclusions for the other direction - a run
+	 * started by hand or by an editor takes the config's word for what is out of
+	 * bounds, where the step takes `grep`'s.
 	 */
 	it("lints every extension against a config block written for it", () => {
 		expect(existsSync(fromRepoRoot(configPath)), configPath).toBe(true);
@@ -121,6 +150,9 @@ describe("JavaScript outside app/", () => {
 		const config = readFileSync(fromRepoRoot(configPath), "utf8");
 		for (const glob of pathspec) {
 			expect(config, glob).toContain(`"**/${glob}"`);
+		}
+		for (const prefix of prefixesDropped) {
+			expect(config, prefix).toContain(`"${prefix}**"`);
 		}
 	});
 });

@@ -42,12 +42,18 @@ export default [
 	// package.json outside `app/`, so `.js` is CommonJS by Node's own rule -
 	// a file that wants ESM out here has to be named `.mjs` to run at all, and
 	// parsing it as anything else would be a lie about how Node loads it.
+	//
+	// The two global tables differ for the same reason: `globals.node` includes
+	// `require`, `module`, `exports` and `__dirname`, which an ES module does not
+	// have - `require("node:fs")` in a `.mjs` is a `ReferenceError` the moment
+	// Node loads it, and handing that block the CommonJS table would have
+	// `no-undef` bless it. `globals.nodeBuiltin` is the same table without them.
 	{
 		files: ["**/*.mjs"],
 		languageOptions: {
 			ecmaVersion: "latest",
 			sourceType: "module",
-			globals: globals.node,
+			globals: globals.nodeBuiltin,
 		},
 	},
 	{
