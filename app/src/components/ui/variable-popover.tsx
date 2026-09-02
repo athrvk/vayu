@@ -91,7 +91,7 @@ const BOUND_ROW_LABEL = "Bound row";
  * is where a shape or radius fix starts reaching only two of them.
  */
 const NAME_CHIP =
-	"inline-flex h-[18px] items-center rounded-md border px-1.5 text-[10px] leading-none";
+	"inline-flex h-[18px] items-center rounded-md border px-1.5 text-[10px] font-semibold leading-none";
 
 /**
  * The bare spelling's own sentence, and deliberately not the `data.*` one.
@@ -449,7 +449,7 @@ export function VariablePopover({
 							{isSecret && (
 								<span
 									title="Secret - hidden until revealed"
-									className="inline-flex h-[18px] items-center gap-1 rounded-md border border-warning-text/40 px-1.5 text-[10px] leading-none text-warning-text"
+									className="inline-flex h-[18px] items-center gap-1 rounded-md border border-warning-text/40 px-1.5 text-[10px] font-semibold leading-none text-warning-text"
 								>
 									<KeyRound className="h-2.5 w-2.5" />
 									Secret

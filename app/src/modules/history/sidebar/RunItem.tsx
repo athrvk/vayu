@@ -195,7 +195,7 @@ export default function RunItem({
 						{run.baseline && (
 							<Badge
 								variant="chip"
-								className="shrink-0 gap-1 bg-primary/15 text-primary px-1.5 py-0 text-[10px] font-medium"
+								className="shrink-0 gap-1 bg-primary/15 text-primary px-1.5 py-0 text-[10px] font-semibold"
 							>
 								<Pin className="w-2.5 h-2.5" />
 								Baseline

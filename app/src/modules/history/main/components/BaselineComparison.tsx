@@ -166,7 +166,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 				    every other variant would drag a `hover:bg-*` along with it. */}
 				<Badge
 					variant="chip"
-					className="gap-1 bg-primary/15 text-primary px-1.5 py-0 text-[10px] font-medium"
+					className="gap-1 bg-primary/15 text-primary px-1.5 py-0 text-[10px] font-semibold"
 				>
 					<Pin className="w-2.5 h-2.5" />
 					{new Date(baselineRun!.startTime).toLocaleString()}

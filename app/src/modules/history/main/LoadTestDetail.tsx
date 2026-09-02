@@ -32,7 +32,7 @@ import {
 	ScrollArea,
 } from "@/components/ui";
 import { formatNumber, loadTestTypeToLabel } from "@/utils";
-import { TruncatedText } from "@/components/shared";
+import { MethodBadge, TruncatedText } from "@/components/shared";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
@@ -178,7 +178,14 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				<div className="flex items-center gap-3 bg-muted/50 p-3 mb-3">
 					{isScenarioLoad ? (
 						<>
-							<Badge variant="outline" className="font-mono font-bold shrink-0">
+							{/* Not a `MethodBadge`: SEQUENCE is not a method, and the
+							    primitive would tint it in the OPTIONS colour (the
+							    `getMethodColor` fallback) and truncate it at the
+							    seven-character method column. It keeps the neutral
+							    outline chip, minus a `font-bold` the code font has no
+							    face for - `Badge`'s own `font-semibold` is the weight
+							    the mono step documents (#1199). */}
+							<Badge variant="outline" className="font-mono shrink-0">
 								SEQUENCE
 							</Badge>
 							<TruncatedText className="text-sm text-foreground flex-1">
@@ -187,9 +194,10 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 						</>
 					) : (
 						<>
-							<Badge variant="outline" className="font-mono font-bold shrink-0">
-								{report.metadata?.requestMethod || "GET"}
-							</Badge>
+							<MethodBadge
+								method={report.metadata?.requestMethod || "GET"}
+								size="md"
+							/>
 							<TruncatedText className="text-sm font-mono text-foreground flex-1">
 								{report.metadata?.requestUrl || "Unknown URL"}
 							</TruncatedText>
