@@ -97,7 +97,9 @@ std::string percent_encode (const std::string& value) {
     char* escaped =
     curl_easy_escape (nullptr, value.c_str (), static_cast<int> (value.size ()));
     if (!escaped) {
-        return value;
+        // Empty rather than the raw value - see the header for why an unescaped
+        // value is the worse of the two failures.
+        return {};
     }
     std::string out (escaped);
     curl_free (escaped);

@@ -138,6 +138,14 @@ struct UrlParts {
  * can. Exported because a query value built anywhere else needs the same
  * escaper: a private copy would not receive libcurl's fixes, which is the rule
  * this file's parsing already follows.
+ *
+ * **Empty when libcurl cannot escape** - an allocation failure, or a value
+ * longer than the `int` its length is passed as. That is the form encoder's
+ * long-standing answer, kept when its private copy of this function was folded
+ * in here (issue #1228), and it is the safer of the two: an unescaped value
+ * spliced into a query string or a form body carries whatever `&` and `=` it
+ * contains, which adds parameters the caller never wrote. Under-sending a
+ * value is recoverable; sending a different request is not.
  */
 [[nodiscard]] std::string percent_encode (const std::string& value);
 
