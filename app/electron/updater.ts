@@ -11,7 +11,11 @@ import { app, dialog, ipcMain, shell } from "electron";
 // be pulled off the default import.
 import electronUpdater from "electron-updater";
 import { resolveUpdateStrategy, type UpdateStrategy } from "./updater-strategy.js";
-import { REPO, UPDATE_CHECK_INTERVAL_MS as CHECK_INTERVAL_MS } from "./constants.js";
+import {
+	REPO,
+	UPDATE_CHECK_INTERVAL_MS as CHECK_INTERVAL_MS,
+	UPDATE_STARTUP_CHECK_DELAY_MS as STARTUP_DELAY_MS,
+} from "./constants.js";
 
 const { autoUpdater } = electronUpdater;
 
@@ -114,6 +118,8 @@ let attempt = 0;
 /** The attempt whose failure has already been acted on - see `handleCheckFailure`. */
 let failedAttempt = 0;
 let retryTimer: NodeJS.Timeout | null = null;
+/** The session's first check, waiting out `STARTUP_DELAY_MS`. */
+let startupTimer: NodeJS.Timeout | null = null;
 
 /**
  * How the updater finds the window to talk to, asked fresh every time.
@@ -177,8 +183,37 @@ function runCheckAttempt(): void {
 	});
 }
 
+/** Drop the waiting first check - it ran, something replaced it, or we are quitting. */
+function clearStartupDelay(): void {
+	if (startupTimer) {
+		clearTimeout(startupTimer);
+		startupTimer = null;
+	}
+}
+
+/**
+ * Wait out `STARTUP_DELAY_MS`, then run the session's first check.
+ *
+ * Only the first one is delayed: the periodic cycle and every manual check keep
+ * their own timing, and a manual check made during the wait absorbs this one
+ * (`startCheckCycle` clears it) rather than being followed by a duplicate.
+ */
+function scheduleStartupCheck(): void {
+	clearStartupDelay();
+	startupTimer = setTimeout(() => {
+		startupTimer = null;
+		startCheckCycle();
+	}, STARTUP_DELAY_MS);
+	// Node keeps the process alive for a pending timer; a check that is not due
+	// yet must not hold up quit.
+	startupTimer.unref?.();
+}
+
 /** Start a check with a full retry budget. Every check path goes through here. */
 function startCheckCycle(): void {
+	// Whichever path gets here first is the session's first check; a startup one
+	// still waiting would only ask the same question again a moment later.
+	clearStartupDelay();
 	clearRetry();
 	attempt = 1;
 	failedAttempt = 0;
@@ -323,8 +358,16 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 	// The startup and periodic checks retry on the same budget. They stay
 	// silent - `settleCheck` answers nobody when no one is waiting - but the
 	// startup one runs on the coldest network stack of the session, so it is
-	// the attempt that most needs a second try.
-	startCheckCycle();
+	// the attempt that most needs a second try. The wait ahead of it warms that
+	// stack rather than replacing the retry: a minute in, Wi-Fi may still be
+	// settling, and a check the user clicks during the wait starts its own
+	// cycle with the same budget.
+	//
+	// It is the *download* the wait is for. On the silent platforms the check
+	// pulls the release as soon as it finds one, and at t=0 that transfer
+	// competed with the user's own API traffic and with the engine's startup
+	// disk work (see `UPDATE_STARTUP_CHECK_DELAY_MS`).
+	scheduleStartupCheck();
 	intervalTimer = setInterval(() => startCheckCycle(), CHECK_INTERVAL_MS);
 }
 
@@ -466,6 +509,7 @@ export function checkForUpdatesNow(source: CheckSource = "menu"): Promise<Update
  * quit. The caller still gets its answer, so no promise is left hanging.
  */
 export function disposeAutoUpdater(): void {
+	clearStartupDelay();
 	if (intervalTimer) {
 		clearInterval(intervalTimer);
 		intervalTimer = null;
