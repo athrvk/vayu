@@ -60,8 +60,7 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { TIMING } from "@/config/timing";
 import { isTextEntryTarget } from "@/lib/keyboard";
-
-const ITEM = '[role="treeitem"]';
+import { TREE_ITEM as ITEM, focusTreeRow, treeRows } from "./tree-focus";
 
 /**
  * Alt+Arrow moves the row itself, rather than the focus - the keyboard half of
@@ -120,19 +119,11 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 	// row in the tree just to move focus by one.
 	const typeahead = useRef({ prefix: "", at: 0 });
 
-	const items = useCallback(
-		() => Array.from(treeRef.current?.querySelectorAll<HTMLElement>(ITEM) ?? []),
-		[treeRef]
-	);
+	const items = useCallback(() => treeRows(treeRef.current), [treeRef]);
 
 	const focusItem = useCallback(
-		(el: HTMLElement | undefined) => {
-			if (!el) return;
-			for (const item of items()) item.tabIndex = -1;
-			el.tabIndex = 0;
-			el.focus();
-		},
-		[items]
+		(el: HTMLElement | undefined) => focusTreeRow(treeRef.current, el),
+		[treeRef]
 	);
 
 	// Exactly one row must be tabbable. Rows render with tabIndex -1, so seed

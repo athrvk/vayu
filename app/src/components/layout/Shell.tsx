@@ -32,6 +32,7 @@ import { Dock } from "./Dock";
 import { ContextBar } from "./ContextBar";
 import { TabStrip } from "./TabStrip";
 import { tabElementId, tabPanelElementId } from "./tab-aria";
+import { closeTabFromKeyboard } from "./tab-focus";
 import { CommandPalette } from "@/modules/palette";
 import { DetailSkeleton } from "@/components/shared/DetailSkeleton";
 import RequestBuilder from "@/modules/request-builder";
@@ -100,7 +101,7 @@ function renderTabContent(tab: Tab | null): React.ReactNode {
 }
 
 export default function Shell() {
-	const { openTabs, activeTabId, closeTab, focusTab, openTab } = useTabsStore();
+	const { openTabs, activeTabId, focusTab, openTab } = useTabsStore();
 	const { toggleDrawer, activateDrawerView, toggleContextBar, setDrawerOpen, setDrawerView } =
 		useLayoutStore();
 	const { triggerSave } = useSaveStore();
@@ -198,7 +199,10 @@ export default function Shell() {
 			}
 			if (matchesChord(e, CLOSE_TAB_CHORD)) {
 				e.preventDefault();
-				if (activeTabId) closeTab(activeTabId);
+				// The chord fires from wherever focus is, and what it closes is
+				// usually what holds it - the panel this tab renders. Focus moves
+				// to the tab that replaces it rather than to `<body>` (#1218).
+				if (activeTabId) closeTabFromKeyboard(activeTabId);
 				return;
 			}
 			if (matchesChord(e, TOGGLE_DRAWER_CHORD)) {
@@ -244,7 +248,6 @@ export default function Shell() {
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [
 		triggerSave,
-		closeTab,
 		toggleDrawer,
 		toggleContextBar,
 		activateDrawerView,
