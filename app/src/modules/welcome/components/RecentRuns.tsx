@@ -34,15 +34,24 @@ import type { Run } from "@/types";
 
 const RECENT_RUN_LIMIT = 5;
 
-/** Status text is shown only for terminal states worth calling out. */
+/**
+ * Status text is shown only for terminal states worth calling out.
+ *
+ * The `--status-*` family, in the same mapping `RunItem` (the history sidebar)
+ * paints the identical three words with: a run status is what that family is
+ * for, and two lists of the same runs answering in two different colours is the
+ * drift it exists to prevent. "Stopped" is orange here rather than the general
+ * amber for that reason - it now matches its own left-bar (`--status-stopped`)
+ * and the sidebar row, and both `-text` pairs are tuned to clear 4.5:1.
+ */
 function statusLabel(status: Run["status"]): { text: string; className: string } | null {
 	switch (status) {
 		case "completed":
-			return { text: "Completed", className: "text-success-text" };
+			return { text: "Completed", className: "text-status-success-text" };
 		case "stopped":
-			return { text: "Stopped", className: "text-warning-text" };
+			return { text: "Stopped", className: "text-status-stopped-text" };
 		case "failed":
-			return { text: "Failed", className: "text-destructive-text" };
+			return { text: "Failed", className: "text-status-error-text" };
 		default:
 			return null;
 	}

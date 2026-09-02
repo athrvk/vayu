@@ -96,6 +96,27 @@ describe("RecentRuns", () => {
 		});
 	});
 
+	it("paints a terminal run status from the --status-* family", () => {
+		// #1225. The same three words the history sidebar's `RunItem` paints, in
+		// the same tokens: a run status is what `--status-*` is for, and the two
+		// lists disagreeing was the drift. "Stopped" is the visible half - it was
+		// the general amber and is now the family's orange, which is also what
+		// this run's own left-bar (`--status-stopped`) has always been.
+		render(
+			<RecentRuns
+				runs={[
+					run({ id: "c", status: "completed" }),
+					run({ id: "s", status: "stopped", startTime: Date.now() - 120_000 }),
+					run({ id: "f", status: "failed", startTime: Date.now() - 180_000 }),
+				]}
+			/>
+		);
+
+		expect([...screen.getByText("Completed").classList]).toContain("text-status-success-text");
+		expect([...screen.getByText("Stopped").classList]).toContain("text-status-stopped-text");
+		expect([...screen.getByText("Failed").classList]).toContain("text-status-error-text");
+	});
+
 	it("renders nothing when there are no runs", () => {
 		const { container } = render(<RecentRuns runs={[]} />);
 		expect(container).toBeEmptyDOMElement();

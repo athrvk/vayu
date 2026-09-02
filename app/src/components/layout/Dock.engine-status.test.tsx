@@ -113,6 +113,24 @@ describe("the engine status indicator", () => {
 		expect(screen.getByText("Connected").closest("[tabindex='0']")).toBeNull();
 	});
 
+	it("paints the connection light from the --status-* family", () => {
+		// #1225. The rule design-system.md states by the word "connection": a
+		// connection indicator belongs to the status family, so a reader looking
+		// for every status surface finds this one. Asserted as class membership
+		// rather than a colour, because the family's green and the general
+		// `--success-text` green are the same value - the mistake this catches is
+		// invisible on screen and only visible in the token name.
+		useEngineStore.setState({ engineStatus: "connected", engineError: null });
+		renderDock();
+
+		const light = screen.getByText("Connected").closest("span");
+		expect(light).toBeTruthy();
+		expect([...light!.classList]).toContain("text-status-success-text");
+		// The bare indicator token measures 2.20:1 as 12px text on --panel, so it
+		// is never the foreground here, whichever family is chosen.
+		expect([...light!.classList]).not.toContain("text-status-success");
+	});
+
 	it("says Starting on first paint, not Disconnected", () => {
 		// The store's own initial value, which is what a launch renders before any
 		// poll has been answered or refused. Reverting the third state puts the
