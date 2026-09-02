@@ -29,19 +29,24 @@
 import { useCallback, useRef } from "react";
 
 /**
- * The key a record is filed under while the builder holds no saved request -
- * the provider's one name for an id-less builder, read by the Send-with-row
- * picker's memory as well as by the slots here (issue #1271). One convention
- * spelled twice is how two spellings of it drift apart.
+ * The key a record is filed under while the builder names no identity at all -
+ * the provider's one fallback, read by the Send-with-row picker's memory as
+ * well as by the slots here (issue #1271). One convention spelled twice is how
+ * two spellings of it drift apart.
  *
- * A request tab is always opened against a request the backend has already
- * created (`useNewRequest`), so what reaches this key is the editable copy
- * History renders for a stored run. Every such copy shares the one bucket,
- * which is what the rules already do with a `requestId` of `null` - `null ===
- * null` passes their ownership check - so two run tabs open at once interfere
- * exactly as they did before this keying, no better and no worse. Giving that
- * copy an identity of its own is issue #1272; it needs one the provider is not
- * handed today.
+ * A builder says which identity it files under with the provider's `memoryKey`
+ * prop, defaulting to `request.id`. A request tab is always opened against a
+ * request the backend has already created (`useNewRequest`), and the editable
+ * copy History renders for a stored run - the one builder with no request id -
+ * passes its run id (issue #1272), so nothing reaches this key in the app
+ * today. It stays as the answer for a builder that has neither, because the
+ * alternative is every such builder sharing whichever key was written last:
+ * the rules read a `requestId` of `null` against another `null` as a match, so
+ * a shared bucket is handed out as owned rather than refused.
+ *
+ * It is the one key the open-tab sweep never drops. That is what it costs: a
+ * key naming no tab cannot be bounded by the tabs, which is the second reason
+ * to declare an identity that does.
  */
 export const UNSAVED_AUTO_KEY = "__unsaved__";
 
@@ -58,8 +63,10 @@ interface AutoRecordSlot<T> {
 }
 
 /**
- * @param requestKey which request the accessors read and write - `request.id`,
- * or {@link UNSAVED_AUTO_KEY} when there is none.
+ * @param requestKey which builder the accessors read and write for - the
+ * provider's resolved `memoryKey`: the request's id, the identity a builder
+ * over something else declared, or {@link UNSAVED_AUTO_KEY} when it has
+ * neither.
  */
 export function useAutoRecordSlot<T>(requestKey: string): AutoRecordSlot<T> {
 	const byRequest = useRef(new Map<string, T>());

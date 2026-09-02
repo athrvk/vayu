@@ -371,6 +371,13 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 			<div className="flex-1 min-h-0">
 				<RequestBuilderProvider
 					initialRequest={seed.request}
+					/* The copy has no request id and must not grow one - that null
+					   is one of the two gates detaching it - but the provider still
+					   has to tell two open run tabs apart when it files what a
+					   setting changed. The run id is the identity it files under
+					   (issue #1272); it names this tab, so the same open-tab sweep
+					   bounds it. */
+					memoryKey={run.id}
 					initialResponse={initialResponse}
 					inheritedPreScripts={seed.collectionPreScripts}
 					inheritedPostScripts={seed.collectionPostScripts}
