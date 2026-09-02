@@ -24,6 +24,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { COMMANDS, availableCommands, commandById } from "./registry";
 import { baseCommandContext } from "./context";
 import { commandTitle, type Command, type CommandContext, type CommandSurfaces } from "./types";
+import { SEND_CHORD } from "@/constants/shortcuts";
 import { useImportModalStore, useTabsStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
@@ -151,11 +152,39 @@ describe("availability", () => {
 		expect(availableCommands(contributed).map((c) => c.id)).toContain("run-load-test");
 	});
 
+	/*
+	 * Send is the second such entry (#1243), and its contribution is narrower
+	 * still: the builder withdraws it while a send would be refused, so the row
+	 * follows the Send button rather than the builder's mere presence.
+	 */
+	it("hides the send command until a mounted builder contributes it", () => {
+		const requestTab: CommandContext = {
+			activeTab: { id: "t1", type: "request", entityId: "r1" },
+			activeTabLabel: "Charge card",
+			activeCollection: null,
+			surfaces: surfaces(),
+		};
+		expect(availableCommands(requestTab).map((c) => c.id)).not.toContain("send-request");
+
+		const contributed: CommandContext = {
+			...requestTab,
+			surfaces: { ...surfaces(), sendRequest: () => {} },
+		};
+		expect(availableCommands(contributed).map((c) => c.id)).toContain("send-request");
+	});
+
 	it("names the target of a contextual command, so Enter holds no surprise", () => {
 		const ctx = fullContext();
 		expect(commandTitle(commandById("run-collection"), ctx)).toBe('Run "Payments"');
 		expect(commandTitle(commandById("close-tab"), ctx)).toBe('Close "Payments"');
 		expect(commandTitle(commandById("run-load-test"), ctx)).toBe('Load test "Payments"');
+		expect(commandTitle(commandById("send-request"), ctx)).toBe('Send "Payments"');
+	});
+
+	it("prints the send chord on the row, from the chord itself", () => {
+		// Not a second spelling of ⌘↵ (#938): the row and the handler read one
+		// definition, so a chord that moves moves on both.
+		expect(commandById("send-request").shortcut).toBe(SEND_CHORD);
 	});
 
 	it("falls back to a generic close title when nothing knows the label", () => {
@@ -166,6 +195,7 @@ describe("availability", () => {
 		};
 		expect(commandTitle(commandById("close-tab"), ctx)).toBe("Close tab");
 		expect(commandTitle(commandById("run-load-test"), ctx)).toBe("Load test this request");
+		expect(commandTitle(commandById("send-request"), ctx)).toBe("Send this request");
 	});
 });
 
@@ -209,6 +239,16 @@ describe("performing", () => {
 		};
 		commandById("run-load-test").perform(ctx);
 		expect(started).toBe(1);
+	});
+
+	it("sends through the contributed handler, never a copy of one", () => {
+		let sent = 0;
+		const ctx: CommandContext = {
+			...fullContext(),
+			surfaces: { ...surfaces(), sendRequest: () => sent++ },
+		};
+		commandById("send-request").perform(ctx);
+		expect(sent).toBe(1);
 	});
 
 	it("hands the collection to the host rather than running it itself", () => {

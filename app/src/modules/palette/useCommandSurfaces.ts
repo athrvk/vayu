@@ -21,12 +21,14 @@
  * from here reaches the Appearance panel's radio group the same way an OS theme
  * change does.
  *
- * A fourth surface is **not** hosted here, and cannot be: starting a load test
- * needs the request builder's live editor draft, which exists only inside a
- * provider the palette is a sibling of. The mounted builder contributes it
- * through `lib/commands/live-surfaces.ts` and this hook merges what is
- * registered, so the command is offered while a builder is on screen and absent
- * the rest of the time.
+ * Two more surfaces are **not** hosted here, and cannot be: starting a load test
+ * and sending both need the request builder's live editor draft, which exists
+ * only inside a provider the palette is a sibling of. The mounted builder
+ * contributes them through `lib/commands/live-surfaces.ts` and this hook merges
+ * what is registered, so those commands are offered while a builder is on screen
+ * and absent the rest of the time. Send is withdrawn for a second reason as
+ * well - the builder stops offering it while it could not send at all - so its
+ * row tracks the Send button rather than merely the builder's presence.
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -49,6 +51,7 @@ export function useCommandSurfaces(): UseCommandSurfacesReturn {
 	const { isDark, setTheme } = useElectronTheme();
 	const [runTarget, setRunTarget] = useState<Collection | null>(null);
 	const startLoadTest = useLiveCommandSurfaceStore((s) => s.startLoadTest);
+	const sendRequest = useLiveCommandSurfaceStore((s) => s.sendRequest);
 
 	const dismissRunDialog = useCallback(() => setRunTarget(null), []);
 
@@ -69,8 +72,9 @@ export function useCommandSurfaces(): UseCommandSurfacesReturn {
 			runCollection: setRunTarget,
 			toggleThemeMode,
 			...(startLoadTest ? { startLoadTest } : {}),
+			...(sendRequest ? { sendRequest } : {}),
 		}),
-		[newRequest, toggleThemeMode, startLoadTest]
+		[newRequest, toggleThemeMode, startLoadTest, sendRequest]
 	);
 
 	return { surfaces, pickerProps, runTarget, dismissRunDialog };

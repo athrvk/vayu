@@ -807,7 +807,7 @@ run any command by name. Mounted once by `Shell`, alongside `ImportModal`.
   welcome screen's picker only on the welcome tab, the tree's run dialog only while the drawer
   is open), so the palette mounts its own - the same components, driven by the same calls. It
   also merges the surfaces a *mounted feature* contributes (the request builder's live draft,
-  for "Load test …") - see [Command Registry](#command-registry-libcommands).
+  for "Load test …" and "Send …") - see [Command Registry](#command-registry-libcommands).
 - **`types.ts`** - the `PaletteItem` shape, the fixed group order, and `rankForEmptyQuery`.
 - **`ranking.ts`** - what renders and in what order, decided once. See Ranking below.
 - **`PaletteResults.tsx`** - grouping and rendering, and nothing else: it asks `ranking.ts` what
@@ -930,8 +930,8 @@ Three things the rows and the frame say (#1176):
 - **A row's trailing edge tells you what already runs it.** A command bound to a chord prints that
   chord's key-caps - one `Kbd` per key, through `chordKeys`, from the `Chord` in
   `constants/shortcuts.ts` that the handler itself matches (#938) and never a second spelling of
-  one. The registry carries it as `Command.shortcut`, and twelve commands have one - seven of the
-  action rows plus the five drawer-view commands generated alongside them; every other row
+  one. The registry carries it as `Command.shortcut`, and thirteen commands have one - eight of
+  the action rows plus the five drawer-view commands generated alongside them; every other row
   prints nothing, because a plausible key that answers to nothing is worse than no key at all. A
   `Recents` row prints its age there instead, that being the reason it is in the section. A row
   that carries both - a chord-bound command with a recency stamp, which no source produces today -
@@ -1005,16 +1005,16 @@ in step or could enumerate them.
   `shortcut` is the `Chord` from `constants/shortcuts.ts` that already runs this command - the
   object the handler matches, so a surface printing it cannot advertise a key nothing answers
   (#938) - and is present only where such a chord genuinely exists.
-- **`registry.ts`** - the roster. Actions (new request, import, run collection, load test, close
-  tab, save, toggle drawer, toggle context bar, toggle theme, open settings) plus one command per
-  drawer view - **generated** from `constants/drawer-views.ts`, the same table the Dock's strip
+- **`registry.ts`** - the roster. Actions (new request, import, run collection, send, load test,
+  close tab, save, toggle drawer, toggle context bar, toggle theme, open settings) plus one
+  command per drawer view - **generated** from `constants/drawer-views.ts`, the same table the Dock's strip
   reads, filtered to drop Settings (which `open-settings` already covers, tab and all) - plus one
   command per settings section, **generated** from `app-panels.ts` and `engine-categories.ts` so
   a section added there appears here without an edit and cannot be named differently.
 - **`context.ts`** - `baseCommandContext()`, the React-free snapshot for a caller that is not a
   render (the native-menu bridge). `hooks/useCommandContext.ts` is the full version.
-- **`live-surfaces.ts`** - the channel a *mounted feature* contributes a surface through. One
-  slot, one contributor: the request builder's start-load-test handler.
+- **`live-surfaces.ts`** - the channel a *mounted feature* contributes a surface through. Two
+  named slots, start-load-test and send, both contributed by the mounted request builder.
 
 Two rules make it work without a dependency-injection tangle:
 
@@ -1033,9 +1033,9 @@ outlives any one mounted view. `CommandSurfaces` covers the rest, and it has two
 - **Host-owned** (`newRequest`, `runCollection`, `toggleThemeMode`) - dialogs and hooks that are
   React but that *any* rendering caller can mount for itself. The palette does exactly that in
   `useCommandSurfaces`, so offering `surfaces` at all means offering these three.
-- **Contributed by a mounted feature** (`startLoadTest`) - state that exists only inside one
-  component tree and cannot be lifted without copying it. Starting a load test needs the request
-  builder's **live editor draft**, before autosave has run; the palette is a sibling of
+- **Contributed by a mounted feature** (`startLoadTest`, `sendRequest`) - state that exists only
+  inside one component tree and cannot be lifted without copying it. Starting a load test needs
+  the request builder's **live editor draft**, before autosave has run; the palette is a sibling of
   `RequestBuilderProvider`, so a command reading a store would find only the last *saved* request
   and would silently run the old URL after an edit. The builder publishes its own handler through
   `live-surfaces.ts` (`useRegisterLoadTestSurface`, mounted by
@@ -1045,21 +1045,35 @@ outlives any one mounted view. `CommandSurfaces` covers the rest, and it has two
   Nothing about the load test moves: the single-active-run policy, the ceilings check and
   `LoadTestConfigDialog` all stay in the builder.
 
+  Send has the identical live-draft problem, so it fills the second slot the same way -
+  `useRegisterSendRequestSurface`, mounted by
+  `modules/request-builder/components/SendRequestCommandSurface.tsx`. Its contribution is
+  conditional where the load test's is not: the builder passes `null` in place of the handler
+  whenever `canSendRequest` (`utils/send-gate.ts`) says a send would be refused - a request already
+  in flight, this builder's own stream open (where the button reads Stop), or an empty URL - and
+  the row disappears with it rather than sitting on screen offering something the Send button
+  would refuse.
+
 The rejected alternative is worth naming, because it is the tempting one: reading the draft out
 of the provider from outside it, or recomposing the payload inside the command, would be a second
 copy of `buildExecBody` and of the run policy - the "hand-rolled copy of a primitive" defect this
 registry exists to remove.
 
-The channel is deliberately **one slot with one contributor**, not a registry of arbitrary named
-surfaces. A second feature with the same live-draft problem (a "Send request" command has it)
-joins that file as a second slot rather than inventing a second channel - but not before it
-exists.
+The channel is deliberately a **closed union of named slots**, not a registry of arbitrary named
+surfaces. Send had the same live-draft problem, and #1243 gave it the second slot rather than a
+second channel: `LiveSurfaceSlot` is `"startLoadTest" | "sendRequest"` and nothing else, so a
+third feature with this problem is a decision taken in `live-surfaces.ts`, not a name a caller
+can invent by passing a string.
 
 Consumers: `modules/palette/sources/commandItems.ts` (the Commands and Settings groups) and
 `hooks/useMenuActions.ts` (Preferences… → `open-settings`). `lib/commands/registry.test.ts` walks
 the roster and asserts every entry says something and that the settings roster still covers both
 catalogues; `modules/request-builder/load-test-command-surface.test.tsx` holds the live channel to
 handing over the request *as edited*, and to clearing itself on unmount.
+`modules/request-builder/send-request-command-surface.test.tsx` holds the same for Send - the
+request crossing the channel *as edited*, not as last saved - plus the gate: it asserts the row is
+absent while the URL is empty, while a send is already in flight, and while this builder's own
+stream is open.
 
 ## Toaster (`components/shared/Toaster.tsx`)
 

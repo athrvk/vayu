@@ -7,6 +7,11 @@
 
 export { COMMANDS, availableCommands, commandById } from "./registry";
 export { baseCommandContext } from "./context";
-export { useLiveCommandSurfaceStore, useRegisterLoadTestSurface } from "./live-surfaces";
+export {
+	useLiveCommandSurfaceStore,
+	useRegisterLoadTestSurface,
+	useRegisterSendRequestSurface,
+} from "./live-surfaces";
+export type { LiveSurfaceSlot } from "./live-surfaces";
 export { commandTitle } from "./types";
 export type { Command, CommandContext, CommandGroup, CommandSurfaces } from "./types";

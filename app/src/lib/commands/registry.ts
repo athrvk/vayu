@@ -33,6 +33,7 @@ import {
 	Play,
 	Plus,
 	Save,
+	Send,
 	Settings,
 	SunMoon,
 	X,
@@ -44,6 +45,7 @@ import {
 	LOAD_TEST_CHORD,
 	NEW_REQUEST_CHORD,
 	SAVE_CHORD,
+	SEND_CHORD,
 	SETTINGS_CHORD,
 	TOGGLE_CONTEXT_BAR_CHORD,
 	TOGGLE_DRAWER_CHORD,
@@ -107,6 +109,30 @@ const ACTION_COMMANDS: readonly Command[] = [
 		perform: (ctx) => {
 			if (ctx.activeCollection) ctx.surfaces?.runCollection(ctx.activeCollection);
 		},
+	},
+	{
+		id: "send-request",
+		// Named like the other contextual commands, and for the same reason: the
+		// row says which request Enter puts on the wire.
+		title: (ctx) => (ctx.activeTabLabel ? `Send "${ctx.activeTabLabel}"` : "Send this request"),
+		keywords: ["execute", "fire", "call", "http", "request", "run"],
+		group: "action",
+		// The app has no send mark of its own - the URL bar's Send is a text
+		// button - so the palette takes lucide's, which is the glyph the action
+		// already reads as everywhere else.
+		icon: Send,
+		// The builder's window handler matches this chord and calls the very
+		// `sendRequest` below.
+		shortcut: SEND_CHORD,
+		/*
+		 * Contributed by the mounted builder, like the load test under it - and
+		 * withdrawn while sending is not possible. Send is Stop for the whole of
+		 * an open stream (#574) and does nothing with an empty URL, so a row that
+		 * stayed on screen there would be one the palette offers and the app
+		 * refuses: `canSendRequest` is the single predicate both routes ask.
+		 */
+		available: (ctx) => ctx.surfaces?.sendRequest !== undefined,
+		perform: (ctx) => ctx.surfaces?.sendRequest?.(),
 	},
 	{
 		id: "run-load-test",
