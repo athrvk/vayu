@@ -261,7 +261,10 @@ popover states plainly that the row's cell, not the environment's value, is
 what the send will use. The hover tooltip reads the same way, from the same
 origins list, because hovering and clicking are two readings of one token and a
 token that answers them differently is worse than one that answers both
-wrongly.
+wrongly. Enter and Space on a focused token are a third way into the same
+popover rather than a fourth reading of the origins (issue #1215): the token is
+a `role="button"` in the field's roving Tab strip, and what opens is the control
+this paragraph describes, unchanged.
 
 A name that **no** scope defines but the row does is the same claim in the
 other direction, and it stops being reported as undefined: the destructive red

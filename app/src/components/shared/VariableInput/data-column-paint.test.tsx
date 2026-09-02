@@ -48,7 +48,7 @@ function overlayOf(value: string, dataColumns?: DataContractScope) {
 			/>
 		</TooltipProvider>
 	);
-	const overlay = container.querySelector('[aria-hidden="true"]') as HTMLElement;
+	const overlay = container.querySelector("[data-variable-overlay]") as HTMLElement;
 	expect(overlay).toBeTruthy();
 	return overlay;
 }
@@ -121,7 +121,7 @@ describe("a bare token naming a declared column, undefined in every scope", () =
 				/>
 			</TooltipProvider>
 		);
-		const overlay = container.querySelector('[aria-hidden="true"]') as HTMLElement;
+		const overlay = container.querySelector("[data-variable-overlay]") as HTMLElement;
 		expect(overlay).toBeTruthy();
 		return overlay;
 	}
@@ -180,7 +180,7 @@ describe("a bare token a scope already defines, that also names a declared colum
 				/>
 			</TooltipProvider>
 		);
-		const overlay = container.querySelector('[aria-hidden="true"]') as HTMLElement;
+		const overlay = container.querySelector("[data-variable-overlay]") as HTMLElement;
 		const runtimeToken = overlay.querySelector("[data-runtime-token]");
 		expect(runtimeToken).toBeNull();
 		const token = overlay.querySelector("[data-variable-token] span") as HTMLElement;

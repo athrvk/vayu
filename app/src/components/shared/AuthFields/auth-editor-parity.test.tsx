@@ -131,14 +131,24 @@ describe("the two auth editors render the same fields", () => {
 	});
 
 	it("offers the api-key location as one control, not a Select on one side and buttons on the other", () => {
+		/*
+		 * `Select` triggers, not every `role="combobox"`. The count used to be
+		 * over all comboboxes, which worked only while a `Select` was the sole
+		 * thing claiming that role - the request side's variable-aware credential
+		 * fields are combobox-shaped too (issue #1215), being text inputs that pop
+		 * a `{{variable}}` list, and they are not what this test is about.
+		 */
+		const selects = (root: HTMLElement) =>
+			root.querySelectorAll('[data-slot="select-trigger"]');
+
 		const request = renderRequestEditor({
 			mode: "apikey",
 			key: "k",
 			value: "v",
 			in: "header",
 		});
-		// Two comboboxes on the request side: the auth-type picker and "Add to".
-		expect(screen.getAllByRole("combobox")).toHaveLength(2);
+		// Two on the request side: the auth-type picker and "Add to".
+		expect(selects(request.container)).toHaveLength(2);
 		request.unmount();
 
 		const collection = renderCollectionEditor({
@@ -149,7 +159,7 @@ describe("the two auth editors render the same fields", () => {
 		});
 		// One for the type picker, one for "Add to" - the hand-rolled button group
 		// is gone, so there is no `button` pair standing in for it.
-		expect(screen.getAllByRole("combobox")).toHaveLength(2);
+		expect(selects(collection.container)).toHaveLength(2);
 		expect(
 			within(collection.container).queryByRole("button", { name: /^Query param$/i })
 		).not.toBeInTheDocument();

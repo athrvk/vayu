@@ -55,6 +55,13 @@ export interface EditableVariableProps {
 	 * has origins to list and writable targets to offer (#564).
 	 */
 	variables: VariableSupport;
+	/**
+	 * Position in the host field's roving tab order (issue #1215). `VariableInput`
+	 * paints a strip of these over one input and gives exactly one of them the
+	 * Tab stop, so a URL with five variables costs one stop rather than five.
+	 * Left at `0` for a token rendered on its own.
+	 */
+	tabIndex?: number;
 }
 
 export default function EditableVariable({
@@ -67,6 +74,7 @@ export default function EditableVariable({
 	secret = false,
 	sourceName,
 	variables,
+	tabIndex,
 }: EditableVariableProps) {
 	const { getVariableOrigins, writableScopes } = variables;
 	const origins = getVariableOrigins(name);
@@ -114,6 +122,7 @@ export default function EditableVariable({
 
 	return (
 		<VariablePopover
+			tabIndex={tabIndex}
 			name={name}
 			varInfo={varInfo}
 			resolved={resolved}

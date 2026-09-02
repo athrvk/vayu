@@ -78,6 +78,43 @@ describe("variable token popover", () => {
 		fireEvent.keyDown(token, { key: "Enter" });
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
+
+	/*
+	 * Opening it was never the whole job - focus has to arrive too (issue #1215).
+	 * The popover suppresses its own open-autofocus and each branch compensates
+	 * with `autoFocus` on the control it opens onto; the masked-secret branch had
+	 * none, and since the popover is non-modal and portalled, Tab from the token
+	 * did not reach into it and a click elsewhere dismissed it. A secret was the
+	 * one variable a keyboard user could not read.
+	 */
+	it("puts focus inside the popover, not just on screen", () => {
+		renderToken({ onValueChange: () => {} });
+		fireEvent.keyDown(screen.getByRole("button"), { key: "Enter" });
+
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.contains(document.activeElement)).toBe(true);
+	});
+
+	it("lands a hidden secret on the eye, which is the only thing to do there", () => {
+		// The eye is a `TooltipIconButton`, so it needs the provider the app
+		// mounts at its root.
+		render(
+			<TooltipProvider>
+				<VariablePopover
+					name="api_key"
+					varInfo={{ value: "hunter2", scope: "global", secret: true }}
+					resolved
+					onValueChange={() => {}}
+					trigger={<span>{"{{api_key}}"}</span>}
+				/>
+			</TooltipProvider>
+		);
+		fireEvent.keyDown(screen.getByRole("button", { name: /api_key/ }), { key: "Enter" });
+
+		const reveal = screen.getByRole("button", { name: "Reveal value" });
+		expect(document.activeElement).toBe(reveal);
+		expect(screen.getByRole("dialog").contains(reveal)).toBe(true);
+	});
 });
 
 function createKeyEvent(key: string): KeyboardEvent {

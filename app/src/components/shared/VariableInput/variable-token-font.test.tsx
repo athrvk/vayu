@@ -58,7 +58,7 @@ function withVariable() {
 
 describe("the variable token's typeface", () => {
 	it("renders an overlay to check (guards the scan itself)", () => {
-		const overlay = withVariable().querySelector('[aria-hidden="true"]');
+		const overlay = withVariable().querySelector("[data-variable-overlay]");
 		expect(overlay).toBeTruthy();
 		expect(overlay!.textContent).toContain("{{base_url}}");
 		// The literal text either side of the token is in there too.
@@ -66,7 +66,7 @@ describe("the variable token's typeface", () => {
 	});
 
 	it("pins no font on any element in the overlay", () => {
-		const overlay = withVariable().querySelector('[aria-hidden="true"]') as HTMLElement;
+		const overlay = withVariable().querySelector("[data-variable-overlay]") as HTMLElement;
 
 		const pinned = Array.from(overlay.querySelectorAll<HTMLElement>("*")).filter(
 			(el) => el.style.fontFamily !== ""
