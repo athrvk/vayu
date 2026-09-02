@@ -67,6 +67,7 @@ function renderBody(body: string) {
 				requestId="r1"
 				schemaTarget={TARGET}
 				onEditorMount={vi.fn()}
+				method="POST"
 				variablesDraft={null}
 				onVariablesDraftChange={() => {}}
 			/>

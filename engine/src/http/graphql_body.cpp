@@ -13,10 +13,13 @@
 
 #include "vayu/http/graphql_body.hpp"
 
+#include "vayu/http/url_parts.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <cctype>
 #include <string_view>
+#include <vector>
 
 namespace vayu::http {
 
@@ -68,6 +71,61 @@ std::string graphql_wire_body (const std::string& content) {
         return content;
     }
     return nlohmann::json{ { "query", content } }.dump ();
+}
+
+std::optional<std::string> graphql_get_parameters (const std::string& content) {
+    if (content.empty ()) {
+        return std::nullopt;
+    }
+    if (!graphql_body_is_enveloped (content)) {
+        // A bare document is the whole query, and the only parameter there is
+        // to send. This is the common case: the request builder writes an
+        // envelope, an agent or a `curl` caller writes the document.
+        return compose_query ({ { "query", percent_encode (content) } });
+    }
+
+    const auto envelope = nlohmann::json::parse (content, nullptr, false);
+    if (envelope.is_discarded () || !envelope.is_object ()) {
+        // Envelope-shaped and unreadable - see the header.
+        return std::nullopt;
+    }
+
+    std::vector<UrlQueryParam> params;
+    for (const auto& [key, value] : envelope.items ()) {
+        if (key == "query") {
+            // `graphql_body_is_enveloped` already proved this is a string.
+            params.push_back ({ "query", percent_encode (value.get<std::string> ()) });
+        } else if (key == "operationName") {
+            // An explicit `null` is how a client says "no named operation",
+            // which the absent parameter says too.
+            if (value.is_null ()) {
+                continue;
+            }
+            if (!value.is_string ()) {
+                return std::nullopt;
+            }
+            params.push_back (
+            { "operationName", percent_encode (value.get<std::string> ()) });
+        } else if (key == "variables" || key == "extensions") {
+            if (value.is_null ()) {
+                continue;
+            }
+            if (!value.is_object ()) {
+                return std::nullopt;
+            }
+            params.push_back ({ key, percent_encode (value.dump ()) });
+        } else {
+            // A member with no parameter to carry it - see the header for why
+            // that is a reason to keep the body transport rather than to drop
+            // what the user wrote.
+            return std::nullopt;
+        }
+    }
+
+    // `items()` walks in the object's own order, which nlohmann sorts by key,
+    // so the parameters come out in a stable order regardless of how the
+    // envelope was written. Sorted or not, a server reads them by name.
+    return compose_query (params);
 }
 
 } // namespace vayu::http

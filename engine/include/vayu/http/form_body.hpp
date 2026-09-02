@@ -152,6 +152,36 @@ namespace vayu::http {
 [[nodiscard]] std::string implied_content_type (const Body& body);
 
 /**
+ * @brief The same three questions, asked of the whole request.
+ *
+ * One body mode's transport depends on the **method**: a `graphql` body goes
+ * out as query parameters on a GET and as a JSON envelope on everything else
+ * (`graphql_get_parameters`, issue #1228). So "has a body?", "which bytes?" and
+ * "which Content-Type?" have a request-level answer that the `Body` overloads
+ * above cannot give - a `Body` does not know the method it will be sent with.
+ *
+ * **Every send site asks these**, and the raw-request view with them, so what
+ * is shown is what went out. The `Body` overloads remain for the callers that
+ * genuinely hold only a body - the script surface's `pm.request.body`, and the
+ * three functions here - and reaching for one at a send site is how a request
+ * would go back to carrying a GraphQL body on a GET.
+ *
+ * `wire_url` is the fourth question, and it is only ever asked here: it is the
+ * URL a request is sent to, which is `request.url` for everything except the
+ * GET transport, where the document rides in the query string.
+ */
+[[nodiscard]] bool has_wire_body (const Request& request);
+
+/// @copydoc has_wire_body(const Request&)
+[[nodiscard]] std::string wire_body_bytes (const Request& request);
+
+/// @copydoc has_wire_body(const Request&)
+[[nodiscard]] std::string implied_content_type (const Request& request);
+
+/// @copydoc has_wire_body(const Request&)
+[[nodiscard]] std::string wire_url (const Request& request);
+
+/**
  * @brief True when the engine writes the Content-Type and a caller's is dropped.
  *
  * Only multipart. Its Content-Type must carry the same boundary as the body

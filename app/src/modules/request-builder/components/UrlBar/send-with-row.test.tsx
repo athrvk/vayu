@@ -80,6 +80,8 @@ function ctx(
 		setAutoContentType: vi.fn(),
 		getAutoAccept: () => null,
 		setAutoAccept: vi.fn(),
+		getAutoMethod: () => null,
+		setAutoMethod: vi.fn(),
 		response: null,
 		setResponse: vi.fn(),
 		activeTab: "params",

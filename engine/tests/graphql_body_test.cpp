@@ -27,13 +27,16 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <map>
 #include <string>
 
 #include "echo_server.hpp"
+#include "optional_assert.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/graphql_body.hpp"
+#include "vayu/http/url_parts.hpp"
 #include "vayu/utils/json.hpp"
 
 namespace vayu::http {
@@ -315,6 +318,216 @@ TEST (GraphQLEnvelope, OtherModesAreUntouched) {
     multipart.mode   = BodyMode::FormData;
     multipart.fields = { { "a", "1", true } };
     EXPECT_EQ (wire_body_bytes (multipart), "");
+}
+
+// ---------------------------------------------------------------------------
+// The GET transport (issue #1228).
+//
+// GraphQL-over-HTTP puts the document in the query string on a GET and in a
+// JSON body on a POST. The engine used to send the envelope as a body on both,
+// and a body on GET is undefined by that specification: the endpoint answered
+// `400 Bad Request`, eleven bytes, with nothing saying why.
+// ---------------------------------------------------------------------------
+
+TEST (GraphQLGetTransport, ABareDocumentIsTheQueryParameter) {
+    const auto parameters = graphql_get_parameters (kBareQuery);
+    ASSERT_HAS_VALUE (parameters);
+    EXPECT_EQ (*parameters, "query=" + percent_encode (kBareQuery));
+}
+
+// Every member the specification gives a parameter, carried as one: the
+// document, the operation being selected, and the two JSON-encoded maps.
+TEST (GraphQLGetTransport, AnEnvelopeSplitsIntoItsParameters) {
+    const auto parameters = graphql_get_parameters (kEnvelope);
+    ASSERT_HAS_VALUE (parameters);
+
+    const auto params = parse_query_params (*parameters);
+    std::map<std::string, std::string> by_name;
+    for (const auto& param : params) {
+        by_name[param.key] = param.value.value_or ("");
+    }
+
+    EXPECT_EQ (by_name["query"], percent_encode ("query A { a } query B { b }"));
+    EXPECT_EQ (by_name["operationName"], percent_encode ("B"));
+    // JSON-encoded, which is what the GET transport says these two are - not
+    // flattened into `variables[limit]=10`, which no GraphQL server reads.
+    EXPECT_EQ (by_name["variables"], percent_encode (R"({"limit":10})"));
+    EXPECT_EQ (by_name["extensions"], percent_encode (R"({"trace":"on"})"));
+    EXPECT_EQ (by_name.size (), 4U);
+}
+
+// An empty body has nothing to carry, and the request has no body frame
+// either - it is simply a GET.
+TEST (GraphQLGetTransport, EmptyContentCarriesNothing) {
+    EXPECT_FALSE (graphql_get_parameters ("").has_value ());
+}
+
+// The three cases that keep the body transport rather than inventing a
+// request. Envelope-shaped and unreadable is the same case
+// `graphql_wire_body` passes through instead of wrapping: a `{{token}}` that
+// went unresolved must not be split into parameters we guessed at.
+TEST (GraphQLGetTransport, AnUnreadableEnvelopeKeepsTheBodyTransport) {
+    EXPECT_FALSE (graphql_get_parameters (R"({"query": {{document}} )").has_value ());
+}
+
+// A member this transport has no parameter for. Dropping it would send a
+// different request than the user wrote; the body carries it verbatim.
+TEST (GraphQLGetTransport, AMemberWithNoParameterKeepsTheBodyTransport) {
+    EXPECT_FALSE (
+    graphql_get_parameters (R"({"query":"{ a }","sessionToken":"t"})").has_value ());
+}
+
+// A member of the wrong type is the same answer for the same reason - the
+// specification's `variables` is a map, and a string there means something
+// this side cannot re-encode faithfully.
+TEST (GraphQLGetTransport, AMemberOfTheWrongTypeKeepsTheBodyTransport) {
+    EXPECT_FALSE (
+    graphql_get_parameters (R"({"query":"{ a }","variables":"{}"})").has_value ());
+    EXPECT_FALSE (
+    graphql_get_parameters (R"({"query":"{ a }","operationName":7})").has_value ());
+}
+
+// An explicit `null` is how a client says "no named operation" and "no
+// variables", which the absent parameter says too - so it is dropped rather
+// than sent as the four characters `null`.
+TEST (GraphQLGetTransport, ExplicitNullsAreOmittedRatherThanSent) {
+    const auto parameters = graphql_get_parameters (
+    R"({"query":"{ a }","operationName":null,"variables":null})");
+    ASSERT_HAS_VALUE (parameters);
+    EXPECT_EQ (*parameters, "query=" + percent_encode ("{ a }"));
+}
+
+// ---------------------------------------------------------------------------
+// What the request-level answers make of that.
+// ---------------------------------------------------------------------------
+
+// The whole rule in one place: no body frame, no derived Content-Type for a
+// body that is not there, and a URL carrying the document. Mutation check:
+// point any of the four back at `request.body` and one of these reddens.
+TEST (GraphQLGetTransport, AGetCarriesTheDocumentInTheUrlAndSendsNoBody) {
+    auto request = graphql_request ("https://example.com/graphql", kBareQuery);
+    request.method = HttpMethod::GET;
+
+    EXPECT_FALSE (has_wire_body (request));
+    EXPECT_EQ (wire_body_bytes (request), "");
+    EXPECT_EQ (implied_content_type (request), "");
+    EXPECT_EQ (wire_url (request),
+    "https://example.com/graphql?query=" + percent_encode (kBareQuery));
+}
+
+// Every other method is the JSON envelope it has always been. POST is the one
+// the app sends and the one the specification names for a mutation.
+TEST (GraphQLGetTransport, PostIsUnchanged) {
+    const auto request = graphql_request ("https://example.com/graphql", kBareQuery);
+
+    EXPECT_TRUE (has_wire_body (request));
+    EXPECT_EQ (wire_body_bytes (request), graphql_wire_body (kBareQuery));
+    EXPECT_EQ (implied_content_type (request), "application/json");
+    EXPECT_EQ (wire_url (request), "https://example.com/graphql");
+}
+
+// A GET whose content cannot be split keeps the transport it had - which is a
+// request that still fails against a strict server, but fails carrying what
+// the user wrote rather than something this side invented.
+TEST (GraphQLGetTransport, AGetWithAnUnreadableEnvelopeStillSendsItsBody) {
+    auto request =
+    graphql_request ("https://example.com/graphql", R"({"query": {{document}} )");
+    request.method = HttpMethod::GET;
+
+    EXPECT_TRUE (has_wire_body (request));
+    EXPECT_EQ (wire_url (request), "https://example.com/graphql");
+}
+
+// The GET-with-body support that predates this (Elasticsearch-style search)
+// is untouched: only a `graphql` body moves into the URL.
+TEST (GraphQLGetTransport, AJsonBodyOnAGetIsStillABody) {
+    Request request;
+    request.method       = HttpMethod::GET;
+    request.url          = "https://example.com/_search";
+    request.body.mode    = BodyMode::Json;
+    request.body.content = R"({"query":{"match_all":{}}})";
+
+    EXPECT_TRUE (has_wire_body (request));
+    EXPECT_EQ (wire_body_bytes (request), R"({"query":{"match_all":{}}})");
+    EXPECT_EQ (wire_url (request), "https://example.com/_search");
+}
+
+// ---------------------------------------------------------------------------
+// On the wire.
+// ---------------------------------------------------------------------------
+
+// The end-to-end shape of the fix: the server sees the document in the target
+// it was asked for, and no body at all. Mutation check: revert
+// `apply_method_and_body` to the body-level predicate and the body assertion
+// reddens with the envelope this request no longer sends.
+TEST_F (GraphQLBodyTest, AGetIsSentAsQueryParametersWithNoBody) {
+    auto request   = graphql_request (server_->url (), kEnvelope);
+    request.method = HttpMethod::GET;
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().status_code, 200);
+
+    EXPECT_EQ (server_->body (), "");
+    EXPECT_EQ (server_->header ("Content-Length"), "");
+    EXPECT_NE (server_->target ().find ("query=" + percent_encode ("query A { a } query B { b }")),
+    std::string::npos)
+    << server_->target ();
+    EXPECT_NE (server_->target ().find ("operationName=B"), std::string::npos)
+    << server_->target ();
+}
+
+// A query string the URL already carries survives, because it is often how the
+// endpoint is addressed at all (an api key, a tenant).
+TEST_F (GraphQLBodyTest, AGetKeepsTheQueryStringTheUrlAlreadyHad) {
+    auto request = graphql_request (server_->url () + "?apikey=k", kBareQuery);
+    request.method = HttpMethod::GET;
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_NE (server_->target ().find ("apikey=k"), std::string::npos)
+    << server_->target ();
+    EXPECT_NE (server_->target ().find ("query="), std::string::npos)
+    << server_->target ();
+}
+
+// The load driver shares `apply_method_and_body` and `wire_url` with the
+// single-request client, exactly as it shares the envelope - proved rather
+// than assumed, the way `LoadDriverEnvelopesTheSameWay` proves the other half.
+TEST_F (GraphQLBodyTest, TheLoadDriverUsesTheSameGetTransport) {
+    auto request   = graphql_request (server_->url (), kBareQuery);
+    request.method = HttpMethod::GET;
+
+    EventLoop loop;
+    loop.start ();
+    auto handle = loop.submit_async (request);
+    auto result = handle.future.get ();
+    loop.stop ();
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (server_->body (), "");
+    // The header, not just the body: httplib does not surface a body on a GET,
+    // so `body()` alone would stay empty even for a request that carried one.
+    // A `Content-Length` at all is a body frame.
+    EXPECT_EQ (server_->header ("Content-Length"), "");
+    EXPECT_NE (server_->target ().find ("query="), std::string::npos)
+    << server_->target ();
+}
+
+// The raw-request view is built from the same two answers, so what it shows is
+// what went out: the URL with the document in it, and no body beneath the
+// headers.
+TEST_F (GraphQLBodyTest, TheRawRequestViewShowsTheGetTransport) {
+    auto request   = graphql_request (server_->url (), kBareQuery);
+    request.method = HttpMethod::GET;
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    const std::string& raw = result.value ().raw_request;
+    EXPECT_NE (raw.find ("query="), std::string::npos) << raw;
+    EXPECT_EQ (raw.find (kBareQuery), std::string::npos) << raw;
 }
 
 } // namespace

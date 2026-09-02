@@ -336,7 +336,10 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
     // Parse URL to extract host and path
     std::string host;
     std::string path = "/";
-    std::string url  = request.url;
+    // The URL the transfer would have used, not the one that was typed: a
+    // GraphQL body on a GET rides in the query string, and a view that showed
+    // the bare URL beside no body would describe neither (issue #1228).
+    std::string url = vayu::http::wire_url (request);
 
     // Remove protocol prefix
     size_t proto_end = url.find ("://");
@@ -388,7 +391,7 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
     // The bytes the transfer would have carried, not `body.content` - for a
     // form or graphql body those are two different strings, and a view that
     // showed the second would describe a request nothing ever sent.
-    const std::string body = vayu::http::wire_body_bytes (request.body);
+    const std::string body = vayu::http::wire_body_bytes (request);
 
     // Add Content-Length for body
     if (!body.empty ()) {
@@ -478,7 +481,7 @@ Result<Response> Client::send (const Request& request) {
     impl_->errors.attach (curl);
 
     // Set URL
-    set_opt<CURLOPT_URL> (curl, request.url.c_str ());
+    set_opt<CURLOPT_URL> (curl, vayu::http::wire_url (request).c_str ());
 
     // Set method and body (shared with the event loop path so the two cannot
     // disagree about what goes on the wire - see apply_method_and_body)
@@ -631,7 +634,7 @@ Result<Response> Client::send (const Request& request) {
     response.raw_request = transfer_debug.last_header_out.empty () ?
     synthesize_raw_request (request, response) :
     raw_request_from_wire (
-    transfer_debug.last_header_out, vayu::http::wire_body_bytes (request.body));
+    transfer_debug.last_header_out, vayu::http::wire_body_bytes (request));
 
     // The bound was reached and this caller asked to keep what was read
     // (issue #1157). Everything the transfer did produce before the write

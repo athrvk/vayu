@@ -41,22 +41,6 @@ std::string percent_decode (const std::string& value) {
     return out;
 }
 
-/// libcurl's percent-encoder, the inverse of the decode above and the same
-/// pure-function call `form_body.cpp` makes. It encodes everything outside the
-/// unreserved set, which is wider than a path segment strictly needs - an
-/// encoded `:` or `@` is still the same path, and over-encoding cannot change
-/// what the URL means the way under-encoding can.
-std::string percent_encode (const std::string& value) {
-    char* escaped =
-    curl_easy_escape (nullptr, value.c_str (), static_cast<int> (value.size ()));
-    if (!escaped) {
-        return value;
-    }
-    std::string out (escaped);
-    curl_free (escaped);
-    return out;
-}
-
 /// Split a raw path on `/`, dropping the empty segment the leading slash makes
 /// and decoding each of the rest on its own. Segment-at-a-time decoding is the
 /// point: decoding the whole path first would turn an encoded `%2F` into a
@@ -104,6 +88,45 @@ std::vector<UrlQueryParam> parse_query_params (std::string_view query) {
         query.remove_prefix (amp + 1);
     }
     return params;
+}
+
+std::string percent_encode (const std::string& value) {
+    // libcurl's escaper, the inverse of the decode above. The handle argument
+    // is documented as unused, so this needs no easy handle - the same reason
+    // `form_body.cpp` calls it with `nullptr`.
+    char* escaped =
+    curl_easy_escape (nullptr, value.c_str (), static_cast<int> (value.size ()));
+    if (!escaped) {
+        // Empty rather than the raw value - see the header for why an unescaped
+        // value is the worse of the two failures.
+        return {};
+    }
+    std::string out (escaped);
+    curl_free (escaped);
+    return out;
+}
+
+std::string url_with_query (const std::string& url, const std::string& query) {
+    if (query.empty ()) {
+        return url;
+    }
+    // The fragment is not sent, and everything after a `#` belongs to it - so
+    // parameters appended past one would never reach the server. Split there
+    // first and put it back last.
+    const size_t hash        = url.find ('#');
+    const std::string target = url.substr (0, hash);
+    const std::string fragment =
+    hash == std::string::npos ? std::string{} : url.substr (hash);
+
+    std::string out = target;
+    if (target.find ('?') == std::string::npos) {
+        out += '?';
+    } else if (!target.empty () && target.back () != '?' && target.back () != '&') {
+        out += '&';
+    }
+    out += query;
+    out += fragment;
+    return out;
 }
 
 std::string compose_query (const std::vector<UrlQueryParam>& params) {
