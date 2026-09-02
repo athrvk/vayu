@@ -90,10 +90,18 @@ a hidden performance budget for the handful that build thousands of rows and
 render them. The 5,000-step `ScenarioRunView` cases cost ~1.1s idle (~2.8s for
 the one that renders twice) and crossed 5s whenever the four cores were shared
 with an engine build, failing a run over machine load rather than over the code
-(#846). Give such a case an explicit `it(name, { timeout: N }, fn)` **with the
-measured cost and the multiplier in a comment**, so the next person under load
-does not raise it by reflex - and do not raise the global default, which would
-slow every genuinely hung test's failure to the new bound.
+(#846). It happened a second time at #1280, where a step-repro case rendered a
+600-row grid at 3.6-5.3s and went red at random under CI shard load.
+
+**Ask what the fixture size is _for_ before reaching for a timeout.** #1280's
+600 rows proved nothing 110 did not: the property was "past the grid's first
+window", and that window is 100, so right-sizing the fixture took the case from
+2.9s to under 600ms where a raised timeout would have kept paying the render on
+every run forever. Only where a case genuinely needs the large fixture, give it
+an explicit `it(name, { timeout: N }, fn)` **with the measured cost and the
+multiplier in a comment**, so the next person under load does not raise it by
+reflex - and do not raise the global default, which would slow every genuinely
+hung test's failure to the new bound.
 
 **A source scan cannot see a class that arrives in a variable.** The badge-hover
 guard scanned for `<Badge className="bg-…">` and missed both real instances,

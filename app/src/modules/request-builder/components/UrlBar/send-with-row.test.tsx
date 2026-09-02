@@ -731,20 +731,39 @@ describe("arriving from a failed step", () => {
 
 	it("opens the list on the row that step bound, without a click", async () => {
 		rememberFile();
-		stubReadDataFile(async () => csvBytes(bigCsv(600)));
+		/*
+		 * A handful of rows past the grid's first window (`ROW_WINDOW_STEP`, 100
+		 * in `SendWithRowDialog.tsx`), which is the whole of the size this case
+		 * needs: a row the picker would not have shown by default is what a
+		 * step's repro exists to reach. It was 600 rows against a target at 500,
+		 * and rendering that grid in jsdom cost 3.6-5.3s - over vitest's 5s
+		 * default under CI shard contention, so the case went red at random
+		 * (issue #1280). The window itself belongs to "the grid's keyboard
+		 * model" below, which stubs an `IntersectionObserver` to get a real one.
+		 */
+		stubReadDataFile(async () => csvBytes(bigCsv(110)));
 		const execute = vi.fn(async () => {});
 
 		// What `openRequestWithDataRow` leaves behind for this tab: the request
 		// is already open, and the row is the half `openTab` cannot carry.
-		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 500 } });
+		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 105 } });
 		renderBar(execute, CONTRACT, "req_a");
 
+		const row = await screen.findByRole("row", { name: /user105@example\.test/ });
+		/*
+		 * Opened *on* the bound row, not merely opened. Every row is in the DOM
+		 * here - `useGrowingWindow` renders the lot where there is no
+		 * `IntersectionObserver` - so finding and clicking the row would pass
+		 * just as well for a picker that ignored the target and opened on row 1.
+		 * The footer is what names the selection, before anything is clicked.
+		 */
+		expect(screen.getByRole("button", { name: /^send row 106$/i })).toBeTruthy();
+
 		// Two clicks from the step card to the repro: the card's, and this one.
-		const row = await screen.findByRole("row", { name: /user500@example\.test/ });
 		fireEvent.click(row);
 
 		await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
-		expect(execute).toHaveBeenCalledWith({ id: "500", email: "user500@example.test" });
+		expect(execute).toHaveBeenCalledWith({ id: "105", email: "user105@example.test" });
 	});
 
 	it("consumes the target, so a later visit opens on nothing", async () => {
