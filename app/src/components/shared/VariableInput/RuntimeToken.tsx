@@ -52,6 +52,20 @@ export interface RuntimeTokenProps {
 	 * from a file the contract has drifted from.
 	 */
 	tone?: DataTokenTone;
+	/**
+	 * Position in the host field's roving tab order (issue #1238), the same prop
+	 * `EditableVariable` takes. `VariableInput` paints one strip over one input
+	 * and gives exactly one token in it the Tab stop. Left at `0` for a token
+	 * rendered on its own.
+	 */
+	tabIndex?: number;
+	/**
+	 * The host field is disabled. The token leaves the tab order rather than
+	 * sitting in it, exactly as the editable one does (`variable-popover.tsx`) -
+	 * a field nobody can edit should not cost a stop to walk past. The tooltip
+	 * still opens on hover, because reading is not editing.
+	 */
+	disabled?: boolean;
 }
 
 export default function RuntimeToken({
@@ -59,12 +73,33 @@ export default function RuntimeToken({
 	description,
 	note,
 	tone = "muted",
+	tabIndex = 0,
+	disabled = false,
 }: RuntimeTokenProps) {
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>
+				{/*
+				 * Focusable, and deliberately not a `role="button"` (issue #1238).
+				 *
+				 * Radix's `asChild` clones its handlers and `aria-*` onto this span
+				 * but does not make a span focusable - it assumes an interactive
+				 * child - so this token was mouse-only, and its tooltip is the whole
+				 * of it: the generator's description, "not generated here" for an
+				 * identity, and the amber "Not a declared column of ..." that is how
+				 * a drifted contract is spotted at all (issues #600, #1195). None of
+				 * that reached a keyboard.
+				 *
+				 * A `tabIndex` is the entire fix, because `Tooltip` opens on focus
+				 * and points `aria-describedby` at the content it opened. The
+				 * editable token's other half - `role="button"` plus Enter/Space -
+				 * would be a lie here: nothing is activated, there is no popover
+				 * behind this, and announcing a button that answers no key is worse
+				 * than announcing nothing.
+				 */}
 				<span
 					className={cn("inline rounded-md font-[inherit]", DATA_TOKEN_TONE_CLASS[tone])}
+					tabIndex={disabled ? -1 : tabIndex}
 					contentEditable={false}
 					suppressContentEditableWarning
 				>
