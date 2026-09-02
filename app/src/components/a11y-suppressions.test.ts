@@ -67,8 +67,14 @@ interface Directive {
  * A reason on the previous line counts too - a wrapped block comment above the
  * directive says as much as a trailing one - which is why this reads the line
  * before rather than only the text after the marker.
+ *
+ * Exported for the cases at the bottom of this file, the way
+ * `focus-indicator.test.ts` exports its class-string reader. All 16 sites write
+ * their reason inline today, so the previous-line arm has no fixture in the
+ * repository to prove it: unread code in a guard is how a guard starts passing
+ * for the wrong reason.
  */
-function reasonFor(lines: readonly string[], at: number): string {
+export function reasonFor(lines: readonly string[], at: number): string {
 	const inline = lines[at].split(REASON).slice(1).join(REASON);
 	if (inline.trim() !== "") return inline.replace(/\*\/\s*}?\s*$/, "").trim();
 
@@ -190,5 +196,49 @@ describe("the doc's list of suppressions", () => {
 		const [, count, files] = totals as RegExpExecArray;
 		expect(Number(count)).toBe(directives.length);
 		expect(Number(files)).toBe(sites.size);
+	});
+});
+
+describe("the reason reader", () => {
+	// The guard above is only as good as this: read the reason too loosely and a
+	// bare directive passes, too strictly and a legal spelling is called
+	// unreasoned. Every arm gets a case, including the one no site uses yet.
+	/** The reason the guard would read for the last directive in `source`. */
+	const reasonAt = (source: string) => {
+		const lines = source.split("\n");
+		const at = lines.reduce(
+			(last, line, i) => (line.includes("eslint-disable") ? i : last),
+			-1
+		);
+		return reasonFor(lines, at);
+	};
+
+	it("reads a reason written after the marker", () => {
+		expect(
+			reasonAt("// eslint-disable-next-line jsx-a11y/no-autofocus -- a dialog field")
+		).toBe("a dialog field");
+	});
+
+	it("stops at the end of a JSX comment rather than keeping its delimiter", () => {
+		expect(
+			reasonAt("{/* eslint-disable-next-line jsx-a11y/no-autofocus -- a dialog field */}")
+		).toBe("a dialog field");
+	});
+
+	it("takes the line above when the directive carries no reason", () => {
+		expect(
+			reasonAt("// a dialog field\n// eslint-disable-next-line jsx-a11y/no-autofocus")
+		).toBe("a dialog field");
+	});
+
+	it("refuses a bare directive, and a second directive above it", () => {
+		expect(reasonAt("const x = 1;\n// eslint-disable-next-line jsx-a11y/no-autofocus")).toBe(
+			""
+		);
+		expect(
+			reasonAt(
+				"// eslint-disable-next-line jsx-a11y/no-autofocus\n// eslint-disable-next-line jsx-a11y/no-autofocus"
+			)
+		).toBe("");
 	});
 });
