@@ -30,6 +30,7 @@ import { useCallback, useState } from "react";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
 import { RequestBuilderContext } from "../../context";
+import { UNSAVED_AUTO_KEY } from "../../context/auto-record-slot";
 import type { RequestBuilderContextValue } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
 import { emptyDrafts } from "../../utils/body-drafts";
@@ -145,7 +146,7 @@ function Harness({
 	 * pick of its own.
 	 */
 	const [rowIndexByRequest, setRowIndexByRequest] = useState<Record<string, number>>({});
-	const rowMemoryKey = requestId ?? "__unsaved__";
+	const rowMemoryKey = requestId ?? UNSAVED_AUTO_KEY;
 	const rememberRowIndex = useCallback(
 		(index: number) =>
 			setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index })),

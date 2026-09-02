@@ -29,7 +29,10 @@
 import { useCallback, useRef } from "react";
 
 /**
- * The key a record is filed under while the builder holds no saved request.
+ * The key a record is filed under while the builder holds no saved request -
+ * the provider's one name for an id-less builder, read by the Send-with-row
+ * picker's memory as well as by the slots here (issue #1271). One convention
+ * spelled twice is how two spellings of it drift apart.
  *
  * A request tab is always opened against a request the backend has already
  * created (`useNewRequest`), so what reaches this key is the editable copy

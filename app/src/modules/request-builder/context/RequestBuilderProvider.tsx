@@ -20,6 +20,7 @@ import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } fro
 import { RequestBuilderContext } from "./RequestBuilderContext";
 import { emptyDrafts, type BodyDrafts, type VariablesDraft } from "../utils/body-drafts";
 import { useAutoRecordSlot, UNSAVED_AUTO_KEY } from "./auto-record-slot";
+import { retainKeys } from "./retain-keys";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import { resolveDataContract } from "@/lib/data-contract";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
@@ -341,30 +342,9 @@ export default function RequestBuilderProvider({
 		retain: retainAutoMethods,
 	} = useAutoRecordSlot<AutoMethod>(autoRecordKey);
 
-	/*
-	 * What bounds the three slots: the open request tabs. A record is only ever
-	 * read by the request it names, so once that request has no tab it can never
-	 * be read again - and a per-request store that nothing prunes is how a ref
-	 * becomes a leak. `MAX_OPEN_TABS` caps the tab strip, so this caps the slots.
-	 *
-	 * Subscribed to rather than selected, like the reveal command above: pruning
-	 * writes to a ref, and a provider that re-rendered on every tab focus would
-	 * pay for it on the request the user is actually working in. The id-less key
-	 * survives - it names no tab, and the History run copy that uses it is the
-	 * one builder whose records nothing else could keep.
-	 */
-	useEffect(() => {
-		const retainOpen = (tabs: readonly Tab[]) => {
-			const live = new Set<string>([UNSAVED_AUTO_KEY]);
-			for (const tab of tabs) {
-				if (tab.type === "request" && tab.entityId !== null) live.add(tab.entityId);
-			}
-			retainAutoContentTypes(live);
-			retainAutoAccepts(live);
-			retainAutoMethods(live);
-		};
-		return useTabsStore.subscribe((s) => retainOpen(s.openTabs));
-	}, [retainAutoContentTypes, retainAutoAccepts, retainAutoMethods]);
+	// What bounds these three is stated with the row memory below, which the
+	// same sweep bounds (issue #1271): one rule over every per-request map the
+	// provider holds, rather than one rule each.
 
 	const { data: collections = [] } = useCollectionsQuery();
 
@@ -415,10 +395,11 @@ export default function RequestBuilderProvider({
 	const [rowIndexByRequest, setRowIndexByRequest] = useState<Record<string, number>>({});
 	/*
 	 * An unsaved request has no id and cannot be switched away from and back to
-	 * as itself, so every one of them shares this key. They can never collide:
-	 * a request tab holds exactly one draft.
+	 * as itself, so every one of them shares this key - the provider's one name
+	 * for an id-less builder, which the auto-record slots above file under too.
+	 * They can never collide: a request tab holds exactly one draft.
 	 */
-	const rowMemoryKey = request.id ?? "__unsaved__";
+	const rowMemoryKey = request.id ?? UNSAVED_AUTO_KEY;
 	const lastRowIndex = rowIndexByRequest[rowMemoryKey] ?? null;
 	const rememberRowIndex = useCallback(
 		(index: number) =>
@@ -446,6 +427,43 @@ export default function RequestBuilderProvider({
 			}),
 		[rowMemoryKey]
 	);
+	const retainRowIndexes = useCallback(
+		(live: ReadonlySet<string>) =>
+			setRowIndexByRequest((previous) => retainKeys(previous, live)),
+		[]
+	);
+
+	/*
+	 * What bounds every per-request map above: the open request tabs (issues
+	 * #1269, #1271). An entry - a record, or a picked row index - is only ever
+	 * read by the request it is filed under, so once that request has no tab it
+	 * can never be read again, and a per-request store that nothing prunes is
+	 * how a map becomes a leak. `MAX_OPEN_TABS` caps the tab strip, so this caps
+	 * the maps.
+	 *
+	 * Subscribed to rather than selected, like the reveal command above: a
+	 * provider that re-rendered on every tab focus would pay for it on the
+	 * request the user is actually working in. The three slots prune a ref, so
+	 * they cannot re-render at all; the row memory is state - `lastRowIndex` is
+	 * read during render - so `retainKeys` returns the map it was given when it
+	 * drops nothing, and React bails out.
+	 *
+	 * The id-less key survives the sweep: it names no tab, and the History run
+	 * copy that uses it is the one builder whose memory nothing else could keep.
+	 */
+	useEffect(() => {
+		const retainOpen = (tabs: readonly Tab[]) => {
+			const live = new Set<string>([UNSAVED_AUTO_KEY]);
+			for (const tab of tabs) {
+				if (tab.type === "request" && tab.entityId !== null) live.add(tab.entityId);
+			}
+			retainAutoContentTypes(live);
+			retainAutoAccepts(live);
+			retainAutoMethods(live);
+			retainRowIndexes(live);
+		};
+		return useTabsStore.subscribe((s) => retainOpen(s.openTabs));
+	}, [retainAutoContentTypes, retainAutoAccepts, retainAutoMethods, retainRowIndexes]);
 
 	/**
 	 * The row the preview resolves against - the picked one, once the file it
