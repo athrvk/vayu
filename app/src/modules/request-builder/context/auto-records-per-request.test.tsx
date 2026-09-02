@@ -26,6 +26,11 @@
  * and `applyStreamToggle` below make exactly the calls the panels make, in the
  * same order, through the real rules.
  *
+ * A builder that is not a saved request has no id to be keyed by and declares
+ * one instead (issue #1272) - the History run copy, which passes its run id.
+ * The block for it asserts what the id-less key could not give two such copies
+ * at once: a record each, and a bound, since a declared identity names a tab.
+ *
  * The last two blocks are the Send-with-row picker's row memory (issue #1271),
  * here rather than in a file of its own because what they check is the same
  * open-tab sweep: it bounds every per-request map the provider holds, and a
@@ -87,6 +92,20 @@ function Probe() {
 
 const tree = (id: string | null) => (
 	<RequestBuilderProvider initialRequest={{ id, name: "r" } as Partial<RequestState>}>
+		<Probe />
+	</RequestBuilderProvider>
+);
+
+/**
+ * A builder over something that is not a saved request: the copy History
+ * renders for a stored run, which is id-less on purpose and says which run it
+ * is with `memoryKey` (issue #1272).
+ */
+const runTree = (runId: string) => (
+	<RequestBuilderProvider
+		initialRequest={{ id: null, name: "r" } as Partial<RequestState>}
+		memoryKey={runId}
+	>
 		<Probe />
 	</RequestBuilderProvider>
 );
@@ -217,6 +236,96 @@ describe("what bounds the records", () => {
 
 		await act(async () => rerender(tree(null)));
 		expect(ctx.getAutoContentType()).not.toBeNull();
+	});
+});
+
+describe("a builder that is not a saved request says which one it is", () => {
+	/*
+	 * Two run tabs, and the copy in each has `id: null` - the gate that stops an
+	 * edited copy from rewriting the saved request. Before issue #1272 they were
+	 * one identity: both filed under the id-less key, and the rules read a
+	 * `requestId` of `null` against another `null` as a match, so the second copy
+	 * into GraphQL was handed the first one's record and told it was already in
+	 * the mode.
+	 */
+	const RUN_TABS: Tab[] = [
+		{ id: "tab_run_a", type: "run", entityId: "run_a" },
+		{ id: "tab_run_b", type: "run", entityId: "run_b" },
+	];
+
+	beforeEach(() => {
+		useTabsStore.setState({ openTabs: [...RUN_TABS], activeTabId: "tab_run_a" });
+	});
+
+	it("gives the second open run tab its own POST and its own record", async () => {
+		const { rerender } = render(runTree("run_a"));
+
+		let a = applyModeChange(fresh(null), "graphql");
+		expect(headerNames(a)).toEqual(["Content-Type"]);
+		expect(a.method).toBe("POST");
+
+		// The other run tab. Same provider instance, same id-less copy - only the
+		// declared identity differs, and that is what has to carry it.
+		await act(async () => rerender(runTree("run_b")));
+		const b = applyModeChange(fresh(null), "graphql");
+		expect(headerNames(b)).toEqual(["Content-Type"]);
+		expect(b.method).toBe("POST");
+
+		// And the first copy can still leave the mode it entered.
+		await act(async () => rerender(runTree("run_a")));
+		a = applyModeChange(a, "none");
+		expect(headerNames(a)).toEqual([]);
+		expect(a.method).toBe("GET");
+	});
+
+	it("answers with nothing for a run copy that has entered no mode", async () => {
+		const { rerender } = render(runTree("run_a"));
+		applyModeChange(fresh(null), "graphql");
+
+		await act(async () => rerender(runTree("run_b")));
+		expect(ctx.getAutoContentType()).toBeNull();
+		expect(ctx.getAutoMethod()).toBeNull();
+	});
+
+	it("forgets a run copy's records when its tab closes", async () => {
+		// A declared identity names a tab, so it joins the sweep rather than
+		// being exempt from it the way the id-less key has to be.
+		const { rerender } = render(runTree("run_a"));
+		applyModeChange(fresh(null), "graphql");
+		applyStreamToggle(fresh(null), true);
+
+		await act(async () => useTabsStore.getState().closeTab("tab_run_a"));
+
+		await act(async () => rerender(runTree("run_a")));
+		expect(ctx.getAutoContentType()).toBeNull();
+		expect(ctx.getAutoAccept()).toBeNull();
+		expect(ctx.getAutoMethod()).toBeNull();
+	});
+
+	it("keeps the records of the run tab that is still open", async () => {
+		const { rerender } = render(runTree("run_a"));
+		applyModeChange(fresh(null), "graphql");
+
+		await act(async () => useTabsStore.getState().closeTab("tab_run_b"));
+
+		await act(async () => rerender(runTree("run_a")));
+		expect(ctx.getAutoMethod()).toEqual({
+			requestId: null,
+			method: "POST",
+			previous: "GET",
+		});
+	});
+
+	it("keeps the picked row of each run tab apart", async () => {
+		// The row memory is filed under the same identity, so it divides with it.
+		const { rerender } = render(runTree("run_a"));
+		await act(async () => ctx.rememberRowIndex(2));
+
+		await act(async () => rerender(runTree("run_b")));
+		expect(ctx.lastRowIndex).toBeNull();
+
+		await act(async () => rerender(runTree("run_a")));
+		expect(ctx.lastRowIndex).toBe(2);
 	});
 });
 

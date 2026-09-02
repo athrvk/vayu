@@ -415,7 +415,8 @@ export default function RequestBuilderProvider({
 	// Filed under the same identity as the records above, for the same reason.
 	const lastRowIndex = rowIndexByRequest[memoryKey] ?? null;
 	const rememberRowIndex = useCallback(
-		(index: number) => setRowIndexByRequest((previous) => ({ ...previous, [memoryKey]: index })),
+		(index: number) =>
+			setRowIndexByRequest((previous) => ({ ...previous, [memoryKey]: index })),
 		[memoryKey]
 	);
 	/*
