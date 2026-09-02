@@ -151,12 +151,16 @@ const CommandDialog = ({
 					/*
 					 * No row overrides here at all any more (#1177). This
 					 * string used to force `px-2 py-3` and 20px icons onto every
-					 * row, which made a 32px row a 44px one - about six of them
+					 * row, which made a 30px row a 44px one - about six of them
 					 * in a 300px list, so anything past the second section was
 					 * below the fold with nothing on screen saying it existed.
-					 * `CommandItem`'s own `px-2 py-1.5` is the 32px single-line
-					 * row this app draws everywhere else, which is also the
-					 * launcher metric, so the fix is to stop overriding it.
+					 * `CommandItem`'s own `px-2 py-1.5` is the single-line row
+					 * this app draws everywhere else, which is also the
+					 * launcher metric, so the fix is to stop overriding it. It
+					 * measures 30.0px in Chromium against the built stylesheet
+					 * - `abc2bd2` took that measurement, and
+					 * `docs/app/COMPONENTS.md` records it along with the
+					 * eleven-row count that rests on it (#1260).
 					 *
 					 * The icon sizes went the same way and were never doing what
 					 * they said: `[&_[cmdk-item]_svg]:h-5` outranks the `h-3.5`

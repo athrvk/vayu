@@ -116,12 +116,14 @@ describe("the command list's surface and its dividers", () => {
 });
 
 describe("the command list's density", () => {
-	it("leaves a row at the primitive's 32px rather than padding it to 44px", () => {
+	it("leaves a row at the primitive's 30px rather than padding it to 44px", () => {
 		const root = renderPalette();
 		const row = root.querySelector("[cmdk-item]");
 		expect(row, "a row should render").toBeTruthy();
-		// 14px of text in `py-1.5` is the 32px single-line row this app draws
-		// everywhere else, and the launcher metric besides.
+		// 14px of text in `py-1.5` is the single-line row this app draws
+		// everywhere else, and the launcher metric besides - 30.0px measured in
+		// Chromium (`abc2bd2`, `docs/app/COMPONENTS.md`), not the 32px this said
+		// before the measurement (#1260).
 		expect(tokens(row!)).toContain("py-1.5");
 		// The dialog used to override that to `py-3` from up here, where no
 		// scan of the row itself would ever see it.

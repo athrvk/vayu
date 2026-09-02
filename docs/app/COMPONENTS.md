@@ -931,7 +931,10 @@ Three things the rows and the frame say (#1176):
   one. The registry carries it as `Command.shortcut`, and twelve commands have one - seven of the
   action rows plus the five drawer-view commands generated alongside them; every other row
   prints nothing, because a plausible key that answers to nothing is worse than no key at all. A
-  `Recents` row prints its age there instead, that being the reason it is in the section.
+  `Recents` row prints its age there instead, that being the reason it is in the section. A row
+  that carries both - a chord-bound command with a recency stamp, which no source produces today -
+  prints the chord: the stamp is why the row is in the section, the chord is how the row is run
+  (#1260).
   `palette-parity.test.ts` is the check that keeps the two lists honest: every chord in
   `SHORTCUT_GROUPS` either carries a command here or an entry in that file's `NO_COMMAND` map
   giving the reason it does not, so a chord cannot go undiscoverable from both surfaces without
