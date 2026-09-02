@@ -97,11 +97,21 @@ tests in ~2 min. If you keep vcpkg elsewhere, set `VCPKG_ROOT` and it is honored
 
 ```bash
 python build.py -t && cd engine && ctest --preset linux-dev --output-on-failure
-cd app && pnpm test          # vitest
+cd app && pnpm test          # vitest, the whole app suite
+cd app && pnpm test Trash    # only the files matching "Trash"
 cd app && pnpm type-check
 cd app && pnpm lint          # ESLint (TS/TSX)
 cd app && pnpm format:check  # Prettier
 ```
+
+**Filter the app suite with `pnpm test <pattern>`, never
+`pnpm test -- <pattern>`.** pnpm forwards the literal `--` into the script and
+vitest then reads what follows as not-a-filter, so the double-dash form runs all
+~500 files while looking like a targeted run - the npm muscle memory costs
+minutes and reads as "the suite is slow". The bare form answers a miss in about
+a second (`No test files found`). Flags need no separator either:
+`pnpm test --shard=1/2` is the form CI runs. `pnpm exec vitest run <pattern>` is
+the explicit equivalent.
 
 CMake presets: `linux-dev`, `linux-prod`, `macos-dev`, `macos-prod`,
 `windows-dev`, `windows-prod`.

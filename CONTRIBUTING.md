@@ -336,10 +336,34 @@ TEST(HttpClientTest, SendsGetRequest) {
 
 ### App (TypeScript)
 
-Currently, the app does not have automated tests. If you add tests:
+The app is tested with [Vitest](https://vitest.dev/). Tests live beside the code
+they cover as `*.test.ts` / `*.test.tsx`, and CI runs the whole suite on every
+push.
 
-- Use Vitest for unit tests
-- Use Playwright for E2E tests (if needed)
+```bash
+cd app
+
+# Run the whole app suite
+pnpm test
+
+# Run only the files matching a pattern
+pnpm test VariablesCategoryTree
+
+# The same run, spelled out
+pnpm exec vitest run VariablesCategoryTree
+
+# Re-run on change
+pnpm test:watch
+```
+
+**Do not write `pnpm test -- <pattern>`.** pnpm forwards the literal `--` into
+the script and vitest then ignores the filter, so that form quietly runs the
+whole suite instead of the file you asked for. Flags need no separator either:
+`pnpm test --shard=1/2` is the form CI runs.
+
+Conventions for writing app tests - the default `node` environment, when to ask
+for `jsdom`, and the timeout rule for render-heavy cases - are in
+`app/CLAUDE.md`.
 
 ## Documentation
 
