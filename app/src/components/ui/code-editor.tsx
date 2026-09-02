@@ -27,6 +27,10 @@ import { useClientSettingsStore } from "@/stores";
 import { selectMonoStack } from "@/stores/client-settings-store";
 import { registerEditorChords } from "@/lib/editor-chords";
 import { ensureMonaco, useLoadedMonaco } from "@/lib/monaco-loader";
+// The hook's own module, not the barrel beside it: the barrel also exports the
+// provider, which reaches into the request builder for its writer, and a
+// `components/ui` primitive must not drag a module tree in behind it.
+import { useEditorVariableTokens } from "@/components/shared/EditorVariableTokens/useEditorVariableTokens";
 import { LEAVE_EDITOR_CHORD } from "@/constants/shortcuts";
 import { chordKeys } from "@/lib/platform";
 import { Kbd } from "./kbd";
@@ -190,6 +194,13 @@ export function CodeEditor({
 	const monaco = useLoadedMonaco();
 	const [loadFailed, setLoadFailed] = useState(false);
 	const [hasFocus, setHasFocus] = useState(false);
+	/*
+	 * `{{variable}}` colouring, ⌘-click and the edit chord (#1220). Inert unless
+	 * a provider is above this editor and the language is one variables are
+	 * interpolated in - see the hook, which takes the instance at mount and
+	 * keeps no state of its own.
+	 */
+	const mountVariableTokens = useEditorVariableTokens({ language, readOnly });
 
 	useEffect(() => {
 		let active = true;
@@ -213,9 +224,10 @@ export function CodeEditor({
 	const handleMount = useCallback<OnMount>(
 		(instance, monaco) => {
 			registerEditorChords(instance, monaco);
+			mountVariableTokens(instance, monaco);
 			onMount?.(instance, monaco);
 		},
-		[onMount]
+		[onMount, mountVariableTokens]
 	);
 
 	// User editor preferences override the shared defaults; an explicit

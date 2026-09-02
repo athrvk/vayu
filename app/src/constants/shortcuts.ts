@@ -182,6 +182,31 @@ export const LEAVE_EDITOR_CHORD: Chord = {
 };
 
 /**
+ * Open the variable under the cursor, inside a code editor.
+ *
+ * The mouse route into a `{{token}}`'s popover is ⌘-click on the token itself
+ * (issue #1220), and a keyboard user has no token to click - Monaco draws its
+ * text rather than laying out DOM, so there is nothing there to Tab to the way
+ * `VariableInput`'s overlay strip offers. This chord is that route: it reads the
+ * caret's own position, so it needs no pointer and no roving tab stop.
+ *
+ * ⇧⌘D, and the free letters are why. Monaco binds A, F, G, I, K, L, M, O and R
+ * with Shift somewhere in the combination; this registry already holds E, H, U,
+ * S, T and M; the native menu takes ⇧⌘W, and the platform edit menu takes ⇧⌘Z
+ * and ⇧⌘V. D is claimed by none of them.
+ *
+ * Bound per editor in the token hook rather than at `window`: which variable to
+ * open is a question only the editor holding the caret can answer, exactly as
+ * `LEAVE_EDITOR_CHORD` is the chord that acts on *this* editor.
+ */
+export const EDIT_VARIABLE_CHORD: Chord = {
+	mod: true,
+	shift: true,
+	key: "D",
+	label: "Edit the variable under the cursor",
+};
+
+/**
  * The drawer view switchers, keyed by the view they activate.
  *
  * ⌘S is Save, so Services takes the shifted pair - free in both maps: the
@@ -272,7 +297,7 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 		title: "Moving focus",
 		chords: [NEXT_REGION_CHORD, PREVIOUS_REGION_CHORD],
 	},
-	{ id: "editors", title: "Editors", chords: [LEAVE_EDITOR_CHORD] },
+	{ id: "editors", title: "Editors", chords: [LEAVE_EDITOR_CHORD, EDIT_VARIABLE_CHORD] },
 ];
 
 /**

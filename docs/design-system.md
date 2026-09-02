@@ -1228,6 +1228,18 @@ on purpose, so a script-focused container paints no ring at all. Landing there
 would move focus with nothing on screen saying where it went, which for a
 keyboard-only feature defeats the point of the key.
 
+**A `{{variable}}` inside an editor is painted from the same tokens as one
+outside it.** `EditableVariable` colours its overlay tokens `text-primary` /
+`text-muted-foreground` / `text-destructive-text` for resolved, empty and
+undefined; Monaco draws its own text, so the same three colours (plus
+`text-muted-foreground` for a run-time token and `text-warning-text` for a
+`data.*` column no contract declares) are declared in `index.css` as five
+global classes its decorations can name - `vayu-variable-token-*`, under a
+`.monaco-editor` prefix so they outrank the theme rules Monaco injects at
+runtime. They are the one place a global class is the right answer rather than
+a utility string, for the same reason the scrollbar block is: no component
+stylesheet reaches what Monaco renders. → `variable-token-classes.test.ts`
+
 ---
 
 ## Row Actions

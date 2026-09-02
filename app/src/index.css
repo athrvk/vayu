@@ -1328,6 +1328,41 @@
 }
 
 /*
+ * `{{variable}}` tokens inside a Monaco editor (issue #1220).
+ *
+ * The same four states `EditableVariable` paints over a single-line field, in
+ * the same tokens - a reader who sees `{{baseUrl}}` in the URL bar and again in
+ * the body beneath it sees one colour, not two. Monaco draws its own text, so
+ * `inlineClassName` takes a plain global class rather than the Tailwind utility
+ * string that component composes.
+ *
+ * Scoped under `.monaco-editor` to outrank the theme rules Monaco injects at
+ * runtime: those are single-class selectors (`.mtk1`) in a stylesheet that
+ * arrives after this one, so an equally specific rule here would lose on order
+ * alone. Two classes beat one whenever the stylesheets load.
+ */
+@layer utilities {
+	.monaco-editor .vayu-variable-token-resolved {
+		@apply text-[hsl(var(--primary))];
+	}
+	/* Resolved, but to nothing - the reason a request carries an empty value. */
+	.monaco-editor .vayu-variable-token-empty {
+		@apply text-[hsl(var(--muted-foreground))];
+	}
+	.monaco-editor .vayu-variable-token-undefined {
+		@apply text-[hsl(var(--destructive-text))];
+	}
+	/* A generator, an identity or a bound column: nothing to define, so muted. */
+	.monaco-editor .vayu-variable-token-runtime {
+		@apply text-[hsl(var(--muted-foreground))];
+	}
+	/* A `data.*` name no contract in scope declares - `describeColumnToken`. */
+	.monaco-editor .vayu-variable-token-warning {
+		@apply text-[hsl(var(--warning-text))];
+	}
+}
+
+/*
  * Reduced motion - user preference toggled from Settings → Appearance. When on,
  * the document carries data-reduced-motion="true" and we collapse transitions
  * and animations app-wide. Kept out of @layer so the !important overrides win.

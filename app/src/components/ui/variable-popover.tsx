@@ -176,6 +176,32 @@ export interface VariablePopoverProps {
 	 * standing on its own is an ordinary tab stop, and `disabled` still wins.
 	 */
 	tabIndex?: number;
+	/**
+	 * Open on mount, for a host that has already decided to open it (issue
+	 * #1220): a `{{token}}` in a Monaco editor has no DOM node to click, so the
+	 * editor mounts this over the token's screen rectangle already open.
+	 *
+	 * Deliberately `defaultOpen` and not a controlled `open`: opening seeds the
+	 * edit buffer from `varInfo`, and the initial state below does that for free.
+	 * A controlled prop would need an effect to re-seed on every external open,
+	 * which is the effect that used to reset the buffer under a user mid-type.
+	 */
+	defaultOpen?: boolean;
+	/**
+	 * Told whenever the popover opens or closes, after the save this component
+	 * already does on close. A host that positioned the trigger itself uses it
+	 * to unmount and to put focus back where it came from.
+	 */
+	onOpenChange?: (open: boolean) => void;
+	/**
+	 * Let focus move into the popover when it opens, instead of leaving it where
+	 * it was. Off by default, and that default is the one `VariableInput` needs:
+	 * its tokens sit over a live `<input>`, so pulling focus out of the field on
+	 * a click in the middle of a URL would take the caret with it. An editor's
+	 * token has the opposite need - the popover is opened by a chord, and a
+	 * keyboard user who cannot reach what opened is no better off than before.
+	 */
+	focusOnOpen?: boolean;
 }
 
 export function VariablePopover({
@@ -190,8 +216,11 @@ export function VariablePopover({
 	origins,
 	writableScopes,
 	tabIndex = 0,
+	defaultOpen = false,
+	onOpenChange,
+	focusOnOpen = false,
 }: VariablePopoverProps) {
-	const [isOpen, setIsOpen] = useState(false);
+	const [isOpen, setIsOpen] = useState(defaultOpen);
 	const [editValue, setEditValue] = useState(varInfo?.value || "");
 	const [isSecretRevealed, setIsSecretRevealed] = useState(false);
 	const openValueRef = useRef(varInfo?.value || "");
@@ -212,11 +241,13 @@ export function VariablePopover({
 			setEditValue(varInfo.value);
 		}
 		setIsOpen(true);
+		onOpenChange?.(true);
 	};
 
 	const closePopover = () => {
 		setIsSecretRevealed(false);
 		setIsOpen(false);
+		onOpenChange?.(false);
 	};
 
 	const canEdit = !!onValueChange && !!varInfo && resolved && !disabled;
@@ -388,7 +419,11 @@ export function VariablePopover({
 						e.preventDefault();
 					}
 				}}
-				onOpenAutoFocus={(e) => e.preventDefault()}
+				onOpenAutoFocus={(e) => {
+					// See `focusOnOpen`: a token over a live input must not take the
+					// caret with it, and a token opened by a chord must be reachable.
+					if (!focusOnOpen) e.preventDefault();
+				}}
 			>
 				<div className="flex flex-col gap-2">
 					{/*

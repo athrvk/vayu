@@ -48,6 +48,12 @@ const NO_COMMAND = new Map<Chord, string>([
 			"there would be no editor to leave by the time it ran",
 	],
 	[
+		shortcuts.EDIT_VARIABLE_CHORD,
+		"reads the caret's own token in the editor that has focus - same reason " +
+			"as the leave-editor chord above it, and the palette would have taken " +
+			"the caret away before the command could look",
+	],
+	[
 		shortcuts.FOCUS_URL_CHORD,
 		"moves focus, and the palette restores focus to wherever it was when it " +
 			"opened - the command would be undone as it closed",
