@@ -8,10 +8,13 @@
 /**
  * One sentence about the schema in hand, derived from the cache entry alone.
  *
- * Pure and Monaco-free, beside the store whose state it reads, because two
- * surfaces render it - the explorer's header badge and the Query pane's chip -
- * and a second copy of these words in one of them is how the two came to say
- * the same thing differently in the first place (#455).
+ * Pure and Monaco-free, beside the store whose state it reads. It had two
+ * renderers - the explorer's header badge and the Query pane's chip - and a
+ * second copy of these words in one of them is how the two came to say the same
+ * thing differently in the first place (#455). The badge now has one home, in
+ * the Query header, in the same place whether the explorer is open or shut
+ * (#1224); the sentence stays here rather than moving into that one caller,
+ * because a second surface asking the same question is what this file is for.
  */
 
 import type { SchemaEntry, SchemaFailure } from "./schema-cache";

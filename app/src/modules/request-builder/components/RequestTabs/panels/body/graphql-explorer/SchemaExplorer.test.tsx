@@ -52,22 +52,13 @@ function renderExplorer(
 	} = {}
 ) {
 	const onInsert = vi.fn();
-	const onRefresh = vi.fn();
-	const onClose = vi.fn();
 	const { entry, ...rest } = overrides;
 	const view = render(
 		<TooltipProvider>
-			<SchemaExplorer
-				entry={entryOf(entry)}
-				schemaKey={KEY}
-				onRefresh={onRefresh}
-				onClose={onClose}
-				onInsert={onInsert}
-				{...rest}
-			/>
+			<SchemaExplorer entry={entryOf(entry)} schemaKey={KEY} onInsert={onInsert} {...rest} />
 		</TooltipProvider>
 	);
-	return { onInsert, onRefresh, onClose, view };
+	return { onInsert, view };
 }
 
 const rows = () => screen.getAllByRole("treeitem");
@@ -388,27 +379,34 @@ describe("what it says when there is no schema", () => {
 	});
 });
 
-describe("the header is where every schema affordance lives", () => {
-	it("states the schema's status here, not a pane away", () => {
+describe("the header carries only what belongs to the pane", () => {
+	/*
+	 * Status, Refresh and the open/close toggle are the schema's, not the pane's,
+	 * and they now sit in one fixed place in the Query header whether this pane is
+	 * open or shut (#1224). A copy of any of them here is the layout changing
+	 * shape with the pane's state again - and, for Refresh, the second standing
+	 * one #455 was filed about.
+	 *
+	 * Mutation check: put any of the three buttons back in this header and the
+	 * matching assertion fails.
+	 */
+	it("holds the search box and the descriptions toggle, and nothing else", () => {
 		renderExplorer();
-		expect(screen.getByTitle(/Schema loaded/)).toBeTruthy();
+		expect(screen.getByLabelText("Search schema")).toBeTruthy();
+		expect(screen.getByLabelText("Show full descriptions")).toBeTruthy();
+		expect(screen.queryByLabelText("Refresh schema")).toBeNull();
+		expect(screen.queryByLabelText("Hide schema")).toBeNull();
 	});
 
-	it("names the failure and the fix when introspection was refused", () => {
-		renderExplorer({
-			entry: {
-				schema: null,
-				status: "error",
-				fetchedAt: null,
-				error: { kind: "auth", message: "401" },
-			},
-		});
-		expect(screen.getByTitle(/Credentials were rejected/).textContent).toContain("No schema");
+	it("states no status of its own - the Query header says it once", () => {
+		renderExplorer();
+		expect(screen.queryByTitle(/Schema loaded/)).toBeNull();
 	});
 
-	it("closes the pane from its own header, since the Query header no longer can", () => {
-		const { onClose } = renderExplorer();
-		fireEvent.click(screen.getByLabelText("Hide schema"));
-		expect(onClose).toHaveBeenCalledTimes(1);
+	it("still says the schema in hand is stale, which is about browsing it", () => {
+		// Not the status badge: this line qualifies the rows the pane is showing,
+		// and it is the only thing on screen that says how much to trust them.
+		renderExplorer({ entry: { status: "error", fetchedAt: Date.now() - 600_000 } });
+		expect(screen.getByText(/Refresh failed/)).toBeTruthy();
 	});
 });

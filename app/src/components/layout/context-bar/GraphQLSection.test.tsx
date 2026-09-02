@@ -127,16 +127,21 @@ describe("the schema status", () => {
 		expect(screen.getByText(/Fetched/)).toBeTruthy();
 	});
 
-	it("refreshes the target the request builder registered", () => {
-		const refreshSchema = vi.fn();
-		useSchemaCache.setState({ activeTarget: TARGET, refreshSchema });
-		show(graphqlRequest(JSON.stringify({ query: "" })));
-
-		fireEvent.click(screen.getByLabelText("Refresh schema"));
-		expect(refreshSchema).toHaveBeenCalledWith(TARGET);
-	});
-
-	it("offers no refresh when no target is registered - there is nothing to fetch", () => {
+	/*
+	 * The bar states the schema; it does not refresh it. Its Refresh was the
+	 * second standing one whenever the body panel was on screen with this bar
+	 * open - the duplication #455 was filed about, in the one combination its
+	 * guard could not see, since that guard renders `GraphQLBody` alone (#1224).
+	 *
+	 * It could never be the only one either: the button was gated on
+	 * `activeTarget`, which `GraphQLBody` alone sets - and only for a non-empty
+	 * URL - and clears when it unmounts. So it stood exactly when the Query
+	 * header's own control stood beside it, and never when it did not.
+	 *
+	 * Mutation check: put the button back and this reds.
+	 */
+	it("offers no refresh at all - the Query header owns the only one", () => {
+		useSchemaCache.setState({ activeTarget: TARGET });
 		show(graphqlRequest(JSON.stringify({ query: "" })));
 		expect(screen.queryByLabelText("Refresh schema")).toBeNull();
 	});

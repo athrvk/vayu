@@ -1992,6 +1992,25 @@ useResizable({ defaultSize, min, max, direction?: "horizontal" | "vertical" })
 - **Content:** `ScrollArea` fills available space
 - **Footer:** `ConnectionStatus` pinned to bottom with `border-t border-border`
 
+### Pane Toggles
+
+**A toggle for a docked pane sits at the edge the pane opens from, and its icon
+names that side.** A user reaches for the side the pane will appear on; a toggle
+on the far edge is not where anyone looks for it, and `PanelRightOpen` on a
+control that opens a pane to the left states the wrong thing outright. The GraphQL
+schema explorer had both faults at once: it is the first panel of a horizontal
+`ResizablePanelGroup`, so it opens on the **left**, while the chip that opened it
+sat at the right of the Query header drawing the `PanelRight*` pair (#1224).
+
+- **Icons:** `PanelLeftOpen` / `PanelLeftClose` for a pane on the left,
+  `PanelRightOpen` / `PanelRightClose` for one on the right. Only the icon and
+  the label change with state.
+- **State:** `aria-expanded` bound to the store the pane reads, never a literal.
+- **One home:** the toggle stays put when the pane opens, and the pane does not
+  grow a close button of its own. A control that changes address with the state
+  it controls teaches a position and then abandons it, and the two copies drift
+  into saying the same thing differently.
+
 ---
 
 ## Component Patterns
