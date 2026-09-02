@@ -6012,12 +6012,15 @@ export const TOOLS: McpTool[] = [
 			body: z.string().optional().describe("Request body content."),
 			// The two sibling tools have carried this text since they existed and
 			// this one carried nothing, so an agent load-testing a GraphQL endpoint
-			// had no way to discover the mode from the schema.
+			// had no way to discover the mode from the schema. The GET transport
+			// rule is part of that: a load run goes out through the event loop's
+			// `wire_url` / `has_wire_body` pair like any other send (#1228), so a
+			// GraphQL run left on the default GET carries no body at all.
 			bodyType: z
 				.string()
 				.optional()
 				.describe(
-					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. File parts are not supported here - a multipart file part names a path on the user\'s machine, which an agent cannot choose for them; author it in the app. An xml `body` is stored and sent verbatim as application/xml.'
+					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the run on the GET an unnamed method defaults to. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. File parts are not supported here - a multipart file part names a path on the user\'s machine, which an agent cannot choose for them; author it in the app. An xml `body` is stored and sent verbatim as application/xml.'
 				),
 			auth: authInput,
 			httpVersion: z
