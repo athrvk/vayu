@@ -31,13 +31,20 @@
  * `findOperationLine`.
  *
  * Like every section, this introspects nothing of its own: it renders whatever
- * the schema cache holds, and its Refresh is the store's own `refreshSchema` on
- * the target the request builder registered.
+ * the schema cache holds.
+ *
+ * **It carries no Refresh.** It used to, and that was the second standing one
+ * whenever the body panel was on screen with this bar open - the duplication
+ * #455 was filed about, in the one combination the guard for it could not see
+ * (#1224). It could never be the *only* one either: the button was gated on the
+ * cache's `activeTarget`, which `GraphQLBody` alone set - and only for a
+ * non-empty URL - and cleared when it unmounted, so it stood exactly when the
+ * Query header's own control stood beside it. Refresh now lives there, once, and
+ * the target field went with the button, being the one thing that read it.
  */
 
-import { AlertCircle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { useRequestQuery } from "@/queries";
-import { TooltipIconButton } from "@/components/ui";
 import { useSchemaCache } from "@/lib/graphql/schema-cache";
 import { documentOutline, parseGraphQLBody } from "@/lib/graphql/graphql-body";
 import { useRevealStore } from "@/lib/graphql/reveal-store";
@@ -57,7 +64,6 @@ const STATUS_LABEL = {
 export function GraphQLSection({ tab }: ContextBarSectionProps) {
 	const { data: request, isLoading } = useRequestQuery(tab.entityId);
 	const entry = useSchemaCache((s) => s.getActiveEntry());
-	const activeTarget = useSchemaCache((s) => s.activeTarget);
 	const revealOperation = useRevealStore((s) => s.revealOperation);
 
 	if (isLoading) return <SectionLoading />;
@@ -92,14 +98,6 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 					) : null}
 					Schema {STATUS_LABEL[status].toLowerCase()}
 				</span>
-				{activeTarget && (
-					<TooltipIconButton
-						label="Refresh schema"
-						className="h-6 w-6 ml-auto"
-						icon={<RefreshCw className="w-3.5 h-3.5" />}
-						onClick={() => void useSchemaCache.getState().refreshSchema(activeTarget)}
-					/>
-				)}
 			</div>
 
 			{/*
