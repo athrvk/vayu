@@ -1514,23 +1514,35 @@ Radix aims its close-focus at - so both outcomes dropped the user to `<body>`
 (#1218). Cancel returns focus to the row, which is still there. A confirmed
 delete moves it to the **next row in the deleted row's own set**, or to the
 **parent** when that row was the last in it: chosen while the row is still on
-screen, since afterwards the DOM cannot say what followed it. Depth comes from
-`aria-level` rather than the parent walk above - that walk takes the first
-treeitem in an ancestor and so can answer with a preceding sibling, which is
-harmless for Left and wrong for choosing what outlives a row. Focus moves
+screen, since afterwards the DOM cannot say what followed it. Focus moves
 through `focusTreeRow`, so the tree's one tab stop travels with it.
 
-Visible order comes from the DOM (`[role="treeitem"]` in document order), since
-collapsed subtrees are not rendered. Note a row's children are a **sibling** of
-that row inside a shared wrapper, not nested within it, so finding a parent row
-means walking up to the enclosing wrapper - not `closest()`.
+**Order comes from the DOM; hierarchy comes from `aria-level`.** Order the DOM
+states plainly - `[role="treeitem"]` in document order is exactly the rows a
+user can see, since collapsed subtrees are not rendered. Parentage it does not:
+a row's children are a **sibling** of that row inside a shared wrapper, not
+nested within it, so `closest()` finds nothing and a walk up the ancestors takes
+whichever treeitem an ancestor holds first - a group's own first row, which is a
+preceding *sibling* of every row after it. Under that walk Left moved to the top
+of a list instead of out of it, and self-corrected on the next press, so it read
+as hesitation rather than as breakage (#1237). One function answers the question
+now - `parentRow` in `tree-focus.ts`, the nearest row above with a smaller
+level - and both the Left key and the delete refocus read it, so there is one
+description of this tree's shape rather than two that can drift.
+
+**A consumer of the hook therefore has to announce `aria-level` on every row**,
+and all three do. It is not only for assistive tech: a tree that omits it is a
+tree of roots, where Left moves nowhere and `*` calls every row a sibling. The
+schema explorer is why the level and not the shape is the source - it renders
+every row, at every depth, as a direct child of the tree, so no DOM rule can
+answer for it at all.
 
 **That same shape is why the hierarchy has to be stated, not inferred.** A
 sibling group is not a child group, so the accessibility tree read as a flat
 list of rows. Every row carries `aria-level` (1-based), `aria-posinset` and
 `aria-setsize`; the children wrapper is `role="group"` and the folder row claims
 it with `aria-owns`, which buys the ownership without moving the DOM the
-roving-focus walk and the hit-area rules depend on. Folders and requests inside
+roving-focus order and the hit-area rules depend on. Folders and requests inside
 one group are **one** set - the requests continue the folders' numbering, or two
 adjacent rows both announce "1 of 1".
 
