@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
@@ -34,16 +34,25 @@ const deleteCollection = vi.fn();
 
 // root > mid > leaf, each holding one request. Deleting `root` cascades over
 // all of it.
-const collections = [
+const TREE = [
 	{ id: "root", name: "Acme", order: 0 },
 	{ id: "mid", name: "Billing", parentId: "root", order: 0 },
 	{ id: "leaf", name: "Invoices", parentId: "mid", order: 0 },
 ];
-const requests = new Map([
+const TREE_REQUESTS: Array<[string, Array<Record<string, unknown>>]> = [
 	["root", [{ id: "r-root", collectionId: "root", name: "Ping", method: "GET", order: 0 }]],
 	["mid", [{ id: "r-mid", collectionId: "mid", name: "Charge", method: "POST", order: 0 }]],
 	["leaf", [{ id: "r-leaf", collectionId: "leaf", name: "List", method: "GET", order: 0 }]],
-]);
+];
+
+/*
+ * Mutable, so a test can answer differently once the delete has settled. The
+ * engine's refetch is what removes a deleted row, and it lands *after* the
+ * dialog has closed - the timing the refocus has to survive (#1234), and one a
+ * fixed fixture cannot express.
+ */
+let collections = [...TREE];
+let requests = new Map(TREE_REQUESTS);
 
 vi.mock("@/queries", () => ({
 	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
@@ -65,15 +74,27 @@ vi.mock("@/queries", () => ({
 }));
 
 function renderTree() {
-	return render(
-		<QueryClientProvider
-			client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-		>
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	// A fresh element per render: React skips reconciling a referentially equal
+	// one, so a rerender with the same object would show none of the new data.
+	const ui = () => (
+		<QueryClientProvider client={client}>
 			<TooltipProvider>
 				<CollectionTree />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
+	const view = render(ui());
+
+	return {
+		...view,
+		/** The refetch that follows a delete, landing after the dialog is gone. */
+		refetchWithout(collectionId: string) {
+			collections = collections.filter((entry) => entry.id !== collectionId);
+			requests = new Map(TREE_REQUESTS.filter(([owner]) => owner !== collectionId));
+			act(() => view.rerender(ui()));
+		},
+	};
 }
 
 /**
@@ -97,6 +118,8 @@ beforeEach(() => {
 	// jsdom implements no scrolling; the reveal effect calls it for an open tab.
 	Element.prototype.scrollIntoView = vi.fn();
 	deleteCollection.mockReset().mockResolvedValue(undefined);
+	collections = [...TREE];
+	requests = new Map(TREE_REQUESTS);
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["root", "mid", "leaf"]) });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 });
@@ -139,27 +162,35 @@ describe("confirming a collection delete", () => {
 	 * opened it has unmounted with the menu, and the dialog is controlled with
 	 * no trigger for Radix to restore to, so without this focus lands on
 	 * `<body>` and the next Tab restarts from the top of the document.
+	 *
+	 * The move waits for the row to actually go (#1234): the delete settles
+	 * before the refetch that removes the row, so at close the row is still
+	 * rendered and is where focus belongs until it is not.
 	 */
-	it("leaves focus on the row that follows the deleted one", async () => {
-		renderTree();
+	it("leaves focus on the row that follows the deleted one, once that row is gone", async () => {
+		const view = renderTree();
 		await askToDelete("Invoices");
 
 		fireEvent.click(await confirmButton());
 
 		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
-		// "Invoices" is followed in Billing's group by the "Charge" request: the
-		// next row at its own level, not the next row in the document, which is
+		expect(document.activeElement).toBe(document.querySelector('[data-collection-id="leaf"]'));
+
+		view.refetchWithout("leaf");
+
+		// "Invoices" was followed in Billing's group by the "Charge" request: the
+		// next row at its own level, not the next row in the document, which was
 		// the request inside the folder being deleted.
 		expect(document.activeElement).toBe(document.querySelector('[data-request-id="r-mid"]'));
 	});
 
 	/*
-	 * A failed delete leaves the row on screen, and the successor is chosen from
-	 * intent rather than outcome - so focus lands beside the row instead of on
-	 * it. Pinned as what it is: still inside the tree, never `<body>`. Outcome
-	 * needs the mutation's result at close time, which is #1234.
+	 * The row a failed delete did not remove is still the row the user was on,
+	 * and it is still there to be focused. Reading the confirm click as the
+	 * outcome sent focus to the successor instead, beside a surviving row
+	 * (#1234).
 	 */
-	it("keeps focus inside the tree when the delete fails", async () => {
+	it("leaves focus on the row when the delete fails", async () => {
 		deleteCollection.mockRejectedValue(new Error("database is locked"));
 		renderTree();
 		await askToDelete("Invoices");
@@ -167,8 +198,27 @@ describe("confirming a collection delete", () => {
 		fireEvent.click(await confirmButton());
 
 		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
-		expect(document.activeElement).not.toBe(document.body);
-		expect(document.activeElement).toHaveAttribute("role", "treeitem");
+		expect(document.activeElement).toBe(document.querySelector('[data-collection-id="leaf"]'));
+	});
+
+	/*
+	 * The deferred move is for a user who is still where the delete left them.
+	 * One who has moved on has chosen where focus is, and the refetch landing is
+	 * no reason to take it back.
+	 */
+	it("does not chase the successor when focus has moved on before the row goes", async () => {
+		const view = renderTree();
+		await askToDelete("Invoices");
+
+		fireEvent.click(await confirmButton());
+		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
+
+		const elsewhere = document.querySelector<HTMLElement>('[data-collection-id="root"]')!;
+		elsewhere.focus();
+
+		view.refetchWithout("leaf");
+
+		expect(document.activeElement).toBe(elsewhere);
 	});
 
 	it("cannot fire the same delete twice from a double click", async () => {
