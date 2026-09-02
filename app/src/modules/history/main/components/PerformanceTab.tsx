@@ -50,6 +50,11 @@ export default function PerformanceTab({
 	// tick rather than each bucket's last-write-wins sample, so it can only be
 	// more permissive than the `.some((d) => d.p99 > 0)` it replaces - and the
 	// chart's own two-point guard still decides whether anything is drawn.
+	//
+	// Memoised despite returning a boolean, as MetricsView does: the predicate
+	// stops at the first tick carrying a p99, but the run that has none - the
+	// one whose card this hides - is the case that scans every tick, and a
+	// loaded series runs to tens of thousands of them.
 	const hasPercentileData = useMemo(() => hasPercentileSignal(timeSeries), [timeSeries]);
 	const isRampUp = derived.mode === "ramp_up";
 
