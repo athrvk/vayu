@@ -1470,7 +1470,7 @@ generator table:
 |-------|-----------|------------|
 | `{{data.email}}` - the reserved `data.*` namespace (issue #402) | `RuntimeToken` | muted or amber, depending on the declared contract - see below |
 | `{{$vu}}`, `{{$iteration}}` - the reserved identity namespace (issues #994, #1101) | `RuntimeToken` | muted, "not generated here", no popover |
-| `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable` | accent when it resolves, **red** when it does not; hover reads, click edits or creates |
+| `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable` | accent when it resolves, **red** when it does not; hover reads, click or Enter edits or creates |
 | `{{$guid}}` - a generator | `RuntimeToken` | muted, "generated per use", no popover |
 
 The two reserved rows sit above the scopes for the same reason and the generator
@@ -1554,6 +1554,48 @@ a click puts the caret at the **near edge** - before the token when its left
 half was clicked, after it when its right half was. The edges, not a position
 inside: `{{data.email}}` is one atom to everything that reads it, and a caret
 between its braces is how a keystroke corrupts the name.
+
+**The keyboard splits the overlay the same way the pointer does, and along the
+same line** (issue #1215). The layer used to be `aria-hidden="true"` as a whole,
+which is right for what it mostly is - a repaint of text the `<input>` beneath
+already carries - and wrong for the one thing it also holds: an editable token is
+a `role="button"` that opens the variable editor, and a focusable control inside
+an `aria-hidden` subtree is the `aria-hidden-focus` violation. Two commits that
+never met, each correct alone. So the duplication now carries the attribute where
+it actually is - every text segment, and every run-time token, which has no
+popover and is not focusable - and the editable tokens stay in the accessibility
+tree.
+
+They share **one** Tab stop between them, roving: the token holding it has
+`tabIndex={0}` and the rest `-1`, Left/Right move between them and Home/End jump
+to the ends, and whichever token takes focus keeps the stop. Without that, a URL
+with five variables put five stops between the URL and Send. It is the roving
+tabindex `design-system.md` describes for the collection tree, hand-wired rather
+than taken from the tree's machinery: `useRovingTreeFocus` navigates
+`[role="treeitem"]` and dispatches at the tree's own data attributes, so pointed
+at tokens it would silently do nothing, and `focusTreeRow` (`tree-focus.ts`)
+moves the stop by writing `tabIndex` onto DOM nodes - correct for rows that do
+not re-render for it, wrong for a strip whose stop is a React prop. Arrowing
+deliberately does not wrap - falling off the end leaves Tab as the way out.
+Locate the layer in a test by `data-variable-overlay`, never by `aria-hidden`,
+which now names the parts rather than the whole.
+
+**The field is a combobox, and it steers its own list.** `VariableInput` carries
+`role="combobox"`, `aria-autocomplete="list"`, `aria-expanded`, `aria-controls`
+and a live `aria-activedescendant` - but only where a list can actually open
+(a scope, or plain suggestions), because promising a list a screen-reader user
+then cannot find is worse than promising nothing. The arrows and Enter are
+handled on the input: `cmdk` reads them off its own `Command.Input`, which
+neither `VariableAutocomplete` nor `SuggestionList` renders, so before #1215 the
+keys were faked by dispatching a synthetic keydown at
+`document.querySelector("[cmdk-root]")` - the first `cmdk` list in the
+*document*, of which the app mounts four - and Enter clicked whatever
+`[cmdk-item][data-selected="true"]` it found there. Both lists are now driven
+through `cmdk`'s controlled `value` / `onValueChange`, stepping through the one
+ordering `lib/variable-suggestions.ts` builds and `VariableAutocomplete` draws.
+`cmdk` mints the listbox and option ids after the props it is handed, so
+`CommandListboxProbe` reports them from inside the list for `aria-controls` and
+`aria-activedescendant`.
 
 `EditableVariable` takes the scope as a **required** prop, because a token only
 renders where there is one. `RuntimeToken` serves all three run-time cases - a

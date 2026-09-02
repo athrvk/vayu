@@ -9,7 +9,7 @@
 
 import * as React from "react";
 import { type DialogProps } from "@radix-ui/react-dialog";
-import { Command as CommandPrimitive } from "cmdk";
+import { Command as CommandPrimitive, useCommandState } from "cmdk";
 import { Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -34,6 +34,62 @@ import { Eyebrow } from "@/components/ui/eyebrow";
  * and a surface class alone loses that cascade.
  */
 const COMMAND_SURFACE = "bg-card surface-card text-card-foreground";
+
+/** The ids an outside control needs to name this list and its highlighted row. */
+export interface CommandListboxState {
+	/** The `role="listbox"` element's id, for `aria-controls`. */
+	listboxId?: string;
+	/** The highlighted `role="option"`'s id, for `aria-activedescendant`. */
+	activeOptionId?: string;
+}
+
+/**
+ * Reports those ids to a control that lives outside the list.
+ *
+ * `cmdk` mints both itself - it writes `id` *after* the props it is handed, so
+ * neither can be passed in - and a combobox that steers this list from outside
+ * has to name them. `VariableInput` is that case: the field is two components
+ * up, the list is never focused, and without the ids a screen reader is told
+ * nothing about a highlight the arrow keys are moving (issue #1215).
+ *
+ * Read from `cmdk`'s own store rather than watched on the DOM, because a
+ * highlight `cmdk` moves for itself - a pointer travelling over the rows -
+ * re-renders this list and nothing above it.
+ *
+ * Render it inside a `CommandList`; `onChange` must be stable.
+ */
+export function CommandListboxProbe({ onChange }: { onChange: (s: CommandListboxState) => void }) {
+	/*
+	 * Subscribed to the highlight rather than to `state.selectedItemId`, which
+	 * `cmdk` only maintains for a list it highlights itself: a controlled `value`
+	 * is written straight into the store, so the id it caches is never recomputed
+	 * and stays undefined for exactly the case this probe exists to serve. The
+	 * highlight itself is always current, and the row carrying it is one scoped
+	 * query away - inside this list, never across the document.
+	 */
+	const highlight = useCommandState((state) => state.value);
+	const ref = React.useRef<HTMLSpanElement>(null);
+
+	React.useEffect(() => {
+		const list = ref.current?.closest<HTMLElement>("[cmdk-list]");
+		/*
+		 * Matched on `data-value` rather than on the rendered `aria-selected`,
+		 * which lags: a row learns its own value in a layout effect and does not
+		 * re-render for it, so on a list's first paint the highlight sits on
+		 * nothing yet. That same layout effect writes `data-value`, and a passive
+		 * effect runs after all of them.
+		 */
+		const rows = list ? Array.from(list.querySelectorAll<HTMLElement>("[cmdk-item]")) : [];
+		onChange({
+			listboxId: list?.id,
+			activeOptionId: rows.find((row) => row.getAttribute("data-value") === highlight)?.id,
+		});
+	}, [onChange, highlight]);
+
+	// `hidden`, so it is out of the accessibility tree rather than an extra
+	// child of a listbox that should hold options and nothing else.
+	return <span ref={ref} hidden />;
+}
 
 function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
 	return (

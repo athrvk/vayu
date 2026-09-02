@@ -1547,6 +1547,23 @@ control and the row genuinely differ** - the history, variables and settings
 trees use full-width buttons that are their own target, so they use the baseline.
 Before adding it, check whether the focusable element already spans the row.
 
+**The other roving strip is not a tree, and does not use the hook.** The
+`{{variable}}` tokens `VariableInput` paints over a field share one Tab stop the
+same way - one token at `tabIndex={0}`, the rest at `-1`, Left/Right between them
+and Home/End to the ends - because a URL with five variables otherwise put five
+stops between the URL and Send (issue #1215). It is wired in the component rather
+than taken from either half of the tree's machinery, for two different reasons.
+`useRovingTreeFocus` navigates `[role="treeitem"]` and acts by dispatching at the
+tree's own `data-tree-*` attributes, so pointed at tokens it would find nothing
+and silently do nothing. `focusTreeRow` (`tree-focus.ts`) is closer - it is
+exactly "move the stop and focus the row" - but it moves the stop by writing
+`tabIndex` onto DOM nodes, which is right for the tree, whose rows render
+`tabIndex={-1}` and do not re-render for it, and wrong here: the token strip's
+stop *is* a React prop, so the same write would sit on top of a vdom value React
+still believes and be undone by the next render. Arrowing does not wrap there -
+falling off the end leaves Tab as the way out, per **Focus must be able to
+leave** above.
+
 ---
 
 ## Flex Items Must Be Told They May Shrink

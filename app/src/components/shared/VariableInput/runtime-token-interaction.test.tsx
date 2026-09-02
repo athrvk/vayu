@@ -88,7 +88,7 @@ describe("a run-time token", () => {
 		const { container } = renderInput("https://x/y?id={{$guid}}");
 
 		// The overlay stays transparent to the pointer; only the token opts back in.
-		const overlay = container.querySelector<HTMLElement>('[aria-hidden="true"]');
+		const overlay = container.querySelector<HTMLElement>("[data-variable-overlay]");
 		expect(overlay?.style.pointerEvents).toBe("none");
 		expect(runtimeToken(container).style.pointerEvents).toBe("auto");
 	});

@@ -118,12 +118,22 @@ const BOUND_ROW_NOTE_ALL_OFF =
 	"While a row is picked, its column answers this name. Every definition below is switched off, so a send that carries no row resolves nothing.";
 
 /** The eye that swaps a hidden secret field for an editable one. */
-function RevealButton({ revealed, onToggle }: { revealed: boolean; onToggle: () => void }) {
+function RevealButton({
+	revealed,
+	onToggle,
+	autoFocus,
+}: {
+	revealed: boolean;
+	onToggle: () => void;
+	/** See the hidden-secret branch below - this is its only entry point. */
+	autoFocus?: boolean;
+}) {
 	return (
 		<TooltipIconButton
 			label={revealed ? "Hide value" : "Reveal value"}
 			icon={revealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
 			onClick={onToggle}
+			autoFocus={autoFocus}
 			className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
 		/>
 	);
@@ -159,6 +169,13 @@ export interface VariablePopoverProps {
 	 * because there is nowhere this popover could put it.
 	 */
 	writableScopes?: VariableScope[];
+	/**
+	 * The trigger's position in a host's roving tab order (issue #1215).
+	 * `VariableInput` paints a strip of tokens over one field and passes `-1` to
+	 * all but one, so the strip costs a single Tab stop. Defaults to `0`: a token
+	 * standing on its own is an ordinary tab stop, and `disabled` still wins.
+	 */
+	tabIndex?: number;
 }
 
 export function VariablePopover({
@@ -172,6 +189,7 @@ export function VariablePopover({
 	triggerClassName,
 	origins,
 	writableScopes,
+	tabIndex = 0,
 }: VariablePopoverProps) {
 	const [isOpen, setIsOpen] = useState(false);
 	const [editValue, setEditValue] = useState(varInfo?.value || "");
@@ -334,7 +352,7 @@ export function VariablePopover({
 	const triggerElement = (
 		<span
 			role="button"
-			tabIndex={disabled ? -1 : 0}
+			tabIndex={disabled ? -1 : tabIndex}
 			className={triggerClassName}
 			onClick={(e) => {
 				if (disabled) return;
@@ -463,6 +481,16 @@ export function VariablePopover({
 								isSecret && !isSecretRevealed ? (
 									<div className="relative">
 										<Input
+											/*
+											 * Keyed against the revealed field below,
+											 * which is otherwise the same `<Input>` in
+											 * the same slot: React would reconcile the
+											 * two rather than remount, and `autoFocus`
+											 * fires on mount - so revealing left focus
+											 * behind on the eye and the field the reveal
+											 * exists to open had to be tabbed back to.
+											 */
+											key="secret-masked"
 											readOnly
 											value={varInfo.value ? SECRET_MASK : ""}
 											placeholder="not set"
@@ -472,11 +500,24 @@ export function VariablePopover({
 										<RevealButton
 											revealed={false}
 											onToggle={() => setIsSecretRevealed(true)}
+											/*
+											 * The popover suppresses its own open-autofocus, and every
+											 * other branch compensates with `autoFocus` on the field it
+											 * opens onto. This one had nothing: the masked field is
+											 * `readOnly`, and the popover is non-modal and portalled, so
+											 * Tab from the token did not enter it and focus-outside
+											 * dismissed it - a secret was the one variable a keyboard
+											 * user could not read (issue #1215). The eye is the right
+											 * landing: revealing is the only action here, and it hands
+											 * focus on to the editable field.
+											 */
+											autoFocus
 										/>
 									</div>
 								) : (
 									<div className="relative">
 										<Input
+											key="secret-revealed"
 											value={editValue}
 											onChange={(e) => setEditValue(e.target.value)}
 											onKeyDown={handleKeyDown}

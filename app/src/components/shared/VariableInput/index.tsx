@@ -37,10 +37,18 @@ import {
 	useCallback,
 	useMemo,
 	useEffect,
+	useLayoutEffect,
 	type KeyboardEvent,
 	type ChangeEvent,
 } from "react";
-import { VariableAutocomplete, SuggestionList } from "@/components/ui";
+import {
+	VariableAutocomplete,
+	SuggestionList,
+	SUGGESTION_LIST_LIMIT,
+	type CommandListboxState,
+} from "@/components/ui";
+import { buildVariableSuggestions, variableSuggestionKey } from "@/lib/variable-suggestions";
+import { isCommitEnter } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 import type { ResolvedVariable, VariableScope, VariableSupport } from "@/types";
 import EditableVariable from "./EditableVariable";
@@ -129,9 +137,18 @@ export default function VariableInput({
 	const [showPlainSuggestions, setShowPlainSuggestions] = useState(false);
 	const [cursorPosition, setCursorPosition] = useState(0);
 	const [searchQuery, setSearchQuery] = useState("");
+	/**
+	 * The highlighted row, as a `cmdk` item value: a `variableSuggestionKey` for
+	 * the variable list, the item's own text for the plain one. Held here rather
+	 * than in the list because the arrow keys arrive at the input - see
+	 * `handleKeyDown`.
+	 */
+	const [highlightedValue, setHighlightedValue] = useState("");
+	/** Which token of the strip holds the single Tab stop - see the overlay. */
+	const [activeTokenIndex, setActiveTokenIndex] = useState(0);
 	const inputRef = useRef<HTMLInputElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
-	const isNavigatingRef = useRef(false);
+	const overlayRef = useRef<HTMLDivElement>(null);
 
 	const allVariables = variables ? variables.getAllVariables() : NO_VARIABLES;
 	const segments = useMemo(() => parseSegments(value), [value]);
@@ -230,10 +247,88 @@ export default function VariableInput({
 	const filteredSuggestions = useMemo(() => {
 		if (suggestions.length === 0) return [];
 		const lowerValue = value.toLowerCase();
-		return suggestions.filter(
-			(s) => s.toLowerCase().includes(lowerValue) && s.toLowerCase() !== lowerValue
-		);
+		return suggestions
+			.filter((s) => s.toLowerCase().includes(lowerValue) && s.toLowerCase() !== lowerValue)
+			.slice(0, SUGGESTION_LIST_LIMIT);
 	}, [suggestions, value]);
+
+	/*
+	 * The variable rows, in the order they are drawn.
+	 *
+	 * Built here as well as inside `VariableAutocomplete` - from the same
+	 * function, so it is one ordering read twice rather than two orderings - so
+	 * that "the next row" is answerable without touching the DOM. It used to be
+	 * answered by dispatching a synthetic keydown at
+	 * `document.querySelector("[cmdk-root]")`, which is the first `cmdk` list in
+	 * the *document*: with a second one mounted earlier, the arrows steered a
+	 * list belonging to another field and Enter picked out of it (issue #1215).
+	 */
+	const variableSuggestions = useMemo(
+		() =>
+			showSuggestions
+				? buildVariableSuggestions({
+						variables: variablesForAutocomplete,
+						searchQuery,
+						dataColumns: variables?.dataColumns,
+					})
+				: [],
+		[showSuggestions, variablesForAutocomplete, searchQuery, variables?.dataColumns]
+	);
+
+	/*
+	 * Which list is on screen, and what it holds.
+	 *
+	 * `showSuggestions` alone is not it: the `{{` context can be open while
+	 * nothing matches, and then no list renders. The combobox has to say
+	 * `aria-expanded="false"` in that state, and Enter has to fall through to
+	 * whatever the field's Enter normally does.
+	 */
+	/**
+	 * Whether this field can ever pop a list up at all. Without a scope and
+	 * without plain suggestions it is an ordinary text box, and should say so.
+	 */
+	const isCombobox = Boolean(variables) || suggestions.length > 0;
+
+	const variableListOpen = showSuggestions && variableSuggestions.length > 0;
+	const plainListOpen =
+		!showSuggestions && showPlainSuggestions && filteredSuggestions.length > 0;
+	const listOpen = variableListOpen || plainListOpen;
+
+	const listValues = useMemo(
+		() =>
+			variableListOpen
+				? variableSuggestions.map(variableSuggestionKey)
+				: plainListOpen
+					? filteredSuggestions
+					: [],
+		[variableListOpen, variableSuggestions, plainListOpen, filteredSuggestions]
+	);
+
+	/*
+	 * Derived rather than corrected in an effect: the rows change on every
+	 * keystroke, and a highlight that survives one render past its row would
+	 * leave Enter inserting a name the list no longer offers.
+	 */
+	const activeValue = listValues.includes(highlightedValue)
+		? highlightedValue
+		: (listValues[0] ?? "");
+
+	/**
+	 * The ids the combobox has to name, reported by the list itself.
+	 *
+	 * `cmdk` mints them - it writes `id` after the props it is handed, so neither
+	 * can be passed in - and `CommandListboxProbe` reads them from inside the
+	 * list rather than from the document. Which list this input steers is the
+	 * whole of issue #1215, and a `document.querySelector` is how it was lost.
+	 */
+	const [listboxIds, setListboxIds] = useState<CommandListboxState>({});
+	const handleListboxState = useCallback((next: CommandListboxState) => {
+		setListboxIds((prev) =>
+			prev.listboxId === next.listboxId && prev.activeOptionId === next.activeOptionId
+				? prev
+				: next
+		);
+	}, []);
 
 	// Handle Escape key globally
 	useEffect(() => {
@@ -247,64 +342,137 @@ export default function VariableInput({
 		return () => document.removeEventListener("keydown", handleEscapeKey);
 	}, []);
 
+	/**
+	 * Move the highlight without moving focus.
+	 *
+	 * Clamped rather than wrapped, which is what `cmdk` does with its default
+	 * `loop={false}` - the list this replaced was `cmdk`'s own handler reached
+	 * through a synthetic event, so wrapping here would be a behaviour change
+	 * smuggled in with a bug fix.
+	 */
+	const moveHighlight = (delta: number) => {
+		if (listValues.length === 0) return;
+		const current = listValues.indexOf(activeValue);
+		const next = Math.min(Math.max(current + delta, 0), listValues.length - 1);
+		setHighlightedValue(listValues[next]);
+	};
+
+	/** Take the highlighted row. False when there is nothing to take. */
+	const commitHighlight = () => {
+		if (!activeValue) return false;
+		if (variableListOpen) {
+			const picked = variableSuggestions.find(
+				(s) => variableSuggestionKey(s) === activeValue
+			);
+			if (!picked) return false;
+			handleSelectVariable(picked.name);
+			return true;
+		}
+		handleSelectSuggestion(activeValue);
+		return true;
+	};
+
 	// Handle keyboard navigation
 	const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
 		/*
-		 * Plain suggestions are navigated by `cmdk` itself - see SuggestionList.
-		 * This used to be ~30 lines of ArrowUp / ArrowDown / Enter / Tab / Escape
-		 * handling against a `selectedSuggestionIndex` this component owned, a
-		 * second implementation of what the Command primitive two branches down
-		 * was already doing for variables.
-		 *
-		 * Only Escape stays here, because closing the list is this component's
-		 * state rather than the list's.
+		 * Escape closes whichever list is open, and closing is this component's
+		 * state rather than the list's - so it is handled even when the list holds
+		 * nothing to navigate.
 		 */
-		if (showPlainSuggestions && e.key === "Escape") {
+		if (e.key === "Escape") {
+			setShowSuggestions(false);
 			setShowPlainSuggestions(false);
 			return;
 		}
 
-		// For variable suggestions, let VariableAutocomplete (Command) handle navigation
-		if (showSuggestions) {
-			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-				e.preventDefault();
-				e.stopPropagation();
-				// Mark that we're navigating to prevent blur from closing popover
-				isNavigatingRef.current = true;
-				// Keep input focused to prevent blur
-				inputRef.current?.focus();
-				// Forward the key event to the Command component
-				const commandRoot = document.querySelector("[cmdk-root]") as HTMLElement;
-				if (commandRoot) {
-					const keyEvent = new KeyboardEvent("keydown", {
-						key: e.key,
-						bubbles: true,
-						cancelable: true,
-					});
-					commandRoot.dispatchEvent(keyEvent);
-				}
-				setTimeout(() => {
-					isNavigatingRef.current = false;
-				}, 100);
-				return;
-			}
-			if (e.key === "Enter" || e.key === "Tab") {
-				e.preventDefault();
-				// Command component will handle selection via onSelect
-				const highlightedItem = document.querySelector(
-					'[cmdk-item][data-selected="true"]'
-				) as HTMLElement;
-				if (highlightedItem) {
-					highlightedItem.click();
-				}
-				return;
-			}
-			if (e.key === "Escape") {
-				setShowSuggestions(false);
-				return;
-			}
+		if (!listOpen) return;
+
+		/*
+		 * Both lists are navigated from here, because in both the keys arrive at
+		 * this input: `cmdk` reads arrows off its own `Command.Input`, which
+		 * neither list renders. Nothing about focus moves - the highlight is
+		 * `activeValue`, handed back down as the list's controlled value.
+		 */
+		if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+			e.preventDefault();
+			e.stopPropagation();
+			moveHighlight(e.key === "ArrowDown" ? 1 : -1);
+			return;
+		}
+
+		// `isCommitEnter`, not a bare Enter: an IME commits its composition buffer
+		// with one, and ⌘/Ctrl+Enter is the app's Send chord (#935, #939).
+		if (isCommitEnter(e) || e.key === "Tab") {
+			if (commitHighlight()) e.preventDefault();
 		}
 	};
+
+	/**
+	 * Arrow between the `{{tokens}}` painted over the field.
+	 *
+	 * The strip is one Tab stop, not one per token: a URL with five variables
+	 * otherwise put five stops between the URL and Send. This is the roving
+	 * tabindex `docs/design-system.md` describes for the collection tree, in the
+	 * one shape a tree hook cannot serve - `useRovingTreeFocus` navigates
+	 * `[role="treeitem"]` and dispatches at the tree's own data attributes, so
+	 * pointing it at tokens would silently do nothing.
+	 *
+	 * Deliberately no wrap: arrowing off the end should not cycle, it should
+	 * leave the reader at the edge with Tab as the way out.
+	 */
+	const handleOverlayKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+		const tokens = Array.from(
+			overlayRef.current?.querySelectorAll<HTMLElement>(
+				'[data-variable-token] [role="button"]'
+			) ?? []
+		);
+		const current = tokens.indexOf(document.activeElement as HTMLElement);
+		if (current === -1) return;
+
+		const next =
+			e.key === "ArrowRight"
+				? current + 1
+				: e.key === "ArrowLeft"
+					? current - 1
+					: e.key === "Home"
+						? 0
+						: e.key === "End"
+							? tokens.length - 1
+							: -1;
+		if (next < 0 || next >= tokens.length || next === current) return;
+
+		e.preventDefault();
+		e.stopPropagation();
+		setActiveTokenIndex(next);
+		tokens[next].focus();
+	};
+
+	/** Whichever token took focus owns the Tab stop from now on. */
+	const handleOverlayFocus = (e: React.FocusEvent<HTMLDivElement>) => {
+		const tokens = Array.from(
+			overlayRef.current?.querySelectorAll<HTMLElement>(
+				'[data-variable-token] [role="button"]'
+			) ?? []
+		);
+		const index = tokens.indexOf(e.target as HTMLElement);
+		if (index !== -1) setActiveTokenIndex(index);
+	};
+
+	/*
+	 * Editing the field re-paints the strip, and the token that held the Tab stop
+	 * may be gone. Healed from the rendered strip rather than by counting tokens
+	 * a second time: the painter decides what is a token through five ordered
+	 * checks, and a second copy of that decision is exactly the drift this file
+	 * has been bitten by before.
+	 */
+	useLayoutEffect(() => {
+		const tokens = overlayRef.current?.querySelectorAll(
+			'[data-variable-token] [role="button"]'
+		);
+		if (tokens && tokens.length > 0 && activeTokenIndex >= tokens.length) {
+			setActiveTokenIndex(0);
+		}
+	}, [activeTokenIndex, segments]);
 
 	// Handle focus - show plain suggestions if available
 	const handleFocus = () => {
@@ -313,22 +481,22 @@ export default function VariableInput({
 		}
 	};
 
-	// Handle blur - hide suggestions
+	/*
+	 * Handle blur - hide suggestions.
+	 *
+	 * The `isNavigatingRef` latch this used to carry is gone with the synthetic
+	 * keydown that needed it: arrowing the list no longer touches focus at all,
+	 * so there is no self-inflicted blur left to suppress.
+	 */
 	const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-		// Don't close if we're navigating with arrow keys
-		if (isNavigatingRef.current) {
-			return;
-		}
 		// Check if focus is moving to the popover
 		const relatedTarget = e.relatedTarget as HTMLElement;
 		if (relatedTarget?.closest("[cmdk-item]") || relatedTarget?.closest("[cmdk-list]")) {
 			return;
 		}
 		setTimeout(() => {
-			if (!isNavigatingRef.current) {
-				setShowSuggestions(false);
-				setShowPlainSuggestions(false);
-			}
+			setShowSuggestions(false);
+			setShowPlainSuggestions(false);
 		}, 200);
 	};
 
@@ -400,6 +568,12 @@ export default function VariableInput({
 		 * the caret back on the right side of it, see `placeCaretAtTokenEdge`.
 		 */
 		let offset = 0;
+		/*
+		 * Position of the next editable token in the strip. Only these are
+		 * focusable - a run-time token has no popover to open - so the roving Tab
+		 * stop counts them and nothing else.
+		 */
+		let tokenPosition = 0;
 
 		return segments.map((seg, i) => {
 			const start = offset;
@@ -427,6 +601,7 @@ export default function VariableInput({
 							key={`${i}-${seg.varName}`}
 							data-variable-token
 							data-runtime-token
+							aria-hidden="true"
 							{...tokenBounds}
 							// The tooltip is this token's entire content, and a
 							// tooltip opens on a pointer event the overlay's
@@ -460,6 +635,7 @@ export default function VariableInput({
 							key={`${i}-${seg.varName}`}
 							data-variable-token
 							data-runtime-token
+							aria-hidden="true"
 							{...tokenBounds}
 							style={{ pointerEvents: "auto" }} // See the data.* token above.
 						>
@@ -492,6 +668,7 @@ export default function VariableInput({
 							key={`${i}-${seg.varName}`}
 							data-variable-token
 							data-runtime-token
+							aria-hidden="true"
 							{...tokenBounds}
 							style={{ pointerEvents: "auto" }} // See the data.* token above.
 						>
@@ -514,6 +691,7 @@ export default function VariableInput({
 							key={`${i}-${seg.varName}`}
 							data-variable-token
 							data-runtime-token
+							aria-hidden="true"
 							{...tokenBounds}
 							style={{ pointerEvents: "auto" }} // See the data.* token above.
 						>
@@ -525,6 +703,7 @@ export default function VariableInput({
 						</span>
 					);
 				}
+				const position = tokenPosition++;
 				return (
 					<span
 						key={`${i}-${seg.varName}`}
@@ -532,6 +711,9 @@ export default function VariableInput({
 						style={{ pointerEvents: "auto" }} // Make variable tokens clickable
 					>
 						<EditableVariable
+							// One Tab stop for the whole strip; the arrows move
+							// between tokens - `handleOverlayKeyDown`.
+							tabIndex={position === activeTokenIndex ? 0 : -1}
 							name={seg.varName}
 							value={varInfo?.value || ""}
 							scope={varInfo?.scope || "global"}
@@ -553,7 +735,7 @@ export default function VariableInput({
 			}
 			// Render text segments - pointer-events: none so clicks pass through to input
 			return (
-				<span key={i} className="text-foreground">
+				<span key={i} className="text-foreground" aria-hidden="true">
 					{seg.content}
 				</span>
 			);
@@ -587,6 +769,20 @@ export default function VariableInput({
 				// Falls back to the placeholder text so the field keeps a name
 				// even when the placeholder itself is withheld above.
 				aria-label={ariaLabel ?? placeholder}
+				/*
+				 * Combobox, but only where a list can actually appear (issue
+				 * #1215). A field with no scope and no plain suggestions never
+				 * pops anything up, and calling that a combobox would promise a
+				 * list a screen-reader user then cannot find. `aria-controls` and
+				 * `aria-activedescendant` name the open list and its highlighted
+				 * row, which is the relationship that was missing entirely: the
+				 * arrows moved a highlight nothing announced.
+				 */
+				role={isCombobox ? "combobox" : undefined}
+				aria-autocomplete={isCombobox ? "list" : undefined}
+				aria-expanded={isCombobox ? listOpen : undefined}
+				aria-controls={listOpen ? listboxIds.listboxId : undefined}
+				aria-activedescendant={listOpen ? listboxIds.activeOptionId : undefined}
 				disabled={disabled}
 				className={cn(
 					"absolute inset-0 w-full h-full bg-transparent border-0 outline-none px-[inherit] font-[inherit] text-[inherit]",
@@ -597,15 +793,34 @@ export default function VariableInput({
 				style={{ zIndex: 1 }}
 			/>
 
-			{/* Visual overlay layer for variable tokens - ON TOP of input for clickable tokens */}
+			{/*
+			 * Visual overlay layer for variable tokens - ON TOP of input for
+			 * clickable tokens.
+			 *
+			 * **Not `aria-hidden`, and the pieces inside it are** (issue #1215).
+			 * The whole layer used to be hidden from assistive technology, which
+			 * is right for what it mostly is - a repaint of text the `<input>`
+			 * beneath already carries - and wrong for the one thing it also holds:
+			 * an editable token is a `role="button"` that opens the variable
+			 * editor, and hiding a focusable control is the `aria-hidden-focus`
+			 * violation. Two commits that never met, each correct alone.
+			 *
+			 * So the duplication is hidden where it actually is - every text
+			 * segment, and every run-time token, which has no popover to open and
+			 * is not focusable - and the editable tokens are left in the
+			 * accessibility tree where they belong.
+			 */}
 			{hasVariables && (
 				<div
+					ref={overlayRef}
+					data-variable-overlay
 					className="absolute inset-0 flex items-center px-[inherit] overflow-hidden"
 					style={{
 						zIndex: 2,
 						pointerEvents: "none", // Pass clicks through to input
 					}}
-					aria-hidden="true"
+					onKeyDown={handleOverlayKeyDown}
+					onFocus={handleOverlayFocus}
 				>
 					<span className="whitespace-pre font-[inherit] text-[inherit]">
 						{renderOverlayContent()}
@@ -614,21 +829,30 @@ export default function VariableInput({
 			)}
 
 			{/* Variable Autocomplete - Use Case 1: Select from list */}
-			{showSuggestions && (
+			{variableListOpen && (
 				<div className="absolute left-0 top-full mt-1 z-50">
 					<VariableAutocomplete
 						variables={variablesForAutocomplete}
 						searchQuery={searchQuery}
 						onSelect={handleSelectVariable}
 						dataColumns={variables?.dataColumns}
+						value={activeValue}
+						onValueChange={setHighlightedValue}
+						onListboxState={handleListboxState}
 					/>
 				</div>
 			)}
 
 			{/* Plain Text Suggestions (e.g., for standard headers) */}
-			{showPlainSuggestions && !showSuggestions && filteredSuggestions.length > 0 && (
+			{plainListOpen && (
 				<div className="absolute left-0 top-full mt-1 z-50">
-					<SuggestionList items={filteredSuggestions} onSelect={handleSelectSuggestion} />
+					<SuggestionList
+						items={filteredSuggestions}
+						onSelect={handleSelectSuggestion}
+						value={activeValue}
+						onValueChange={setHighlightedValue}
+						onListboxState={handleListboxState}
+					/>
 				</div>
 			)}
 		</div>

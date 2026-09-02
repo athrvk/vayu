@@ -228,7 +228,7 @@ describe("DesignRunView - the copy shows the stored exchange", () => {
 	it("seeds the editor from the snapshot, not from the live request", () => {
 		renderView(designRun());
 
-		const url = screen.getByRole("textbox", { name: /request url/i });
+		const url = screen.getByRole("combobox", { name: /request url/i });
 		expect((url as HTMLInputElement).value).toBe("https://api.example.test/users?page=2");
 	});
 
@@ -278,7 +278,7 @@ describe("DesignRunView - the copy is detached", () => {
 		try {
 			renderView(designRun());
 
-			const url = screen.getByRole("textbox", { name: /request url/i });
+			const url = screen.getByRole("combobox", { name: /request url/i });
 			fireEvent.change(url, { target: { value: "https://api.example.test/edited" } });
 
 			// The builder autosaves on a debounce. Run well past it: the point is
@@ -444,7 +444,7 @@ describe("DesignRunView - a lookup failure is not a deletion", () => {
 		expect(screen.getByText(/failed to fetch/i)).toBeTruthy();
 		expect(screen.getByRole("button", { name: /try again/i })).toBeTruthy();
 		// Nothing was seeded - no URL bar, no builder.
-		expect(screen.queryByRole("textbox", { name: /request url/i })).toBeNull();
+		expect(screen.queryByRole("combobox", { name: /request url/i })).toBeNull();
 	});
 
 	it("retries the lookup rather than walking the user away", () => {
@@ -510,7 +510,7 @@ describe("DesignRunView - the request lookup has to settle first", () => {
 		const { rerender } = render(tree());
 
 		// Nothing is seeded yet - the builder must not mount on a guess.
-		expect(screen.queryByRole("textbox", { name: /request url/i })).toBeNull();
+		expect(screen.queryByRole("combobox", { name: /request url/i })).toBeNull();
 
 		// The lookup lands.
 		isLoadingRequest = false;
