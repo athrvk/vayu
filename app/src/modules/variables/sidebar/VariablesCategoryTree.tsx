@@ -39,7 +39,7 @@
  *     button is the second.
  */
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
 import { useTabsStore } from "@/stores";
 import { useVariablesStore, type VariableCategory } from "@/modules/variables/variables-store";
@@ -157,44 +157,50 @@ export default function VariablesCategoryTree() {
 	const deleteEnvironmentMutation = useDeleteEnvironmentMutation();
 	const updateEnvironmentMutation = useUpdateEnvironmentMutation();
 
-	/*
-	 * A rename hands focus back to the row it belongs to. The tree is one tab
-	 * stop, and the rename field replaces the row's only focusable control - so
-	 * an Enter or Escape that left focus on `<body>` would drop the user out of
-	 * the tree entirely, which is the cost F2 would otherwise carry.
+	/**
+	 * The row to hand focus back to once React has unmounted the rename field,
+	 * set only when that field is closed *from the keyboard*. The tree is one tab
+	 * stop and the field replaces the row's only focusable control, so an Enter
+	 * or Escape that left focus on `<body>` would drop the user out of the tree
+	 * entirely - the cost F2 would otherwise carry. A blur deliberately does not
+	 * set it: focus has already gone where the user put it.
 	 *
-	 * Only the keyboard exits set the flag: a rename committed by blur means
-	 * focus has already moved somewhere the user chose, and taking it back would
-	 * be the same defect pointing the other way. Same rule as `CollectionItem`.
+	 * The refocus waits for the effect below rather than running inline, which is
+	 * the whole point of the pattern (`CollectionItem` does the same). Focusing
+	 * the row while the field is still mounted *blurs* it, and its `onBlur`
+	 * commits - so an inline version saved the very rename Escape had just
+	 * cancelled, reading the value out of a closure the cancel had not yet
+	 * cleared. An id rather than a ref because this file renders every row
+	 * itself; there is no per-row component to hold one.
 	 */
-	const returnFocusToRow = useRef(false);
+	const returnFocusToEnvId = useRef<string | null>(null);
 
-	const focusEnvironmentRow = (envId: string) => {
-		if (!returnFocusToRow.current) return;
-		returnFocusToRow.current = false;
+	useEffect(() => {
+		if (renamingEnvId || !returnFocusToEnvId.current) return;
+		const envId = returnFocusToEnvId.current;
+		returnFocusToEnvId.current = null;
 		const rows = treeRef.current?.querySelectorAll<HTMLElement>("[data-environment-id]");
 		Array.from(rows ?? [])
 			.find((row) => row.dataset.environmentId === envId)
 			?.focus();
-	};
+	}, [renamingEnvId]);
 
 	const startRenameEnvironment = (env: Environment) => {
 		setRenamingEnvId(env.id);
 		setRenameEnvValue(env.name);
 	};
 
-	const cancelRenameEnvironment = (envId?: string) => {
+	const cancelRenameEnvironment = () => {
 		setRenamingEnvId(null);
 		setRenameEnvValue("");
-		if (envId) focusEnvironmentRow(envId);
 	};
 
 	const submitRenameEnvironment = async (envId: string) => {
 		const name = renameEnvValue.trim();
 		const current = environments.find((e) => e.id === envId);
-		if (!name || name === current?.name) return cancelRenameEnvironment(envId);
+		if (!name || name === current?.name) return cancelRenameEnvironment();
 		await updateEnvironmentMutation.mutateAsync({ id: envId, name });
-		cancelRenameEnvironment(envId);
+		cancelRenameEnvironment();
 	};
 
 	/**
@@ -487,16 +493,16 @@ export default function VariablesCategoryTree() {
 														onKeyDown={(e) => {
 															e.stopPropagation();
 															if (isCommitEnter(e)) {
-																returnFocusToRow.current = true;
+																returnFocusToEnvId.current =
+																	environment.id;
 																submitRenameEnvironment(
 																	environment.id
 																);
 															}
 															if (e.key === "Escape") {
-																returnFocusToRow.current = true;
-																cancelRenameEnvironment(
-																	environment.id
-																);
+																returnFocusToEnvId.current =
+																	environment.id;
+																cancelRenameEnvironment();
 															}
 														}}
 														className="h-6 flex-1 text-sm"
@@ -594,9 +600,16 @@ export default function VariablesCategoryTree() {
 													aria-hidden="true"
 													tabIndex={-1}
 													data-tree-rename
-													onClick={() =>
-														startRenameEnvironment(environment)
-													}
+													onClick={() => {
+														// Parity with the delete target below,
+														// not a live path: the confirm dialog is
+														// modal, so while a deletion runs the tree
+														// is inert and no key reaches this row.
+														// It costs a line and holds if that ever
+														// stops being true.
+														if (isDeleting) return;
+														startRenameEnvironment(environment);
+													}}
 												/>
 												<button
 													type="button"

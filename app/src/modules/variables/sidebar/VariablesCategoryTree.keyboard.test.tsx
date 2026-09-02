@@ -58,12 +58,13 @@ const COLLECTION: Collection = {
 const idle = { isLoading: false, isError: false, refetch: vi.fn() };
 const createEnvironment = vi.fn();
 const updateEnvironment = vi.fn();
+const deleteEnvironment = vi.fn();
 
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ ...idle, data: [COLLECTION] }),
 	useEnvironmentsQuery: () => ({ ...idle, data: [STAGING, PRODUCTION] }),
 	useCreateEnvironmentMutation: () => ({ mutateAsync: createEnvironment, isPending: false }),
-	useDeleteEnvironmentMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useDeleteEnvironmentMutation: () => ({ mutateAsync: deleteEnvironment, isPending: false }),
 	useUpdateEnvironmentMutation: () => ({ mutateAsync: updateEnvironment, isPending: false }),
 }));
 
@@ -233,6 +234,36 @@ describe("the actions that had no keyboard path", () => {
 		// user out of it entirely.
 		expect(screen.queryByDisplayValue("Staging")).not.toBeInTheDocument();
 		expect(document.activeElement).toBe(row(tree, "Staging"));
+	});
+
+	it("cancels the edit it was asked to cancel", () => {
+		const tree = renderTree();
+		press(row(tree, "Staging"), "F2");
+		fireEvent.change(screen.getByDisplayValue("Staging"), {
+			target: { value: "Staging edited" },
+		});
+
+		fireEvent.keyDown(screen.getByDisplayValue("Staging edited"), { key: "Escape" });
+
+		// Handing focus back to the row *blurs* the field, and the field commits
+		// on blur - so a refocus that runs before React unmounts it saves the
+		// rename Escape just cancelled, off a value the cancel has not cleared
+		// yet. The effect that defers it is the only thing standing between
+		// those two, which is why this asserts the write and not just the focus.
+		expect(updateEnvironment).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(row(tree, "Staging"));
+	});
+
+	it("commits a keyboard rename exactly once", async () => {
+		const tree = renderTree();
+		press(row(tree, "Staging"), "F2");
+		fireEvent.change(screen.getByDisplayValue("Staging"), { target: { value: "Sandbox" } });
+
+		fireEvent.keyDown(screen.getByDisplayValue("Sandbox"), { key: "Enter" });
+
+		// The same self-inflicted blur would otherwise send a second write.
+		await waitFor(() => expect(updateEnvironment).toHaveBeenCalledTimes(1));
+		expect(updateEnvironment).toHaveBeenCalledWith({ id: "env_1", name: "Sandbox" });
 	});
 
 	it("asks before deleting on Delete and on Backspace", () => {
