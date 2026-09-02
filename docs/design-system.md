@@ -923,7 +923,8 @@ composes with page zoom.
 | Title / small heading | 15px | semibold | `text-md font-semibold` |
 | Body / default | 13px | regular | `text-sm` |
 | Small label | 12px | medium | `text-xs font-medium` |
-| Micro / badge | 10–11px | mono semibold | `text-[10px] font-mono font-semibold` |
+| Micro / badge (mono) | 10–11px | mono semibold | `text-[10px] font-mono font-semibold` |
+| Micro / badge (UI face) | 10–11px | semibold | `text-[10px] font-semibold` |
 | URL / path | 12–13px | mono | `text-xs font-mono` |
 
 **Only `text-[10px]`, `text-[11px]`, `text-[22px]` and `text-[34px]` may be
@@ -936,9 +937,23 @@ font ships.** `fonts.css` loads JetBrains Mono - the default `--font-mono` - at
 four selectable code faces, has a real 700. So `font-mono font-bold` on a chip
 renders a synthesised weight for every user who has not picked that one face -
 which is what this row used to specify while `MethodBadge`, the primitive that
-owns the step, shipped `font-semibold` (#1199). `type-scale.test.ts` now reads
-this row and every 10-11px mono class string in `src`, and fails on a weight
-above 600 in either, so the two cannot part again.
+owns the step, shipped `font-semibold` (#1199).
+
+**The same step in the UI face is semibold too, and the reason is the row
+itself.** The mono row settled one half of 10px and left the other half with no
+row to read, so the chips that are not `font-mono` picked a weight each - four
+different values, one pair of them inside a single primitive: `VariableScopeBadge`
+rendered `font-medium` compact and `font-semibold` full, because compact
+overrode `Badge`'s base and full did not (#1222). Semibold is that base, so a
+chip that names no weight is already correct; a chip that names one should name
+this. Above 600 is refused here for a second reason on top of the synthesised
+face: at 10px in the UI face the extra stroke closes the counters rather than
+reading as emphasis.
+
+`type-scale.test.ts` reads both rows and every 10-11px class string in `src`,
+mono or not, and fails on a weight above 600 in any of them, so the rows and the
+app cannot part again. It is a ceiling rather than a pin, because of the two
+exceptions below.
 
 Two things at this size deliberately carry no badge weight. A chip that prints a
 *value* rather than a label - a column name, a cookie attribute - is the URL /

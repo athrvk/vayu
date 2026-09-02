@@ -62,7 +62,7 @@ export function Field({ label, hint, children }: FieldProps) {
 
 export function SectionLabel({ children }: { children: React.ReactNode }) {
 	return (
-		<div className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground mb-2">
+		<div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-2">
 			{children}
 		</div>
 	);
