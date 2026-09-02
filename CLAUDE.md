@@ -135,8 +135,11 @@ there, it does not make it fast; see `docs/engine/building.md`. A
 rebuild ~2.5min; the app suite ~90s. Running
 both after retouching a doc comment reads as diligence and is just latency. Ask
 what a failure would even look like before running anything: **if no test could
-possibly go from green to red, do not run tests.** CI runs the full matrix on
-every push, so a local full-suite run is for *your* confidence, not for coverage.
+possibly go from green to red, do not run tests.** CI runs the checks your diff
+can actually affect - `pr-tests.yml` triggers on every pull request against
+`master`, and each work job is gated on its own tree being touched - so a local
+full-suite run is for *your* confidence, not for coverage. A branch with no pull
+request open has no CI behind it at all.
 
 Concrete cases where the answer is simply "don't":
 
