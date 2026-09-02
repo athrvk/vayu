@@ -47,6 +47,36 @@ function levelOf(row: HTMLElement): number {
 }
 
 /**
+ * The row that owns `rows[index]`: the nearest row above it that is shallower.
+ * `null` for a root, which is the honest answer rather than a near miss.
+ *
+ * Depth comes from `aria-level`, never from the DOM shape, and this is the one
+ * reading of the hierarchy the whole tree uses - navigation and delete refocus
+ * alike. A row's children are rendered as a *sibling* of that row rather than
+ * inside it, so `closest()` finds no parent and a walk up the ancestors answers
+ * with whichever treeitem an ancestor holds first: the group's own first row,
+ * which is a preceding *sibling* of every row after it. That walk sent
+ * ArrowLeft to the top of a list instead of out of it (#1237). Two of the three
+ * trees defeat any shape-based rule outright - the schema explorer renders every
+ * row, at every depth, as a direct child of `role="tree"` - while `aria-level`
+ * is on every row of all three, because the same sibling shape is why the
+ * hierarchy has to be announced rather than inferred.
+ *
+ * Takes the row list rather than the tree: both callers already hold one, and
+ * re-querying per row turned the `*` key into a DOM sweep per candidate.
+ */
+export function parentRow(rows: HTMLElement[], index: number): HTMLElement | null {
+	const row = rows[index];
+	if (!row) return null;
+
+	const level = levelOf(row);
+	for (let above = index - 1; above >= 0; above--) {
+		if (levelOf(rows[above]) < level) return rows[above];
+	}
+	return null;
+}
+
+/**
  * The row that should hold focus once `row` and everything under it is gone:
  * the following sibling, the parent when it was the last child, and the row
  * before it when it was the last child of the root.
@@ -69,14 +99,10 @@ export function rowAfterRemoving(
 
 	if (after < rows.length && levelOf(rows[after]) === level) return rows[after];
 
-	// Nothing follows it in its own set, so the parent survives it: the nearest
-	// row above it that is shallower. Read off `aria-level` rather than through
-	// the tree's own parent walk, which takes the first treeitem in an ancestor
-	// and so can answer with a preceding sibling - harmless for Left-arrow,
-	// wrong for choosing what outlives a row.
-	for (let above = index - 1; above >= 0; above--) {
-		if (levelOf(rows[above]) < level) return rows[above];
-	}
+	// Nothing follows it in its own set, so the parent survives it.
+	const parent = parentRow(rows, index);
+	if (parent) return parent;
+
 	// A root row with no root after it. The row before it is another root, or
 	// something under one, and either survives.
 	return rows[index - 1] ?? null;
