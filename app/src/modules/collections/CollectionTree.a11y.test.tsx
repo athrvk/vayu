@@ -233,3 +233,65 @@ describe("a rename never strands focus", () => {
 		expect(document.activeElement).toBe(collectionRow("beta"));
 	});
 });
+
+/**
+ * The delete half of the same defect the rename block above pins (#1218).
+ *
+ * A rename can hand focus back to its own row. A delete cannot - the row is the
+ * thing that went - so the successor is chosen while the row is still on screen
+ * and Radix's restore, which would aim at the deleted row, is overridden.
+ */
+describe("a delete never strands focus", () => {
+	/** The keyboard path in: Delete on a focused row, then the confirm button. */
+	async function deleteFromKeyboard(row: HTMLElement, title: string) {
+		row.focus();
+		fireEvent.keyDown(row, { key: "Delete" });
+		expect(await screen.findByText(title)).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+		await waitFor(() => expect(screen.queryByText(title)).toBeNull());
+	}
+
+	it("moves focus to the next row in the set", async () => {
+		renderTree();
+
+		// "Billing" is followed in Acme's group by the "Ping" request: the next
+		// row at its own level, not the next row in the document.
+		await deleteFromKeyboard(collectionRow("billing"), "Delete collection?");
+
+		expect(document.activeElement).toBe(requestRow("r-ping"));
+	});
+
+	it("moves focus to the parent when the last row in a set goes", async () => {
+		renderTree();
+
+		// "Ping" is last in Acme's group - the row after it belongs to the other
+		// root, whose set this delete does not touch.
+		await deleteFromKeyboard(requestRow("r-ping"), "Delete request?");
+
+		expect(document.activeElement).toBe(collectionRow("acme"));
+	});
+
+	it("puts the tree's tab stop on the row it focused", async () => {
+		renderTree();
+
+		await deleteFromKeyboard(collectionRow("billing"), "Delete collection?");
+
+		// Focus without the roving stop is a row the next Tab cannot return to.
+		expect(requestRow("r-ping").tabIndex).toBe(0);
+		expect(collectionRow("beta").tabIndex).toBe(-1);
+	});
+
+	it("returns focus to the row when the dialog is cancelled", async () => {
+		renderTree();
+		const row = collectionRow("billing");
+		row.focus();
+		fireEvent.keyDown(row, { key: "Delete" });
+		expect(await screen.findByText("Delete collection?")).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+		// Nothing was deleted, so the successor must not be where focus lands -
+		// and Radix's own restore aims at a trigger this dialog does not have.
+		await waitFor(() => expect(document.activeElement).toBe(row));
+	});
+});

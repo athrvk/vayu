@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { focusTreeRow } from "./tree-focus";
 import { walkAncestors } from "./tree-utils";
 import type { TreeEntity } from "./drop-position";
 import type { Collection, Request } from "@/types";
@@ -176,11 +177,7 @@ export function useRevealActiveSelection(
 		// The roving tabindex has to follow: the moved row is where the user is
 		// working, and leaving the tab stop on the row it displaced means the
 		// next Alt+Arrow moves something else (see useRovingTreeFocus).
-		for (const item of tree.querySelectorAll<HTMLElement>('[role="treeitem"]')) {
-			item.tabIndex = -1;
-		}
-		row.tabIndex = 0;
-		row.focus();
+		focusTreeRow(tree, row);
 	});
 
 	return { revealEntity };

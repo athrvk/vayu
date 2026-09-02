@@ -27,6 +27,14 @@
  * lookup table a source scan goes quietly green. That exact failure has
  * happened here before with class names arriving through bindings.
  *
+ * **The modes come from `BODY_MODES`, not from a list here.** The first version
+ * of this guard named `json` / `text` / `graphql`, so `xml` - a mode the picker
+ * had offered all along - was never rendered and its missing completion was
+ * invisible to the very test written to catch it (#1214). A literal list of
+ * modes in the test is the same drift as a literal list of languages in the
+ * hook, one file further out; only the picker's own table knows what a body can
+ * be.
+ *
  * The form modes are not Monaco at all - `form-data` and
  * `x-www-form-urlencoded` render the key/value table, whose cells are
  * `VariableInput`, which pops the same list from the same rule in
@@ -38,6 +46,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { BODY_LANGUAGES } from "@/hooks/useVariableCompletionProvider";
+import { BODY_MODES } from "./body-modes";
 import { RequestBuilderContext } from "../../../../context";
 import type { RequestBuilderContextValue, RequestState, BodyMode } from "../../../../types";
 import { createDefaultRequestState } from "../../../../utils/request-state";
@@ -55,6 +64,20 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 }));
 
 const { default: BodyPanel } = await import("../BodyPanel");
+
+/** Every mode the picker offers, in the picker's own order. */
+const ALL_MODES = BODY_MODES.map((mode) => mode.value);
+
+/** The two modes that render the key/value table instead of an editor. */
+const TABLE_MODES: BodyMode[] = ["form-data", "x-www-form-urlencoded"];
+
+/**
+ * The modes that mount no Monaco editor at all, and are therefore not covered
+ * by `BODY_LANGUAGES`. Deliberately a literal: a mode's own row cannot say
+ * whether it edits text, so a new mode either mounts an editor (and is checked
+ * below) or is added here by someone who decided it should not.
+ */
+const NON_EDITOR_MODES: BodyMode[] = ["none", ...TABLE_MODES];
 
 /*
  * `GraphQLBody` is lazy since #1146, so BodyPanel first renders it as the
@@ -98,35 +121,48 @@ beforeEach(() => {
 });
 
 describe("the languages the body editors mount with", () => {
-	it.each([
-		["json", 1],
-		["text", 1],
-		["graphql", 2], // the query pane and the variables pane
-	] as const)("%s is one the completion provider is registered for", async (bodyMode, count) => {
-		await renderMode(bodyMode);
-
-		// A mode that mounted no editor would pass a `.every()` vacuously.
-		expect(mounted).toHaveLength(count);
-		for (const language of mounted) {
-			expect(BODY_LANGUAGES).toContain(language);
-		}
+	it("has modes to check, and every non-editor mode is one of them", () => {
+		// The loops below derive their input; an empty or renamed table would
+		// make each of them pass while reading nothing.
+		expect(ALL_MODES.length).toBeGreaterThan(0);
+		expect(ALL_MODES).toEqual(expect.arrayContaining(NON_EDITOR_MODES));
 	});
+
+	it.each(ALL_MODES)(
+		"%s mounts only languages the completion provider is registered for",
+		async (bodyMode) => {
+			await renderMode(bodyMode);
+
+			// A mode that mounted no editor would pass the loop below vacuously,
+			// so every mode that is not a declared non-editor one must mount at
+			// least one - which is how a new mode reaches the check at all.
+			if (NON_EDITOR_MODES.includes(bodyMode)) {
+				expect(mounted).toHaveLength(0);
+			} else {
+				expect(mounted.length).toBeGreaterThan(0);
+			}
+			for (const language of mounted) {
+				expect(BODY_LANGUAGES).toContain(language);
+			}
+		}
+	);
 
 	it("covers the whole list between them, so no entry is dead", async () => {
 		// The mirror of the check above: `BODY_LANGUAGES` must not accumulate
 		// languages nothing mounts, which is how the list would start drifting.
 		const seen = new Set<string>();
-		for (const bodyMode of ["json", "text", "graphql"] as const) {
-			await renderMode(bodyMode);
+		for (const bodyMode of ALL_MODES) {
+			const { unmount } = await renderMode(bodyMode);
 			mounted.forEach((l) => seen.add(l));
 			mounted.length = 0;
+			unmount();
 		}
 		expect([...seen].sort()).toEqual([...BODY_LANGUAGES].sort());
 	});
 });
 
 describe("the modes with no code editor", () => {
-	it.each(["form-data", "x-www-form-urlencoded"] as const)(
+	it.each(TABLE_MODES)(
 		"%s uses the key/value table, whose cells complete variables themselves",
 		async (bodyMode) => {
 			await renderMode(bodyMode, {
