@@ -2,8 +2,10 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { useRef } from "react";
+import { Copy } from "lucide-react";
+import { RowActionsMenu } from "@/components/shared/RowActionsMenu";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
 import { TIMING } from "@/config/timing";
 
@@ -38,9 +40,14 @@ function Tree({ expanded }: { expanded: boolean }) {
 						<button tabIndex={-1} data-tree-activate onClick={activate}>
 							demo
 						</button>
-						<button tabIndex={-1} data-tree-menu onClick={menu}>
-							menu
-						</button>
+						{/* The real menu, not a stand-in. A plain button answered the
+						    `.click()` this hook dispatches, so a stub here certified
+						    a path the Radix-backed component did not have (#1212). */}
+						<RowActionsMenu
+							label="Row menu"
+							tabIndex={-1}
+							actions={[{ label: "Menu action", icon: Copy, onSelect: menu }]}
+						/>
 						<button tabIndex={-1} data-tree-rename onClick={rename}>
 							rename
 						</button>
@@ -222,7 +229,7 @@ describe("useRovingTreeFocus", () => {
 
 	// C makes every row control tabIndex=-1, so these keys are the replacement
 	// path - without them delete and row actions become mouse-only.
-	it("reaches row actions with Delete and Shift+F10 / ContextMenu", () => {
+	it("reaches row actions with Delete and Shift+F10 / ContextMenu", async () => {
 		render(<Tree expanded />);
 		byName("req-1").focus();
 		key("Delete");
@@ -230,9 +237,15 @@ describe("useRovingTreeFocus", () => {
 
 		byName("demo").focus();
 		key("F10", { shiftKey: true });
-		expect(menu).toHaveBeenCalledTimes(1);
+		expect(await screen.findByRole("menu")).toBeInTheDocument();
+
+		// Close it and press the other key: the menu takes focus while open, so
+		// the row is not listening until it has it back.
+		fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+		await waitFor(() => expect(document.activeElement).toBe(byName("demo")));
+
 		key("ContextMenu");
-		expect(menu).toHaveBeenCalledTimes(2);
+		expect(await screen.findByRole("menu")).toBeInTheDocument();
 	});
 
 	/*
@@ -255,14 +268,18 @@ describe("useRovingTreeFocus", () => {
 		expect(del).toHaveBeenCalledTimes(2);
 	});
 
-	it("opens the row menu on Shift+Enter, the Mac-reachable path", () => {
+	it("opens the row menu on Shift+Enter, the Mac-reachable path", async () => {
 		render(<Tree expanded />);
 		byName("demo").focus();
 
 		key("Enter", { shiftKey: true });
-		expect(menu).toHaveBeenCalledTimes(1);
+		expect(await screen.findByRole("menu")).toBeInTheDocument();
 		// Shift+Enter is the menu, not a second way to open the row.
 		expect(activate).not.toHaveBeenCalled();
+
+		// End to end: the action the menu offers actually runs from here.
+		fireEvent.click(screen.getByRole("menuitem", { name: "Menu action" }));
+		await waitFor(() => expect(menu).toHaveBeenCalledTimes(1));
 	});
 
 	it("still activates on plain Enter and on Space", () => {

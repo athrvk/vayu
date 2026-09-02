@@ -1230,7 +1230,10 @@ absent - and here the answer is no.
 **Prefer `RowActionsMenu`** (`components/shared`) over adding another inline icon
 button. It renders the `⋯` trigger plus a `DropdownMenu`, so rows expose actions
 consistently and get focus management, Escape-to-close and arrow-key navigation
-for free. Used by request rows and environment rows.
+for free. Used by request rows and environment rows. It opens on a pointer and
+on a click reporting `detail === 0` - the keyboard's kind - and takes a
+`tabIndex` prop, `0` unless the row sits in a roving-tabindex tree. See Tree
+Navigation for why.
 
 ---
 
@@ -1414,6 +1417,25 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   Both row types must render every hidden control: a folder row without
   `data-tree-delete` swallowed Delete silently for months, because the hook
   `preventDefault`s the key whether or not it finds something to click.
+
+**Those keys reach a control by clicking it, so the control has to answer a
+click.** The hook calls `.click()` on the row's `[data-tree-menu]`, and Radix's
+dropdown trigger opens on `pointerdown` and on its own `keydown` - neither of
+which a programmatic click dispatches. Every menu-only action (Duplicate, Move
+to, Run, Add, Export) was therefore mouse-only, on a path the tree advertised
+(#1212). `RowActionsMenu` now holds its own open state and opens on a click
+reporting `detail === 0`, which is what a click with no pointer behind it
+reports - the mouse path stays Radix's, since its own `pointerdown` has already
+opened the menu by the time a real click arrives. The hidden `<button>` controls
+answer a click by being plain buttons; anything richer added to a row has to
+declare how it answers one.
+
+**`RowActionsMenu` takes its `tabIndex` from the row.** It is `0` by default -
+outside a tree the `⋯` menu is an ordinary tab stop - and these rows pass `-1`,
+because the tree is one tab stop and the keys above are the way in. Closing the
+menu hands focus back to the *row*, not to the trigger Radix would return it to:
+a `tabIndex={-1}` control holding the tree's focus is a stop the user cannot Tab
+back to.
 
 Rows declare behaviour through data attributes rather than props
 (`data-tree-activate`, `data-tree-toggle`, `data-tree-menu`, `data-tree-rename`,

@@ -312,6 +312,9 @@ export default function CollectionItem({
 				{!isRenaming && (
 					<RowActionsMenu
 						label={`More actions for ${collection.name}`}
+						// The tree is one tab stop: the row holds it, and Shift+F10 /
+						// Menu / Shift+Enter are the way in from here.
+						tabIndex={-1}
 						className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 						// "Move to..." is appended rather than built in
 						// `getCollectionActions`: it belongs to the drag slice, which
