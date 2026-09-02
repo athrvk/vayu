@@ -1474,6 +1474,19 @@ It is a subset of `pm.response` and has no `to.*` assertion chain.
   nothing to say why. Before issue #1188 this fetch was the one read in the
   engine with no bound at all.
 
+**It leaves the way its execution leaves.** The fetch takes the transport policy
+its enclosing execution resolved - the proxy mode and URL, the bypass list, the
+custom CA bundle and the client-certificate registry - rather than whatever the
+daemon's own environment would pick up. A script that authenticates through
+`pm.sendRequest` and then lets the real request carry the session has to take the
+same route out of the machine, or one of the two is unreachable behind a
+corporate proxy (issue #705). Which policy that is follows the path, as the byte
+bound above does: a design-mode send's scripts take the one resolved for that
+send, and a load run's deferred `tests` script takes the one the run's own
+transfers left by - resolved once when the run starts and kept for it, so a
+Settings edit made while the run was in flight cannot send an assertion by a
+route the responses it is asserting on never took (issue #1256).
+
 **Not available to agents.** Vayu's MCP target allowlist is checked in the MCP
 server, against the composed URL, before it calls the engine - so a script-issued
 request never passes that gate. The engine therefore refuses script-issued

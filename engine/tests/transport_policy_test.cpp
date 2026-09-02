@@ -37,6 +37,8 @@
 #include "proxy_server.hpp"
 #include "temp_database.hpp"
 #include "tls_backend.hpp"
+#include "vayu/core/run_manager.hpp"
+#include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/curl_options.hpp"
@@ -52,6 +54,23 @@ namespace vayu::http::routes {
 std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
 const vayu::http::TransportPolicy& transport);
 } // namespace vayu::http::routes
+
+namespace vayu::core {
+// Defined in run_manager.cpp, not declared in its header: the one place a load
+// run resolves a transport policy, and where it keeps the snapshot the deferred
+// script pass reads back (issue #1256). Borrowed here rather than exported,
+// because what the load-path traversal case below has to drive is the run's own
+// resolution - a policy the test hands over itself would assert nothing about
+// where the run got one.
+void configure_event_loop (vayu::db::Database& db,
+const nlohmann::json& config,
+const std::shared_ptr<RunContext>& context,
+size_t concurrency,
+double target_rps,
+int timeout_ms,
+int configured_workers,
+int default_max_per_host);
+} // namespace vayu::core
 
 namespace vayu::http {
 namespace {
@@ -773,6 +792,142 @@ TEST (TransportPolicyPaths, ScriptSendRequestTraversesManualProxy) {
     ASSERT_TRUE (result.success) << result.error_message;
     ASSERT_EQ (proxy.count (), 1u);
     EXPECT_EQ (proxy.seen ().front (), upstream.url ("/hello"));
+}
+
+/**
+ * The load path's deferred `tests` script, driven the way a run drives it
+ * (issue #1256).
+ *
+ * The case above says nothing about this one: it hands the context a policy,
+ * and the load path's failure was that nobody handed it one. So these start
+ * from the settings and go through `configure_event_loop` - the run's own
+ * resolution, the same call `execute_load_test` makes before its first transfer
+ * - and then replay the script the way the run does once the transfers are
+ * done. What is under test is the whole carry, not one assignment of it.
+ */
+class LoadRunScriptTransportTest : public TransportPolicyDbTest {
+    protected:
+    /// What a run started from the app carries: one sampled response to replay
+    /// against, and a `tests` script allowed to send.
+    static nlohmann::json run_config () {
+        return { { "response_sample_rate", 1 }, { "max_response_samples", 10 },
+            { "allowScriptRequests", true } };
+    }
+
+    /// The run resolving its own transport. One worker and one slot, because
+    /// nothing is ever submitted to the loop this builds - the transfers these
+    /// scripts assert on are the recorded samples below.
+    void configure_run (const std::shared_ptr<vayu::core::RunContext>& context) const {
+        vayu::core::configure_event_loop (*db_, context->config, context,
+        /*concurrency=*/1, /*target_rps=*/0.0, /*timeout_ms=*/5000,
+        /*configured_workers=*/1, /*default_max_per_host=*/1);
+    }
+
+    static vayu::Response sampled_response () {
+        vayu::Response response;
+        response.status_code     = 200;
+        response.status_text     = "OK";
+        response.body            = "{}";
+        response.timing.total_ms = 1.0;
+        return response;
+    }
+
+    /// A fetch whose failure is a thrown sentence, which is what the replay
+    /// records as a failure - a `pm.sendRequest` that never reached the proxy
+    /// still answers, so the proxy's own tally is the assertion that matters.
+    static std::string fetch_script (const std::string& url) {
+        return "pm.sendRequest('" +
+        url + "', function (err, res) { if (err) { throw new Error(err.message); } });";
+    }
+};
+
+// Mutation-check: drop either half of the carry - `context->transport =
+// loop_config.transport` in `configure_event_loop`, or `script_ctx.transport =
+// replay.transport` in `run_replay` - and the fetch leaves by the environment
+// pickup instead, so the proxy sees nothing.
+TEST_F (LoadRunScriptTransportTest, ADeferredScriptTraversesTheRunsProxy) {
+    MockUpstream upstream;
+    MockProxy proxy;
+    set_config ("proxyMode", "manual");
+    set_config ("proxyUrl", proxy.url ());
+
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("run-script-transport", run_config ());
+    context->test_script = fetch_script (upstream.url ("/hello"));
+    configure_run (context);
+    context->metrics_collector->record_response_sample (sampled_response ());
+
+    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->failed, 0u);
+    ASSERT_EQ (proxy.count (), 1u);
+    EXPECT_EQ (proxy.seen ().front (), upstream.url ("/hello"));
+}
+
+// The scenario shape threads the policy through `replay_scenario_steps` rather
+// than setting it on the one replay, so reverting that line alone would leave
+// the case above green - the trap issue #1188's own per-step case fell into.
+TEST_F (LoadRunScriptTransportTest, ADeferredStepScriptTraversesTheRunsProxy) {
+    MockUpstream upstream;
+    MockProxy proxy;
+    set_config ("proxyMode", "manual");
+    set_config ("proxyUrl", proxy.url ());
+
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("run-step-transport", run_config ());
+
+    auto execution = std::make_shared<vayu::core::ScenarioExecution> ();
+    execution->request.source        = "collection";
+    execution->request.collection_id = "col_1";
+    execution->request.iterations    = 1;
+
+    vayu::core::ScenarioStep step;
+    step.index          = 0;
+    step.name           = "Fetch";
+    step.post_script    = fetch_script (upstream.url ("/hello"));
+    step.request.method = HttpMethod::GET;
+    step.request.url    = upstream.url ("/hello");
+    execution->plan.steps.push_back (step);
+
+    context->scenario = execution;
+    configure_run (context);
+    context->metrics_collector->configure_step_samples ({ true });
+    context->metrics_collector->record_step_response_sample (sampled_response (), 0,
+    vayu::core::SampleIdentity{ /*iteration=*/0, /*vu=*/1, /*data_row_index=*/std::nullopt });
+
+    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+
+    ASSERT_EQ (validation.steps.size (), 1u);
+    ASSERT_HAS_VALUE (validation.steps[0]);
+    EXPECT_EQ (validation.steps[0]->failed, 0u);
+    ASSERT_EQ (proxy.count (), 1u);
+    EXPECT_EQ (proxy.seen ().front (), upstream.url ("/hello"));
+}
+
+// The other direction, which is what makes the two above about the *run's*
+// policy rather than about any policy: a run configured to bypass the proxy
+// keeps its script off it too. Without this, wiring the replay to a policy
+// resolved from anywhere at all would pass.
+TEST_F (LoadRunScriptTransportTest, ADeferredScriptStaysOffTheProxyWhenTheRunDoes) {
+    MockUpstream upstream;
+    MockProxy proxy;
+    // `off` writes an empty `CURLOPT_PROXY` rather than skipping the option, so
+    // the environment's own `http_proxy` cannot decide this one either way.
+    set_config ("proxyMode", "off");
+    set_config ("proxyUrl", proxy.url ());
+
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("run-script-no-proxy", run_config ());
+    context->test_script = fetch_script (upstream.url ("/hello"));
+    configure_run (context);
+    context->metrics_collector->record_response_sample (sampled_response ());
+
+    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->failed, 0u);
+    EXPECT_EQ (proxy.count (), 0u);
 }
 
 TEST (TransportPolicyPaths, LoadRunTraversesManualProxy) {
