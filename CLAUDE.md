@@ -176,6 +176,13 @@ assert **both** branches.
   `.prettierignore` now enforces that boundary mechanically: prettier's domain
   is `app/`, so a root-resolved run or an editor's format-on-save cannot reflow
   a doc. Format only files you touched that were clean before.
+- **ESLint's domain is wider than prettier's**: `app/` under
+  `app/eslint.config.mjs`, and the first-party JavaScript *outside* `app/`
+  (`scripts/perf/*.{mjs,cjs}` today) under `app/eslint.repo-js.config.mjs`, run
+  from the repository root by the `App quality checks` job (#1166). Both are
+  still `--fix`-free by the rule above. A new `.mjs`/`.cjs` anywhere but `app/`
+  is linted the day it lands, with no CI edit - see `CONTRIBUTING.md` for the
+  local command.
 - **"Written but never read" is this codebase's most repeated defect** - found
   nine times: state one layer records and no layer displays (SSE errors,
   save-failure reasons, an import phase, parsed cookie attributes), and config
