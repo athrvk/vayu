@@ -534,12 +534,16 @@ colour it wants.** Anything painting the lifecycle state of a run, a connection
 or a service - connected, running, completed, stopped, failed - takes
 `--status-*`, including when that state is drawn as text or as a glyph rather
 than as a dot (`text-status-success-text`). The Dock's connection light and its
-running-services chip, the Services panel dot, the mock-server glyph and the
-Welcome screen's recent-run labels are all that case. `--success` /
-`--warning` / `--destructive` keep everything else: banner text, form and field
-errors, metric readouts such as the dashboard's "ramp off target", and action
-affordances such as the Dock's "Restart pending", which announces a pending
-setting rather than a state. `--success-text` and `--status-success-text` are
+running-services chip, the Services panel dot, the mock-server glyph, the MCP
+server's Running / Stopped badge and the Welcome screen's recent-run labels are
+all that case. `--success` / `--warning` / `--destructive` keep everything else,
+and the boundary is worth naming because several of them look close: banner
+text, form and field errors, a schema's fetch or validation outcome (the context
+bar's GraphQL state, the body panel's schema badge), metric readouts such as the
+dashboard's "ramp off target" and `ThroughputTwinCard`'s delta chip - a number
+against a target is not a lifecycle - and action affordances such as the Dock's
+"Restart pending", which announces a pending setting rather than a state.
+`--success-text` and `--status-success-text` are
 the same value in both themes, so on the green surfaces this distinction is not
 visible - it is only greppable, which is what it is for: the family is how a
 future reader finds every status surface, and one that answers a different name
