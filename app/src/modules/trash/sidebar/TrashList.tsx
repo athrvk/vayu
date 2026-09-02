@@ -5,10 +5,11 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { useToastStore } from "@/stores";
+import { useRemovalRefocus } from "@/hooks/useRemovalRefocus";
 import {
 	useTrashQuery,
 	useRestoreTrashMutation,
@@ -42,7 +43,11 @@ export default function TrashList() {
 	const [purgingId, setPurgingId] = useState<string | null>(null);
 	const [purgeTarget, setPurgeTarget] = useState<TrashEntry | null>(null);
 
-	const entries = data?.items ?? [];
+	const listRef = useRef<HTMLDivElement>(null);
+
+	// Memoised because the refocus effect below depends on it: `?? []` is a fresh
+	// array on every render while the query has no data.
+	const entries = useMemo(() => data?.items ?? [], [data]);
 
 	/*
 	 * Gated on there being nothing cached, the way HistoryList gates its own:
@@ -92,6 +97,31 @@ export default function TrashList() {
 		}
 	};
 
+	/*
+	 * A purge dialog is controlled with no trigger, so Radix's close-focus has
+	 * nowhere to land and the row it was opened from is about to go (#1234). The
+	 * list is flat, so the rule is simply the next row, or the one before it when
+	 * the purged row was last - and, as in the tree, the move waits for the row
+	 * to actually leave, which here is always after the dialog has closed: this
+	 * dialog closes before the purge is even sent.
+	 */
+	const { capture, onCloseAutoFocus } = useRemovalRefocus();
+
+	useEffect(() => {
+		if (!purgeTarget) return;
+		const rowFor = (id: string) =>
+			listRef.current?.querySelector<HTMLElement>(`[data-trash-id="${CSS.escape(id)}"]`) ??
+			null;
+		const index = entries.findIndex((entry) => entry.id === purgeTarget.id);
+		const successor = index === -1 ? undefined : (entries[index + 1] ?? entries[index - 1]);
+
+		capture({
+			doomed: () => rowFor(purgeTarget.id),
+			successor: () => (successor ? rowFor(successor.id) : null),
+			focus: (row) => row.focus(),
+		});
+	}, [capture, entries, purgeTarget]);
+
 	const purgeDescription = purgeTarget
 		? purgeTarget.kind === "collection"
 			? `"${purgeTarget.name}" and everything inside it will be removed for good. This cannot be undone.`
@@ -115,7 +145,7 @@ export default function TrashList() {
 				)}
 
 				<div className="flex-1 min-h-0 overflow-hidden">
-					<div className="h-full space-y-2 overflow-y-auto pr-1">
+					<div ref={listRef} className="h-full space-y-2 overflow-y-auto pr-1">
 						{isLoading && <ListSkeleton rows={4} leading />}
 
 						{!isLoading && showError && (
@@ -166,6 +196,7 @@ export default function TrashList() {
 					description={purgeDescription}
 					confirmLabel="Delete forever"
 					onConfirm={handleConfirmPurge}
+					onCloseAutoFocus={onCloseAutoFocus}
 					isDeleting={!!purgingId}
 				/>
 			</div>

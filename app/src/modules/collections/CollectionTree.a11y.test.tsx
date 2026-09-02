@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
@@ -33,14 +33,19 @@ import CollectionTree from "./CollectionTree";
 // Two roots; the first holds one subfolder and one request, so a group mixes
 // both kinds of row and the request's position has to continue the folder's
 // numbering rather than restart at 1.
-const collections = [
+const TREE = [
 	{ id: "acme", name: "Acme", order: 0 },
 	{ id: "beta", name: "Beta", order: 1 },
 	{ id: "billing", name: "Billing", parentId: "acme", order: 0 },
 ];
-const requests = new Map([
+const TREE_REQUESTS: Array<[string, Array<{ id: string; [key: string]: unknown }>]> = [
 	["acme", [{ id: "r-ping", collectionId: "acme", name: "Ping", method: "GET", order: 0 }]],
-]);
+];
+
+// Mutable: a delete removes a row when the refetch lands, which is after the
+// dialog has closed (#1234), and only a fixture that can shrink says so.
+let collections = [...TREE];
+let requests = new Map(TREE_REQUESTS);
 
 vi.mock("@/queries", () => ({
 	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
@@ -61,16 +66,36 @@ vi.mock("@/queries", () => ({
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+let rerenderTree = () => {};
+
 function renderTree() {
-	return render(
-		<QueryClientProvider
-			client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-		>
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	// A fresh element per render: React skips reconciling a referentially equal
+	// one, so a rerender with the same object would show none of the new data.
+	const ui = () => (
+		<QueryClientProvider client={client}>
 			<TooltipProvider>
 				<CollectionTree />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
+	const view = render(ui());
+	rerenderTree = () => act(() => view.rerender(ui()));
+	return view;
+}
+
+/** The refetch a delete triggers, landing after the dialog has closed. */
+function removeCollection(id: string) {
+	collections = collections.filter((entry) => entry.id !== id);
+	requests = new Map(TREE_REQUESTS.filter(([owner]) => owner !== id));
+	rerenderTree();
+}
+
+function removeRequest(id: string) {
+	requests = new Map(
+		TREE_REQUESTS.map(([owner, rows]) => [owner, rows.filter((row) => row.id !== id)])
+	);
+	rerenderTree();
 }
 
 const collectionRow = (id: string) =>
@@ -89,6 +114,8 @@ function startRename(row: HTMLElement) {
 
 beforeEach(() => {
 	Element.prototype.scrollIntoView = vi.fn();
+	collections = [...TREE];
+	requests = new Map(TREE_REQUESTS);
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["acme"]) });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 });
@@ -266,13 +293,18 @@ describe("a rename never strands focus", () => {
  * and Radix's restore, which would aim at the deleted row, is overridden.
  */
 describe("a delete never strands focus", () => {
-	/** The keyboard path in: Delete on a focused row, then the confirm button. */
-	async function deleteFromKeyboard(row: HTMLElement, title: string) {
+	/**
+	 * The keyboard path in: Delete on a focused row, then the confirm button -
+	 * and then the removal itself, because the row goes when the refetch lands
+	 * rather than when the dialog closes, and focus follows the row (#1234).
+	 */
+	async function deleteFromKeyboard(row: HTMLElement, title: string, removeRow: () => void) {
 		row.focus();
 		fireEvent.keyDown(row, { key: "Delete" });
 		expect(await screen.findByText(title)).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 		await waitFor(() => expect(screen.queryByText(title)).toBeNull());
+		removeRow();
 	}
 
 	it("moves focus to the next row in the set", async () => {
@@ -280,7 +312,9 @@ describe("a delete never strands focus", () => {
 
 		// "Billing" is followed in Acme's group by the "Ping" request: the next
 		// row at its own level, not the next row in the document.
-		await deleteFromKeyboard(collectionRow("billing"), "Delete collection?");
+		await deleteFromKeyboard(collectionRow("billing"), "Delete collection?", () =>
+			removeCollection("billing")
+		);
 
 		expect(document.activeElement).toBe(requestRow("r-ping"));
 	});
@@ -290,7 +324,9 @@ describe("a delete never strands focus", () => {
 
 		// "Ping" is last in Acme's group - the row after it belongs to the other
 		// root, whose set this delete does not touch.
-		await deleteFromKeyboard(requestRow("r-ping"), "Delete request?");
+		await deleteFromKeyboard(requestRow("r-ping"), "Delete request?", () =>
+			removeRequest("r-ping")
+		);
 
 		expect(document.activeElement).toBe(collectionRow("acme"));
 	});
@@ -298,7 +334,9 @@ describe("a delete never strands focus", () => {
 	it("puts the tree's tab stop on the row it focused", async () => {
 		renderTree();
 
-		await deleteFromKeyboard(collectionRow("billing"), "Delete collection?");
+		await deleteFromKeyboard(collectionRow("billing"), "Delete collection?", () =>
+			removeCollection("billing")
+		);
 
 		// Focus without the roving stop is a row the next Tab cannot return to.
 		expect(requestRow("r-ping").tabIndex).toBe(0);

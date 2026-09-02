@@ -375,12 +375,11 @@ export default function CollectionTree() {
 							? `"${panel.deleteConfirm?.name}" and all its requests will be moved to the Trash, where they can be restored.`
 							: `"${panel.deleteConfirm?.name}" will be moved to the Trash, where it can be restored.`
 					}
-					onConfirm={() => {
-						deleteRefocus.markConfirmed();
-						panel.confirmDelete();
-					}}
-					// The row this dialog was opened from is about to stop
-					// existing, so Radix's restore has nowhere to land (#1218).
+					onConfirm={panel.confirmDelete}
+					// The row this dialog was opened from may stop existing, so
+					// Radix's restore has nowhere to land (#1218). Where focus goes
+					// follows the outcome: the row while it is still there, the
+					// successor once the delete has actually removed it (#1234).
 					onCloseAutoFocus={deleteRefocus.onCloseAutoFocus}
 					isDeleting={panel.isDeleteInFlight}
 				/>
