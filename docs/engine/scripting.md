@@ -1436,6 +1436,8 @@ the network's answer, so they arrive as the callback's `err` - an `Error` with
 a `.code` (`CONNECTION_FAILED`, `DNS_ERROR`, `TIMEOUT`, …) and `res` null. The
 script's own mistakes throw out of the call instead: an unusable argument, an
 unsupported body mode, exceeding the request cap, and the capability being off.
+A response over the byte bound below is the network's answer too, not a
+mistake: it arrives as `err` with `.code` `RESPONSE_TOO_LARGE`.
 
 `res` carries `code`, `status` (the reason phrase, as on `pm.response`),
 `responseTime`, `headers` with `get()`/`has()`/`each()`/`all()`/`count()`/
@@ -1443,7 +1445,7 @@ unsupported body mode, exceeding the request cap, and the capability being off.
 [Reading response headers](#reading-response-headers) - `json()` and `text()`.
 It is a subset of `pm.response` and has no `to.*` assertion chain.
 
-**Two bounds, both hard.**
+**Three bounds, all hard.**
 
 - *The script's deadline.* The wall-clock limit is enforced by a QuickJS
   interrupt handler, and QuickJS only calls it **between bytecode operations** -
@@ -1459,6 +1461,18 @@ It is a subset of `pm.response` and has no `to.*` assertion chain.
   throws. A load run's `tests` script runs once per *sampled* response, serially,
   on the run's worker thread, so an uncapped loop would turn post-run validation
   into minutes of apparent hang.
+- *A response byte bound.* The fetch reads at most what the enclosing execution
+  reads, and **refuses** past it - the callback's `err` says
+  `Response is N bytes, over the M byte limit`, and `res` is null. Which
+  setting supplies `M` follows the path: a design-mode send's scripts (Send, a
+  collection-run step) take `maxDesignResponseBodyBytes`, a load run's deferred
+  `tests` script takes `maxResponseBodyBytes`, because a script that runs once
+  per sampled response belongs to the run's memory budget rather than to the one
+  sized for a body a person is about to look at. Refusing rather than handing
+  over a prefix is the deliberate half: `res` has no truncation flag - nor does
+  `pm.response` - so a cut body would reach `JSON.parse` as corrupt input with
+  nothing to say why. Before issue #1188 this fetch was the one read in the
+  engine with no bound at all.
 
 **Not available to agents.** Vayu's MCP target allowlist is checked in the MCP
 server, against the composed URL, before it calls the engine - so a script-issued
@@ -2233,8 +2247,9 @@ The **language** is current; what is missing is the **host environment**:
 - **No Node.js APIs**: No `require()`, `fs`, `http`, etc.
 - **Sandboxed**: No filesystem access. The only network access is
   [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) - capped at
-  10 requests per script, bounded by the script's own deadline, and refused
-  outright for agent-started runs.
+  10 requests per script, bounded by the script's own deadline and by the
+  response byte bound its path reads, and refused outright for agent-started
+  runs.
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script (default), enforced by a wall-clock deadline - an
   infinite-loop script is aborted and reported as an error rather than hanging the

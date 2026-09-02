@@ -72,6 +72,7 @@ add_executable(vayu_tests
     load_script_scopes_test.cpp
     script_info_test.cpp
     script_send_request_test.cpp
+    script_send_request_cap_test.cpp
     script_sent_headers_test.cpp
     sent_headers_wire_test.cpp
     set_cookie_test.cpp
@@ -352,6 +353,7 @@ set(vayu_scratch_database_suites
     ScenarioRunnerTest
     ScratchDatabaseCleanup
     ScriptRequestNameTest
+    ScriptSendRequestCapLoadTest
     ScriptVariableScopesTest
     ServerBindTest
     SpecBindRouteTest

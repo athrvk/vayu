@@ -634,8 +634,8 @@ governs what a run measures rather than what it keeps:
 | Key                 | Default   | Range        | Effect |
 |---------------------|-----------|--------------|--------|
 | `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
-| `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
-| `maxDesignResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **design-mode** send - `POST /execute`, and each step of a collection run - reads into memory. A bigger response is read up to this point and answered with `bodyCapped: true` (see `POST /execute`) rather than failing, because someone is watching for it. Separate from `maxResponseBodyBytes` above, which is the load path's and refuses instead. |
+| `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory, and what a `pm.sendRequest` from that run's deferred `tests` script may read. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
+| `maxDesignResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **design-mode** send - `POST /execute`, and each step of a collection run - reads into memory, and what a `pm.sendRequest` from that send's scripts may read. A bigger response is read up to this point and answered with `bodyCapped: true` (see `POST /execute`) rather than failing, because someone is watching for it - a script's own fetch is the exception and refuses, having no way to tell the script its body was cut (see [scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)). Separate from `maxResponseBodyBytes` above, which is the load path's and refuses in every case. |
 | `maxSampleBodyBytes` | `32768`  | 0–104857600  | Largest response body kept for a single captured **load-run** sample. Bigger bodies are stored truncated and marked. Deliberately far below `maxTraceBodyBytes`: a design run stores one exchange the user asked for, a load run stores tens nobody asked for individually. `0` keeps headers and metadata and no body. |
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
 | `maxResponseSampleBytes` | `268435456` | 0–1073741824 | Total response-body bytes one load run may hold for its post-run test scripts and schema checks. Two orders of magnitude above `maxSampleBytes` because these bodies are kept **whole** - a truncated one would fail a check the target passed - so past the budget whole samples are dropped instead, counted as `sampling.responseSamplesDropped`. `0` retains no sample that has a body. |
@@ -5502,6 +5502,14 @@ does not apply to it - what does is that the body crosses to the app and is
 held there as well, and that failing a response the user asked to see would be
 the wrong trade where showing them the first 32MB of it is not. Neither setting
 reads the other: raising the load cap does not change what a Send reads.
+
+A **script's own fetch** (`pm.sendRequest`) is a third read, and it takes the
+bound of the path it runs on: the design bound in a Send's or a collection
+step's scripts, the load bound in a load run's deferred `tests` script, which
+runs once per sampled response. It refuses at that bound rather than keeping a
+prefix, on either path, because nothing on the object it hands the script could
+say the body was cut - see
+[scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest).
 
 **Wire method and body.** A body is sent with whatever method the request
 names: a `GET` carrying one stays a `GET` on the wire (Elasticsearch-style

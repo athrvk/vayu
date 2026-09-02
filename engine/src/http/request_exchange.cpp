@@ -46,6 +46,12 @@ size_t design_response_body_bound (vayu::db::Database& db) {
     static_cast<int> (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES)));
 }
 
+size_t load_response_body_bound (vayu::db::Database& db) {
+    return static_cast<size_t> (std::max (0,
+    db.get_config_int ("maxResponseBodyBytes",
+    static_cast<int> (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES))));
+}
+
 nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response) {
     nlohmann::json trace;
@@ -519,8 +525,12 @@ bool verbose) {
         ctx.iteration_count = inputs.iteration_count;
         ctx.in_scenario     = inputs.in_scenario;
         // Both scripts' `pm.sendRequest` leaves by the same route the send
-        // below does - see ScriptContext::transport.
-        ctx.transport = inputs.transport;
+        // below does - see ScriptContext::transport - and reads no more of a
+        // body than that send does (issue #1188). The bound is the same value;
+        // what differs is the answer at it, which the script's own send has to
+        // refuse rather than truncate - see ScriptContext::max_response_bytes.
+        ctx.transport          = inputs.transport;
+        ctx.max_response_bytes = inputs.max_response_bytes;
         // Both scripts of a step read the same row: they are the same
         // iteration, and a test script asserting against the row its request
         // was built from is the point of a data-driven run.

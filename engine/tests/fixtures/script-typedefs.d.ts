@@ -1294,7 +1294,7 @@ declare const pm: {
 	 * 
 	 * auth takes Postman's { type, <type>: params } shape in either spelling, and composes basic, bearer and apikey. Any other type - oauth2 included - is refused by name rather than dropped, and an Authorization header the script set itself wins.
 	 * 
-	 * Bounded on purpose: the request's timeout is capped at whatever is left of the script's own time budget, and one script may issue at most 10 requests. Both throw when exceeded.
+	 * Bounded on purpose: the request's timeout is capped at whatever is left of the script's own time budget, and one script may issue at most 10 requests. Both throw when exceeded. The response body is bounded too - at whatever the enclosing execution reads, maxDesignResponseBodyBytes for a send's scripts and maxResponseBodyBytes for a load run's - and a body past it is refused rather than cut: that one reaches the callback as err with .code RESPONSE_TOO_LARGE, because res carries no flag a script could read to learn its body was short.
 	 * 
 	 * **Not available to agents.** Vayu's MCP target allowlist is checked before the engine is called, so a request sent from inside a script would bypass it. When a run comes from the MCP server this throws instead of sending.
 	 * 

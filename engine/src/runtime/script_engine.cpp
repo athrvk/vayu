@@ -161,6 +161,11 @@ struct ContextData {
     /// `ScriptContext::transport`, which owns the rationale.
     vayu::http::TransportPolicy transport;
 
+    /// How much of a `pm.sendRequest` response body is read before the
+    /// transfer is refused - see `ScriptContext::max_response_bytes`, which
+    /// owns the rationale and the per-path choice.
+    size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
+
     /// Whether `pm.execution` may record an intent at all - see
     /// `ScriptContext::in_scenario`.
     bool in_scenario = false;
@@ -7357,6 +7362,13 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     // then lets the real request carry the session needs both to reach the
     // network the same way.
     client_config.transport = data->transport;
+    // The bound the enclosing execution resolved for its own read (issue
+    // #1188), so a script's fetch is not the one read with no byte bound left.
+    // `truncate_over_limit` stays false: a script parses what it is handed, and
+    // there is no property on this response object that could tell it the body
+    // was cut - so the honest answer to an oversized body is the error the
+    // callback can catch, not a prefix.
+    client_config.max_response_bytes = data->max_response_bytes;
     // Staged jar writes ride the next transfer of this execution, and this is
     // it - so a script that sets a cookie and then sends through
     // pm.sendRequest carries it. Drained rather than copied: this transfer's
@@ -8667,6 +8679,7 @@ class ScriptEngine::Impl {
         ctx_data.cookie_scope       = ctx.cookie_scope;
         ctx_data.cookie_writes      = ctx.cookie_writes;
         ctx_data.transport          = ctx.transport;
+        ctx_data.max_response_bytes = ctx.max_response_bytes;
         ctx_data.in_scenario        = ctx.in_scenario;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
