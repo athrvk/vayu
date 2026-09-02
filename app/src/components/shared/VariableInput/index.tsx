@@ -52,7 +52,7 @@ import { isCommitEnter } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 import type { ResolvedVariable, VariableScope, VariableSupport } from "@/types";
 import EditableVariable from "./EditableVariable";
-import RuntimeToken from "./RuntimeToken";
+import RuntimeToken, { type RuntimeTokenProps } from "./RuntimeToken";
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { variableCompletionContext } from "@/lib/variable-completion";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
@@ -94,6 +94,18 @@ const NO_VARIABLES: Record<string, ResolvedVariable> = {};
 
 /** The generator table by name, for the overlay's token lookup. */
 const DYNAMIC_BY_NAME = new Map(DYNAMIC_VARIABLES.map((v) => [v.name, v]));
+
+/**
+ * The tokens the roving strip walks, in painted order.
+ *
+ * Whatever inside a token's wrapper carries a `tabindex`, rather than the
+ * `[role="button"]` this matched while only editable tokens were focusable
+ * (issue #1238). The two kinds do not share a role and must not: the editable
+ * token's trigger is a `role="button"` that opens a popover, and a run-time
+ * token's is deliberately none, because nothing about it is activated. What
+ * they do share is being a stop, which is the thing the strip is enumerating.
+ */
+const TOKEN_STOPS = "[data-variable-token] [tabindex]";
 
 // Parse text into segments (text and variables)
 function parseSegments(
@@ -429,9 +441,7 @@ export default function VariableInput({
 	 */
 	const handleOverlayKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
 		const tokens = Array.from(
-			overlayRef.current?.querySelectorAll<HTMLElement>(
-				'[data-variable-token] [role="button"]'
-			) ?? []
+			overlayRef.current?.querySelectorAll<HTMLElement>(TOKEN_STOPS) ?? []
 		);
 		const current = tokens.indexOf(document.activeElement as HTMLElement);
 		if (current === -1) return;
@@ -457,9 +467,7 @@ export default function VariableInput({
 	/** Whichever token took focus owns the Tab stop from now on. */
 	const handleOverlayFocus = (e: React.FocusEvent<HTMLDivElement>) => {
 		const tokens = Array.from(
-			overlayRef.current?.querySelectorAll<HTMLElement>(
-				'[data-variable-token] [role="button"]'
-			) ?? []
+			overlayRef.current?.querySelectorAll<HTMLElement>(TOKEN_STOPS) ?? []
 		);
 		const index = tokens.indexOf(e.target as HTMLElement);
 		if (index !== -1) setActiveTokenIndex(index);
@@ -473,9 +481,7 @@ export default function VariableInput({
 	 * has been bitten by before.
 	 */
 	useLayoutEffect(() => {
-		const tokens = overlayRef.current?.querySelectorAll(
-			'[data-variable-token] [role="button"]'
-		);
+		const tokens = overlayRef.current?.querySelectorAll(TOKEN_STOPS);
 		if (tokens && tokens.length > 0 && activeTokenIndex >= tokens.length) {
 			setActiveTokenIndex(0);
 		}
@@ -576,11 +582,38 @@ export default function VariableInput({
 		 */
 		let offset = 0;
 		/*
-		 * Position of the next editable token in the strip. Only these are
-		 * focusable - a run-time token has no popover to open - so the roving Tab
-		 * stop counts them and nothing else.
+		 * Position of the next token in the strip. Every token counts, both kinds
+		 * (issue #1238): a run-time token opens no popover, but its tooltip is the
+		 * whole of what it has to say, so it is a stop like any other.
 		 */
 		let tokenPosition = 0;
+		/** The stop this token holds; exactly one of them is `0`. */
+		const nextStop = () => (tokenPosition++ === activeTokenIndex ? 0 : -1);
+
+		/*
+		 * One wrapper for all four run-time cases. They differ only in the words of
+		 * the tooltip and the tone - which is the reason `RuntimeToken` is one
+		 * component rather than three - so the tab-stop wiring they now also share
+		 * is written once rather than in four places for it to drift between.
+		 */
+		const runtimeToken = (
+			key: string,
+			bounds: { "data-token-start": number; "data-token-end": number },
+			token: RuntimeTokenProps
+		) => (
+			<span
+				key={key}
+				data-variable-token
+				data-runtime-token
+				{...bounds}
+				// The tooltip is this token's entire content, and a tooltip opens on
+				// a pointer event the overlay's `pointer-events: none` never
+				// delivered (issue #604).
+				style={{ pointerEvents: "auto" }}
+			>
+				<RuntimeToken {...token} tabIndex={nextStop()} disabled={disabled} />
+			</span>
+		);
 
 		return segments.map((seg, i) => {
 			const start = offset;
@@ -603,26 +636,12 @@ export default function VariableInput({
 					 * token, unchanged. `describeDataToken` owns which is which.
 					 */
 					const data = describeDataToken(seg.varName, variables?.dataColumns);
-					return (
-						<span
-							key={`${i}-${seg.varName}`}
-							data-variable-token
-							data-runtime-token
-							aria-hidden="true"
-							{...tokenBounds}
-							// The tooltip is this token's entire content, and a
-							// tooltip opens on a pointer event the overlay's
-							// `pointer-events: none` never delivered (issue #604).
-							style={{ pointerEvents: "auto" }}
-						>
-							<RuntimeToken
-								name={seg.varName}
-								description={data.description}
-								note={data.note}
-								tone={data.tone}
-							/>
-						</span>
-					);
+					return runtimeToken(`${i}-${seg.varName}`, tokenBounds, {
+						name: seg.varName,
+						description: data.description,
+						note: data.note,
+						tone: data.tone,
+					});
 				}
 				/*
 				 * The identity namespace is reserved the same way (issue
@@ -637,22 +656,11 @@ export default function VariableInput({
 				 */
 				const identity = iterationVariable(seg.varName);
 				if (identity) {
-					return (
-						<span
-							key={`${i}-${seg.varName}`}
-							data-variable-token
-							data-runtime-token
-							aria-hidden="true"
-							{...tokenBounds}
-							style={{ pointerEvents: "auto" }} // See the data.* token above.
-						>
-							<RuntimeToken
-								name={identity.name}
-								description={identity.description}
-								note="not generated here"
-							/>
-						</span>
-					);
+					return runtimeToken(`${i}-${seg.varName}`, tokenBounds, {
+						name: identity.name,
+						description: identity.description,
+						note: "not generated here",
+					});
 				}
 				const varInfo = allVariables[seg.varName];
 				/*
@@ -670,47 +678,25 @@ export default function VariableInput({
 						: undefined;
 				if (boundColumn) {
 					const data = describeBareColumnToken(boundColumn);
-					return (
-						<span
-							key={`${i}-${seg.varName}`}
-							data-variable-token
-							data-runtime-token
-							aria-hidden="true"
-							{...tokenBounds}
-							style={{ pointerEvents: "auto" }} // See the data.* token above.
-						>
-							<RuntimeToken
-								name={seg.varName}
-								description={data.description}
-								note={data.note}
-								tone={data.tone}
-							/>
-						</span>
-					);
+					return runtimeToken(`${i}-${seg.varName}`, tokenBounds, {
+						name: seg.varName,
+						description: data.description,
+						note: data.note,
+						tone: data.tone,
+					});
 				}
 				// A generator only shows through when nothing defines the name -
 				// the same order the resolver uses, so the token cannot describe a
 				// value the request will not carry.
 				const dynamic = varInfo ? undefined : DYNAMIC_BY_NAME.get(seg.varName);
 				if (dynamic) {
-					return (
-						<span
-							key={`${i}-${seg.varName}`}
-							data-variable-token
-							data-runtime-token
-							aria-hidden="true"
-							{...tokenBounds}
-							style={{ pointerEvents: "auto" }} // See the data.* token above.
-						>
-							<RuntimeToken
-								name={dynamic.name}
-								description={dynamic.description}
-								note="generated per use"
-							/>
-						</span>
-					);
+					return runtimeToken(`${i}-${seg.varName}`, tokenBounds, {
+						name: dynamic.name,
+						description: dynamic.description,
+						note: "generated per use",
+					});
 				}
-				const position = tokenPosition++;
+				const position = nextStop();
 				return (
 					<span
 						key={`${i}-${seg.varName}`}
@@ -720,7 +706,7 @@ export default function VariableInput({
 						<EditableVariable
 							// One Tab stop for the whole strip; the arrows move
 							// between tokens - `handleOverlayKeyDown`.
-							tabIndex={position === activeTokenIndex ? 0 : -1}
+							tabIndex={position}
 							name={seg.varName}
 							value={varInfo?.value || ""}
 							scope={varInfo?.scope || "global"}
@@ -805,18 +791,19 @@ export default function VariableInput({
 			 * Visual overlay layer for variable tokens - ON TOP of input for
 			 * clickable tokens.
 			 *
-			 * **Not `aria-hidden`, and the pieces inside it are** (issue #1215).
-			 * The whole layer used to be hidden from assistive technology, which
-			 * is right for what it mostly is - a repaint of text the `<input>`
-			 * beneath already carries - and wrong for the one thing it also holds:
-			 * an editable token is a `role="button"` that opens the variable
-			 * editor, and hiding a focusable control is the `aria-hidden-focus`
-			 * violation. Two commits that never met, each correct alone.
+			 * **Not `aria-hidden`, and the text inside it is** (issues #1215,
+			 * #1238). The whole layer used to be hidden from assistive technology,
+			 * which is right for what it mostly is - a repaint of text the
+			 * `<input>` beneath already carries - and wrong for what it also
+			 * holds: tokens the keyboard can land on, and hiding a focusable
+			 * control is the `aria-hidden-focus` violation.
 			 *
-			 * So the duplication is hidden where it actually is - every text
-			 * segment, and every run-time token, which has no popover to open and
-			 * is not focusable - and the editable tokens are left in the
-			 * accessibility tree where they belong.
+			 * So the duplication is hidden where it actually is - the literal text
+			 * either side of a token, which the input does carry - and the tokens
+			 * are left in the accessibility tree. Both kinds: #1215 excused the
+			 * run-time ones on the grounds that they are not focusable, which they
+			 * now are, because their tooltip is the only statement of where the
+			 * value comes from and it was mouse-only.
 			 */}
 			{hasVariables && (
 				<div
