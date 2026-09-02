@@ -69,6 +69,18 @@ interface RequestBuilderProviderProps {
 	children: ReactNode;
 	initialRequest?: Partial<RequestState>;
 	/**
+	 * The identity this builder files its per-builder memory under - the three
+	 * auto side-effect records and the picker's row index (issue #1272).
+	 *
+	 * Defaults to `request.id`, which is what a request tab wants. The History
+	 * run view passes its run id, because the copy it renders is deliberately
+	 * id-less (`design-run-seed.ts` sets `id: null`, one of the two gates that
+	 * detach it) and two open run tabs would otherwise be one identity. Pass an
+	 * id the tab strip can name - a record keyed under it is bounded by that
+	 * tab, exactly as a request's is.
+	 */
+	memoryKey?: string;
+	/**
 	 * Starting response for a builder with no id, which cannot read the store.
 	 * Used by the History run view, where the response comes from the run.
 	 *
@@ -122,6 +134,7 @@ interface RequestBuilderProviderProps {
 export default function RequestBuilderProvider({
 	children,
 	initialRequest,
+	memoryKey: declaredMemoryKey,
 	initialResponse,
 	inheritedPreScripts,
 	inheritedPostScripts,
@@ -290,12 +303,18 @@ export default function RequestBuilderProvider({
 	}, []);
 
 	/*
-	 * Which request the three records below are read and written for. One
-	 * `RequestBuilderProvider` serves every request tab, so a slot holding a
-	 * single record held whichever request was in a mode last, and the request
-	 * before it kept what the app had changed for it (issue #1269).
+	 * The one identity every per-builder map here is read and written under: the
+	 * three records below and the picker's row index further down. One
+	 * `RequestBuilderProvider` serves every tab, so a slot holding a single
+	 * record held whichever request was in a mode last, and the request before
+	 * it kept what the app had changed for it (issue #1269).
+	 *
+	 * A request tab is its request; a builder over something else says so with
+	 * `memoryKey`, because two id-less builders are not one builder (issue
+	 * #1272). Spelled once rather than per map - the maps share a sweep, and two
+	 * spellings of one rule are how they drift apart.
 	 */
-	const autoRecordKey = request.id ?? UNSAVED_AUTO_KEY;
+	const memoryKey = declaredMemoryKey ?? request.id ?? UNSAVED_AUTO_KEY;
 
 	/*
 	 * The Content-Type row a body mode added on its way in, so leaving the mode
@@ -313,7 +332,7 @@ export default function RequestBuilderProvider({
 		get: getAutoContentType,
 		set: setAutoContentType,
 		retain: retainAutoContentTypes,
-	} = useAutoRecordSlot<AutoHeader>(autoRecordKey);
+	} = useAutoRecordSlot<AutoHeader>(memoryKey);
 
 	/*
 	 * The `Accept: text/event-stream` row the Event stream toggle added, so
@@ -327,7 +346,7 @@ export default function RequestBuilderProvider({
 		get: getAutoAccept,
 		set: setAutoAccept,
 		retain: retainAutoAccepts,
-	} = useAutoRecordSlot<AutoHeader>(autoRecordKey);
+	} = useAutoRecordSlot<AutoHeader>(memoryKey);
 
 	/*
 	 * The method the GraphQL body mode set, so leaving the mode can put back
@@ -340,10 +359,10 @@ export default function RequestBuilderProvider({
 		get: getAutoMethod,
 		set: setAutoMethod,
 		retain: retainAutoMethods,
-	} = useAutoRecordSlot<AutoMethod>(autoRecordKey);
+	} = useAutoRecordSlot<AutoMethod>(memoryKey);
 
 	// What bounds these three is stated with the row memory below, which the
-	// same sweep bounds (issue #1271): one rule over every per-request map the
+	// same sweep bounds (issue #1271): one rule over every per-builder map the
 	// provider holds, rather than one rule each.
 
 	const { data: collections = [] } = useCollectionsQuery();
@@ -393,18 +412,11 @@ export default function RequestBuilderProvider({
 	const { maxRows: dataFileMaxRows } = useDataFileLimits();
 	const sendWithRow = useSendWithRow(dataColumns, dataFileMaxRows);
 	const [rowIndexByRequest, setRowIndexByRequest] = useState<Record<string, number>>({});
-	/*
-	 * An unsaved request has no id and cannot be switched away from and back to
-	 * as itself, so every one of them shares this key - the provider's one name
-	 * for an id-less builder, which the auto-record slots above file under too.
-	 * They can never collide: a request tab holds exactly one draft.
-	 */
-	const rowMemoryKey = request.id ?? UNSAVED_AUTO_KEY;
-	const lastRowIndex = rowIndexByRequest[rowMemoryKey] ?? null;
+	// Filed under the same identity as the records above, for the same reason.
+	const lastRowIndex = rowIndexByRequest[memoryKey] ?? null;
 	const rememberRowIndex = useCallback(
-		(index: number) =>
-			setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index })),
-		[rowMemoryKey]
+		(index: number) => setRowIndexByRequest((previous) => ({ ...previous, [memoryKey]: index })),
+		[memoryKey]
 	);
 	/*
 	 * A Send that carries no row leaves the request bound to none (issue #1062).
@@ -421,11 +433,11 @@ export default function RequestBuilderProvider({
 	const forgetRowIndex = useCallback(
 		() =>
 			setRowIndexByRequest((previous) => {
-				if (!(rowMemoryKey in previous)) return previous;
-				const { [rowMemoryKey]: _forgotten, ...rest } = previous;
+				if (!(memoryKey in previous)) return previous;
+				const { [memoryKey]: _forgotten, ...rest } = previous;
 				return rest;
 			}),
-		[rowMemoryKey]
+		[memoryKey]
 	);
 	const retainRowIndexes = useCallback(
 		(live: ReadonlySet<string>) =>
@@ -434,10 +446,10 @@ export default function RequestBuilderProvider({
 	);
 
 	/*
-	 * What bounds every per-request map above: the open request tabs (issues
-	 * #1269, #1271). An entry - a record, or a picked row index - is only ever
-	 * read by the request it is filed under, so once that request has no tab it
-	 * can never be read again, and a per-request store that nothing prunes is
+	 * What bounds every per-builder map above: the open tabs (issues #1269,
+	 * #1271, #1272). An entry - a record, or a picked row index - is only ever
+	 * read by the builder it is filed under, so once that builder has no tab it
+	 * can never be read again, and a per-builder store that nothing prunes is
 	 * how a map becomes a leak. `MAX_OPEN_TABS` caps the tab strip, so this caps
 	 * the maps.
 	 *
@@ -448,14 +460,22 @@ export default function RequestBuilderProvider({
 	 * read during render - so `retainKeys` returns the map it was given when it
 	 * drops nothing, and React bails out.
 	 *
-	 * The id-less key survives the sweep: it names no tab, and the History run
-	 * copy that uses it is the one builder whose memory nothing else could keep.
+	 * A run tab is swept like a request tab, because the History copy it holds
+	 * now files under its run id (issue #1272) and that id names a tab like any
+	 * other. Run ids and request ids come from different tables and cannot
+	 * collide; a run tab holding no builder - a load test, a scenario - only
+	 * ever keeps a key nothing wrote.
+	 *
+	 * The id-less key survives the sweep: it names no tab, and a builder that
+	 * declares no identity of its own is the one whose memory nothing else
+	 * could keep.
 	 */
 	useEffect(() => {
 		const retainOpen = (tabs: readonly Tab[]) => {
 			const live = new Set<string>([UNSAVED_AUTO_KEY]);
 			for (const tab of tabs) {
-				if (tab.type === "request" && tab.entityId !== null) live.add(tab.entityId);
+				if (tab.entityId === null) continue;
+				if (tab.type === "request" || tab.type === "run") live.add(tab.entityId);
 			}
 			retainAutoContentTypes(live);
 			retainAutoAccepts(live);

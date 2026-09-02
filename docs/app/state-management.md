@@ -1883,26 +1883,45 @@ alternative and is wrong in the same direction as the bug - it strands the first
 request's header at the moment of the switch rather than at the second request's
 mode change.
 
-What bounds the maps is the open request tabs. A record can only ever be read by
-the request it names, so once that request has no tab it is unreachable, and a
-per-request store that nothing prunes is how a map becomes a leak; `tabs-store`
+What bounds the maps is the open tabs. A record can only ever be read by the
+builder it names, so once that builder has no tab it is unreachable, and a
+per-builder store that nothing prunes is how a map becomes a leak; `tabs-store`
 is subscribed to rather than selected from, because a provider that re-rendered
 on every tab focus would charge the request the user is working in for it.
-`MAX_OPEN_TABS` caps the tab strip, so it caps the maps. The one key that
-survives the sweep is the id-less one, shared by any builder holding no saved
-request: it names no tab, and the editable copy History renders for a stored run
-is what uses it. Two such copies open at once share that one bucket and
-interfere as they always have, since the rules read a `requestId` of `null`
-against another `null` as a match; giving that copy an identity of its own is
-issue #1272.
+`MAX_OPEN_TABS` caps the tab strip, so it caps the maps. Both request tabs and
+run tabs are swept, by their `entityId` - a request id and a run id respectively,
+from different tables and so unable to collide. A run tab holding no builder at
+all (a load test, a scenario) only ever keeps a key nothing wrote.
+
+**Which identity a builder files under is one value, resolved once** (issue
+#1272): `memoryKey ?? request.id ?? UNSAVED_AUTO_KEY`, read by every per-builder
+map the provider holds - the three slots above and the picker's row memory
+below. A request tab is its request and passes nothing. The editable copy
+History renders for a stored run passes the run id, because `design-run-seed.ts`
+gives that copy `id: null` on purpose - a null id is one of the two gates that
+stop an edited copy from rewriting the saved request - so every open run copy
+used to share the id-less bucket. That was not a near miss: the rules read a
+`requestId` of `null` against another `null` as a match, so the second run tab
+to pick GraphQL was handed the first one's record, accepted it as its own and
+took the "already in this mode" branch - its method was never set to `POST`, and
+its record was the other tab's. A prop rather than a field on `RequestState`
+that only History would set: `request.id` stays honestly null, and no request
+grows a "which run am I" field for one caller. A run id names a tab, so those
+records are bounded by the same sweep rather than exempt from it.
+
+`UNSAVED_AUTO_KEY` is what remains for a builder declaring neither - nothing in
+the app today - and it is the one key the sweep cannot drop, since a key naming
+no tab cannot be bounded by the tabs. It is kept rather than removed because the
+alternative for such a builder is sharing whichever key was written last, which
+the `null === null` ownership check hands out as owned rather than refusing.
 
 **The same sweep bounds the Send-with-row picker's memory** (issue #1271), the
 provider's other per-request map: which row index each request was last sent
 with (`rowIndexByRequest`, issues #659 and #1062). It survives a tab switch and
 a return, because neither of those is a send - and it goes when the tab does,
 for the reason above, since the request it was picked for can no longer be
-switched to. Two maps, one rule, one sweep, and one name for the request that
-has no id: `UNSAVED_AUTO_KEY` is what both file an id-less builder under.
+switched to. Two maps, one rule, one sweep, and one identity: the key resolved
+above is the key both file under.
 
 The row memory is `useState` rather than a ref - `lastRowIndex` is read while
 rendering - so its half of the sweep is a `setState`, and `retainKeys`
