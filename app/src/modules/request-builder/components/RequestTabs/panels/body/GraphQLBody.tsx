@@ -27,6 +27,7 @@ import {
 	RefreshCw,
 } from "lucide-react";
 import type { OnMount } from "@monaco-editor/react";
+import type { HttpMethod } from "@/types";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import type { editor } from "monaco-editor";
 import {
@@ -61,6 +62,7 @@ import {
 import type { SchemaTreeNode } from "@/lib/graphql/schema-tree";
 import { SchemaExplorer } from "./graphql-explorer/SchemaExplorer";
 import { BadgeText, SchemaStatusBadge } from "./SchemaStatusBadge";
+import { sendsGraphQLInTheUrl } from "./graphql-method";
 import { schemaStatusTitle } from "@/lib/graphql/schema-status";
 import { useLayoutStore } from "@/stores";
 import {
@@ -109,6 +111,15 @@ export interface GraphQLBodyProps {
 	 */
 	variablesDraft: string | null;
 	onVariablesDraftChange: (text: string) => void;
+	/**
+	 * The method this request will be sent with.
+	 *
+	 * Read for one thing: GraphQL over `GET` is a different transport - the
+	 * document travels as query parameters and a mutation cannot be sent that
+	 * way - and the Query header says so when that is what will happen
+	 * (issue #1228).
+	 */
+	method: HttpMethod;
 }
 
 /**
@@ -143,6 +154,31 @@ function VariablesFormBadge({ form }: { form: VariablesForm }) {
 		>
 			<AlertCircle className="w-3 h-3" />
 			Not sent
+		</BadgeText>
+	);
+}
+
+/**
+ * What a `GET` will do with this document, when that is what is about to happen.
+ *
+ * Nothing at all on any other method, which is the common case: choosing the
+ * GraphQL mode on a request still holding the default `GET` moves it to `POST`
+ * (`graphql-method.ts`), so this renders for a `GET` the user chose themselves
+ * or one an import wrote. It describes a transport rather than reporting an
+ * error - `GET` is a legitimate way to send a query, and the wrong way to send
+ * a mutation - which is why the sentence names both halves and the method
+ * selector is one click away.
+ */
+function GetTransportBadge({ method }: { method: HttpMethod }) {
+	if (!sendsGraphQLInTheUrl(method)) return null;
+
+	return (
+		<BadgeText
+			className="text-muted-foreground"
+			title="GraphQL over GET is sent as query parameters, not as a JSON body. A mutation needs POST."
+		>
+			<AlertCircle className="w-3 h-3" />
+			Sent as query parameters
 		</BadgeText>
 	);
 }
@@ -318,6 +354,7 @@ export function GraphQLBody({
 	onEditorMount,
 	variablesDraft,
 	onVariablesDraftChange,
+	method,
 }: GraphQLBodyProps) {
 	// One subscription, not three: the entry object is the store's own reference,
 	// so it is a stable snapshot, and status/schema/error/freshness cannot be
@@ -729,6 +766,7 @@ export function GraphQLBody({
 						<PaneTitle>Query</PaneTitle>
 					</span>
 					<div className="flex items-center gap-2">
+						<GetTransportBadge method={method} />
 						{names.length > 1 && (
 							<Select
 								value={parts.operationName}

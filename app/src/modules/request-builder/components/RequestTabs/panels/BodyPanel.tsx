@@ -75,6 +75,7 @@ import type { SchemaTarget } from "@/lib/graphql/schema-cache";
 import { cn } from "@/lib/utils";
 import { BODY_MODES } from "./body/body-modes";
 import { switchContentType, withoutContentType } from "./body/content-type";
+import { switchGraphQLMethod } from "./body/graphql-method";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
 import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
 
@@ -176,6 +177,8 @@ export default function BodyPanel() {
 		setVariablesDraft,
 		getAutoContentType,
 		setAutoContentType,
+		getAutoMethod,
+		setAutoMethod,
 		resolvedAuth,
 	} = useRequestBuilderContext();
 	const variables = useVariableSupport();
@@ -303,6 +306,26 @@ export default function BodyPanel() {
 		if (contentType.headers !== request.headers) updateField("headers", contentType.headers);
 		setAutoContentType(contentType.auto);
 		setAddedContentType(contentType.added);
+
+		/*
+		 * GraphQL means something different on a GET - the document travels as
+		 * query parameters and a mutation cannot be sent at all - and a new
+		 * request is a GET, so picking the mode used to build a request the
+		 * server answered with a bare 400 (issue #1228). The method moves the
+		 * same reversible way the header above does, and back again on the way
+		 * out; `graphql-method.ts` is the rule, including why a method the user
+		 * chose is left alone in both directions.
+		 */
+		const graphqlMethod = switchGraphQLMethod(
+			mode,
+			request.method,
+			request.id,
+			getAutoMethod()
+		);
+		if (graphqlMethod.method !== request.method) {
+			updateField("method", graphqlMethod.method);
+		}
+		setAutoMethod(graphqlMethod.auto);
 	};
 
 	const undoContentType = () => {
@@ -454,6 +477,7 @@ export default function BodyPanel() {
 						>
 							<GraphQLBody
 								body={request.body || ""}
+								method={request.method}
 								onBodyChange={(b) => updateField("body", b)}
 								requestId={request.id ?? null}
 								schemaTarget={gqlSchemaTarget}

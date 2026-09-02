@@ -121,6 +121,24 @@ export interface AutoHeader {
 	value: string;
 }
 
+/**
+ * The method a body mode set, and what it was before (issue #1228).
+ *
+ * The same reversible-side-effect rule as {@link AutoHeader}, on the one field
+ * that is not a header row: GraphQL over `GET` is sent as query parameters and
+ * cannot carry a mutation at all, so choosing the mode on a request still
+ * holding the default `GET` sets `POST` - and leaving the mode puts `GET` back.
+ *
+ * `method` is what this record set, and it is re-checked before the revert for
+ * the reason `AutoHeader` keeps `value`: a method the user has picked since is
+ * theirs, and reverting it would take a choice away rather than complete one.
+ */
+export interface AutoMethod {
+	requestId: string | null;
+	method: HttpMethod;
+	previous: HttpMethod;
+}
+
 // ============================================================================
 // Request State
 // ============================================================================
@@ -401,6 +419,15 @@ export interface RequestBuilderContextValue {
 	 */
 	getAutoAccept: () => AutoHeader | null;
 	setAutoAccept: (auto: AutoHeader | null) => void;
+
+	/**
+	 * The method the GraphQL body mode set, so leaving the mode can put back
+	 * the one it replaced (issue #1228). A third slot beside the two above,
+	 * and deliberately not one of them: what it owns is a scalar field rather
+	 * than a header row, so it records the value it wrote instead of a row id.
+	 */
+	getAutoMethod: () => AutoMethod | null;
+	setAutoMethod: (auto: AutoMethod | null) => void;
 
 	// Response State
 	response: ResponseState | null;

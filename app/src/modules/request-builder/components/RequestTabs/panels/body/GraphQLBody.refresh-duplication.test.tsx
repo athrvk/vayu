@@ -85,6 +85,7 @@ function Composed({ withContextBar }: { withContextBar: boolean }) {
 				requestId="r1"
 				schemaTarget={TARGET}
 				onEditorMount={() => {}}
+				method="POST"
 				variablesDraft={draft}
 				onVariablesDraftChange={setDraft}
 			/>

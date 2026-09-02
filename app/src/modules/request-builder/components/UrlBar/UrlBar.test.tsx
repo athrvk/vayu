@@ -59,6 +59,8 @@ function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBu
 		// panel's record (issue #574).
 		getAutoAccept: () => null,
 		setAutoAccept: vi.fn(),
+		getAutoMethod: () => null,
+		setAutoMethod: vi.fn(),
 		response: null,
 		setResponse: vi.fn(),
 		activeTab: "params",

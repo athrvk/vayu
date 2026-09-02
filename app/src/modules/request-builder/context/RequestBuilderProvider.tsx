@@ -45,6 +45,7 @@ import { queryKeys } from "@/queries";
 import type { ScriptPart, VariableValue } from "@/types";
 import type {
 	AutoHeader,
+	AutoMethod,
 	RequestState,
 	ResponseState,
 	RequestTab,
@@ -314,6 +315,19 @@ export default function RequestBuilderProvider({
 	const getAutoAccept = useCallback(() => autoAcceptRef.current, []);
 	const setAutoAccept = useCallback((auto: AutoHeader | null) => {
 		autoAcceptRef.current = auto;
+	}, []);
+
+	/*
+	 * The method the GraphQL body mode set, so leaving the mode can put back
+	 * the one it replaced (issue #1228). Here for the same reason as the two
+	 * above - the panel that writes it is unmounted whenever another tab is on
+	 * screen, and a record that does not outlive the panel leaves the method
+	 * changed with nothing left to change it back.
+	 */
+	const autoMethodRef = useRef<AutoMethod | null>(null);
+	const getAutoMethod = useCallback(() => autoMethodRef.current, []);
+	const setAutoMethod = useCallback((auto: AutoMethod | null) => {
+		autoMethodRef.current = auto;
 	}, []);
 
 	const { data: collections = [] } = useCollectionsQuery();
@@ -937,6 +951,8 @@ export default function RequestBuilderProvider({
 			setAutoContentType,
 			getAutoAccept,
 			setAutoAccept,
+			getAutoMethod,
+			setAutoMethod,
 			response,
 			setResponse,
 			inheritedPreScripts,
@@ -981,6 +997,8 @@ export default function RequestBuilderProvider({
 			setAutoContentType,
 			getAutoAccept,
 			setAutoAccept,
+			getAutoMethod,
+			setAutoMethod,
 			response,
 			setResponse,
 			inheritedPreScripts,
