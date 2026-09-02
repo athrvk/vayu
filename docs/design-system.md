@@ -1496,9 +1496,10 @@ and is the guard on every pointer handler a row spreads.
 rows is a 2px `bg-primary` span positioned inside the target row and indented to
 that row's own depth - the depth is the only thing separating "after this
 collapsed folder", "into it" and "after its parent". Dropping *into* a folder
-reuses the selected-row ring. Nothing new gets `role="treeitem"`: the
-roving-focus walk and the group nesting are read off the DOM, so an indicator
-node between rows would change the tree's shape mid-drag. A row that cannot take
+reuses the selected-row ring. Nothing new gets `role="treeitem"`: every row in
+document order *is* the tree's row list, so an indicator node between rows would
+join it and change the tree's shape mid-drag - a row with no level, sitting
+between a folder and its children. A row that cannot take
 the drop is dimmed and carries `data-drop-blocked` - the dragged folder's own
 subtree, and the block the dragged row does not belong to.
 
