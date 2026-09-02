@@ -102,7 +102,24 @@ export default function CollectionTree() {
 		getRequestsByCollection,
 	});
 
-	const deleteRefocus = useDeleteRefocus(treeRef, panel.deleteConfirm);
+	/*
+	 * The row the open delete dialog would remove. Collections and requests carry
+	 * their ids on different attributes, which is the one thing the shared
+	 * refocus hook cannot know for a tree.
+	 */
+	const doomedRowSelector = panel.deleteConfirm
+		? `[${panel.deleteConfirm.type === "collection" ? "data-collection-id" : "data-request-id"}="${CSS.escape(panel.deleteConfirm.id)}"]`
+		: null;
+
+	/*
+	 * Where focus goes when the deleted row was the only one in the tree: a root
+	 * with no root after it and no parent has no successor to offer, and "Add
+	 * collection" is both the nearest surviving control and the one thing there
+	 * is left to do on an empty tree.
+	 */
+	const addCollectionRef = useRef<HTMLButtonElement>(null);
+
+	const deleteRefocus = useDeleteRefocus(treeRef, doomedRowSelector, addCollectionRef);
 
 	/*
 	 * A row mid-rename or mid-delete is neither a drag source nor a drop target:
@@ -162,6 +179,7 @@ export default function CollectionTree() {
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button
+								ref={addCollectionRef}
 								variant="ghost"
 								size="icon"
 								onClick={panel.openNewCollectionForm}

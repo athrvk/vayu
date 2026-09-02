@@ -42,7 +42,8 @@ Some modules have components displayed in both the sidebar and main content area
 
 - **Location:** Both sidebar and main
 - **Sidebar:** `sidebar/VariablesCategoryTree.tsx` - Tree navigation for variable scopes
-- **Main:** `main/VariablesEditor.tsx` and related editors - Variable editing interface
+- **Main:** `main/VariablesMain.tsx` - Variable editing interface, exported as
+  `VariablesEditor`; the grid itself is `main/VariableTableEditor.tsx`
 - **Usage:**
 
     ```tsx

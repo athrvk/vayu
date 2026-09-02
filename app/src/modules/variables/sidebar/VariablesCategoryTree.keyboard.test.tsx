@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import VariablesCategoryTree from "./VariablesCategoryTree";
@@ -60,30 +60,54 @@ const createEnvironment = vi.fn();
 const updateEnvironment = vi.fn();
 const deleteEnvironment = vi.fn();
 
+/**
+ * The list the query answers with, so a test can take a row out of it the way a
+ * refetch does. A delete's focus move waits for the row to actually leave, and
+ * that landing is a later render than the dialog's close.
+ */
+let environments: Environment[] = [];
+
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ ...idle, data: [COLLECTION] }),
-	useEnvironmentsQuery: () => ({ ...idle, data: [STAGING, PRODUCTION] }),
+	useEnvironmentsQuery: () => ({ ...idle, data: environments }),
 	useCreateEnvironmentMutation: () => ({ mutateAsync: createEnvironment, isPending: false }),
 	useDeleteEnvironmentMutation: () => ({ mutateAsync: deleteEnvironment, isPending: false }),
 	useUpdateEnvironmentMutation: () => ({ mutateAsync: updateEnvironment, isPending: false }),
 }));
 
 const setSelectedCategory = vi.fn();
-vi.mock("@/stores", () => ({ useTabsStore: () => ({ openTab: vi.fn() }) }));
+const failSave = vi.fn();
+vi.mock("@/stores", () => ({
+	useTabsStore: () => ({ openTab: vi.fn() }),
+	useSaveStore: () => ({ failSave }),
+}));
 vi.mock("@/modules/variables/variables-store", () => ({
 	useVariablesStore: () => ({ selectedCategory: null, setSelectedCategory }),
 }));
 
+/** Redraws the tree from whatever `environments` now holds. */
+let redraw: (() => void) | null = null;
+
 function renderTree() {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-	render(
+	// A fresh element per call: React bails out of a rerender given the very
+	// element it already holds, and this one has to re-read the query mock.
+	const ui = () => (
 		<QueryClientProvider client={qc}>
 			<TooltipProvider>
 				<VariablesCategoryTree />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
+	const view = render(ui());
+	redraw = () => act(() => view.rerender(ui()));
 	return screen.getByRole("tree", { name: "Variable scopes" });
+}
+
+/** The refetch that lands after a delete: the row is gone, and the tree redraws. */
+function refetchWithout(environmentId: string) {
+	environments = environments.filter((environment) => environment.id !== environmentId);
+	redraw?.();
 }
 
 /** The row whose `data-tree-label` is `name` - the name the user sees. */
@@ -103,6 +127,9 @@ function press(target: HTMLElement, key: string, init: Partial<KeyboardEventInit
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	environments = [STAGING, PRODUCTION];
+	deleteEnvironment.mockResolvedValue(undefined);
+	redraw = null;
 });
 
 describe("the sidebar is one tree, not a list of tab stops", () => {
@@ -290,5 +317,72 @@ describe("the actions that had no keyboard path", () => {
 		// so neither is asserted against a stubbed `isMac`.
 		press(row(tree, "Staging"), "Backspace");
 		expect(screen.getByText(/"Staging" will be permanently removed/)).toBeInTheDocument();
+	});
+});
+
+/**
+ * The half #1217 left behind: the key it added opens a dialog Radix aims its
+ * close-focus at a row that is about to stop existing, so both outcomes ended on
+ * `<body>` - the defect #1218 and #1234 fixed for the other two lists, on a tree
+ * that grew its Delete key afterwards.
+ */
+describe("a delete never strands focus", () => {
+	/** Delete on the row, then Confirm, waiting for the dialog to actually go. */
+	async function deleteFromKeyboard(target: HTMLElement) {
+		press(target, "Delete");
+		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+		await waitFor(() => expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull());
+	}
+
+	it("moves focus to the next environment once the deleted row is gone", async () => {
+		const tree = renderTree();
+
+		await deleteFromKeyboard(row(tree, "Staging"));
+		expect(deleteEnvironment).toHaveBeenCalledWith("env_1");
+		// Still the deleted row's own: the dialog closes before the refetch that
+		// removes it, and until then nothing says the delete succeeded.
+		expect(document.activeElement).toBe(row(tree, "Staging"));
+
+		refetchWithout("env_1");
+
+		expect(document.activeElement).toBe(row(tree, "Production"));
+		// The tree is one tab stop, so it has to travel with the focus.
+		expect(row(tree, "Production").tabIndex).toBe(0);
+	});
+
+	it("falls back to the section header when the last environment goes", async () => {
+		environments = [STAGING];
+		const tree = renderTree();
+
+		await deleteFromKeyboard(row(tree, "Staging"));
+		refetchWithout("env_1");
+
+		// Every environment row is a level-2 child of the Environments header, and
+		// the header outlives the last of them - so the tree's own rule answers
+		// here and the sidebar needs no last resort named beside it.
+		expect(document.activeElement).toBe(row(tree, "Environments"));
+		expect(document.activeElement).not.toBe(document.body);
+	});
+
+	it("leaves focus on the row, and says so, when the delete fails", async () => {
+		deleteEnvironment.mockRejectedValue(new Error("database is locked"));
+		const tree = renderTree();
+
+		await deleteFromKeyboard(row(tree, "Production"));
+
+		// The row is still sitting there, so focus belongs on it - the outcome
+		// decides, never the confirm click.
+		expect(document.activeElement).toBe(row(tree, "Production"));
+		expect(failSave).toHaveBeenCalledWith("database is locked");
+	});
+
+	it("returns focus to the row when the dialog is cancelled", async () => {
+		const tree = renderTree();
+
+		press(row(tree, "Staging"), "Delete");
+		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+		await waitFor(() => expect(document.activeElement).toBe(row(tree, "Staging")));
+		expect(deleteEnvironment).not.toHaveBeenCalled();
 	});
 });

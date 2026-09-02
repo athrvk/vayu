@@ -340,6 +340,23 @@ describe("delete forever", () => {
 		expect(document.activeElement).toBe(rowFor("c1"));
 	});
 
+	it("falls back to the list when the purged row was the only one", async () => {
+		state.items = [collectionEntry()];
+		const view = renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Delete Billing forever" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete forever$/ }));
+
+		await waitFor(() => expect(purge).toHaveBeenCalledWith("c1"));
+		view.refetchWithout("c1");
+
+		// Neither a next nor a previous row is left, and Trash has no create
+		// control to hand focus to the way the trees do - so it goes to the list
+		// itself, which is still there holding the empty state. Never `<body>`.
+		const list = document.querySelector<HTMLElement>("[data-trash-list]");
+		expect(document.activeElement).toBe(list);
+	});
+
 	it("leaves focus on the row when the purge fails", async () => {
 		state.items = [collectionEntry(), collectionEntry({ id: "c2", name: "Shipping" })];
 		purge.mockRejectedValue(new Error("database is locked"));

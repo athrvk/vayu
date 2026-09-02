@@ -343,6 +343,24 @@ describe("a delete never strands focus", () => {
 		expect(collectionRow("beta").tabIndex).toBe(-1);
 	});
 
+	it("falls back to the create control when the tree's last row goes", async () => {
+		collections = [{ id: "solo", name: "Solo", order: 0 }];
+		requests = new Map();
+		renderTree();
+
+		await deleteFromKeyboard(collectionRow("solo"), "Delete collection?", () => {
+			collections = [];
+			requests = new Map();
+			rerenderTree();
+		});
+
+		// A root with no root after it and no parent has no successor to offer, and
+		// `<body>` is where that answer used to end. "Add collection" is the
+		// nearest thing that survives an emptied tree - and the only thing left to
+		// do on one.
+		expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add collection" }));
+	});
+
 	it("returns focus to the row when the dialog is cancelled", async () => {
 		renderTree();
 		const row = collectionRow("billing");

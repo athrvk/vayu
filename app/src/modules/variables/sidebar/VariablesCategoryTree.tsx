@@ -41,7 +41,8 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
-import { useTabsStore } from "@/stores";
+import { useDeleteRefocus } from "@/modules/collections/useDeleteRefocus";
+import { useTabsStore, useSaveStore } from "@/stores";
 import { useVariablesStore, type VariableCategory } from "@/modules/variables/variables-store";
 import {
 	useCollectionsQuery,
@@ -126,6 +127,7 @@ export default function VariablesCategoryTree() {
 
 	const { selectedCategory, setSelectedCategory } = useVariablesStore();
 	const { openTab } = useTabsStore();
+	const { failSave } = useSaveStore();
 
 	const treeRef = useRef<HTMLDivElement>(null);
 	const treeFocus = useRovingTreeFocus(treeRef);
@@ -253,13 +255,29 @@ export default function VariablesCategoryTree() {
 		? environments.find((e) => e.id === deleteConfirmEnvId)
 		: null;
 
+	/*
+	 * A delete dialog is controlled with no trigger, so Radix aims its close-focus
+	 * at nothing and the row it was opened from is the one thing about to go: both
+	 * outcomes dropped the user on `<body>`, from a Delete key this tree only
+	 * gained in #1217. The tree's shared rule (#1218, #1234) answers it - the row
+	 * while it is still there, the successor once the removal actually lands.
+	 *
+	 * No last resort to name: every environment row is a level-2 child of the
+	 * Environments header, which survives the last of them, so `rowAfterRemoving`
+	 * always has that header to answer with.
+	 */
+	const deleteRefocus = useDeleteRefocus(
+		treeRef,
+		deleteConfirmEnvId ? `[data-environment-id="${CSS.escape(deleteConfirmEnvId)}"]` : null,
+		null
+	);
+
 	const handleConfirmDelete = async () => {
 		if (!deleteConfirmEnvId) return;
 		const envIdToDelete = deleteConfirmEnvId;
 		setDeletingEnvId(envIdToDelete);
 		try {
 			await deleteEnvironmentMutation.mutateAsync(envIdToDelete);
-			setDeleteConfirmEnvId(null);
 			if (
 				selectedCategory?.type === "environment" &&
 				(selectedCategory as { type: "environment"; environmentId: string })
@@ -267,7 +285,17 @@ export default function VariablesCategoryTree() {
 			) {
 				setSelectedCategory(null);
 			}
+		} catch (error) {
+			// A bare `mutateAsync` left the rejection unhandled and the dialog up,
+			// which reads as "the click didn't register" rather than "the delete
+			// failed". Reported through the Dock, the channel the collection tree's
+			// own failures already use.
+			failSave(error instanceof Error ? error.message : "Failed to delete environment");
 		} finally {
+			// Both outcomes close it, because focus is handed back from the close
+			// and the decision of *where* is read from whether the row actually
+			// left - never from the confirm click.
+			setDeleteConfirmEnvId(null);
 			setDeletingEnvId(null);
 		}
 	};
@@ -766,6 +794,7 @@ export default function VariablesCategoryTree() {
 						: "This environment will be permanently removed. This cannot be undone."
 				}
 				onConfirm={handleConfirmDelete}
+				onCloseAutoFocus={deleteRefocus.onCloseAutoFocus}
 				isDeleting={!!deletingEnvId && deletingEnvId === deleteConfirmEnvId}
 			/>
 		</>
