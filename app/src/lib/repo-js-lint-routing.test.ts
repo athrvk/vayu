@@ -58,7 +58,10 @@ function jobRunningLint(): string {
 	if (step === -1) return "";
 
 	const isJobKey = (line: string) => /^ {2}[A-Za-z0-9_-]+:$/.test(line);
-	const start = lines.slice(0, step).findLastIndex(isJobKey);
+	let start = -1;
+	for (let line = step - 1; line >= 0 && start === -1; line--) {
+		if (isJobKey(lines[line])) start = line;
+	}
 	if (start === -1) return "";
 
 	const rest = lines.slice(start + 1);
