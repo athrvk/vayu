@@ -15,8 +15,8 @@
  * did, so the one place you write the *longest* payloads was also the only
  * place you had to remember a variable's name and spell it yourself.
  *
- * **Registered for the body languages only.** `json`, `plaintext` and `graphql`
- * are what `CodeEditor` mounts for a request body. Deliberately *not*
+ * **Registered for the body languages only.** `json`, `plaintext`, `graphql`
+ * and `xml` are what `CodeEditor` mounts for a request body. Deliberately *not*
  * `javascript`: the script editors are the one place `{{name}}` is not the
  * syntax - a script reaches variables through `pm.environment.get()`, its
  * sibling scope accessors, or the merged `pm.variables.get()`, and offering
@@ -67,7 +67,7 @@ const CLOSE_BRACES = "}}";
  * wired only by matching strings, several files apart, so a new body mode with
  * a new language would lose completion silently.
  */
-export const BODY_LANGUAGES = ["json", "plaintext", "graphql"];
+export const BODY_LANGUAGES = ["json", "plaintext", "graphql", "xml"];
 
 /** The resolver's own precedence, so the winning definition sorts first. */
 const SCOPE_ORDER: Record<string, number> = { environment: 0, collection: 1, global: 2 };
