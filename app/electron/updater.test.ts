@@ -296,8 +296,15 @@ describe("when the session's first check runs", () => {
 
 		await letStartupDelayPass();
 		listeners.get("update-not-available")?.({});
-		await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS - UPDATE_STARTUP_CHECK_DELAY_MS);
 
+		// Up to a millisecond before the interval is due, the first check is still
+		// the only one - the delay must not have moved this boundary with it.
+		await vi.advanceTimersByTimeAsync(
+			UPDATE_CHECK_INTERVAL_MS - UPDATE_STARTUP_CHECK_DELAY_MS - 1
+		);
+		expect(checkForUpdates).toHaveBeenCalledTimes(1);
+
+		await vi.advanceTimersByTimeAsync(1);
 		expect(checkForUpdates).toHaveBeenCalledTimes(2);
 	});
 });
@@ -361,7 +368,11 @@ describe("one transient is not the answer", () => {
 		// is in flight inherits its fate. It has to inherit the retry too.
 		vi.useFakeTimers();
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater("darwin");
-		initAutoUpdater(getWindow); // the startup check is still waiting out its delay
+		initAutoUpdater(getWindow);
+		// The click has to land on the startup check itself, so let the launch
+		// delay pass first: before it does there is a timer, not a check, and the
+		// click would simply start its own cycle.
+		await letStartupDelayPass();
 		const first = checkForUpdatesNow("renderer");
 		const joined = checkForUpdatesNow("renderer");
 
