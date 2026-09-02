@@ -34,7 +34,10 @@ export function BadgeText({
 	children: React.ReactNode;
 }) {
 	return (
-		<span className={cn("flex items-center gap-1 text-[10px]", className)} title={title}>
+		<span
+			className={cn("flex items-center gap-1 text-[10px] font-semibold", className)}
+			title={title}
+		>
 			{children}
 		</span>
 	);

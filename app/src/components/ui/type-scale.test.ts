@@ -108,9 +108,15 @@ describe("type scale", () => {
  * The rule this enforces is a ceiling, not a single value: a weight *above* 600
  * cannot render, while `font-medium` on a numeric readout is a real face and a
  * deliberate emphasis (`TimingWaterfall`, `PhasePercentiles`).
+ *
+ * The step has a second row now (#1222). #1199 settled the mono half and left
+ * the same size in the UI face with no row to read, so its chips picked a weight
+ * each - four across five sites, one pair inside `VariableScopeBadge` itself.
+ * Both rows say semibold and the scan below covers both faces: above 600 is a
+ * synthesised face in mono, and at 10px in the UI face it closes the counters.
  */
-const MICRO_MONO_SIZES = ["text-[10px]", "text-[11px]"] as const;
-const MICRO_MONO_WEIGHT = "font-semibold";
+const MICRO_SIZES = ["text-[10px]", "text-[11px]"] as const;
+const MICRO_WEIGHT = "font-semibold";
 
 /** Any Tailwind weight utility, `semibold` first so it wins over `bold`. */
 const WEIGHT_CLASS = /font-(semibold|extrabold|bold|medium|normal|light|thin|black)\b/;
@@ -147,9 +153,15 @@ describe("the micro/badge step's weight", () => {
 		expect(rows.length).toBeGreaterThanOrEqual(8);
 	});
 
-	it("is documented as the weight the app renders", () => {
-		const micro = rows.find((cells) => cells[0].startsWith("Micro / badge"));
-		expect(micro, "no 'Micro / badge' row in the Type Scale Conventions table").toBeDefined();
+	// One row per face. Both are asserted, because a contributor reads whichever
+	// one matches the chip in front of them and a row that disagreed with its
+	// twin would be the same defect the two rows exist to end.
+	it.each([
+		["Micro / badge (mono)", true],
+		["Micro / badge (UI face)", false],
+	])("%s is documented as the weight the app renders", (use, isMono) => {
+		const micro = rows.find((cells) => cells[0] === use);
+		expect(micro, `no '${use}' row in the Type Scale Conventions table`).toBeDefined();
 		const [, , weight, klass] = micro as string[];
 
 		// Both cells, because they drifted as a pair: the Weight cell is what a
@@ -158,46 +170,64 @@ describe("the micro/badge step's weight", () => {
 		expect(/\b(semibold|extrabold|bold|medium|regular|normal|light)\b/.exec(weight)?.[1]).toBe(
 			"semibold"
 		);
-		expect(klass).toContain(MICRO_MONO_WEIGHT);
-		expect(klass).toContain("font-mono");
+		expect(klass).toContain(MICRO_WEIGHT);
+		// The class cell is the thing a contributor pastes, so the row that is not
+		// about mono must not hand them a `font-mono` to paste with it.
+		expect(klass.includes("font-mono")).toBe(isMono);
 	});
 });
 
-describe("no chip at the micro/badge step asks for a face the app has not bundled", () => {
+describe("no chip at the micro/badge step is heavier than the step", () => {
 	/**
-	 * Every class string that puts a mono utility and a 10-11px size together.
-	 * A weight named here must be the documented one; a string that names no
-	 * weight is fine - it is either inheriting `Badge`'s own `font-semibold` or
-	 * printing a value, which the URL/path step leaves unweighted.
+	 * Every class string carrying a 10-11px size, in either face. A weight named
+	 * there must not be above the step's; a string that names no weight is fine -
+	 * it is either inheriting `Badge`'s own `font-semibold` or printing a value,
+	 * which the URL/path step leaves unweighted.
+	 *
+	 * Both quoting forms, because a class list with a conditional in it is a
+	 * template literal and two of the app's are at this size - a quoted-only
+	 * scan reads as covering the app while missing them.
 	 *
 	 * This sees a class only where it is written as a literal beside the size.
-	 * `MethodBadge` composes the two through `cn()` in separate arguments, so
-	 * the step's own primitive is pinned by rendering it instead
-	 * (`MethodBadge.test.tsx`), not here.
+	 * `MethodBadge` and `VariableScopeBadge` compose the two through `cn()` in
+	 * separate arguments - or take the weight from a `cva` base, which is not in
+	 * the source at all - so the step's primitives are pinned by rendering them
+	 * (`MethodBadge.test.tsx`, `variable-scope-badge.test.tsx`), not here.
 	 */
-	const found: string[] = [];
+	const found: { where: string; mono: boolean }[] = [];
 	const offences: string[] = [];
 
 	for (const file of files) {
 		const source = readFileSync(join(srcRoot, file), "utf8");
-		for (const [literal] of source.matchAll(/"[^"\n]*font-mono[^"\n]*"/g)) {
-			if (!MICRO_MONO_SIZES.some((size) => literal.includes(size))) continue;
-			found.push(`${relative(".", file)}  ${literal}`);
+		for (const [literal] of source.matchAll(/"[^"\n]*"|`[^`]*`/g)) {
+			if (!MICRO_SIZES.some((size) => literal.includes(size))) continue;
+			const mono = literal.includes("font-mono");
+			found.push({ where: `${relative(".", file)}  ${literal}`, mono });
 			const weight = WEIGHT_CLASS.exec(literal)?.[0];
 			if (weight === undefined || !HEAVIER_THAN_SEMIBOLD.has(weight)) continue;
 			offences.push(
 				`${relative(".", file)}  ${literal}\n  ` +
-					`${weight} at the micro/badge step is a synthesised face - the ` +
-					`default code font ships no weight above 600. Use ${MICRO_MONO_WEIGHT}.`
+					`${weight} at the micro/badge step ` +
+					(mono
+						? "is a synthesised face - the default code font ships no weight above 600."
+						: "closes the counters at this size rather than reading as emphasis.") +
+					` Use ${MICRO_WEIGHT}.`
 			);
 		}
 	}
 
-	it("scans a real set of chips", () => {
-		expect(found.length).toBeGreaterThan(3);
+	// Both faces, separately: the scan grew to cover the UI face in #1222, and a
+	// regex that quietly stopped matching one of them would still pass a count
+	// carried by the other.
+	it("scans a real set of chips in the code face", () => {
+		expect(found.filter((chip) => chip.mono).length).toBeGreaterThan(3);
 	});
 
-	it("uses no weight the code font cannot draw", () => {
+	it("scans a real set of chips in the UI face", () => {
+		expect(found.filter((chip) => !chip.mono).length).toBeGreaterThan(3);
+	});
+
+	it("uses no weight above the step", () => {
 		expect(offences.join("\n")).toBe("");
 	});
 });

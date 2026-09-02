@@ -99,7 +99,7 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 			<div className="space-y-3">
 				{groups.map((group) => (
 					<section key={group.source} className="space-y-1.5">
-						<h3 className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+						<h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
 							{group.label}
 						</h3>
 						{group.tests.map((test, i) => (

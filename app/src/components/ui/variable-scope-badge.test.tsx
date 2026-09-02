@@ -66,6 +66,27 @@ describe("labels", () => {
 	});
 });
 
+describe("one size, one weight", () => {
+	/**
+	 * Both variants are the 10px micro/badge step in the UI face, whose weight is
+	 * `font-semibold` (`docs/design-system.md`). This primitive was the clearest
+	 * case of the drift #1222 collected: `compact` overrode `Badge`'s base to
+	 * `font-medium` and `full` inherited it, so one component rendered one size at
+	 * two weights.
+	 *
+	 * Rendered rather than scanned, because after the fix neither variant names a
+	 * weight at all - it arrives from the `cva` base through `cn()`, where no
+	 * source scan can see it, and a scan would have passed on the broken version
+	 * too.
+	 */
+	it.each(["compact", "full"] as const)("%s renders the step's weight", (variant) => {
+		const cls = badgeFor("global", variant).className;
+		expect(cls).toContain("text-[10px]");
+		expect(cls).toContain("font-semibold");
+		expect(cls).not.toMatch(/font-(medium|normal|light|thin|bold|extrabold|black)\b/);
+	});
+});
+
 describe("neither variant is interactive", () => {
 	/**
 	 * The full variant was `variant="secondary"`, whose `hover:bg-secondary/80`

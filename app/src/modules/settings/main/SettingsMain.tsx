@@ -611,7 +611,7 @@ export default function SettingsMain() {
 							<div className="flex items-center gap-2">
 								<CardTitle className="text-base">{entry.label}</CardTitle>
 								{needsRestart && (
-									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
 										<RefreshCw className="w-2.5 h-2.5" />
 										Restart Required
 									</span>
@@ -631,7 +631,7 @@ export default function SettingsMain() {
 									 * distinguishable - "Pending" is the more urgent of
 									 * the pair and should not read as identical.
 									 */
-									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-warning/50 bg-warning/15 text-[10px] font-medium text-warning-text">
+									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-warning/50 bg-warning/15 text-[10px] font-semibold text-warning-text">
 										Pending
 									</span>
 								)}
