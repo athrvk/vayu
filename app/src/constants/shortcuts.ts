@@ -69,6 +69,79 @@ export const TOGGLE_CONTEXT_BAR_CHORD: Chord = {
 /** Open Settings, the platform convention for a preferences window. */
 export const SETTINGS_CHORD: Chord = { mod: true, key: ",", label: "Open settings" };
 
+/** Create a request. ⌘N is what every app that makes things binds. */
+export const NEW_REQUEST_CHORD: Chord = { mod: true, key: "N", label: "New request" };
+
+/**
+ * Put the caret in the URL field, the way ⌘L does in a browser.
+ *
+ * Bridged out of Monaco (`lib/editor-chords.ts`): the standalone editor binds
+ * CtrlCmd+L to `expandLineSelection`, and this is exactly the chord someone
+ * halfway through a request body reaches for.
+ */
+export const FOCUS_URL_CHORD: Chord = { mod: true, key: "L", label: "Focus the URL bar" };
+
+/**
+ * Move to the next open tab, and back.
+ *
+ * ⇧⌘] / ⇧⌘[ is Safari's and Chrome's own pair on macOS, and free of both maps
+ * on the others - the native menu binds no bracket at all and the renderer's
+ * ⇧⌘ chords are E, H, U, S, T and M.
+ *
+ * Matched by `code`, for the reason the digit row is: the character these keys
+ * produce moves with the layout *and* with Shift - a US keyboard reports `}`
+ * for ⇧], and an AZERTY one has no unshifted bracket at all - while the
+ * position is the same everywhere. `key` stays the label, so the hint reads
+ * ⇧⌘] rather than ⇧⌘}.
+ *
+ * One definition for both platforms rather than the Ctrl+Tab pair Windows and
+ * Linux browsers also offer: `Chord` has no word for a literal Control key
+ * (`mod` *is* ⌘ on macOS), so Ctrl+Tab would need either a new modifier
+ * threaded through `matchesChord`, `chordKeys`, `chordKeybinding` and
+ * `dispatchChord`, or this chord declared twice and kept in step by hand.
+ */
+export const NEXT_TAB_CHORD: Chord = {
+	mod: true,
+	shift: true,
+	key: "]",
+	code: "BracketRight",
+	label: "Next tab",
+};
+
+export const PREVIOUS_TAB_CHORD: Chord = {
+	mod: true,
+	shift: true,
+	key: "[",
+	code: "BracketLeft",
+	label: "Previous tab",
+};
+
+/**
+ * Move focus to the next region of the window - and, shifted, to the previous.
+ *
+ * F6 is the desktop convention for cycling panes (Windows Explorer, Firefox,
+ * VS Code's `workbench.action.focusNextPart`), and it is the answer to the
+ * thing landmarks alone do not fix: the drawer is labelled and reachable by a
+ * screen reader's landmark list, and reaching the URL bar from a collection row
+ * still meant Tabbing through every request in the tree.
+ *
+ * A skip link was the alternative and is the wrong shape here. "Skip to
+ * content" exists because a web page has a top that a reader arrives at; a
+ * desktop window has no top to skip from, and focus is as likely to start in
+ * the context bar as anywhere else.
+ *
+ * No modifier, so `Shell`'s handler matches these before its `⌘ or Ctrl` gate.
+ * That is safe because F6 is a function key: no text field consumes it, and
+ * nothing in the app claims it.
+ */
+export const NEXT_REGION_CHORD: Chord = { key: "F6", label: "Focus the next region" };
+
+export const PREVIOUS_REGION_CHORD: Chord = {
+	shift: true,
+	key: "F6",
+	label: "Focus the previous region",
+};
+
 /**
  * Move focus out of a code editor.
  *
@@ -156,7 +229,11 @@ export interface ShortcutGroup {
  * rather than printing a second row for a key the reader already saw.
  */
 export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
-	{ id: "requests", title: "Requests", chords: [SEND_CHORD, LOAD_TEST_CHORD] },
+	{
+		id: "requests",
+		title: "Requests",
+		chords: [NEW_REQUEST_CHORD, SEND_CHORD, LOAD_TEST_CHORD, FOCUS_URL_CHORD],
+	},
 	{
 		id: "workspace",
 		title: "Workspace",
@@ -174,7 +251,16 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 		title: "Drawer views",
 		chords: Object.values(DRAWER_VIEW_CHORDS).filter((chord) => chord !== SETTINGS_CHORD),
 	},
-	{ id: "tabs", title: "Tabs", chords: TAB_CHORDS },
+	{
+		id: "tabs",
+		title: "Tabs",
+		chords: [NEXT_TAB_CHORD, PREVIOUS_TAB_CHORD, ...TAB_CHORDS],
+	},
+	{
+		id: "focus",
+		title: "Moving focus",
+		chords: [NEXT_REGION_CHORD, PREVIOUS_REGION_CHORD],
+	},
 	{ id: "editors", title: "Editors", chords: [LEAVE_EDITOR_CHORD] },
 ];
 

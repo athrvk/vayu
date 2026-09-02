@@ -129,6 +129,16 @@ interface TabsState {
 	 */
 	closeTabsForEntities: (entityIds: Iterable<string>, type?: TabType) => void;
 	focusTab: (tabId: string) => void;
+	/**
+	 * Focus the tab `step` places along from the active one, wrapping at both
+	 * ends. `1` is the next tab, `-1` the previous.
+	 *
+	 * Here rather than at the caller for the reason `closeTab` picks its own
+	 * replacement: "which tab is next" is one rule, and the ⇧⌘] chord, a future
+	 * menu item and anything else that offers it should not each re-derive it
+	 * from `openTabs` and disagree about what happens at the ends.
+	 */
+	focusAdjacentTab: (step: 1 | -1) => void;
 }
 
 /**
@@ -411,6 +421,27 @@ export const useTabsStore = create<TabsState>()(
 						tabFocusedAt: stampFocus(tabFocusedAt, openTabs, tabId),
 					});
 				}
+			},
+
+			focusAdjacentTab: (step) => {
+				const { openTabs, activeTabId } = get();
+				if (openTabs.length === 0) return;
+				/*
+				 * `openTabs` order, not `tabFocusedAt` order: "next" means the tab
+				 * to the right of this one in the strip, which is what the user is
+				 * looking at. The recency stamps answer a different question, and
+				 * the palette is where they are asked.
+				 */
+				const current = openTabs.findIndex((t) => t.id === activeTabId);
+				// With no active tab, forwards starts at the first and backwards at
+				// the last - the same wrap, entered from outside.
+				const next =
+					current === -1
+						? step === 1
+							? 0
+							: openTabs.length - 1
+						: (current + step + openTabs.length) % openTabs.length;
+				get().focusTab(openTabs[next].id);
 			},
 		}),
 		{

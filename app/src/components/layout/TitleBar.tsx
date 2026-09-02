@@ -36,6 +36,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { CommandSearchBar } from "./CommandSearchBar";
+import type { AppRegion } from "./region-focus";
 import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
 
 const isElectron = !!window.electronAPI;
@@ -285,6 +286,10 @@ export default function TitleBar() {
 		<header
 			className="titlebar h-[var(--titlebar-height)] grid grid-cols-[1fr_auto_1fr] items-center bg-panel border-b border-border shrink-0 select-none"
 			style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+			// A stop in the F6 cycle - see `region-focus.ts`. Absent outside
+			// Electron, where this whole bar is, and the cycle simply has three
+			// stops there.
+			data-app-region={"banner" satisfies AppRegion}
 		>
 			<div className="flex min-w-0 items-center h-full">
 				{/* macOS: space for native traffic lights */}

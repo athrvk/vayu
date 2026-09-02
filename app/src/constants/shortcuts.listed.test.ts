@@ -53,8 +53,8 @@ const listed = shortcuts.SHORTCUT_GROUPS.flatMap((group) => [...group.chords]);
 
 describe("the chord registry", () => {
 	it("declares chords at all - an empty walk would pass every case below", () => {
-		// Nine tab chords plus the ten named ones, with ⌘, shared.
-		expect(declared.size).toBeGreaterThanOrEqual(18);
+		// Nine tab chords plus the sixteen named ones, with ⌘, shared.
+		expect(declared.size).toBeGreaterThanOrEqual(24);
 	});
 
 	it("names every chord, so a row has something to be called", () => {

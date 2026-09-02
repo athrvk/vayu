@@ -28,9 +28,11 @@ import {
 	SEND_CHORD,
 	LOAD_TEST_CHORD,
 	TOGGLE_CONTEXT_BAR_CHORD,
+	FOCUS_URL_CHORD,
 	LEAVE_EDITOR_CHORD,
 } from "@/constants/shortcuts";
 import { isMac, type Chord } from "@/lib/platform";
+import { focusableWithin, focusFirstOf } from "@/lib/focusable";
 
 /**
  * A chord as a Monaco keybinding number (`KeyMod.CtrlCmd | KeyCode.Enter`), or
@@ -88,24 +90,23 @@ export function dispatchChord(chord: Chord): void {
  * binding it resolves, so the context-bar toggle died at the editor instead of
  * reaching `Shell`'s bubble-phase listener. S, W, B, comma, the digits and the
  * ⇧ view chords really are unbound there and still arrive on their own.
- */
-const BRIDGED_CHORDS: readonly Chord[] = [SEND_CHORD, LOAD_TEST_CHORD, TOGGLE_CONTEXT_BAR_CHORD];
-
-/**
- * What a Tab press can land on, as the browser decides it.
  *
- * `tabindex="-1"` is excluded rather than included: those nodes are focusable
- * by script only, so landing on one puts the user where Tab did not offer to
- * go and where the next Tab continues from somewhere they cannot see.
+ * ⌘L is claimed the same way - `expandLineSelection`
+ * (`contrib/lineSelection/browser/lineSelection.js`) - and it is the chord a
+ * user in a body editor is most likely to reach for, "take me back to the
+ * address bar" being how you leave a page you are done with (#1219).
+ *
+ * ⇧⌘[ and ⇧⌘] are deliberately *not* here. Monaco binds them to fold and
+ * unfold, which is what those keys should do with a caret in code, and
+ * `keyCodeFor` has no `KeyCode` for a bracket anyway - so they switch tabs
+ * everywhere except inside an editor, where the editor's own meaning wins.
  */
-const FOCUSABLE_SELECTOR = [
-	"a[href]",
-	"button:not([disabled])",
-	"input:not([disabled])",
-	"select:not([disabled])",
-	"textarea:not([disabled])",
-	'[tabindex]:not([tabindex="-1"])',
-].join(",");
+const BRIDGED_CHORDS: readonly Chord[] = [
+	SEND_CHORD,
+	LOAD_TEST_CHORD,
+	TOGGLE_CONTEXT_BAR_CHORD,
+	FOCUS_URL_CHORD,
+];
 
 /**
  * Move focus to the first focusable element after `container`, or - when the
@@ -114,12 +115,6 @@ const FOCUSABLE_SELECTOR = [
  * This is the editor's way out, so the target has to be somewhere Tab would
  * have gone. Focusing the container itself is not: Monaco's textarea is *inside*
  * it, so the next Tab would walk straight back in.
- *
- * Whether a candidate is visible is read back from `document.activeElement`
- * rather than decided in advance. A `display: none` element ignores `.focus()`,
- * so the read is exact where a geometric test would be a guess - and it is the
- * one check jsdom, which has no layout and reports every element as zero-sized,
- * can still answer honestly.
  *
  * Document order, not the tab order proper: a positive `tabIndex` would come
  * first in a real Tab press and does not here. Nothing in `app/src` uses one,
@@ -133,9 +128,7 @@ const FOCUSABLE_SELECTOR = [
 export function focusAfterEditor(container: HTMLElement | null | undefined): boolean {
 	if (!container) return false;
 
-	const outside = Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-		(el) => !container.contains(el) && !el.closest("[aria-hidden='true'],[inert],[hidden]")
-	);
+	const outside = focusableWithin(document).filter((el) => !container.contains(el));
 	const firstAfter = outside.findIndex(
 		(el) => (container.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
 	);
@@ -146,11 +139,7 @@ export function focusAfterEditor(container: HTMLElement | null | undefined): boo
 			? [...outside].reverse()
 			: [...outside.slice(firstAfter), ...outside.slice(0, firstAfter).reverse()];
 
-	for (const el of order) {
-		el.focus();
-		if (document.activeElement === el) return true;
-	}
-	return false;
+	return focusFirstOf(order);
 }
 
 /**
