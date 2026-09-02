@@ -42,8 +42,8 @@ function layoutSources(): string[] {
  * the attribute themselves (#1219): a scan that hardcodes what it looks for
  * goes quietly green if that thing is renamed - matching nothing and finding no
  * offenders. Renaming the helper without its call sites still fails here,
- * because a band whose marker the scan cannot find is a band missing from
- * `EXPECTED`.
+ * because a marker the scan cannot find drops that band from `markedRegions`,
+ * which is what the comparison against `EXPECTED` then catches.
  *
  * What the scan can no longer see is the attribute itself, which now reaches
  * the DOM inside the helper. `writes the attribute the cycle queries` below is
