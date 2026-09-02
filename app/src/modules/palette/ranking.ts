@@ -129,7 +129,9 @@ export interface RankedPalette {
 	/**
 	 * The verbs the palette offers: at the head of the empty query, and again
 	 * when a typed query matched nothing at all. In between - a query with
-	 * results - they rank as the `command` section they have always been.
+	 * results - they rank as the `command` section they have always been. On the
+	 * empty query, minus any verb Recents already holds: the row renders there
+	 * instead, one section up.
 	 */
 	quickActions: PaletteItem[];
 	/** The familiar fixed order, minus whatever was promoted or lifted. */
@@ -153,16 +155,28 @@ export interface RankedPalette {
  *
  * The empty query answers that question with two sections of its own, above the
  * fixed order: Recents, and the verbs. Both are *lifted* out of the sections
- * their rows belong to rather than copied into the new ones - the same rule the
- * top result follows, and for the same reason: two rows carrying the same cmdk
- * `value` would both read as selected.
+ * their rows belong to - and out of each other - rather than copied into the
+ * new ones, the same rule the top result follows and for the same reason: two
+ * rows carrying the same cmdk `value` would both read as selected.
  */
 export function rankPalette(items: PaletteItem[], query: string): RankedPalette {
 	const needle = query.trim();
 	if (needle === "") {
-		const quickActions = verbsOf(items);
+		/*
+		 * The lead sections render in the order they are built and the earlier
+		 * one owns the row, which is the precedence the top result already sets.
+		 * The two predicates are independent - a verb is a `command` row, a
+		 * recent is one carrying a `recencyAt` stamp - and nothing stops a row
+		 * from answering both, so without the exclusion one added stamp would
+		 * put a row under both headings: two rows carrying one cmdk `value`,
+		 * reading as selected together, counted twice in `total`. No source
+		 * stamps a command today, so this changes no screen; it is what keeps
+		 * the one that does from arming the defect silently.
+		 */
 		const recents = recentsOf(items);
-		const lifted = new Set([...quickActions, ...recents].map((item) => item.id));
+		const recentIds = new Set(recents.map((item) => item.id));
+		const quickActions = verbsOf(items).filter((item) => !recentIds.has(item.id));
+		const lifted = new Set([...recents, ...quickActions].map((item) => item.id));
 		const groups = groupsOf(
 			items.filter((item) => !lifted.has(item.id)),
 			(ofKind) => rankForEmptyQuery(ofKind)

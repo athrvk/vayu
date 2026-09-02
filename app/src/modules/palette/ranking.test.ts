@@ -274,6 +274,25 @@ describe("the empty query's lead sections", () => {
 		expect(ranked.groups.map((g) => g.kind)).toEqual(["settings"]);
 	});
 
+	it("gives a dated command to Recents alone, not to both sections", () => {
+		/*
+		 * The two predicates overlap: a verb is a `command` row, a recent is one
+		 * carrying a stamp, and a row can answer both. No source stamps a
+		 * command today, so this is the guard on the day one does - without the
+		 * exclusion in `rankPalette` the row renders under both headings, under
+		 * one cmdk `value`, and `total` counts it twice.
+		 */
+		const items = [
+			item({ id: "dated-verb", kind: "command", recencyAt: 3000 }),
+			item({ id: "verb", kind: "command" }),
+		];
+		const ranked = rankPalette(items, "");
+		expect(ranked.recents.map((i) => i.id)).toEqual(["dated-verb"]);
+		expect(ranked.quickActions.map((i) => i.id)).toEqual(["verb"]);
+		expect(rendered(items, "")).toEqual(["dated-verb", "verb"]);
+		expect(ranked.total).toBe(2);
+	});
+
 	it("has neither section once something is typed", () => {
 		const items = [
 			item({ id: "verb", kind: "command", title: "Import collection" }),
