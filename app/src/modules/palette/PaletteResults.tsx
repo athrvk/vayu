@@ -85,9 +85,11 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 	/*
 	 * The sections above the fixed order, in the order they render. Each holds
 	 * rows lifted out of the sections below rather than copied into it - two
-	 * rows carrying the same `value` would both read as selected - so at most
-	 * one of these is ever populated at a time: the top result answers a typed
-	 * query, Recents and the verbs answer an empty one.
+	 * rows carrying the same `value` would both read as selected - so no row
+	 * reaches this list twice. The top result answers a typed query and Recents
+	 * and the verbs both answer an empty one, so the two of them do render
+	 * together; a row that qualifies for both belongs to Recents, the earlier
+	 * section, and `ranking.ts` has already taken it out of the other.
 	 */
 	const lead: LeadSection[] = [
 		{ key: "top", heading: TOP_RESULT_LABEL, items: ranked.top },

@@ -250,10 +250,10 @@ See [App Architecture - Sidecar](app/architecture.md#engine-sidecar-electronside
 ### Outbound Transport
 
 Every request the engine puts on the wire - a design send, a load run, an SSE
-stream, an OAuth token fetch, a spec import by URL, a monitor scrape - leaves
-through one transport policy, resolved from Settings > Network & connectivity
-at the point of use and applied by a single function
-(`detail::apply_transport_policy`). There is one hop between the engine and the
+stream, an OAuth token fetch, a spec import by URL, a monitor scrape, a script's
+own `pm.sendRequest` - leaves through one transport policy, resolved from
+Settings > Network & connectivity at the point of use and applied by a single
+function (`detail::apply_transport_policy`). There is one hop between the engine and the
 target and it is either absent or a proxy:
 
 ```

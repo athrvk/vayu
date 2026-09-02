@@ -21,8 +21,13 @@
  *   registry; indexing them here would put every settings screen in the group
  *   twice, under two rows that do the same thing.
  * - **It does not own a matcher.** `searchSettings` is the sidebar's ranking,
- *   and a palette that ranked settings differently from the settings sidebar
- *   would be two answers to one question. One index, one ranking, two UIs.
+ *   and a palette that matched settings differently from the settings sidebar
+ *   would be two answers to one question. One index, one matcher, two UIs -
+ *   which rows are settings results is decided once, here. Their order on
+ *   screen is not: `ranking.ts` re-sorts every section by the score it gave the
+ *   row, so the palette can list what it kept in an order the sidebar would
+ *   not, deliberately, since the palette scores these rows by the one measure
+ *   it scores every other kind by and the sidebar ranks them among themselves.
  */
 
 import { useMemo } from "react";
