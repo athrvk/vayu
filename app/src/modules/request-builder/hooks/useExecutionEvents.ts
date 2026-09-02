@@ -11,7 +11,8 @@
  * `POST /execute` with `stream: true` answers `202 {runId, eventsUrl}` and the
  * upstream's events arrive over that URL as SSE. This hook owns exactly one
  * such subscription - the one `execution-events-store` is holding - and writes
- * every frame into that store.
+ * every frame into that store, in batches on the live-refresh cadence rather
+ * than one commit per frame (issue #1158).
  *
  * **A per-endpoint `EventSource`, not the `SSEClient` singleton.** That client
  * belongs to load and scenario runs: it is a single connection whose lifetime
@@ -32,6 +33,7 @@
 
 import { useEffect, useRef } from "react";
 import { API_ENDPOINTS } from "@/config/api-endpoints";
+import { createThrottledBatcher } from "@/services/throttled-batcher";
 import { useExecutionEventsStore } from "@/stores";
 import {
 	STREAM_END_REASONS,
@@ -155,6 +157,23 @@ export function useExecutionEvents(): void {
 		}
 
 		const store = useExecutionEventsStore.getState();
+
+		/*
+		 * A commit per flush window, not per frame (issue #1158).
+		 *
+		 * The buffer, the leading edge and the trailing timer are
+		 * `services/throttled-batcher.ts` - the same mechanism `LoadTestService`
+		 * and `ScenarioRunService` commit through, on the same `liveRefreshMs`
+		 * cadence, so a timing fix lands in one place rather than three.
+		 *
+		 * It lives in the effect rather than in a ref, because everything it
+		 * holds belongs to one subscription: the buffer is this run's frames,
+		 * the way the resume point and the `EventSource` beside it are.
+		 */
+		const batcher = createThrottledBatcher<StreamEvent>((batch) =>
+			store.addEvents(runId, batch)
+		);
+
 		let source: EventSource | null = null;
 		let retryTimer: ReturnType<typeof setTimeout> | null = null;
 		let attempts = 0;
@@ -201,7 +220,7 @@ export function useExecutionEvents(): void {
 			source.onmessage = (event) => {
 				noteFrame(event);
 				const parsed = parseMessageFrame(payloadOf(event));
-				if (parsed) store.addEvent(runId, parsed);
+				if (parsed) batcher.push(parsed);
 			};
 
 			source.addEventListener("complete", (event) => {
@@ -210,6 +229,11 @@ export function useExecutionEvents(): void {
 					event instanceof MessageEvent
 						? parseCompleteFrame(payloadOf(event))
 						: { reason: "error" as const, totalEvents: null };
+				// Before `endStream`, and not only so the last window's rows are
+				// on screen: a `complete` frame that named no total falls back to
+				// `events.length`, so a tail still in the buffer would be missing
+				// from the count as well as from the list.
+				batcher.flush();
 				store.endStream(runId, reason, totalEvents);
 				source?.close();
 				source = null;
@@ -227,6 +251,9 @@ export function useExecutionEvents(): void {
 				source = null;
 
 				if (attempts >= EXECUTION_EVENTS_MAX_RETRIES) {
+					// What arrived before the stream was lost belongs under the
+					// notice explaining why it stopped, not dropped with it.
+					batcher.flush();
 					// Ended rather than left open: the reconnects are spent, so
 					// nothing more is coming and a pane that kept saying "streaming"
 					// would be lying. `error` is the honest reason - the engine may
@@ -248,6 +275,17 @@ export function useExecutionEvents(): void {
 
 		return () => {
 			cancelled = true;
+			/*
+			 * Flush rather than discard. A teardown is either the stream ending -
+			 * where the buffer is already empty, having been flushed above - or
+			 * this subscription being replaced, and only the store can tell which
+			 * run the leftovers belong to: `addEvents` drops a batch addressed to
+			 * a run it is no longer holding, and `startStream` has already moved
+			 * it on by the time React runs this. Discarding here instead would
+			 * lose up to one window of a stream that is still the store's, which
+			 * the relay will not re-deliver - the resume point has passed them.
+			 */
+			batcher.flush();
 			if (retryTimer !== null) clearTimeout(retryTimer);
 			source?.close();
 		};
