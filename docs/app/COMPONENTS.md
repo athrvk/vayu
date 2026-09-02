@@ -1470,9 +1470,10 @@ same reason - there is deliberately **no re-export shim** in
 scope; without one it is a plain text field, since a token would paint a name
 "not defined" and open an editor with nowhere to write.
 
-**A token has four states, and the overlay decides between them in the order
-`resolveTemplate` does** - reserved namespaces first, then the scopes, then the
-generator table:
+**A token has four states, decided in the order `resolveTemplate` decides
+them** - reserved namespaces first, then the scopes, then the generator table.
+The overlay paints that decision rather than making it; `classifyVariableToken`
+makes it, for every surface (see below):
 
 | Token | Painted by | Looks like |
 |-------|-----------|------------|

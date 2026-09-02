@@ -229,6 +229,13 @@ export default function VariableInput({
 	 * falls back to the first token, in the same render rather than one later.
 	 * The count comes from `overlayTokens`, so nothing here reads back the DOM it
 	 * has just painted to learn how many tokens it painted.
+	 *
+	 * The fallback is a fallback and not a reset: `activeTokenIndex` still holds
+	 * the token the reader last put focus on, so a stop that comes back into
+	 * range - retype three variables, delete two, type them again - is theirs
+	 * again rather than the first token's. That is the roving-tabindex rule the
+	 * rest of the app follows; the effect this replaced could not, having only
+	 * the state itself to write its correction to.
 	 */
 	const activeStop = activeTokenIndex < overlayTokens.length ? activeTokenIndex : 0;
 
