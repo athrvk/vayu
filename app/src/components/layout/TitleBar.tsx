@@ -159,7 +159,8 @@ function AppIcon() {
 			// button-activation key, not one of the app's shortcuts.
 			tabIndex={0}
 			onKeyDown={(e) => {
-				if (!isCommitEnter(e) && e.key !== " ") return;
+				const activates = isCommitEnter(e) || (e.key === " " && !e.ctrlKey && !e.metaKey);
+				if (!activates) return;
 				e.preventDefault();
 				openSystemMenu(e);
 			}}

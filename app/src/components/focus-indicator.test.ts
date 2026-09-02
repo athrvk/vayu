@@ -29,7 +29,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
-import { blankComments } from "@/lib/jsx-opening-tags.testkit";
+import { blankComments, literalMask } from "@/lib/jsx-opening-tags.testkit";
 
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -51,8 +51,16 @@ const INDICATORS = [
 	"data-[highlighted",
 ];
 
-/** The helper calls whose arguments are one class string between them. */
-const CLASS_HELPER = /\b(cn|cva|clsx)\s*$/;
+/**
+ * The helper calls whose arguments are one class string between them.
+ *
+ * `cva` is deliberately absent. Its arguments are a base string and an object
+ * of variants, only some of which are ever applied, so an indicator in one
+ * variant does not answer for an `outline-none` in the base - reading the whole
+ * call would let a ring on `variant="ghost"` cover a bare `variant="default"`.
+ * An occurrence inside a `cva()` is therefore read as its own literal.
+ */
+const CLASS_HELPER = /\b(cn|clsx)\s*$/;
 
 /**
  * Every element with `outline-none` that is deliberately without an indicator
@@ -90,30 +98,10 @@ const EXEMPT: readonly { file: string; marker: string; why: string; requires?: s
 	},
 ];
 
-/** Marks every character that sits inside a string or template literal. */
-function literalMask(source: string): boolean[] {
-	const inLiteral = new Array<boolean>(source.length).fill(false);
-	let quote: string | null = null;
-	for (let i = 0; i < source.length; i++) {
-		const c = source[i];
-		if (quote) {
-			inLiteral[i] = true;
-			if (c === "\\") i++;
-			else if (c === quote) quote = null;
-			continue;
-		}
-		if (c === '"' || c === "'" || c === "`") {
-			quote = c;
-			inLiteral[i] = true;
-		}
-	}
-	return inLiteral;
-}
-
 /**
  * The whole class string an occurrence belongs to: the arguments of the
- * enclosing `cn()` / `cva()` / `clsx()` call, or - for a plain
- * `className="…"` - the literal itself.
+ * enclosing `cn()` / `clsx()` call, or - for a plain `className="…"`, and for
+ * a `cva()` whose variants are not all applied at once - the literal itself.
  *
  * Parentheses inside literals do not count, which is what the mask is for: a
  * class like `origin-[--radix-popover-content-transform-origin]` holds none,
@@ -258,6 +246,14 @@ describe("the class-string reader", () => {
 	it("reads a plain attribute as its own literal", () => {
 		const source = '<input className="outline-none" />\n<b className="focus-visible:ring-1" />';
 		expect(classStringAt(source, source.indexOf("outline-none"))).toBe('"outline-none"');
+	});
+
+	it("reads a cva() occurrence as its own literal, not the variant block", () => {
+		const source =
+			'cva("h-9 outline-none", {\nvariants: { v: { ghost: "focus-visible:ring-1" } },\n})';
+		expect(classStringAt(source, source.indexOf("outline-none"))).not.toContain(
+			"focus-visible:"
+		);
 	});
 
 	it("is not confused by parentheses inside a class", () => {

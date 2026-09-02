@@ -58,6 +58,37 @@ export function blankComments(src: string): string {
 }
 
 /**
+ * Which characters sit inside a string or template literal, by index.
+ *
+ * Every scan here has to skip literal contents - a `>` in `[&>span]`, a `(` in
+ * an `origin-[…]` class, a `{` in a `data-[state=open]` variant - and this is
+ * the one place that decides what "inside a literal" means. It is meant for
+ * comment-blanked source: on raw source the apostrophe in `member's` is
+ * indistinguishable from an opening quote, which is the bug `blankComments`
+ * exists for, so blank first and mask second.
+ */
+export function literalMask(src: string): boolean[] {
+	const inLiteral = new Array<boolean>(src.length).fill(false);
+	let quote: string | null = null;
+	for (let i = 0; i < src.length; i++) {
+		const c = src[i];
+		if (quote) {
+			inLiteral[i] = true;
+			if (c === "\\") {
+				if (i + 1 < src.length) inLiteral[i + 1] = true;
+				i++;
+			} else if (c === quote) quote = null;
+			continue;
+		}
+		if (c === '"' || c === "'" || c === "`") {
+			quote = c;
+			inLiteral[i] = true;
+		}
+	}
+	return inLiteral;
+}
+
+/**
  * Every `<Name ...>` opening tag in `src`, each returned whole - from the `<`
  * to the `>` that closes it, self-closing or not.
  *
@@ -77,21 +108,17 @@ interface TagRange {
 function tagRanges(source: string, name: string): TagRange[] {
 	// Structure is read from the blanked copy; the caller slices the original.
 	const src = blankComments(source);
+	const inLiteral = literalMask(src);
 	const ranges: TagRange[] = [];
 	const re = new RegExp(`<${name}\\b`, "g");
 	let match: RegExpExecArray | null;
 	while ((match = re.exec(src))) {
 		let depth = 0; // {} nesting
-		let quote: string | null = null;
 		let i = match.index + match[0].length;
 		for (; i < src.length; i++) {
+			if (inLiteral[i]) continue;
 			const c = src[i];
-			if (quote) {
-				if (c === quote) quote = null;
-				continue;
-			}
-			if (c === '"' || c === "'" || c === "`") quote = c;
-			else if (c === "{") depth++;
+			if (c === "{") depth++;
 			else if (c === "}") depth--;
 			else if (c === ">" && depth === 0) break;
 		}

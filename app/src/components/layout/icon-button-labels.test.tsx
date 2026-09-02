@@ -28,9 +28,12 @@
  *
  * Two gaps closed in #1216:
  *
- * - It saw `<Button size="icon">` and nothing else, while 13 raw `<button>`
+ * - It saw `<Button size="icon">` and nothing else, while 12 raw `<button>`
  *   elements hold an icon and no text. Every one of them is named today; the
- *   scan is here so the fourteenth is not the one that finds out.
+ *   scan is here so the thirteenth is not the one that finds out. (A
+ *   thirteenth exists and is skipped on purpose: the schema explorer's chevron
+ *   is `aria-hidden` and `tabIndex={-1}`, a pointer affordance for an expand
+ *   the row already exposes through `aria-expanded` and the arrow keys.)
  * - `title`-only was accepted without limit. No site relies on it any more, so
  *   the count is pinned at zero: a *new* icon button gets a real `aria-label`,
  *   which is the half of the name computation that survives keyboard focus.
