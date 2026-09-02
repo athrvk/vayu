@@ -219,11 +219,20 @@ describe("the field's combobox semantics", () => {
 	});
 });
 
-/** Everything a keyboard can land on, by the rules a browser uses. */
+/**
+ * Everything a keyboard can land on, by the rules a browser uses.
+ *
+ * `[tabindex]` including `-1`, not only the Tab stops: in a roving strip every
+ * token but one *is* `-1`, and the arrow keys focus them (`handleOverlayKeyDown`
+ * calls `.focus()` on the destination). Reading the strip as one focusable
+ * element let this guard pass while four run-time tokens sat focusable inside
+ * `aria-hidden` wrappers - which is the state issue #1238 found and the reason
+ * the rule is `aria-hidden-focus`, not `aria-hidden-tabstop`.
+ */
 function focusable(root: HTMLElement): HTMLElement[] {
 	return Array.from(
 		root.querySelectorAll<HTMLElement>(
-			'a[href], button, input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
+			"a[href], button, input:not([disabled]), select, textarea, [tabindex]"
 		)
 	);
 }
@@ -248,21 +257,24 @@ describe("the token overlay", () => {
 		const { container } = renderHarness({ initial: "a/{{$guid}}" });
 
 		const overlay = container.querySelector<HTMLElement>("[data-variable-overlay]")!;
-		// The literal text either side of a token, and a run-time token, which has
-		// no popover to open and is not focusable.
+		// The literal text either side of a token - and only that. A run-time
+		// token was hidden here too until issue #1238, on the grounds that it was
+		// not focusable; it now is, and its tooltip is the only statement of where
+		// the value comes from.
 		expect(within(overlay).getByText("a/")).toHaveAttribute("aria-hidden", "true");
-		expect(overlay.querySelector("[data-runtime-token]")).toHaveAttribute(
-			"aria-hidden",
-			"true"
-		);
+		expect(overlay.querySelector("[data-runtime-token]")).not.toHaveAttribute("aria-hidden");
 	});
 });
 
-/** The editable tokens, in painted order. */
+/**
+ * The tokens the strip walks, in painted order - both kinds.
+ *
+ * By the stop rather than by a role, matching the component's own selector: the
+ * editable token's trigger is a `role="button"`, a run-time token's deliberately
+ * is not, and what makes either one of these is that it carries a `tabindex`.
+ */
 function tokens(container: HTMLElement): HTMLElement[] {
-	return Array.from(
-		container.querySelectorAll<HTMLElement>('[data-variable-token] [role="button"]')
-	);
+	return Array.from(container.querySelectorAll<HTMLElement>("[data-variable-token] [tabindex]"));
 }
 
 describe("the token strip", () => {
@@ -312,7 +324,7 @@ describe("the token strip", () => {
 		const { container } = render(
 			<TooltipProvider delayDuration={0}>
 				<VariableInput
-					value="{{alpha}}/{{beta}}"
+					value="{{alpha}}/{{$guid}}/{{beta}}"
 					onChange={() => {}}
 					aria-label="URL"
 					disabled
@@ -322,10 +334,60 @@ describe("the token strip", () => {
 		);
 
 		// The other half of "no focusable element under aria-hidden": a disabled
-		// field paints the same strip, and it must not hold a stop at all.
+		// field paints the same strip, and it must not hold a stop at all - the
+		// run-time token in the middle included (issue #1238).
 		const strip = tokens(container);
-		expect(strip).toHaveLength(2);
+		expect(strip).toHaveLength(3);
 		expect(strip.every((t) => t.getAttribute("tabindex") === "-1")).toBe(true);
+	});
+
+	/*
+	 * Issue #1238. The strip counted only editable tokens, so a run-time one in
+	 * the middle of a field was skipped over and its tooltip - the whole of what
+	 * it has to say - was mouse-only. Stop counting the run-time tokens and the
+	 * three below red: the strip loses its middle stop, and the arrow that should
+	 * land on it walks to the far editable token instead.
+	 */
+	it("walks both kinds of token, in painted order", () => {
+		const { container } = renderHarness({ initial: "{{alpha}}/{{$guid}}/{{beta}}" });
+
+		const strip = tokens(container);
+		expect(strip).toHaveLength(3);
+		expect(strip.map((t) => t.textContent)).toEqual(["{{alpha}}", "{{$guid}}", "{{beta}}"]);
+	});
+
+	it("is still one Tab stop with a run-time token among them", () => {
+		const { container } = renderHarness({ initial: "{{alpha}}/{{$guid}}/{{beta}}" });
+
+		const strip = tokens(container);
+		expect(strip.filter((t) => t.getAttribute("tabindex") === "0")).toHaveLength(1);
+		expect(strip[0]).toHaveAttribute("tabindex", "0");
+	});
+
+	it("arrows onto a run-time token rather than past it", () => {
+		const { container } = renderHarness({ initial: "{{alpha}}/{{$guid}}/{{beta}}" });
+
+		const strip = tokens(container);
+		strip[0].focus();
+		fireEvent.keyDown(strip[0], { key: "ArrowRight" });
+
+		const runtime = tokens(container)[1];
+		expect(runtime).toHaveTextContent("{{$guid}}");
+		expect(document.activeElement).toBe(runtime);
+		expect(runtime).toHaveAttribute("tabindex", "0");
+
+		// And it hands the stop on rather than swallowing it - it is a stop in a
+		// strip, not a trap.
+		fireEvent.keyDown(runtime, { key: "ArrowRight" });
+		expect(document.activeElement).toBe(tokens(container)[2]);
+	});
+
+	it("gives a run-time token no button role - there is nothing to activate", () => {
+		const { container } = renderHarness({ initial: "{{$guid}}" });
+
+		// The editable token's other half. A screen reader announcing a button
+		// that answers no key is worse than announcing nothing.
+		expect(tokens(container)[0]).not.toHaveAttribute("role");
 	});
 
 	it("still opens the popover from the token that holds focus", () => {
