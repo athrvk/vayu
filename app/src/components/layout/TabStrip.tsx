@@ -60,6 +60,7 @@ import { getMethodColor } from "@/utils";
 // The tab -> panel ids, shared with Shell, which renders the panel end of the
 // relationship. See tab-aria.ts.
 import { tabElementId, tabPanelElementId } from "./tab-aria";
+import { closeTabFromKeyboard } from "./tab-focus";
 
 function TabItem({
 	tab,
@@ -107,7 +108,9 @@ function TabItem({
 				// work and the request it showed is still in its collection.
 				if (e.key === "Delete" || e.key === "Backspace") {
 					e.preventDefault();
-					closeTab(tab.id);
+					// Through the shared helper, because this tab is what holds
+					// focus: closing it plainly drops the user on `<body>` (#1218).
+					closeTabFromKeyboard(tab.id);
 				}
 			}}
 			onAuxClick={(e) => {
@@ -337,6 +340,9 @@ export function TabStrip() {
 			<button
 				onClick={() => openTab({ type: "welcome", entityId: null })}
 				aria-label="New tab"
+				// Where focus lands when the last tab is closed from the keyboard
+				// (tab-focus.ts), the way the tree's hidden controls are reached.
+				data-tab-new
 				style={{ width: TAB_NEW_BUTTON_WIDTH }}
 				className="flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground"
 			>

@@ -1508,6 +1508,18 @@ catch focus drops the user to `<body>` and the next Tab restarts from the top of
 the document. Both row types refocus their own row. A *blur* deliberately does
 not - focus has already gone where the user sent it.
 
+**A delete must hand focus on, because the row it came from is gone.** The
+confirm dialog is rendered controlled with no trigger, and a trigger is what
+Radix aims its close-focus at - so both outcomes dropped the user to `<body>`
+(#1218). Cancel returns focus to the row, which is still there. A confirmed
+delete moves it to the **next row in the deleted row's own set**, or to the
+**parent** when that row was the last in it: chosen while the row is still on
+screen, since afterwards the DOM cannot say what followed it. Depth comes from
+`aria-level` rather than the parent walk above - that walk takes the first
+treeitem in an ancestor and so can answer with a preceding sibling, which is
+harmless for Left and wrong for choosing what outlives a row. Focus moves
+through `focusTreeRow`, so the tree's one tab stop travels with it.
+
 Visible order comes from the DOM (`[role="treeitem"]` in document order), since
 collapsed subtrees are not rendered. Note a row's children are a **sibling** of
 that row inside a shared wrapper, not nested within it, so finding a parent row
