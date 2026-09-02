@@ -177,8 +177,10 @@ function environmentRow(): Row {
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
-	// This row has no `data-tree-activate` - it is not part of the collection
-	// tree's roving-focus group. Reach it through its label.
+	// The variables sidebar is its own roving-focus tree (#1217), so this row
+	// carries `data-tree-activate` like the two above - but so do the section
+	// headers and the other scopes, and only this one belongs to the fixture.
+	// Reach it through its label.
 	const activator = screen.getByText(ENVIRONMENT.name).closest("button") as HTMLElement;
 	return {
 		row: activator.parentElement as HTMLElement,

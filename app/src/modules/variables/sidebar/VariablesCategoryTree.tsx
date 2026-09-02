@@ -12,9 +12,35 @@
  * - Globals
  * - Collections (with variables)
  * - Environments
+ *
+ * **A real WAI-ARIA tree, on the same hook the collection tree uses** (#1217).
+ * Rename and Duplicate live only in the row's ⋯ menu, whose trigger is
+ * `tabIndex={-1}`, so before this both actions were mouse-only: nothing here
+ * listened for F2, Shift+F10, ContextMenu or Shift+Enter, and no other surface
+ * offers them (`VariableTableEditor` has a delete fallback and nothing else).
+ * The sidebar was also one Tab stop per control rather than one for the tree.
+ *
+ * `useRovingTreeFocus` is reused rather than re-implemented: a hand-rolled copy
+ * would not receive the primitive's fixes, and the two lists of key guards would
+ * drift the way this repo has watched them drift before. Rows declare what they
+ * can do through the hook's `data-tree-*` protocol; see `docs/design-system.md`
+ * "Tree Navigation".
+ *
+ * Two shapes here differ from the collection tree, deliberately:
+ *
+ *   - **The section headers are rows.** Globals, Environments and Collections
+ *     are the three level-1 treeitems; the environments and collections lists
+ *     are their level-2 children. That is what lets one arrow key walk the whole
+ *     sidebar, and it gives the headers expand/collapse on Right/Left for free.
+ *   - **"Add environment" stays a Tab stop**, outside the header row's treeitem.
+ *     The tree owns no "create" key, so moving that button inside the roving
+ *     tabindex would make creating an environment mouse-only - trading the
+ *     defect this file just fixed for a new one. The tree is one stop; that
+ *     button is the second.
  */
 
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
 import { useTabsStore } from "@/stores";
 import { useVariablesStore, type VariableCategory } from "@/modules/variables/variables-store";
 import {
@@ -48,6 +74,13 @@ import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { Badge, Input, DeleteConfirmDialog, TooltipIconButton } from "@/components/ui";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
+
+/**
+ * Globals, Environments, Collections - the level-1 rows a screen reader counts
+ * ("2 of 3"). A literal, because the three are written out in the JSX below
+ * rather than mapped: two of them differ in shape.
+ */
+const SCOPE_SECTIONS = 3;
 
 export default function VariablesCategoryTree() {
 	// Fetches its own data, like the other three drawer views. It used to
@@ -93,6 +126,15 @@ export default function VariablesCategoryTree() {
 
 	const { selectedCategory, setSelectedCategory } = useVariablesStore();
 	const { openTab } = useTabsStore();
+
+	const treeRef = useRef<HTMLDivElement>(null);
+	const treeFocus = useRovingTreeFocus(treeRef);
+	// A row's children are rendered as a sibling of the row, not inside it (the
+	// shape the roving-focus walk and the hit-area rules depend on), so the
+	// header row claims its list with `aria-owns` instead.
+	const environmentsGroupId = useId();
+	const collectionsGroupId = useId();
+
 	const [collectionsExpanded, setCollectionsExpanded] = useState(true);
 
 	// Selecting a scope must also surface the variables editor in the main view
@@ -114,6 +156,34 @@ export default function VariablesCategoryTree() {
 	const createEnvironmentMutation = useCreateEnvironmentMutation();
 	const deleteEnvironmentMutation = useDeleteEnvironmentMutation();
 	const updateEnvironmentMutation = useUpdateEnvironmentMutation();
+
+	/**
+	 * The row to hand focus back to once React has unmounted the rename field,
+	 * set only when that field is closed *from the keyboard*. The tree is one tab
+	 * stop and the field replaces the row's only focusable control, so an Enter
+	 * or Escape that left focus on `<body>` would drop the user out of the tree
+	 * entirely - the cost F2 would otherwise carry. A blur deliberately does not
+	 * set it: focus has already gone where the user put it.
+	 *
+	 * The refocus waits for the effect below rather than running inline, which is
+	 * the whole point of the pattern (`CollectionItem` does the same). Focusing
+	 * the row while the field is still mounted *blurs* it, and its `onBlur`
+	 * commits - so an inline version saved the very rename Escape had just
+	 * cancelled, reading the value out of a closure the cancel had not yet
+	 * cleared. An id rather than a ref because this file renders every row
+	 * itself; there is no per-row component to hold one.
+	 */
+	const returnFocusToEnvId = useRef<string | null>(null);
+
+	useEffect(() => {
+		if (renamingEnvId || !returnFocusToEnvId.current) return;
+		const envId = returnFocusToEnvId.current;
+		returnFocusToEnvId.current = null;
+		const rows = treeRef.current?.querySelectorAll<HTMLElement>("[data-environment-id]");
+		Array.from(rows ?? [])
+			.find((row) => row.dataset.environmentId === envId)
+			?.focus();
+	}, [renamingEnvId]);
 
 	const startRenameEnvironment = (env: Environment) => {
 		setRenamingEnvId(env.id);
@@ -205,43 +275,97 @@ export default function VariablesCategoryTree() {
 	return (
 		<>
 			<DrawerPanel title="Variables">
-				<div className="flex flex-col w-full py-2">
+				<div
+					ref={treeRef}
+					role="tree"
+					aria-label="Variable scopes"
+					onKeyDown={treeFocus.onKeyDown}
+					onFocus={treeFocus.onFocus}
+					className="flex flex-col w-full py-2"
+				>
 					{/* Globals Section (Lowest Priority) */}
 					<div className="mb-4">
-						<button
-							onClick={() => selectCategory({ type: "globals" })}
+						{/* The row is the treeitem; the button inside it owns the
+						    action and is not a tab stop of its own. A leaf: no
+						    aria-expanded, so Right and Left move nowhere from here. */}
+						<div
+							role="treeitem"
+							tabIndex={-1}
+							aria-selected={isSelected({ type: "globals" })}
+							aria-level={1}
+							aria-posinset={1}
+							aria-setsize={SCOPE_SECTIONS}
+							data-tree-label="Globals"
 							className={cn(
 								// h-8: shared drawer row height (see CollectionItem).
-								"w-full flex h-8 items-center gap-2 px-8 text-left text-sm hover:bg-accent transition-colors",
+								// focus-row: the row paints the focus ring, since it -
+								// not the narrower button - is the perceived target.
+								"focus-row flex h-8 items-center hover:bg-accent transition-colors",
 								isSelected({ type: "globals" }) &&
 									"bg-scope-global/10 text-scope-global hover:bg-scope-global/20"
 							)}
 						>
-							<Globe className="w-3 h-3" />
-							<span>Globals</span>
-						</button>
+							<button
+								type="button"
+								tabIndex={-1}
+								data-tree-activate
+								onClick={() => selectCategory({ type: "globals" })}
+								// self-stretch + flex-1: the button covers the row it
+								// sits in, so nothing of the 32px is dead to a click.
+								className="flex flex-1 self-stretch items-center gap-2 px-8 text-left text-sm"
+							>
+								<Globe className="w-3 h-3" />
+								<span>Globals</span>
+							</button>
+						</div>
 					</div>
 
 					{/* Environments Section (Medium Priority) */}
 					<div className="mb-4">
 						<div className="flex items-center">
-							<button
-								onClick={() => setEnvironmentsExpanded(!environmentsExpanded)}
-								className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
+							{/* The header is a level-1 row: Right expands it, Left
+							    collapses it, Enter does either. `data-tree-toggle` and
+							    `data-tree-activate` are the same button because for a
+							    section header those two verbs are one. */}
+							<div
+								role="treeitem"
+								tabIndex={-1}
+								aria-expanded={environmentsExpanded}
+								aria-level={1}
+								aria-posinset={2}
+								aria-setsize={SCOPE_SECTIONS}
+								aria-owns={environmentsExpanded ? environmentsGroupId : undefined}
+								data-tree-label="Environments"
+								className="focus-row flex min-w-0 flex-1 items-center"
 							>
-								{environmentsExpanded ? (
-									<ChevronDown className="w-3 h-3" />
-								) : (
-									<ChevronRight className="w-3 h-3" />
-								)}
-								<Cloud className="w-3 h-3" />
-								<span>Environments</span>
-								<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
-									{isLoadingEnvironments || showEnvironmentsError
-										? "-"
-										: environments.length}
-								</Badge>
-							</button>
+								<button
+									type="button"
+									tabIndex={-1}
+									data-tree-toggle
+									data-tree-activate
+									onClick={() => setEnvironmentsExpanded(!environmentsExpanded)}
+									className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
+								>
+									{environmentsExpanded ? (
+										<ChevronDown className="w-3 h-3" />
+									) : (
+										<ChevronRight className="w-3 h-3" />
+									)}
+									<Cloud className="w-3 h-3" />
+									<span>Environments</span>
+									<Badge
+										variant="secondary"
+										className="ml-auto text-xs px-1.5 py-0"
+									>
+										{isLoadingEnvironments || showEnvironmentsError
+											? "-"
+											: environments.length}
+									</Badge>
+								</button>
+							</div>
+							{/* Outside the row above, deliberately: the tree has no
+							    "create" key, so this is the sidebar's second tab stop
+							    rather than a control the keyboard cannot reach. */}
 							<TooltipIconButton
 								label="Add environment"
 								icon={<Plus className="w-3 h-3" />}
@@ -254,7 +378,7 @@ export default function VariablesCategoryTree() {
 						</div>
 
 						{environmentsExpanded && (
-							<div className="mt-1">
+							<div id={environmentsGroupId} role="group" className="mt-1">
 								{/* New Environment Input */}
 								{creatingEnvironment && (
 									<div className="px-3 py-1 pl-6">
@@ -297,7 +421,7 @@ export default function VariablesCategoryTree() {
 										No environments
 									</div>
 								) : (
-									environments.map((environment) => {
+									environments.map((environment, index) => {
 										const variableCount = environment.variables
 											? Object.keys(environment.variables).length
 											: 0;
@@ -323,6 +447,19 @@ export default function VariablesCategoryTree() {
 											 */
 											<div
 												key={environment.id}
+												role="treeitem"
+												tabIndex={-1}
+												// The row a rename hands focus back to,
+												// found by id rather than by a ref map.
+												data-environment-id={environment.id}
+												data-tree-label={environment.name}
+												aria-selected={isSelected({
+													type: "environment",
+													environmentId: environment.id,
+												})}
+												aria-level={2}
+												aria-posinset={index + 1}
+												aria-setsize={environments.length}
 												onClick={(e) => {
 													if (e.target !== e.currentTarget) return;
 													if (isDeleting) return;
@@ -355,18 +492,26 @@ export default function VariablesCategoryTree() {
 														}
 														onKeyDown={(e) => {
 															e.stopPropagation();
-															if (isCommitEnter(e))
+															if (isCommitEnter(e)) {
+																returnFocusToEnvId.current =
+																	environment.id;
 																submitRenameEnvironment(
 																	environment.id
 																);
-															if (e.key === "Escape")
+															}
+															if (e.key === "Escape") {
+																returnFocusToEnvId.current =
+																	environment.id;
 																cancelRenameEnvironment();
+															}
 														}}
 														className="h-6 flex-1 text-sm"
 													/>
 												) : (
 													<button
 														type="button"
+														tabIndex={-1}
+														data-tree-activate
 														onClick={() =>
 															selectCategory({
 																type: "environment",
@@ -407,6 +552,10 @@ export default function VariablesCategoryTree() {
 													renamingEnvId !== environment.id && (
 														<RowActionsMenu
 															label={`More actions for environment ${environment.name}`}
+															// The tree is one tab stop: the row
+															// holds it, and Shift+F10 / Menu /
+															// Shift+Enter are the way in from here.
+															tabIndex={-1}
 															className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 															actions={[
 																{
@@ -437,6 +586,42 @@ export default function VariablesCategoryTree() {
 															]}
 														/>
 													)}
+												{/* Keyboard-only rename and delete targets: F2 and
+												    Delete/Backspace click them (see
+												    useRovingTreeFocus). Never shown; the same two
+												    actions live in the row's menu, so this row
+												    answers every key the tree advertises rather
+												    than swallowing two of them silently - the hook
+												    preventDefaults them either way. Delete opens
+												    the same confirm dialog the menu does. */}
+												<button
+													type="button"
+													className="hidden"
+													aria-hidden="true"
+													tabIndex={-1}
+													data-tree-rename
+													onClick={() => {
+														// Parity with the delete target below,
+														// not a live path: the confirm dialog is
+														// modal, so while a deletion runs the tree
+														// is inert and no key reaches this row.
+														// It costs a line and holds if that ever
+														// stops being true.
+														if (isDeleting) return;
+														startRenameEnvironment(environment);
+													}}
+												/>
+												<button
+													type="button"
+													className="hidden"
+													aria-hidden="true"
+													tabIndex={-1}
+													data-tree-delete
+													onClick={() => {
+														if (isDeleting) return;
+														setDeleteConfirmEnvId(environment.id);
+													}}
+												/>
 											</div>
 										);
 									})
@@ -447,29 +632,45 @@ export default function VariablesCategoryTree() {
 
 					{/* Collections Section (Highest Priority) */}
 					<div>
-						<button
-							onClick={() => setCollectionsExpanded(!collectionsExpanded)}
-							className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
+						<div
+							role="treeitem"
+							tabIndex={-1}
+							aria-expanded={collectionsExpanded}
+							aria-level={1}
+							aria-posinset={3}
+							aria-setsize={SCOPE_SECTIONS}
+							aria-owns={collectionsExpanded ? collectionsGroupId : undefined}
+							data-tree-label="Collections"
+							className="focus-row flex items-center"
 						>
-							{collectionsExpanded ? (
-								<ChevronDown className="w-3 h-3" />
-							) : (
-								<ChevronRight className="w-3 h-3" />
-							)}
-							<Layers className="w-3 h-3" />
-							<span>Collections</span>
-							<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
-								{/* A dash while loading *and* while failed: a literal 0 beside
-								    "Couldn't load collections" asserts a count the app does
-								    not have. Same reason loading already shows one. */}
-								{isLoadingCollections || showCollectionsError
-									? "-"
-									: collections.length}
-							</Badge>
-						</button>
+							<button
+								type="button"
+								tabIndex={-1}
+								data-tree-toggle
+								data-tree-activate
+								onClick={() => setCollectionsExpanded(!collectionsExpanded)}
+								className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
+							>
+								{collectionsExpanded ? (
+									<ChevronDown className="w-3 h-3" />
+								) : (
+									<ChevronRight className="w-3 h-3" />
+								)}
+								<Layers className="w-3 h-3" />
+								<span>Collections</span>
+								<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
+									{/* A dash while loading *and* while failed: a literal 0 beside
+									    "Couldn't load collections" asserts a count the app does
+									    not have. Same reason loading already shows one. */}
+									{isLoadingCollections || showCollectionsError
+										? "-"
+										: collections.length}
+								</Badge>
+							</button>
+						</div>
 
 						{collectionsExpanded && (
-							<div className="mt-1">
+							<div id={collectionsGroupId} role="group" className="mt-1">
 								{isLoadingCollections ? (
 									<ListSkeleton rows={2} className="px-1" />
 								) : showCollectionsError ? (
@@ -484,21 +685,25 @@ export default function VariablesCategoryTree() {
 										No collections
 									</div>
 								) : (
-									collections.map((collection) => {
+									collections.map((collection, index) => {
 										const variableCount = collection.variables
 											? Object.keys(collection.variables).length
 											: 0;
 										return (
-											<button
+											<div
 												key={collection.id}
-												onClick={() =>
-													selectCategory({
-														type: "collection",
-														collectionId: collection.id,
-													})
-												}
+												role="treeitem"
+												tabIndex={-1}
+												data-tree-label={collection.name}
+												aria-selected={isSelected({
+													type: "collection",
+													collectionId: collection.id,
+												})}
+												aria-level={2}
+												aria-posinset={index + 1}
+												aria-setsize={collections.length}
 												className={cn(
-													"w-full flex h-8 items-center gap-2 px-3 pl-12.5 text-left text-sm hover:bg-accent transition-colors",
+													"focus-row flex h-8 items-center hover:bg-accent transition-colors",
 													isSelected({
 														type: "collection",
 														collectionId: collection.id,
@@ -506,21 +711,38 @@ export default function VariablesCategoryTree() {
 														"bg-scope-collection/10 text-scope-collection hover:bg-scope-collection/20"
 												)}
 											>
-												{/* <Folder className="w-4 h-4 text-orange-400" /> */}
-												<TruncatedText className="flex-1">
-													{collection.name}
-												</TruncatedText>
-												{/* `chip` - same reason as the environment
-												    badge above. */}
-												{variableCount > 0 && (
-													<Badge
-														variant="chip"
-														className="text-xs bg-scope-collection/10 text-scope-collection px-1.5 py-0"
-													>
-														{variableCount}
-													</Badge>
-												)}
-											</button>
+												<button
+													type="button"
+													tabIndex={-1}
+													data-tree-activate
+													onClick={() =>
+														selectCategory({
+															type: "collection",
+															collectionId: collection.id,
+														})
+													}
+													// The row carries no ⋯ menu, so the button
+													// covers all of it: the indent stays here
+													// rather than on the row, and no part of the
+													// 32px is dead to a click.
+													className="flex min-w-0 flex-1 self-stretch items-center gap-2 px-3 pl-12.5 text-left text-sm"
+												>
+													{/* <Folder className="w-4 h-4 text-orange-400" /> */}
+													<TruncatedText className="flex-1">
+														{collection.name}
+													</TruncatedText>
+													{/* `chip` - same reason as the environment
+													    badge above. */}
+													{variableCount > 0 && (
+														<Badge
+															variant="chip"
+															className="text-xs bg-scope-collection/10 text-scope-collection px-1.5 py-0"
+														>
+															{variableCount}
+														</Badge>
+													)}
+												</button>
+											</div>
 										);
 									})
 								)}

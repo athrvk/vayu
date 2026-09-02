@@ -895,9 +895,10 @@
 	 * and picks up the same accent fill hover already uses, which is how native
 	 * list selection reads. The inner control then draws nothing.
 	 *
-	 * Only needed where control and row genuinely differ. Full-width rows (the
-	 * history, variables and settings trees) are their own target and use the
-	 * baseline above.
+	 * Only needed where control and row genuinely differ, which now includes the
+	 * variables sidebar's rows (they became treeitems in #1217). Full-width rows
+	 * (the history and settings trees) are their own target and use the baseline
+	 * above.
 	 *
 	 * The indicator deliberately mirrors the disclosure chevron's own ring
 	 * (ring-2 ring-primary/30) and the selected-row ring (ring-1 ring-inset
