@@ -23,6 +23,7 @@ import ExportSpecDialog from "./ExportSpecDialog";
 import RunCollectionDialog from "./RunCollectionDialog";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
 import { useRevealActiveSelection } from "./useRevealActiveSelection";
+import { useDeleteRefocus } from "./useDeleteRefocus";
 import { useTreeCrud } from "./useTreeCrud";
 import { useTreeDnd } from "./useTreeDnd";
 import { MoveToDialog } from "./MoveToDialog";
@@ -100,6 +101,8 @@ export default function CollectionTree() {
 		requestsByCollection,
 		getRequestsByCollection,
 	});
+
+	const deleteRefocus = useDeleteRefocus(treeRef, panel.deleteConfirm);
 
 	/*
 	 * A row mid-rename or mid-delete is neither a drag source nor a drop target:
@@ -372,7 +375,13 @@ export default function CollectionTree() {
 							? `"${panel.deleteConfirm?.name}" and all its requests will be moved to the Trash, where they can be restored.`
 							: `"${panel.deleteConfirm?.name}" will be moved to the Trash, where it can be restored.`
 					}
-					onConfirm={panel.confirmDelete}
+					onConfirm={() => {
+						deleteRefocus.markConfirmed();
+						panel.confirmDelete();
+					}}
+					// The row this dialog was opened from is about to stop
+					// existing, so Radix's restore has nowhere to land (#1218).
+					onCloseAutoFocus={deleteRefocus.onCloseAutoFocus}
 					isDeleting={panel.isDeleteInFlight}
 				/>
 

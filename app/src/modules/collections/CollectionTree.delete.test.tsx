@@ -134,6 +134,43 @@ describe("confirming a collection delete", () => {
 		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
 	});
 
+	/*
+	 * Where focus goes once the dialog is gone (#1218). The menu item that
+	 * opened it has unmounted with the menu, and the dialog is controlled with
+	 * no trigger for Radix to restore to, so without this focus lands on
+	 * `<body>` and the next Tab restarts from the top of the document.
+	 */
+	it("leaves focus on the row that follows the deleted one", async () => {
+		renderTree();
+		await askToDelete("Invoices");
+
+		fireEvent.click(await confirmButton());
+
+		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
+		// "Invoices" is followed in Billing's group by the "Charge" request: the
+		// next row at its own level, not the next row in the document, which is
+		// the request inside the folder being deleted.
+		expect(document.activeElement).toBe(document.querySelector('[data-request-id="r-mid"]'));
+	});
+
+	/*
+	 * A failed delete leaves the row on screen, and the successor is chosen from
+	 * intent rather than outcome - so focus lands beside the row instead of on
+	 * it. Pinned as what it is: still inside the tree, never `<body>`. Outcome
+	 * needs the mutation's result at close time, which is #1234.
+	 */
+	it("keeps focus inside the tree when the delete fails", async () => {
+		deleteCollection.mockRejectedValue(new Error("database is locked"));
+		renderTree();
+		await askToDelete("Invoices");
+
+		fireEvent.click(await confirmButton());
+
+		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
+		expect(document.activeElement).not.toBe(document.body);
+		expect(document.activeElement).toHaveAttribute("role", "treeitem");
+	});
+
 	it("cannot fire the same delete twice from a double click", async () => {
 		let settle: () => void = () => {};
 		deleteCollection.mockReturnValue(
