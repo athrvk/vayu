@@ -293,7 +293,7 @@ cross-language conformance fixture. See `variable-resolution.md`.
 - **TanStack Query**: Server state and caching
 - **Radix UI**: Accessible component primitives
 - **Tailwind CSS**: Utility-first styling
-- **Monaco Editor**: Code editing - scripts, JSON body, and GraphQL (with syntax diagnostics, autocomplete, hover, and formatting via `graphql-language-service`)
+- **Monaco Editor**: Code editing - scripts, JSON body, and GraphQL (with syntax diagnostics, autocomplete, hover, and formatting via `graphql-language-service`); `{{variable}}` tokens are coloured and explained on hover in the body and GraphQL editors too
 - **uPlot**: Charts for metrics visualization (all dashboard/history charts centralize on one Canvas primitive; see `modules/dashboard/components/charts/uplot/`)
 - **Vite**: Build tool and dev server
 

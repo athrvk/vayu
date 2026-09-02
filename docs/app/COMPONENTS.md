@@ -298,7 +298,7 @@ Shared, Monaco-independent modules that power the GraphQL body mode.
 | `variables-schema.ts` | Derives a JSON Schema from the query's `$variable` definitions + the introspected schema via `getVariablesJSONSchema`, then applies it to the variables editor through `monaco.json.jsonDefaults` so variable values are validated and autocompleted. The query is masked before it is parsed - one `{{token}}` anywhere used to cost the pane the schema for every variable the query declares - and the schema is registered against the pane's masked twin as well as the pane itself. |
 | `variables-diagnostics.ts` | What the Variables pane's JSON markers are computed from: a hidden twin model holding the pane's text with every out-of-string token masked to a same-length JSON string. Monaco's JSON worker validates the twin, and its markers are republished on the visible model minus the ones that land on a token - so a `{{token}}` no longer reads as a syntax error while a genuine mistake beside it, which the aborted parse used to swallow, now does. Filtering the worker's markers on the pane itself cannot do this: one token also earns an `End of file expected.` on the character *after* it. |
 
-`lib/monaco-setup.ts` (sibling of `lib/graphql/`) configures `@monaco-editor/react` to use the locally bundled `monaco-editor` instead of the jsDelivr CDN, wires language web workers via Vite `?worker` imports, and calls `registerGraphqlProviders`. It is a side-effecting module, and `lib/monaco-loader.ts` is its only importer: `ensureMonaco()` pulls it in when the first `CodeEditor` mounts rather than at startup, and `CodeEditor` renders a placeholder until it resolves (#1146). That order is the requirement, not an optimisation - `loader.init()` running before `loader.config({ monaco })` sends the app to the CDN for a copy it already ships. Anything that needs the instance without wanting to load it (the `pm.*`, `{{variable}}` and script-type providers registered from `App`) subscribes with `useLoadedMonaco()`.
+`lib/monaco-setup.ts` (sibling of `lib/graphql/`) configures `@monaco-editor/react` to use the locally bundled `monaco-editor` instead of the jsDelivr CDN, wires language web workers via Vite `?worker` imports, and calls `registerGraphqlProviders`. It is a side-effecting module, and `lib/monaco-loader.ts` is its only importer: `ensureMonaco()` pulls it in when the first `CodeEditor` mounts rather than at startup, and `CodeEditor` renders a placeholder until it resolves (#1146). That order is the requirement, not an optimisation - `loader.init()` running before `loader.config({ monaco })` sends the app to the CDN for a copy it already ships. Anything that needs the instance without wanting to load it (the `pm.*`, `{{variable}}` completion, `{{variable}}` hover, and script-type providers registered from `App`) subscribes with `useLoadedMonaco()`.
 
 ## Collections (`modules/collections/`)
 
@@ -1468,10 +1468,10 @@ generator table:
 
 | Token | Painted by | Looks like |
 |-------|-----------|------------|
-| `{{data.email}}` - the reserved `data.*` namespace (issue #402) | `RuntimeToken` | muted or amber, depending on the declared contract - see below |
-| `{{$vu}}`, `{{$iteration}}` - the reserved identity namespace (issues #994, #1101) | `RuntimeToken` | muted, "not generated here", no popover |
-| `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable` | accent when it resolves, **red** when it does not; hover reads, click or Enter edits or creates |
-| `{{$guid}}` - a generator | `RuntimeToken` | muted, "generated per use", no popover |
+| `{{data.email}}` - the reserved `data.*` namespace (issue #402) | `RuntimeToken`, or a decoration in an editor | muted or amber, depending on the declared contract - see below |
+| `{{$vu}}`, `{{$iteration}}` - the reserved identity namespace (issues #994, #1101) | `RuntimeToken`, or a decoration in an editor | muted, "not generated here", no popover |
+| `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable`, or a decoration in an editor | accent when it resolves, **red** when it does not; hover reads, and click or Enter - ⌘-click or ⇧⌘D in an editor - edits or creates |
+| `{{$guid}}` - a generator | `RuntimeToken`, or a decoration in an editor | muted, "generated per use", no popover |
 
 The two reserved rows sit above the scopes for the same reason and the generator
 row below them for the opposite one: a scope that defines `$guid` wins and takes
@@ -1479,6 +1479,29 @@ the editable token, while a variable named `data.email` or `$vu` answers for
 neither the column nor the identity, so it must not paint as though it had. The
 identity names are matched exactly, so `{{$vus}}` is an ordinary unknown `$name`
 and keeps the red paint that is how a typo is spotted (issue #186).
+
+**The same four states now paint inside the Monaco body and GraphQL editors
+too** (issue #1220), as decorations rather than DOM tokens - there is no
+`<input>` behind that text to overlay. Hovering reads the token the same way
+the overlay's tooltip does, and ⌘/Ctrl-click or the `EDIT_VARIABLE_CHORD`
+opens the same `VariablePopover`, positioned over the token's screen
+rectangle. The decision of *what a token is* is shared: `classifyVariableToken`
+(`lib/variable-token-kind.ts`) lifts the same ladder this section describes
+out of the paint, so the editors and the overlay answer one `{{name}}`
+identically. `VariableInput` still holds its own copy of the ladder inline -
+issue #1239 is what adopts this module there. Script editors are excluded:
+the engine never interpolates script source, so `{{name}}` there is literal
+text except inside `pm.variables.replaceIn`. Read-only editors (response
+body, raw request/response, the settings preview) are excluded too - a
+response body's `{{x}}` is data someone was sent, not a token the app owns.
+
+Excluding them takes two mechanisms, not one, because the decorations are per
+editor and a Monaco hover provider is per *language*: the `json` provider
+answering for a request body is the same object Monaco asks about a response
+body. So an editor that paints tokens marks its model
+(`lib/variable-token-models.ts`) and the hover answers for a marked model and
+no other. `readOnly` cannot decide it - that is an editor option, and the
+provider is handed a model.
 
 **A `data.*` token has three states of its own** (issue #600), decided by
 `describeDataToken` against `VariableSupport.dataColumns` - the contract the
@@ -1744,7 +1767,8 @@ The other half of its job is making an editor behave like the rest of the app,
 because Monaco's defaults are not this app's and there are a dozen mount sites
 to keep from each answering that separately (#938, #1213).
 
-**Keyboard.** `lib/editor-chords.ts` binds, on every instance:
+**Keyboard.** `lib/editor-chords.ts` binds the first four on every instance, and
+`useEditorVariableTokens` the last on the editors that paint variable tokens:
 
 - **The two send chords** (⌘↵, ⇧⌘↵), re-dispatched on `document.body` for the
   one window handler to decide. Monaco owns Enter and `ownsEnterKey` excludes
@@ -1767,6 +1791,14 @@ to keep from each answering that separately (#938, #1213).
   container, walking backwards when the editor is the last thing on the page -
   never to the container itself, whose textarea the next Tab would walk straight
   back into.
+- **⇧⌘D, the variable under the cursor** (issue #1220). A `{{token}}` in a
+  Monaco editor is painted text, not a `role="button"` a Tab can reach, so the
+  mouse route into its popover (⌘/Ctrl-click) has no keyboard twin to inherit.
+  `EDIT_VARIABLE_CHORD` is that twin: it reads the caret's own position, and it
+  is bound where the token decorations are - per editor, in
+  `useEditorVariableTokens` - because which variable to open is a question only
+  the editor holding the caret can answer. Registered only where the tokens are
+  painted, so a read-only viewer and a script editor never carry it.
 
 **A read-only editor has no trap to escape**: `tabFocusMode` is simply on for
 it, Tab having nothing to indent in text nobody can type into, so it shows no

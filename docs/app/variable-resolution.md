@@ -264,7 +264,14 @@ token that answers them differently is worse than one that answers both
 wrongly. Enter and Space on a focused token are a third way into the same
 popover rather than a fourth reading of the origins (issue #1215): the token is
 a `role="button"` in the field's roving Tab strip, and what opens is the control
-this paragraph describes, unchanged.
+this paragraph describes, unchanged. The Monaco hover provider (issue #1220)
+reads the same origins list again for the body and GraphQL editors - a third
+reading of one answer, not a second one, so a token means the same thing
+whether it sits in a single-line field or in the body beneath it. That provider
+is registered outside the builder, so it takes the bound row from
+`bound-row-store` the way the tab strip does (issue #1074); without it the
+editor would rank the scopes while the field one line above ranks the row over
+them, which is the disagreement this paragraph exists to forbid.
 
 A name that **no** scope defines but the row does is the same claim in the
 other direction, and it stops being reported as undefined: the destructive red
@@ -321,7 +328,10 @@ its tooltip, and a chain that declares nothing keeps the neutral token above. It
 is authoring-time advice in every case - the run's file is the authority, and a
 run with a mismatched file is still the user's to start. Declared columns are
 also completed: `{{data.` offers them in the request fields and the body editors,
-and `pm.iterationData.get("` offers them in the script editors (see below).
+and `pm.iterationData.get("` offers them in the script editors (see below). The
+body editors also colour and explain these tokens on hover, the same three
+states as the request fields; the script editors do not, for the same
+interpolation reason as everywhere else in this document (D16).
 
 The script panel's **"Names mentioned:" chips** read the same three states
 (issue #604). They used to paint a name red whenever no scope defined it, which

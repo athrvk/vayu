@@ -1207,6 +1207,18 @@ without being told. Guarded by `code-editor.chords.test.tsx` (the chord is
 registered, the hint appears on focus and never on a read-only editor) and
 `shortcuts.listed.test.ts` (it reaches the panel).
 
+**A `{{variable}}` inside an editor is painted from the same tokens as one
+outside it.** `EditableVariable` colours its overlay tokens `text-primary` /
+`text-muted-foreground` / `text-destructive-text` for resolved, empty and
+undefined; Monaco draws its own text, so the same three colours (plus
+`text-muted-foreground` for a run-time token and `text-warning-text` for a
+`data.*` column no contract declares) are declared in `index.css` as five
+global classes its decorations can name - `vayu-variable-token-*`, under a
+`.monaco-editor` prefix so they outrank the theme rules Monaco injects at
+runtime. They are the one place a global class is the right answer rather than
+a utility string, for the same reason the scrollbar block is: no component
+stylesheet reaches what Monaco renders. → `variable-token-classes.test.ts`
+
 ---
 
 ## Row Actions

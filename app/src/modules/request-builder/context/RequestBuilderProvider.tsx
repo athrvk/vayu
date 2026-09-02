@@ -58,6 +58,7 @@ import { createDefaultRequestState } from "../utils/request-state";
 import { responseFromRunResult } from "../utils/restore-response";
 import { useExecutionEvents } from "../hooks/useExecutionEvents";
 import { useSendWithRow } from "../hooks/useSendWithRow";
+import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
 
 interface RequestBuilderProviderProps {
 	children: ReactNode;
@@ -1013,7 +1014,14 @@ export default function RequestBuilderProvider({
 
 	return (
 		<RequestBuilderContext.Provider value={contextValue}>
-			{children}
+			{/*
+			 * Inside the context, not around it: the `{{token}}` popover the code
+			 * editors open is the same one the single-line fields open, and it
+			 * needs this provider's `updateVariable` and `writableScopes` to edit
+			 * or create anything (issue #1220). Every Monaco editor that
+			 * interpolates variables is somewhere under here.
+			 */}
+			<EditorVariableTokensProvider>{children}</EditorVariableTokensProvider>
 		</RequestBuilderContext.Provider>
 	);
 }
