@@ -224,9 +224,16 @@ pm.expect(value).to.satisfy(function (v) { return v > 0; });
 
 // Chainers
 pm.expect(value).to.not.equal(expected);     // negates the rest of the chain
+pm.expect(value).not.to.equal(expected);     // and reads either way round
 pm.expect(value).to.be.above(0).and.to.be.below(10);
 pm.expect(value).to.deep.include({ a: 1 });  // deep applies to include, property,
                                              // members and oneOf as well
+
+// Any chain word may precede any matcher - `be` and `and` assert nothing, so a
+// matcher follows either of them directly
+pm.expect(code).to.be.equal(200);
+pm.expect(token).to.be.a('string').and.match(/^prefix_/);
+pm.expect(scope).to.be.a('string').and.not.empty;
 
 // Language chains - they assert nothing, and make a chain read as English
 pm.expect(value).to.be.an('array').that.include(item);
@@ -325,7 +332,16 @@ Notes on the edges:
   `TypeError` because nothing was asserted, and the response assertions refuse
   a wrong-typed argument the same way (#998). Both throw, so a test fails
   either way; what differs is `e.name`.
-- **`.and` carries the chain's flags**, `not` included, exactly as in chai.
+- **`.and` carries the chain's flags**, `not` included, exactly as in chai. It
+  is a language chain like `.that`, not a return to the start of one: a matcher
+  may follow it directly (`.and.match(/x/)`), and so may `not`.
+- **The grammar is chai's: any chain word before any matcher.** Every word above
+  - `to`, `be`, `have`, `at`, `and`, `all`, `not`, `deep`, `nested` and the
+  language chains - is installed on the same expectation and hands it back, so
+  the editor's declarations describe one type rather than the paths this page
+  happens to spell (#1209). The examples in this section are compiled against
+  those declarations by the app's suite, so a chain that reads correctly here
+  is one the editor accepts.
 
 ## Response Object (`pm.response`)
 

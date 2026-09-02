@@ -415,6 +415,23 @@ these:
                    English, and carry the chain's flags like .and)
 ```
 
+**The chain words above are a vocabulary, not a route.** The dotted spellings
+in that table are how the completion popup offers each matcher, not the only
+way to reach it: `to`, `be`, `have`, `at`, `and`, `all`, `not`, `deep`, `nested`
+and every language chain are members of the same expectation and each hands it
+back, so any of them may precede any matcher, exactly as in chai. All four of
+these run, and the editor accepts all four (#1209):
+
+```javascript
+pm.expect(code).to.be.equal(200);                       // `be` asserts nothing
+pm.expect(token).to.be.a('string').and.match(/^prefix_/); // matcher after .and
+pm.expect(scope).to.be.a('string').and.not.empty;         // `not` after .and
+pm.expect(value).not.to.equal(1);                         // `not` before .to
+```
+
+Terminal getters (`.to.be.true`, `.to.exist`) return the chain too, so a chain
+continues past one: `.to.be.true.and.equal(1)`.
+
 **`equal` is `===`; `eql` (and `deep.equal`) is deep.** So
 `expect({a:1}).to.equal({a:1})` **fails** - different references - and
 `expect({a:1,b:2}).to.eql({b:2,a:1})` **passes**: key order is not part of deep
