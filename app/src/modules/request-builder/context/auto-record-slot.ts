@@ -31,15 +31,18 @@ import { useCallback, useRef } from "react";
 /**
  * The key a record is filed under while the builder holds no saved request.
  *
- * Shares one bucket for every such builder, which is what the rules already do
- * with a `requestId` of `null` - `null === null` passes their ownership check.
  * A request tab is always opened against a request the backend has already
- * created (`useNewRequest`), so the only builder that reaches this key is the
- * read-only copy History renders for a stored run.
+ * created (`useNewRequest`), so what reaches this key is the editable copy
+ * History renders for a stored run. Every such copy shares the one bucket,
+ * which is what the rules already do with a `requestId` of `null` - `null ===
+ * null` passes their ownership check - so two run tabs open at once interfere
+ * exactly as they did before this keying, no better and no worse. Giving that
+ * copy an identity of its own is issue #1272; it needs one the provider is not
+ * handed today.
  */
 export const UNSAVED_AUTO_KEY = "__unsaved__";
 
-export interface AutoRecordSlot<T> {
+interface AutoRecordSlot<T> {
 	/** The record for the request on screen, or null if it has none. */
 	get: () => T | null;
 	/** Files a record against the request on screen; null forgets it. */

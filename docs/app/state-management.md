@@ -1890,8 +1890,11 @@ is subscribed to rather than selected from, because pruning writes to a ref and
 a provider that re-rendered on every tab focus would charge the request the user
 is working in for it. `MAX_OPEN_TABS` caps the tab strip, so it caps the maps.
 The one key that survives the sweep is the id-less one, shared by any builder
-holding no saved request: it names no tab, and the read-only copy History
-renders for a stored run is what uses it.
+holding no saved request: it names no tab, and the editable copy History renders
+for a stored run is what uses it. Two such copies open at once share that one
+bucket and interfere as they always have, since the rules read a `requestId` of
+`null` against another `null` as a match; giving that copy an identity of its
+own is issue #1272.
 
 In the provider rather than in the panels for the drafts' reason and one of its
 own: Radix unmounts an inactive `TabsContent`, so a panel-local record is gone
