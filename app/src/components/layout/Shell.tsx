@@ -22,17 +22,26 @@ import {
 	TOGGLE_DRAWER_CHORD,
 	TOGGLE_CONTEXT_BAR_CHORD,
 	SETTINGS_CHORD,
+	NEW_REQUEST_CHORD,
+	FOCUS_URL_CHORD,
+	NEXT_TAB_CHORD,
+	PREVIOUS_TAB_CHORD,
+	NEXT_REGION_CHORD,
+	PREVIOUS_REGION_CHORD,
 	DRAWER_VIEW_CHORDS,
 	TAB_CHORDS,
 	matchesChord,
 } from "@/constants/shortcuts";
+import { useNewRequest } from "@/hooks/useNewRequest";
 import { ImportModal } from "@/modules/collections/ImportModal";
+import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
 import { Drawer } from "./Drawer";
 import { Dock } from "./Dock";
 import { ContextBar } from "./ContextBar";
 import { TabStrip } from "./TabStrip";
 import { tabElementId, tabPanelElementId } from "./tab-aria";
 import { closeTabFromKeyboard } from "./tab-focus";
+import { cycleRegionFocus, focusRequestUrl, type AppRegion } from "./region-focus";
 import { CommandPalette } from "@/modules/palette";
 import { DetailSkeleton } from "@/components/shared/DetailSkeleton";
 import RequestBuilder from "@/modules/request-builder";
@@ -100,8 +109,29 @@ function renderTabContent(tab: Tab | null): React.ReactNode {
 	}
 }
 
+/**
+ * Which way this key cycles the window's regions, or `null` when it is not
+ * either region chord.
+ *
+ * Outside the component and asked before the handler's modifier gate, because
+ * F6 is the one chord in the map that carries no ⌘ or Ctrl.
+ */
+function regionStep(e: KeyboardEvent): 1 | -1 | null {
+	if (matchesChord(e, NEXT_REGION_CHORD)) return 1;
+	if (matchesChord(e, PREVIOUS_REGION_CHORD)) return -1;
+	return null;
+}
+
 export default function Shell() {
-	const { openTabs, activeTabId, focusTab, openTab } = useTabsStore();
+	const { openTabs, activeTabId, focusTab, focusAdjacentTab, openTab } = useTabsStore();
+	/*
+	 * The Shell hosts the new-request flow for its ⌘N chord, and the palette
+	 * hosts its own for the "New request" command. Two hosts of one hook, not
+	 * two flows: `useNewRequest` is written to be mounted more than once ("each
+	 * caller renders its own from `pickerProps`, so two surfaces never fight
+	 * over one dialog's open state"), and both reach the same creation path.
+	 */
+	const { newRequest, pickerProps } = useNewRequest();
 	const { toggleDrawer, activateDrawerView, toggleContextBar, setDrawerOpen, setDrawerView } =
 		useLayoutStore();
 	const { triggerSave } = useSaveStore();
@@ -178,7 +208,11 @@ export default function Shell() {
 		 * dead on AZERTY, whose unshifted digits produce `&é"'(-è_çà`).
 		 */
 		const handleKeyDown = (e: KeyboardEvent) => {
-			if (!(e.metaKey || e.ctrlKey)) return;
+			// F6 and ⇧F6 are the only chords here without the primary modifier, so
+			// they are settled before the gate that lets every other key go by
+			// untouched - the gate is what keeps this listener off the typing path.
+			const region = regionStep(e);
+			if (region === null && !(e.metaKey || e.ctrlKey)) return;
 			/*
 			 * Nothing here acts while a modal is up (#935). Every chord below
 			 * moves or destroys the thing the dialog is attached to - ⌘W closed
@@ -192,6 +226,31 @@ export default function Shell() {
 			 */
 			if (isModalOpen()) return;
 
+			if (region !== null) {
+				e.preventDefault();
+				cycleRegionFocus(region);
+				return;
+			}
+			if (matchesChord(e, NEW_REQUEST_CHORD)) {
+				e.preventDefault();
+				newRequest();
+				return;
+			}
+			if (matchesChord(e, FOCUS_URL_CHORD)) {
+				e.preventDefault();
+				focusRequestUrl();
+				return;
+			}
+			if (matchesChord(e, NEXT_TAB_CHORD)) {
+				e.preventDefault();
+				focusAdjacentTab(1);
+				return;
+			}
+			if (matchesChord(e, PREVIOUS_TAB_CHORD)) {
+				e.preventDefault();
+				focusAdjacentTab(-1);
+				return;
+			}
 			if (matchesChord(e, SAVE_CHORD)) {
 				e.preventDefault();
 				triggerSave();
@@ -253,6 +312,8 @@ export default function Shell() {
 		activateDrawerView,
 		openTab,
 		focusTab,
+		focusAdjacentTab,
+		newRequest,
 		activeTabId,
 		openTabs,
 	]);
@@ -265,6 +326,10 @@ export default function Shell() {
 			    what opens it. It owns that chord rather than the keydown map
 			    below - see the capture-phase note in CommandPalette. */}
 			<CommandPalette />
+			{/* The picker for ⌘N, on the same terms as the modals above: mounted
+			    once, shows nothing until the flow asks where a request should
+			    land. The palette renders its own from the same hook. */}
+			<CollectionPicker {...pickerProps} />
 			{/* Every tab uses the same shell: one left Drawer (its view switches
 			    with the tab - collections/history/variables/settings), the main
 			    content, and the request-only ContextBar. No tab type takes over
@@ -290,7 +355,13 @@ export default function Shell() {
 				<div className="flex flex-1 flex-col min-w-0 overflow-hidden">
 					<TabStrip />
 					<div className="flex flex-1 overflow-hidden relative">
-						<main className="flex-1 overflow-hidden flex flex-col min-w-0">
+						<main
+							className="flex-1 overflow-hidden flex flex-col min-w-0"
+							// A stop in the F6 cycle - see `region-focus.ts`. On `main`
+							// rather than on the tabpanel inside it so the cycle reaches
+							// the pane whether or not a tab is open.
+							data-app-region={"main" satisfies AppRegion}
+						>
 							{/*
 							 * The other half of the strip's tabs pattern: the region a tab
 							 * controls has to say so, or `aria-controls` points at nothing

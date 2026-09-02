@@ -30,6 +30,8 @@ import { render, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Shell from "./Shell";
 import { useTabsStore, useLayoutStore, useSaveStore } from "@/stores";
+import { REQUEST_URL_INPUT_ID } from "@/constants/dom-ids";
+import { REGION_ATTRIBUTE } from "./region-focus";
 
 vi.mock("./Drawer", () => ({ Drawer: () => <div data-testid="drawer" /> }));
 vi.mock("./Dock", () => ({ Dock: () => <div data-testid="dock" /> }));
@@ -60,6 +62,22 @@ vi.mock("@/modules/variables/main/VariablesMain", () => ({
 }));
 vi.mock("@/modules/inbox", () => ({ default: () => <div data-testid="inbox" /> }));
 
+/*
+ * The new-request flow itself is `useNewRequest`'s, and it is covered where it
+ * lives. What ⌘N owes is that it reaches that flow rather than a second copy of
+ * it, so the hook is stubbed and the chord's job is to call it.
+ */
+const newRequest = vi.fn();
+vi.mock("@/hooks/useNewRequest", () => ({
+	useNewRequest: () => ({
+		newRequest: () => newRequest(),
+		pickerProps: { open: false, onOpenChange: () => {}, collections: [], onSelect: () => {} },
+	}),
+}));
+vi.mock("@/modules/welcome/components/CollectionPicker", () => ({
+	CollectionPicker: () => <div data-testid="collection-picker" />,
+}));
+
 function renderShell() {
 	return render(
 		<QueryClientProvider client={new QueryClient()}>
@@ -74,13 +92,15 @@ interface Press {
 	code?: string;
 	shift?: boolean;
 	alt?: boolean;
+	/** The primary modifier. F6 is the one chord here that carries none. */
+	mod?: boolean;
 }
 
-const press = ({ key, code = "", shift = false, alt = false }: Press) =>
+const press = ({ key, code = "", shift = false, alt = false, mod = true }: Press) =>
 	fireEvent.keyDown(document.body, {
 		key,
 		code,
-		ctrlKey: true,
+		ctrlKey: mod,
 		shiftKey: shift,
 		altKey: alt,
 		bubbles: true,
@@ -232,5 +252,124 @@ describe("mod+1-9 on a shifted-digit layout", () => {
 		renderShell();
 		press({ key: "9", code: "Digit9" });
 		expect(useTabsStore.getState().activeTabId).toBe(SECOND);
+	});
+});
+
+describe("moving between tabs without counting them", () => {
+	beforeEach(() => {
+		useTabsStore.setState({
+			openTabs: [
+				{ id: FIRST, type: "request", entityId: "req-1" },
+				{ id: SECOND, type: "request", entityId: "req-2" },
+				{ id: THIRD, type: "request", entityId: "req-3" },
+			],
+			activeTabId: SECOND,
+		});
+	});
+
+	// Matched on `code`: ⇧] reports `}` on a US layout, and the shifted bracket
+	// is a different character again elsewhere. The position is what is stable.
+	it("moves to the next tab on mod+shift+]", () => {
+		renderShell();
+		press({ key: "}", code: "BracketRight", shift: true });
+		expect(useTabsStore.getState().activeTabId).toBe(THIRD);
+	});
+
+	it("moves to the previous tab on mod+shift+[", () => {
+		renderShell();
+		press({ key: "{", code: "BracketLeft", shift: true });
+		expect(useTabsStore.getState().activeTabId).toBe(FIRST);
+	});
+
+	it("wraps off the end to the first tab", () => {
+		useTabsStore.setState({ activeTabId: THIRD });
+		renderShell();
+		press({ key: "}", code: "BracketRight", shift: true });
+		expect(useTabsStore.getState().activeTabId).toBe(FIRST);
+	});
+
+	it("wraps off the front to the last tab", () => {
+		useTabsStore.setState({ activeTabId: FIRST });
+		renderShell();
+		press({ key: "{", code: "BracketLeft", shift: true });
+		expect(useTabsStore.getState().activeTabId).toBe(THIRD);
+	});
+
+	it("does nothing with no tabs open", () => {
+		useTabsStore.setState({ openTabs: [], activeTabId: null });
+		renderShell();
+		press({ key: "}", code: "BracketRight", shift: true });
+		expect(useTabsStore.getState().activeTabId).toBeNull();
+	});
+});
+
+/** A stand-in region holding one button, for the F6 case below. */
+function band(name: string, buttonId: string): [HTMLElement, HTMLButtonElement] {
+	const region = document.createElement("div");
+	region.setAttribute(REGION_ATTRIBUTE, name);
+	const button = document.createElement("button");
+	button.id = buttonId;
+	region.append(button);
+	return [region, button];
+}
+
+describe("the chords that reach past the store", () => {
+	beforeEach(() => {
+		newRequest.mockClear();
+		useTabsStore.setState({
+			openTabs: [{ id: FIRST, type: "request", entityId: "req-1" }],
+			activeTabId: FIRST,
+		});
+	});
+
+	it("starts the new-request flow on mod+N", () => {
+		renderShell();
+		press({ key: "n" });
+		expect(newRequest).toHaveBeenCalledTimes(1);
+	});
+
+	it("focuses and selects the URL field on mod+L", () => {
+		renderShell();
+		// Standing in for the mounted request builder, which this suite mocks
+		// out - what the chord needs from it is the one id it publishes.
+		const url = document.createElement("input");
+		url.id = REQUEST_URL_INPUT_ID;
+		url.value = "https://api.example.com";
+		document.body.append(url);
+
+		press({ key: "l" });
+
+		expect(document.activeElement).toBe(url);
+		expect(url.selectionEnd).toBe(url.value.length);
+		url.remove();
+	});
+
+	/*
+	 * The bands themselves are `region-focus.test.ts`'s subject; what this owes
+	 * is that F6 reaches the cycle at all - it is the one chord matched before
+	 * the handler's `⌘ or Ctrl` gate, so a gate written a line too early kills
+	 * it with everything else still working.
+	 *
+	 * Two stand-in bands either side of the Shell, because the panels that would
+	 * fill its own `main` are mocked out to bare divs here - so `main` holds
+	 * nothing focusable and is stepped over, which is the skip rule doing its
+	 * job in passing.
+	 */
+	it("cycles focus to the next region on F6, which carries no modifier", () => {
+		renderShell();
+		const [banner, bannerControl] = band("banner", "banner-control");
+		const [context, contextControl] = band("context", "context-control");
+		document.body.prepend(banner);
+		document.body.append(context);
+		bannerControl.focus();
+
+		press({ key: "F6", mod: false });
+		expect(document.activeElement).toBe(contextControl);
+
+		press({ key: "F6", mod: false, shift: true });
+		expect(document.activeElement).toBe(bannerControl);
+
+		banner.remove();
+		context.remove();
 	});
 });
