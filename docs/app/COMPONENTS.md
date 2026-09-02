@@ -1562,9 +1562,21 @@ already carries - and wrong for the one thing it also holds: an editable token i
 a `role="button"` that opens the variable editor, and a focusable control inside
 an `aria-hidden` subtree is the `aria-hidden-focus` violation. Two commits that
 never met, each correct alone. So the duplication now carries the attribute where
-it actually is - every text segment, and every run-time token, which has no
-popover and is not focusable - and the editable tokens stay in the accessibility
-tree.
+it actually is - the literal text either side of a token, which the input does
+carry - and the tokens stay in the accessibility tree.
+
+**Both kinds of token, and the run-time one took a second pass to get there**
+(issue #1238). #1215 left it hidden on the grounds that it is not focusable,
+which was true and is the reason it should not have been: its tooltip is its
+*entire* content, and it carries the only statement of where the value will come
+from - the generator's description, `not generated here` for an identity, and the
+amber "Not a declared column of …" that is how a drifted contract is spotted at
+all. All of it was mouse-only. A `tabIndex` on the trigger is the whole fix,
+because Radix opens the tooltip on focus and points `aria-describedby` at what it
+opened; the editable token's other half - `role="button"` plus Enter/Space - is
+deliberately **not** copied over, since nothing about a run-time token is
+activated and announcing a button that answers no key is worse than announcing
+nothing. A disabled field drops every token to `-1`, both kinds alike.
 
 They share **one** Tab stop between them, roving: the token holding it has
 `tabIndex={0}` and the rest `-1`, Left/Right move between them and Home/End jump
@@ -1578,7 +1590,10 @@ moves the stop by writing `tabIndex` onto DOM nodes - correct for rows that do
 not re-render for it, wrong for a strip whose stop is a React prop. Arrowing
 deliberately does not wrap - falling off the end leaves Tab as the way out.
 Locate the layer in a test by `data-variable-overlay`, never by `aria-hidden`,
-which now names the parts rather than the whole.
+which now names the parts rather than the whole - and enumerate the strip by
+`[data-variable-token] [tabindex]`, never by `[role="button"]`, which is the
+editable token's trigger alone and quietly stopped meaning "a token" when the
+run-time ones joined the strip.
 
 **The field is a combobox, and it steers its own list.** `VariableInput` carries
 `role="combobox"`, `aria-autocomplete="list"`, `aria-expanded`, `aria-controls`
