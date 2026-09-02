@@ -12,6 +12,16 @@
  * end.
  */
 
+// Before the first include, because `curl/curl.h` below reaches `windows.h` -
+// whose `min` / `max` macros then break the `std::numeric_limits<...>::max ()`
+// in `load_pacing.hpp` that `vayu/core/run_manager.hpp` pulls in for the load
+// path's cases. `NOMINMAX` is PRIVATE to `vayu_core` (`engine/CMakeLists.txt`),
+// so this target never gets it - the same trap `client.hpp` documents for
+// `daemon.cpp`, and the reason it names its own enum rather than curl's.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <curl/curl.h>
 #include <gtest/gtest.h>
 #include <httplib.h>
