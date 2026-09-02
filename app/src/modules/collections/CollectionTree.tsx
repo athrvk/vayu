@@ -112,10 +112,10 @@ export default function CollectionTree() {
 		: null;
 
 	/*
-	 * Where focus goes when the deleted row was the only one in the tree: a root
-	 * with no root after it and no parent has no successor to offer, and "Add
-	 * collection" is both the nearest surviving control and the one thing there
-	 * is left to do on an empty tree.
+	 * Where focus goes when the deleted row was the only one in the tree - the
+	 * one case the tree's own rule cannot answer, since a root otherwise falls
+	 * back to the root before it. "Add collection" is the nearest surviving
+	 * control, and the one thing left to do on an emptied tree.
 	 */
 	const addCollectionRef = useRef<HTMLButtonElement>(null);
 

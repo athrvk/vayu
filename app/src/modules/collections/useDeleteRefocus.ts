@@ -25,7 +25,8 @@ import { TREE_ITEM, focusTreeRow, rowAfterRemoving } from "./tree-focus";
  * the variables sidebar acquired a keyboard Delete in #1217, after this was
  * written, and hand-rolling its own would have been the third copy of a timing
  * rule this repo has already watched drift twice. What differs between them is
- * only which attribute identifies a row, so that is the parameter.
+ * which attribute identifies a row and where an emptied tree hands focus, so
+ * those are the parameters.
  *
  * @param doomedSelector matches the row the open dialog would remove, `null`
  *   when no dialog is open. The caller spells it, because only the caller knows

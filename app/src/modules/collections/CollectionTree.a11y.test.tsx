@@ -354,10 +354,10 @@ describe("a delete never strands focus", () => {
 			rerenderTree();
 		});
 
-		// A root with no root after it and no parent has no successor to offer, and
-		// `<body>` is where that answer used to end. "Add collection" is the
-		// nearest thing that survives an emptied tree - and the only thing left to
-		// do on one.
+		// One row, so there is no root before or after it and no parent either:
+		// the only shape the tree's own rule answers `null` for, and `<body>` is
+		// where that used to end. "Add collection" is the nearest thing that
+		// survives an emptied tree - and the only thing left to do on one.
 		expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add collection" }));
 	});
 
