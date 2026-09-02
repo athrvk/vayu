@@ -130,6 +130,33 @@ struct UrlParts {
 [[nodiscard]] std::string compose_url (const UrlParts& parts);
 
 /**
+ * @brief One value percent-encoded for a URL, through libcurl's escaper.
+ *
+ * Everything outside the unreserved set is escaped, which is wider than a path
+ * segment or a query value strictly needs - an encoded `:` is still the same
+ * URL, and over-encoding cannot change what one means the way under-encoding
+ * can. Exported because a query value built anywhere else needs the same
+ * escaper: a private copy would not receive libcurl's fixes, which is the rule
+ * this file's parsing already follows.
+ */
+[[nodiscard]] std::string percent_encode (const std::string& value);
+
+/**
+ * @brief @p url carrying @p query as well, merged into any query it already has.
+ *
+ * The URL's own bytes are kept: it is *not* parsed and recomposed, because a
+ * URL nobody edited must reach the wire as it arrived (see @ref compose_url for
+ * the same rule stated from the other side). The parameters are appended after
+ * a `?` or, where the URL already has one, after a `&` - and **before the
+ * fragment**, which is not part of what is sent and would swallow everything
+ * written after it.
+ *
+ * @p query is already-encoded wire bytes with no leading `?`, the shape
+ * @ref compose_query answers with. Empty in, @p url out unchanged.
+ */
+[[nodiscard]] std::string url_with_query (const std::string& url, const std::string& query);
+
+/**
  * @brief `{"api", "example", "com"}` -> `"api.example.com"`.
  */
 [[nodiscard]] std::string join_host (const std::vector<std::string>& host);

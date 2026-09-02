@@ -429,7 +429,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     state.started_at = std::chrono::steady_clock::now ();
 
     errors.attach (curl);
-    set_opt<CURLOPT_URL> (curl, request.request.url.c_str ());
+    set_opt<CURLOPT_URL> (curl, vayu::http::wire_url (request.request).c_str ());
     curl_mime* mime = detail::apply_method_and_body (curl, request.request);
 
     struct curl_slist* headers_list = detail::build_request_header_list (

@@ -11,6 +11,7 @@
 
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
+#include "vayu/http/url_parts.hpp"
 #include "vayu/utils/reentrant.hpp"
 
 #include <cerrno>
@@ -21,21 +22,12 @@ namespace vayu::http {
 
 namespace {
 
-// libcurl's percent-encoder, with its allocation returned to it. The handle
-// argument is unused by libcurl (and documented as ignored), so this stays a
-// pure function - no easy handle has to exist to encode a body.
-std::string percent_encode (const std::string& value) {
-    char* escaped =
-    curl_easy_escape (nullptr, value.c_str (), static_cast<int> (value.size ()));
-    if (!escaped) {
-        return {};
-    }
-    std::string out (escaped);
-    curl_free (escaped);
-    return out;
-}
+// The percent-encoder is `url_parts.hpp`'s, not a copy here: both wrapped the
+// same `curl_easy_escape` call, and the one that is exported is the one a
+// query-string builder can reach (issue #1228). The decoder below stays,
+// because it is *not* the same function - the `+` rule is this media type's.
 
-// The inverse, with the media type's `+` rule applied before unescaping so a
+// libcurl's decoder, with the media type's `+` rule applied before unescaping so a
 // `%2B` still decodes to a literal plus. libcurl's unescape returns the decoded
 // length out-of-band because a decoded value may contain NUL bytes.
 std::string percent_decode (std::string value) {
@@ -198,6 +190,61 @@ std::string implied_content_type (const Body& body) {
     // `binary` is the same question with the same answer.
     default: return {};
     }
+}
+
+namespace {
+
+/**
+ * The GraphQL-over-HTTP GET transport, asked as one question: the query
+ * parameters this request's body travels as, or nothing when it travels in the
+ * body frame like every other request.
+ *
+ * One function rather than a condition repeated at each of the four answers
+ * below, because a request whose URL carried the document *and* whose body
+ * frame carried it too would send the query twice - and the two conditions
+ * would have to be kept identical by hand to prevent it.
+ */
+std::optional<std::string> graphql_url_transport (const Request& request) {
+    if (request.method != HttpMethod::GET || request.body.mode != BodyMode::GraphQL) {
+        return std::nullopt;
+    }
+    if (!has_wire_body (request.body)) {
+        return std::nullopt;
+    }
+    return graphql_get_parameters (request.body.content);
+}
+
+} // namespace
+
+bool has_wire_body (const Request& request) {
+    if (graphql_url_transport (request)) {
+        return false;
+    }
+    return has_wire_body (request.body);
+}
+
+std::string wire_body_bytes (const Request& request) {
+    if (!has_wire_body (request)) {
+        return {};
+    }
+    return wire_body_bytes (request.body);
+}
+
+std::string implied_content_type (const Request& request) {
+    // A request with no body frame has no body to describe: deriving
+    // `application/json` for a GraphQL GET would announce a body that is not
+    // there, on a request whose document is in the URL.
+    if (!has_wire_body (request)) {
+        return {};
+    }
+    return implied_content_type (request.body);
+}
+
+std::string wire_url (const Request& request) {
+    if (const auto parameters = graphql_url_transport (request)) {
+        return url_with_query (request.url, *parameters);
+    }
+    return request.url;
 }
 
 bool content_type_is_engine_owned (const Body& body) {
