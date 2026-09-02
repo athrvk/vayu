@@ -104,3 +104,40 @@ describe("off macOS", () => {
 		expect(useLayoutStore.getState().paletteOpen).toBe(false);
 	});
 });
+
+/**
+ * Claiming the key means stopping it, not only preventing its default.
+ *
+ * Monaco treats ⌘K as a chord *leader*, so a merely-prevented event still
+ * reached it and put the editor into chord mode behind the open palette: the
+ * next keystroke answered "not a command" in its status bar. Nothing about the
+ * palette looked wrong, which is why this is pinned here.
+ */
+describe("the chord stops at the palette", () => {
+	/** What the focused control sees, listening below the window's capture. */
+	function pressWithSpy(target: Element, key: string, mods: { ctrl?: boolean }) {
+		const seen = vi.fn();
+		target.addEventListener("keydown", seen);
+		fireEvent.keyDown(target, {
+			key,
+			code: `Key${key.toUpperCase()}`,
+			ctrlKey: !!mods.ctrl,
+			bubbles: true,
+		});
+		target.removeEventListener("keydown", seen);
+		return seen;
+	}
+
+	it("keeps Ctrl+K from reaching the control below it", async () => {
+		const { field } = await mountOn("linux");
+		expect(pressWithSpy(field, "k", { ctrl: true })).not.toHaveBeenCalled();
+	});
+
+	it("stops that chord and no other key", async () => {
+		// The scope the comment above the listener promises. Ctrl+J is nobody's
+		// chord here, so it must arrive at the field untouched.
+		const { field } = await mountOn("linux");
+		expect(pressWithSpy(field, "j", { ctrl: true })).toHaveBeenCalledTimes(1);
+		expect(pressWithSpy(field, "k", {})).toHaveBeenCalledTimes(1);
+	});
+});

@@ -110,7 +110,7 @@ Main layout: tab-centric with resizable drawer, split/overlay context bar, and d
 
 - **One uniform layout for every tab** - `Drawer` (left) + a content column holding `TabStrip` over main + `ContextBar`. No tab type takes over the row. This is deliberate: the Dock's drawer switchers always have a Drawer to act on, so they can never be dead. (Settings used to full-take-over and suppress the Drawer, which left those buttons doing nothing while Settings was open.)
 - **Left navigation is always the Drawer.** Every main view that needs a category/entity list uses the shared Drawer for it - never its own left rail. `SettingsMain` and `VariablesMain` are pure content panes; their category trees live in the Drawer (`settings` / `variables` views). Follow this pattern for any new view - do not add a second sidebar inside the main area.
-- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U/S/T (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab). Every one of them is a `Chord` in `constants/shortcuts.ts`, matched by `matchesChord` - the same registry the Dock's tooltips advertise from, so no surface can claim a chord the handler does not listen for. They were fourteen hand-rolled comparisons until #938, which is how AltGr (Ctrl+Alt on European Windows layouts) came to fire Save and close tabs, and how ⌘1-9 came to be dead on AZERTY. ⌘K (command palette) is **not** in this map - it is owned by `CommandPalette`, on the capture phase, because Monaco swallows the key on the bubble.
+- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U/S/T (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab). Every one of them is a `Chord` in `constants/shortcuts.ts`, matched by `matchesChord` - the same registry the Dock's tooltips advertise from, so no surface can claim a chord the handler does not listen for. They were fourteen hand-rolled comparisons until #938, which is how AltGr (Ctrl+Alt on European Windows layouts) came to fire Save and close tabs, and how ⌘1-9 came to be dead on AZERTY. ⌘K (command palette) is **not** in this map - it is owned by `CommandPalette`, on the capture phase, because Monaco swallows the key on the bubble. ⌘I is in the map and still needs help reaching it: Monaco claims CtrlCmd+I for `triggerSuggest`, so the bridge in `lib/editor-chords.ts` re-dispatches it from inside an editor (see [`code-editor`](#code-editor)), as it does the two send chords.
 - **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
 - **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
 - **Every surface but `RequestBuilder` is `React.lazy`** (#1146), behind one Suspense boundary inside the tab panel whose fallback is a `DetailSkeleton` naming the pane. Only one surface is mounted at a time, so a boundary per branch would be the same fallback written eight times. `RequestBuilder` stays eager because it is what most sessions open into. Two consequences worth knowing: a surface must be imported from its own file rather than its module barrel (`@/modules/settings` also exports the Drawer's `SettingsCategoryTree`, so importing the barrel here would put the settings surface back in the entry chunk), and a lazy branch is still one component per tab type - the boundary does not remount tab content, which `shell-tab-identity.test.tsx` holds.
@@ -1638,7 +1638,7 @@ since it is always under the provider.
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+`badge`, `button`, `card`, `code-editor`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
 
 ### `dialog`
 
@@ -1691,6 +1691,68 @@ fix, leaving the original outline-less in dark. The border stays a prop
 (default `border-border`, pass `border-rule` on a declared surface) because
 `border-rule` falls back to the invisible default where no surface declares one.
 `dashboard/components/shared.tsx` re-exports it so existing imports resolve.
+
+### `code-editor`
+
+The single wrapper around Monaco. Every shared editor setting lives here so it
+changes in one place, and it is also where Monaco is *loaded* - `ensureMonaco()`
+on first mount, a skeleton until it resolves (see `lib/monaco-setup.ts` above).
+The other half of its job is making an editor behave like the rest of the app,
+because Monaco's defaults are not this app's and there are a dozen mount sites
+to keep from each answering that separately (#938, #1213).
+
+**Keyboard.** `lib/editor-chords.ts` binds, on every instance:
+
+- **The two send chords** (⌘↵, ⇧⌘↵), re-dispatched on `document.body` for the
+  one window handler to decide. Monaco owns Enter and `ownsEnterKey` excludes
+  editors from that handler on purpose, so without the bridge ⌘↵ inserted a
+  newline in the body, GraphQL and script panes.
+- **⌘I**, the context-bar toggle, for the opposite reason: Monaco binds
+  CtrlCmd+I as a secondary `triggerSuggest` keybinding on every platform and its
+  keybinding service stops what it resolves, so the chord died at the editor
+  instead of reaching `Shell`'s bubble-phase listener. S, W, B, `,`, the digits
+  and the ⇧ view chords really are unbound in the standalone editor and arrive
+  on their own - which is what the bridge's comment used to claim about **all**
+  of them.
+- **⇧⌘M, the way out.** Monaco's Tab indents, which is right for a code editor
+  and a keyboard trap for anyone who reached one by tabbing (WCAG 2.1.2).
+  Monaco's own exit, `editor.action.toggleTabFocusMode`, cannot simply be
+  advertised: it is Ctrl+M, which on macOS means ⌃⇧M - a modifier `Chord` has no
+  word for - while the ⌘M this registry *would* render is Minimize. So the app
+  declares `LEAVE_EDITOR_CHORD` and the Keyboard Shortcuts panel lists it like
+  any other. It moves focus to the first focusable element after the editor's
+  container, walking backwards when the editor is the last thing on the page -
+  never to the container itself, whose textarea the next Tab would walk straight
+  back into.
+
+**A read-only editor has no trap to escape**: `tabFocusMode` is simply on for
+it, Tab having nothing to indent in text nobody can type into, so it shows no
+hint. The binding is still registered there, redundantly - one `addCommand` on
+every instance is cheaper to keep true than a `readOnly` branch threaded through
+the bridge. Editable editors keep Tab and show a `Kbd` hint naming the chord
+*while they hold focus* - at the moment it is wanted, rather than as a standing
+badge over a dozen panes. The hint is the app's one surface floating over
+Monaco's own canvas rather than a declared app surface, so it carries
+`border-border-strong` explicitly: there is no `--rule` for `border-rule` to
+inherit, and neither theme's `--popover` separates from the editor background on
+its own.
+
+⌘K is not bound here at all. It belongs to `CommandPalette`, on the capture
+phase, which both prevents **and stops** it: preventing alone left the event in
+flight, and Monaco - which treats ⌘K as a chord *leader* - entered chord mode
+behind the open palette, so the next keystroke answered "not a command" in its
+status bar.
+
+**`ariaLabel` is required.** Monaco's default accessible name is "Editor
+content", so a dozen unlabelled panes are one control to a screen reader. It is
+per call site rather than derived from `language`, because two editors can share
+a language and never a job (the GraphQL variables pane and a JSON body are both
+`json`). The type holds the prop present; `code-editor.aria-label.test.tsx`
+holds the labels non-empty and distinct, with a floor under the mount count so a
+broken scan cannot pass vacuously. The two script panels take theirs from
+`SCRIPT_VARIANTS`, the collection script tab from its `kind` - a scan cannot
+follow either, which is the same limit that applies to class names arriving in
+a variable.
 
 ### Markdown (`markdown-view`, `markdown-editor`)
 

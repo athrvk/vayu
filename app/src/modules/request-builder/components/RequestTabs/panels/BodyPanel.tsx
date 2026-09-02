@@ -428,6 +428,7 @@ export default function BodyPanel() {
 											? "xml"
 											: "plaintext"
 								}
+								ariaLabel="Request body"
 								value={request.body || ""}
 								onChange={(v) => updateField("body", v ?? "")}
 								onMount={handleEditorMount}

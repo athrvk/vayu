@@ -752,6 +752,7 @@ export function GraphQLBody({
 					<CodeEditor
 						height="100%"
 						language="graphql"
+						ariaLabel="GraphQL query"
 						value={query}
 						onChange={(q) => write({ query: q ?? "" })}
 						onMount={handleQueryMount}
@@ -803,6 +804,7 @@ export function GraphQLBody({
 					<CodeEditor
 						height="100%"
 						language="json"
+						ariaLabel="GraphQL variables"
 						value={variables}
 						onChange={(v) => {
 							setVariables(v ?? "");

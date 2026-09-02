@@ -28,43 +28,13 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { openingTags, summarize } from "@/lib/jsx-opening-tags.testkit";
 
 const sources = import.meta.glob("/src/**/*.tsx", {
 	query: "?raw",
 	import: "default",
 	eager: true,
 });
-
-/**
- * Extract complete `<Button ...>` opening tags. A regex cannot do this: JSX
- * props hold arrow functions (`onClick={(e) => …}`) and object literals whose
- * `>` and `}` would end the match early - which is exactly the bug that made an
- * earlier version of this test flag already-labelled buttons. So scan with a
- * brace/string-aware cursor and end the tag only at a top-level `>`.
- */
-function buttonOpeningTags(src: string): string[] {
-	const tags: string[] = [];
-	const re = /<Button\b/g;
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(src))) {
-		let depth = 0; // {} nesting
-		let quote: string | null = null;
-		let i = m.index + m[0].length;
-		for (; i < src.length; i++) {
-			const c = src[i];
-			if (quote) {
-				if (c === quote) quote = null;
-				continue;
-			}
-			if (c === '"' || c === "'" || c === "`") quote = c;
-			else if (c === "{") depth++;
-			else if (c === "}") depth--;
-			else if (c === ">" && depth === 0) break;
-		}
-		tags.push(src.slice(m.index, i + 1));
-	}
-	return tags;
-}
 
 const isIconButton = (tag: string) => /size=["']icon["']/.test(tag);
 
@@ -73,7 +43,7 @@ const hasAccessibleName = (tag: string) =>
 
 describe("icon-only buttons have accessible names", () => {
 	const iconTags = Object.entries(sources).flatMap(([path, src]) =>
-		buttonOpeningTags(src as string)
+		openingTags(src as string, "Button")
 			.filter(isIconButton)
 			.map((tag) => ({ path, tag }))
 	);
@@ -89,7 +59,7 @@ describe("icon-only buttons have accessible names", () => {
 	it("names every icon-only Button", () => {
 		const offenders = iconTags
 			.filter(({ tag }) => !hasAccessibleName(tag))
-			.map(({ path, tag }) => `${path}: ${tag.replace(/\s+/g, " ").slice(0, 90)}`);
+			.map(({ path, tag }) => summarize(path, tag));
 		expect(offenders).toEqual([]);
 	});
 });

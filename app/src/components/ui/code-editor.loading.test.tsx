@@ -76,7 +76,7 @@ describe("the editor waits for Monaco", () => {
 	it("shows the placeholder, and no editor, until the load resolves", async () => {
 		const { CodeEditor } = await freshEditor(() => ({ monaco: fakeMonaco }));
 
-		render(<CodeEditor value="" language="json" />);
+		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
 
 		// The mutation check: render `<Editor>` without the `useLoadedMonaco`
 		// gate and this passes an editor straight through, which is the
@@ -93,7 +93,7 @@ describe("the editor waits for Monaco", () => {
 	it("swaps the placeholder for the editor once Monaco is there", async () => {
 		const { CodeEditor } = await freshEditor(() => ({ monaco: fakeMonaco }));
 
-		render(<CodeEditor value="" language="json" />);
+		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
 		await act(async () => {});
 
 		expect(screen.getByTestId("editor")).toBeInTheDocument();
@@ -108,7 +108,7 @@ describe("a failed load says so", () => {
 			throw new Error("chunk load failed");
 		});
 
-		render(<CodeEditor value="" language="json" />);
+		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
 		await act(async () => {});
 
 		expect(screen.getByRole("alert")).toHaveTextContent(/editor failed to load/i);

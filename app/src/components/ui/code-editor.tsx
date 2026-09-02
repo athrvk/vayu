@@ -27,6 +27,9 @@ import { useClientSettingsStore } from "@/stores";
 import { selectMonoStack } from "@/stores/client-settings-store";
 import { registerEditorChords } from "@/lib/editor-chords";
 import { ensureMonaco, useLoadedMonaco } from "@/lib/monaco-loader";
+import { LEAVE_EDITOR_CHORD } from "@/constants/shortcuts";
+import { chordKeys } from "@/lib/platform";
+import { Kbd } from "./kbd";
 import { Skeleton } from "./skeleton";
 import { cn } from "@/lib/utils";
 
@@ -103,9 +106,60 @@ const DEFAULT_OPTIONS = {
 	cursorSmoothCaretAnimation: "on",
 } satisfies EditorOptions;
 
+/**
+ * The way out of the Tab trap, beside the editor that has one.
+ *
+ * Only while the editor holds focus: a keyboard user is told the chord at the
+ * moment they need it, and the dozen editors in the app do not each carry a
+ * standing badge over their content. Read-only editors never show it - they run
+ * with `tabFocusMode` on, so Tab already leaves them and there is no trap to
+ * advertise a way out of.
+ *
+ * Caps come from `chordKeys` and the `Kbd` primitive, like every other chord
+ * this app puts on screen: a hand-rolled badge here would be a second spelling
+ * of a modifier `lib/platform.ts` already spells per platform.
+ *
+ * Not `UrlBar`'s `Hint`, which is the app's other chord-on-focus pattern: that
+ * one is a Radix `Tooltip` around a `TooltipTrigger asChild`, and Monaco's
+ * `<Editor>` is not a ref-forwarding child a trigger can attach to. The shape
+ * here is instead the floating-surface one every popover uses - `bg-popover`,
+ * a border, a shadow.
+ *
+ * The border is not decoration and not `border-rule`. This chip is the one
+ * surface in the app that floats over *Monaco's* canvas rather than over a
+ * declared app surface, so there is no `--rule` to inherit and it would fall
+ * back to the invisible default. The fill cannot separate it either: Monaco's
+ * dark background is #1e1e1e against a `--popover` of #1a1a1f, and both are
+ * white in light. `border-border-strong` is the edge that reads on both, and
+ * it is the token `Kbd` itself is built from.
+ */
+function LeaveEditorHint() {
+	return (
+		<div className="pointer-events-none absolute bottom-1.5 right-3 z-10 flex items-center gap-1 rounded-md border border-border-strong bg-popover px-1.5 py-1 text-popover-foreground shadow-md">
+			<span className="text-[10px] leading-none text-muted-foreground">Leave editor</span>
+			{chordKeys(LEAVE_EDITOR_CHORD).map((cap) => (
+				<Kbd key={cap} size="sm">
+					{cap}
+				</Kbd>
+			))}
+		</div>
+	);
+}
+
 export interface CodeEditorProps {
 	value: string;
 	language: string;
+	/**
+	 * What this editor is, for a screen reader - "Request body", "Test script".
+	 *
+	 * Required rather than optional, and per call site rather than derived from
+	 * `language`: two editors can share a language and never the same job (the
+	 * GraphQL variables pane and the request body are both `json`), and a dozen
+	 * panes all announcing Monaco's default "Editor content" is the same as none
+	 * of them announcing anything. `code-editor.aria-label.test.tsx` holds the
+	 * labels distinct; the type holds them present.
+	 */
+	ariaLabel: string;
 	/** Coalesces Monaco's `string | undefined` to a plain string. */
 	onChange?: (value: string) => void;
 	/** CSS height; use "100%" inside flex containers. */
@@ -121,6 +175,7 @@ export interface CodeEditorProps {
 export function CodeEditor({
 	value,
 	language,
+	ariaLabel,
 	onChange,
 	height = "100%",
 	readOnly = false,
@@ -134,6 +189,7 @@ export function CodeEditor({
 	const monoStack = useClientSettingsStore(selectMonoStack);
 	const monaco = useLoadedMonaco();
 	const [loadFailed, setLoadFailed] = useState(false);
+	const [hasFocus, setHasFocus] = useState(false);
 
 	useEffect(() => {
 		let active = true;
@@ -203,24 +259,50 @@ export function CodeEditor({
 	}
 
 	return (
-		<Editor
-			className={className}
-			height={height}
-			language={language}
-			value={value}
-			theme={isDark ? "vs-dark" : "vs"}
-			onChange={onChange ? (v) => onChange(v ?? "") : undefined}
-			onMount={handleMount}
-			options={{
-				...DEFAULT_OPTIONS,
-				...prefOptions,
-				readOnly,
-				...options,
-				// `scrollbar` is a nested object, so a caller passing one of its keys
-				// would otherwise replace the whole thing and silently drop the
-				// wheel-propagation default above. Merge it a level deeper.
-				scrollbar: { ...DEFAULT_OPTIONS.scrollbar, ...options?.scrollbar },
+		/*
+		 * The wrapper exists for the hint, which has to be positioned against the
+		 * editor's own box. `className` and `height` stay on it rather than on
+		 * `<Editor>` so every call site's layout reads exactly as it did - and so
+		 * the two states above, which already render their own box, keep the same
+		 * shape as this one.
+		 */
+		<div
+			className={cn("relative", className)}
+			style={{ height }}
+			onFocus={() => setHasFocus(true)}
+			onBlur={(e) => {
+				// Monaco moves focus between its own nodes (the hidden textarea, the
+				// find widget); only focus leaving the editor entirely counts.
+				if (!e.currentTarget.contains(e.relatedTarget)) setHasFocus(false);
 			}}
-		/>
+		>
+			<Editor
+				height="100%"
+				language={language}
+				value={value}
+				theme={isDark ? "vs-dark" : "vs"}
+				onChange={onChange ? (v) => onChange(v ?? "") : undefined}
+				onMount={handleMount}
+				options={{
+					...DEFAULT_OPTIONS,
+					...prefOptions,
+					readOnly,
+					ariaLabel,
+					/*
+					 * Tab moves focus in an editor nobody can type into: there is no
+					 * indentation to insert, so Monaco's default is a keyboard trap
+					 * (WCAG 2.1.2) with nothing on the other side of it. The editable
+					 * editors keep Tab and get `LEAVE_EDITOR_CHORD` plus the hint above.
+					 */
+					tabFocusMode: readOnly,
+					...options,
+					// `scrollbar` is a nested object, so a caller passing one of its keys
+					// would otherwise replace the whole thing and silently drop the
+					// wheel-propagation default above. Merge it a level deeper.
+					scrollbar: { ...DEFAULT_OPTIONS.scrollbar, ...options?.scrollbar },
+				}}
+			/>
+			{!readOnly && hasFocus && <LeaveEditorHint />}
+		</div>
 	);
 }
