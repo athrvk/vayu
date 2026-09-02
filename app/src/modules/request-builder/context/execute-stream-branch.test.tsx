@@ -217,7 +217,9 @@ describe("the streaming send branch", () => {
 
 		// What the relay delivered, then the frame that closes it.
 		act(() => {
-			useExecutionEventsStore.getState().addEvent("run_1", { event: "token", data: "live" });
+			useExecutionEventsStore
+				.getState()
+				.addEvents("run_1", [{ event: "token", data: "live" }]);
 			useExecutionEventsStore.getState().endStream("run_1", "completed", 9);
 		});
 
@@ -245,7 +247,9 @@ describe("the streaming send branch", () => {
 		});
 
 		act(() => {
-			useExecutionEventsStore.getState().addEvent("run_1", { event: "token", data: "live" });
+			useExecutionEventsStore
+				.getState()
+				.addEvents("run_1", [{ event: "token", data: "live" }]);
 			useExecutionEventsStore.getState().endStream("run_1", "completed", 1);
 		});
 

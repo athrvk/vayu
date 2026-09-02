@@ -24,8 +24,18 @@
  *
  * Once the run reaches its terminal status the **stored** trace is the complete
  * record and the tab reads that instead (`restore-response.ts`) - what lives
- * here is only ever what has arrived so far, bounded by the engine's retained
- * ring rather than by anything this side.
+ * here is only ever what has arrived so far.
+ *
+ * **What bounds that is the stream cap, not the retained ring** (issue #1158).
+ * The ring - `sseMaxRetainedEvents`, 2,000 by default - is what a *reconnect*
+ * replays; a connected client is replayed the ring and then tails to the end of
+ * the stream, so what accumulates here is bounded by `sseMaxStreamEvents`
+ * instead: 100,000 events by default, 10,000,000 at the ceiling, or the
+ * duration cap, whichever the stream reaches first. Which is why the Events tab
+ * windows this list rather than assuming it stays short.
+ *
+ * Rows arrive **in batches**, on the same `liveRefreshMs` cadence the load and
+ * scenario dashboards commit on - see `addEvents`.
  */
 
 import { create } from "zustand";
@@ -59,7 +69,8 @@ interface ExecutionEventsState {
 	/** Begin a stream: clears any previous one's rows, then starts streaming. */
 	startStream: (params: { requestId: string | null; runId: string; eventsUrl: string }) => void;
 	noteOpen: (runId: string, open: StreamOpen) => void;
-	addEvent: (runId: string, event: StreamEvent) => void;
+	/** Append what one flush window collected, oldest first. */
+	addEvents: (runId: string, events: StreamEvent[]) => void;
 	endStream: (runId: string, reason: StreamEndReason, totalEvents: number | null) => void;
 	setError: (runId: string, error: string | null) => void;
 	/** Forget the stream entirely - used when the response it fed is replaced. */
@@ -78,7 +89,7 @@ const EMPTY = {
 	error: null,
 } satisfies Omit<
 	ExecutionEventsState,
-	"startStream" | "noteOpen" | "addEvent" | "endStream" | "setError" | "clear"
+	"startStream" | "noteOpen" | "addEvents" | "endStream" | "setError" | "clear"
 >;
 
 export const useExecutionEventsStore = create<ExecutionEventsState>((set) => ({
@@ -97,8 +108,15 @@ export const useExecutionEventsStore = create<ExecutionEventsState>((set) => ({
 	 */
 	noteOpen: (runId, open) => set((s) => (s.runId === runId ? { open } : s)),
 
-	addEvent: (runId, event) =>
-		set((s) => (s.runId === runId ? { events: [...s.events, event] } : s)),
+	/*
+	 * One copy and one notify per *batch* (issue #1158). A frame used to cost a
+	 * full copy of the list on its own, so a stream running at a few hundred
+	 * events a second spent a renderer core on spread-copies and re-renders for
+	 * as long as it ran. The batch is `useExecutionEvents`', collected by
+	 * `services/throttled-batcher.ts` - never empty, per that helper's contract.
+	 */
+	addEvents: (runId, events) =>
+		set((s) => (s.runId === runId ? { events: [...s.events, ...events] } : s)),
 
 	endStream: (runId, reason, totalEvents) =>
 		set((s) =>
