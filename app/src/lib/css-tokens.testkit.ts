@@ -71,7 +71,8 @@ export function basePalette(css: string = indexCss): Map<string, string> {
 
 /**
  * The colour families that ship a bare token and a `-text` foreground of its
- * own - `destructive`, `success`, `warning` and the `status-*` set.
+ * own. Which families those are is the stylesheet's answer, not a list kept
+ * here - writing one out is what this function exists to stop.
  *
  * A family qualifies by declaring both halves as colours in the base palette.
  * `primary` therefore does not: `--primary-text` aliases `--primary`, so there
