@@ -14,22 +14,15 @@
  * the readable *foreground*, darkened in light mode and lightened in dark so it
  * clears AA as small text or a small glyph.
  *
- * Using the fill token as a foreground fails AA. Measured live on `bg-card`
- * (contrast ratio; 4.5 is the floor for normal text, 3.0 for icons):
- *
- *   family           light bare   light -text   dark bare   dark -text
- *   destructive         4.87         5.48         1.73         5.40
- *   success             3.33         5.71         7.46         8.81
- *   warning             2.13         5.46         8.13         9.81
- *   status-success      2.30         5.71         7.53         8.81
- *   status-error        3.78         5.88         4.59         5.85
- *   status-stopped      2.79         5.73         6.23         7.40
- *   status-running      3.64         5.99         4.77         6.75
- *
- * `destructive` is the only family that fails in dark; the rest fail in light.
- * That inversion is the tell that this is not a dark-mode bug - it is the fill
- * token standing in for the foreground one, which shows up in whichever mode the
- * fill happens to sit closest to the surface behind it.
+ * Using the fill token as a foreground fails AA. The measured ratios live in
+ * `docs/design-system.md` ("The bare token is the fill"), which is the one
+ * record of them - every family fails at one end or the other, `destructive`
+ * in dark, the three mode-consistent HTTP-status indicators (`status-warning`,
+ * `status-redirect`, `status-no-response`) in both, the rest in light. That
+ * spread is the tell
+ * that this is not a dark-mode bug: it is the fill token standing in for the
+ * foreground one, and which mode it breaks in just depends on where that fill
+ * sits relative to the surface behind it.
  *
  * So `text-<family>` is banned, including `hover:`/`focus:` prefixes and the
  * `/NN` opacity forms - a faded `-text` is no safer than a solid bare token, and
@@ -37,9 +30,13 @@
  * `bg-*`, `border-*` and `*-foreground` (the paired foreground for a solid fill)
  * are all correct uses of the bare token and are left alone.
  *
- * `status-warning` is deliberately absent from the list below: it has no `-text`
- * variant, because bare already measures 17.72 / 15.78 - banning it would only
- * force churn towards a token that does not exist.
+ * **The families are read out of `index.css`, not listed here.** A hand-written
+ * list held seven while the stylesheet had grown to ten, so `status-redirect`,
+ * `status-no-response` and `status-warning` were guarded by nothing - and the
+ * comment that had explained `status-warning`'s absence ("it has no `-text`
+ * variant") was describing a stylesheet that no longer existed (#1253). A
+ * family is now whatever declares both halves in the base palette, so the next
+ * token pair arrives guarded.
  *
  * **Known blind spot: inline styles.** This scans for the `text-<family>` class,
  * so `style={{ color: "hsl(var(--warning))" }}` walks straight past it.
@@ -57,6 +54,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { familiesWithTextPair, indexCss } from "@/lib/css-tokens.testkit";
 
 const sources: Record<string, string> = import.meta.glob("/src/**/*.{ts,tsx}", {
 	query: "?raw",
@@ -64,16 +62,8 @@ const sources: Record<string, string> = import.meta.glob("/src/**/*.{ts,tsx}", {
 	eager: true,
 });
 
-/** Families with a `-text` foreground variant. One line each to add another. */
-const FAMILIES = [
-	"destructive",
-	"success",
-	"warning",
-	"status-success",
-	"status-error",
-	"status-stopped",
-	"status-running",
-];
+/** Families with a `-text` foreground variant, as `index.css` declares them. */
+const FAMILIES = familiesWithTextPair();
 
 /**
  * `text-<family>` not followed by `-` or a word character, so `-text` and
@@ -83,37 +73,73 @@ const FAMILIES = [
  */
 const bareForeground = (family: string) => new RegExp(`\\btext-${family}(?![-\\w])`);
 
+/** Every place a scanned source uses `family`'s fill token as a foreground. */
+function bareForegroundUses(files: Record<string, string>, family: string): string[] {
+	const pattern = bareForeground(family);
+	const offenders: string[] = [];
+	for (const [path, src] of Object.entries(files)) {
+		if (path.includes(".test.")) continue;
+		src.split("\n").forEach((line, i) => {
+			// Prose in comments may name the class; only code is scanned.
+			// The token can sit far from `className` - a ternary branch on
+			// its own line, a helper returning a class string - so the line
+			// is scanned whole rather than only inside a `className=`.
+			const code = line.replace(/^\s*(\/\/|\/?\*).*$/, "");
+			if (pattern.test(code)) {
+				offenders.push(`${path}:${i + 1}: ${line.trim().slice(0, 88)}`);
+			}
+		});
+	}
+	return offenders;
+}
+
+/** A stylesheet shaped like `index.css`'s base palette, for the cases below. */
+const palette = (declarations: string) => `@layer base {\n\t:root {\n${declarations}\n\t}\n}\n`;
+
 describe("status colours use the -text token for foreground", () => {
+	it("derives its families from the stylesheet (guards the derivation)", () => {
+		expect(indexCss.length).toBeGreaterThan(1000);
+		// Empty would make every case below vanish rather than fail.
+		expect(FAMILIES.length).toBeGreaterThan(0);
+		expect(FAMILIES).toContain("status-warning");
+	});
+
+	it("takes a family only while the stylesheet declares both halves", () => {
+		const both = "\t\t--status-warning: 38 92% 36%;\n\t\t--status-warning-text: 38 90% 30%;";
+		expect(familiesWithTextPair(palette(both))).toEqual(["status-warning"]);
+
+		const bareOnly = "\t\t--status-warning: 38 92% 36%;";
+		expect(familiesWithTextPair(palette(bareOnly))).toEqual([]);
+	});
+
+	it("leaves out a family whose `-text` only aliases the bare token", () => {
+		// `--primary-text: var(--primary)` is the live case: same colour, so
+		// there is no more readable variant to prefer and nothing to ban.
+		const aliased = "\t\t--primary: 24 90% 46%;\n\t\t--primary-text: var(--primary);";
+		expect(familiesWithTextPair(palette(aliased))).toEqual([]);
+	});
+
 	it("finds -text utilities to check (guards the scan itself)", () => {
+		const used = new RegExp(`\\btext-(?:${FAMILIES.join("|")})-text\\b`, "g");
 		const total = Object.values(sources).reduce<number>(
-			(n, src) =>
-				n +
-				((src as string).match(
-					/\btext-(?:[a-z-]*?)(?:destructive|success|warning|error|stopped|running)-text\b/g
-				)?.length ?? 0),
+			(n, src) => n + ((src as string).match(used)?.length ?? 0),
 			0
 		);
 		expect(total).toBeGreaterThan(50);
 	});
 
+	it("reports the bare token where a source uses one", () => {
+		const path = "/src/components/ui/fixture.tsx";
+		const bare = { [path]: `<span className="text-status-warning">4xx</span>` };
+		expect(bareForegroundUses(bare, "status-warning")).toHaveLength(1);
+
+		const fixed = { [path]: `<span className="text-status-warning-text">4xx</span>` };
+		expect(bareForegroundUses(fixed, "status-warning")).toEqual([]);
+	});
+
 	for (const family of FAMILIES) {
 		it(`uses no bare \`text-${family}\`, which is the fill token`, () => {
-			const pattern = bareForeground(family);
-			const offenders: string[] = [];
-			for (const [path, src] of Object.entries(sources)) {
-				if (path.includes(".test.")) continue;
-				(src as string).split("\n").forEach((line, i) => {
-					// Prose in comments may name the class; only code is scanned.
-					// The token can sit far from `className` - a ternary branch on
-					// its own line, a helper returning a class string - so the line
-					// is scanned whole rather than only inside a `className=`.
-					const code = line.replace(/^\s*(\/\/|\/?\*).*$/, "");
-					if (pattern.test(code)) {
-						offenders.push(`${path}:${i + 1}: ${line.trim().slice(0, 88)}`);
-					}
-				});
-			}
-			expect(offenders).toEqual([]);
+			expect(bareForegroundUses(sources, family)).toEqual([]);
 		});
 	}
 });

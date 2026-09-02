@@ -274,29 +274,44 @@ whole of the rule, and it is worth stating separately because the failure mode i
 easy to miss: a bare token used as a foreground still *looks* like the right
 colour, it is just too close in luminance to the surface behind it. Measured on
 `bg-card` in the running app (contrast ratio; **bold fails** the 4.5 floor for
-normal text, and the two worst also fail the 3.0 floor for icons):
+normal text, and the four values under 3.0 fail the 3.0 icon floor as well):
 
-| family           | light bare | light `-text` | dark bare | dark `-text` |
-|------------------|-----------:|--------------:|----------:|-------------:|
-| `destructive`    |       4.87 |          5.48 |  **1.73** |         5.40 |
-| `success`        |   **3.33** |          5.71 |      7.46 |         8.81 |
-| `warning`        |   **2.13** |          5.46 |      8.13 |         9.81 |
-| `status-success` |   **2.30** |          5.71 |      7.53 |         8.81 |
-| `status-error`   |   **3.78** |          5.88 |      4.59 |         5.85 |
-| `status-stopped` |   **2.79** |          5.73 |      6.23 |         7.40 |
-| `status-running` |   **3.64** |          5.99 |      4.77 |         6.75 |
-| `status-warning` |      17.72 |         17.72 |     15.78 |        15.78 |
+| family              | light bare | light `-text` | dark bare | dark `-text` |
+|---------------------|-----------:|--------------:|----------:|-------------:|
+| `destructive`       |       4.87 |          5.48 |  **1.73** |         5.40 |
+| `success`           |   **3.33** |          5.71 |      7.46 |         8.81 |
+| `warning`           |   **2.13** |          5.46 |      8.13 |         9.81 |
+| `status-success`    |   **2.30** |          5.71 |      7.53 |         8.81 |
+| `status-error`      |   **3.78** |          5.88 |      4.59 |         5.85 |
+| `status-stopped`    |   **2.79** |          5.73 |      6.23 |         7.40 |
+| `status-running`    |   **3.64** |          5.99 |      4.77 |         6.75 |
+| `status-warning`    |   **3.98** |          5.46 |  **4.35** |         9.81 |
+| `status-redirect`   |   **4.34** |          7.86 |  **3.99** |         5.64 |
+| `status-no-response`|   **3.98** |          6.69 |  **4.34** |         6.71 |
 
-Note the inversion: `destructive` is the only family that fails in **dark**,
-every other family fails in **light**. That rules out "a dark-mode bug" as the
-diagnosis - the single cause is the fill token standing in for the foreground
-one, and which mode it breaks in just depends on where that fill sits relative to
-the surface. `destructive` on `bg-destructive/10` and on `bg-background` measures
-worse still (4.14 / 4.43 light, 1.69 / 1.99 dark), so a tinted error chip is the
-worst case, not the safe one.
+Which mode a family fails in is not a property of the mode. `destructive` fails
+in **dark** alone, the six above it in **light** alone, and the last three - the
+mode-consistent indicators added for HTTP status - in **both**, because a value
+tuned to read as a dot on either card is by construction near the middle. That
+spread rules out "a dark-mode bug" as the diagnosis: the single cause is the fill
+token standing in for the foreground one, and which mode it shows up in just
+depends on where that fill sits relative to the surface. `destructive` on
+`bg-destructive/10` and on `bg-background` measures worse still (4.14 / 4.43
+light, 1.69 / 1.99 dark), so a tinted error chip is the worst case, not the safe
+one.
 
-`status-warning` is the exception: it has no `-text` variant, because the bare
-token already measures 17.72 / 15.78. Leave it as-is.
+`status-warning` used to be recorded here as an exception with no `-text`
+variant. It has one - `--status-warning-text`, holding the same value as
+`--warning-text` in both themes, which is why its `-text` column repeats that
+row's figures rather than stating a second number for one colour. The bare amber
+is the family's worst case rather than its safe one: 3.98 on the card, 3.63 on
+`--background`, 3.38 on `--muted` / `--accent` and 3.54 on its own `/10` tint, so
+it clears the 3.0 icon floor everywhere and the 4.5 text floor nowhere. The
+`-text` variant clears both on all four (5.46 / 4.98 / 4.64 / 4.86 light). Its
+worst is the `--muted` case the light-amber floor above is quoted from, and the
+two figures differ in the last place - 4.64 computed from the declared triple,
+4.63 measured in the browser, which quantises to 8-bit channels first. That is
+the size of the gap between the two methods across this whole page.
 
 Icons count. 1.73 fails the non-text threshold as surely as the text one, so a
 red `AlertCircle` is in scope, not just the sentence next to it. So are opacity
@@ -314,7 +329,10 @@ a `Trash2` at `size="icon"`. Putting a text label in it would stop it passing.
 `app/src/components/ui/status-color-tokens.test.ts` enforces this: it fails on
 any `text-<family>` in `app/src` (including `hover:`/`focus:` prefixes and `/NN`
 opacity forms) while allowing `bg-*`, `border-*` and `*-foreground`, which are
-correct uses of the fill token.
+correct uses of the fill token. It reads the families out of `index.css` - every
+token declaring both a bare value and a `-text` one in the base palette - rather
+than listing them, so a family added to the stylesheet arrives guarded. A
+hand-written list held seven while the stylesheet had ten.
 
 **Non-text contrast (WCAG 1.4.11) is a separate 3.0 bar**, and it applies to
 things text contrast never touches: focus rings, control boundaries, and the
@@ -507,6 +525,12 @@ same "good / bad / busy" signal on either surface. Distinct from `--success` /
 --status-running: 217 91% 60%;   /* blue-500   - running */
 --status-stopped: 25 95% 53%;    /* orange-500 - stopped */
 /* pending → text-muted-foreground / bg-muted-foreground */
+
+/* The HTTP-status half of the same family, added with that vocabulary below.
+   Amber cannot follow the -500 convention - see the note further down. */
+--status-redirect: 258 60% 62%;     /* violet  - 3xx, redirect */
+--status-no-response: 240 5% 52%;   /* neutral - status 0, nothing came back */
+--status-warning: 38 92% 36%;       /* amber   - 4xx, client error */
 ```
 
 **A status colour has three jobs, and three tokens.** The base value above is
