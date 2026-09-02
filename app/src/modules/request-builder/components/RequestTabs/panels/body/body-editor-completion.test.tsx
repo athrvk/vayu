@@ -128,16 +128,24 @@ describe("the languages the body editors mount with", () => {
 		expect(ALL_MODES).toEqual(expect.arrayContaining(NON_EDITOR_MODES));
 	});
 
-	it.each(ALL_MODES)("%s is one the completion provider is registered for", async (bodyMode) => {
-		await renderMode(bodyMode);
+	it.each(ALL_MODES)(
+		"%s mounts only languages the completion provider is registered for",
+		async (bodyMode) => {
+			await renderMode(bodyMode);
 
-		// A mode that mounted no editor would pass the loop below vacuously, so
-		// each mode has to mount what its row implies: an editor, or the table.
-		expect(mounted.length > 0).toBe(!NON_EDITOR_MODES.includes(bodyMode));
-		for (const language of mounted) {
-			expect(BODY_LANGUAGES).toContain(language);
+			// A mode that mounted no editor would pass the loop below vacuously,
+			// so every mode that is not a declared non-editor one must mount at
+			// least one - which is how a new mode reaches the check at all.
+			if (NON_EDITOR_MODES.includes(bodyMode)) {
+				expect(mounted).toHaveLength(0);
+			} else {
+				expect(mounted.length).toBeGreaterThan(0);
+			}
+			for (const language of mounted) {
+				expect(BODY_LANGUAGES).toContain(language);
+			}
 		}
-	});
+	);
 
 	it("covers the whole list between them, so no entry is dead", async () => {
 		// The mirror of the check above: `BODY_LANGUAGES` must not accumulate
