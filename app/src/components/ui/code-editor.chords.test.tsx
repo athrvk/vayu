@@ -26,6 +26,7 @@ import {
 	SEND_CHORD,
 	LOAD_TEST_CHORD,
 	TOGGLE_CONTEXT_BAR_CHORD,
+	FOCUS_URL_CHORD,
 	LEAVE_EDITOR_CHORD,
 } from "@/constants/shortcuts";
 import { chordKeybinding } from "@/lib/editor-chords";
@@ -69,16 +70,19 @@ vi.mock("@/lib/monaco-loader", () => ({
 }));
 
 describe("CodeEditor keyboard wiring", () => {
-	it("registers the send, load-test, context-bar and leave chords on every instance", () => {
+	it("registers the send, load-test, context-bar, focus-URL and leave chords on every instance", () => {
 		addCommand.mockClear();
 		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
 		// ⌘I is in the list because Monaco binds it for `triggerSuggest` and
 		// stops it: drop it and the context bar stops toggling from an editor,
 		// which is invisible from `Shell`, where the handler still looks correct.
+		// ⌘L is there for the same reason - Monaco binds it to
+		// `expandLineSelection`, so the URL bar became unreachable from a body.
 		expect(addCommand.mock.calls.map((c) => c[0])).toEqual([
 			chordKeybinding(SEND_CHORD, monaco),
 			chordKeybinding(LOAD_TEST_CHORD, monaco),
 			chordKeybinding(TOGGLE_CONTEXT_BAR_CHORD, monaco),
+			chordKeybinding(FOCUS_URL_CHORD, monaco),
 			chordKeybinding(LEAVE_EDITOR_CHORD, monaco),
 		]);
 	});
@@ -88,7 +92,7 @@ describe("CodeEditor keyboard wiring", () => {
 		const onMount = vi.fn();
 		render(<CodeEditor value="" language="json" ariaLabel="Request body" onMount={onMount} />);
 		expect(onMount).toHaveBeenCalledTimes(1);
-		expect(addCommand).toHaveBeenCalledTimes(4);
+		expect(addCommand).toHaveBeenCalledTimes(5);
 	});
 });
 

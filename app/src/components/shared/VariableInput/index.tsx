@@ -76,6 +76,12 @@ interface VariableInputProps {
 	 */
 	"aria-label"?: string;
 	/**
+	 * The field's element id, for the rare caller something outside its subtree
+	 * has to reach - the Shell's ⌘L focuses the URL field this way, having no
+	 * ref into the request builder. From `constants/dom-ids.ts`, both ends.
+	 */
+	id?: string;
+	/**
 	 * The variable scope this field edits inside. Omitted where there is none,
 	 * which makes this a plain text field: no tokens, no `{{` autocomplete, no
 	 * edit popover. See `VariableSupport`.
@@ -143,6 +149,7 @@ export default function VariableInput({
 	suggestions = [],
 	onPaste,
 	"aria-label": ariaLabel,
+	id,
 	variables,
 }: VariableInputProps) {
 	const [showSuggestions, setShowSuggestions] = useState(false);
@@ -744,6 +751,7 @@ export default function VariableInput({
 			{/* Input layer - receives text input. Borderless, fills the wrapper. */}
 			<input
 				ref={inputRef}
+				id={id}
 				type="text"
 				value={value}
 				onChange={handleChange}

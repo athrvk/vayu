@@ -7,6 +7,7 @@
 
 import { useLayoutStore } from "@/stores";
 import { PanelResizeHandle } from "./PanelResizeHandle";
+import type { AppRegion } from "./region-focus";
 import { DEFAULT_DRAWER_WIDTH } from "@/constants/layout";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
@@ -36,6 +37,9 @@ export function Drawer() {
 			className="relative flex shrink-0 bg-panel"
 			style={{ width }}
 			aria-label={`${drawerView.charAt(0).toUpperCase()}${drawerView.slice(1)} sidebar`}
+			// A stop in the F6 cycle - see `region-focus.ts` for why the bands are
+			// marked rather than found by tag name.
+			data-app-region={"drawer" satisfies AppRegion}
 		>
 			<div className="panel-clip flex-1 overflow-hidden flex flex-col min-w-0">
 				{/* Each view supplies its own DrawerPanel, which owns the header and

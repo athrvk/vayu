@@ -1207,6 +1207,27 @@ without being told. Guarded by `code-editor.chords.test.tsx` (the chord is
 registered, the hint appears on focus and never on a read-only editor) and
 `shortcuts.listed.test.ts` (it reaches the panel).
 
+**Moving focus *between* regions is F6's job, not Tab's** (#1219). The window is
+four bands - the title bar, the drawer, the main pane and the context bar - and
+reaching one from another by Tab alone meant walking every request in an
+expanded collection tree on the way. F6 cycles the bands; Shift+F6 goes back.
+
+Each band carries `data-app-region` rather than being found by landmark tag.
+`header, aside, main` looks like it would do the same job, and it does not: the
+run view renders its own `<header>`, the breadcrumb its own `<nav>`, and the
+inbox its own `<aside>` - content landmarks *inside* `main`, so a tag query
+would cycle around inside one region forever rather than moving between the
+four the window actually has. The attribute says which of the shell's children
+are stops in the cycle, and a feature adding a landmark of its own cannot join
+it by accident.
+
+Focus lands on the region's first focusable element, never on the region
+container itself. A `tabindex="-1"` box would be a legal target and would take
+focus silently: the `:focus-visible` rule above is written `[tabindex]:not([tabindex="-1"])`,
+on purpose, so a script-focused container paints no ring at all. Landing there
+would move focus with nothing on screen saying where it went, which for a
+keyboard-only feature defeats the point of the key.
+
 ---
 
 ## Row Actions

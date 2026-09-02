@@ -92,12 +92,30 @@ describe("the two casts in monaco-setup.ts are honest at runtime", () => {
 		}
 	});
 
-	// monaco.contribution.js pulls in a large chunk of monaco's module graph on
-	// first import, which vitest has to transform cold. Measured 5-8s locally;
-	// 20s is roughly 3x that for a slower or shared-core CI runner.
+	/*
+	 * monaco.contribution.js pulls in a large chunk of monaco's module graph on
+	 * first import, which vitest has to transform cold. It is the only cost in
+	 * this case - the four assertions below it are property reads.
+	 *
+	 * 6.85s measured on an idle Linux container (`vitest --reporter=verbose`,
+	 * this case alone). The budget was 20s, call it 3x, and it was not enough:
+	 * on `windows-latest` shard 1 it timed out twice in a row at 20s (#1219),
+	 * where this file shares two cores with the rest of the shard *and* with
+	 * the real `vite build` the last case in this file runs. Windows is the
+	 * platform this repo already sizes differently for that reason - the test
+	 * presets drop it to `-j4` with a `RESOURCE_LOCK` because concurrency there
+	 * costs more than it returns.
+	 *
+	 * 45s is ~6.6x the measured cost, which clears the observed Windows
+	 * overrun with room, and is still short enough that an import that truly
+	 * hangs fails this file inside a minute instead of sitting on a runner.
+	 * Raise it again only with a *measurement*, the way this line carries one:
+	 * a number moved by reflex is how a wall-clock budget stops meaning
+	 * anything (see the render-heavy note in `app/CLAUDE.md`).
+	 */
 	it(
 		"json/monaco.contribution.js exports what the jsonDefaults cast promises",
-		{ timeout: 20_000 },
+		{ timeout: 45_000 },
 		async () => {
 			const jsonLanguage =
 				await import("monaco-editor/esm/vs/language/json/monaco.contribution.js");
@@ -114,6 +132,11 @@ describe("the two casts in monaco-setup.ts are honest at runtime", () => {
 		}
 	);
 
+	// Still 20s, and deliberately not raised with its neighbour: this one runs
+	// warm. The json case above has already pulled monaco's shared editor graph
+	// through the transform, so what is left here is the typescript language
+	// module alone - 18ms in the same measured run. If these two are ever
+	// reordered or split, this is the number that has to move.
 	it(
 		"typescript/monaco.contribution.js exports what the typescript cast promises",
 		{ timeout: 20_000 },
