@@ -80,6 +80,12 @@ struct ScriptReplay {
     /// fetches belong to the budget sized for a run rather than for a body
     /// someone is watching for.
     size_t max_response_bytes = vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES;
+    /// The route a `pm.sendRequest` from this script leaves by (issue #1256) -
+    /// the run's own, carried from `RunContext::transport` rather than resolved
+    /// here. A script that authenticates through a proxy the run's transfers
+    /// went through, or presents the client certificate they presented, is the
+    /// case #705 exists for; the load path was the one caller that never set it.
+    vayu::http::TransportPolicy transport;
 };
 
 /**
@@ -136,6 +142,7 @@ std::vector<std::string>& failure_messages) {
             script_ctx.iteration          = sample.iteration;
             script_ctx.vu                 = sample.vu;
             script_ctx.max_response_bytes = replay.max_response_bytes;
+            script_ctx.transport          = replay.transport;
             if (replay.data_rows != nullptr && sample.data_row_index &&
             *sample.data_row_index < replay.data_rows->size ()) {
                 script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
@@ -252,6 +259,7 @@ vayu::http::routes::ScriptVariableScopes& scopes,
 const std::shared_ptr<RunContext>& context,
 const vayu::http::SseLimits& sse_limits,
 size_t max_response_bytes,
+const vayu::http::TransportPolicy& transport,
 bool verbose,
 ScriptValidation& validation,
 std::vector<std::string>& failure_messages) {
@@ -297,6 +305,7 @@ std::vector<std::string>& failure_messages) {
         step.name.empty () ? "step " + std::to_string (i + 1) + ": " : step.name + ": ";
         replay.sse_limits         = sse_limits;
         replay.max_response_bytes = max_response_bytes;
+        replay.transport          = transport;
 
         const auto totals = run_replay (engine, scopes, replay, failure_messages);
         validation.steps[i] = totals;
@@ -389,6 +398,16 @@ bool verbose) {
     // (issue #1188) - the load bound, because this pass is the load path's.
     const size_t script_response_bound =
     vayu::http::routes::load_response_body_bound (db);
+    // The route those fetches leave by (issue #1256), and the one value of this
+    // pass that is NOT re-read from the database here: it is the snapshot the
+    // run's own transfers were sent under, taken at `configure_event_loop` and
+    // kept on the context. A bound is what this pass may read *now*, so
+    // reading it now is right; a route is what the traffic being asserted on
+    // took, and a script that reached the target by a different one than the
+    // run did - a proxy edited mid-run, a client certificate registered since -
+    // would report a healthy target as broken. The run resolves it once, and
+    // both halves of the run use that one answer.
+    const vayu::http::TransportPolicy& script_transport = context->transport;
 
     // The run-level request and identity, for the single-request shape. A
     // scenario takes both off the plan step it is replaying instead, so it does
@@ -449,11 +468,12 @@ bool verbose) {
     std::vector<std::string> failure_messages;
 
     if (per_step) {
-        const ScriptValidationTotals totals = replay_scenario_steps (engine, scopes, context,
-        sse_limits, script_response_bound, verbose, validation, failure_messages);
-        sampled = totals.sampled;
-        passed  = totals.passed;
-        failed  = totals.failed;
+        const ScriptValidationTotals totals = replay_scenario_steps (engine,
+        scopes, context, sse_limits, script_response_bound, script_transport,
+        verbose, validation, failure_messages);
+        sampled                             = totals.sampled;
+        passed                              = totals.passed;
+        failed                              = totals.failed;
         // Every scripted step drew a blank, so the run validated nothing.
         if (sampled == 0) {
             return validation;
@@ -480,6 +500,7 @@ bool verbose) {
         replay.request_name       = script_request_name;
         replay.sse_limits         = sse_limits;
         replay.max_response_bytes = script_response_bound;
+        replay.transport          = script_transport;
 
         const auto totals = run_replay (engine, scopes, replay, failure_messages);
         sampled = totals.sampled;
@@ -1101,6 +1122,11 @@ int default_max_per_host) {
     // per change. Matching per transfer stays cheap because it reads this
     // snapshot, never the database.
     loop_config.transport = vayu::http::resolve_transport_policy (db);
+    // The same snapshot, kept for the deferred script pass at the other end of
+    // the run (issue #1256): a `pm.sendRequest` out of a `tests` script must
+    // leave the way the transfers it is asserting on left, and this is the one
+    // place a load run resolves that. See `RunContext::transport`.
+    context->transport = loop_config.transport;
     loop_config.max_response_body_bytes =
     vayu::http::routes::load_response_body_bound (db);
     // Only enable curl verbose if explicitly requested in config,

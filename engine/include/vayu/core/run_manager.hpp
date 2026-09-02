@@ -34,6 +34,7 @@
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/transport_policy.hpp"
 
 namespace vayu::http {
 // A scenario run's steps send through the daemon's jar; the manager only passes
@@ -328,6 +329,32 @@ struct RunContext {
      * strategy thread's hot path.
      */
     std::optional<vayu::StreamBounds> stream_bounds;
+
+    /**
+     * The route every transfer of this run left by, kept so the deferred
+     * script pass can leave by it too (issue #1256).
+     *
+     * A copy of the `EventLoopConfig::transport` the run's transfers were sent
+     * under, written by `configure_event_loop` - the one place a load run
+     * resolves a policy - and read at the other end of the run by
+     * `validate_scripts`, which has no other way to reach it: the loop keeps
+     * its config behind its pImpl and is released before retention.
+     *
+     * Held rather than re-resolved there because the deferred `tests` script
+     * asserts on responses these transfers produced, and a `pm.sendRequest`
+     * that took a different proxy, CA bundle or client certificate than they
+     * did would report the target as broken over a `Settings` edit made while
+     * the run was in flight. Same reasoning as `scenario_runner.cpp`'s
+     * run-scoped `transport` (issue #705, epic decision 3 of #704), one run
+     * later in the lifecycle.
+     *
+     * The default - the environment pickup a bare `TransportPolicy` carries -
+     * only ever reaches a script through a `RunContext` built by hand, since
+     * `execute_load_test` configures the loop before anything can be sampled
+     * and is the only path to the validation pass. Written and read on the
+     * run's worker thread, so it needs no lock.
+     */
+    vayu::http::TransportPolicy transport;
 
     // High-performance in-memory metrics collector
     // Replaces direct DB writes for individual results during load tests
