@@ -865,7 +865,10 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   [the `body` union](api-reference.md#the-request-body-union). A `graphql`
   `body` may be the bare query document: the engine envelopes it as
   `{"query": ...}` and sends `application/json`, and an envelope written out in
-  full is sent unchanged - see
+  full is sent unchanged - on `POST`. With `method` `GET` the same fields
+  travel as `query` / `operationName` / `variables` / `extensions` query
+  parameters instead, with no body and no Content-Type, so a mutation needs
+  `POST` rather than the `GET` a new request defaults to - see
   [the `graphql` envelope](api-reference.md#the-graphql-envelope). A `jsonrpc`
   `body` may be the bare call object: the engine adds `"jsonrpc":"2.0"`, plus
   `"id":1` when the call names no id, and a frame that already declares a
@@ -881,8 +884,9 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   so the tools state the limit rather than inventing a shape for it. A stored
   file part is left alone unless `body` replaces the whole body.
 - **What actually went out** - the engine adds headers an agent never wrote: the
-  body-implied `Content-Type` (a `graphql` or `jsonrpc` body sends
-  `application/json`, an `xml` one `application/xml`, an
+  body-implied `Content-Type` (a `graphql` body on `POST`, or a `jsonrpc` body,
+  sends `application/json`; a `graphql` body on `GET` has no body, so the engine
+  adds no Content-Type for it at all - an `xml` one `application/xml`, an
   `x-www-form-urlencoded` one its own type), a
   default `User-Agent`, and
   the `Cookie` line the jar matched for the environment. So the request an agent

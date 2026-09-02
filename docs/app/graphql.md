@@ -14,6 +14,20 @@ Pick **GraphQL** in the Body tab's mode picker. Vayu appends
 because GraphQL goes on the wire as a JSON envelope
 (`{"query": …, "variables": …}`) rather than as a bare document.
 
+Picking the mode also sets the method to **POST**, when the request still
+holds the default GET a new request starts with. Leaving GraphQL for another
+body mode gives the method back, the same way it removes the header. There is
+no Undo button for this one - the method selector is on screen and already
+shows what changed, which the Headers tab does not. A method you chose
+yourself is never touched, in either direction.
+
+That is because GraphQL means something different on a GET: the query travels
+as URL query parameters instead of a JSON body, and a mutation cannot be sent
+that way at all. A GET still reaches GraphQL when you pick it back yourself, or
+when an import wrote one - the Query pane header then carries a **Sent as query
+parameters** badge naming what will happen, so nothing silently 400s with no
+explanation on screen.
+
 ## The schema
 
 The moment a GraphQL body is on screen with a URL in the bar, Vayu introspects

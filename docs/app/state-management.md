@@ -1812,15 +1812,17 @@ getAutoContentType: () => AutoHeader | null
 setAutoContentType: (auto: AutoHeader | null) => void
 getAutoAccept: () => AutoHeader | null
 setAutoAccept: (auto: AutoHeader | null) => void
+getAutoMethod: () => AutoMethod | null
+setAutoMethod: (auto: AutoMethod | null) => void
 ```
 
-Which header row a *setting* added on its way in, so that leaving the setting
-can take it back. Two settings own one each: the body mode's `Content-Type`
-(written by `BodyPanel`) and the Event stream toggle's
-`Accept: text/event-stream` (written by `SettingsPanel`, issue #574). Two named
-slots rather than one map keyed by header name - there are exactly two, each
-owns a different header, and a map would let a caller read the wrong record by
-passing the wrong string.
+Which header row - or, for the third slot, which method - a *setting* added on
+its way in, so that leaving the setting can take it back. Two settings own a
+header row each: the body mode's `Content-Type` (written by `BodyPanel`) and
+the Event stream toggle's `Accept: text/event-stream` (written by
+`SettingsPanel`, issue #574). Named slots rather than one map keyed by header
+name - each owns a different field, and a map would let a caller read the
+wrong record by passing the wrong string.
 
 GraphQL is sent as a JSON envelope and genuinely needs
 `Content-Type: application/json`, so `BodyPanel` appends one - but nothing
@@ -1846,11 +1848,30 @@ Three things it is deliberate about:
   serves every request tab, and row ids are not unique across a duplicated
   request.
 
+The third slot, `AutoMethod`, is not a fourth `AutoHeader` (issue #1228). A new
+request is a GET, and GraphQL over GET is a different transport - the document
+travels as query parameters and a mutation cannot be sent that way - so picking
+the GraphQL body mode on a request still holding that default used to build one
+the server answered with a bare `400`. The mode now sets `POST` the same
+reversible way it sets the `Content-Type` header above, and leaving the mode
+puts the method back - but what it owns is a scalar field on the request, not a
+row in an array, so `AutoMethod` is `{ requestId, method, previous }`: the value
+it wrote and the value it replaced, rather than a row id. `switchGraphQLMethod`
+in `panels/body/graphql-method.ts` is the rule that reads it, called from
+`BodyPanel.handleModeChange` beside `switchAutoHeader`. It keeps the same two
+guarantees stated as bullets above, read against a scalar instead of a row: a
+method the user has since chosen - the field's value no longer matching what
+this record wrote - is no longer ours to revert, and a record naming another
+request is dropped rather than applied. A GET still reaches GraphQL through the
+door this side effect does not touch - the user picks GET back, or an import
+wrote one - which is when the Query pane header's `BadgeText` names the
+transport that will be used.
+
 In the provider rather than in the panels for the drafts' reason and one of its
 own: Radix unmounts an inactive `TabsContent`, so a panel-local record is gone
 by the next change - and then nothing removes the header, which is the bug the
 record exists to fix. Ephemeral, like the drafts: what is persisted is the
-header row itself, in `request.headers`.
+header row itself, in `request.headers`, or the method, in `request.method`.
 
 ### `useSaveManager()` - Auto-Save Manager
 

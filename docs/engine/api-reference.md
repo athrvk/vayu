@@ -252,7 +252,7 @@ so a body that round-trips through storage sends the same bytes.
 |---|---|---|
 | `none` | nothing | no body |
 | `json` / `text` | `content` (string) | `content`, verbatim |
-| `graphql` | `content` (string) | the GraphQL-over-HTTP envelope (see below) |
+| `graphql` | `content` (string) | the GraphQL-over-HTTP envelope on POST, query parameters on GET (see below) |
 | `jsonrpc` | `content` (string) | the JSON-RPC 2.0 call envelope (see below) |
 | `xml` | `content` (string) | `content`, verbatim |
 | `x-www-form-urlencoded` | `fields` | percent-encoded `key=value&…` |
@@ -281,7 +281,9 @@ Five Content-Type rules follow from the encoding:
   straight to `/execute` - sent the wrong type. A declared header still wins, so
   `application/vnd.api+json` reaches the server unchanged.
 - `graphql` and `jsonrpc` set `Content-Type: application/json` under the same
-  rule - a Content-Type the caller wrote wins.
+  rule - a Content-Type the caller wrote wins. `graphql` only on the method
+  that carries a body at all: a GraphQL `GET` has no body and derives no
+  Content-Type, since there is nothing to describe (see below).
 - `xml` sets `Content-Type: application/xml`, again only when the caller
   declared none. It has no envelope and nothing is done to `content`; the header
   is the whole of what the mode adds over `text`, which is why an endpoint
@@ -318,6 +320,30 @@ or a mistyped one - is passed through unchanged rather than wrapped. Wrapping a
 body the engine could not read would turn a broken envelope into a valid
 request carrying the wrong query. A bare GraphQL document cannot take that
 shape, so nothing legitimate falls into it.
+
+GraphQL-over-HTTP defines two transports, and the request's method picks
+between them (issue #1228). Everything above is the POST transport - the
+envelope goes out as a JSON body. On a **GET**, the same fields travel as
+percent-encoded query parameters instead, and the request has **no body and no
+derived Content-Type**:
+
+| Parameter | From |
+|---|---|
+| `query` | the envelope's `query`, or the whole of `content` when it is a bare document |
+| `operationName` | the envelope's `operationName`, when present and not `null` |
+| `variables` | the envelope's `variables`, JSON-encoded, when present and not `null` |
+| `extensions` | the envelope's `extensions`, JSON-encoded, when present and not `null` |
+
+These parameters are merged into whatever query string the request's URL
+already has, not used to replace it - a `GET` sent to `/graphql?debug=1` keeps
+`debug=1` alongside `query=…`. The engine sends a body on a GraphQL `GET` in
+three cases, each because dropping the alternative would send a request the
+caller did not write rather than the one it wrote: `content` is empty, `content`
+is envelope-shaped but does not parse (the same unreadable-envelope case
+above), or the envelope carries a member this transport has no parameter for,
+or one of `operationName` / `variables` / `extensions` whose value is not the
+type the specification gives it. In all three, the request falls back to the
+POST-style JSON body even though the method is `GET`.
 
 #### The `jsonrpc` envelope
 
