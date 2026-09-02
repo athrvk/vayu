@@ -33,7 +33,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useEffect } from "react";
+import { useEffect, Profiler } from "react";
 import { render, act } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
@@ -251,6 +251,42 @@ describe("what bounds the picker's row memory", () => {
 
 		await act(async () => rerender(tree(null)));
 		expect(ctx.lastRowIndex).toBe(1);
+	});
+
+	it("stops re-rendering the provider once the tabs-store changes drop nothing", async () => {
+		/*
+		 * The sweep runs on *every* tabs-store write - the subscription takes the
+		 * whole state - and the row memory is the one map it prunes with a
+		 * `setState`. Without `retainKeys`' identity guard that would be a new
+		 * object each time, so every tab focus would re-render the provider for
+		 * the life of the session.
+		 *
+		 * Counted through a `Profiler` because the render is all there is to see:
+		 * the context value is memoized on `lastRowIndex`, which such a write
+		 * leaves untouched, so no child of the provider can tell the difference.
+		 *
+		 * The first focus after a pick still commits once - React renders a
+		 * component that has just changed state one more time before it can bail
+		 * out - so what is asserted is the steady state after that, which is what
+		 * the guard is actually for.
+		 */
+		let commits = 0;
+		render(
+			<Profiler id="provider" onRender={() => (commits += 1)}>
+				{tree("req_a")}
+			</Profiler>
+		);
+		await act(async () => ctx.rememberRowIndex(2));
+		await act(async () => useTabsStore.getState().focusTab("tab_b"));
+
+		const settled = commits;
+		await act(async () => useTabsStore.getState().focusTab("tab_a"));
+		await act(async () => useTabsStore.getState().focusTab("tab_b"));
+		expect(commits).toBe(settled);
+
+		// And the counter is live: the write that *does* drop a key renders.
+		await act(async () => useTabsStore.getState().closeTab("tab_a"));
+		expect(commits).toBeGreaterThan(settled);
 	});
 });
 
