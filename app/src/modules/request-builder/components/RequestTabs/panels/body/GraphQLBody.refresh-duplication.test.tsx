@@ -103,7 +103,6 @@ beforeEach(() => {
 		byKey: { [key]: { status: "ready", schema: fixtureSchema(), error: null, fetchedAt: 1 } },
 		lru: [key],
 		activeKey: key,
-		activeTarget: TARGET,
 	});
 });
 
@@ -122,6 +121,12 @@ describe("one Refresh-schema control on screen, in every combination", () => {
 			it(`shows exactly one with the ${state}`, () => {
 				useExplorerStore.setState({ open: explorerOpen, byKey: {}, lru: [] });
 				render(<Composed withContextBar={withContextBar} />);
+
+				// Both subtrees are really drawing their schema half, so the count
+				// below is a count and not a section that early-returned "this
+				// request does not send a GraphQL body".
+				expect(screen.queryByTestId("graphql-explorer") !== null).toBe(explorerOpen);
+				expect(screen.queryAllByText("Schema loaded")).toHaveLength(withContextBar ? 1 : 0);
 
 				/*
 				 * Mutation check: give the context-bar section its Refresh back, or

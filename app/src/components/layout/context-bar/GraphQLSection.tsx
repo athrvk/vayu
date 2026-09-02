@@ -36,10 +36,11 @@
  * **It carries no Refresh.** It used to, and that was the second standing one
  * whenever the body panel was on screen with this bar open - the duplication
  * #455 was filed about, in the one combination the guard for it could not see
- * (#1224). It could never be the *only* one either: the button was gated on
- * `activeTarget`, which `GraphQLBody` alone sets - and only for a non-empty URL -
- * and clears when it unmounts, so it stood exactly when the Query header's own
- * control stood beside it. Refresh now lives there, once.
+ * (#1224). It could never be the *only* one either: the button was gated on the
+ * cache's `activeTarget`, which `GraphQLBody` alone set - and only for a
+ * non-empty URL - and cleared when it unmounted, so it stood exactly when the
+ * Query header's own control stood beside it. Refresh now lives there, once, and
+ * the target field went with the button, being the one thing that read it.
  */
 
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";

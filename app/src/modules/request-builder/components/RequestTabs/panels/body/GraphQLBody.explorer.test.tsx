@@ -225,6 +225,10 @@ describe("one schema control, in one place, whatever the pane is doing", () => {
 		for (const open of [false, true]) {
 			useExplorerStore.setState({ open });
 			mount("");
+			// The scan is worth nothing if it scanned nothing: a header with the
+			// control in it is a dozen nodes deep, and an empty `querySelectorAll`
+			// would pass this file for free.
+			expect(queryHeader().querySelectorAll("*").length).toBeGreaterThan(5);
 			expect(hiddenAtRest()).toEqual([]);
 			cleanup();
 		}

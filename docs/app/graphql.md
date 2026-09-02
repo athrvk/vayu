@@ -39,8 +39,10 @@ an `Authorization` row directly, press Refresh.
 
 ## The schema explorer
 
-Press the panel icon in the Query pane's header - or the **Browse schema**
-control - to dock the explorer beside the editor.
+Press **Browse schema**, the panel icon at the left of the Query pane's header,
+to dock the explorer beside the editor. It opens on that side, which is where
+the icon points; the same button closes it again, so the control does not move
+when the pane appears.
 
 - **Browse** Query, Mutation, Subscription and Types. Fields show their
   arguments and result type; descriptions sit beside them; a deprecated field or
@@ -116,9 +118,11 @@ choice becomes real. Whatever else the envelope carries (`extensions`, an
 ## The context bar
 
 The bar's **GraphQL** section carries the glanceable half: whether a schema is
-loaded, how old it is, the endpoint, a Refresh, and an outline of the operations
-the request defines. Browsing belongs beside the cursor that inserts, which is
-why the tree lives in the editor pane and not here.
+loaded, how old it is, the endpoint, and an outline of the operations the
+request defines. Refreshing is not part of it - there is one Refresh, in the
+Query pane's header, on screen whether the explorer is open or closed. Browsing
+belongs beside the cursor that inserts, which is why the tree lives in the
+editor pane and not here.
 
 The outline reads the saved request, so it follows the editor as autosave
 catches up rather than keystroke by keystroke.
