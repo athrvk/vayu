@@ -185,6 +185,27 @@ describe("confirming a collection delete", () => {
 	});
 
 	/*
+	 * The other order, and the one the real mutation produces: it drops the id
+	 * from the cached list in its own `onSuccess`, so the row can be gone before
+	 * the `finally` closes the dialog. Then there is nothing to defer to and the
+	 * successor is where focus goes at close.
+	 */
+	it("moves focus to the successor when the row went before the dialog closed", async () => {
+		let view: ReturnType<typeof renderTree> | null = null;
+		deleteCollection.mockImplementation(() => {
+			view?.refetchWithout("leaf");
+			return Promise.resolve();
+		});
+		view = renderTree();
+		await askToDelete("Invoices");
+
+		fireEvent.click(await confirmButton());
+
+		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
+		expect(document.activeElement).toBe(document.querySelector('[data-request-id="r-mid"]'));
+	});
+
+	/*
 	 * The row a failed delete did not remove is still the row the user was on,
 	 * and it is still there to be focused. Reading the confirm click as the
 	 * outcome sent focus to the successor instead, beside a surviving row
