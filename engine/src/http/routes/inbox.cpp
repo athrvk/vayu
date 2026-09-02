@@ -123,9 +123,11 @@ std::string path_of (const std::string& target) {
  * recording the body is what a capture is for; it also takes a `const
  * Request&`, so it cannot rewrite the path either. `process_request`'s
  * `setup_request` callback is the one hook that sees a mutable `Request` ahead
- * of routing, and overriding `process_and_close_socket` - the protected virtual
- * cpp-httplib's own `SSLServer` extends the same way - is how a caller reaches
- * it.
+ * of routing, and overriding `process_and_close_socket` reaches it. That one is
+ * *private* in `httplib::Server`, which is no obstacle: access control governs
+ * who may call a virtual, not who may override it, and it is how cpp-httplib's
+ * own `SSLServer` extends the same function. `process_request` and the members
+ * the override reads are protected.
  */
 class AnyPathServer final : public httplib::Server {
     public:
@@ -134,7 +136,7 @@ class AnyPathServer final : public httplib::Server {
     /// already spells.
     static constexpr const char* ROUTE = "/";
 
-    protected:
+    private:
     bool process_and_close_socket (::socket_t sock) override {
         // Mirrors httplib::Server::process_and_close_socket. The one difference
         // is the `setup_request` callback below, which that one passes as null -

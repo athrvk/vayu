@@ -154,7 +154,11 @@ alive at that point. All four managers run that lifecycle - bind, wait for the a
 join, release - through one shared `ManagedListener`
 (`engine/include/vayu/http/managed_listener.hpp`), so a fix to it reaches every listener rather than
 one of four copies; what stays per-manager is the route registration, the error each bind failure
-answers with, and the OAuth attempt TTL sweep. The mock server is the one built on the helper rather
+answers with, and the OAuth attempt TTL sweep. Since #1140 a manager may hand it the
+`httplib::Server` those routes are registered on, too: the inbox hands it a subclass that routes
+every request as one path, so that a path too long for cpp-httplib's regex matcher still reaches its
+capture, and the other three take the plain server the listener builds for itself. The mock server
+is the one built on the helper rather
 than ported to it: #505 extracted it before this listener existed, which was the whole point of
 extracting it when the third one landed.
 
