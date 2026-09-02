@@ -1530,10 +1530,31 @@ same constraint `ResponseAnnouncer` carries). What writes to it now is a move -
 happen ("Get Users is already first in Billing"), which is the only feedback a
 keyboard user gets for a row that visibly went nowhere.
 
-Currently on `CollectionItem` and `RequestItem` rows. **Only needed where the
-control and the row genuinely differ** - the history, variables and settings
-trees use full-width buttons that are their own target, so they use the baseline.
-Before adding it, check whether the focusable element already spans the row.
+Currently on `CollectionItem` and `RequestItem` rows and on every row of the
+variables sidebar (`VariablesCategoryTree`, #1217), which is a roving-tabindex
+tree for the same reason: its Rename and Duplicate live only in the row's ⋯ menu,
+so a row that was not a `treeitem` left both unreachable without a mouse.
+**Otherwise only needed where the control and the row genuinely differ** - the
+history and settings trees use full-width buttons that are their own target, so
+they use the baseline. Before adding it, check whether the focusable element
+already spans the row.
+
+**The variables sidebar shows what a second consumer costs.** Two things there
+are not the collection tree's, and both are decisions rather than omissions:
+
+- **Its section headers are rows.** Globals, Environments and Collections are the
+  three level-1 treeitems and the two lists are their children, so one arrow key
+  walks the whole sidebar and the headers get expand/collapse from Right/Left.
+  The header's one button is both `data-tree-toggle` and `data-tree-activate`,
+  because for a header those two verbs are the same one.
+- **"Add environment" is still a tab stop**, and sits outside the header row's
+  treeitem. The tree owns no "create" key, so a `tabIndex={-1}` there would make
+  creating an environment mouse-only - the defect the tree was adopted to fix,
+  pointing the other way. The tree is one stop; that button is the second.
+
+A row that does not carry a control still has to declare it: an environment row
+renders the hidden `data-tree-rename` and `data-tree-delete` buttons, because the
+hook `preventDefault`s F2 and Delete whether or not it finds something to click.
 
 ---
 
