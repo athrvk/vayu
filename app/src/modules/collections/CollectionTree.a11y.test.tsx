@@ -148,6 +148,30 @@ describe("the tree's shape as assistive tech sees it", () => {
 	});
 });
 
+describe("ArrowLeft leaves the group", () => {
+	// On the shipped DOM, not the hook's fixture: Ping is the *second* row of
+	// Acme's group, which is the row the old parent walk got wrong - it took the
+	// first treeitem the group held, so Left moved to Billing, the sibling above.
+	it("moves to the owner row from a row that is not the group's first", () => {
+		renderTree();
+
+		requestRow("r-ping").focus();
+		fireEvent.keyDown(requestRow("r-ping"), { key: "ArrowLeft" });
+
+		expect(document.activeElement).toBe(collectionRow("acme"));
+	});
+
+	it("still moves to the owner row from the group's first", () => {
+		renderTree();
+
+		// Billing is collapsed, so Left moves rather than collapsing.
+		collectionRow("billing").focus();
+		fireEvent.keyDown(collectionRow("billing"), { key: "ArrowLeft" });
+
+		expect(document.activeElement).toBe(collectionRow("acme"));
+	});
+});
+
 describe("the Delete key", () => {
 	it("opens the confirm dialog from a collection row", async () => {
 		renderTree();

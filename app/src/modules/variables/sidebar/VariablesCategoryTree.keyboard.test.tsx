@@ -184,6 +184,19 @@ describe("moving around it", () => {
 		expect(document.activeElement).toBe(row(tree, "Production"));
 	});
 
+	it("leaves the section from its second row, not just its first", () => {
+		const tree = renderTree();
+
+		// The symptom #1237 was measured on: Left from Production, the second
+		// environment, moved to Staging - the first row of the group, which the
+		// old DOM walk answered with for every row after it.
+		press(row(tree, "Production"), "ArrowLeft");
+		expect(document.activeElement).toBe(row(tree, "Environments"));
+
+		press(row(tree, "Staging"), "ArrowLeft");
+		expect(document.activeElement).toBe(row(tree, "Environments"));
+	});
+
 	it("collapses and expands a section with Left and Right", () => {
 		const tree = renderTree();
 

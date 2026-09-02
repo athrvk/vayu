@@ -333,6 +333,20 @@ describe("the keyboard", () => {
 		expect(rows().map((r) => r.getAttribute("data-tree-label"))).toContain("createPost");
 	});
 
+	// Left had nowhere to go here at all before #1237: every row of this tree is
+	// a direct child of the tree element, whatever its depth, so a walk up the
+	// DOM found no parent and the key silently did nothing. Depth is announced
+	// rather than nested, and that is what the tree now reads.
+	it("leaves a branch with Left, which this tree's flat DOM cannot say", () => {
+		renderExplorer();
+		const tree = screen.getByRole("tree");
+		fireEvent.click(rowNamed("Query")!.querySelector("[data-tree-toggle]")!);
+		act(() => rowNamed("search")!.focus());
+
+		fireEvent.keyDown(tree, { key: "ArrowLeft" });
+		expect(document.activeElement).toBe(rowNamed("Query"));
+	});
+
 	it("inserts the focused row with Enter", () => {
 		const { onInsert } = renderExplorer();
 		const tree = screen.getByRole("tree");
