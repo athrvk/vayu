@@ -15,10 +15,7 @@ import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
-import {
-	isRateLimitedRun,
-	buildPercentileChartData,
-} from "@/modules/dashboard/utils/metricsTransforms";
+import { isRateLimitedRun, hasPercentileSignal } from "@/modules/dashboard/utils/metricsTransforms";
 import {
 	LatencyPercentilesChart,
 	ResponseTimeVsConcurrencyChart,
@@ -45,8 +42,15 @@ export default function PerformanceTab({
 	// history percentile chart / scatter can render the same views as the live
 	// dashboard. Mirror MetricsView's split: ramp_up → response-time-vs-concurrency
 	// scatter (capacity elbow), other modes → percentiles-over-time.
-	const percentileChartData = useMemo(() => buildPercentileChartData(timeSeries), [timeSeries]);
-	const hasPercentileData = percentileChartData.some((d) => d.p99 > 0);
+	//
+	// The gate asks a predicate, not a series (#1190, the rule #1152 wrote into
+	// modules/dashboard/README.md). The chart below builds the percentile series
+	// from this same array, so building it here too transformed a loaded run's
+	// ticks twice on every render of the tab. `hasPercentileSignal` reads every
+	// tick rather than each bucket's last-write-wins sample, so it can only be
+	// more permissive than the `.some((d) => d.p99 > 0)` it replaces - and the
+	// chart's own two-point guard still decides whether anything is drawn.
+	const hasPercentileData = useMemo(() => hasPercentileSignal(timeSeries), [timeSeries]);
 	const isRampUp = derived.mode === "ramp_up";
 
 	return (
