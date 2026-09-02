@@ -280,9 +280,9 @@ struct ScriptContext {
      * the bound its own send reads. Which bound that is differs by path, and
      * the difference is deliberate - a design-mode send's scripts take
      * `maxDesignResponseBodyBytes`, a load run's deferred `tests` script takes
-     * `maxResponseBodyBytes`, because a script that runs once per virtual user
-     * belongs to the load path's memory budget and not to the one sized for a
-     * body a person is about to look at.
+     * `maxResponseBodyBytes`, because a script that runs once per sampled
+     * response belongs to the load path's memory budget and not to the one
+     * sized for a body a person is about to look at.
      *
      * Reaching it **refuses** the transfer - `ErrorCode::ResponseTooLarge`
      * reaches the callback as its `err` - rather than handing the script a

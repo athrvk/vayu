@@ -39,6 +39,7 @@
 #include "task_queue.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
+#include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -254,6 +255,45 @@ class ScriptSendRequestCapLoadTest : public ::testing::Test {
         return context;
     }
 
+    /**
+     * The scenario shape of the same run: one plan step whose own `tests`
+     * script fetches the body. `validate_scripts` takes a different branch for
+     * this one - `replay_scenario_steps`, which threads the bound per step -
+     * so the single-request case above says nothing about it.
+     */
+    std::shared_ptr<vayu::core::RunContext> step_run_expecting (
+    const std::string& expected) const {
+        const json cfg = { { "response_sample_rate", 1 },
+            { "max_response_samples", 10 }, { "allowScriptRequests", true } };
+        auto context   = std::make_shared<vayu::core::RunContext> (RUN_ID, cfg);
+
+        auto execution = std::make_shared<vayu::core::ScenarioExecution> ();
+        execution->request.source        = "collection";
+        execution->request.collection_id = "col_1";
+        execution->request.iterations    = 1;
+
+        vayu::core::ScenarioStep step;
+        step.index          = 0;
+        step.name           = "Fetch";
+        step.post_script    = fetch_expecting (server_->url (), expected);
+        step.request.method = vayu::HttpMethod::GET;
+        step.request.url    = server_->url ();
+        execution->plan.steps.push_back (step);
+
+        context->scenario = execution;
+        context->metrics_collector->configure_step_samples ({ true });
+
+        vayu::Response sample;
+        sample.status_code     = 200;
+        sample.status_text     = "OK";
+        sample.body            = "{}";
+        sample.timing.total_ms = 1.0;
+        context->metrics_collector->record_step_response_sample (sample, 0,
+        vayu::core::SampleIdentity{ /*iteration=*/0, /*vu=*/1,
+        /*data_row_index=*/std::nullopt });
+        return context;
+    }
+
     /// What the replay recorded, which is where the script's thrown sentence
     /// lands - empty when every replay passed.
     std::string recorded_failure () {
@@ -280,6 +320,22 @@ TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptTakesTheRunsLoadBound) {
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->sampled, 1u);
     EXPECT_EQ (validation.run->failed, 0u) << recorded_failure ();
+}
+
+// The scenario shape threads the bound through `replay_scenario_steps` rather
+// than setting it on the one replay, so reverting that line alone would leave
+// the case above green. Mutation-check it separately.
+TEST_F (ScriptSendRequestCapLoadTest, AReplayedStepScriptTakesTheRunsLoadBound) {
+    set_load_bound (READ_BOUND);
+
+    const auto validation = vayu::core::validate_scripts (
+    step_run_expecting (refusal_of (READ_BOUND)), *db_, false);
+
+    ASSERT_EQ (validation.steps.size (), 1u);
+    const auto& step = validation.steps[0];
+    ASSERT_HAS_VALUE (step);
+    EXPECT_EQ (step->sampled, 1u);
+    EXPECT_EQ (step->failed, 0u) << recorded_failure ();
 }
 
 TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptUnderTheBoundReadsTheWholeBody) {
