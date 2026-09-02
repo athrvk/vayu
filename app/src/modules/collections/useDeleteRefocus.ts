@@ -22,6 +22,13 @@ import type { DeleteConfirmTarget } from "./useTreeCrud";
  * After a delete the row is the thing that went, so a successor is chosen while
  * it is still on screen - once the dialog closes, "the row after the one that
  * was there" is not a question the DOM can answer any more.
+ *
+ * Confirming is read as intent, not as outcome, and the dialog closes in a
+ * `finally` either way - so a delete that *fails* also lands focus on the
+ * successor, beside a row that is still there. Focus stays inside the tree,
+ * which is what this is for, on the wrong row of it. Telling the two apart
+ * needs the mutation's result at close time, which the CRUD hook does not
+ * expose and this is not the change to make it: #1234.
  */
 export function useDeleteRefocus(
 	treeRef: RefObject<HTMLElement | null>,
