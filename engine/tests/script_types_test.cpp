@@ -170,10 +170,13 @@ TEST (ScriptTypesTest, EveryListedMemberReachesTheOutput) {
     << "completion table looks empty - the scan proved nothing";
 }
 
-// See CHAIN_CONTINUATIONS in script_types.cpp. These names carry meaning the
-// table cannot express, so the generator hardcodes them; if the table stops
-// offering one, the hardcoding is stale and the chain silently loses a link.
-TEST (ScriptTypesTest, ChainVocabularyStillExistsInTheTable) {
+// See CHAIN_ROOTS and LANGUAGE_CHAINS in script_types.cpp. Which label roots
+// open the chain is the one fact the table still cannot express, so the
+// generator hardcodes them; a root it hardcodes and the table stops offering is
+// a chain the generator no longer recognises, and a label rooted at it declares
+// a top-level global instead. What the word *means* - a passthrough, `and`, or
+// `not` - is no longer hardcoded anywhere: every chain word is the chain now.
+TEST (ScriptTypesTest, TheChainRootsStillExistInTheTable) {
     std::set<std::string> labels;
     for (const auto& item : get_script_completions ()) {
         labels.insert (item.value ("label", ""));
