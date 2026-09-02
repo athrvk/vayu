@@ -113,7 +113,10 @@ export interface BodyConfig {
  * which name it is working on.
  *
  * Ephemeral, like the body drafts - `requestId` says whose row it is, and a
- * record belonging to another request is dropped rather than applied.
+ * record belonging to another request is dropped rather than applied. The
+ * provider keeps one record per request (issue #1269), so the rule reading this
+ * one is normally handed the record it owns; the check stays because the rule
+ * is a pure function that cannot know that.
  */
 export interface AutoHeader {
 	requestId: string | null;
@@ -406,6 +409,11 @@ export interface RequestBuilderContextValue {
 	 * provider for the same reasons as the drafts above - and for one more: the
 	 * record has to outlive the panel, or the header outlives the mode that
 	 * needed it, which is the bug it exists to fix.
+	 *
+	 * These accessors answer for the request on screen, and each slot holds one
+	 * record per request (issue #1269) - one provider serves every request tab,
+	 * so a slot holding a single record stranded the header the app had added to
+	 * whichever request entered the mode first.
 	 */
 	getAutoContentType: () => AutoHeader | null;
 	setAutoContentType: (auto: AutoHeader | null) => void;
