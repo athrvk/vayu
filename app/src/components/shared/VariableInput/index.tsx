@@ -19,16 +19,15 @@
  * - Autocomplete dropdown when typing {{
  * - Click variables to open edit popover with current value
  *
- * A bare `{{name}}` that names a declared data column and that no scope
- * defines paints as a bound-column runtime token rather than an undefined
- * variable (issue #1007) - see the `boundColumn` check in
- * `renderOverlayContent` and `describeBareColumnToken`.
- *
- * `{{$vu}}` and `{{$iteration}}` paint as run-time tokens too (issue #1101):
- * they address the reserved identity namespace, which no scope can answer, so
- * the "not defined, click to create" treatment marked the one case that always
- * works - and marked it identically to `{{$vus}}`, a typo that reaches the wire
- * in braces.
+ * What a `{{token}}` *is* is not decided here: `classifyVariableToken`
+ * (`@/lib/variable-token-kind`) owns that ladder for every surface that paints
+ * one, this overlay and the Monaco decorations alike (issues #1220, #1239).
+ * So a bare `{{name}}` that names a declared data column and that no scope
+ * defines paints as a bound-column run-time token rather than an undefined
+ * variable (issue #1007), and `{{$vu}}` / `{{$iteration}}` paint as run-time
+ * tokens (issue #1101) - both because the classifier says so, in the order
+ * `resolveTemplate` resolves them. This file decides only what each answer
+ * looks like.
  */
 
 import {
@@ -37,7 +36,6 @@ import {
 	useCallback,
 	useMemo,
 	useEffect,
-	useLayoutEffect,
 	type KeyboardEvent,
 	type ChangeEvent,
 } from "react";
@@ -52,13 +50,10 @@ import { isCommitEnter } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 import type { ResolvedVariable, VariableScope, VariableSupport } from "@/types";
 import EditableVariable from "./EditableVariable";
-import RuntimeToken, { type RuntimeTokenProps } from "./RuntimeToken";
+import RuntimeToken from "./RuntimeToken";
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { variableCompletionContext } from "@/lib/variable-completion";
-import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
-import { isDataVariableName } from "@/lib/variable-resolution";
-import { iterationVariable } from "@/lib/iteration-variables";
-import { describeDataToken, describeBareColumnToken } from "@/lib/data-contract";
+import { classifyVariableToken, type VariableTokenKind } from "@/lib/variable-token-kind";
 
 interface VariableInputProps {
 	value: string;
@@ -92,8 +87,24 @@ interface VariableInputProps {
 /** Stable identity for the no-scope case, so the memos below do not re-run. */
 const NO_VARIABLES: Record<string, ResolvedVariable> = {};
 
-/** The generator table by name, for the overlay's token lookup. */
-const DYNAMIC_BY_NAME = new Map(DYNAMIC_VARIABLES.map((v) => [v.name, v]));
+/**
+ * One `{{token}}` the strip paints: what the name addresses, and where its text
+ * sits in `value`.
+ *
+ * Decided before the paint rather than inside it (issue #1239), which is what
+ * lets the strip count its own stops without reading the DOM it just rendered.
+ */
+interface OverlayToken {
+	/** The name as written inside the braces. */
+	name: string;
+	/** What that name is, from the one ladder every token surface reads. */
+	kind: VariableTokenKind;
+	/**
+	 * The token's own span of `value`, as the attributes a click reads back -
+	 * see `placeCaretAtTokenEdge`.
+	 */
+	bounds: { "data-token-start": number; "data-token-end": number };
+}
 
 /**
  * The tokens the roving strip walks, in painted order.
@@ -177,6 +188,49 @@ export default function VariableInput({
 	 * nowhere to write. The literal the user typed is the honest thing to show.
 	 */
 	const hasVariables = Boolean(variables) && segments.some((s) => s.type === "variable");
+
+	/**
+	 * The tokens the strip paints, in painted order, each already classified.
+	 *
+	 * The five ordered checks are `classifyVariableToken`'s - the same ladder the
+	 * Monaco decorations read, rather than a second copy of it written here
+	 * (issue #1239). Two copies would answer one `{{name}}` differently, and the
+	 * same name would read as a bound column in the URL field and an undefined
+	 * variable in the body beneath it.
+	 *
+	 * The offsets are accumulated over every segment, tokens and the text between
+	 * them alike, because the segments tile the whole string - so a token's bounds
+	 * are exact and a click can put the caret back beside it.
+	 */
+	const overlayTokens = useMemo(() => {
+		const tokens: OverlayToken[] = [];
+		let offset = 0;
+		for (const seg of segments) {
+			const start = offset;
+			offset += seg.content.length;
+			if (seg.type !== "variable" || !seg.varName) continue;
+			tokens.push({
+				name: seg.varName,
+				kind: classifyVariableToken(seg.varName, {
+					variables: allVariables,
+					dataColumns: variables?.dataColumns,
+				}),
+				bounds: { "data-token-start": start, "data-token-end": offset },
+			});
+		}
+		return tokens;
+	}, [segments, allVariables, variables?.dataColumns]);
+
+	/**
+	 * Which token of the strip holds the Tab stop, as the strip stands now.
+	 *
+	 * Derived rather than corrected in an effect: editing the field re-paints the
+	 * strip, and the token that held the stop may be gone - a stop past the end
+	 * falls back to the first token, in the same render rather than one later.
+	 * The count comes from `overlayTokens`, so nothing here reads back the DOM it
+	 * has just painted to learn how many tokens it painted.
+	 */
+	const activeStop = activeTokenIndex < overlayTokens.length ? activeTokenIndex : 0;
 
 	/*
 	 * Check if we should show autocomplete.
@@ -473,20 +527,6 @@ export default function VariableInput({
 		if (index !== -1) setActiveTokenIndex(index);
 	};
 
-	/*
-	 * Editing the field re-paints the strip, and the token that held the Tab stop
-	 * may be gone. Healed from the rendered strip rather than by counting tokens
-	 * a second time: the painter decides what is a token through five ordered
-	 * checks, and a second copy of that decision is exactly the drift this file
-	 * has been bitten by before.
-	 */
-	useLayoutEffect(() => {
-		const tokens = overlayRef.current?.querySelectorAll(TOKEN_STOPS);
-		if (tokens && tokens.length > 0 && activeTokenIndex >= tokens.length) {
-			setActiveTokenIndex(0);
-		}
-	}, [activeTokenIndex, segments]);
-
 	// Handle focus - show plain suggestions if available
 	const handleFocus = () => {
 		if (suggestions.length > 0 && !showSuggestions) {
@@ -570,144 +610,71 @@ export default function VariableInput({
 		inputRef.current?.focus();
 	};
 
-	// Render the overlay content with variable tokens
+	/**
+	 * Paint what `overlayTokens` decided, and nothing else.
+	 *
+	 * Two shapes rather than five (issue #1239): every run-time case - a `data.*`
+	 * column, an identity name, a bare bound column, a generator - is one
+	 * `RuntimeToken`, because they differ only in the words of the tooltip and
+	 * the tone. Which of the two a name takes is `classifyVariableToken`'s answer,
+	 * read above; the ordering that produces it is documented there.
+	 */
 	const renderOverlayContent = () => {
 		if (!value) return null;
 
 		/*
-		 * Where each segment's text starts in `value`. The segments tile the
-		 * whole string (matches plus the slices between them), so a running
-		 * count is exact - and it is what lets a click on a run-time token put
-		 * the caret back on the right side of it, see `placeCaretAtTokenEdge`.
-		 */
-		let offset = 0;
-		/*
 		 * Position of the next token in the strip. Every token counts, both kinds
 		 * (issue #1238): a run-time token opens no popover, but its tooltip is the
 		 * whole of what it has to say, so it is a stop like any other.
+		 *
+		 * `overlayTokens` holds one entry per variable segment, in this order and
+		 * on this same condition, so the position is also the index into it.
 		 */
-		let tokenPosition = 0;
-		/** The stop this token holds; exactly one of them is `0`. */
-		const nextStop = () => (tokenPosition++ === activeTokenIndex ? 0 : -1);
-
-		/*
-		 * One wrapper for all four run-time cases. They differ only in the words of
-		 * the tooltip and the tone - which is the reason `RuntimeToken` is one
-		 * component rather than three - so the tab-stop wiring they now also share
-		 * is written once rather than in four places for it to drift between.
-		 */
-		const runtimeToken = (
-			key: string,
-			bounds: { "data-token-start": number; "data-token-end": number },
-			token: RuntimeTokenProps
-		) => (
-			<span
-				key={key}
-				data-variable-token
-				data-runtime-token
-				{...bounds}
-				// The tooltip is this token's entire content, and a tooltip opens on
-				// a pointer event the overlay's `pointer-events: none` never
-				// delivered (issue #604).
-				style={{ pointerEvents: "auto" }}
-			>
-				<RuntimeToken {...token} tabIndex={nextStop()} disabled={disabled} />
-			</span>
-		);
+		let position = 0;
 
 		return segments.map((seg, i) => {
-			const start = offset;
-			offset += seg.content.length;
-			const tokenBounds = { "data-token-start": start, "data-token-end": offset };
-
 			if (seg.type === "variable" && seg.varName) {
-				/*
-				 * The reserved namespace is read *before* the scopes, exactly as
-				 * `resolveTemplate` reads it: `data.*` is disjoint from the tiers,
-				 * so a variable someone happened to name `data.email` must not
-				 * answer for the column - and must not paint the token as though
-				 * it had. Only a collection run's iteration binds one.
-				 */
-				if (isDataVariableName(seg.varName)) {
-					/*
-					 * Three states now rather than one (issue #600): a declared
-					 * column, a column no contract in scope declares, and - when
-					 * nothing in the chain declares anything - phase 1's neutral
-					 * token, unchanged. `describeDataToken` owns which is which.
-					 */
-					const data = describeDataToken(seg.varName, variables?.dataColumns);
-					return runtimeToken(`${i}-${seg.varName}`, tokenBounds, {
-						name: seg.varName,
-						description: data.description,
-						note: data.note,
-						tone: data.tone,
-					});
+				const { name, kind, bounds } = overlayTokens[position];
+				/** The stop this token holds; exactly one of them is `0`. */
+				const tabIndex = position++ === activeStop ? 0 : -1;
+				const key = `${i}-${name}`;
+
+				if (kind.state === "runtime") {
+					return (
+						<span
+							key={key}
+							data-variable-token
+							data-runtime-token
+							{...bounds}
+							// The tooltip is this token's entire content, and a
+							// tooltip opens on a pointer event the overlay's
+							// `pointer-events: none` never delivered (issue #604).
+							style={{ pointerEvents: "auto" }}
+						>
+							<RuntimeToken
+								name={name}
+								description={kind.description}
+								note={kind.note}
+								tone={kind.tone}
+								tabIndex={tabIndex}
+								disabled={disabled}
+							/>
+						</span>
+					);
 				}
-				/*
-				 * The identity namespace is reserved the same way (issue
-				 * #994), so it is decided in the same tier - before the
-				 * scopes, not beside the generator table below. The
-				 * difference is load-bearing: a scope that defines `$guid`
-				 * wins and takes the editable token, but `lookupVariable`
-				 * answers `$vu` ahead of every scope, so a variable someone
-				 * happens to name `$vu` shadows nothing and must not paint
-				 * as though it had. Nothing binds it until the iteration
-				 * that sends the request, which is what the note says.
-				 */
-				const identity = iterationVariable(seg.varName);
-				if (identity) {
-					return runtimeToken(`${i}-${seg.varName}`, tokenBounds, {
-						name: identity.name,
-						description: identity.description,
-						note: "not generated here",
-					});
-				}
-				const varInfo = allVariables[seg.varName];
-				/*
-				 * A bare token whose name is a declared column, and which no scope
-				 * defines, is bound by a run's row exactly as `{{data.name}}` is
-				 * (issue #1007) - painting it as an undefined variable would offer
-				 * to create one that a bind will never consult (`EditableVariable`'s
-				 * `resolved={false}` treatment, below). A scope that DOES define the
-				 * name is left alone: it keeps painting as that variable, unchanged
-				 * - shadowing the column in the paint is a separate design question.
-				 */
-				const boundColumn =
-					!varInfo && variables?.dataColumns?.columns.includes(seg.varName)
-						? variables.dataColumns
-						: undefined;
-				if (boundColumn) {
-					const data = describeBareColumnToken(boundColumn);
-					return runtimeToken(`${i}-${seg.varName}`, tokenBounds, {
-						name: seg.varName,
-						description: data.description,
-						note: data.note,
-						tone: data.tone,
-					});
-				}
-				// A generator only shows through when nothing defines the name -
-				// the same order the resolver uses, so the token cannot describe a
-				// value the request will not carry.
-				const dynamic = varInfo ? undefined : DYNAMIC_BY_NAME.get(seg.varName);
-				if (dynamic) {
-					return runtimeToken(`${i}-${seg.varName}`, tokenBounds, {
-						name: dynamic.name,
-						description: dynamic.description,
-						note: "generated per use",
-					});
-				}
-				const position = nextStop();
+
+				const varInfo = kind.info;
 				return (
 					<span
-						key={`${i}-${seg.varName}`}
+						key={key}
 						data-variable-token
 						style={{ pointerEvents: "auto" }} // Make variable tokens clickable
 					>
 						<EditableVariable
 							// One Tab stop for the whole strip; the arrows move
 							// between tokens - `handleOverlayKeyDown`.
-							tabIndex={position}
-							name={seg.varName}
+							tabIndex={tabIndex}
+							name={name}
 							value={varInfo?.value || ""}
 							scope={varInfo?.scope || "global"}
 							resolved={!!varInfo}

@@ -1496,8 +1496,9 @@ opens the same `VariablePopover`, positioned over the token's screen
 rectangle. The decision of *what a token is* is shared: `classifyVariableToken`
 (`lib/variable-token-kind.ts`) lifts the same ladder this section describes
 out of the paint, so the editors and the overlay answer one `{{name}}`
-identically. `VariableInput` still holds its own copy of the ladder inline -
-issue #1239 is what adopts this module there. Script editors are excluded:
+identically - the overlay classifies each `{{name}}` once per repaint, before
+any paint, and its five ordered checks exist nowhere else (issue #1239).
+Script editors are excluded:
 the engine never interpolates script source, so `{{name}}` there is literal
 text except inside `pm.variables.replaceIn`. Read-only editors (response
 body, raw request/response, the settings preview) are excluded too - a

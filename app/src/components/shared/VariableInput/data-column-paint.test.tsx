@@ -127,7 +127,7 @@ describe("a bare token naming a declared column, undefined in every scope", () =
 	}
 
 	it("paints as the same muted, informational tone as {{data.column}}", () => {
-		// Revert the `boundColumn` check in `renderOverlayContent` and this token
+		// Revert the bare-column rung of `classifyVariableToken` and this token
 		// falls through to `EditableVariable` with `resolved={false}` instead -
 		// `text-destructive-text`, the exact false alarm #1007 exists to close.
 		const overlay = bareOverlayOf("https://x/{{email}}", contract);
