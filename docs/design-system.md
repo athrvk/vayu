@@ -307,8 +307,11 @@ row's figures rather than stating a second number for one colour. The bare amber
 is the family's worst case rather than its safe one: 3.98 on the card, 3.63 on
 `--background`, 3.38 on `--muted` / `--accent` and 3.54 on its own `/10` tint, so
 it clears the 3.0 icon floor everywhere and the 4.5 text floor nowhere. The
-`-text` variant clears both on all four (5.46 / 4.98 / 4.64 / 4.86 light), its
-worst being the `--muted` case the light-amber floor above is quoted from.
+`-text` variant clears both on all four (5.46 / 4.98 / 4.64 / 4.86 light). Its
+worst is the `--muted` case the light-amber floor above is quoted from, and the
+two figures differ in the last place - 4.64 computed from the declared triple,
+4.63 measured in the browser, which quantises to 8-bit channels first. That is
+the size of the gap between the two methods across this whole page.
 
 Icons count. 1.73 fails the non-text threshold as surely as the text one, so a
 red `AlertCircle` is in scope, not just the sentence next to it. So are opacity

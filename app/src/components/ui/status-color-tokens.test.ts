@@ -17,7 +17,9 @@
  * Using the fill token as a foreground fails AA. The measured ratios live in
  * `docs/design-system.md` ("The bare token is the fill"), which is the one
  * record of them - every family fails at one end or the other, `destructive`
- * in dark, `status-warning` in both, the rest in light. That spread is the tell
+ * in dark, the three mode-consistent HTTP-status indicators (`status-warning`,
+ * `status-redirect`, `status-no-response`) in both, the rest in light. That
+ * spread is the tell
  * that this is not a dark-mode bug: it is the fill token standing in for the
  * foreground one, and which mode it breaks in just depends on where that fill
  * sits relative to the surface behind it.
