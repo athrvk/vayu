@@ -868,6 +868,13 @@ would both read as selected, and both would be counted. A row past the Recents c
 reachable in the section it was not lifted from. Neither section is a `PaletteKind`: no source
 produces one, so a kind for it would be a shape nothing returns.
 
+They lift out of **each other** too, by the order they render: Recents is built first and the
+verbs exclude whatever it took (#1197). The two tests are independent - a verb is a `command` row,
+a recent is one carrying a `recencyAt` stamp - so a stamped command would otherwise sit under both
+headings, which is the duplicate the lift exists to prevent. No source stamps a command today, so
+this decides nothing on screen; it is what keeps the first one that does from arming the defect
+silently, and `ranking.test.ts` pins it.
+
 Once something is typed, four rules apply:
 
 - **The best match is promoted to a `Top result` section**, lifted out of its own section rather

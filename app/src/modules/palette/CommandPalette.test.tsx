@@ -575,6 +575,31 @@ describe("the list's height", () => {
 		// declarations ship and the smaller one wins on source order.
 		expect(cls).not.toContain("max-h-[300px]");
 	});
+
+	it("pins the row padding the row count is counted in", () => {
+		/*
+		 * The cap is one input to "about eleven rows"; the row's own height is
+		 * the other, and a padding change would halve the visible count with the
+		 * assertion above still green - jsdom has no layout, so nothing here can
+		 * measure the rows themselves. So pin the padding they are drawn with:
+		 * `CommandItem`'s `px-2 py-1.5` is the 32px single-line row, read off a
+		 * rendered palette row rather than the primitive, since a caller's
+		 * `className` goes through tailwind-merge and can replace it - which is
+		 * exactly what `command.chrome.test.tsx`'s density read of the bare
+		 * primitive cannot see.
+		 *
+		 * The row *count* itself stays a manual measurement: eleven rows and two
+		 * headings in Chromium at a 768px window, nine at 600px (#1177).
+		 */
+		renderPalette();
+		open();
+
+		const row = document.querySelector('[data-slot="command-item"]');
+		expect(row).not.toBeNull();
+		const cls = (row?.getAttribute("class") ?? "").split(/\s+/);
+		expect(cls).toContain("px-2");
+		expect(cls).toContain("py-1.5");
+	});
 });
 
 /**
