@@ -108,15 +108,27 @@ function EngineStatus() {
 	const engineError = useEngineStore((s) => s.engineError);
 
 	/*
-	 * success-text, not status-success. The status tokens are tuned as fills and
-	 * indicators; as 12px text `status-success` measures 2.21:1 on the light
-	 * panel, well under the 4.5 AA needs. The `-text` variant is the accessible
-	 * pair (4.57 light / 9.58 dark) and the dot inherits it via bg-current,
-	 * clearing the 3:1 that non-text indicators need too.
+	 * `status-success-text`: not the general `success-text`, and not the bare
+	 * `status-success`. A connection light is precisely what design-system.md
+	 * means by "Run, connection, and test status", so it belongs to the
+	 * `--status-*` family - the family a reader greps to find every status
+	 * surface. The comment this replaces rejected the *bare* token, which is the
+	 * right rejection and the wrong conclusion: as 12px text `status-success`
+	 * measures 2.20:1 on --panel, and the family's own answer to that is its
+	 * `-text` pair, not a different family.
+	 *
+	 * Measured on --panel, the Dock's own surface, in both themes: 5.43:1 light
+	 * (142 72% 27%) and 9.61:1 dark (142 60% 55%), so the dot - which inherits
+	 * the colour through bg-current - clears the 3:1 non-text bar too. The pair
+	 * is byte-identical to --success-text in both modes, so the swap moved no
+	 * pixel; it moved the token into the family that names this indicator.
+	 *
+	 * `starting` and `unreachable` stay on --muted-foreground, which is what the
+	 * doc prescribes for a pending state (there is no --status-pending).
 	 */
 	const className = cn(
 		"flex items-center gap-1 text-xs",
-		engineStatus === "connected" ? "text-success-text" : "text-muted-foreground"
+		engineStatus === "connected" ? "text-status-success-text" : "text-muted-foreground"
 	);
 	const label = (
 		<>
@@ -209,12 +221,13 @@ function RunningServices() {
 				{/*
 				 * A button, not a chip: knowing a listener is up is only half the
 				 * need - the other half is getting to it, and the drawer is where
-				 * it can be stopped or copied. `success-text` is the accessible
-				 * pair the connection light above uses for the same 12px dot.
+				 * it can be stopped or copied. A listener being up is a service's
+				 * run state, so it takes `status-success-text`, the same pair the
+				 * connection light above uses for the same 12px dot.
 				 */}
 				<button
 					onClick={() => revealDrawerView("services")}
-					className="flex items-center gap-1 text-xs text-success-text rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					className="flex items-center gap-1 text-xs text-status-success-text rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 				>
 					<span className="w-1.5 h-1.5 rounded-full bg-current" />
 					{count === 1 ? "1 service" : `${count} services`}
@@ -239,6 +252,11 @@ function PendingRestartButton() {
 				 * back to Settings. Warning tokens rather than a raw amber - the
 				 * `-text` variant is the pair that passes contrast at 12px, the
 				 * same rule the connection light follows above.
+				 *
+				 * Deliberately `--warning` and not the `--status-*` family the two
+				 * indicators beside it now use: this announces a pending action on
+				 * a setting, not the state of a run, a connection or a service, and
+				 * amber in that family means "4xx client error".
 				 */}
 				<button
 					onClick={() => void restart()}
