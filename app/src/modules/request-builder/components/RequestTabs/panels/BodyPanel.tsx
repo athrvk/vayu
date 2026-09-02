@@ -15,8 +15,10 @@
  * **XML is a plain code pane too.** SOAP and legacy-enterprise APIs are HTTP
  * plus an XML document the user writes whole, so the mode buys highlighting
  * (Monaco's `xml` basic language ships in the bundle already, for the response
- * viewer) and an auto-`Content-Type: application/xml` - not an editor. The
- * engine sends its content byte for byte, with no envelope of any kind.
+ * viewer), the `{{` completion every other body language gets
+ * (`BODY_LANGUAGES`, which this mode was missing from until #1214) and an
+ * auto-`Content-Type: application/xml` - not an editor of its own. The engine
+ * sends its content byte for byte, with no envelope of any kind.
  *
  * **JSON-RPC is a plain JSON pane, deliberately.** Its call is one JSON text -
  * the envelope around it (`"jsonrpc":"2.0"`, and an `id` when the call names
@@ -71,6 +73,7 @@ import { useResizable } from "@/hooks/useResizable";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
 import { cn } from "@/lib/utils";
+import { BODY_MODES } from "./body/body-modes";
 import { switchContentType, withoutContentType } from "./body/content-type";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
 import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
@@ -82,21 +85,6 @@ import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
  * `bodyMode === "graphql"`, so it loads then (#1146).
  */
 const GraphQLBody = lazy(() => import("./body/GraphQLBody"));
-
-const BODY_MODES: { value: BodyMode; label: string; contentType: string | null }[] = [
-	{ value: "none", label: "None", contentType: null },
-	{ value: "json", label: "JSON", contentType: "application/json" },
-	{ value: "text", label: "Text", contentType: "text/plain" },
-	{ value: "graphql", label: "GraphQL", contentType: "application/json" },
-	{ value: "jsonrpc", label: "JSON-RPC", contentType: "application/json" },
-	{ value: "xml", label: "XML", contentType: "application/xml" },
-	{ value: "form-data", label: "Form Data", contentType: "multipart/form-data" },
-	{
-		value: "x-www-form-urlencoded",
-		label: "URL Encoded",
-		contentType: "application/x-www-form-urlencoded",
-	},
-];
 
 /** One arrow press. A shade over a text line, so it moves visibly. */
 const RESIZE_STEP = 24;
