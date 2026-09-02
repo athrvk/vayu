@@ -248,6 +248,7 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 				<CodeEditor
 					height="350px"
 					language="javascript"
+					ariaLabel={config.editorLabel}
 					value={script}
 					onChange={(value) => updateField(config.field, value ?? "")}
 				/>

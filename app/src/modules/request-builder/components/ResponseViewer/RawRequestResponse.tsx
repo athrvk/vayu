@@ -92,6 +92,7 @@ export default function RawRequestResponse({ rawRequest, response }: RawRequestR
 		<CodeEditor
 			height="100%"
 			language="http"
+			ariaLabel="Raw request and response"
 			value={rawRequest ? `${markLines(rawRequest, SENT_MARKER)}\n${received}` : received}
 			readOnly
 			/*

@@ -19,13 +19,20 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import type * as Monaco from "monaco-editor";
 import { CodeEditor } from "./code-editor";
-import { SEND_CHORD, LOAD_TEST_CHORD } from "@/constants/shortcuts";
+import {
+	SEND_CHORD,
+	LOAD_TEST_CHORD,
+	TOGGLE_CONTEXT_BAR_CHORD,
+	LEAVE_EDITOR_CHORD,
+} from "@/constants/shortcuts";
 import { chordKeybinding } from "@/lib/editor-chords";
+import { chordKeys } from "@/lib/platform";
 
 const addCommand = vi.fn();
+const getContainerDomNode = vi.fn(() => document.createElement("div"));
 
 /** Monaco's two enums, with the real values for the keys in play. */
 const monaco = {
@@ -33,9 +40,19 @@ const monaco = {
 	KeyCode: { Enter: 3, Digit1: 22, KeyA: 31 },
 } as unknown as typeof Monaco;
 
+/** Options the wrapper handed Monaco on the last render. */
+let lastOptions: Record<string, unknown> = {};
+
 vi.mock("@monaco-editor/react", () => ({
-	Editor: ({ onMount }: { onMount?: (e: unknown, m: unknown) => void }) => {
-		onMount?.({ addCommand }, monaco);
+	Editor: ({
+		onMount,
+		options,
+	}: {
+		onMount?: (e: unknown, m: unknown) => void;
+		options?: Record<string, unknown>;
+	}) => {
+		lastOptions = options ?? {};
+		onMount?.({ addCommand, getContainerDomNode }, monaco);
 		return <div data-testid="editor" />;
 	},
 }));
@@ -52,20 +69,80 @@ vi.mock("@/lib/monaco-loader", () => ({
 }));
 
 describe("CodeEditor keyboard wiring", () => {
-	it("registers the send and load-test chords on every instance", () => {
+	it("registers the send, load-test, context-bar and leave chords on every instance", () => {
 		addCommand.mockClear();
-		render(<CodeEditor value="" language="json" />);
+		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
+		// ⌘I is in the list because Monaco binds it for `triggerSuggest` and
+		// stops it: drop it and the context bar stops toggling from an editor,
+		// which is invisible from `Shell`, where the handler still looks correct.
 		expect(addCommand.mock.calls.map((c) => c[0])).toEqual([
 			chordKeybinding(SEND_CHORD, monaco),
 			chordKeybinding(LOAD_TEST_CHORD, monaco),
+			chordKeybinding(TOGGLE_CONTEXT_BAR_CHORD, monaco),
+			chordKeybinding(LEAVE_EDITOR_CHORD, monaco),
 		]);
 	});
 
 	it("still runs the caller's own onMount", () => {
 		addCommand.mockClear();
 		const onMount = vi.fn();
-		render(<CodeEditor value="" language="json" onMount={onMount} />);
+		render(<CodeEditor value="" language="json" ariaLabel="Request body" onMount={onMount} />);
 		expect(onMount).toHaveBeenCalledTimes(1);
-		expect(addCommand).toHaveBeenCalledTimes(2);
+		expect(addCommand).toHaveBeenCalledTimes(4);
+	});
+});
+
+describe("CodeEditor accessibility options", () => {
+	it("names the editor for a screen reader, instead of Monaco's default", () => {
+		render(<CodeEditor value="" language="json" ariaLabel="GraphQL variables" />);
+		expect(lastOptions.ariaLabel).toBe("GraphQL variables");
+	});
+
+	it("lets Tab leave a read-only editor, where it has nothing to indent", () => {
+		render(<CodeEditor value="" language="json" ariaLabel="Response body" readOnly />);
+		expect(lastOptions.tabFocusMode).toBe(true);
+	});
+
+	it("keeps Tab indenting an editable one, which has the chord and the hint instead", () => {
+		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
+		expect(lastOptions.tabFocusMode).toBe(false);
+	});
+});
+
+/**
+ * A chord nothing advertises is a chord nobody presses.
+ *
+ * On focus rather than always: the hint is worth its place over the content
+ * only while someone is in the editor it is the way out of, and every editable
+ * pane in the app would otherwise carry a standing badge.
+ */
+describe("the leave-editor hint", () => {
+	const hint = () => screen.queryByText("Leave editor");
+
+	it("stays out of the way until the editor has focus", () => {
+		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
+		expect(hint()).toBeNull();
+	});
+
+	it("appears when focus enters, spelling the chord from the registry", () => {
+		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
+		fireEvent.focus(screen.getByTestId("editor"));
+		expect(hint()).toBeInTheDocument();
+		for (const cap of chordKeys(LEAVE_EDITOR_CHORD)) {
+			expect(screen.getByText(cap)).toBeInTheDocument();
+		}
+	});
+
+	it("goes again when focus leaves", () => {
+		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
+		fireEvent.focus(screen.getByTestId("editor"));
+		fireEvent.blur(screen.getByTestId("editor"));
+		expect(hint()).toBeNull();
+	});
+
+	it("never shows on a read-only editor, which Tab already leaves", () => {
+		render(<CodeEditor value="" language="json" ariaLabel="Response body" readOnly />);
+		fireEvent.focus(screen.getByTestId("editor"));
+		expect(hint()).toBeNull();
 	});
 });

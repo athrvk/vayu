@@ -114,6 +114,19 @@ export function CommandPalette() {
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (!matchesChord(e, PALETTE_CHORD)) return;
 			e.preventDefault();
+			/*
+			 * And stopped here, not merely prevented. `preventDefault` cancels the
+			 * browser's own action and nothing else: the event still finished its
+			 * journey to Monaco, which treats ⌘K as a chord *leader* and entered
+			 * chord mode behind the open palette - so the next key typed in the
+			 * editor answered "not a command" in its status bar. Capturing a key and
+			 * leaving it in flight is half a claim.
+			 *
+			 * Scoped to this one chord like the capture phase itself: the `return`
+			 * above is the only other way out of this handler, so no other key is
+			 * stopped.
+			 */
+			e.stopPropagation();
 			// Toggling rather than only opening: the chord that summoned it is
 			// the one a user presses again to dismiss it.
 			setPaletteOpen(!useLayoutStore.getState().paletteOpen);

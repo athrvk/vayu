@@ -331,6 +331,7 @@ export default function ResponseBody({
 						// syntax colours is the third of the three passes the
 						// threshold exists to avoid.
 						language={isLargeBody || viewMode === "raw" ? "plaintext" : language}
+						ariaLabel="Response body"
 						value={formattedBody}
 						readOnly
 						fontSize={compact ? 12 : 13}

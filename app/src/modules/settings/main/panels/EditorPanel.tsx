@@ -150,7 +150,12 @@ export default function EditorPanel() {
 				</CardHeader>
 				<CardContent>
 					<div className="h-48 overflow-hidden rounded-md border border-border">
-						<CodeEditor value={SAMPLE} language="javascript" readOnly />
+						<CodeEditor
+							value={SAMPLE}
+							language="javascript"
+							ariaLabel="Editor settings preview"
+							readOnly
+						/>
 					</div>
 				</CardContent>
 			</Card>

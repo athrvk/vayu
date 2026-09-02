@@ -70,6 +70,31 @@ export const TOGGLE_CONTEXT_BAR_CHORD: Chord = {
 export const SETTINGS_CHORD: Chord = { mod: true, key: ",", label: "Open settings" };
 
 /**
+ * Move focus out of a code editor.
+ *
+ * Monaco's Tab indents, which is right for a code editor and a keyboard trap
+ * for anyone who reached one by tabbing (WCAG 2.1.2). Monaco's own way out is
+ * `editor.action.toggleTabFocusMode`, and it cannot simply be advertised: its
+ * binding is Ctrl+M, which on macOS is ⌃⇧M - a modifier this registry has no
+ * word for - while the ⌘M the platform *would* spell it as is Minimize.
+ *
+ * So the app declares its own exit, here, where the Keyboard Shortcuts panel
+ * lists it for free and `lib/editor-chords.ts` binds it. ⇧ sits beside Monaco's
+ * Ctrl+M rather than taking it over, and CtrlCmd+Shift+M is claimed by neither
+ * the standalone editor nor the native menu.
+ *
+ * Read-only editors carry no such chord: `tabFocusMode` is simply on for them
+ * (`ui/code-editor.tsx`), Tab having no editing meaning in text nobody can type
+ * into. The chord is for the editors where Tab still has to indent.
+ */
+export const LEAVE_EDITOR_CHORD: Chord = {
+	mod: true,
+	shift: true,
+	key: "M",
+	label: "Move focus out of the editor",
+};
+
+/**
  * The drawer view switchers, keyed by the view they activate.
  *
  * ⌘S is Save, so Services takes the shifted pair - free in both maps: the
@@ -147,6 +172,7 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 		chords: Object.values(DRAWER_VIEW_CHORDS).filter((chord) => chord !== SETTINGS_CHORD),
 	},
 	{ id: "tabs", title: "Tabs", chords: TAB_CHORDS },
+	{ id: "editors", title: "Editors", chords: [LEAVE_EDITOR_CHORD] },
 ];
 
 /**

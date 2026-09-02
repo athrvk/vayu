@@ -256,6 +256,7 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 				<CodeEditor
 					height="320px"
 					language="javascript"
+					ariaLabel={`Collection ${isPre ? "pre-request" : "post-request"} script`}
 					value={script}
 					onChange={setScript}
 					fontSize={12}
