@@ -3249,12 +3249,19 @@ started, and a running listener keeps what it was started with:
 | `inboxMaxCaptures` | 500 | 1 - 10000 | Captures retained per inbox, oldest evicted first. Also the ceiling on one `limit` of the capture list |
 | `inboxLivePollIntervalMs` | 250 | 25 - 5000 | How often a watched inbox checks for new captures - the delay between a webhook landing and its event |
 
-Two are **not** settings, deliberately. A request over **8 MiB** is refused at
+Three are **not** settings, deliberately. A request over **8 MiB** is refused at
 the transport with a `413` and recorded nowhere: that bounds what an
 unauthenticated remote caller can make the engine buffer, which is not the local
 user's preference to spend. The canned response's **`delayMs` is capped at
 30000**: it holds a listener thread for its whole duration and a stop waits on
-that join, so it bounds how long a stop can be made to take.
+that join, so it bounds how long a stop can be made to take. The **request
+target** - path and query together - is capped at **8192 bytes** by the
+transport, past which it answers `414`.
+
+Below that cap the path's length does not matter, and "any path" is meant
+literally: an inbox routes every request to its capture without matching the
+path against anything, so a signed callback URL, a per-delivery token in the
+path or a deeply nested tenant route is recorded like any other (issue #1140).
 
 ### POST /inbox/start
 

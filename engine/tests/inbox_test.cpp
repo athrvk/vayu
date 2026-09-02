@@ -285,6 +285,59 @@ TEST_F (InboxListenerTest, RecordsWhatArrivedOnAnyMethodAndPath) {
     EXPECT_EQ (newest.front ().method, "DELETE");
 }
 
+TEST_F (InboxListenerTest, RecordsAPathPastTheRegexRouteLimitWithItsBody) {
+    // cpp-httplib 0.53.1 refuses a regex route outright for any path longer
+    // than CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH (256) rather than risk
+    // std::regex_match's per-character recursion. The `.*` route per method
+    // this listener used to register was subject to that, so a webhook
+    // delivered to a longer path drew httplib's own 404 and was never recorded
+    // at all - no row, no sign anything arrived (issue #1140). Put those
+    // registrations back in place of AnyPathServer and the size assertion below
+    // goes red: nothing is stored.
+    const std::string long_path = "/hooks/" + std::string (300, 'a');
+    ASSERT_GT (long_path.size (), 256u)
+    << "the path must clear the limit to test it";
+
+    auto started = start ();
+    auto client  = client_for (started.info);
+
+    auto posted = client.Post (long_path + "?attempt=2", "{\"id\":7}", "application/json");
+    ASSERT_TRUE (posted) << "POST to the inbox failed";
+    EXPECT_EQ (posted->status, 200);
+
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 10, 0);
+    ASSERT_EQ (captures.size (), 1u);
+    const auto& capture = captures.front ();
+    EXPECT_EQ (capture.path, long_path);
+    EXPECT_EQ (capture.query, "attempt=2");
+    // The body is the half a pre-routing handler could not have recorded, which
+    // is why this listener routes rather than answers ahead of the body read.
+    EXPECT_EQ (capture.body, "{\"id\":7}");
+    EXPECT_FALSE (capture.body_truncated);
+
+    // A body-less method on the same path is routed the same way.
+    ASSERT_TRUE (client.Get (long_path));
+    EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 2);
+}
+
+TEST_F (InboxListenerTest, RecordsThePathDecodedAsHttplibItselfWould) {
+    // The path is read off the target now that routing rewrites `req.path`, so
+    // it has to stay the *decoded* path cpp-httplib put there before - the
+    // column, the wire and the URL the app rebuilds from it all mean that.
+    auto started = start ();
+    auto client  = client_for (started.info);
+
+    ASSERT_TRUE (client.Post ("/hooks/a%20b/caf%C3%A9?q=1%202", "{}", "application/json"));
+
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 1, 0);
+    ASSERT_EQ (captures.size (), 1u);
+    EXPECT_EQ (captures.front ().path, "/hooks/a b/caf\xC3\xA9");
+    // The query is still the raw string off the wire, undecoded, as it always
+    // was - httplib's own client re-spells the space as '+' on the way out, and
+    // a capture shows what arrived rather than a reading of it.
+    EXPECT_EQ (captures.front ().query, "q=1+2");
+}
+
 TEST_F (InboxListenerTest, ServesTheCannedResponseIncludingItsDelay) {
     InboxStartRequest request;
     request.response.status   = 500;

@@ -76,6 +76,108 @@ std::string query_of (const std::string& target) {
     return pos == std::string::npos ? std::string{} : target.substr (pos + 1);
 }
 
+/**
+ * The decoded path of a request target, without the query string.
+ *
+ * Exactly what cpp-httplib's own request-line parser puts in `Request::path` -
+ * `decode_path_component` of everything before the first '?', the fragment
+ * having already been cut from the target. A capture derives the path here
+ * rather than reading `req.path`, because the inbox listener routes every
+ * request as one literal path; see `AnyPathServer`.
+ */
+std::string path_of (const std::string& target) {
+    const auto pos = target.find ('?');
+    return httplib::decode_path_component (
+    pos == std::string::npos ? target : target.substr (0, pos));
+}
+
+/**
+ * The inbox's listener: one handler, reached by every request whatever its path.
+ *
+ * cpp-httplib chooses a handler by matching `Request::path`, and the only
+ * matcher of its two that can span path segments is the regex one - which,
+ * since 0.53.1, refuses any path longer than
+ * `CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH` (256) before it reaches
+ * `std::regex_match`. The `.*` route per method this replaces was subject to
+ * that, so a webhook delivered to a longer path drew httplib's own 404 and was
+ * never recorded - no row, nothing in the list, no sign anything arrived
+ * (issue #1140). Long paths are ordinary in the traffic an inbox exists to
+ * receive: signed callback URLs, per-delivery tokens in the path, deeply
+ * nested tenant routes.
+ *
+ * An inbox has nothing to route - one handler answers every method and path -
+ * so rather than ask the matcher a question whose answer is always yes, every
+ * request is routed **as** `ROUTE` and the handlers register on that literal,
+ * which `make_matcher` answers with a `PathParamsMatcher` that compares it as a
+ * string. No regex runs against an inbox's traffic at all, so nothing bounds
+ * the path it accepts but httplib's own 8192-byte request-target cap.
+ *
+ * Raising the limit instead would be the wrong lever twice over: it is a
+ * compile-time macro read by an `inline` function, so a value for this
+ * translation unit alone is an ODR violation, and raising it globally hands
+ * `std::regex_match` up to that 8192-byte target - the per-character recursion
+ * the limit exists to bound - on the one listener that may bind past loopback.
+ *
+ * The mock server's fix for the same defect (#1139) does not port here.
+ * `set_pre_routing_handler` runs before cpp-httplib reads the body, and
+ * recording the body is what a capture is for; it also takes a `const
+ * Request&`, so it cannot rewrite the path either. `process_request`'s
+ * `setup_request` callback is the one hook that sees a mutable `Request` ahead
+ * of routing, and overriding `process_and_close_socket` reaches it. That one is
+ * *private* in `httplib::Server`, which is no obstacle: access control governs
+ * who may call a virtual, not who may override it, and it is how cpp-httplib's
+ * own `SSLServer` extends the same function. `process_request` and the members
+ * the override reads are protected.
+ *
+ * The mirror below is a copy of library code, and it has an exit on record
+ * rather than by default: #1283 tracks upstreaming a public request-setup hook
+ * (or a matcher-free default handler) to cpp-httplib, after which this class
+ * and its version assert go and the two inbox tests that pin this behaviour
+ * stay as they are.
+ */
+class AnyPathServer final : public httplib::Server {
+    public:
+    /// The path every request is routed as, and so the pattern the handlers
+    /// register on. Any literal would do; "/" is the one an inbox's own URL
+    /// already spells.
+    static constexpr const char* ROUTE = "/";
+
+    private:
+    bool process_and_close_socket (::socket_t sock) override {
+        // Mirrors httplib::Server::process_and_close_socket. The one difference
+        // is the `setup_request` callback below, which that one passes as null -
+        // and `process_request` is its only caller, so there is no narrower
+        // override that reaches the callback.
+        static_assert (std::string_view (CPPHTTPLIB_VERSION) == "0.53.1",
+        "cpp-httplib moved: re-read Server::process_and_close_socket, "
+        "confirm this override still mirrors it, then update this assert - "
+        "or retire the mirror entirely if the release carries a public "
+        "request-setup hook (issue #1283).");
+
+        std::string remote_addr;
+        int remote_port = 0;
+        httplib::detail::get_remote_ip_and_port (sock, remote_addr, remote_port);
+
+        std::string local_addr;
+        int local_port = 0;
+        httplib::detail::get_local_ip_and_port (sock, local_addr, local_port);
+
+        bool websocket_upgraded = false;
+        const auto ret = httplib::detail::process_server_socket (svr_sock_,
+        sock, keep_alive_max_count_, keep_alive_timeout_sec_, read_timeout_sec_,
+        read_timeout_usec_, write_timeout_sec_, write_timeout_usec_,
+        [&] (httplib::Stream& strm, bool close_connection, bool& connection_closed) {
+            return process_request (
+            strm, remote_addr, remote_port, local_addr, local_port,
+            close_connection, connection_closed,
+            [] (httplib::Request& req) { req.path = ROUTE; }, &websocket_upgraded);
+        });
+
+        httplib::detail::drain_and_close_socket (sock);
+        return ret;
+    }
+};
+
 /// Read a canned response's content type without assuming the caller's casing.
 std::string content_type_of (const std::map<std::string, std::string>& headers) {
     for (const auto& [name, value] : headers) {
@@ -395,7 +497,7 @@ struct InboxManager::Inbox {
     /// limits and the canned response above it while the accept loop is alive.
     /// Its listening state *is* the inbox's `running` - a stopped inbox keeps
     /// its record, so there is nothing else for `running` to mean.
-    ManagedListener listener;
+    ManagedListener listener{ std::make_unique<AnyPathServer> () };
 
     InboxInfo info_locked () const {
         InboxInfo info;
@@ -447,10 +549,13 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         capture_row.inbox_id    = raw->id;
         capture_row.received_at = routes::now_ms ();
         capture_row.method      = req.method;
-        capture_row.path        = req.path;
-        capture_row.query       = query_of (req.target);
-        capture_row.headers     = headers_to_json (req.headers).dump ();
-        capture_row.body_bytes  = static_cast<int64_t> (req.body.size ());
+        // Not `req.path`: the listener routes every request as one literal path
+        // so that no path length can miss the handler, so what arrived is only
+        // still on the target. See AnyPathServer.
+        capture_row.path       = path_of (req.target);
+        capture_row.query      = query_of (req.target);
+        capture_row.headers    = headers_to_json (req.headers).dump ();
+        capture_row.body_bytes = static_cast<int64_t> (req.body.size ());
         capture_row.body_truncated = capture_row.body_bytes > raw->limits.max_body_bytes;
         capture_row.body        = capture_row.body_truncated ?
                req.body.substr (0, static_cast<size_t> (raw->limits.max_body_bytes)) :
@@ -495,15 +600,18 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         }
     };
 
-    // Every method cpp-httplib will route, on every path. CONNECT, TRACE and
-    // PRI are the remainder and are not routable - a webhook is never one.
+    // Every method cpp-httplib will route, on the one literal path the listener
+    // routes every request as - which is how a path of any length reaches the
+    // capture rather than being refused by a regex route (AnyPathServer, issue
+    // #1140). CONNECT, TRACE and PRI are the remainder and are not routable - a
+    // webhook is never one.
     httplib::Server& svr = inbox->listener.server ();
-    svr.Get (".*", capture); // also serves HEAD
-    svr.Post (".*", capture);
-    svr.Put (".*", capture);
-    svr.Patch (".*", capture);
-    svr.Delete (".*", capture);
-    svr.Options (".*", capture);
+    svr.Get (AnyPathServer::ROUTE, capture); // also serves HEAD
+    svr.Post (AnyPathServer::ROUTE, capture);
+    svr.Put (AnyPathServer::ROUTE, capture);
+    svr.Patch (AnyPathServer::ROUTE, capture);
+    svr.Delete (AnyPathServer::ROUTE, capture);
+    svr.Options (AnyPathServer::ROUTE, capture);
 
     const auto started =
     inbox->listener.start (request.bind, request.port, "inbox " + inbox->id);

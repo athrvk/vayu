@@ -55,7 +55,16 @@ ClaimRegistry& registry () {
 } // namespace
 
 ManagedListener::ManagedListener ()
-: server_ (std::make_unique<httplib::Server> ()) {
+: ManagedListener (std::make_unique<httplib::Server> ()) {
+}
+
+ManagedListener::ManagedListener (std::unique_ptr<httplib::Server> server)
+: server_ (std::move (server)) {
+    if (!server_) {
+        throw std::invalid_argument (
+        "ManagedListener was handed no server - every accessor would then read "
+        "as a listener stop() had already released");
+    }
 }
 
 ManagedListener::~ManagedListener () {
