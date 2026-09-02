@@ -163,6 +163,7 @@ export default function CollectionItem({
 			{/* The row is the treeitem: one tab stop for the whole tree, arrows
 			    move between rows (useRovingTreeFocus). tabIndex starts at -1; the
 			    hook promotes exactly one row to 0. */}
+			{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:200-208, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor */}
 			<div
 				ref={rowRef}
 				role="treeitem"

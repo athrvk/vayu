@@ -127,7 +127,7 @@ describe("where focus lands when the menu closes", () => {
 	it("returns to the row when the trigger is inside a treeitem", async () => {
 		render(
 			<div role="tree">
-				<div role="treeitem" tabIndex={0} data-testid="row">
+				<div role="treeitem" aria-selected={false} tabIndex={0} data-testid="row">
 					<RowActionsMenu label={LABEL} actions={actions} tabIndex={-1} />
 				</div>
 			</div>

@@ -275,6 +275,7 @@ export default function VariablesCategoryTree() {
 	return (
 		<>
 			<DrawerPanel title="Variables">
+				{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
 				<div
 					ref={treeRef}
 					role="tree"
@@ -329,6 +330,7 @@ export default function VariablesCategoryTree() {
 							    section header those two verbs are one. */}
 							<div
 								role="treeitem"
+								aria-selected={false}
 								tabIndex={-1}
 								aria-expanded={environmentsExpanded}
 								aria-level={1}
@@ -445,6 +447,7 @@ export default function VariablesCategoryTree() {
 											 * go. RequestItem carries the rule and why
 											 * the target check is what it is.
 											 */
+											// eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:200-208, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor
 											<div
 												key={environment.id}
 												role="treeitem"
@@ -634,6 +637,7 @@ export default function VariablesCategoryTree() {
 					<div>
 						<div
 							role="treeitem"
+							aria-selected={false}
 							tabIndex={-1}
 							aria-expanded={collectionsExpanded}
 							aria-level={1}

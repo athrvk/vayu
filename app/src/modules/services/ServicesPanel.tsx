@@ -131,6 +131,7 @@ function ServiceRow({
 	flashed,
 }: ServiceRowProps) {
 	return (
+		// eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- delegates only clicks landing on the row's own padding to the native button inside it, the drawer-row hit-area pattern in app/CLAUDE.md
 		<div
 			className={cn(
 				"flex h-8 cursor-pointer items-center gap-1 px-3 hover:bg-muted/50",

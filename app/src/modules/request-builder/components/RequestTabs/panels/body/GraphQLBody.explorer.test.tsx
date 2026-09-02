@@ -59,6 +59,7 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 			// eslint-disable-next-line react-hooks/exhaustive-deps
 		}, []);
 		return (
+			// eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- test stub for the Monaco-backed CodeEditor, driven only by fireEvent.click here
 			<div data-testid={`editor-${language}`} onClick={() => onChange(value)}>
 				{value}
 			</div>

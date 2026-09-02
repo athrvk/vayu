@@ -310,6 +310,7 @@ export default function CollectionTree() {
 			    context - see CollectionTreeContext for why it is not props. */}
 				{!isLoadingCollections && rootCollections.length > 0 && (
 					<div className="flex-1 min-h-0">
+						{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
 						<div
 							role="tree"
 							aria-label="Collections"

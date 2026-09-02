@@ -710,6 +710,7 @@ export default function VariableInput({
 	};
 
 	return (
+		// eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- wraps a native input; the click only widens the hit area to the padded box, and the input is keyboard-operable on its own
 		<div
 			ref={containerRef}
 			className={cn(
@@ -780,6 +781,7 @@ export default function VariableInput({
 			 * value comes from and it was mouse-only.
 			 */}
 			{hasVariables && (
+				// eslint-disable-next-line jsx-a11y/no-static-element-interactions -- `pointerEvents: none` overlay whose keydown delegates for the roving-tabindex tokens inside it, the same shape as useRovingTreeFocus
 				<div
 					ref={overlayRef}
 					data-variable-overlay
