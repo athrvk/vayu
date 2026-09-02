@@ -5,26 +5,16 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import {
-	FolderOpen,
-	Clock,
-	Braces,
-	Info,
-	PanelRight,
-	Radio,
-	RefreshCw,
-	Settings,
-	Trash2,
-} from "lucide-react";
+import { Info, PanelRight, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
 import { DRAWER_VIEW_CHORDS, TOGGLE_CONTEXT_BAR_CHORD } from "@/constants/shortcuts";
+import { DRAWER_VIEWS } from "@/constants/drawer-views";
 import {
 	useLayoutStore,
 	useEngineStore,
 	useSaveStore,
 	useTabsStore,
-	type DrawerView,
 	// Aliased: `EngineStatus` is the component below, and the type is what it
 	// switches on.
 	type EngineStatus as EngineConnectionStatus,
@@ -33,104 +23,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { contextBarHasContent } from "./context-bar-content";
 import { useRunningServiceCount } from "@/modules/services";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
-
-interface DrawerButton {
-	view: DrawerView;
-	icon: React.ReactNode;
-	label: string;
-	shortcut: string;
-}
-
-const DRAWER_BUTTONS: DrawerButton[] = [
-	{
-		view: "collections",
-		icon: <FolderOpen className="w-4 h-4" />,
-		label: "Collections",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.collections),
-	},
-	{
-		view: "history",
-		icon: <Clock className="w-4 h-4" />,
-		label: "History",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.history),
-	},
-	{
-		view: "variables",
-		/*
-		 * `Braces`, not `Zap`. The lightning bolt is this app's load-test mark -
-		 * it is the Load Test button in the URL bar, the dashboard tab icon, and
-		 * the badge on a load run in History. Sitting in the Dock it said "run",
-		 * which is the one thing this view does not do.
-		 *
-		 * `{}` is the strongest reading of "variables" here because it *is* the
-		 * syntax: every variable in Vayu is written `{{name}}`, in the URL bar,
-		 * in headers, in bodies, in scripts. The user has already learned the
-		 * glyph before they ever look at the Dock.
-		 *
-		 * Rejected: `Variable` (lucide's `(x)`) is maths notation, not ours, and
-		 * its centre crossing packs a 6-unit X into a 24-unit box - at 16px that
-		 * is roughly 4px of detail, and it gives the icon the same
-		 * round-with-something-inside silhouette as Clock and Settings.
-		 * `SquareCode` (`<>` in a box) reads "script", and Vayu has real pre/post
-		 * scripts to confuse it with. `Parentheses` is `Variable` minus the X:
-		 * unreadable on its own, and it says "call", not "value".
-		 *
-		 * Distinctness in the strip: Braces is two thin open curves with a gap
-		 * down the middle, the only glyph of the four that is not a closed or
-		 * centre-filled shape - Collections is a solid horizontal trapezoid,
-		 * History a filled circle, Settings a round cog.
-		 *
-		 * Kept in step with `variables/main/VariablesMain.tsx` (empty state) and
-		 * `welcome/Launcher.tsx` (the Variables tile), which drew the same
-		 * concept as `Variable` and `Database` respectively.
-		 */
-		icon: <Braces className="w-4 h-4" />,
-		label: "Variables",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.variables),
-	},
-	{
-		view: "services",
-		/*
-		 * `Radio`: the group is inboxes, OAuth issuers and (with #481) mock
-		 * servers - things that sit there *listening*, which is what the
-		 * broadcast arcs say and what none of the alternatives do. `Server`
-		 * reads as a remote host, which is the thing these stand in for rather
-		 * than what they are; `Play` is the load-test run mark; `Plug` reads as
-		 * a connection to something else, and the point of a local service is
-		 * that there is nothing else.
-		 *
-		 * Distinct in the strip: it is the only glyph made of concentric arcs -
-		 * Collections a solid trapezoid, History a filled circle, Variables two
-		 * open curves, Settings a round cog.
-		 */
-		icon: <Radio className="w-4 h-4" />,
-		label: "Services",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.services),
-	},
-	{
-		view: "trash",
-		/*
-		 * `Trash2`, the same glyph every delete affordance in the app already
-		 * uses - and that repetition is the argument for it rather than against
-		 * it. The user meets this icon on the row action that put the item here;
-		 * finding it again in the Dock is how they learn where the item went.
-		 *
-		 * Distinct in the strip: a tapered bin with a lid line across the top,
-		 * the only glyph of the six that is wider at the shoulders than the foot
-		 * - Collections a solid trapezoid, History a filled circle, Variables
-		 * two open curves, Services concentric arcs, Settings a round cog.
-		 */
-		icon: <Trash2 className="w-4 h-4" />,
-		label: "Trash",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.trash),
-	},
-	{
-		view: "settings",
-		icon: <Settings className="w-4 h-4" />,
-		label: "Settings",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.settings),
-	},
-];
 
 interface DockButtonProps {
 	active: boolean;
@@ -399,15 +291,18 @@ export function Dock() {
 				    arrow-key traversal between the buttons, which this does not
 				    implement, and claiming it would mislead a keyboard user. */}
 				<nav className="flex items-center gap-0.5" aria-label="Sidebar views">
-					{DRAWER_BUTTONS.map(({ view, icon, label, shortcut }) => (
+					{/* Names, marks and order from `constants/drawer-views.ts`, chords
+					    from `constants/shortcuts.ts` - the strip holds neither, so the
+					    palette offering the same six cannot name them differently. */}
+					{DRAWER_VIEWS.map(({ view, label, icon: Icon }) => (
 						<DockButton
 							key={view}
 							active={drawerOpen && drawerView === view}
 							onClick={() => activateDrawerView(view)}
 							label={label}
-							shortcut={shortcut}
+							shortcut={formatChord(DRAWER_VIEW_CHORDS[view])}
 						>
-							{icon}
+							<Icon className="w-4 h-4" />
 						</DockButton>
 					))}
 				</nav>
