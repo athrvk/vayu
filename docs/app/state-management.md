@@ -1885,16 +1885,30 @@ mode change.
 
 What bounds the maps is the open request tabs. A record can only ever be read by
 the request it names, so once that request has no tab it is unreachable, and a
-per-request store that nothing prunes is how a ref becomes a leak; `tabs-store`
-is subscribed to rather than selected from, because pruning writes to a ref and
-a provider that re-rendered on every tab focus would charge the request the user
-is working in for it. `MAX_OPEN_TABS` caps the tab strip, so it caps the maps.
-The one key that survives the sweep is the id-less one, shared by any builder
-holding no saved request: it names no tab, and the editable copy History renders
-for a stored run is what uses it. Two such copies open at once share that one
-bucket and interfere as they always have, since the rules read a `requestId` of
-`null` against another `null` as a match; giving that copy an identity of its
-own is issue #1272.
+per-request store that nothing prunes is how a map becomes a leak; `tabs-store`
+is subscribed to rather than selected from, because a provider that re-rendered
+on every tab focus would charge the request the user is working in for it.
+`MAX_OPEN_TABS` caps the tab strip, so it caps the maps. The one key that
+survives the sweep is the id-less one, shared by any builder holding no saved
+request: it names no tab, and the editable copy History renders for a stored run
+is what uses it. Two such copies open at once share that one bucket and
+interfere as they always have, since the rules read a `requestId` of `null`
+against another `null` as a match; giving that copy an identity of its own is
+issue #1272.
+
+**The same sweep bounds the Send-with-row picker's memory** (issue #1271), the
+provider's other per-request map: which row index each request was last sent
+with (`rowIndexByRequest`, issues #659 and #1062). It survives a tab switch and
+a return, because neither of those is a send - and it goes when the tab does,
+for the reason above, since the request it was picked for can no longer be
+switched to. Two maps, one rule, one sweep, and one name for the request that
+has no id: `UNSAVED_AUTO_KEY` is what both file an id-less builder under.
+
+The row memory is `useState` rather than a ref - `lastRowIndex` is read while
+rendering - so its half of the sweep is a `setState`, and `retainKeys`
+(`context/retain-keys.ts`) returns the map it was handed when every key is still
+live. Without that identity guard the provider would re-render on every tab
+focus, which is exactly the cost the subscription was chosen to avoid.
 
 In the provider rather than in the panels for the drafts' reason and one of its
 own: Radix unmounts an inactive `TabsContent`, so a panel-local record is gone

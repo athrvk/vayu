@@ -230,9 +230,12 @@ send is about to put on the wire, not composition's guess at it.
 both send *without* a row, so the pick is cleared by one: a row left standing
 across a plain Send would put the file's value in every preview beside a request
 that had just gone out with the environment's, which is this same disagreement
-arrived at from the other side. Nothing else clears it - the picker's memory
+arrived at from the other side. Nothing else *clears* it - the picker's memory
 still survives a tab switch and a return (issue #659), because neither of those
-is a send.
+is a send. Closing the request's tab does drop it, which is not the same act: it
+ends the memory rather than unbinding the row, and it is what bounds a map the
+provider would otherwise hold for the life of the session (issue #1271, see
+[`state-management.md`](state-management.md#requestbuildercontext---the-headers-a-setting-added)).
 
 **Why the renderer can show this and composition cannot.** A plan is composed
 once, before any row exists to bind, so composition still defers both

@@ -25,6 +25,11 @@
  * `Select` commits, and a Select does not commit in jsdom. `applyModeChange`
  * and `applyStreamToggle` below make exactly the calls the panels make, in the
  * same order, through the real rules.
+ *
+ * The last two blocks are the Send-with-row picker's row memory (issue #1271),
+ * here rather than in a file of its own because what they check is the same
+ * open-tab sweep: it bounds every per-request map the provider holds, and a
+ * rule with two callers is worth asserting from both.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -35,6 +40,7 @@ import { useRequestBuilderContext } from "./RequestBuilderContext";
 import { switchContentType } from "../components/RequestTabs/panels/body/content-type";
 import { switchGraphQLMethod } from "../components/RequestTabs/panels/body/graphql-method";
 import { switchAutoHeader } from "../utils/auto-header";
+import { retainKeys } from "./retain-keys";
 import { useTabsStore, type Tab } from "@/stores";
 import type { BodyMode, HttpMethod, KeyValueItem } from "@/types";
 import type { RequestBuilderContextValue, RequestState } from "../types";
@@ -211,5 +217,68 @@ describe("what bounds the records", () => {
 
 		await act(async () => rerender(tree(null)));
 		expect(ctx.getAutoContentType()).not.toBeNull();
+	});
+});
+
+describe("what bounds the picker's row memory", () => {
+	it("forgets a request's picked row when its tab closes", async () => {
+		const { rerender } = render(tree("req_a"));
+		await act(async () => ctx.rememberRowIndex(2));
+		expect(ctx.lastRowIndex).toBe(2);
+
+		await act(async () => useTabsStore.getState().closeTab("tab_a"));
+
+		await act(async () => rerender(tree("req_a")));
+		expect(ctx.lastRowIndex).toBeNull();
+	});
+
+	it("keeps the picked row of a request whose tab is still open", async () => {
+		const { rerender } = render(tree("req_a"));
+		await act(async () => ctx.rememberRowIndex(2));
+
+		// B's tab goes; A's pick is not B's and has no business going with it.
+		await act(async () => useTabsStore.getState().closeTab("tab_b"));
+
+		await act(async () => rerender(tree("req_a")));
+		expect(ctx.lastRowIndex).toBe(2);
+	});
+
+	it("keeps the picked row of a builder that has no request id", async () => {
+		const { rerender } = render(tree(null));
+		await act(async () => ctx.rememberRowIndex(1));
+
+		await act(async () => useTabsStore.getState().closeTab("tab_a"));
+
+		await act(async () => rerender(tree(null)));
+		expect(ctx.lastRowIndex).toBe(1);
+	});
+});
+
+describe("retainKeys", () => {
+	/*
+	 * The sweep runs on every tabs-store change, and the row memory is state, so
+	 * the guard below is what keeps a tab focus from re-rendering the provider.
+	 * Asserted here rather than through the provider because a `setState` that
+	 * returns an equal-but-new object re-renders the provider and *nothing*
+	 * else: the context value is memoized on `lastRowIndex`, which such a write
+	 * leaves untouched, so no child can see the difference.
+	 */
+	it("returns the map it was given when every key is still live", () => {
+		const previous = { req_a: 2, req_b: 0 };
+		expect(retainKeys(previous, new Set(["req_a", "req_b", "req_c"]))).toBe(previous);
+	});
+
+	it("returns a new map with only the live keys when one is dropped", () => {
+		const previous = { req_a: 2, req_b: 0 };
+		const kept = retainKeys(previous, new Set(["req_b"]));
+		expect(kept).not.toBe(previous);
+		expect(kept).toEqual({ req_b: 0 });
+	});
+
+	it("returns the empty map it was given rather than a new one", () => {
+		// The ordinary case: nothing has been picked, and every tab close would
+		// otherwise write a fresh object.
+		const previous = {};
+		expect(retainKeys(previous, new Set(["req_a"]))).toBe(previous);
 	});
 });
