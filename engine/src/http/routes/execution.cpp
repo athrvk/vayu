@@ -1321,6 +1321,12 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // stream, and a settings change between them would otherwise send
     // the two halves out by different routes.
     const auto transport = vayu::http::resolve_transport_policy (ctx.db);
+    // What either script's `pm.sendRequest` may read (issue #1188). The stream
+    // itself is bounded by its event and duration caps rather than by a byte
+    // total, but a script's auxiliary fetch is an ordinary buffered read and
+    // takes the design bound the buffered path's scripts take - resolved once
+    // here for the same reason `transport` is.
+    const size_t script_response_bound = design_response_body_bound (ctx.db);
     // Loaded whether or not this send carries a script, because the
     // residual-token pass below reads them too (issue #1008): a `{{token}}`
     // that resolves on the buffered path and stays literal here would be one
@@ -1331,9 +1337,10 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (send.request);
         bind_script_scopes (
         pre_ctx, scopes, ctx.cookie_jar, send.cookie_scope, &pre_cookie_writes);
-        pre_ctx.request_id   = send.run.request_id;
-        pre_ctx.request_name = send.script_request_name;
-        pre_ctx.transport    = transport;
+        pre_ctx.request_id         = send.run.request_id;
+        pre_ctx.request_name       = send.script_request_name;
+        pre_ctx.transport          = transport;
+        pre_ctx.max_response_bytes = script_response_bound;
         // The same row the transfer below carries, on the same terms
         // as the buffered path: a stream is still one send, and one
         // send with a row is iteration 0 of 1.
@@ -1390,12 +1397,12 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // long after this handler's frame - and its row must be the one the
     // pre-request script and the transfer used.
     spec.on_complete =
-    [&db = ctx.db, &jar = ctx.cookie_jar, id = run_id,
-    cookie_scope = send.cookie_scope, run = send.run,
-    script_config = send.script_config, post_request_script = send.post_script,
-    request_name = send.script_request_name, scopes, iteration_data = send.data_row,
-    transport, pre_script_result] (const vayu::Request& sent,
-    const vayu::Response& response, const vayu::http::SseStreamContext& context) mutable {
+    [&db = ctx.db, &jar = ctx.cookie_jar, id = run_id, cookie_scope = send.cookie_scope,
+    run = send.run, script_config = send.script_config,
+    post_request_script = send.post_script, request_name = send.script_request_name,
+    scopes, iteration_data = send.data_row, transport, script_response_bound,
+    pre_script_result] (const vayu::Request& sent, const vayu::Response& response,
+    const vayu::http::SseStreamContext& context) mutable {
         StreamRecord record;
         nlohmann::json scripts = nlohmann::json::object ();
         record.events          = vayu::http::stream_trace_node (context);
@@ -1422,9 +1429,10 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                     std::vector<vayu::http::CookieWrite> post_cookie_writes;
                     auto post_ctx = vayu::runtime::ScriptContext::for_test (sent, response);
                     bind_script_scopes (post_ctx, scopes, jar, cookie_scope, &post_cookie_writes);
-                    post_ctx.request_id   = run.request_id;
-                    post_ctx.request_name = request_name;
-                    post_ctx.transport    = transport;
+                    post_ctx.request_id         = run.request_id;
+                    post_ctx.request_name       = request_name;
+                    post_ctx.transport          = transport;
+                    post_ctx.max_response_bytes = script_response_bound;
                     if (iteration_data) {
                         post_ctx.iteration_data = &*iteration_data;
                         post_ctx.iteration      = 0;

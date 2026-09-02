@@ -74,6 +74,12 @@ struct ScriptReplay {
     /// a stream: every sample in one run is then bounded by one rule rather
     /// than by whatever the settings said when each replay reached it.
     vayu::http::SseLimits sse_limits;
+    /// What a `pm.sendRequest` from this script may read (issue #1188), read
+    /// once for the pass on the same terms as `sse_limits`. The load bound,
+    /// not the design one: this script runs once per sampled response, so its
+    /// fetches belong to the budget sized for a run rather than for a body
+    /// someone is watching for.
+    size_t max_response_bytes = vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES;
 };
 
 /**
@@ -127,8 +133,9 @@ std::vector<std::string>& failure_messages) {
             // - a duration-bounded run has no total to report, and a script
             // that could read it from one mode and not the other is worse than
             // one that never reads it.
-            script_ctx.iteration = sample.iteration;
-            script_ctx.vu        = sample.vu;
+            script_ctx.iteration          = sample.iteration;
+            script_ctx.vu                 = sample.vu;
+            script_ctx.max_response_bytes = replay.max_response_bytes;
             if (replay.data_rows != nullptr && sample.data_row_index &&
             *sample.data_row_index < replay.data_rows->size ()) {
                 script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
@@ -244,6 +251,7 @@ ScriptValidationTotals replay_scenario_steps (vayu::runtime::ScriptEngine& engin
 vayu::http::routes::ScriptVariableScopes& scopes,
 const std::shared_ptr<RunContext>& context,
 const vayu::http::SseLimits& sse_limits,
+size_t max_response_bytes,
 bool verbose,
 ScriptValidation& validation,
 std::vector<std::string>& failure_messages) {
@@ -287,7 +295,8 @@ std::vector<std::string>& failure_messages) {
         // per-step tallies below.
         replay.failure_prefix =
         step.name.empty () ? "step " + std::to_string (i + 1) + ": " : step.name + ": ";
-        replay.sse_limits = sse_limits;
+        replay.sse_limits         = sse_limits;
+        replay.max_response_bytes = max_response_bytes;
 
         const auto totals = run_replay (engine, scopes, replay, failure_messages);
         validation.steps[i] = totals;
@@ -376,6 +385,10 @@ bool verbose) {
     vayu::runtime::ScriptEngine engine (script_config);
     // One read for the whole pass, shared by every replay it drives.
     const vayu::http::SseLimits sse_limits = vayu::http::read_sse_limits (db);
+    // The same, for what a `pm.sendRequest` out of these scripts may read
+    // (issue #1188) - the load bound, because this pass is the load path's.
+    const size_t script_response_bound =
+    vayu::http::routes::load_response_body_bound (db);
 
     // The run-level request and identity, for the single-request shape. A
     // scenario takes both off the plan step it is replaying instead, so it does
@@ -436,11 +449,11 @@ bool verbose) {
     std::vector<std::string> failure_messages;
 
     if (per_step) {
-        const ScriptValidationTotals totals = replay_scenario_steps (engine,
-        scopes, context, sse_limits, verbose, validation, failure_messages);
-        sampled                             = totals.sampled;
-        passed                              = totals.passed;
-        failed                              = totals.failed;
+        const ScriptValidationTotals totals = replay_scenario_steps (engine, scopes, context,
+        sse_limits, script_response_bound, verbose, validation, failure_messages);
+        sampled = totals.sampled;
+        passed  = totals.passed;
+        failed  = totals.failed;
         // Every scripted step drew a blank, so the run validated nothing.
         if (sampled == 0) {
             return validation;
@@ -463,9 +476,10 @@ bool verbose) {
         // `pm.iterationData` `undefined` there.
         replay.data_rows =
         context->load_data == nullptr ? nullptr : &context->load_data->rows;
-        replay.request_id   = script_request_id;
-        replay.request_name = script_request_name;
-        replay.sse_limits   = sse_limits;
+        replay.request_id         = script_request_id;
+        replay.request_name       = script_request_name;
+        replay.sse_limits         = sse_limits;
+        replay.max_response_bytes = script_response_bound;
 
         const auto totals = run_replay (engine, scopes, replay, failure_messages);
         sampled = totals.sampled;
@@ -1087,9 +1101,8 @@ int default_max_per_host) {
     // per change. Matching per transfer stays cheap because it reads this
     // snapshot, never the database.
     loop_config.transport = vayu::http::resolve_transport_policy (db);
-    loop_config.max_response_body_bytes = static_cast<size_t> (std::max (0,
-    db.get_config_int ("maxResponseBodyBytes",
-    static_cast<int> (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES))));
+    loop_config.max_response_body_bytes =
+    vayu::http::routes::load_response_body_bound (db);
     // Only enable curl verbose if explicitly requested in config,
     // independent of server verbose mode
     loop_config.verbose = config.value ("verbose", false);

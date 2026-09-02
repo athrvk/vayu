@@ -83,6 +83,25 @@ TEST_F (ConfigRouteTest, TheDesignReadBoundFollowsTheSetting) {
     EXPECT_EQ (vayu::http::routes::design_response_body_bound (*db_), 4096U);
 }
 
+// Its load-path sibling, on the same reasoning (issue #1188): the deferred
+// `tests` pass reads `maxResponseBodyBytes` for what a script's own
+// `pm.sendRequest` may pull, so a mistyped key there would silently leave that
+// fetch on the compiled-in default while the Settings control read as though
+// it governed every read of the run.
+
+TEST_F (ConfigRouteTest, TheLoadReadBoundDefaultsToTheCompiledInLimit) {
+    EXPECT_EQ (vayu::http::routes::load_response_body_bound (*db_),
+    vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES);
+}
+
+TEST_F (ConfigRouteTest, TheLoadReadBoundFollowsTheSetting) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"maxResponseBodyBytes":"4096"}})");
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    EXPECT_EQ (vayu::http::routes::load_response_body_bound (*db_), 4096U);
+}
+
 TEST_F (ConfigRouteTest, InvalidJsonIs400WithReason) {
     auto [status, body] = vayu::http::routes::apply_config_update (*db_, "not json");
     EXPECT_EQ (status, 400);

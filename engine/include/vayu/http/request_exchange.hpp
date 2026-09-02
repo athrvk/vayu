@@ -378,4 +378,17 @@ bool verbose);
  */
 [[nodiscard]] size_t design_response_body_bound (vayu::db::Database& db);
 
+/**
+ * What this database is configured to let a load-run transfer read
+ * (`maxResponseBodyBytes`), for the same reason its design-mode sibling above
+ * is one function: two call sites, one spelling.
+ *
+ * It reads a *load* bound from a header about the design exchange because the
+ * two callers are the two halves of one run - the event loop reads it for the
+ * transfers, and the deferred `tests` pass reads it for the `pm.sendRequest`
+ * those scripts may make (issue #1188) - and a script that runs once per
+ * virtual user belongs to the load path's memory budget.
+ */
+[[nodiscard]] size_t load_response_body_bound (vayu::db::Database& db);
+
 } // namespace vayu::http::routes

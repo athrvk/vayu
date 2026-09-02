@@ -272,6 +272,32 @@ struct ScriptContext {
     vayu::http::TransportPolicy transport;
 
     /**
+     * @brief How much of a `pm.sendRequest` response body the engine will read
+     *        before refusing the transfer (issue #1188).
+     *
+     * Carried in rather than read here for the reason `transport` is: the
+     * script engine holds no `Database`, and the caller has already resolved
+     * the bound its own send reads. Which bound that is differs by path, and
+     * the difference is deliberate - a design-mode send's scripts take
+     * `maxDesignResponseBodyBytes`, a load run's deferred `tests` script takes
+     * `maxResponseBodyBytes`, because a script that runs once per virtual user
+     * belongs to the load path's memory budget and not to the one sized for a
+     * body a person is about to look at.
+     *
+     * Reaching it **refuses** the transfer - `ErrorCode::ResponseTooLarge`
+     * reaches the callback as its `err` - rather than handing the script a
+     * prefix: `pm.sendRequest`'s response object exposes no truncation flag
+     * (nor does `pm.response`), so a cut body would reach `JSON.parse` as
+     * corrupt input with nothing to say why. `/import/fetch` refuses for the
+     * same reason.
+     *
+     * The default is the compiled-in design bound rather than `0`, so a
+     * context built by hand is bounded by construction; `0` would be
+     * unbounded, which is the state issue #1188 exists to end.
+     */
+    size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
+
+    /**
      * @brief Expose @p req to the script as a mutable `pm.request`.
      *
      * The one supported way to opt into write-back, so the read snapshot and
