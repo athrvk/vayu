@@ -89,7 +89,8 @@ export function dispatchChord(chord: Chord): void {
  * keybinding service calls `preventDefault` *and* `stopPropagation` for any
  * binding it resolves, so the context-bar toggle died at the editor instead of
  * reaching `Shell`'s bubble-phase listener. S, W, B, comma, the digits and the
- * ⇧ view chords really are unbound there and still arrive on their own.
+ * ⇧ view chords really are unbound there and still arrive on their own, as
+ * does N.
  *
  * ⌘L is claimed the same way - `expandLineSelection`
  * (`contrib/lineSelection/browser/lineSelection.js`) - and it is the chord a

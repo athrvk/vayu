@@ -94,11 +94,22 @@ export const FOCUS_URL_CHORD: Chord = { mod: true, key: "L", label: "Focus the U
  * position is the same everywhere. `key` stays the label, so the hint reads
  * ⇧⌘] rather than ⇧⌘}.
  *
- * One definition for both platforms rather than the Ctrl+Tab pair Windows and
- * Linux browsers also offer: `Chord` has no word for a literal Control key
- * (`mod` *is* ⌘ on macOS), so Ctrl+Tab would need either a new modifier
- * threaded through `matchesChord`, `chordKeys`, `chordKeybinding` and
- * `dispatchChord`, or this chord declared twice and kept in step by hand.
+ * One definition on every platform, rather than these brackets on macOS and
+ * the Ctrl+Tab pair Windows and Linux browsers also offer. That fork is
+ * *available* - `mod: "strict"` already means the platform's own modifier and
+ * refuses the other, so `isMac ? this : { mod: "strict", key: "Tab" }` would
+ * express it - and it is a judgement, not an impossibility. It was declined
+ * because a forked chord is two chords wearing one name: two bindings for the
+ * bridge and the panel to get right, two rows for a platform test to pin, and
+ * a second key to keep free in both maps forever. ⇧⌘] and ⇧⌘[ are already the
+ * macOS convention, and free on the others, so the fork would buy Windows and
+ * Linux a more familiar chord and nothing else.
+ *
+ * What is genuinely inexpressible is Ctrl+Tab on *macOS*: `mod` is ⌘ there
+ * whether lenient or strict, and `Chord` has no word for a literal Control
+ * key. That would need a new modifier threaded through `matchesChord`,
+ * `chordKeys`, `chordKeybinding` and `dispatchChord` - which is a reason not
+ * to reach for Ctrl+Tab everywhere, not a reason against the fork above.
  */
 export const NEXT_TAB_CHORD: Chord = {
 	mod: true,

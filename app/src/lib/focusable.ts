@@ -20,7 +20,7 @@
  * by script only, so landing on one puts the user where Tab did not offer to
  * go and where the next Tab continues from somewhere they cannot see.
  */
-export const FOCUSABLE_SELECTOR = [
+const FOCUSABLE_SELECTOR = [
 	"a[href]",
 	"button:not([disabled])",
 	"input:not([disabled])",

@@ -24,7 +24,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import type { AppRegion } from "./region-focus";
+import { REGION_ATTRIBUTE, type AppRegion } from "./region-focus";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -34,8 +34,15 @@ function layoutSources(): string[] {
 		.map((f) => join(here, f));
 }
 
-/** `data-app-region={"drawer" satisfies AppRegion}` - the name it marks. */
-const MARKER = /data-app-region=\{"([a-z]+)" satisfies AppRegion\}/g;
+/**
+ * `data-app-region={"drawer" satisfies AppRegion}` - the name it marks.
+ *
+ * Built from `REGION_ATTRIBUTE` rather than spelling the attribute again: JSX
+ * needs a literal attribute name, so the four bands cannot read the constant,
+ * and a scan that also hardcoded it would go quietly green if the constant were
+ * ever renamed - matching nothing and finding no offenders.
+ */
+const MARKER = new RegExp(`${REGION_ATTRIBUTE}=\\{"([a-z]+)" satisfies AppRegion\\}`, "g");
 
 function markedRegions(): string[] {
 	return layoutSources().flatMap((file) =>
