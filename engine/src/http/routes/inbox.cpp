@@ -128,6 +128,12 @@ std::string path_of (const std::string& target) {
  * who may call a virtual, not who may override it, and it is how cpp-httplib's
  * own `SSLServer` extends the same function. `process_request` and the members
  * the override reads are protected.
+ *
+ * The mirror below is a copy of library code, and it has an exit on record
+ * rather than by default: #1283 tracks upstreaming a public request-setup hook
+ * (or a matcher-free default handler) to cpp-httplib, after which this class
+ * and its version assert go and the two inbox tests that pin this behaviour
+ * stay as they are.
  */
 class AnyPathServer final : public httplib::Server {
     public:
@@ -144,8 +150,9 @@ class AnyPathServer final : public httplib::Server {
         // override that reaches the callback.
         static_assert (std::string_view (CPPHTTPLIB_VERSION) == "0.53.1",
         "cpp-httplib moved: re-read Server::process_and_close_socket, "
-        "confirm this override still mirrors it, then update this "
-        "assert (issue #1140).");
+        "confirm this override still mirrors it, then update this assert - "
+        "or retire the mirror entirely if the release carries a public "
+        "request-setup hook (issue #1283).");
 
         std::string remote_addr;
         int remote_port = 0;
