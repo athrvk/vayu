@@ -118,10 +118,24 @@ const DEFAULT_OPTIONS = {
  * Caps come from `chordKeys` and the `Kbd` primitive, like every other chord
  * this app puts on screen: a hand-rolled badge here would be a second spelling
  * of a modifier `lib/platform.ts` already spells per platform.
+ *
+ * Not `UrlBar`'s `Hint`, which is the app's other chord-on-focus pattern: that
+ * one is a Radix `Tooltip` around a `TooltipTrigger asChild`, and Monaco's
+ * `<Editor>` is not a ref-forwarding child a trigger can attach to. The shape
+ * here is instead the floating-surface one every popover uses - `bg-popover`,
+ * a border, a shadow.
+ *
+ * The border is not decoration and not `border-rule`. This chip is the one
+ * surface in the app that floats over *Monaco's* canvas rather than over a
+ * declared app surface, so there is no `--rule` to inherit and it would fall
+ * back to the invisible default. The fill cannot separate it either: Monaco's
+ * dark background is #1e1e1e against a `--popover` of #1a1a1f, and both are
+ * white in light. `border-border-strong` is the edge that reads on both, and
+ * it is the token `Kbd` itself is built from.
  */
 function LeaveEditorHint() {
 	return (
-		<div className="pointer-events-none absolute bottom-1.5 right-3 z-10 flex items-center gap-1 rounded-md bg-card px-1.5 py-1 shadow-sm">
+		<div className="pointer-events-none absolute bottom-1.5 right-3 z-10 flex items-center gap-1 rounded-md border border-border-strong bg-popover px-1.5 py-1 text-popover-foreground shadow-md">
 			<span className="text-[10px] leading-none text-muted-foreground">Leave editor</span>
 			{chordKeys(LEAVE_EDITOR_CHORD).map((cap) => (
 				<Kbd key={cap} size="sm">

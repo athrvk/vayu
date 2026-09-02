@@ -121,8 +121,14 @@ const FOCUSABLE_SELECTOR = [
  * one check jsdom, which has no layout and reports every element as zero-sized,
  * can still answer honestly.
  *
- * Returns whether focus actually moved, so a caller can tell "nowhere to go"
- * from "went somewhere".
+ * Document order, not the tab order proper: a positive `tabIndex` would come
+ * first in a real Tab press and does not here. Nothing in `app/src` uses one,
+ * and the day something does, this is the line to revisit.
+ *
+ * Returns whether focus moved. Nothing acts on `false` - when an editor is the
+ * only focusable thing on the page there is no better place to send focus than
+ * where it already is - so the reader is `editor-chords.test.ts`, which is what
+ * makes "nowhere to go" a case rather than an assumption.
  */
 export function focusAfterEditor(container: HTMLElement | null | undefined): boolean {
 	if (!container) return false;

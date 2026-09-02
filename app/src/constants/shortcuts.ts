@@ -83,9 +83,12 @@ export const SETTINGS_CHORD: Chord = { mod: true, key: ",", label: "Open setting
  * Ctrl+M rather than taking it over, and CtrlCmd+Shift+M is claimed by neither
  * the standalone editor nor the native menu.
  *
- * Read-only editors carry no such chord: `tabFocusMode` is simply on for them
- * (`ui/code-editor.tsx`), Tab having no editing meaning in text nobody can type
- * into. The chord is for the editors where Tab still has to indent.
+ * Read-only editors have no trap to escape: `tabFocusMode` is simply on for
+ * them (`ui/code-editor.tsx`), Tab having no editing meaning in text nobody can
+ * type into, so they show no hint. The binding is still registered there - it
+ * costs one `addCommand` and doing the same thing on every instance is cheaper
+ * to keep true than a `readOnly` branch through the bridge - it is just
+ * redundant with the Tab that already works.
  */
 export const LEAVE_EDITOR_CHORD: Chord = {
 	mod: true,

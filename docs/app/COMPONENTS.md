@@ -1725,10 +1725,17 @@ to keep from each answering that separately (#938, #1213).
   never to the container itself, whose textarea the next Tab would walk straight
   back into.
 
-**Read-only editors carry no exit chord**: `tabFocusMode` is simply on for them,
-Tab having nothing to indent in text nobody can type into. Editable ones keep
-Tab and show a `Kbd` hint naming the chord *while they hold focus* - at the
-moment it is wanted, rather than as a standing badge over a dozen panes.
+**A read-only editor has no trap to escape**: `tabFocusMode` is simply on for
+it, Tab having nothing to indent in text nobody can type into, so it shows no
+hint. The binding is still registered there, redundantly - one `addCommand` on
+every instance is cheaper to keep true than a `readOnly` branch threaded through
+the bridge. Editable editors keep Tab and show a `Kbd` hint naming the chord
+*while they hold focus* - at the moment it is wanted, rather than as a standing
+badge over a dozen panes. The hint is the app's one surface floating over
+Monaco's own canvas rather than a declared app surface, so it carries
+`border-border-strong` explicitly: there is no `--rule` for `border-rule` to
+inherit, and neither theme's `--popover` separates from the editor background on
+its own.
 
 ⌘K is not bound here at all. It belongs to `CommandPalette`, on the capture
 phase, which both prevents **and stops** it: preventing alone left the event in
