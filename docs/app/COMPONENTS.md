@@ -137,6 +137,8 @@ Resizable sidebar (220–480px default, per view). The single left navigation fo
 
 Both `variables` and `settings` follow the same nav/content split: the tree lives here in the Drawer, the editor is the corresponding tab (`VariablesMain` / `SettingsMain`), and selecting a category sets the shared store selection **and** opens/focuses that tab.
 
+A `TrashList` row is a `data-trash-id` box carrying `tabIndex={-1}` and `.focus-row`: not a tab stop in front of its two buttons, but a target focus can be *put* on - which is what a permanent delete needs, since its confirm dialog has no trigger for Radix to restore to and the row it was opened from is about to go. Where focus lands follows the outcome rather than the confirm click, through the shared `useRemovalRefocus` (`hooks/useRemovalRefocus.ts`, also the collection tree's): the purged row while it is still there, and the next row - or the previous one, when the purged row was last - once it has actually gone (#1234).
+
 Resize handle on the right edge (double-click resets to defaults). Visibility toggled by `toggleDrawer()` or ⌘B.
 
 ### `ContextBar` (`components/layout/ContextBar.tsx`)

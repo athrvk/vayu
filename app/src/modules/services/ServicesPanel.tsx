@@ -72,16 +72,18 @@ import { NewIssuerDialog } from "./NewIssuerDialog";
 /**
  * The running light, in the vocabulary the inbox header already uses.
  *
- * `success-text` rather than the bare status token for the same reason the
- * Dock's connection light uses it: as 12px text the indicator token misses AA,
- * and the dot inherits the accessible pair through `bg-current`.
+ * `status-success-text` rather than the bare status token for the same reason
+ * the Dock's connection light uses it: as 12px text the indicator token misses
+ * AA, and the dot inherits the accessible pair through `bg-current`. A service
+ * that is listening is a run state, so it takes the `--status-*` family; this
+ * dot moves with the Dock's light, since it exists to say the same thing.
  */
 function StatusDot({ running }: { running: boolean }) {
 	return (
 		<span
 			className={cn(
 				"h-1.5 w-1.5 shrink-0 rounded-full bg-current",
-				running ? "text-success-text" : "text-muted-foreground"
+				running ? "text-status-success-text" : "text-muted-foreground"
 			)}
 			aria-hidden="true"
 		/>

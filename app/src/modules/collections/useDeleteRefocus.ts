@@ -5,70 +5,46 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { useEffect, type RefObject } from "react";
+import { useRemovalRefocus } from "@/hooks/useRemovalRefocus";
 import { focusTreeRow, rowAfterRemoving } from "./tree-focus";
 import type { DeleteConfirmTarget } from "./useTreeCrud";
 
 /**
  * Where focus goes after a row is deleted from the tree.
  *
- * Radix aims its close-focus at the dialog's trigger, and this dialog is
- * rendered controlled with none - so focus fell to `<body>` and the next Tab
- * restarted from the top of the document (#1218), on Cancel as much as on
- * Delete. The tree already refuses to strand focus after a rename or a row menu
- * closing; its one destructive action still did.
+ * The tree's half of `useRemovalRefocus`, which holds the timing and the rule:
+ * this names the rows and how the tree moves focus onto one. Cancel and a
+ * failed delete both leave focus on the row it was invoked from, because both
+ * leave that row on screen; a delete that actually removes it moves focus to
+ * the successor, whenever the removal lands.
  *
- * Cancel is the easy half: the row is still there, so focus goes back to it.
- * After a delete the row is the thing that went, so a successor is chosen while
- * it is still on screen - once the dialog closes, "the row after the one that
- * was there" is not a question the DOM can answer any more.
- *
- * Confirming is read as intent, not as outcome, and the dialog closes in a
- * `finally` either way - so a delete that *fails* also lands focus on the
- * successor, beside a row that is still there. Focus stays inside the tree,
- * which is what this is for, on the wrong row of it. Telling the two apart
- * needs the mutation's result at close time, which the CRUD hook does not
- * expose and this is not the change to make it: #1234.
+ * `rowAfterRemoving` runs while the row is still mounted - once it is gone,
+ * "the row after the one that was there" is not a question the DOM can answer.
  */
 export function useDeleteRefocus(
 	treeRef: RefObject<HTMLElement | null>,
 	deleteConfirm: DeleteConfirmTarget | null
 ) {
-	const row = useRef<HTMLElement | null>(null);
-	const successor = useRef<HTMLElement | null>(null);
-	const confirmed = useRef(false);
+	const { capture, onCloseAutoFocus } = useRemovalRefocus();
 
 	useEffect(() => {
 		if (!deleteConfirm) return;
-		confirmed.current = false;
+		const tree = treeRef.current;
 		const attribute =
 			deleteConfirm.type === "collection" ? "data-collection-id" : "data-request-id";
-		const doomed = treeRef.current?.querySelector<HTMLElement>(
-			`[${attribute}="${CSS.escape(deleteConfirm.id)}"]`
-		);
-		row.current = doomed ?? null;
-		successor.current = doomed ? rowAfterRemoving(treeRef.current, doomed) : null;
-	}, [deleteConfirm, treeRef]);
+		const selector = `[${attribute}="${CSS.escape(deleteConfirm.id)}"]`;
+		const doomed = tree?.querySelector<HTMLElement>(selector) ?? null;
+		const successor = doomed ? rowAfterRemoving(tree, doomed) : null;
 
-	/** Called on the way into the deletion, not after it: the dialog closes on
-	 * both outcomes and nothing in its close tells the two apart. */
-	const markConfirmed = useCallback(() => {
-		confirmed.current = true;
-	}, []);
+		capture({
+			// Re-queried rather than held: a refetch can replace the element while
+			// the dialog is up, and the id is what identifies the row.
+			doomed: () => tree?.querySelector<HTMLElement>(selector) ?? null,
+			successor: () => (successor?.isConnected ? successor : null),
+			focus: (row) => focusTreeRow(tree, row),
+		});
+	}, [capture, deleteConfirm, treeRef]);
 
-	const onCloseAutoFocus = useCallback(
-		(event: Event) => {
-			const target = confirmed.current ? successor.current : row.current;
-			row.current = null;
-			successor.current = null;
-			// Only onto a row that is still there: a failed delete leaves the tree
-			// as it was, and a refetch can replace the element under either ref.
-			if (!target?.isConnected) return;
-			event.preventDefault();
-			focusTreeRow(treeRef.current, target);
-		},
-		[treeRef]
-	);
-
-	return { markConfirmed, onCloseAutoFocus };
+	return { onCloseAutoFocus };
 }

@@ -529,6 +529,22 @@ and a "200 OK" chip read identically on either theme. This is the same split
 `bg-status-error-fill`, `border-status-running/25`, etc. Use `--warning` for
 "expiring / caution" indicators (amber) and `--success` for success *banners*.
 
+**Which family a surface belongs to is decided by what it describes, not by the
+colour it wants.** Anything painting the lifecycle state of a run, a connection
+or a service - connected, running, completed, stopped, failed - takes
+`--status-*`, including when that state is drawn as text or as a glyph rather
+than as a dot (`text-status-success-text`). The Dock's connection light and its
+running-services chip, the Services panel dot, the mock-server glyph and the
+Welcome screen's recent-run labels are all that case. `--success` /
+`--warning` / `--destructive` keep everything else: banner text, form and field
+errors, metric readouts such as the dashboard's "ramp off target", and action
+affordances such as the Dock's "Restart pending", which announces a pending
+setting rather than a state. `--success-text` and `--status-success-text` are
+the same value in both themes, so on the green surfaces this distinction is not
+visible - it is only greppable, which is what it is for: the family is how a
+future reader finds every status surface, and one that answers a different name
+is one it will miss.
+
 The same set also colors **HTTP response severity** and **latency thresholds**,
 since those map onto the same hues.
 
@@ -1569,11 +1585,25 @@ not - focus has already gone where the user sent it.
 **A delete must hand focus on, because the row it came from is gone.** The
 confirm dialog is rendered controlled with no trigger, and a trigger is what
 Radix aims its close-focus at - so both outcomes dropped the user to `<body>`
-(#1218). Cancel returns focus to the row, which is still there. A confirmed
-delete moves it to the **next row in the deleted row's own set**, or to the
-**parent** when that row was the last in it: chosen while the row is still on
-screen, since afterwards the DOM cannot say what followed it. Focus moves
-through `focusTreeRow`, so the tree's one tab stop travels with it.
+(#1218). Cancel returns focus to the row, which is still there. A delete that
+actually removes the row moves focus to the **next row in the deleted row's own
+set**, or to the **parent** when that row was the last in it: chosen while the
+row is still on screen, since afterwards the DOM cannot say what followed it.
+Focus moves through `focusTreeRow`, so the tree's one tab stop travels with it.
+
+**Which of the two it is, is read from the outcome and never from the confirm
+click.** The dialog closes on a failure as much as on a success, and nothing at
+close time can say which happened - `confirmDelete` returns `void`, and an
+awaited answer arrives after Radix has already moved focus. Read as intent, a
+*failed* delete landed the user beside a row that was still sitting there
+(#1234). So the decision waits instead: focus goes back to the row at close, and
+moves to the successor only once that row actually leaves the DOM - which for a
+successful delete is normally a later render, when the refetch lands. A user who
+has moved focus on in the meantime keeps it; the move only happens out of
+`<body>`, where the removal itself left it. The waiting is
+`useRemovalRefocus` (`app/src/hooks/`), shared with the Trash view's permanent
+delete - a flat list, so its rule is the next row, or the previous one when the
+purged row was last.
 
 **Order comes from the DOM; hierarchy comes from `aria-level`.** Order the DOM
 states plainly - `[role="treeitem"]` in document order is exactly the rows a
