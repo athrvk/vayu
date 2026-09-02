@@ -19,6 +19,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { RequestBuilderContext } from "./RequestBuilderContext";
 import { emptyDrafts, type BodyDrafts, type VariablesDraft } from "../utils/body-drafts";
+import { useAutoRecordSlot, UNSAVED_AUTO_KEY } from "./auto-record-slot";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import { resolveDataContract } from "@/lib/data-contract";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
@@ -37,6 +38,8 @@ import {
 	useResponseStore,
 	useExecutionEventsStore,
 	useBoundRowStore,
+	useTabsStore,
+	type Tab,
 } from "@/stores";
 import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
 import { apiService } from "@/services";
@@ -286,6 +289,14 @@ export default function RequestBuilderProvider({
 	}, []);
 
 	/*
+	 * Which request the three records below are read and written for. One
+	 * `RequestBuilderProvider` serves every request tab, so a slot holding a
+	 * single record held whichever request was in a mode last, and the request
+	 * before it kept what the app had changed for it (issue #1269).
+	 */
+	const autoRecordKey = request.id ?? UNSAVED_AUTO_KEY;
+
+	/*
 	 * The Content-Type row a body mode added on its way in, so leaving the mode
 	 * can remove it again. Here rather than in `BodyPanel` for the drafts' reason
 	 * and one of its own: the panel is unmounted whenever another tab is on
@@ -297,11 +308,11 @@ export default function RequestBuilderProvider({
 	 * drafts: the record names its own request and `switchContentType` drops one
 	 * belonging to another.
 	 */
-	const autoContentTypeRef = useRef<AutoHeader | null>(null);
-	const getAutoContentType = useCallback(() => autoContentTypeRef.current, []);
-	const setAutoContentType = useCallback((auto: AutoHeader | null) => {
-		autoContentTypeRef.current = auto;
-	}, []);
+	const {
+		get: getAutoContentType,
+		set: setAutoContentType,
+		retain: retainAutoContentTypes,
+	} = useAutoRecordSlot<AutoHeader>(autoRecordKey);
 
 	/*
 	 * The `Accept: text/event-stream` row the Event stream toggle added, so
@@ -311,11 +322,11 @@ export default function RequestBuilderProvider({
 	 * another tab - and then the header outlives the setting that needed it,
 	 * which is exactly the bug the record exists to prevent.
 	 */
-	const autoAcceptRef = useRef<AutoHeader | null>(null);
-	const getAutoAccept = useCallback(() => autoAcceptRef.current, []);
-	const setAutoAccept = useCallback((auto: AutoHeader | null) => {
-		autoAcceptRef.current = auto;
-	}, []);
+	const {
+		get: getAutoAccept,
+		set: setAutoAccept,
+		retain: retainAutoAccepts,
+	} = useAutoRecordSlot<AutoHeader>(autoRecordKey);
 
 	/*
 	 * The method the GraphQL body mode set, so leaving the mode can put back
@@ -324,11 +335,36 @@ export default function RequestBuilderProvider({
 	 * screen, and a record that does not outlive the panel leaves the method
 	 * changed with nothing left to change it back.
 	 */
-	const autoMethodRef = useRef<AutoMethod | null>(null);
-	const getAutoMethod = useCallback(() => autoMethodRef.current, []);
-	const setAutoMethod = useCallback((auto: AutoMethod | null) => {
-		autoMethodRef.current = auto;
-	}, []);
+	const {
+		get: getAutoMethod,
+		set: setAutoMethod,
+		retain: retainAutoMethods,
+	} = useAutoRecordSlot<AutoMethod>(autoRecordKey);
+
+	/*
+	 * What bounds the three slots: the open request tabs. A record is only ever
+	 * read by the request it names, so once that request has no tab it can never
+	 * be read again - and a per-request store that nothing prunes is how a ref
+	 * becomes a leak. `MAX_OPEN_TABS` caps the tab strip, so this caps the slots.
+	 *
+	 * Subscribed to rather than selected, like the reveal command above: pruning
+	 * writes to a ref, and a provider that re-rendered on every tab focus would
+	 * pay for it on the request the user is actually working in. The id-less key
+	 * survives - it names no tab, and the History run copy that uses it is the
+	 * one builder whose records nothing else could keep.
+	 */
+	useEffect(() => {
+		const retainOpen = (tabs: readonly Tab[]) => {
+			const live = new Set<string>([UNSAVED_AUTO_KEY]);
+			for (const tab of tabs) {
+				if (tab.type === "request" && tab.entityId !== null) live.add(tab.entityId);
+			}
+			retainAutoContentTypes(live);
+			retainAutoAccepts(live);
+			retainAutoMethods(live);
+		};
+		return useTabsStore.subscribe((s) => retainOpen(s.openTabs));
+	}, [retainAutoContentTypes, retainAutoAccepts, retainAutoMethods]);
 
 	const { data: collections = [] } = useCollectionsQuery();
 

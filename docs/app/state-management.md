@@ -1844,9 +1844,11 @@ Three things it is deliberate about:
   panel wrote are identical apart from their id, and only ours may be removed.
 - **A row whose value has been edited is no longer ours** - retyping it is a
   decision, so it stays and the record is dropped. Merely disabling it is not.
-- **A record naming another request is dropped, not applied.** One provider
-  serves every request tab, and row ids are not unique across a duplicated
-  request.
+- **A record naming another request is dropped, not applied.** Row ids are not
+  unique across a duplicated request, so the rule asks whose record it has been
+  handed rather than trusting the caller. Since issue #1269 the provider cannot
+  hand it the wrong one (see below); the check stays because the rule is a pure
+  function, and the storage is not the only thing that could ever call it.
 
 The third slot, `AutoMethod`, is not a fourth `AutoHeader` (issue #1228). A new
 request is a GET, and GraphQL over GET is a different transport - the document
@@ -1866,6 +1868,33 @@ request is dropped rather than applied. A GET still reaches GraphQL through the
 door this side effect does not touch - the user picks GET back, or an import
 wrote one - which is when the Query pane header's `BadgeText` names the
 transport that will be used.
+
+**Each slot holds one record per request, bounded by the open tabs** (issue
+#1269). One provider serves every request tab, and a slot holding a single
+record held whichever request entered the mode last: the request before it kept
+the `Content-Type` row, or the `POST`, that the app had added for it, with
+nothing left that knew it was the app's - the very bug the records exist to
+prevent, one request removed. So a slot is a map from request id to record
+(`context/auto-record-slot.ts`), keyed the way the record already named itself,
+and the accessors keep their argument-free shape: the provider knows which
+request is on screen, and a caller that had to pass the id could pass the wrong
+one. Resetting the records when the active request changes was the smaller
+alternative and is wrong in the same direction as the bug - it strands the first
+request's header at the moment of the switch rather than at the second request's
+mode change.
+
+What bounds the maps is the open request tabs. A record can only ever be read by
+the request it names, so once that request has no tab it is unreachable, and a
+per-request store that nothing prunes is how a ref becomes a leak; `tabs-store`
+is subscribed to rather than selected from, because pruning writes to a ref and
+a provider that re-rendered on every tab focus would charge the request the user
+is working in for it. `MAX_OPEN_TABS` caps the tab strip, so it caps the maps.
+The one key that survives the sweep is the id-less one, shared by any builder
+holding no saved request: it names no tab, and the editable copy History renders
+for a stored run is what uses it. Two such copies open at once share that one
+bucket and interfere as they always have, since the rules read a `requestId` of
+`null` against another `null` as a match; giving that copy an identity of its
+own is issue #1272.
 
 In the provider rather than in the panels for the drafts' reason and one of its
 own: Radix unmounts an inactive `TabsContent`, so a panel-local record is gone
