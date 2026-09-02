@@ -27,13 +27,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { indexCss as css } from "@/lib/css-tokens.testkit";
 import { ROLE_TOKEN } from "@/modules/dashboard/components/charts/uplot/uplotTheme";
-
-const cssPath = join(dirname(fileURLToPath(import.meta.url)), "..", "index.css");
-const css = readFileSync(cssPath, "utf8");
 
 /** Split `:root` from `.dark`, so a token defined in both resolves per theme. */
 const darkStart = css.indexOf(".dark {");
