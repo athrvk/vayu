@@ -899,8 +899,9 @@ TEST_F (LoadRunScriptTransportTest, ADeferredStepScriptTraversesTheRunsProxy) {
     const auto validation = vayu::core::validate_scripts (context, *db_, false);
 
     ASSERT_EQ (validation.steps.size (), 1u);
-    ASSERT_HAS_VALUE (validation.steps[0]);
-    EXPECT_EQ (validation.steps[0]->failed, 0u);
+    const auto& step_totals = validation.steps[0];
+    ASSERT_HAS_VALUE (step_totals);
+    EXPECT_EQ (step_totals->failed, 0u);
     ASSERT_EQ (proxy.count (), 1u);
     EXPECT_EQ (proxy.seen ().front (), upstream.url ("/hello"));
 }
