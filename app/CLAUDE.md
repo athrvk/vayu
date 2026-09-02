@@ -3,6 +3,11 @@
 Renderer and Electron main process for Vayu. Apache-2.0. See the repo root
 `CLAUDE.md` for build commands, commit rules and repo-wide conventions.
 
+Tests run from this directory: `pnpm test` for the whole suite,
+`pnpm test <pattern>` for the files matching it. Never `pnpm test -- <pattern>` -
+pnpm forwards the literal `--` and vitest drops the filter, so that form runs
+everything.
+
 ## Conventions
 
 - Strict TypeScript - no `any`, no `@ts-ignore` without justification. `pnpm lint`

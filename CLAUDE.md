@@ -97,11 +97,21 @@ tests in ~2 min. If you keep vcpkg elsewhere, set `VCPKG_ROOT` and it is honored
 
 ```bash
 python build.py -t && cd engine && ctest --preset linux-dev --output-on-failure
-cd app && pnpm test          # vitest
+cd app && pnpm test          # vitest, the whole app suite
+cd app && pnpm test Trash    # only the files matching "Trash"
 cd app && pnpm type-check
 cd app && pnpm lint          # ESLint (TS/TSX)
 cd app && pnpm format:check  # Prettier
 ```
+
+**Filter the app suite with `pnpm test <pattern>`, never
+`pnpm test -- <pattern>`.** pnpm forwards the literal `--` into the script and
+vitest then reads what follows as not-a-filter, so the double-dash form runs all
+~600 files while looking like a targeted run - the npm muscle memory costs
+minutes and reads as "the suite is slow". The bare form answers a miss in about
+a second (`No test files found`). Flags need no separator either:
+`pnpm test --shard=1/2` is the form CI runs. `pnpm exec vitest run <pattern>` is
+the explicit equivalent.
 
 CMake presets: `linux-dev`, `linux-prod`, `macos-dev`, `macos-prod`,
 `windows-dev`, `windows-prod`.
@@ -125,8 +135,11 @@ there, it does not make it fast; see `docs/engine/building.md`. A
 rebuild ~2.5min; the app suite ~90s. Running
 both after retouching a doc comment reads as diligence and is just latency. Ask
 what a failure would even look like before running anything: **if no test could
-possibly go from green to red, do not run tests.** CI runs the full matrix on
-every push, so a local full-suite run is for *your* confidence, not for coverage.
+possibly go from green to red, do not run tests.** CI runs the checks your diff
+can actually affect - `pr-tests.yml` triggers on every pull request against
+`master`, and each work job is gated on its own tree being touched - so a local
+full-suite run is for *your* confidence, not for coverage. A branch with no pull
+request open has no CI behind it at all.
 
 Concrete cases where the answer is simply "don't":
 
