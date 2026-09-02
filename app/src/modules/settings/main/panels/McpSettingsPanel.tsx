@@ -570,9 +570,15 @@ export default function McpSettingsPanel() {
 								Disabled
 							</Badge>
 						) : running ? (
+							// The `--status-*` family, not the general semantic one: this
+							// says whether a server process is up, which is the same
+							// question the Dock's connection light and the Services panel
+							// dot answer, in the same two words the history rows use.
+							// Measured on the tints they sit on: 5.21 light / 7.51 dark
+							// running, 5.19 / 6.43 stopped.
 							<Badge
 								variant="chip"
-								className="ml-1 border border-success/20 bg-success/10 text-success-text"
+								className="ml-1 border border-status-success/20 bg-status-success/10 text-status-success-text"
 							>
 								<CircleCheck className="w-3 h-3 mr-1" />
 								Running
@@ -580,7 +586,7 @@ export default function McpSettingsPanel() {
 						) : (
 							<Badge
 								variant="chip"
-								className="ml-1 border border-warning/30 bg-warning/10 text-warning-text"
+								className="ml-1 border border-status-stopped/30 bg-status-stopped/10 text-status-stopped-text"
 							>
 								<CircleSlash className="w-3 h-3 mr-1" />
 								Stopped

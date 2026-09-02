@@ -133,7 +133,8 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 			<span className="surface-sunken flex min-w-0 items-center gap-1.5 rounded-md border border-rule px-2 py-1">
 				{/* A server that is up is a run state, so the glyph takes the
 				    `--status-*` family's text pair - the bare indicator token
-				    misses even the 3:1 icon bar on a light surface (2.20:1). */}
+				    misses even the 3:1 icon bar on a light surface (2.21:1,
+				    design-system.md). */}
 				<ServerCog
 					className="h-3.5 w-3.5 shrink-0 text-status-success-text"
 					aria-hidden="true"

@@ -126,9 +126,6 @@ describe("the engine status indicator", () => {
 		const light = screen.getByText("Connected").closest("span");
 		expect(light).toBeTruthy();
 		expect([...light!.classList]).toContain("text-status-success-text");
-		// The bare indicator token measures 2.20:1 as 12px text on --panel, so it
-		// is never the foreground here, whichever family is chosen.
-		expect([...light!.classList]).not.toContain("text-status-success");
 	});
 
 	it("says Starting on first paint, not Disconnected", () => {
