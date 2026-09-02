@@ -320,6 +320,50 @@ describe("the token strip", () => {
 		expect(document.activeElement).toBe(tokens(container)[0]);
 	});
 
+	/*
+	 * The stop is an index, and retyping the field can leave it past the end of
+	 * the strip that index addressed. It is clamped from the classified tokens,
+	 * in the render that paints them - the layout effect that used to heal it
+	 * read the rendered strip back to learn how many tokens it had just painted
+	 * (issue #1239). Drop the clamp and this reds: the one surviving token keeps
+	 * `-1`, so the strip holds no stop at all and its tooltips leave the tab
+	 * order with it.
+	 */
+	it("returns the Tab stop to the first token when the field is retyped shorter", () => {
+		const { container, input } = renderHarness({ initial: "{{alpha}}/{{beta}}/{{gamma}}" });
+
+		tokens(container)[0].focus();
+		fireEvent.keyDown(tokens(container)[0], { key: "End" });
+		expect(tokens(container)[2]).toHaveAttribute("tabindex", "0");
+
+		type(input, "{{alpha}}");
+
+		const strip = tokens(container);
+		expect(strip).toHaveLength(1);
+		expect(strip[0]).toHaveAttribute("tabindex", "0");
+	});
+
+	/*
+	 * The other half of that rule, and the one place this differs from the effect
+	 * it replaced: the fallback does not overwrite where the reader was. The
+	 * effect had nowhere to put a temporary answer, so it reset the stop for good
+	 * and a strip that grew back opened at its first token; the derived clamp
+	 * hands the stop back to the token the reader had actually chosen, which is
+	 * what a roving tabindex does everywhere else in the app.
+	 */
+	it("hands the stop back to the chosen token when the strip grows again", () => {
+		const { container, input } = renderHarness({ initial: "{{alpha}}/{{beta}}/{{gamma}}" });
+
+		tokens(container)[0].focus();
+		fireEvent.keyDown(tokens(container)[0], { key: "End" });
+		type(input, "{{alpha}}");
+		type(input, "{{alpha}}/{{beta}}/{{gamma}}");
+
+		const strip = tokens(container);
+		expect(strip.filter((t) => t.getAttribute("tabindex") === "0")).toHaveLength(1);
+		expect(strip[2]).toHaveAttribute("tabindex", "0");
+	});
+
 	it("leaves the tab order entirely when the field is disabled", () => {
 		const { container } = render(
 			<TooltipProvider delayDuration={0}>

@@ -23,10 +23,10 @@
  * "what is this token" differently, and the same `{{name}}` would read as a
  * column in a URL and an undefined variable in the body beneath it.
  *
- * `VariableInput` still holds its own copy of the ladder inline; #1239 (split
- * the decision from the paint) is the issue that adopts this module there,
- * because doing it here would be rewriting a 180-line render function this
- * change has no other reason to touch.
+ * `VariableInput` adopted this module in #1239 (split the decision from the
+ * paint), and the ladder now exists only here: its overlay classifies each
+ * token before painting it, which is also how its roving strip counts its own
+ * stops without reading back the DOM it has just rendered.
  */
 
 import { DYNAMIC_VARIABLES } from "./dynamic-variables";
