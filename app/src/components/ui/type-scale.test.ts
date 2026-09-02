@@ -184,6 +184,10 @@ describe("no chip at the micro/badge step is heavier than the step", () => {
 	 * it is either inheriting `Badge`'s own `font-semibold` or printing a value,
 	 * which the URL/path step leaves unweighted.
 	 *
+	 * Both quoting forms, because a class list with a conditional in it is a
+	 * template literal and two of the app's are at this size - a quoted-only
+	 * scan reads as covering the app while missing them.
+	 *
 	 * This sees a class only where it is written as a literal beside the size.
 	 * `MethodBadge` and `VariableScopeBadge` compose the two through `cn()` in
 	 * separate arguments - or take the weight from a `cva` base, which is not in
@@ -195,7 +199,7 @@ describe("no chip at the micro/badge step is heavier than the step", () => {
 
 	for (const file of files) {
 		const source = readFileSync(join(srcRoot, file), "utf8");
-		for (const [literal] of source.matchAll(/"[^"\n]*"/g)) {
+		for (const [literal] of source.matchAll(/"[^"\n]*"|`[^`]*`/g)) {
 			if (!MICRO_SIZES.some((size) => literal.includes(size))) continue;
 			const mono = literal.includes("font-mono");
 			found.push({ where: `${relative(".", file)}  ${literal}`, mono });

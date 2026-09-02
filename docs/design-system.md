@@ -950,10 +950,19 @@ this. Above 600 is refused here for a second reason on top of the synthesised
 face: at 10px in the UI face the extra stroke closes the counters rather than
 reading as emphasis.
 
-`type-scale.test.ts` reads both rows and every 10-11px class string in `src`,
-mono or not, and fails on a weight above 600 in any of them, so the rows and the
-app cannot part again. It is a ceiling rather than a pin, because of the two
-exceptions below.
+`type-scale.test.ts` reads both rows and every 10-11px class string written in
+`src` - either face, quoted or a template literal - and fails on a weight above
+600 in any of them, so the rows and the app cannot part again. A weight that is
+not *written* beside the size is out of its reach, whether it arrives through a
+`cn()` argument or from a `cva` base, so the two primitives at this step are
+pinned by rendering them instead (`MethodBadge.test.tsx`,
+`variable-scope-badge.test.tsx`).
+
+It is a ceiling and never a floor: a chip that names a *lighter* weight, or none
+at all, passes. That is deliberate, and tightening it is not the fix - the two
+exceptions below live in exactly the shape a floor would have to match, so a
+floor would fail on a `<code>` printing a column name. Below the ceiling the row
+above is the rule and review is what applies it.
 
 Two things at this size deliberately carry no badge weight. A chip that prints a
 *value* rather than a label - a column name, a cookie attribute - is the URL /
