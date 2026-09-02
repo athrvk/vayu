@@ -35,6 +35,7 @@ import {
 	DropdownMenuItem,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { isCommitEnter } from "@/lib/keyboard";
 import { CommandSearchBar } from "./CommandSearchBar";
 import type { AppRegion } from "./region-focus";
 import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
@@ -105,7 +106,10 @@ function WindowControls() {
  * title-bar icon is HTSYSMENU, which does not drag the window either.
  */
 function AppIcon() {
-	const openSystemMenu = (e: React.MouseEvent) => {
+	// Typed on the currentTarget rather than on the event, because the keyboard
+	// path below opens the same menu from the same anchor and a `MouseEvent`
+	// parameter would have forced a second copy of the two lines that matter.
+	const openSystemMenu = (e: React.SyntheticEvent<HTMLElement>) => {
 		e.preventDefault();
 		// Anchored to the icon's bottom-left, so the menu drops from the control
 		// rather than from the pointer - which is what the OS menu does.
@@ -145,6 +149,19 @@ function AppIcon() {
 			onDoubleClick={(e) => {
 				e.preventDefault();
 				window.electronAPI?.windowClose();
+			}}
+			// A `role="button"` owes the keyboard what a real button gives for free:
+			// a tab stop and Enter/Space. Alt+Space is the OS path to the same menu,
+			// which is why this went unnoticed - but the control is in the tab order
+			// of a window whose first row is otherwise reachable, and a control that
+			// answers only the pointer is the pattern jsx-a11y now fails the build
+			// over. Space is matched on `e.key` rather than a chord: it is the
+			// button-activation key, not one of the app's shortcuts.
+			tabIndex={0}
+			onKeyDown={(e) => {
+				if (!isCommitEnter(e) && e.key !== " ") return;
+				e.preventDefault();
+				openSystemMenu(e);
 			}}
 			role="button"
 			aria-label="System menu"
