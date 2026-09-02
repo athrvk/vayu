@@ -1183,6 +1183,30 @@ roving tabindex focuses the row), or focus sits on a control inside it. `:has()`
 is descendant-only and does not cover the first, hence the `:focus-visible`
 selector alongside it.
 
+**Focus must be able to leave, and a Monaco editor is where it could not.** A
+ring that says where focus is means nothing if Tab cannot move it on. Monaco
+indents with Tab - right for a code editor, and a keyboard trap for anyone who
+reached one by tabbing (WCAG 2.1.2). Two rules, both held in `ui/code-editor.tsx`
+rather than at the dozen mount sites:
+
+- **A read-only editor runs with `tabFocusMode` on.** There is no indentation to
+  insert in text nobody can type into, so Tab simply moves focus and no trap
+  exists to escape.
+- **An editable editor advertises the way out while it holds focus.** ⇧⌘M
+  (`LEAVE_EDITOR_CHORD`) moves focus to the first focusable element after the
+  editor, and a `Kbd` hint names it in the editor's bottom-right corner - on
+  focus, not always, so a dozen panes do not each carry a standing badge over
+  their content. The caps come from `chordKeys`, like every other chord this app
+  puts on screen; a hand-rolled badge would be a second place a modifier is
+  spelled.
+
+The general rule behind both: **any component that takes over a key the browser
+uses for navigation owes the user a documented way back**, and that way back is a
+`Chord` in `constants/shortcuts.ts` so the Keyboard Shortcuts panel lists it
+without being told. Guarded by `code-editor.chords.test.tsx` (the chord is
+registered, the hint appears on focus and never on a read-only editor) and
+`shortcuts.listed.test.ts` (it reaches the panel).
+
 ---
 
 ## Row Actions
