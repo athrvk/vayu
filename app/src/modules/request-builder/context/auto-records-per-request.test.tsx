@@ -267,9 +267,15 @@ describe("a builder that is not a saved request says which one it is", () => {
 		// The other run tab. Same provider instance, same id-less copy - only the
 		// declared identity differs, and that is what has to carry it.
 		await act(async () => rerender(runTree("run_b")));
-		const b = applyModeChange(fresh(null), "graphql");
+		let b = applyModeChange(fresh(null), "graphql");
 		expect(headerNames(b)).toEqual(["Content-Type"]);
 		expect(b.method).toBe("POST");
+
+		// Each copy leaves the mode on its own record, so the second one going
+		// first must not be the first one's exit.
+		b = applyModeChange(b, "none");
+		expect(headerNames(b)).toEqual([]);
+		expect(b.method).toBe("GET");
 
 		// And the first copy can still leave the mode it entered.
 		await act(async () => rerender(runTree("run_a")));
