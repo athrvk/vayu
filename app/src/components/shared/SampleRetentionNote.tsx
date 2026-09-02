@@ -18,6 +18,12 @@
  * Silent unless there is something to say: a run that dropped nothing, or one
  * whose summary predates the counts, gets no notice at all. "Nothing was
  * displaced" and "we cannot tell" are both worse as prose than as absence.
+ *
+ * What it says about the tested responses depends on which bound thinned them:
+ * the count cap displaces an incumbent and leaves a uniform sample of the run,
+ * while a spent byte budget stops admitting and leaves the part of it whose
+ * bodies fit. `sampling.responseSampleBudgetSpent` is the engine's answer to
+ * which one happened (issue #1192).
  */
 
 import { Callout } from "./Callout";
@@ -57,11 +63,23 @@ export function SampleRetentionNote({
 	const noun = budget === "traces" ? "samples" : "responses";
 	const verb = budget === "traces" ? "shown" : "tested";
 
+	// The uniformity the reservoir buys holds for every bound but one: the
+	// response store's byte budget stops admitting rather than displacing, so a
+	// run that spent it was graded on the part of it whose bodies fit. An
+	// `undefined` marker is a run recorded before the engine reported which
+	// bound applied - it keeps today's sentence, because weakening the claim for
+	// every older run costs the accurate message in the case that is nearly all
+	// of them (only a target whose retained bodies average more than ~256 KiB
+	// can reach the budget at the defaults).
+	const budgetSpent = budget === "responses" && sampling.responseSampleBudgetSpent === true;
+
 	return (
 		<Callout severity="info" title="Bounded retention" className={className}>
 			{displaced.toLocaleString()} further {noun} were displaced by this run&apos;s retention
-			limit. The {shown.toLocaleString()} {verb} are drawn uniformly from the whole run, not
-			from its opening.
+			limit.{" "}
+			{budgetSpent
+				? `Its response-sample budget was spent, so the ${shown.toLocaleString()} tested are drawn from the part of the run whose bodies fit, not uniformly from the whole of it.`
+				: `The ${shown.toLocaleString()} ${verb} are drawn uniformly from the whole run, not from its opening.`}
 		</Callout>
 	);
 }

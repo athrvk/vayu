@@ -907,6 +907,52 @@ TEST_F (RunsRouteTest, ReportOmitsSamplingWhenTheSummaryPredatesIt) {
     EXPECT_FALSE (body.contains ("sampling"));
 }
 
+// Issue #1192: `responseSamplesDropped` counts both bounds on the response
+// sample store, and only one of them costs the tested set its uniformity. The
+// marker is what lets the app say which run it is looking at, so it has to
+// survive the summary -> report round trip in both states.
+TEST_F (RunsRouteTest, ReportSaysWhetherTheResponseSampleBudgetWasSpent) {
+    auto spent                                   = summary_inputs ();
+    spent.retention.response_sample_budget_spent = true;
+    seed ({ .id = "run_budget_spent", .start_time = 1000 });
+    db_->update_run_summary (
+    "run_budget_spent", vayu::core::build_run_summary_payload (spent).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_budget_spent");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body["sampling"].contains ("responseSampleBudgetSpent"));
+    EXPECT_TRUE (body["sampling"]["responseSampleBudgetSpent"].get<bool> ());
+
+    seed ({ .id = "run_count_capped", .start_time = 1000 });
+    db_->update_run_summary ("run_count_capped",
+    vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+
+    auto [ok, uniform] = vayu::http::routes::run_report_response (*db_, "run_count_capped");
+    ASSERT_EQ (ok, 200);
+    ASSERT_TRUE (uniform["sampling"].contains ("responseSampleBudgetSpent"))
+    << "a run that did not spend the budget says so, rather than reading like "
+       "a run nothing looked at";
+    EXPECT_FALSE (uniform["sampling"]["responseSampleBudgetSpent"].get<bool> ());
+}
+
+// A run recorded between the byte budget (#1155) and its marker (#1192) had
+// the budget and no record of whether it spent it. That is not the same claim
+// as "it kept its uniformity", so the key is left out rather than reported
+// false - the same absent-vs-zero rule the section itself follows.
+TEST_F (RunsRouteTest, ReportOmitsTheBudgetMarkerWhenTheSummaryPredatesIt) {
+    seed ({ .id = "run_no_marker", .start_time = 1000 });
+    auto summary = vayu::core::build_run_summary_payload (summary_inputs ());
+    summary["sampling"].erase ("response_sample_budget_spent");
+    db_->update_run_summary ("run_no_marker", summary.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_marker");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("sampling"));
+    EXPECT_FALSE (body["sampling"].contains ("responseSampleBudgetSpent"));
+    EXPECT_EQ (body["sampling"]["responseSamplesDropped"].get<size_t> (), 900u)
+    << "the rest of the section still reads";
+}
+
 // Server vitals survive the summary -> report round trip in the shape the
 // scrape wrote them, so the section a reader sees is the one the run recorded.
 TEST_F (RunsRouteTest, ReportCarriesTheMonitorSummary) {

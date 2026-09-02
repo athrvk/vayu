@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <chrono>
 #include <map>
+#include <optional>
 #include <thread>
 #include <utility>
 
@@ -188,6 +189,13 @@ struct ReportExtras {
     size_t response_samples_dropped = 0;
     size_t exemplars_dropped        = 0;
     size_t sample_bodies_dropped    = 0;
+    // Whether the response-sample byte budget ended a sample, which is what
+    // separates a still-uniform tested set from one drawn from the part of the
+    // run whose bodies fit (issue #1192). Empty is a summary written before the
+    // marker existed: the app cannot tell that run's case either way, so the
+    // key is left out rather than reported as `false` - "not spent" is a claim,
+    // and this one would be made about a run nothing looked at.
+    std::optional<bool> response_sample_budget_spent;
     // A scenario run's own tallies, read from the summary's `scenario` object.
     // `has_scenario` false leaves the section out entirely rather than showing
     // a load run four zeros - the section exists to say what a sequence did.
@@ -261,6 +269,16 @@ template <typename T>
 void read_number (const nlohmann::json& obj, const char* key, T& out) {
     if (obj.contains (key) && obj[key].is_number ()) {
         out = obj[key].get<T> ();
+    }
+}
+
+// Read a boolean out of a JSON object as an optional, so a key an older engine
+// never wrote stays *absent* rather than becoming `false`. A number reads as
+// nothing on purpose: the report says what the summary recorded, and a
+// malformed value is not a recording.
+void read_optional_bool (const nlohmann::json& obj, const char* key, std::optional<bool>& out) {
+    if (obj.contains (key) && obj[key].is_boolean ()) {
+        out = obj[key].get<bool> ();
     }
 }
 
@@ -393,6 +411,8 @@ void apply_summary_sampling (const nlohmann::json& summary, ReportExtras& extras
         read_number (sampling, "exemplars_dropped", extras.exemplars_dropped);
         read_number (sampling, "sample_bodies_dropped", extras.sample_bodies_dropped);
         read_number (sampling, "response_bodies_captured", extras.response_bodies_captured);
+        read_optional_bool (sampling, "response_sample_budget_spent",
+        extras.response_sample_budget_spent);
     }
 }
 
@@ -1173,7 +1193,10 @@ double target_rps) {
 
     // How much each bounded store thinned away. All zeros means the sampled
     // sets below are complete; non-zero means they are a uniform sample of the
-    // run (reservoir retention), not its opening.
+    // run (reservoir retention), not its opening - except where
+    // `responseSampleBudgetSpent` says the byte budget stopped admitting, which
+    // is the one bound that leaves the tested set drawn from the part of the
+    // run whose bodies fit.
     if (extras.has_sampling) {
         json_report["sampling"] = { { "errorsDropped", extras.errors_dropped },
             { "successTracesDropped", extras.success_traces_dropped },
@@ -1182,6 +1205,14 @@ double target_rps) {
             { "exemplarsDropped", extras.exemplars_dropped },
             { "sampleBodiesDropped", extras.sample_bodies_dropped },
             { "responseBodiesCaptured", extras.response_bodies_captured } };
+        // Only when the summary recorded it. Absent is a run written before the
+        // marker existed, which the app must be able to tell from a run that
+        // kept its uniformity - the same absent-vs-zero rule the section itself
+        // follows one level up.
+        if (extras.response_sample_budget_spent.has_value ()) {
+            json_report["sampling"]["responseSampleBudgetSpent"] =
+            *extras.response_sample_budget_spent;
+        }
     }
 
     add_optional_report_sections (extras, json_report);

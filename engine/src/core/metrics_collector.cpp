@@ -601,6 +601,11 @@ bool MetricsCollector::claim_response_sample_bytes (size_t bytes) {
     response_sample_bytes_.fetch_add (bytes, std::memory_order_relaxed);
     if (before + bytes > config_.max_response_sample_bytes) {
         response_sample_bytes_.fetch_sub (bytes, std::memory_order_relaxed);
+        // Recorded here rather than at the two call sites, so a third store
+        // spending the same budget cannot forget to say so. This refusal is
+        // the whole of what makes the retained set non-uniform - see
+        // response_sample_budget_spent().
+        response_budget_spent_.store (true, std::memory_order_relaxed);
         return false;
     }
     return true;

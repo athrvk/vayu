@@ -10,9 +10,10 @@
 
 /**
  * The note exists to stop a sampled list from reading as a complete one, so the
- * cases that matter are the three ways it can lie: claiming completeness when
- * records were displaced, claiming a loss when there was none, and asserting
- * either against a run that never reported the counts.
+ * cases that matter are the four ways it can lie: claiming completeness when
+ * records were displaced, claiming a loss when there was none, asserting either
+ * against a run that never reported the counts, and calling a set uniform when
+ * the run's byte budget is what thinned it (issue #1192).
  */
 
 import { describe, it, expect } from "vitest";
@@ -56,6 +57,83 @@ describe("SampleRetentionNote", () => {
 
 		expect(screen.getByText(/998,000 further responses were displaced/)).toBeInTheDocument();
 		expect(screen.getByText(/1,000 tested/)).toBeInTheDocument();
+	});
+
+	// The store is bounded twice and one counter reports both, so the marker is
+	// the only thing that says whether the uniformity sentence is true. Drop the
+	// branch and this case reddens: the note claims a uniform sample of a run
+	// that was graded on its cheap-bodied part.
+	it("does not claim uniformity when the byte budget is what thinned the tested set", () => {
+		render(
+			<SampleRetentionNote
+				sampling={sampling({
+					responseSamplesDropped: 998_000,
+					responseSampleBudgetSpent: true,
+				})}
+				shown={1_000}
+				budget="responses"
+			/>
+		);
+
+		expect(
+			screen.getByText(/1,000 tested are drawn from the part of the run whose bodies fit/)
+		).toBeInTheDocument();
+		expect(screen.queryByText(/drawn uniformly from the whole run/)).not.toBeInTheDocument();
+	});
+
+	it("keeps the uniformity sentence for a run the count cap alone thinned", () => {
+		render(
+			<SampleRetentionNote
+				sampling={sampling({
+					responseSamplesDropped: 998_000,
+					responseSampleBudgetSpent: false,
+				})}
+				shown={1_000}
+				budget="responses"
+			/>
+		);
+
+		expect(
+			screen.getByText(/1,000 tested are drawn uniformly from the whole run/)
+		).toBeInTheDocument();
+	});
+
+	// A run recorded before the engine reported which bound applied. Weakening
+	// the copy for every such run costs the accurate message in the case that is
+	// nearly all of them, so absent reads as today's sentence - it just must not
+	// read as the budget-spent one, which would assert a bias nothing measured.
+	it("reads a run recorded before the marker as today's message, not as budget-spent", () => {
+		render(
+			<SampleRetentionNote
+				sampling={sampling({ responseSamplesDropped: 900 })}
+				shown={40}
+				budget="responses"
+			/>
+		);
+
+		expect(
+			screen.getByText(/40 tested are drawn uniformly from the whole run/)
+		).toBeInTheDocument();
+		expect(screen.queryByText(/whose bodies fit/)).not.toBeInTheDocument();
+	});
+
+	// The marker belongs to the response store alone; a trace surface reading it
+	// would describe the list on screen by a budget it was never charged to.
+	it("ignores the response-budget marker on a trace surface", () => {
+		render(
+			<SampleRetentionNote
+				sampling={sampling({
+					successTracesDropped: 29_000,
+					responseSampleBudgetSpent: true,
+				})}
+				shown={100}
+				budget="traces"
+			/>
+		);
+
+		expect(
+			screen.getByText(/100 shown are drawn uniformly from the whole run/)
+		).toBeInTheDocument();
 	});
 
 	it("says nothing when the run displaced nothing", () => {

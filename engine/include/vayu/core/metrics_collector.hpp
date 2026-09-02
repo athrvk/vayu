@@ -497,9 +497,33 @@ class MetricsCollector {
      * count cap (`max_response_samples`) refuses or displaces a candidate; the
      * byte budget (`max_response_sample_bytes`) drops one whose body no longer
      * fits. Neither ever stores a truncated body - see the config field.
+     *
+     * The one thing the count loses is which bound applied, and the two differ
+     * in what they leave behind: a displaced incumbent keeps the retained set a
+     * uniform sample of the run, a spent byte budget stops admitting. That is
+     * what `response_sample_budget_spent()` beside this answers.
      */
     [[nodiscard]] size_t response_samples_dropped () const {
         return response_dropped_.load (std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Whether the byte budget ever ended a response sample.
+     *
+     * True means at least one sample was dropped because its body no longer fit
+     * `max_response_sample_bytes`, so the retained set is drawn from the part of
+     * the run whose bodies fit rather than uniformly from the whole of it. The
+     * drop count cannot say this: the count cap displaces an incumbent and stays
+     * uniform, and both bounds report through `response_samples_dropped()`
+     * (issue #1192).
+     *
+     * A flag rather than a second counter, deliberately. How many samples the
+     * budget ended is a number no reader acts on - what changes the reading of
+     * the report is that it was spent at all - and a second count beside the
+     * first would invite the sum, which is not the drop total.
+     */
+    [[nodiscard]] bool response_sample_budget_spent () const {
+        return response_budget_spent_.load (std::memory_order_relaxed);
     }
 
     /**
@@ -987,6 +1011,12 @@ class MetricsCollector {
     /// accepted (~k ln(n/k) of them) while what is held stays at k, and the
     /// budget would eventually freeze a reservoir that is nowhere near it.
     std::atomic<size_t> response_sample_bytes_{ 0 };
+    /// Set the first time a body no longer fits the budget above, and never
+    /// cleared: a run that spent the budget once is graded on the part of it
+    /// whose bodies fit, and a later release that frees room does not give the
+    /// dropped responses back. Read by the run summary as the one thing
+    /// `response_dropped_` cannot say (issue #1192).
+    std::atomic<bool> response_budget_spent_{ false };
 
     /**
      * @brief One reservoir per plan step, for a scenario load run's deferred

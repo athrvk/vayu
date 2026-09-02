@@ -6366,7 +6366,7 @@ named it.
     "errorsDropped": 0, "successTracesDropped": 29000,
     "slowTracesDropped": 0, "responseSamplesDropped": 998000,
     "exemplarsDropped": 0, "sampleBodiesDropped": 12,
-    "responseBodiesCaptured": 23
+    "responseBodiesCaptured": 23, "responseSampleBudgetSpent": false
   },
   "monitor": {
     "samples": 60, "failures": 0,
@@ -6538,8 +6538,18 @@ target never produced. They differ in one way worth knowing: the count cap
 displaces an incumbent, so the tested set stays a uniform sample of the run,
 while an exhausted byte budget stops admitting - a run that spends it is graded
 on the part of the run whose bodies fit. The counter cannot say which bound
-applied, so the app's retention note states the uniform case for both; issue
-#1192 is that gap.
+applied on its own; `responseSampleBudgetSpent` is the answer (issue #1192).
+`true` means the byte budget ended at least one sample, so the tested set is
+drawn from the part of the run whose bodies fit; `false` means only the count
+cap displaced anything, so the tested set stays a uniform sample of the whole
+run. It is written by every run recorded since the marker existed, and is
+**absent** on a summary written before that - absent means "not known", not
+"not spent", which matters because weakening the uniform claim for every
+pre-marker run would cost the accurate message in the case that is nearly all
+of them: only a target whose retained bodies average more than ~256 KiB
+reaches the budget at the defaults. The app's retention note drops its
+uniformity sentence only when the key reads `true`; absent or `false` both
+keep it.
 
 Three of its keys are about captured responses rather than retention:
 `responseBodiesCaptured` is how many exchanges the run stored (see
