@@ -183,6 +183,14 @@ white-on-`--primary` never occurs because fills use `--primary-fill`).
 - **`docs/design-system.md` values are checked against `index.css`**
   → `design-system-doc.test.ts`. Prose is not - if you change a value, read the
   sentence around it.
+- **Accessibility has a section of its own** in `docs/design-system.md`
+  ("Accessibility", after Focus & Interaction States): which check holds which
+  rule, why a tooltip is not a name, why `outline-none` needs a replacement in
+  the same class string, and the three `jsx-a11y` rules configured rather than
+  obeyed as written. `eslint-plugin-jsx-a11y` recommended runs on every `.tsx`
+  under `pnpm lint`, so a hand-rolled `role="button"` without a tab stop or a
+  key handler now fails CI at the line. → `focus-indicator.test.ts`,
+  `icon-button-labels.test.tsx`, plus the lint itself
 
 ## Borders: what a rule sits _on_, never what it is
 

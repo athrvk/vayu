@@ -145,6 +145,7 @@ function EngineStatus() {
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<span
+					// eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- TooltipTrigger (Radix) wires focus and blur to reveal and dismiss this tooltip, which is the only keyboard path to the engine error text
 					tabIndex={0}
 					className={cn(
 						className,

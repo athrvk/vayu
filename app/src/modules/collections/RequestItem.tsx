@@ -125,6 +125,7 @@ export default function RequestItem({
 	};
 
 	return (
+		// eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:200-208, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor
 		<div
 			ref={rowRef}
 			data-request-id={request.id}

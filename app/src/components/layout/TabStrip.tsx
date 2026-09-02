@@ -148,6 +148,7 @@ function TabItem({
 					{descriptor.label}
 				</span>
 			</ScrollOnOverflow>
+			{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- close is a keyboard action on the focused `role="tab"` row (Delete/Backspace, TabStrip.tsx:109-114); this span is `tabIndex={-1}` on purpose, a pointer affordance for the same thing */}
 			<span
 				role="button"
 				tabIndex={-1}
@@ -279,6 +280,7 @@ export function TabStrip() {
 			 * is unchanged visually, because the strip's flex layout is on the element
 			 * around all three.
 			 */}
+			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tablist is never a tab stop, the active `role="tab"` child carries `tabIndex={0}` and this onKeyDown moves it */}
 			<div role="tablist" onKeyDown={onKeyDown} className="flex min-w-0 items-stretch">
 				{visible.map((i) => (
 					<TabItem

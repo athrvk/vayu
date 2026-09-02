@@ -1286,6 +1286,74 @@ stylesheet reaches what Monaco renders. → `variable-token-classes.test.ts`
 
 ---
 
+## Accessibility
+
+Which tool holds a rule decides what breaking it looks like: a lint error on the
+line, a source scan naming the file, a rendered assertion, or - until #1216 -
+nothing at all. `eslint-plugin-jsx-a11y`'s recommended set now runs on every
+`.tsx` under `pnpm lint`, underneath the behavioural guards rather than instead
+of them: the lint reads markup, and none of the rules below are things it can
+see.
+
+| Rule | Enforced by |
+|------|-------------|
+| An icon-only button carries an `aria-label` | `icon-button-labels.test.tsx` |
+| `outline-none` is paired with a replacement indicator | `focus-indicator.test.ts` |
+| A control revealed on hover is revealed on focus too | `row-action-reveal.test.ts` |
+| An editor that takes Tab advertises the way out | `code-editor.chords.test.tsx` |
+| Every chord the app listens for is listed for the user | `shortcuts.listed.test.ts` |
+| A hand-rolled `role="button"` is focusable and answers Enter/Space | `jsx-a11y/interactive-supports-focus`, `jsx-a11y/click-events-have-key-events` |
+| A `role="treeitem"` carries `aria-selected` | `jsx-a11y/role-has-required-aria-props` |
+| A `<label>` names a control | `jsx-a11y/label-has-associated-control` |
+
+**A tooltip is not a name.** Radix supplies `aria-describedby` while a tooltip is
+open, which is a description; before it opens - and to a screen reader reading
+the row - the button is announced as "button". The Dock's four view switchers
+all had tooltips and all announced as bare buttons. `title` is a name, but the
+weaker one, since it does not surface on keyboard focus: no control here relies
+on it any more, and the guard pins that count at zero.
+
+**`outline-none` needs its replacement in the same class string.** The base
+`:focus-visible` outline at the top of this page is the whole focus story for
+anything without its own ring, so `outline-none` is the single token that opts
+an element out of it - and the command palette's input had been opted out since
+it was written, unnoticed, because it is the only focusable element in its
+dialog. A replacement may be a ring on the element, a ring on the wrapper it
+fills (`focus-within:`, as `CommandInput` and `VariableInput` do), or the
+background fill Radix and cmdk paint on `data-[selected]` / `data-[highlighted]`.
+An element that is genuinely never a tab stop is exempt by name, with a reason,
+in the guard - and an exemption claiming "the wrapper paints it" has to name the
+class that does.
+
+**A composite widget is not itself a tab stop.** A tree, a tablist or a
+radiogroup keeps one focusable descendant and moves that stop with the arrow
+keys (`useRovingTreeFocus.ts`); the container carries the `onKeyDown` and no
+`tabIndex`. `jsx-a11y` cannot see across that split and reports the container as
+unfocusable, so those sites carry a one-line disable naming the hook - the same
+for a row whose Enter and Space arrive through the tree rather than through its
+own handler.
+
+**The lint's allowlist.** Three rules are configured rather than obeyed as
+written, in `app/eslint.config.mjs`, each because the pattern it flags is the
+correct one here:
+
+- `no-autofocus` is off. Its 14 sites are all a field inside a dialog, a rename
+  box opened over a row, or the command palette - moving focus into what the
+  user just opened is the WAI-ARIA dialog pattern, not the page-load autofocus
+  the rule exists to prevent.
+- `label-has-associated-control` is given `controlComponents: ["Switch",
+  "Input", "SelectTrigger"]`. It recognises a nested control by lower-case tag
+  name, and each of those renders exactly one native labelable element, so the
+  association it asks for is already there.
+- `no-noninteractive-tabindex` also allows `role="separator"`. A focusable
+  separator is the ARIA window splitter, which is what both resize handles are,
+  arrow/Page/Home/End and all.
+
+Everything else is suppressed at the line it happens on, with the reason and the
+file that provides the missing half.
+
+---
+
 ## Row Actions
 
 Controls that appear on a row you are already hovering - `⋯`, delete, remove.

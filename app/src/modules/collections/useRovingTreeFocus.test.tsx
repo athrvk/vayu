@@ -27,10 +27,12 @@ function Tree({ expanded }: { expanded: boolean }) {
 	const { onKeyDown, onFocus } = useRovingTreeFocus(ref);
 	return (
 		<div ref={ref}>
+			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
 			<div role="tree" onKeyDown={onKeyDown} onFocus={onFocus}>
 				<div>
 					<div
 						role="treeitem"
+						aria-selected={false}
 						tabIndex={-1}
 						aria-level={1}
 						aria-expanded={expanded}
@@ -59,6 +61,7 @@ function Tree({ expanded }: { expanded: boolean }) {
 						<div>
 							<div
 								role="treeitem"
+								aria-selected={false}
 								tabIndex={-1}
 								aria-level={2}
 								data-name="req-1"
@@ -76,6 +79,7 @@ function Tree({ expanded }: { expanded: boolean }) {
 							</div>
 							<div
 								role="treeitem"
+								aria-selected={false}
 								tabIndex={-1}
 								aria-level={2}
 								data-name="req-2"
@@ -86,6 +90,7 @@ function Tree({ expanded }: { expanded: boolean }) {
 				</div>
 				<div
 					role="treeitem"
+					aria-selected={false}
 					tabIndex={-1}
 					aria-level={1}
 					aria-expanded={false}
@@ -111,10 +116,12 @@ function EmptyFolderTree() {
 	const { onKeyDown, onFocus } = useRovingTreeFocus(ref);
 	return (
 		<div ref={ref}>
+			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
 			<div role="tree" onKeyDown={onKeyDown} onFocus={onFocus}>
 				<div>
 					<div
 						role="treeitem"
+						aria-selected={false}
 						tabIndex={-1}
 						aria-level={1}
 						aria-expanded="true"
@@ -129,6 +136,7 @@ function EmptyFolderTree() {
 				</div>
 				<div
 					role="treeitem"
+					aria-selected={false}
 					tabIndex={-1}
 					aria-level={1}
 					data-name="after"
@@ -147,6 +155,7 @@ function Row({ name, level, expanded }: { name: string; level: number; expanded?
 	return (
 		<div
 			role="treeitem"
+			aria-selected={false}
 			tabIndex={-1}
 			aria-level={level}
 			aria-expanded={expanded}
@@ -173,6 +182,7 @@ function DeepTree() {
 	const { onKeyDown, onFocus } = useRovingTreeFocus(ref);
 	return (
 		<div ref={ref}>
+			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
 			<div role="tree" onKeyDown={onKeyDown} onFocus={onFocus}>
 				<div>
 					<Row name="root-a" level={1} expanded />

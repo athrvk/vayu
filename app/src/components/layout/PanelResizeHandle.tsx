@@ -117,6 +117,7 @@ export function PanelResizeHandle({
 	};
 
 	return (
+		// eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- WAI-ARIA window splitter - a focusable `role="separator"` is its sanctioned interactive form, with the arrow/Page/Home/End handling in the onKeyDown just below
 		<div
 			role="separator"
 			aria-orientation="vertical"

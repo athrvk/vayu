@@ -48,6 +48,7 @@ export function ProfilePicker({
 	};
 
 	return (
+		// eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the radiogroup is never a tab stop, the selected `role="radio"` child carries `tabIndex={0}` and this onKeyDown moves selection and focus together
 		<div
 			ref={groupRef}
 			role="radiogroup"

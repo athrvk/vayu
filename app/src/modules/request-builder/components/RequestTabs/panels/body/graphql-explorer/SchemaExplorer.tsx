@@ -290,6 +290,7 @@ export function SchemaExplorer({
 						Nothing matches "{term}".
 					</p>
 				) : (
+					// eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it
 					<div
 						ref={treeRef}
 						role="tree"
@@ -385,6 +386,7 @@ function ExplorerRow({
 		 * of the drawer's rows before `drawer-row-hit-area` pinned it.
 		 */
 		<div
+			// eslint-disable-next-line jsx-a11y/role-has-required-aria-props -- this tree has no selection model - a row inserts into the query and nothing stays selected - so `aria-selected` is omitted rather than faked
 			role="treeitem"
 			aria-expanded={node.expandable ? expanded : undefined}
 			aria-level={depth + 1}
