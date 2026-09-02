@@ -26,8 +26,8 @@
  *   which rows are settings results is decided once, here. Their order on
  *   screen is not: `ranking.ts` re-sorts every section by the score it gave the
  *   row, so the palette can list what it kept in an order the sidebar would
- *   not, deliberately, since the palette ranks these rows against six other
- *   kinds and the sidebar ranks them against each other.
+ *   not, deliberately, since the palette scores these rows by the one measure
+ *   it scores every other kind by and the sidebar ranks them among themselves.
  */
 
 import { useMemo } from "react";

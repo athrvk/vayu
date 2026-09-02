@@ -582,8 +582,9 @@ describe("the list's height", () => {
 		 * the other, and a padding change would halve the visible count with the
 		 * assertion above still green - jsdom has no layout, so nothing here can
 		 * measure the rows themselves. So pin the padding they are drawn with:
-		 * `CommandItem`'s `px-2 py-1.5` is the 32px single-line row, read off a
-		 * rendered palette row rather than the primitive, since a caller's
+		 * `CommandItem`'s `px-2 py-1.5` is the row measured at 30.0px in
+		 * Chromium, read off a rendered palette row rather than the primitive,
+		 * since a caller's
 		 * `className` goes through tailwind-merge and can replace it - which is
 		 * exactly what `command.chrome.test.tsx`'s density read of the bare
 		 * primitive cannot see.
