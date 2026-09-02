@@ -8,9 +8,13 @@
 // string can silently degrade a declaration, so these guard the derivation.
 //
 // What they check, in order of how quietly it would break:
-//   - the chain vocabulary still exists in the table (see CHAIN_CONTINUATIONS
-//     in script_types.cpp: a renamed `.to.not` would become `void` and take
-//     every `.to.not.` completion with it, with nothing else failing);
+//   - the declared assertion chain is the object the runtime builds, member
+//     for member in both directions (see TheDeclaredChainIsTheObjectTheRuntime
+//     Builds: this is the guard that made the enumerated chain pins retirable,
+//     because it fails on a member added to either side alone);
+//   - the chain roots still exist in the table (see LANGUAGE_CHAINS and
+//     CHAIN_ROOTS in script_types.cpp: a label the generator no longer
+//     recognises as a chain declares a top-level `that` nothing binds);
 //   - every listed non-snippet member reaches the output;
 //   - the signature reader handles the shapes the table actually uses,
 //     including the two it cannot parse.
@@ -18,6 +22,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -45,6 +50,53 @@ constexpr int KIND_SNIPPET = 28;
 
 bool contains (const std::string& haystack, const std::string& needle) {
     return haystack.find (needle) != std::string::npos;
+}
+
+/**
+ * @brief The body of `interface VayuExpectation`, terminating newline included.
+ *
+ * The newline matters: a member is asserted as a whole line, and the closing
+ * `\n}\n` shares its `\n` with the last member's, so a slice that stops at the
+ * brace ends mid-line and the last member - `with`, alphabetically - can never
+ * be found.
+ */
+std::string chain_interface_body (const std::string& dts) {
+    const size_t open = dts.find ("interface VayuExpectation {");
+    if (open == std::string::npos) {
+        return {};
+    }
+    const size_t close = dts.find ("\n}\n", open);
+    return close == std::string::npos ? std::string{} :
+                                        dts.substr (open, close - open + 1);
+}
+
+/**
+ * @brief The names declared at an interface body's own indent.
+ *
+ * A member is one tab, an identifier, then either its parameter list or its
+ * type. Reading anything at that indent instead would collect the ` * ` lines
+ * of every doc comment as members - which is how the first version of
+ * TheDeclaredChainIsTheObjectTheRuntimeBuilds came to send ` * Example` to
+ * QuickJS as a property name.
+ */
+std::set<std::string> declared_members (const std::string& body) {
+    std::set<std::string> names;
+    for (size_t pos = body.find ("\n\t"); pos != std::string::npos;
+    pos             = body.find ("\n\t", pos + 1)) {
+        size_t end = pos + 2;
+        while (end < body.size () &&
+        (std::isalnum (static_cast<unsigned char> (body[end])) ||
+        body[end] == '_' || body[end] == '$')) {
+            end++;
+        }
+        const std::string name = body.substr (pos + 2, end - pos - 2);
+        if (name.empty () || std::isdigit (static_cast<unsigned char> (name.front ())) ||
+        end >= body.size () || (body[end] != '(' && body[end] != ':')) {
+            continue; // a doc-comment line, or a member one tab deeper
+        }
+        names.insert (name);
+    }
+    return names;
 }
 
 /**
@@ -118,23 +170,27 @@ TEST (ScriptTypesTest, EveryListedMemberReachesTheOutput) {
     << "completion table looks empty - the scan proved nothing";
 }
 
-// See CHAIN_CONTINUATIONS in script_types.cpp. These names carry meaning the
-// table cannot express, so the generator hardcodes them; if the table stops
-// offering one, the hardcoding is stale and the chain silently loses a link.
-TEST (ScriptTypesTest, ChainVocabularyStillExistsInTheTable) {
+// See CHAIN_ROOTS and LANGUAGE_CHAINS in script_types.cpp. Which label roots
+// open the chain is the one fact the table still cannot express, so the
+// generator hardcodes them; a root it hardcodes and the table stops offering is
+// a chain the generator no longer recognises, and a label rooted at it declares
+// a top-level global instead. What the word *means* - a passthrough, `and`, or
+// `not` - is no longer hardcoded anywhere: every chain word is the chain now.
+TEST (ScriptTypesTest, TheChainRootsStillExistInTheTable) {
     std::set<std::string> labels;
     for (const auto& item : get_script_completions ()) {
         labels.insert (item.value ("label", ""));
     }
-    EXPECT_TRUE (labels.count ("to.not"))
-    << "generator types `not` as the chain";
-    EXPECT_TRUE (labels.count ("and")) << "generator types `and` as the chain";
+    EXPECT_TRUE (labels.count ("to.not")) << "the chain still declares `not`";
+    EXPECT_TRUE (labels.count ("and"))
+    << "`and` is a chain root the generator hardcodes - see CHAIN_ROOTS";
     EXPECT_TRUE (labels.count ("pm.expect"))
     << "generator types `expect` as opening the chain";
 
     // See LANGUAGE_CHAINS in script_types.cpp - chai's words that assert
-    // nothing (issue #1053). Same hardcoding, same staleness risk: one dropped
-    // from the table degrades to `void` and takes the rest of its chain with it.
+    // nothing (issue #1053). Hardcoded there, so one dropped from the table is
+    // a chain root the generator no longer recognises, and a label rooted at it
+    // declares a top-level global instead.
     for (const char* word : { "also", "been", "but", "does", "has", "is", "of",
          "same", "still", "that", "which", "with" }) {
         EXPECT_TRUE (labels.count (word))
@@ -142,28 +198,26 @@ TEST (ScriptTypesTest, ChainVocabularyStillExistsInTheTable) {
     }
 }
 
-// A language chain is followed by whatever the chain allows, a matcher
-// included, so it is typed as the `to` node and declared on *both* interfaces -
-// the runtime installs every member on one object. Declared on the chain root
-// alone, `pm.expect(rows).to.be.an("array").that.is.not.empty` is an editor
-// error on a script the runtime runs.
-TEST (ScriptTypesTest, LanguageChainsContinueIntoTheMatchers) {
-    const std::string dts    = generate_script_typedefs ();
-    const size_t expect_to   = dts.find ("interface VayuExpectTo {");
-    const size_t expectation = dts.find ("interface VayuExpectation {");
-    ASSERT_NE (expect_to, std::string::npos);
-    ASSERT_NE (expectation, std::string::npos);
-    ASSERT_LT (expect_to, expectation) << "VayuExpectTo is rendered first";
+// The runtime builds one object: `create_expectation` installs `to`, `be`,
+// `have`, `at`, `not`, `deep`, `nested`, every language chain and every matcher
+// on the same expectation, and every one of them hands that expectation back.
+// So the declarations are one interface, and every chain word is that interface
+// - which is what lets a matcher follow any of them. Declared as a path tree,
+// `pm.expect(rows).to.be.an("array").and.not.empty` is an editor error on a
+// script the runtime runs (issue #1209).
+TEST (ScriptTypesTest, EveryChainWordCarriesTheWholeChain) {
+    const std::string dts        = generate_script_typedefs ();
+    const std::string chain_body = chain_interface_body (dts);
+    ASSERT_FALSE (chain_body.empty ());
 
-    const std::string to_body = dts.substr (expect_to, expectation - expect_to);
-    const std::string chain_body = dts.substr (expectation);
-    for (const char* word : { "also", "been", "but", "does", "has", "is", "of",
+    // Every word a chain can be continued by, whether the table lists it in its
+    // own right (`not`, `and`, the language chains) or only ever as a prefix of
+    // a longer label (`be`, `have`, `at`, `deep`, `nested`, `all`).
+    for (const char* word : { "to", "be", "have", "at", "and", "not", "deep",
+         "nested", "all", "also", "been", "but", "does", "has", "is", "of",
          "same", "still", "that", "which", "with" }) {
-        const std::string declaration = std::string ("\t") + word + ": VayuExpectTo;\n";
-        EXPECT_TRUE (contains (to_body, declaration))
-        << word << " is unreachable after another language chain or `.to`";
-        EXPECT_TRUE (contains (chain_body, declaration))
-        << word << " is unreachable after a matcher";
+        EXPECT_TRUE (contains (chain_body, std::string ("\t") + word + ": VayuExpectation;\n"))
+        << word << " does not carry the chain, so no matcher can follow it";
     }
 
     // A language chain is a chain member, not a global: `that` reaching the
@@ -172,21 +226,40 @@ TEST (ScriptTypesTest, LanguageChainsContinueIntoTheMatchers) {
     EXPECT_FALSE (contains (dts, "declare function that"));
 }
 
-TEST (ScriptTypesTest, ChainContinuationsReturnTheChain) {
+// One interface, so there is one place a member can be. The second one existed
+// only to name what `.to.not` returned; every chain node is the same type now,
+// so a chain word has nothing else to point at. Its absence is asserted rather
+// than assumed - a half-collapsed generator that still emitted it would leave
+// the paths it named reachable and the rest not.
+TEST (ScriptTypesTest, TheChainIsOneInterface) {
     const std::string dts = generate_script_typedefs ();
-    // `expect` opens the chain, `.and` continues it, `.not` re-enters the `to`
-    // node it sits in - none of which the table says.
-    // `pm.expect` carries `fail`, so it is declared as a call signature beside
-    // its members rather than as a plain method - see
-    // AFunctionsOwnMembersSitBesideItsCallSignature.
-    EXPECT_TRUE (contains (dts, "(value: any, message?: string): VayuExpectation;"));
-    EXPECT_TRUE (contains (dts, "and: VayuExpectation;"));
-    EXPECT_TRUE (contains (dts, "not: VayuExpectTo;"));
-    EXPECT_TRUE (contains (dts, "interface VayuExpectTo {"));
     EXPECT_TRUE (contains (dts, "interface VayuExpectation {"));
-    // An assertion that documents no return continues the chain when it is in
-    // one, so a chain call stays chainable.
+    EXPECT_FALSE (contains (dts, "VayuExpectTo"))
+    << "the chain is declared as more than one interface again";
+
+    // `pm.expect` opens the chain, which its own table entry does not say - see
+    // forced_return. It carries `fail`, so it is a call signature beside its
+    // members rather than a plain method (see the test below).
+    EXPECT_TRUE (contains (dts, "(value: any, message?: string): VayuExpectation;"));
+    // A matcher returns the chain, so a call stays chainable.
     EXPECT_TRUE (contains (dts, "equal(expected: any): VayuExpectation;"));
+}
+
+// The four chains issue #1209 reported, as the declarations the editor reads
+// them through. Each was rejected with TS2339 against the two-interface shape
+// because the member existed only under some other path: `match` under `to`
+// alone, `not` under `to` alone, `equal` outside `be`, `empty` inside it. The
+// docs-compile suite compiles the chains themselves; these pin the declarations
+// they need, so a regression is located here rather than in a vitest diff.
+TEST (ScriptTypesTest, TheChainDeclaresTheMembersItWasRejecting) {
+    const std::string dts        = generate_script_typedefs ();
+    const std::string chain_body = chain_interface_body (dts);
+    ASSERT_FALSE (chain_body.empty ());
+
+    EXPECT_TRUE (contains (chain_body, "\tmatch(regex: RegExp): VayuExpectation;\n"));
+    EXPECT_TRUE (contains (chain_body, "\tnot: VayuExpectation;\n"));
+    EXPECT_TRUE (contains (chain_body, "\tequal(expected: any): VayuExpectation;\n"));
+    EXPECT_TRUE (contains (chain_body, "\tempty: VayuExpectation;\n"));
 }
 
 // The `()` in a label is what says whose members its children are. Read the
@@ -209,12 +282,73 @@ TEST (ScriptTypesTest, AFunctionsOwnMembersSitBesideItsCallSignature) {
     EXPECT_TRUE (contains (dts, "jar(): {"));
 }
 
-// A getter that performs an assertion yields nothing. It looks identical to a
-// continuation in the table, which is exactly why the distinction is guarded.
-TEST (ScriptTypesTest, TerminalAssertionGettersAreVoid) {
+// A getter that performs an assertion returns the chain - `expect_true` ends in
+// `expect_chained (ctx, this_val)`, not `JS_UNDEFINED` - so `.to.be.true` is
+// followable, and typing it `void` made `.to.be.true.and.equal(1)` an error on
+// a script the runtime runs. That is also why the chain needs no vocabulary
+// list any more: a terminal getter and a chain word have the same type, so
+// nothing has to tell them apart. `field_type` still answers `void` for prose,
+// which is right everywhere it is still asked - see AStringLiteralUnionIsAType.
+TEST (ScriptTypesTest, TerminalAssertionGettersContinueTheChain) {
     const std::string dts = generate_script_typedefs ();
-    EXPECT_TRUE (contains (dts, "true: void;"));
-    EXPECT_TRUE (contains (dts, "exist: void;"));
+    EXPECT_TRUE (contains (dts, "\ttrue: VayuExpectation;\n"));
+    EXPECT_TRUE (contains (dts, "\texist: VayuExpectation;\n"));
+    EXPECT_FALSE (contains (dts, "\ttrue: void;\n"));
+    EXPECT_FALSE (contains (dts, "\texist: void;\n"));
+}
+
+/**
+ * @brief The declared chain is the object `create_expectation` builds.
+ *
+ * This is the guard the enumerated chain pins above could not be: it reads the
+ * interface's members out of the generated text and the object's out of the
+ * real script engine, and fails on a member either side has alone. A matcher
+ * added to `create_expectation` and not to the completion table is undeclared
+ * and red-lines in the editor; a table label whose leaf the runtime does not
+ * carry declares a member that throws by name at run time (the unknown-member
+ * hook, #999). Both were previously invisible until someone wrote the chain.
+ *
+ * `Object.getOwnPropertyNames` rather than a walk that *reads* the members:
+ * every terminal getter asserts on access, so enumerating values would run
+ * eight assertions against the number 1 and throw on most of them.
+ */
+TEST (ScriptTypesTest, TheDeclaredChainIsTheObjectTheRuntimeBuilds) {
+#ifdef VAYU_HAS_QUICKJS
+    const std::string dts = generate_script_typedefs ();
+    const std::set<std::string> declared = declared_members (chain_interface_body (dts));
+    ASSERT_GT (declared.size (), 40u)
+    << "the interface scan found nothing - it would agree with any runtime";
+
+    std::string list;
+    for (const std::string& name : declared) {
+        list += (list.empty () ? "'" : ",'") + name + "'";
+    }
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Environment env;
+    vayu::runtime::ScriptContext ctx;
+    ctx.environment = &env;
+
+    const auto result = engine.execute ("var declared = [" + list +
+    "];\n"
+    "var runtime = Object.getOwnPropertyNames(pm.expect(1));\n"
+    "var undeclared = runtime.filter(function (n) { return declared.indexOf(n) "
+    "< 0; });\n"
+    "var absent = declared.filter(function (n) { return runtime.indexOf(n) < "
+    "0; });\n"
+    "if (runtime.length < 40) { throw new Error('the expectation looks "
+    "empty'); }\n"
+    "if (undeclared.length || absent.length) {\n"
+    "  throw new Error('on the runtime and undeclared: [' + undeclared.join(', "
+    "') +\n"
+    "    '], declared and not on the runtime: [' + absent.join(', ') + ']');\n"
+    "}\n",
+    ctx);
+    EXPECT_TRUE (result.success)
+    << "the chain interface and create_expectation disagree: " << result.error_message;
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
 }
 
 // An optional field is `T | undefined` for any T the reader knows, not for the
@@ -399,9 +533,12 @@ TEST (ScriptTypesTest, ACallInsideALabelDoesNotEmptyTheSignature) {
 TEST (ScriptTypesTest, AStringLiteralUnionIsAType) {
     const std::string dts = generate_script_typedefs ();
     EXPECT_TRUE (contains (dts, "eventName: 'prerequest' | 'test';"));
-    // And prose is still not one: an assertion getter restating its own dotted
-    // name must not start being read as a type because it contains quotes.
-    EXPECT_TRUE (contains (dts, "true: void;"));
+    // And prose is still not one: a getter restating its own dotted name must
+    // not start being read as a type because it contains quotes. The example is
+    // from `pm.response.to.have.status`, which is a different object with its
+    // own chain - `field_type` is unchanged, and the chain collapse (#1209)
+    // deliberately did not reach it.
+    EXPECT_TRUE (contains (dts, "ok: void;"));
 }
 
 // `deep` is a flag-setting getter on the one chain object, so the runtime has

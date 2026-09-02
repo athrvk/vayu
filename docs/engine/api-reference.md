@@ -6791,7 +6791,7 @@ so a client may cache on `version`.
   "version": "1.0.0",
   "engine": "quickjs",
   "libUri": "ts:vayu/pm.d.ts",
-  "typeDefinitions": "interface VayuExpectTo {\n\tequal(expected: any): VayuExpectation;\n…"
+  "typeDefinitions": "interface VayuExpectation {\n\tequal(expected: any): VayuExpectation;\n…"
 }
 ```
 
@@ -6809,13 +6809,37 @@ Declaring the absent globals keeps the real mistake caught ("not callable")
 while that suppression is in force. A test executes `typeof <name>` in the real
 script engine for every entry, so the list cannot drift from the runtime.
 
-Two things the generated file cannot get from the table, both handled in
+**The assertion chain is one interface, read by leaf rather than by path**
+(#1209). A completion label is a dotted spelling - `to.have.deep.property` is
+what someone types - and not the shape of the object: `create_expectation`
+installs `to`, `have`, `deep` and `property` on the same expectation, and every
+one of them hands that expectation back. So the generator takes each label's
+last segment as the member and every earlier segment as evidence that word is a
+chainer, and emits a single `VayuExpectation` where every chain word is a
+property of that type and every matcher a method returning it - chai's own
+model. Read as a path tree it emitted two interfaces instead, and a matcher was
+reachable only along the one route some label happened to spell, so
+`.to.be.a('string').and.match(/x/)` was an editor error on a chain the engine
+runs. Where two labels share a leaf (`to.have.property`,
+`to.have.deep.property`, `to.have.nested.property`), the plainest spelling
+declares the member and the longer ones fold their documentation into its hover
+under their own labels.
+
+The guard is set equality rather than a list of names:
+`TheDeclaredChainIsTheObjectTheRuntimeBuilds` reads the interface's members out
+of the generated text and the expectation's out of the real script engine
+(`Object.getOwnPropertyNames`, so no terminal getter is triggered) and fails on
+a member either side has alone. A matcher added to the runtime and not to the
+table now reddens instead of being missing.
+
+Two things the generated file still cannot get from the table, both handled in
 `script_types.cpp` and guarded by `script_types_test.cpp`:
 
-- **Chain vocabulary.** A getter that *continues* an assertion chain (`.to.not`,
-  `.and`) and one that *performs* an assertion (`.to.be.true`) are identical as
-  completion entries - both are non-functions whose `detail` restates their own
-  name. Only meaning separates them, so the meaning is named in the generator.
+- **Which label roots open the chain.** `that.is.not.empty` is a chain and
+  `console.log` is a global, and nothing in either entry says which; the chain
+  roots (`to`, `and`, and chai's twelve language chains) are named in the
+  generator, so a label rooted at one is filed under the chain rather than
+  declaring a top-level `that` nothing binds.
 - **Unparseable parameter lists.** Two entries document an overload in prose
   TypeScript cannot parse (`upsert({ key, value }) | (name, value)`). Those fall
   back to `(...args: any[])`, keeping the member callable rather than emitting a
