@@ -202,8 +202,11 @@ white-on-`--primary` never occurs because fills use `--primary-fill`).
   the same class string, and the three `jsx-a11y` rules configured rather than
   obeyed as written. `eslint-plugin-jsx-a11y` recommended runs on every `.tsx`
   under `pnpm lint`, so a hand-rolled `role="button"` without a tab stop or a
-  key handler now fails CI at the line. → `focus-indicator.test.ts`,
-  `icon-button-labels.test.tsx`, plus the lint itself
+  key handler now fails CI at the line. The rules it cannot see are suppressed
+  at the line, and that section enumerates every one of them: adding a
+  suppression means adding it there, with its reason, and raising a ceiling
+  (#1282). → `focus-indicator.test.ts`, `icon-button-labels.test.tsx`,
+  `a11y-suppressions.test.ts`, plus the lint itself
 
 ## Borders: what a rule sits _on_, never what it is
 

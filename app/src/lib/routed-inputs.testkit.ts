@@ -92,6 +92,17 @@ export const DOC_READING_GUARDS = {
 		reader: "app/src/components/ui/type-scale.test.ts",
 		paths: ["docs/design-system.md"],
 	},
+	/*
+	 * The third reader of that page, and the second of its prose (#1282): the
+	 * Accessibility section enumerates the `jsx-a11y` rules suppressed at the
+	 * line, and the guard holds that list to what `app/src` actually carries. A
+	 * site edited out of the doc alone is the drift it exists to catch, so the
+	 * page is one of its inputs in the same sense the sources are.
+	 */
+	a11ySuppressions: {
+		reader: "app/src/components/a11y-suppressions.test.ts",
+		paths: ["docs/design-system.md"],
+	},
 	rendererState: {
 		reader: "app/src/state-management-doc.test.ts",
 		paths: [
