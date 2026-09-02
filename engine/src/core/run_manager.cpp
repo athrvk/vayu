@@ -33,22 +33,6 @@ inline int64_t now_ms () {
     .count ();
 }
 
-/// Snapshot what each bounded store thinned away, for the run summary. One
-/// copy so the completed-run and crashed-run summaries cannot report retention
-/// differently.
-SamplingRetention read_retention (const MetricsCollector& mc) {
-    SamplingRetention retention;
-    retention.errors_dropped               = mc.errors_dropped ();
-    retention.success_traces_dropped       = mc.success_results_dropped ();
-    retention.slow_traces_dropped          = mc.slow_results_dropped ();
-    retention.response_samples_dropped     = mc.response_samples_dropped ();
-    retention.exemplars_dropped            = mc.exemplar_results_dropped ();
-    retention.sample_bodies_dropped        = mc.sample_bodies_dropped ();
-    retention.response_bodies_captured     = mc.response_bodies_captured ();
-    retention.response_sample_budget_spent = mc.response_sample_budget_spent ();
-    return retention;
-}
-
 /**
  * @brief One deferred replay: a script, the samples it runs against, and the
  *        identity `pm.info` reports while it does.
@@ -197,6 +181,19 @@ std::vector<std::string>& failure_messages) {
     return totals;
 }
 } // namespace
+
+SamplingRetention read_retention (const MetricsCollector& mc) {
+    SamplingRetention retention;
+    retention.errors_dropped               = mc.errors_dropped ();
+    retention.success_traces_dropped       = mc.success_results_dropped ();
+    retention.slow_traces_dropped          = mc.slow_results_dropped ();
+    retention.response_samples_dropped     = mc.response_samples_dropped ();
+    retention.exemplars_dropped            = mc.exemplar_results_dropped ();
+    retention.sample_bodies_dropped        = mc.sample_bodies_dropped ();
+    retention.response_bodies_captured     = mc.response_bodies_captured ();
+    retention.response_sample_budget_spent = mc.response_sample_budget_spent ();
+    return retention;
+}
 
 /**
  * The run-level request and identity a single-request replay reads.

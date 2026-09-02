@@ -539,3 +539,53 @@ TEST (RunManager, ConstructorStillAcceptsAPlainTestString) {
     RunContext ctx ("r", config);
     EXPECT_EQ (ctx.test_script, "pm.test(\"a\",()=>{});");
 }
+
+// The wiring nobody else covers: what a collector counted has to reach the
+// stored summary. A field the collector grows and `read_retention` forgets
+// reports as zero-or-false forever, which is this repo's most repeated defect -
+// so the two cases the byte-budget marker (issue #1192) exists to separate are
+// checked through the function that carries it, not off the collector alone.
+// Drop the assignment in read_retention and the first half reddens.
+TEST (ReadRetention, CarriesTheResponseSampleBudgetMarkerIntoTheSummary) {
+    MetricsCollectorConfig tight;
+    tight.expected_requests         = 100;
+    tight.response_sample_rate      = 1;
+    tight.max_response_samples      = 1000;
+    tight.max_response_sample_bytes = 250;
+    MetricsCollector spent ("run_read_retention_spent", tight);
+
+    vayu::Response response;
+    response.status_code     = 200;
+    response.body            = std::string (100, 'x');
+    response.timing.total_ms = 1.0;
+    for (int i = 0; i < 10; ++i) {
+        spent.record_response_sample (response);
+    }
+
+    RunSummaryInputs inputs;
+    inputs.retention = read_retention (spent);
+    EXPECT_TRUE (inputs.retention.response_sample_budget_spent);
+    EXPECT_GT (inputs.retention.response_samples_dropped, 0u);
+    EXPECT_TRUE (build_run_summary_payload (
+    inputs)["sampling"]["response_sample_budget_spent"]
+    .get<bool> ());
+
+    MetricsCollectorConfig roomy;
+    roomy.expected_requests         = 100;
+    roomy.response_sample_rate      = 1;
+    roomy.max_response_samples      = 2;
+    roomy.max_response_sample_bytes = 1'000'000;
+    MetricsCollector displaced ("run_read_retention_uniform", roomy);
+    for (int i = 0; i < 10; ++i) {
+        displaced.record_response_sample (response);
+    }
+
+    RunSummaryInputs uniform;
+    uniform.retention = read_retention (displaced);
+    EXPECT_GT (uniform.retention.response_samples_dropped, 0u)
+    << "the count cap has to have displaced something for the two to differ";
+    EXPECT_FALSE (uniform.retention.response_sample_budget_spent);
+    EXPECT_FALSE (build_run_summary_payload (
+    uniform)["sampling"]["response_sample_budget_spent"]
+    .get<bool> ());
+}

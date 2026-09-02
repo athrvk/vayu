@@ -907,6 +907,17 @@ struct RunSummaryInputs {
 [[nodiscard]] nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs);
 
 /**
+ * @brief Snapshot what each bounded store thinned away, for the run summary.
+ *
+ * One copy so the completed-run and crashed-run summaries cannot report
+ * retention differently. Declared here rather than kept private because it is
+ * the only thing that carries a collector's counts into the stored summary: a
+ * field the collector grows and this forgets reaches no report, and nothing
+ * else in the engine would say so.
+ */
+[[nodiscard]] SamplingRetention read_retention (const MetricsCollector& mc);
+
+/**
  * @brief Wrap a per-tick stats object as a wire-ready SSE "metrics" event,
  * tagged with `id: <offset>` for Last-Event-ID resume. Extracted for testing.
  */
