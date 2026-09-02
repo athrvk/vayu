@@ -177,6 +177,33 @@ describe("useExecutionEvents batching", () => {
 		expect(committed()).toEqual(["e0", "e1"]);
 	});
 
+	it("keeps a buffered frame across a reconnect, and resumes after the one it received", () => {
+		const { unmount } = renderHook(() => useExecutionEvents());
+		startStream();
+
+		deliver(0);
+		deliver(1);
+		expect(committed()).toEqual(["e0"]);
+
+		// A dropped socket is not the stream ending: the batcher's timer is its
+		// own, so what it holds survives the reconnect rather than going with the
+		// `EventSource`. The resume point is the frame *received*, not the frame
+		// committed - the two are no longer the same thing, and reading the
+		// committed one would ask the relay to re-send a row already buffered.
+		act(() => void latest().onerror?.());
+		act(() => void vi.advanceTimersByTime(30_000));
+
+		expect(latest().url).toContain("lastEventId=1");
+
+		deliver(2);
+		act(() => void vi.advanceTimersByTime(FLUSH_MS));
+
+		expect(committed()).toEqual(["e0", "e1", "e2"]);
+		expect(useExecutionEventsStore.getState().isStreaming).toBe(true);
+
+		unmount();
+	});
+
 	it("drops what a replaced stream left buffered rather than committing it into the next", () => {
 		const { unmount } = renderHook(() => useExecutionEvents());
 		startStream("run_1");
