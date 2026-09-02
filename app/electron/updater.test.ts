@@ -22,6 +22,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { ROOT_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { UPDATE_CHECK_INTERVAL_MS, UPDATE_STARTUP_CHECK_DELAY_MS } from "./constants.js";
 
 type Handler = (arg: unknown) => void;
 
@@ -115,6 +116,11 @@ function failAttempt(err: Error): void {
 /** Let the retry's delay elapse so the second attempt runs. */
 async function letRetryRun(): Promise<void> {
 	await vi.advanceTimersByTimeAsync(2_000);
+}
+
+/** Let the launch delay elapse so the session's first check runs. */
+async function letStartupDelayPass(): Promise<void> {
+	await vi.advanceTimersByTimeAsync(UPDATE_STARTUP_CHECK_DELAY_MS);
 }
 
 afterEach(() => {
@@ -221,6 +227,81 @@ describe("checkForUpdatesNow", () => {
 	});
 });
 
+describe("when the session's first check runs", () => {
+	// On Windows and the Linux AppImage a check that finds a release downloads it
+	// on the spot, and `initAutoUpdater` is called moments after the window is
+	// created - so the transfer used to start at t=0 of a launch, against the
+	// user's own API traffic and the engine's startup disk work.
+
+	it("holds the first check back rather than starting one at launch", async () => {
+		vi.useFakeTimers();
+		const { initAutoUpdater } = await loadUpdater();
+		initAutoUpdater(getWindow);
+
+		expect(checkForUpdates).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(UPDATE_STARTUP_CHECK_DELAY_MS - 1);
+		expect(checkForUpdates).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(checkForUpdates).toHaveBeenCalledTimes(1);
+	});
+
+	it("waits on the notify platforms too, so there is one timing to reason about", async () => {
+		// macOS only fetches the feed, which is cheap - but a second timing rule
+		// would be a second thing to keep true.
+		vi.useFakeTimers();
+		const { initAutoUpdater } = await loadUpdater("darwin");
+		initAutoUpdater(getWindow);
+
+		expect(checkForUpdates).not.toHaveBeenCalled();
+		await letStartupDelayPass();
+		expect(checkForUpdates).toHaveBeenCalledTimes(1);
+	});
+
+	it("lets a check the user asks for during the wait stand in for it", async () => {
+		// Settings → General, or the menu item, moments after launch: the answer
+		// is the one the startup check would have got, so running it again when
+		// the delay elapses would be the same question twice.
+		vi.useFakeTimers();
+		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
+		initAutoUpdater(getWindow);
+
+		const pending = checkForUpdatesNow("renderer");
+		listeners.get("update-not-available")?.({});
+		await expect(pending).resolves.toMatchObject({ status: "up-to-date" });
+
+		await letStartupDelayPass();
+		expect(checkForUpdates).toHaveBeenCalledTimes(1);
+	});
+
+	it("drops the waiting check when the app quits before it comes due", async () => {
+		// `will-quit` runs while the delay is still pending on any launch shorter
+		// than a minute - the check must not fire into a torn-down updater.
+		vi.useFakeTimers();
+		const { initAutoUpdater, disposeAutoUpdater } = await loadUpdater();
+		initAutoUpdater(getWindow);
+
+		disposeAutoUpdater();
+		await letStartupDelayPass();
+
+		expect(checkForUpdates).not.toHaveBeenCalled();
+	});
+
+	it("leaves the 6h cycle on its own clock", async () => {
+		// The delay moves the first check, not the interval: the second check of
+		// the session still lands 6h after launch, not 6h after the first one.
+		vi.useFakeTimers();
+		const { initAutoUpdater } = await loadUpdater();
+		initAutoUpdater(getWindow);
+
+		await letStartupDelayPass();
+		listeners.get("update-not-available")?.({});
+		await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS - UPDATE_STARTUP_CHECK_DELAY_MS);
+
+		expect(checkForUpdates).toHaveBeenCalledTimes(2);
+	});
+});
+
 describe("one transient is not the answer", () => {
 	// A mac check is three sequential HTTPS requests through Chromium's net
 	// stack, and the first one of the session runs on the coldest possible
@@ -280,7 +361,7 @@ describe("one transient is not the answer", () => {
 		// is in flight inherits its fate. It has to inherit the retry too.
 		vi.useFakeTimers();
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater("darwin");
-		initAutoUpdater(getWindow); // starts the startup check
+		initAutoUpdater(getWindow); // the startup check is still waiting out its delay
 		const first = checkForUpdatesNow("renderer");
 		const joined = checkForUpdatesNow("renderer");
 
@@ -313,6 +394,7 @@ describe("one transient is not the answer", () => {
 		vi.useFakeTimers();
 		const { initAutoUpdater } = await loadUpdater();
 		initAutoUpdater(getWindow);
+		await letStartupDelayPass(); // the startup check is in flight from here
 		checkForUpdates.mockClear();
 
 		// Nobody is waiting on the startup check - it still gets its retry.
@@ -514,6 +596,7 @@ describe("where the result is delivered", () => {
 		vi.useFakeTimers();
 		const { initAutoUpdater } = await loadUpdater();
 		initAutoUpdater(getWindow);
+		await letStartupDelayPass(); // a silent cycle is actually in flight
 		// No manual check in flight - the interval's events must not pop a
 		// dialog over whatever the user is doing.
 		listeners.get("update-not-available")?.({});
