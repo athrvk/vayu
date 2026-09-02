@@ -41,7 +41,7 @@ import { ContextBar } from "./ContextBar";
 import { TabStrip } from "./TabStrip";
 import { tabElementId, tabPanelElementId } from "./tab-aria";
 import { closeTabFromKeyboard } from "./tab-focus";
-import { cycleRegionFocus, focusRequestUrl, type AppRegion } from "./region-focus";
+import { cycleRegionFocus, focusRequestUrl, regionProps } from "./region-focus";
 import { CommandPalette } from "@/modules/palette";
 import { DetailSkeleton } from "@/components/shared/DetailSkeleton";
 import RequestBuilder from "@/modules/request-builder";
@@ -360,7 +360,7 @@ export default function Shell() {
 							// A stop in the F6 cycle - see `region-focus.ts`. On `main`
 							// rather than on the tabpanel inside it so the cycle reaches
 							// the pane whether or not a tab is open.
-							data-app-region={"main" satisfies AppRegion}
+							{...regionProps("main")}
 						>
 							{/*
 							 * The other half of the strip's tabs pattern: the region a tab

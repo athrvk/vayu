@@ -1289,6 +1289,15 @@ four the window actually has. The attribute says which of the shell's children
 are stops in the cycle, and a feature adding a landmark of its own cannot join
 it by accident.
 
+A band is marked by spreading `regionProps("drawer")` from `region-focus.ts`,
+never by writing the attribute onto the element. A JSX attribute *name* has to
+be a literal, so bands that spelled it out left one name with five spellings,
+four of which a rename would leave behind; and the value they carried inline,
+`{"drawer" satisfies AppRegion}`, is a node `jsx-ast-utils` has no case for, so
+`pnpm lint` printed two "could not be resolved" advisories on every run, CI
+included (#1261). The helper takes the `AppRegion` union, which makes a name
+that is not a band an error at the call rather than on the value.
+
 Focus lands on the region's first focusable element, never on the region
 container itself. A `tabindex="-1"` box would be a legal target and would take
 focus silently: the `:focus-visible` rule above is written `[tabindex]:not([tabindex="-1"])`,

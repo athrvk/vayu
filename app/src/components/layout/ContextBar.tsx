@@ -27,7 +27,7 @@ import { useLayoutStore, useTabsStore } from "@/stores";
 import { DEFAULT_CONTEXT_BAR_WIDTH } from "@/constants/layout";
 import { TooltipIconButton } from "@/components/ui";
 import { contextBarHasContent } from "./context-bar-content";
-import type { AppRegion } from "./region-focus";
+import { regionProps } from "./region-focus";
 import { sectionsForTab } from "./context-bar/registry";
 import { ContextBarSectionFrame, SectionLoading } from "./context-bar/Section";
 
@@ -70,7 +70,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 			style={{ width: contextBarWidth }}
 			aria-label="Context sidebar"
 			// A stop in the F6 cycle - see `region-focus.ts`.
-			data-app-region={"context" satisfies AppRegion}
+			{...regionProps("context")}
 		>
 			<PanelResizeHandle
 				side="left"

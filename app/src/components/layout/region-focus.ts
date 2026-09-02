@@ -48,6 +48,27 @@ export const REGION_ATTRIBUTE = "data-app-region";
  */
 export type AppRegion = "banner" | "drawer" | "main" | "context";
 
+/**
+ * The props that mark a band, spread onto it: `<aside {...regionProps("drawer")}>`.
+ *
+ * Spread rather than written as an attribute, for two reasons. A JSX attribute
+ * *name* has to be a literal, so each band spelled `data-app-region` out by
+ * hand and `REGION_ATTRIBUTE` was read only by the query on the other side -
+ * five spellings of one name, four of which a rename would leave behind. And
+ * the value carried its own type inline (`{"drawer" satisfies AppRegion}`),
+ * which `jsx-ast-utils` has no case for: every `pnpm lint` run, CI included,
+ * printed two `TSSatisfiesExpression` advisories asking the reader to go file a
+ * bug upstream (#1261). They came from the two bands that are an `<aside>` -
+ * the only one of the four tags `jsx-a11y/role-supports-aria-props` resolves an
+ * implicit role for, and so the only one whose attributes it reads.
+ *
+ * The parameter types the name more tightly than `satisfies` did, besides: a
+ * name outside the union is now an error at the call rather than on the value.
+ */
+export function regionProps(region: AppRegion): Record<typeof REGION_ATTRIBUTE, AppRegion> {
+	return { [REGION_ATTRIBUTE]: region };
+}
+
 /** Every region currently on screen, in document order. */
 export function appRegions(): HTMLElement[] {
 	return Array.from(document.querySelectorAll<HTMLElement>(`[${REGION_ATTRIBUTE}]`));
