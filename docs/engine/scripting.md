@@ -2325,7 +2325,8 @@ The **language** is current; what is missing is the **host environment**:
   an exhausted byte budget simply stops admitting. Only a target whose retained
   bodies average more than ~256 KiB reaches it at the defaults; raise
   `maxResponseSampleBytes`, or lower `max_response_samples` so fewer, later
-  responses share the budget, if that matters for the run you are grading
+  responses share the budget, if that matters for the run you are grading. The
+  report says which one happened: `sampling.responseSampleBudgetSpent`
 - `samplesTested` in the report (`TestsSampled`) is the **size of that sample**,
   not the run's request count, and `sampling.responseSamplesDropped` beside it
   says how many responses the bound thinned away

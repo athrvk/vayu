@@ -2074,6 +2074,18 @@ export interface RunReport {
 		/** Responses displaced or dropped before test validation ran. */
 		responseSamplesDropped: number;
 		/**
+		 * Whether the run's response-sample **byte** budget
+		 * (`max_response_sample_bytes`) ended a sample. The count above cannot
+		 * say it: the store is bounded twice and both bounds report through it,
+		 * but only this one costs the tested set its uniformity - the count cap
+		 * displaces an incumbent, while a spent byte budget stops admitting, so
+		 * the run is graded on the part of it whose bodies fit.
+		 *
+		 * `undefined` is a run recorded before the marker existed, which is not
+		 * the same claim as `false` - see `SampleRetentionNote`.
+		 */
+		responseSampleBudgetSpent?: boolean;
+		/**
 		 * Per-status exemplars refused because the exemplar store was full
 		 * (`max_exemplar_results`). Only a target answering with more distinct
 		 * status codes than that limit can produce a non-zero figure.

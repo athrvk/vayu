@@ -1206,8 +1206,15 @@ scripts are graded on. That buffer is bounded twice, and one counter reports
 both: by count (`max_response_samples`), which displaces an incumbent and so
 keeps the graded set uniform over the run, and by bytes
 (`max_response_sample_bytes`), which stops admitting once the retained bodies
-fill it. The renderer cannot tell which applied, which is why the note's
-uniformity sentence is not always true - issue #1192.
+fill it. The renderer now reads `sampling.responseSampleBudgetSpent` to tell
+which one applied (issue #1192): `true` means the byte budget ended at least
+one sample, so the graded set is drawn from the part of the run whose bodies
+fit rather than uniformly from the whole of it; `false` means only the count
+cap displaced anything, so the graded set stays uniform. The key is absent on
+a summary written before the marker existed, and absent keeps today's
+uniformity sentence rather than weakening it - only a target whose retained
+bodies average more than ~256 KiB reaches the budget at the defaults, so
+absent-as-uniform is the accurate message for nearly every older run.
 The renderer treats a non-zero count as "this list is a
 *sample* of a larger set": `SampleRetentionNote` (shared) renders under the
 dashboard's Sampled Requests, the history Samples tab and the Test Validation

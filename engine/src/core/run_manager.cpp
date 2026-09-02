@@ -38,13 +38,14 @@ inline int64_t now_ms () {
 /// differently.
 SamplingRetention read_retention (const MetricsCollector& mc) {
     SamplingRetention retention;
-    retention.errors_dropped           = mc.errors_dropped ();
-    retention.success_traces_dropped   = mc.success_results_dropped ();
-    retention.slow_traces_dropped      = mc.slow_results_dropped ();
-    retention.response_samples_dropped = mc.response_samples_dropped ();
-    retention.exemplars_dropped        = mc.exemplar_results_dropped ();
-    retention.sample_bodies_dropped    = mc.sample_bodies_dropped ();
-    retention.response_bodies_captured = mc.response_bodies_captured ();
+    retention.errors_dropped               = mc.errors_dropped ();
+    retention.success_traces_dropped       = mc.success_results_dropped ();
+    retention.slow_traces_dropped          = mc.slow_results_dropped ();
+    retention.response_samples_dropped     = mc.response_samples_dropped ();
+    retention.exemplars_dropped            = mc.exemplar_results_dropped ();
+    retention.sample_bodies_dropped        = mc.sample_bodies_dropped ();
+    retention.response_bodies_captured     = mc.response_bodies_captured ();
+    retention.response_sample_budget_spent = mc.response_sample_budget_spent ();
     return retention;
 }
 
@@ -1689,7 +1690,14 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
         // by the Samples tab to warn about credentials, so it has to be
         // persisted rather than re-derived - the tab renders from the report
         // long after the collector is gone.
-        { "response_bodies_captured", inputs.retention.response_bodies_captured } };
+        { "response_bodies_captured", inputs.retention.response_bodies_captured },
+        // Which of the two bounds on the response-sample store thinned it. The
+        // count above says how much went unvalidated; this says whether what
+        // was kept is still a uniform sample of the run, which is the sentence
+        // the app's retention note prints (issue #1192). Always written, so an
+        // absent key means an engine too old to have looked - not a run that
+        // kept its uniformity.
+        { "response_sample_budget_spent", inputs.retention.response_sample_budget_spent } };
     // Omitted entirely when validation did not run, so the report keeps
     // distinguishing "no test script" from "a script that passed nothing".
     if (inputs.tests.has_value ()) {

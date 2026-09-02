@@ -1110,6 +1110,50 @@ TEST (MetricsCollectorSampleBudget, StepReservoirsShareTheRunsBudget) {
     EXPECT_EQ (collector.response_samples_dropped (), 8u);
 }
 
+// Issue #1192: the drop count cannot say which bound applied, and the two
+// leave different sets behind - a displaced incumbent keeps the retained set a
+// uniform sample of the run, a spent byte budget keeps the part of it whose
+// bodies fit. A run that never reaches the budget must not be marked, or the
+// app stops making the uniformity claim in the case where it holds. Remove the
+// store in claim_response_sample_bytes and the second half reddens.
+TEST (MetricsCollectorSampleBudget, OnlyTheByteBudgetMarksTheRetainedSetNonUniform) {
+    MetricsCollector count_capped ("run_count_cap", reservoir_config (4, 1'000'000));
+    for (int i = 0; i < 200; ++i) {
+        count_capped.record_response_sample (response_with_body (100));
+    }
+    ASSERT_GT (count_capped.response_samples_dropped (), 0u)
+    << "the count cap has to have displaced something for the two cases to "
+       "differ";
+    EXPECT_FALSE (count_capped.response_sample_budget_spent ())
+    << "a reservoir displacement leaves the retained set uniform over the run";
+
+    MetricsCollector budget_spent ("run_budget_spent", reservoir_config (1000, 250));
+    for (int i = 0; i < 10; ++i) {
+        budget_spent.record_response_sample (response_with_body (100));
+    }
+    EXPECT_TRUE (budget_spent.response_sample_budget_spent ());
+
+    budget_spent.release_response_samples ();
+    EXPECT_TRUE (budget_spent.response_sample_budget_spent ())
+    << "the summary is built after the retention window releases the bodies, "
+       "and freeing them does not give the dropped responses back";
+}
+
+// The per-step stores spend the same budget, so they mark the same fact - a
+// scenario run that spends it through its steps is graded on the part of the
+// run whose bodies fit, exactly as a single-request one is.
+TEST (MetricsCollectorSampleBudget, AStepStoreSpendingTheBudgetMarksItToo) {
+    MetricsCollector collector ("run_step_budget_marked", reservoir_config (10, 250));
+    collector.configure_step_samples ({ true, true });
+
+    for (int i = 0; i < 5; ++i) {
+        collector.record_step_response_sample (response_with_body (100), 0, {});
+        collector.record_step_response_sample (response_with_body (100), 1, {});
+    }
+
+    EXPECT_TRUE (collector.response_sample_budget_spent ());
+}
+
 // #1154's deferred half: the retention window keeps the tick topic and the
 // summary counters, not the bodies the deferred passes have already read. A
 // run against a large-bodied target used to hold its whole sample budget

@@ -808,6 +808,11 @@ struct SamplingRetention {
     /// tab warn that the stored set may contain credentials. Deleted with the
     /// run, which makes `maxRunsRetained` the expiry for that data too.
     size_t response_bodies_captured = 0;
+    /// Whether the response-sample byte budget (`max_response_sample_bytes`)
+    /// ended at least one sample. The counts above cannot say it: both bounds
+    /// on that store report through `response_samples_dropped`, and only this
+    /// one costs the retained set its uniformity (issue #1192).
+    bool response_sample_budget_spent = false;
 };
 
 /**

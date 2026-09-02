@@ -1087,11 +1087,13 @@ retry is the reason for saying anything.
 
 One sentence, wherever a sampled set is displayed: how many records the run's
 bounded stores displaced, and that what is on screen is drawn uniformly from
-the whole run rather than its opening. Several surfaces show such a set - the
-dashboard's Sampled Requests card, the history Samples tab, and the shared
-`TestValidationSummary` (itself rendered in both the dashboard and the history
-Overview) - so the wording lives here once instead of being written out per
-surface and drifting.
+the whole run rather than its opening - except on the `responses` surface when
+the run's response-sample byte budget was spent, where it says instead that
+what is on screen is drawn from the part of the run whose bodies fit. Several
+surfaces show such a set - the dashboard's Sampled Requests card, the history
+Samples tab, and the shared `TestValidationSummary` (itself rendered in both
+the dashboard and the history Overview) - so the wording lives here once
+instead of being written out per surface and drifting.
 
 Renders nothing when the run displaced nothing, and nothing when the run
 reported no counts at all (an older summary): "nothing was dropped" and "we
