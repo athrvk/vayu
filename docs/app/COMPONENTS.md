@@ -1571,11 +1571,14 @@ They share **one** Tab stop between them, roving: the token holding it has
 to the ends, and whichever token takes focus keeps the stop. Without that, a URL
 with five variables put five stops between the URL and Send. It is the roving
 tabindex `design-system.md` describes for the collection tree, hand-wired rather
-than taken from `useRovingTreeFocus`: that hook navigates `[role="treeitem"]` and
-dispatches at the tree's own data attributes, so pointed at tokens it would
-silently do nothing. Arrowing deliberately does not wrap - falling off the end
-leaves Tab as the way out. Locate the layer in a test by `data-variable-overlay`,
-never by `aria-hidden`, which now names the parts rather than the whole.
+than taken from the tree's machinery: `useRovingTreeFocus` navigates
+`[role="treeitem"]` and dispatches at the tree's own data attributes, so pointed
+at tokens it would silently do nothing, and `focusTreeRow` (`tree-focus.ts`)
+moves the stop by writing `tabIndex` onto DOM nodes - correct for rows that do
+not re-render for it, wrong for a strip whose stop is a React prop. Arrowing
+deliberately does not wrap - falling off the end leaves Tab as the way out.
+Locate the layer in a test by `data-variable-overlay`, never by `aria-hidden`,
+which now names the parts rather than the whole.
 
 **The field is a combobox, and it steers its own list.** `VariableInput` carries
 `role="combobox"`, `aria-autocomplete="list"`, `aria-expanded`, `aria-controls`
