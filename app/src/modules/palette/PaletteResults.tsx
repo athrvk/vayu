@@ -218,10 +218,15 @@ function PaletteRow({
 					{item.subtitle}
 				</span>
 			)}
-			{/* The two trailing slots below are mutually exclusive by
-			    construction, which is why neither guards against the other: a
-			    chord belongs to a command, and no command source stamps a
-			    recency.
+			{/* One of the two trailing slots below draws, never both, and the
+			    chord is the one that wins: a stamp is why a row is in Recents,
+			    but the chord is how the row is run, and how to run it outlasts
+			    when it last was. The recency carries the guard because it is
+			    the slot that yields. Both at once would print `⌘K  2m ago` with
+			    the spacing of neither - each carries `ml-auto`, so the second
+			    no longer pushes right (#1260). No source stamps a command row
+			    today; #1197 made one survivable by keeping such a row out of
+			    two sections at once, and this is the same premise held here.
 
 			    One cap per key, the `Kbd` docstring's own chord form, drawn from
 			    the chord the handler matches rather than a second spelling of
@@ -236,7 +241,7 @@ function PaletteRow({
 					))}
 				</span>
 			)}
-			{recency && (
+			{recency && !item.shortcut && (
 				<span className="ml-auto shrink-0 pl-3 text-xs text-muted-foreground">
 					{recency}
 				</span>

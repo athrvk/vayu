@@ -33,7 +33,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CommandPalette } from "./CommandPalette";
 import { useImportModalStore, useLayoutStore, useTabsStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
-import { useLiveCommandSurfaceStore } from "@/lib/commands";
+import { useLiveCommandSurfaceStore, type CommandContext } from "@/lib/commands";
 import { CLOSE_TAB_CHORD } from "@/constants/shortcuts";
 import { chordKeys, isMac } from "@/lib/platform";
 import { formatRelativeTime } from "@/utils";
@@ -100,6 +100,28 @@ vi.mock("@/queries", () => ({
 vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ resolveString: (s: string) => s }),
 }));
+
+/**
+ * The row no source produces yet: a command that also carries a recency stamp.
+ * `ranking.ts` sends anything stamped to Recents (#1197), so such a row reaches
+ * `PaletteRow` with a chord *and* an age to print - the collision the trailing
+ * slots guard against (#1260). `commandItems` has no code path that writes
+ * `recencyAt`, and that is the premise under test rather than an omission, so
+ * the stamp is applied here, to one row, by id.
+ */
+const stampedCommand = vi.hoisted(() => ({ id: null as string | null, at: 0 }));
+
+vi.mock("./sources/commandItems", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./sources/commandItems")>();
+	return {
+		commandItems: (ctx: CommandContext) =>
+			actual
+				.commandItems(ctx)
+				.map((item) =>
+					item.id === stampedCommand.id ? { ...item, recencyAt: stampedCommand.at } : item
+				),
+	};
+});
 
 function renderPalette() {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -178,6 +200,7 @@ beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
 	useImportModalStore.setState({ isOpen: false });
 	useSettingsStore.setState({ selectedCategory: "appearance", highlightedKey: null });
+	stampedCommand.id = null;
 	useLiveCommandSurfaceStore.setState({ startLoadTest: null });
 });
 afterEach(cleanup);
@@ -542,6 +565,31 @@ describe("the launcher sections", () => {
 		// is worse than none, since nothing would answer it.
 		const row = screen.getByText("Import collection").closest("[cmdk-item]")!;
 		expect(row.querySelectorAll("kbd")).toHaveLength(0);
+	});
+
+	it("prints the chord and not the age on a Recents row carrying both", () => {
+		const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "inbox", entityId: null }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		stampedCommand.id = "command:close-tab";
+		stampedCommand.at = fiveMinutesAgo;
+		renderPalette();
+		open();
+
+		// The stamp is what put it in Recents, and no other row is dated.
+		expect(rowsUnder("Recents")).toEqual(['Close "Inbox"']);
+
+		const row = screen.getByText('Close "Inbox"').closest("[cmdk-item]")!;
+		const caps = [...row.querySelectorAll("kbd")].map((el) => el.textContent);
+		expect(caps).toEqual(chordKeys(CLOSE_TAB_CHORD));
+		// Drop the `!item.shortcut` guard in `PaletteRow` and this is the line
+		// that reds: both slots draw, each with its own `ml-auto`, so the age
+		// no longer pushes right and the row reads `⌘W  5m ago` with the
+		// spacing of neither.
+		expect(row.textContent).not.toContain(formatRelativeTime(fiveMinutesAgo));
 	});
 
 	it("puts the keyboard hints outside the band that scrolls", () => {
