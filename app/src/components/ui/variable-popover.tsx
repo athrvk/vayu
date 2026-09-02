@@ -481,6 +481,16 @@ export function VariablePopover({
 								isSecret && !isSecretRevealed ? (
 									<div className="relative">
 										<Input
+											/*
+											 * Keyed against the revealed field below,
+											 * which is otherwise the same `<Input>` in
+											 * the same slot: React would reconcile the
+											 * two rather than remount, and `autoFocus`
+											 * fires on mount - so revealing left focus
+											 * behind on the eye and the field the reveal
+											 * exists to open had to be tabbed back to.
+											 */
+											key="secret-masked"
 											readOnly
 											value={varInfo.value ? SECRET_MASK : ""}
 											placeholder="not set"
@@ -507,6 +517,7 @@ export function VariablePopover({
 								) : (
 									<div className="relative">
 										<Input
+											key="secret-revealed"
 											value={editValue}
 											onChange={(e) => setEditValue(e.target.value)}
 											onKeyDown={handleKeyDown}

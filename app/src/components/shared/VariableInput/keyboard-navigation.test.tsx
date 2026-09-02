@@ -191,6 +191,24 @@ describe("the field's combobox semantics", () => {
 		expect(input.getAttribute("aria-activedescendant")).toBe(moved?.id);
 	});
 
+	it("tracks a highlight the pointer moved, not only one the arrows did", () => {
+		/*
+		 * cmdk moves its own highlight on `onPointerMove`, which re-renders the
+		 * list and nothing above it. The probe is subscribed to cmdk's store
+		 * rather than to this field's state for exactly that reason - read the
+		 * highlight from the props going down and a hover would announce nothing.
+		 */
+		const { container, input } = renderHarness();
+
+		type(input, "{{");
+		const list = ownList(container);
+		const rows = list.querySelectorAll<HTMLElement>("[cmdk-item]");
+		fireEvent.pointerMove(rows[2]);
+
+		expect(highlighted(list)).toHaveTextContent("gamma");
+		expect(input.getAttribute("aria-activedescendant")).toBe(rows[2].id);
+	});
+
 	it("stays an ordinary text box where no list can ever open", () => {
 		const { input } = renderHarness({ scoped: false });
 
@@ -288,6 +306,26 @@ describe("the token strip", () => {
 
 		fireEvent.keyDown(tokens(container)[2], { key: "Home" });
 		expect(document.activeElement).toBe(tokens(container)[0]);
+	});
+
+	it("leaves the tab order entirely when the field is disabled", () => {
+		const { container } = render(
+			<TooltipProvider delayDuration={0}>
+				<VariableInput
+					value="{{alpha}}/{{beta}}"
+					onChange={() => {}}
+					aria-label="URL"
+					disabled
+					variables={variableSupportStub(SCOPED)}
+				/>
+			</TooltipProvider>
+		);
+
+		// The other half of "no focusable element under aria-hidden": a disabled
+		// field paints the same strip, and it must not hold a stop at all.
+		const strip = tokens(container);
+		expect(strip).toHaveLength(2);
+		expect(strip.every((t) => t.getAttribute("tabindex") === "-1")).toBe(true);
 	});
 
 	it("still opens the popover from the token that holds focus", () => {
