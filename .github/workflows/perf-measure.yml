@@ -229,7 +229,10 @@ jobs:
       - name: Check the packaged app carries the engine
         shell: bash
         run: |
-          staged="$(find app/release -type f -path '*/resources/bin/vayu-engine*' | head -n 1)"
+          # -ipath, because the directory extraResources lands in is named for
+          # the platform's own convention: `resources/bin` in an unpacked Linux
+          # or Windows build, `Vayu.app/Contents/Resources/bin` on macOS.
+          staged="$(find app/release -type f -ipath '*/resources/bin/vayu-engine*' | head -n 1)"
           if [ -z "$staged" ]; then
             echo "::error::the packaged build has no engine under resources/bin - electron-builder's extraResources did not copy app/build/resources/bin"
             find app/release -maxdepth 3 -name resources -type d
