@@ -119,7 +119,10 @@ describe("the GraphQL section's relevance", () => {
 	});
 
 	it("appears for a request that does send one", () => {
-		request = restRequest({ bodyType: "graphql", body: { mode: "graphql", content: "{ me }" } });
+		request = restRequest({
+			bodyType: "graphql",
+			body: { mode: "graphql", content: "{ me }" },
+		});
 		expect(renderHook(() => useGraphQLRelevance(TAB)).result.current).toBe("content");
 	});
 
@@ -141,7 +144,9 @@ describe("the cookies section's relevance", () => {
 	it("says none for a host whose jar is empty", () => {
 		// Not hidden: "nothing is riding along" is an answer to a question people
 		// open this section to ask.
-		expect(renderHook(() => useCookiesRelevance(TAB)).result.current).toEqual({ empty: "none" });
+		expect(renderHook(() => useCookiesRelevance(TAB)).result.current).toEqual({
+			empty: "none",
+		});
 	});
 
 	it("has content once one cookie matches the host", () => {
@@ -160,7 +165,9 @@ describe("the cookies section's relevance", () => {
 				{ environmentId: "env_1", cookies: [] },
 			],
 		};
-		expect(renderHook(() => useCookiesRelevance(TAB)).result.current).toEqual({ empty: "none" });
+		expect(renderHook(() => useCookiesRelevance(TAB)).result.current).toEqual({
+			empty: "none",
+		});
 	});
 
 	it("waits rather than reporting empty while the jar is loading", () => {

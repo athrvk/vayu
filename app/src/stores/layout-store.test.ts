@@ -180,10 +180,7 @@ describe("layout-store context-bar sections", () => {
 		});
 
 		it("prunes the retired `environment` id", () => {
-			const migrated = migrate(
-				{ contextBarCollapsedSections: ["environment", "auth"] },
-				3
-			);
+			const migrated = migrate({ contextBarCollapsedSections: ["environment", "auth"] }, 3);
 			expect(migrated.contextBarCollapsedSections).not.toContain("environment");
 			expect(migrated.contextBarCollapsedSections).toEqual(["auth", "code"]);
 		});

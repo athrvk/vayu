@@ -67,12 +67,12 @@ interface ContextBarSectionSlotProps {
  * answer.
  *
  * The `useRelevance` call lives in a component of its own rather than in the
- * loop above it because the applicable section list changes with the tab, and a
- * hook called once per member of a list whose length changes is the rules of
- * hooks broken. A component per section, keyed by the section id - unique, and
- * pinned so by `registry.test.tsx` - gives every hook a mount of its own:
- * React unmounts the slot when its id leaves the list, so no instance ever ends
- * up calling a different section's hook in the same position.
+ * loop that renders it, because the applicable section list changes with the
+ * tab, and a hook called once per member of a list whose length changes is the
+ * rules of hooks broken. A component per section, keyed by the section id -
+ * unique, and pinned so by `registry.test.tsx` - gives every hook a mount of its
+ * own: React unmounts the slot when its id leaves the list, so no instance ever
+ * ends up calling a different section's hook in the same position.
  */
 function ContextBarSectionSlot({ section, tab, expanded, onToggle }: ContextBarSectionSlotProps) {
 	// A section that declares no relevance has content by definition. The
