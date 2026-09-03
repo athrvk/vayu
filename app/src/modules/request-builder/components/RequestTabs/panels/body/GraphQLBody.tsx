@@ -99,8 +99,6 @@ export interface GraphQLBodyProps {
 	 * it are previews, used for cache identity and display, never sent.
 	 */
 	schemaTarget: SchemaTarget;
-	/** Registers each editor so the panel can relayout them on a height change. */
-	onEditorMount: OnMount;
 	/**
 	 * The Variables pane's text as this request last had it, or null for none.
 	 *
@@ -351,7 +349,6 @@ export function GraphQLBody({
 	onBodyChange,
 	requestId,
 	schemaTarget,
-	onEditorMount,
 	variablesDraft,
 	onVariablesDraftChange,
 	method,
@@ -374,7 +371,6 @@ export function GraphQLBody({
 	 */
 	const variablesDiagnostics = useRef<{ dispose: () => void } | null>(null);
 	const handleVariablesMount: OnMount = (editorInstance, monacoInstance) => {
-		onEditorMount(editorInstance, monacoInstance);
 		monacoRef.current = monacoInstance;
 		const model = editorInstance.getModel();
 		setVariablesModelUri(model?.uri.toString() ?? null);
@@ -402,8 +398,7 @@ export function GraphQLBody({
 	 * case, so "no editor yet" is the ordinary path rather than the odd one.
 	 */
 	const [queryEditorReady, setQueryEditorReady] = useState(false);
-	const handleQueryMount: OnMount = (editorInstance, monacoInstance) => {
-		onEditorMount(editorInstance, monacoInstance);
+	const handleQueryMount: OnMount = (editorInstance) => {
 		queryEditorRef.current = editorInstance;
 		setQueryEditorReady(true);
 	};

@@ -17,10 +17,21 @@
  * *between* `--border` and `--border-strong` in dark, so `border-input` there
  * was either invisible or wrong depending on the theme. `surface-sunken`
  * declares a `--rule` that reads on it, and `border-rule` inherits that.
+ *
+ * **The editor fills the panel** (#1223). It was pinned at 350px inside a
+ * `flex-1 overflow-y-auto` tab, so on a tall window the one place a user writes
+ * code stayed the same height and a wall of reference prose below it took the
+ * rest. The prose is gone: what it listed is in the engine's completion table,
+ * which `ScriptSnippets` lists insertably and the editor already offers as you
+ * type. What is left below the editor is the one fact per variant that a
+ * snippet cannot show, beside the link to the docs that carry the rest.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import type * as Monaco from "monaco-editor";
 import { Button, Badge, CodeEditor, VariableScopeBadge } from "@/components/ui";
+import { ScriptSnippets } from "@/components/shared";
+import { insertSnippetAtCursor } from "@/lib/editor-snippet";
 import { useRequestBuilderContext } from "../../../../context";
 import InheritedScriptsNotice from "../InheritedScriptsNotice";
 import LegacyScriptNotice from "../LegacyScriptNotice";
@@ -48,6 +59,7 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 	const context = useRequestBuilderContext();
 	const { request, updateField, getAllVariables, getVariableOrigins } = context;
 	const [showVariables, setShowVariables] = useState(false);
+	const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
 
 	const script = request[config.field];
 	const usedVars = referencedVariables(script);
@@ -55,7 +67,14 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 	const hasReferencedVars = usedVars.length > 0;
 
 	return (
-		<div className="space-y-4">
+		/*
+		 * A column that fills the tab panel, for `BodyPanel`'s reason: the editor
+		 * was a fixed 350px box inside a pane with the window's height. Everything
+		 * but the editor keeps its intrinsic height; `min-h-0` is what lets the
+		 * editor shrink below its content when the window is short - including
+		 * when the snippets list below it opens (#1223).
+		 */
+		<div className="flex min-h-0 flex-1 flex-col gap-4">
 			<div className="flex items-center justify-between">
 				<p className="text-sm text-muted-foreground">{config.intro}</p>
 				{hasReferencedVars && (
@@ -271,48 +290,40 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 				</div>
 			)}
 
-			<div className="rounded-md border border-rule surface-card bg-card overflow-hidden">
+			<div className="min-h-40 flex-1 rounded-md border border-rule surface-card bg-card overflow-hidden">
 				<CodeEditor
-					height="350px"
 					language="javascript"
 					ariaLabel={config.editorLabel}
 					value={script}
 					onChange={(value) => updateField(config.field, value ?? "")}
+					onMount={(instance) => {
+						editorRef.current = instance;
+					}}
 				/>
 			</div>
 
-			<div className="text-xs text-muted-foreground space-y-1">
-				{/*
-				 * The quick reference is six lines; the scripting guide is the rest
-				 * of the API - every matcher, every `pm.*` member, and the rules
-				 * these notes only summarise. It goes to the published docs site
-				 * through the keyed `openAppLink` channel, which is the only way
-				 * the renderer can reach the system browser (a plain anchor would
-				 * spawn an unmanaged Electron window).
-				 */}
-				<div className="flex items-center justify-between gap-2">
-					<p className="font-medium">Quick Reference:</p>
-					<button
-						type="button"
-						className="text-primary-text underline underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
-						onClick={() => window.electronAPI?.openAppLink("scripting")}
-					>
-						Scripting docs
-					</button>
-				</div>
-				<pre className="m-0 p-2 surface-sunken rounded-md border border-rule font-mono whitespace-pre-wrap">
-					{config.quickReference.join("\n")}
-				</pre>
-				{/*
-				 * The rules a snippet cannot show. `list-disc` needs the inside
-				 * position: the panel has no gutter to hang markers in, and
-				 * outside markers would sit under the pre block's left edge.
-				 */}
-				<ul className="list-disc list-inside space-y-1 pt-1">
-					{config.notes.map((note, index) => (
-						<li key={index}>{note}</li>
-					))}
-				</ul>
+			<ScriptSnippets
+				context={variant === "pre" ? "pre" : "test"}
+				onInsert={(snippet) => insertSnippetAtCursor(editorRef.current, snippet)}
+			/>
+
+			{/*
+			 * The one fact a snippet cannot show, and the link to the rest. The
+			 * guide is every matcher, every `pm.*` member and the rules the
+			 * completion table states per member; it opens through the keyed
+			 * `openAppLink` channel, which is the only way the renderer can reach
+			 * the system browser (a plain anchor would spawn an unmanaged
+			 * Electron window).
+			 */}
+			<div className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground">
+				<p>{config.contextNote}</p>
+				<button
+					type="button"
+					className="shrink-0 text-primary-text underline underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+					onClick={() => window.electronAPI?.openAppLink("scripting")}
+				>
+					Scripting docs
+				</button>
 			</div>
 		</div>
 	);

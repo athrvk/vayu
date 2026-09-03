@@ -75,6 +75,21 @@ interface LayoutState {
 	graphqlVariablesSize: number;
 
 	/**
+	 * Whether the script editors' snippets list is collapsed to its header.
+	 *
+	 * One flag for both hosts - the request Script panel and the collection
+	 * Script tab - because it answers one question about the person, not about
+	 * the surface: whether they want templates on screen while they write. It is
+	 * here for the same reason the GraphQL Variables pane's collapse is: the
+	 * panel's own memory dies with the Radix unmount every tab switch does.
+	 *
+	 * Collapsed by default. The editor is what the panel is for, and a list that
+	 * opened itself under every script editor would be the wall of prose it
+	 * replaced, with a chevron on it.
+	 */
+	scriptSnippetsCollapsed: boolean;
+
+	/**
 	 * Whether the ⌘K command palette is showing.
 	 *
 	 * Here rather than as local state in the palette because the two things that
@@ -114,6 +129,8 @@ interface LayoutState {
 	setGraphqlVariablesCollapsed: (collapsed: boolean) => void;
 	setGraphqlVariablesSize: (size: number) => void;
 
+	setScriptSnippetsCollapsed: (collapsed: boolean) => void;
+
 	setPaletteOpen: (open: boolean) => void;
 }
 
@@ -129,6 +146,7 @@ export const useLayoutStore = create<LayoutState>()(
 			requestSplitRatio: 0.5,
 			graphqlVariablesCollapsed: false,
 			graphqlVariablesSize: DEFAULT_GRAPHQL_VARIABLES_SIZE,
+			scriptSnippetsCollapsed: true,
 			paletteOpen: false,
 
 			setDrawerOpen: (open) => set({ drawerOpen: open }),
@@ -172,6 +190,8 @@ export const useLayoutStore = create<LayoutState>()(
 						Math.min(GRAPHQL_VARIABLES_MAX_SIZE, size)
 					),
 				}),
+
+			setScriptSnippetsCollapsed: (collapsed) => set({ scriptSnippetsCollapsed: collapsed }),
 
 			setPaletteOpen: (open) => set({ paletteOpen: open }),
 		}),
@@ -224,6 +244,7 @@ export const useLayoutStore = create<LayoutState>()(
 				requestSplitRatio: state.requestSplitRatio,
 				graphqlVariablesCollapsed: state.graphqlVariablesCollapsed,
 				graphqlVariablesSize: state.graphqlVariablesSize,
+				scriptSnippetsCollapsed: state.scriptSnippetsCollapsed,
 			}),
 		}
 	)

@@ -16,7 +16,6 @@ export { useVariableCompletionProvider } from "./useVariableCompletionProvider";
 export { useDataContract } from "./useDataContract";
 export { useDeclaredDataFile, type DeclaredDataFileState } from "./useDeclaredDataFile";
 export { useElectronTheme } from "./useElectronTheme";
-export { useResizable } from "./useResizable";
 export { useOverflowTitle } from "./useOverflowTitle";
 export { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 export { useCopy } from "./useCopy";

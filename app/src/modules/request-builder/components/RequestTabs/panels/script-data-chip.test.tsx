@@ -33,6 +33,16 @@ import { DATA_TOKEN_TONE_CLASS } from "@/lib/data-token-tone";
 import type { VariableOrigin } from "@/types/domain";
 
 /** Monaco does not run under jsdom; nothing here tests the editor. */
+/**
+ * The snippets list under a script editor reads the engine's completion table
+ * (#1223). Its own behaviour is `ScriptSnippets.test.tsx`; here it only needs
+ * to not reach for a QueryClient this suite does not set up.
+ */
+vi.mock("@/queries", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries")>()),
+	useScriptCompletionsQuery: () => ({ data: undefined, isPending: true, isError: false }),
+}));
+
 vi.mock("@/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/components/ui")>()),
 	CodeEditor: () => <div data-testid="code-editor" />,
