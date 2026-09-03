@@ -283,7 +283,7 @@ export function useEditorVariableTokens({
 	);
 
 	/**
-	 * Install the decorations, the ⌘-click and the chord on the mounted editor -
+	 * Install the decorations, the click-to-edit and the chord on the mounted editor -
 	 * once, and only where the tokens are painted at all.
 	 *
 	 * Called from the mount callback and again from the effect below, because
@@ -323,16 +323,26 @@ export function useEditorVariableTokens({
 			editor.onMouseLeave(() => hideHover()),
 			editor.onDidScrollChange(() => hideHover()),
 			editor.onMouseDown((event) => {
-				// ⌘/Ctrl-click edits, plain click keeps placing the caret - taking
-				// the plain one would steal the click that puts the cursor in the
-				// middle of a body.
-				if (!event.event.ctrlKey && !event.event.metaKey) return;
+				/*
+				 * A plain click on a token opens it, which is what everyone tries
+				 * first - the token is painted like something you can click.
+				 *
+				 * It used to take ⌘/Ctrl, on the reasoning that a plain click
+				 * belongs to the caret. What made that liveable was the hover
+				 * saying "⌘-click or ⇧⌘D to edit"; without that line the chord is
+				 * unguessable, and a token that looks clickable and answers
+				 * nothing is worse than a caret that lands one character late.
+				 * The caret is not actually lost either: `preventDefault` is only
+				 * called for the modified click, so a plain one still places it
+				 * before the popover takes focus, and Escape hands focus back to
+				 * exactly there.
+				 */
 				if (!event.target.position) return;
 				const model = editor.getModel();
 				if (!model) return;
 				const range = tokenAtPosition(variableTokenRanges(model), event.target.position);
 				if (!range) return;
-				event.event.preventDefault();
+				if (event.event.ctrlKey || event.event.metaKey) event.event.preventDefault();
 				open(editor, range);
 			})
 		);

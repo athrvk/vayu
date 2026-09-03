@@ -10,7 +10,7 @@
 
 /**
  * What one editor does with the tokens in its text: paints them, shows the one
- * under the pointer, opens one on ⌘-click, and binds the chord that opens the
+ * under the pointer, opens one on a click, and binds the chord that opens the
  * one under the caret.
  *
  * Driven against a Monaco stub rather than a real editor - the API surface used
@@ -337,13 +337,32 @@ describe("useEditorVariableTokens", () => {
 		expect(request.rect).toMatchObject({ left: 10 + 5 * 8, top: 24, height: 18 });
 	});
 
-	it("keeps a plain click for placing the caret", () => {
+	it("opens on a plain click too, without taking the caret from it", () => {
+		// The chord was the only way in while the Monaco hover spelled it out.
+		// Nothing spells it out now, and a painted token looks pressable.
+		variables.baseUrl = { value: "https://x", scope: "environment" };
+		const stub = stubEditor(["GET {{baseUrl}}"]);
+		mount(stub);
+
+		const preventDefault = vi.fn();
+		stub.handlers.mouse?.({
+			event: { metaKey: false, ctrlKey: false, preventDefault },
+			target: { position: { lineNumber: 1, column: 8 } },
+		} as unknown as Monaco.editor.IEditorMouseEvent);
+		expect(openTokenEditor).toHaveBeenCalledTimes(1);
+		expect(openTokenEditor.mock.calls[0][0].name).toBe("baseUrl");
+		// Monaco still places the caret: only the modified click is prevented,
+		// so Escape hands focus back to where the click landed.
+		expect(preventDefault).not.toHaveBeenCalled();
+	});
+
+	it("leaves a click outside any token to the editor", () => {
 		variables.baseUrl = { value: "https://x", scope: "environment" };
 		const stub = stubEditor(["GET {{baseUrl}}"]);
 		mount(stub);
 		stub.handlers.mouse?.({
 			event: { metaKey: false, ctrlKey: false, preventDefault: vi.fn() },
-			target: { position: { lineNumber: 1, column: 8 } },
+			target: { position: { lineNumber: 1, column: 2 } },
 		} as unknown as Monaco.editor.IEditorMouseEvent);
 		expect(openTokenEditor).not.toHaveBeenCalled();
 	});

@@ -166,6 +166,21 @@ describe("EditorVariableTokensProvider", () => {
 			expect(cardText()).toContain("Staging");
 		});
 
+		it("says the token can be opened, since nothing else does now", () => {
+			const tokens = mountProvider();
+			act(() => tokens.setHoveredToken({ name: "baseUrl", rect }));
+			// The Monaco hover this card replaced spelled the affordance out
+			// ("⌘-click or ⇧⌘D to edit"); painted text on a canvas has no other
+			// way to say it is pressable.
+			expect(cardText()).toContain("Click to edit");
+		});
+
+		it("offers no edit line for a generator, which has nothing to open", () => {
+			const tokens = mountProvider();
+			act(() => tokens.setHoveredToken({ name: "$guid", rect }));
+			expect(cardText()).not.toContain("Click to edit");
+		});
+
 		it("says a secret is one, and never prints it", () => {
 			const tokens = mountProvider();
 			act(() => tokens.setHoveredToken({ name: "token", rect }));
