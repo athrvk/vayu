@@ -82,7 +82,7 @@ Forgetting it fails loudly (`document is not defined`), never silently.
 sets no `testTimeout`, so every case gets the default 5s. A case that builds
 thousands of rows and renders them spends most of that budget idle and crosses
 it under machine or CI-shard load, failing over the environment rather than
-the code (#846, #1280). Ask what the fixture size is *for* before reaching for
+the code (#846, #1280). Ask what the fixture size is _for_ before reaching for
 a timeout: a property such as "past the grid's first window" needs a fixture
 one step past that window, not hundreds of rows. Only where a case genuinely
 needs the large fixture, give it an explicit `it(name, { timeout: N }, fn)`
@@ -101,7 +101,7 @@ missing from the other.** `responseFromExecuteResult` (live `/execute` body)
 and `responseFromRunResult` (a stored trace, from History) both build
 `ResponseState` and neither knows about the other. When you add a field to
 one, add it to both and assert they agree (`validation-funnels.test.ts` is the
-shape: drive both with the same input, compare). The engine stores the *same*
+shape: drive both with the same input, compare). The engine stores the _same_
 object it returned rather than letting each side derive its own.
 
 **Before measuring or changing a class, `rg` for it in the components.** A
@@ -110,7 +110,7 @@ conclusion about a combination the app never renders is not a finding.
 ## UI rules (enforced by tests - breaking one fails CI)
 
 - **Status colours have three tokens:** `--status-*` (dot/icon/tint),
-  `--status-*-text` (when the colour *is* the text), `--status-*-fill` (solid
+  `--status-*-text` (when the colour _is_ the text), `--status-*-fill` (solid
   chip under a white label). Using the bare fill as a foreground is the most
   common colour bug here. → `status-color-tokens.test.ts`
 - **`--primary` vs `--primary-fill`:** `--primary` is text/ring/chart and
@@ -174,9 +174,9 @@ conclusion about a combination the app never renders is not a finding.
   → `focus-indicator.test.ts`, `icon-button-labels.test.tsx`,
   `a11y-suppressions.test.ts`, plus the lint itself
 
-## Borders: what a rule sits *on*, never what it is
+## Borders: what a rule sits _on_, never what it is
 
-**A border is invisible or not depending on what it sits *on*, never on what it
+**A border is invisible or not depending on what it sits _on_, never on what it
 is.** `--border` is tuned for the canvas (1.14) and is the same colour as
 `--card` in dark (1.00), so a rule inside a card is simply absent. A card's own
 outline on `border-border` is correct, because that edge faces the canvas; both
@@ -195,7 +195,7 @@ vs 1.16, and the pair inverts in light), which is why sunken uses an alpha of
 
 The mistake is **enumerable, not impossible**: a `border-rule` under no
 declared surface silently falls back to the invisible default. So guard the
-*declarations* (`surface-rule.test.tsx`, `ImportModal.surface-rule.test.tsx`);
+_declarations_ (`surface-rule.test.tsx`, `ImportModal.surface-rule.test.tsx`);
 asserting `border-rule` is present proves nothing. The surface classes are in
 use across the tree; a new surface declares one rather than picking a token.
 On an element whose primitive already sets a background utility
@@ -232,6 +232,6 @@ later on an unrelated change. Those lists and the `app_doc_fixtures` /
 by `routed-inputs.test.ts`, which fails if either side changes alone. Take the
 path from the registry rather than spelling it again in the guard.
 
-Module READMEs carry the *why* for their feature and are easy to miss:
+Module READMEs carry the _why_ for their feature and are easy to miss:
 `app/src/modules/README.md`, plus one each for `welcome/`, `request-builder/`
 and `dashboard/`.
