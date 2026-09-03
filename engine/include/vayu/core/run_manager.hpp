@@ -177,6 +177,8 @@ struct EngineDefaults {
 
 struct RunContext {
     std::string run_id;
+    /// The loop also carries Windows' 1 ms timer resolution for its lifetime
+    /// (issue #1161), so releasing it below gives that back too.
     std::unique_ptr<vayu::http::EventLoop> event_loop;
     // Orders the metrics thread's reads of `event_loop` against its
     // publication (#956). start_run spawns the metrics thread before the

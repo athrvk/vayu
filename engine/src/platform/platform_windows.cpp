@@ -26,15 +26,7 @@
 #include <process.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-// clang-format off
-// The only include order in the engine that a sort would break, hence the one
-// exemption from `SortIncludes` (issue #886). timeapi.h uses MMRESULT, UINT and
-// WINAPI, which windows.h defines, so it does not compile standalone - and
-// alphabetically it sorts first. Nothing here catches that but the Windows CI
-// leg, which is why this is pinned rather than left to the sorter.
 #include <windows.h>
-#include <timeapi.h>
-// clang-format on
 
 #include <atomic>
 #include <fstream>
@@ -253,32 +245,9 @@ std::string path_join (const std::string& base, const std::string& component) {
     }
 }
 
-// ============================================================================
-// High-Resolution Timer
-// ============================================================================
-// Windows default timer resolution is ~15.6 ms, which makes short sleeps
-// round to 15 ms and caps load-test throughput (~1k RPS). timeBeginPeriod(1)
-// sets 1 ms resolution so sleep_for(microseconds) is accurate (60k+ RPS).
-
-namespace {
-int g_timer_resolution_refcount = 0;
-}
-
-void enable_high_resolution_timer () {
-    if (g_timer_resolution_refcount++ == 0) {
-        (void)timeBeginPeriod (1);
-    }
-}
-
-void disable_high_resolution_timer () {
-    if (g_timer_resolution_refcount <= 0) {
-        return;
-    }
-    --g_timer_resolution_refcount;
-    if (g_timer_resolution_refcount == 0) {
-        (void)timeEndPeriod (1);
-    }
-}
+// The 1 ms timer request used to live here, held for the process' whole life.
+// It is `HighResolutionTimerScope` in high_resolution_timer.cpp now, taken by
+// each run and released with it (issue #1161).
 
 } // namespace vayu::platform
 

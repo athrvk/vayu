@@ -55,6 +55,7 @@ add_executable(vayu_tests
     sse_stream_test.cpp
     server_bind_test.cpp
     numeric_flag_test.cpp
+    high_resolution_timer_test.cpp
     argument_rules_test.cpp
     transport_policy_test.cpp
     tls_verification_test.cpp
