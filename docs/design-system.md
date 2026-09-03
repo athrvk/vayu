@@ -2035,11 +2035,14 @@ the only one.
 ## Layout Structure
 
 ```
-Shell
-├── Drawer (aside)               220–480px, default 260px - PanelResizeHandle
-│   ├── ActivityBar          w-11 (44px)  bg-panel border-r border-border
-│   └── the active view      bg-panel border-r border-border  (collapsible)
-└── content column (flex-1)      TabStrip, then main + ContextBar
+Shell                            flex flex-col h-full bg-background
+├── row (flex-1)
+│   ├── Drawer (aside)       220–480px, default 260px, bg-panel - one of the six
+│   │                        views, plus its PanelResizeHandle on the right edge
+│   └── content column       TabStrip, then main beside the ContextBar
+│                            (220–480px, its handle on the left edge)
+└── Dock                     h-[var(--dock-height)] border-t border-border - the
+                             view switcher, along the bottom of the window
 ```
 
 ### The panels that resize, and the one handle that resizes them
