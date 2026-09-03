@@ -78,13 +78,46 @@ def engine_rows(data: Optional[dict]) -> list[tuple[str, str]]:
     ]
 
 
+APP_SCHEMA = 2
+
+
+def packaged_rows(packaged: dict) -> list[tuple[str, str]]:
+    """The packaged app's own cold start - the number a user would recognise.
+
+    Reported ahead of the renderer-graph rows because it is the one that
+    describes a launch: process start to a window on screen, main process,
+    engine handshake and renderer included (#1165). `basis` says where the
+    clock started, since Electron cannot always report process creation and
+    the fallback counts from later - two runs on different bases are not
+    comparable, and the row is what makes that visible.
+    """
+    rows = [
+        ("cold start method", str(packaged.get("method", "-"))),
+        ("packaged app ready-to-show (median of 3)", num(packaged.get("medianMs"), " ms", 0)),
+    ]
+    if packaged.get("basis"):
+        rows.append(("cold start measured from", str(packaged["basis"])))
+    if packaged.get("note"):
+        rows.append(("cold start note", str(packaged["note"])))
+    return rows
+
+
 def app_rows(data: Optional[dict]) -> list[tuple[str, str]]:
     if data is None:
         return [("app leg", "**did not produce a result**")]
 
     bundle = data.get("bundle") or {}
     startup = data.get("startup") or {}
-    rows = [
+    rows = []
+    # An older or newer producer is readable - every field is fetched by name -
+    # but its rows may not be the ones below, and a silently short table reads
+    # like a measurement nobody took.
+    schema = data.get("schema")
+    if schema != APP_SCHEMA:
+        rows.append(("app schema", f"**{schema}, expected {APP_SCHEMA} - rows may be incomplete**"))
+
+    rows += packaged_rows(data.get("packagedStartup") or {})
+    rows += [
         ("renderer entry chunk", f"`{bundle.get('entryChunkName', '-')}` {mib(bundle.get('entryChunkBytes'))}"),
         ("renderer dist total", mib(bundle.get("totalDistBytes"))),
         ("renderer dist files", str(bundle.get("fileCount", "-"))),

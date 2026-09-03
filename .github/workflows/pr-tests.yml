@@ -306,6 +306,7 @@ jobs:
             app_root_inputs:
               - 'README.md'
               - 'install.sh'
+              - 'scripts/perf/measure-app.mjs'
             engine:
               - 'engine/**'
               - 'VERSION'

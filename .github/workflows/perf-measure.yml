@@ -17,8 +17,10 @@ name: Perf Measure
 #     stays honestly unmeasured, and #1161 says so.
 #   - The CURLSSLOPT_NATIVE_CA handshake delta - it needs a TLS target and the
 #     mock server has no TLS mode, which is where #1143 records it.
-#   - The real app's end-to-end cold start, which cannot be launched unpackaged
-#     (#1165). The startup figure here is the renderer graph alone.
+#   - What an installer costs to run (NSIS, dmg, AppImage's FUSE mount). The
+#     app is packaged unpacked (`--dir`) and launched from there: the same
+#     asar, the same resources/bin engine and the same main process a user
+#     installs, without three installer formats on three runners (#1165).
 
 on:
   schedule:
@@ -67,14 +69,21 @@ jobs:
             preset: linux-prod
             engine: engine/build-release/vayu-engine
             mock: ./mock-server
+            # Platform and architecture are named rather than left to
+            # electron-builder's defaults: `electron-builder.json` declares the
+            # mac targets as universal, which needs two engine arches, and this
+            # job builds one - the runner's own.
+            pack: --linux dir --x64
           - os: windows-latest
             preset: windows-prod
             engine: engine/build-release/vayu-engine.exe
             mock: ./mock-server.exe
+            pack: --win dir --x64
           - os: macos-latest
             preset: macos-prod
             engine: engine/build-release/vayu-engine
             mock: ./mock-server
+            pack: --mac dir --arm64
     env:
       VCPKG_COMMIT: '114d9fe62faf35856b45cf55cb93b57028a45d63'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
@@ -157,12 +166,51 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
-      # The renderer only. The startup harness loads dist/ into a window of its
-      # own and never touches the compiled main process, so electron:compile
-      # would be build time nothing here reads.
-      - name: Build the renderer
+      # Both halves, now that the packaged app is launched: `main` in
+      # app/package.json points at dist-electron/main.js, which is what
+      # electron:compile emits. Until #1165 only the renderer was built, because
+      # the startup harness loads dist/ into a window of its own and never
+      # touches the main process.
+      - name: Build the renderer and compile the main process
         working-directory: app
-        run: pnpm run build
+        run: |
+          pnpm run build
+          pnpm run electron:compile
+
+      # Where a production build looks for the engine: electron-builder copies
+      # `app/build/resources/bin` into the package's `resources/bin`, and
+      # `sidecar.ts` resolves `process.resourcesPath/bin` there when NODE_ENV is
+      # unset. Without this the packaged app throws a plain Error on the missing
+      # binary, which `startEngine`'s catch turns into a modal box and a quit -
+      # no window, and the cold-start leg reports a launch that never showed one.
+      - name: Stage the engine into the app's resources
+        shell: bash
+        run: |
+          mkdir -p app/build/resources/bin
+          cp "${{ matrix.engine }}" app/build/resources/bin/
+          chmod +x app/build/resources/bin/*
+          ls -l app/build/resources/bin
+
+      # macOS is the one platform whose `electron-builder.json` block names an
+      # icon (`build/icon.png`), so packaging fails there without one. Linux and
+      # Windows declare none and take Electron's default, which no measurement
+      # reads. release.yml stages the full icon set because an installer ships
+      # it; this needs the one file that makes the build run.
+      - name: Stage the macOS icon
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p app/build
+          cp shared/icon_png/vayu_icon_512x512.png app/build/icon.png
+
+      # `dir`, not the installers release.yml builds: an unpacked build is the
+      # same asar, the same staged engine and the same main process, and it is
+      # what the cold-start leg launches. Paying three runners to also compress
+      # a dmg, an NSIS installer and an AppImage would measure the packaging,
+      # not the app.
+      - name: Package the app, unpacked
+        working-directory: app
+        run: pnpm exec electron-builder --config electron-builder.json ${{ matrix.pack }} --publish never
 
       # Not left to the runner image: the first run of this workflow died here
       # with `go: command not found` on macos-latest. Go is documented as
@@ -215,13 +263,32 @@ jobs:
           sudo chmod 4755 "$sandbox"
           ls -l "$sandbox"
 
+      # The packaged build ships its own copy of that helper, with the same
+      # ownership problem and the same remedy - see the step above for why this
+      # is a chown rather than --no-sandbox.
+      - name: Configure the packaged app's sandbox helper (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sandbox="app/release/linux-unpacked/chrome-sandbox"
+          if [ ! -f "$sandbox" ]; then
+            echo "::warning::no chrome-sandbox at $sandbox - the packaged leg will report unavailable"
+            exit 0
+          fi
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          ls -l "$sandbox"
+
       - name: Measure the app
         shell: bash
         env:
           # xvfb on the Linux runner, which has no display; the Windows and
           # macOS runners have a desktop session and launch the app directly.
           LAUNCHER: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }}
-        run: $LAUNCHER node scripts/perf/measure-app.mjs --out perf-app.json
+        run: |
+          $LAUNCHER node scripts/perf/measure-app.mjs \
+            --out perf-app.json \
+            --packaged-dir app/release
 
       - name: Summarize
         if: always()
