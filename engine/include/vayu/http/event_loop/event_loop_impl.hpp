@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "vayu/http/event_loop.hpp"
+#include "vayu/platform/platform.hpp"
 
 namespace vayu::http::detail {
 
@@ -71,6 +72,17 @@ class EventLoopImpl {
     private:
     void submit (std::unique_ptr<TransferData> data);
 
+    /// Windows' 1 ms timer resolution, held for exactly as long as this loop
+    /// exists (issue #1161). The loop is the consumer that needs it - each
+    /// worker asks `curl_multi_poll` for a `POLL_TIMEOUT_MS = 1` wait, which
+    /// the OS default rounds to ~15.6ms - and the rate-limited pacing loop
+    /// that sleeps beside it below ~500 RPS is coextensive with it. A loop
+    /// exists only while a run is sending, so an idle sidecar - which it is
+    /// for nearly all of an app session - asks for nothing, and a design-mode
+    /// scenario run, which builds no loop, asks for nothing either. First
+    /// member so it is taken before a worker can poll and given back after
+    /// the last one has stopped. A no-op off Windows.
+    vayu::platform::HighResolutionTimerScope timer_resolution;
     EventLoopConfig config;
     std::vector<std::unique_ptr<EventLoopWorker>> workers;
     std::atomic<size_t> next_worker{ 0 };

@@ -28,10 +28,11 @@
 #define NOMINMAX
 #endif
 // clang-format off
-// The second of the engine's two exemptions from `SortIncludes` (issue #886,
-// the first is in platform_windows.cpp): timeapi.h uses MMRESULT, UINT and
+// The engine's one exemption from `SortIncludes` (issue #886), which moved
+// here with the timer request it is for: timeapi.h uses MMRESULT, UINT and
 // WINAPI, which windows.h defines, so it does not compile standalone - and
-// alphabetically it sorts first.
+// alphabetically it sorts first. Nothing catches that but the Windows CI leg,
+// which is why this is pinned rather than left to the sorter.
 #include <windows.h>
 #include <timeapi.h>
 // clang-format on

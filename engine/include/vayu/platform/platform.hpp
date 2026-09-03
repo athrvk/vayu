@@ -206,9 +206,12 @@ std::string path_join (const std::string& base, const std::string& component);
  *
  * So the request is scoped to runs and not to the process: the sidecar is
  * resident for the whole app session and idle for almost all of it, and a
- * process-lifetime request is the classic Windows battery finding. Each run's
- * `RunContext` holds one of these from its construction until
- * `release_execution_resources` drops it beside the event loop it was for.
+ * process-lifetime request is the classic Windows battery finding. The holder
+ * is the event loop itself (`detail::EventLoopImpl`), which exists only while
+ * a run is sending and is destroyed by `release_execution_resources` as the
+ * run is retained - so nothing has to remember to give the request back, and
+ * a design-mode scenario run, which sends sequentially and builds no loop,
+ * never asks for it.
  *
  * Nesting is safe: the underlying request is refcounted, taken by the first
  * holder and released by the last, under a mutex - the count and the OS call

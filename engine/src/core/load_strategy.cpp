@@ -572,16 +572,18 @@ class ConstantLoadStrategy : public LoadStrategy {
      * remainder; on Windows short waits spin instead.
      *
      * Not because of 15.6ms rounding, which is what this said until issue
-     * #1161 read the two mechanisms against each other: a run holds
-     * `HighResolutionTimerScope` for as long as it sends, so in-process the
-     * resolution is already 1ms. The spin is for the residual - even at 1ms,
-     * `sleep_for(1000us)` returns at ~1-2ms, and a tick is exactly 1000us from
-     * 1000 RPS up (`tick_us` below), so sleeping the remainder would make an
-     * open-loop generator's arrivals bursty and its latency numbers dishonest.
-     * The 2000us threshold puts every tick from ~500 RPS on the spin and
-     * leaves the sleep to the slower ticks, which are long enough to absorb
-     * the overshoot - and which are the reason the 1ms request is taken at
-     * all, along with the event loop's 1ms `curl_multi_poll`.
+     * #1161 read the two mechanisms against each other: this run's event loop
+     * holds `platform::HighResolutionTimerScope` for as long as it exists, so
+     * in-process the resolution is already 1ms while a run is sending, on the
+     * pacing thread as much as in the loop. The spin is for the residual -
+     * even at 1ms, `sleep_for(1000us)` returns at ~1-2ms, and a tick is
+     * exactly 1000us from 1000 RPS up (`tick_us` below), so sleeping the
+     * remainder would make an open-loop generator's arrivals bursty and its
+     * latency numbers dishonest. The 2000us threshold puts every tick from
+     * ~500 RPS on the spin and leaves the sleep to the slower ticks, which are
+     * long enough to absorb a 1ms overshoot - and which would round to ~15.6ms
+     * without the loop's request, so the sleep leg is the second thing that
+     * request buys.
      *
      * @p context is read only by that spin, so the leg without it leaves the
      * parameter unused.

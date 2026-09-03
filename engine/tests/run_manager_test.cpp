@@ -8,6 +8,7 @@
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/platform/platform.hpp"
 
 using namespace vayu::core;
 
@@ -321,18 +322,21 @@ TEST (RunManagerRetention, RetainReleasesTheMachineryAndKeepsTheTopic) {
 }
 
 // Windows' 1 ms timer resolution is one of those execution resources since
-// issue #1161: a run takes it because its event loop polls at 1ms and its
-// pacing sleeps below ~500 RPS would otherwise round to ~15.6ms, and an idle
-// engine - which the sidecar is for almost all of an app session - holds
-// nothing. Retention is what has to give it back: a retained run has stopped
-// sending, and the 60-90s window would otherwise be a run's worth of held
-// resolution per run.
+// issue #1161: the loop asks curl for a 1ms poll, which the OS default would
+// round to ~15.6ms, so the loop holds the request for its lifetime. Retention
+// is what gives it back - a retained run has stopped sending, and the 60-90s
+// window would otherwise be a run's worth of held resolution per run, on a
+// sidecar that is idle for almost all of an app session.
 TEST (RunManagerRetention, RetainGivesBackTheHighResolutionTimer) {
     EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
 
     RunManager mgr;
     nlohmann::json cfg;
     auto ctx = std::make_shared<RunContext> ("run_z", cfg);
+    vayu::http::EventLoopConfig loop_cfg;
+    loop_cfg.num_workers    = 1;
+    loop_cfg.max_concurrent = 1;
+    ctx->publish_event_loop (std::make_unique<vayu::http::EventLoop> (loop_cfg));
     mgr.register_run ("run_z", ctx);
 
     EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 1);
@@ -345,14 +349,29 @@ TEST (RunManagerRetention, RetainGivesBackTheHighResolutionTimer) {
     EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
 }
 
-// A run that never reaches retention - one refused, or one whose context is
-// dropped by a failing spawn - gives the request back all the same, because
-// the scope is a member and not a pair of calls to remember.
-TEST (RunManagerRetention, ADroppedContextGivesBackTheHighResolutionTimer) {
+// The narrowing that binding the request to the loop buys: a design-mode
+// scenario run sends its steps sequentially and builds no event loop, so it
+// asks for no timer resolution at all - where a request taken per run would
+// have held 1ms resolution for the length of every collection run.
+TEST (RunManagerRetention, ARunWithNoEventLoopAsksForNoTimerResolution) {
+    nlohmann::json cfg;
+    RunContext ctx ("run_sequential", cfg);
+    ctx.scenario = std::make_shared<const ScenarioExecution> ();
+
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
+}
+
+// A loop that never reaches retention - a run that threw before its context
+// was retained, or a manager destroyed under it - gives the request back all
+// the same, because the scope is a member of the loop and not a pair of calls
+// to remember.
+TEST (RunManagerRetention, ADroppedEventLoopGivesBackTheHighResolutionTimer) {
     EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
     {
-        nlohmann::json cfg;
-        RunContext ctx ("run_dropped", cfg);
+        vayu::http::EventLoopConfig loop_cfg;
+        loop_cfg.num_workers    = 1;
+        loop_cfg.max_concurrent = 1;
+        const vayu::http::EventLoop loop (loop_cfg);
         EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 1);
     }
     EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
