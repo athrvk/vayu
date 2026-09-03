@@ -124,11 +124,19 @@ struct DeclaredDefaultHeader {
 const DefaultHeaderPolicy& policy);
 
 /**
- * @brief Why @p name cannot be a header name the engine adds, or nothing.
+ * @brief Why @p name cannot be the name the engine adds the correlation id
+ *        under, or nothing.
  *
- * RFC 9110's token rule, applied at the config write path so a name that would
- * break a header line is refused where it is typed rather than on every send
- * afterwards.
+ * Two rules, both applied at the config write path so a name that would break
+ * every request afterwards is refused where it is typed:
+ *
+ * - RFC 9110's token rule, because anything else breaks the header line.
+ * - It cannot name a header the engine derives on its own. `build_request_header_list`
+ *   decides each default against the *request's* headers rather than against
+ *   what it has already appended, so a correlation id called `User-Agent` would
+ *   put two `User-Agent` lines on the wire with different values, and one called
+ *   `Accept-Encoding` would fight the line libcurl writes from
+ *   `CURLOPT_ACCEPT_ENCODING`.
  */
 [[nodiscard]] std::optional<std::string> unusable_header_name (std::string_view name);
 

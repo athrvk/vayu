@@ -78,16 +78,19 @@ bool is_bare_uuid (std::string_view value) {
     return true;
 }
 
-/// A stored row's text without its surrounding whitespace. The renderer's own
-/// copy of this rule trims too, and the two have to answer alike: a row this
-/// pass kept and the editor hid would be a header the wire carries and nobody
-/// can see.
+/// The ASCII whitespace both sides of this rule strip, spelled out rather than
+/// left to a library: the renderer trims the same set explicitly (see
+/// `isLegacyManagedHeader`), and a row one side trimmed and the other did not
+/// would be a header the wire carries and the editor hides.
+constexpr std::string_view TRIMMED_WHITESPACE = " \t\n\r\f\v";
+
+/// A stored row's text without that surrounding whitespace.
 std::string_view trimmed (std::string_view text) {
-    const auto first = text.find_first_not_of (" \t");
+    const auto first = text.find_first_not_of (TRIMMED_WHITESPACE);
     if (first == std::string_view::npos) {
         return {};
     }
-    return text.substr (first, text.find_last_not_of (" \t") - first + 1);
+    return text.substr (first, text.find_last_not_of (TRIMMED_WHITESPACE) - first + 1);
 }
 
 /// A stored row's `value`, or "" for a row that carries none.
@@ -128,6 +131,18 @@ std::optional<std::string> unusable_header_name (std::string_view name) {
     if (offending != name.end ()) {
         return std::format (
         "'{}' is not a header name: '{}' cannot appear in one", name, *offending);
+    }
+    // A name the engine already derives would be added twice, by two rules that
+    // each check only the request's own headers - see the header for what each
+    // collision does on the wire.
+    const std::string folded = vayu::utils::ascii_lower (name);
+    for (const std::string_view derived : { "user-agent", "accept-encoding", "content-type" }) {
+        if (folded == derived) {
+            return std::format (
+            "'{}' is a header the engine derives on its own, so it cannot also "
+            "carry the correlation id",
+            name);
+        }
     }
     return std::nullopt;
 }

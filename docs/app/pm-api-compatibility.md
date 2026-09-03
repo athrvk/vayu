@@ -900,8 +900,9 @@ request has already gone out, so nothing is written back and a mutation there is
 The two hooks therefore read **different header sets**, matching Postman: a pre-request
 script sees the composed headers it is there to edit, and a test script sees the ones that
 were actually sent - including the `Content-Type` the engine derives from the body mode and
-the default `User-Agent`, neither of which exists yet when the pre-request script runs
-(#483). A `form-data` `Content-Type` appears in neither, because libcurl writes that one
+the [headers the engine adds itself](../engine/api-reference.md#default-request-headers): the
+default `User-Agent`, the negotiated `Accept-Encoding`, and a correlation id where one is
+switched on. None of those exists yet when the pre-request script runs (#483, #1229). A `form-data` `Content-Type` appears in neither, because libcurl writes that one
 itself with the boundary.
 
 ```javascript

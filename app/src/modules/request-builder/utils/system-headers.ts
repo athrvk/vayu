@@ -34,6 +34,20 @@ import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 const BARE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * The ASCII whitespace this rule strips, spelled out rather than left to
+ * `String.prototype.trim`.
+ *
+ * `trim()` also strips Unicode spaces (NBSP, U+2028) that the engine's copy of
+ * this rule does not, and the two answering differently is the whole defect:
+ * a row this side hid and the engine kept is a header on the wire that nothing
+ * shows. Same set as `TRIMMED_WHITESPACE` in
+ * `engine/src/http/default_headers.cpp`.
+ */
+const ASCII_TRIM = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
+
+const trimmed = (text: string): string => text.replace(ASCII_TRIM, "");
+
+/**
  * Was this stored header row written by a pre-#1229 Vayu client?
  *
  * Three rules, each as narrow as it can be, because acting on this deletes what
@@ -47,13 +61,13 @@ const BARE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
  *   crawler's `User-Agent` is exactly the header a testing tool exists to send.
  */
 export const isLegacyManagedHeader = (key: string, value: string): boolean => {
-	switch (key.trim().toLowerCase()) {
+	switch (trimmed(key).toLowerCase()) {
 		case "x-vayu-version":
 			return true;
 		case "x-request-id":
-			return BARE_UUID.test(value.trim());
+			return BARE_UUID.test(trimmed(value));
 		case "user-agent":
-			return value.trim().toLowerCase().startsWith("vayu/");
+			return trimmed(value).toLowerCase().startsWith("vayu/");
 		default:
 			return false;
 	}

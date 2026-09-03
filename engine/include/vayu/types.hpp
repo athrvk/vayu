@@ -322,9 +322,12 @@ struct Request {
      * the request that was written, so each of them can be refused per send,
      * which is what a client's auto-header toggle carries here.
      *
-     * Case-insensitive, like every header name. A name that is not one the
-     * engine adds is refused at the route boundary rather than ignored here:
-     * silently accepting it would read as an opt-out that did nothing.
+     * Case-insensitive, like every header name. A name that is not a header
+     * name at all is refused where the payload is read, because a malformed
+     * opt-out is a request the caller will not get; a well-formed name the
+     * engine adds nothing under is accepted and does nothing, because config
+     * can switch a default off between the moment a client read the declared
+     * set and the moment it sends.
      */
     std::set<std::string, CaseInsensitiveLess> suppressed_default_headers;
 

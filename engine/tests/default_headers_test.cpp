@@ -228,8 +228,11 @@ TEST (DefaultHeadersTest, ReadsAPaddedRowTheSameWayTheEditorDoes) {
     // The renderer's copy of this rule trims, so this one does too: a row this
     // pass kept and the editor hid would be a header on the wire that nothing
     // shows.
+    // Every byte of ASCII whitespace the renderer's copy strips, since the two
+    // sides answering differently is what this rule exists to prevent.
     const std::string stored =
-    R"json([{"key":" X-Vayu-Version ","value":"0.1.1","enabled":true}])json";
+    R"json([{"key":" X-Vayu-Version\n","value":"0.1.1","enabled":true},
+            {"key":"\tUser-Agent ","value":"\r\nVayu/0.1.1\t","enabled":true}])json";
 
     const auto rewritten = vayu::http::strip_legacy_managed_headers (stored);
     ASSERT_HAS_VALUE (rewritten);

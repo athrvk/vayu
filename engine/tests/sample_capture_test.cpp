@@ -48,9 +48,9 @@ TEST (LooksBinary, NonTextContentTypeIsBinaryWithoutReadingBytes) {
 }
 
 TEST (LooksBinary, InvalidUtf8IsBinaryEvenWhenLabelledText) {
-    // The realistic case: `Accept-Encoding: gzip` with no
-    // CURLOPT_ACCEPT_ENCODING, so the compressed bytes arrive under the
-    // origin's own `text/html`.
+    // A request that wrote its own `Accept-Encoding: gzip`, which leaves the
+    // engine's negotiation - and libcurl's decoding - off (#1229), so the
+    // compressed bytes arrive under the origin's own `text/html`.
     const std::string gzip = std::string ("\x1f\x8b\x08\x00\x00\x00\x00\x00", 8) + "\xff\xfe";
     EXPECT_TRUE (looks_binary (gzip, "text/html"));
 

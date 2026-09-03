@@ -29,9 +29,12 @@ namespace vayu::core {
  * @brief Whether a captured body should be stored as a binary descriptor
  *        instead of text.
  *
- * The engine never sets `CURLOPT_ACCEPT_ENCODING`, so a request that asks for
- * `gzip` gets the compressed bytes in `Response::body`; images and protobuf
- * arrive the same way. Storing those as a string means `dump()` either throws
+ * Since issue #1229 the engine negotiates compression by default and libcurl
+ * decodes what it negotiated, so a gzip response arrives here as its decoded
+ * bytes - but a request that carries its own `Accept-Encoding`, or a run with
+ * `loadNegotiateCompression` off against a server that compresses anyway, still
+ * puts compressed bytes in `Response::body`; images and protobuf arrive that way
+ * regardless. Storing those as a string means `dump()` either throws
  * or - with `error_handler_t::replace` - silently rewrites them into a
  * mojibake that reads like a real body. Neither is honest, so a binary body is
  * recorded as its size and content type and nothing else.

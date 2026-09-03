@@ -1186,8 +1186,10 @@ can say the set is incomplete rather than presenting a biased subset as the whol
 defaults are far below design mode's `maxTraceBodyBytes` (5 MiB): a design run stores one
 exchange the user asked for, a load run stores tens nobody asked for individually.
 
-**Binary bodies.** The engine never sets `CURLOPT_ACCEPT_ENCODING`, so a request that asks for
-`gzip` gets the compressed bytes in the response body; images and protobuf arrive the same way.
+**Binary bodies.** Since issue #1229 the engine negotiates compression by default and libcurl
+decodes what it negotiated, so a gzip response is stored decoded - but a request carrying its own
+`Accept-Encoding`, or a run with `loadNegotiateCompression` off against a server that compresses
+anyway, still yields compressed bytes; images and protobuf arrive that way regardless.
 Those are stored as a descriptor (`binary = 1`, `blob_id = 0`, with `body_bytes` and
 `content_type`), never as text - `error_handler_t::replace` would keep `dump()` from throwing and
 hand the reader a mojibake that reads like a real response. The rule is
