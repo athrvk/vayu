@@ -24,7 +24,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { REGION_ATTRIBUTE, type AppRegion } from "./region-focus";
+import { REGION_ATTRIBUTE, regionProps, type AppRegion } from "./region-focus";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -35,14 +35,21 @@ function layoutSources(): string[] {
 }
 
 /**
- * `data-app-region={"drawer" satisfies AppRegion}` - the name it marks.
+ * `{...regionProps("drawer")}` - the name it marks.
  *
- * Built from `REGION_ATTRIBUTE` rather than spelling the attribute again: JSX
- * needs a literal attribute name, so the four bands cannot read the constant,
- * and a scan that also hardcoded it would go quietly green if the constant were
- * ever renamed - matching nothing and finding no offenders.
+ * Built from `regionProps.name` rather than spelling the call again, the same
+ * reason the pattern was built from `REGION_ATTRIBUTE` while the bands wrote
+ * the attribute themselves (#1219): a scan that hardcodes what it looks for
+ * goes quietly green if that thing is renamed - matching nothing and finding no
+ * offenders. Renaming the helper without its call sites still fails here,
+ * because a marker the scan cannot find drops that band from `markedRegions`,
+ * which is what the comparison against `EXPECTED` then catches.
+ *
+ * What the scan can no longer see is the attribute itself, which now reaches
+ * the DOM inside the helper. `writes the attribute the cycle queries` below is
+ * that half, and `region-focus.test.ts` walks the result.
  */
-const MARKER = new RegExp(`${REGION_ATTRIBUTE}=\\{"([a-z]+)" satisfies AppRegion\\}`, "g");
+const MARKER = new RegExp(`\\{\\.\\.\\.${regionProps.name}\\("([a-z]+)"\\)\\}`, "g");
 
 function markedRegions(): string[] {
 	return layoutSources().flatMap((file) =>
@@ -70,7 +77,14 @@ describe("the shell marks every region the cycle knows about", () => {
 	it("catches a marker when there is one", () => {
 		// The scan's own mutation check: the pattern has to match the shape it
 		// counts, or agreement above means nothing.
-		const sample = '<main data-app-region={"main" satisfies AppRegion} className="x">';
+		const sample = '<main {...regionProps("main")} className="x">';
 		expect(Array.from(sample.matchAll(MARKER), (m) => m[1])).toEqual(["main"]);
+	});
+
+	it("writes the attribute the cycle queries", () => {
+		// The half the scan lost when the marker moved into a helper: finding
+		// the call at each band proves nothing unless the call still produces
+		// the attribute `appRegions` selects on.
+		expect(regionProps("drawer")).toEqual({ [REGION_ATTRIBUTE]: "drawer" });
 	});
 });
