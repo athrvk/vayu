@@ -148,28 +148,44 @@ export function narrowsSteps(filter: StepListFilter): boolean {
 }
 
 /**
+ * The predicate `filter` describes, as a function of one row.
+ *
+ * **The one definition, and the reason it is exported** (issue #1297). A live
+ * list counts its matches and produces its window in two passes that stop at
+ * different places - the count runs to the end of the batch, the window stops
+ * as soon as it has enough rows - so neither can be expressed as a call to
+ * {@link filterSteps}, which always returns every match as an array. Handing
+ * out the predicate itself is what keeps that from becoming a second copy of
+ * the rule: {@link filterSteps} is this function applied to a whole list, and
+ * remains the oracle a windowed reader is checked against.
+ *
+ * The query is trimmed and lowercased once, here, rather than per row.
+ */
+export function stepMatcher(filter: StepListFilter): (step: ScenarioStepRow) => boolean {
+	const query = filter.query.trim().toLowerCase();
+	const { outcome } = filter;
+	return (step) =>
+		(outcome === null || step.outcome === outcome) &&
+		(query === "" || matchesQuery(step, query));
+}
+
+/**
  * The rows to show under `filter`.
  *
  * Returns the same array reference when nothing narrows, so an untouched view
- * hands `useGrowingWindow` the total it already had rather than a new array
- * that only looks like a new list.
+ * hands its window the total it already had rather than a new array that only
+ * looks like a new list.
  *
- * One predicate, wherever the rows come from: a live list maintains what it
- * matched across commits (`useFilteredSteps`, issue #1205) by calling this with
- * the batch that just arrived rather than by testing rows a second way.
+ * One predicate, wherever the rows come from: {@link stepMatcher} holds it, and
+ * a live list (`useFilteredSteps`, issues #1205 and #1297) calls that directly
+ * rather than testing rows a second way.
  */
 export function filterSteps(
 	steps: readonly ScenarioStepRow[],
 	filter: StepListFilter
 ): readonly ScenarioStepRow[] {
 	if (!narrowsSteps(filter)) return steps;
-	const query = filter.query.trim().toLowerCase();
-	const { outcome } = filter;
-	return steps.filter(
-		(step) =>
-			(outcome === null || step.outcome === outcome) &&
-			(query === "" || matchesQuery(step, query))
-	);
+	return steps.filter(stepMatcher(filter));
 }
 
 /** Why the step list is empty, when a control rather than the run emptied it. */
