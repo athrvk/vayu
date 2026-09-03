@@ -276,11 +276,23 @@ node scripts/perf/measure-app.mjs --out perf-app.json --packaged-dir app/release
 `--packaged-dir` is optional - without it the packaged leg reports
 `"unavailable"` and the renderer-graph figures still come out.
 
+**On a headless Linux box, run it under a display with a window manager.**
+`xvfb-run` alone supplies an X server that maps and focuses nothing, and the
+app's window is frameless: measured on the CI runner, the app came up whole -
+engine listening, MCP up, the renderer fetching from it - and never produced a
+frame, so `ready-to-show` never fired and the leg timed out. The harness's
+plain window became showable in that same session. What the workflow runs is:
+
+```bash
+xvfb-run -a bash -c "openbox --sm-disable & node scripts/perf/measure-app.mjs --out perf-app.json --packaged-dir app/release"
+```
+
 **The packaged figure is the real cold start.** The workflow builds the
 renderer, compiles the Electron main process, stages the engine binary into
 `app/build/resources/bin/` (where `sidecar.ts` looks inside a package), and
-packages an unpacked build - `electron-builder --linux dir --x64`, and the
-`--win dir --x64` / `--mac dir --arm64` equivalents; `--dir`, no installer.
+packages an unpacked build - `electron-builder --linux dir`, and the
+`--win dir` / `--mac dir` equivalents; `--dir`, no installer, and no
+architecture named, so each runner packages for its own.
 `measure-app.mjs` launches that executable three times with
 `VAYU_MEASURE_STARTUP=1` set and reports the median milliseconds from process
 start to `ready-to-show`: the executable's own load, the main process's import
