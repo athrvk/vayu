@@ -142,13 +142,19 @@ describe("useFilteredSteps against a from-scratch filter", () => {
 				]);
 				replays += 1;
 			} else {
-				// A chip pressed, a search typed, or both cleared.
+				// A chip pressed, a search typed, cleared, or left holding the
+				// whitespace a cleared box can be left with - which narrows
+				// nothing, and is the one query that must not be taken at its
+				// word.
+				const typed = random();
 				filter = {
 					outcome: random() < 0.5 ? OUTCOMES[Math.floor(random() * 4)] : null,
 					query:
-						random() < 0.5
+						typed < 0.5
 							? NAMES[Math.floor(random() * NAMES.length)].slice(0, 6)
-							: "",
+							: typed < 0.65
+								? "  "
+								: "",
 				};
 				narrowings += 1;
 			}

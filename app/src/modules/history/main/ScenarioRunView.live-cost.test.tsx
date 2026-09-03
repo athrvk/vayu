@@ -77,6 +77,46 @@ function event(
 	};
 }
 
+/** A report `results[]` row, for the changeover a run's end makes. */
+function storedStep(stepIndex: number, outcome: StepOutcome) {
+	return {
+		timestamp: 1_700_000_000_000,
+		statusCode: 200,
+		latencyMs: 5,
+		trace: {
+			iteration: 0,
+			stepIndex,
+			stepName: `Step ${stepIndex + 1}`,
+			outcome,
+			response: { headers: {}, body: "{}" },
+		},
+	};
+}
+
+function report(results: ReturnType<typeof storedStep>[]): RunReport {
+	return {
+		summary: {
+			totalRequests: 0,
+			successfulRequests: 0,
+			failedRequests: 0,
+			errorRate: 0,
+			totalDurationSeconds: 0,
+			avgRps: 0,
+		},
+		latency: { min: 0, max: 0, avg: 0, p50: 0, p90: 0, p95: 0, p99: 0 },
+		statusCodes: {},
+		errors: { total: 0, withDetails: 0, types: {} },
+		results,
+	};
+}
+
+/** The step names on screen, in the order the list renders them. */
+function shownNames(): string[] {
+	return screen
+		.queryAllByRole("button", { expanded: false })
+		.map((row) => (row.textContent ?? "").match(/Step \d+/)?.[0] ?? "");
+}
+
 function stream(steps: ScenarioStepEvent[]): void {
 	act(() => {
 		useScenarioRunStore.getState().addSteps(steps);
@@ -169,24 +209,43 @@ describe("what a live run costs the list", () => {
 	 * active filter reaches the screen.
 	 */
 	it("shows what a filter matches, batch after batch", () => {
-		const shown = () =>
-			screen
-				.queryAllByRole("button", { expanded: false })
-				.map((row) => (row.textContent ?? "").match(/Step \d+/)?.[0] ?? "");
-
 		render(<ScenarioRunView run={RUN} />);
 		stream([event(0, "passed"), event(1, "failed")]);
 		fireEvent.click(screen.getByLabelText(/show only failed steps/i));
-		expect(shown()).toEqual(["Step 2"]);
+		expect(shownNames()).toEqual(["Step 2"]);
 
 		// The batch, not the run: only its failed row joins the list.
 		stream([event(2, "passed"), event(3, "failed")]);
-		expect(shown()).toEqual(["Step 2", "Step 4"]);
+		expect(shownNames()).toEqual(["Step 2", "Step 4"]);
 
 		// And a replay that revises a row already on screen throws the kept rows
 		// away rather than showing one the list no longer holds.
 		stream([event(1, "passed")]);
-		expect(shown()).toEqual(["Step 4"]);
+		expect(shownNames()).toEqual(["Step 4"]);
+	});
+
+	it("matches the stored rows over again when they replace the live ones", () => {
+		const { rerender } = render(<ScenarioRunView run={RUN} />);
+		stream([event(0, "passed"), event(1, "failed")]);
+		fireEvent.click(screen.getByLabelText(/show only failed steps/i));
+		expect(shownNames()).toEqual(["Step 2"]);
+
+		/*
+		 * The run ends and its report lands, so the view reads the stored rows
+		 * instead: a longer list of different objects under the same controls.
+		 * The mutation this pins is the view handing the hook the live epoch for
+		 * that list too - it has not moved, so the rows matched from the live
+		 * list would be kept and only the third row tested, showing "Step 2",
+		 * which the stored rows say passed.
+		 */
+		reportQuery.data = report([
+			storedStep(0, "failed"),
+			storedStep(1, "passed"),
+			storedStep(2, "failed"),
+		]);
+		rerender(<ScenarioRunView run={RUN} />);
+
+		expect(shownNames()).toEqual(["Step 1", "Step 3"]);
 	});
 
 	it("says the list is empty because of the chip, not because the run is", () => {

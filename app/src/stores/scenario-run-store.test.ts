@@ -19,6 +19,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { useScenarioRunStore } from "./scenario-run-store";
+import { emptyStepSummary } from "@/modules/history/main/scenario-steps";
 import type { ScenarioStepEvent, StepOutcome } from "@/types";
 
 function event(stepIndex: number, outcome: StepOutcome = "passed"): ScenarioStepEvent {
@@ -35,9 +36,13 @@ function event(stepIndex: number, outcome: StepOutcome = "passed"): ScenarioStep
 const store = () => useScenarioRunStore.getState();
 
 beforeEach(() => {
+	// The whole of it, summary included: a fold handed a summary from the
+	// previous case's rows would be counting a list it never saw.
 	useScenarioRunStore.setState({
 		runId: null,
 		steps: [],
+		summary: emptyStepSummary(),
+		appendEpoch: 0,
 		isStreaming: false,
 		error: null,
 	});
