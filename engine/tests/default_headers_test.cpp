@@ -224,6 +224,18 @@ TEST (DefaultHeadersTest, KeepsTheHeadersOfThoseNamesThatWereTheUsersOwn) {
     EXPECT_FALSE (vayu::http::strip_legacy_managed_headers (stored).has_value ());
 }
 
+TEST (DefaultHeadersTest, ReadsAPaddedRowTheSameWayTheEditorDoes) {
+    // The renderer's copy of this rule trims, so this one does too: a row this
+    // pass kept and the editor hid would be a header on the wire that nothing
+    // shows.
+    const std::string stored =
+    R"json([{"key":" X-Vayu-Version ","value":"0.1.1","enabled":true}])json";
+
+    const auto rewritten = vayu::http::strip_legacy_managed_headers (stored);
+    ASSERT_HAS_VALUE (rewritten);
+    EXPECT_EQ (nlohmann::json::parse (*rewritten).size (), 0U);
+}
+
 TEST (DefaultHeadersTest, LeavesAloneWhatItCannotRead) {
     EXPECT_FALSE (vayu::http::strip_legacy_managed_headers ("not json").has_value ());
     EXPECT_FALSE (vayu::http::strip_legacy_managed_headers ("{}").has_value ());

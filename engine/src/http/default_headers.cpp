@@ -78,6 +78,18 @@ bool is_bare_uuid (std::string_view value) {
     return true;
 }
 
+/// A stored row's text without its surrounding whitespace. The renderer's own
+/// copy of this rule trims too, and the two have to answer alike: a row this
+/// pass kept and the editor hid would be a header the wire carries and nobody
+/// can see.
+std::string_view trimmed (std::string_view text) {
+    const auto first = text.find_first_not_of (" \t");
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    return text.substr (first, text.find_last_not_of (" \t") - first + 1);
+}
+
 /// A stored row's `value`, or "" for a row that carries none.
 std::string row_value (const nlohmann::json& row) {
     if (row.contains ("value") && row["value"].is_string ()) {
@@ -89,15 +101,15 @@ std::string row_value (const nlohmann::json& row) {
 /// Is this stored row one a pre-#1229 renderer wrote? See
 /// `strip_legacy_managed_headers` for why each rule is as narrow as it is.
 bool legacy_managed_row (const std::string& key, const std::string& value) {
-    const std::string folded = vayu::utils::ascii_lower (key);
+    const std::string folded = vayu::utils::ascii_lower (trimmed (key));
     if (folded == "x-vayu-version") {
         return true;
     }
     if (folded == "x-request-id") {
-        return is_bare_uuid (value);
+        return is_bare_uuid (trimmed (value));
     }
     if (folded == "user-agent") {
-        return vayu::utils::ascii_lower (value).starts_with ("vayu/");
+        return vayu::utils::ascii_lower (trimmed (value)).starts_with ("vayu/");
     }
     return false;
 }
