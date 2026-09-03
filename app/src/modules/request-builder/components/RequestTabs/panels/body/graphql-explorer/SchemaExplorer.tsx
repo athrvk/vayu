@@ -443,6 +443,14 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 	);
 }
 
+/**
+ * The row's full signature, the way a schema declares it: `users(first: Int):
+ * [User]`. Null for a row that has none.
+ */
+function signatureLine(node: SchemaTreeNode): string | null {
+	return node.signature ? `${node.name}${node.signature}` : null;
+}
+
 interface ExplorerRowProps {
 	node: SchemaTreeNode;
 	depth: number;
@@ -486,11 +494,25 @@ function ExplorerRow({
 	const description = splitAtMatch(node.description ?? "", descriptionStart, matchLength);
 
 	/*
-	 * A branch and a "Returned by" heading hold rows; they write nothing. Their
-	 * activator opens them, so that pressing Enter on one does what its chevron
-	 * does rather than nothing at all.
+	 * A branch, a "Returned by" heading and an "Arguments" heading hold rows;
+	 * they write nothing. Their activator opens them, so that pressing Enter on
+	 * one does what its chevron does rather than nothing at all.
 	 */
-	const container = node.kind === "branch" || node.kind === "returned-by";
+	const container =
+		node.kind === "branch" || node.kind === "returned-by" || node.kind === "arguments";
+
+	/*
+	 * What follows the name: the result type alone for a field that takes
+	 * arguments, the whole signature for every row that has no argument list to
+	 * lose. An argument list is unbounded - three arguments is ordinary - and
+	 * drawn inline it took the width the result type needed, so a row read
+	 * `users (first: Int, userId: In…` and never said what it answered with.
+	 *
+	 * The count replaces it rather than the names, which are as unbounded as the
+	 * list they came from. The names are one row down, under Arguments, and the
+	 * whole signature is on the hover.
+	 */
+	const secondary = node.args.length > 0 ? `: ${node.returnType}` : node.signature;
 
 	/*
 	 * A description the term matched is always shown in full, whatever the
@@ -506,6 +528,14 @@ function ExplorerRow({
 	 */
 	const full = showDescription || descriptionMatched;
 	const title = [
+		/*
+		 * The signature leads, because it is the one thing on the row that the
+		 * row itself does not show whole: the arguments come off the line so the
+		 * result type survives the pane's width, and this is where they stayed
+		 * readable without dragging the splitter. A type row's "signature" is its
+		 * kind label, which the row already draws, so it adds nothing here.
+		 */
+		node.kind === "type" ? null : signatureLine(node),
 		node.description,
 		deprecated ? `Deprecated: ${node.deprecationReason}` : null,
 		node.branch === "subscription" && node.kind === "field"
@@ -639,8 +669,15 @@ function ExplorerRow({
 							{name.after}
 						</span>
 					</span>
-					{node.signature && (
-						<span className="truncate text-muted-foreground">{node.signature}</span>
+					{node.args.length > 0 && (
+						<span data-tree-args className="shrink-0 text-muted-foreground">
+							({node.args.length} {node.args.length === 1 ? "arg" : "args"})
+						</span>
+					)}
+					{secondary && (
+						<span data-tree-signature className="truncate text-muted-foreground">
+							{secondary}
+						</span>
 					)}
 					{node.description && !full && (
 						<span

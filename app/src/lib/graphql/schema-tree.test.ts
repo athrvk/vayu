@@ -166,6 +166,94 @@ describe("childNodes", () => {
 	});
 });
 
+/**
+ * A field's arguments, off the row's one line and into rows of their own.
+ *
+ * Inline they were the longest part of a row and the least scannable, and they
+ * took the width the result type needed: at the pane's default 34% a field with
+ * two arguments read `posts (first: Int = 10, filter: PostFil…` and never said
+ * it answered with `[Post!]!`.
+ */
+describe("a field's arguments", () => {
+	const posts = childNamed(childNamed(branch("query"), "user"), "posts");
+
+	it("carries them structured, in declaration order, with their defaults", () => {
+		expect(posts.args).toEqual([
+			{ name: "first", type: "Int", defaultValue: "10" },
+			{ name: "filter", type: "PostFilter", defaultValue: null },
+		]);
+		expect(posts.returnType).toBe("[Post!]!");
+	});
+
+	it("leaves the signature whole, which is what the search still reads", () => {
+		// The row draws `returnType`; `signature` is the hover and the index's
+		// middle tier. Folding the arguments out of it would drop that tier
+		// silently - `first` would stop finding `posts`.
+		expect(posts.signature).toBe("(first: Int = 10, filter: PostFilter): [Post!]!");
+	});
+
+	it("lists them above the fields of what the field returns", () => {
+		expect(childNodes(schema, posts).map((c) => c.name)).toEqual([
+			"Arguments",
+			"id",
+			"title",
+			"body",
+			"author",
+		]);
+	});
+
+	it("opens a field that takes arguments even when it answers with a scalar", () => {
+		const deletePost = childNamed(branch("mutation"), "deletePost");
+		expect(deletePost.expandable).toBe(true);
+		expect(childNodes(schema, deletePost).map((c) => c.name)).toEqual(["Arguments"]);
+	});
+
+	it("reads each argument the way the schema declares it", () => {
+		const args = childNodes(schema, childNamed(posts, "Arguments"));
+		expect(args.map((a) => `${a.name}${a.signature}`)).toEqual([
+			"first: Int = 10",
+			"filter: PostFilter",
+		]);
+		expect(args.map((a) => a.kind)).toEqual(["argument", "argument"]);
+		expect(args[0].returnType).toBe("Int");
+	});
+
+	it("names the field an argument belongs to, and the route to it", () => {
+		const first = childNamed(childNamed(posts, "Arguments"), "first");
+		// The insertion writes the argument onto a field, so it needs the field.
+		// Reading one out of the row itself would name `User.first`, which the
+		// schema does not have.
+		expect(first.argumentOwner).toEqual({
+			parentTypeName: "User",
+			fieldName: "posts",
+			rootPath: [
+				{ parentTypeName: "Query", fieldName: "user" },
+				{ parentTypeName: "User", fieldName: "posts" },
+			],
+		});
+		expect(first.rootPath).toBeNull();
+	});
+
+	it("opens an argument whose type has members of its own", () => {
+		const filter = childNamed(childNamed(posts, "Arguments"), "filter");
+		expect(filter.expandable).toBe(true);
+		expect(childNodes(schema, filter).map((c) => c.name)).toEqual([
+			"authorId",
+			"ranking",
+			"tags",
+		]);
+	});
+
+	it("keeps arguments out of the search index, where the field is the answer", () => {
+		const matches = searchSchema(buildSearchIndex(schema), "first");
+		// Typing `first` finds the field that takes it, through the signature
+		// tier - not a second `first` row with no address and an owner type that
+		// does not declare it.
+		expect(matches.map((m) => m.node.name)).toContain("posts");
+		expect(matches.map((m) => m.node.kind)).not.toContain("argument");
+	});
+});
+
 describe("searchSchema", () => {
 	const index = buildSearchIndex(schema);
 
@@ -546,11 +634,15 @@ describe("the routes that reach a type", () => {
 		// Without this the row reads as returning a Node and expands into
 		// Node's one field, neither of which is what it is offering.
 		expect(viaNode.signature).toContain("→ Post");
+		expect(viaNode.returnType).toContain("→ Post");
 		expect(viaNode.typeName).toBe("Post");
 		expect(viaNode.rootPath).toEqual([
 			{ parentTypeName: "Query", fieldName: "node", narrowTo: "Post" },
 		]);
+		// The narrowing changes what the row answers with, not what it asks for:
+		// `node(id: ID!)` still takes its argument on the way to a Post.
 		expect(childNodes(schema, viaNode).map((c) => c.name)).toEqual([
+			"Arguments",
 			"id",
 			"title",
 			"body",
@@ -664,6 +756,17 @@ describe("treeLocationOf", () => {
 			expand: ["branch:types", "branch:types/type:User"],
 			id: "branch:types/type:User/User.handle",
 		});
+	});
+
+	it("places no argument row, which lives only under the field it belongs to", () => {
+		const posts = childNamed(childNamed(branch("query"), "user"), "posts");
+		const args = childNamed(posts, "Arguments");
+
+		// An argument's `ownerTypeName` names the type that declares its *field*,
+		// so the address this builds for a field row would be `User.first` - a row
+		// nothing answers to. Refused rather than computed.
+		expect(treeLocationOf(args)).toBeNull();
+		expect(treeLocationOf(childNamed(args, "first"))).toBeNull();
 	});
 
 	it("walks a type back to the Types branch", () => {

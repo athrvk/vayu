@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import { buildSchema, parse, validate, type GraphQLSchema } from "graphql";
 import { fixtureSchema } from "@/test/graphql-schema-fixture";
 import {
+	insertArgument,
 	insertField,
 	insertFragment,
 	insertionForNode,
@@ -699,6 +700,164 @@ describe("insertionForNode - a type row", () => {
 			});
 			expectValid(result.text);
 		}
+	});
+});
+
+/**
+ * An argument row activates into an edit of the field that takes it.
+ *
+ * The row exists because an argument list drawn inline cost the result type its
+ * width; making the rows *insertable* is what turns the text that was clipped
+ * into the thing the user wanted from it.
+ */
+describe("insertionForNode - an argument row", () => {
+	/** The Arguments row under a field, reached the way a user opens to it. */
+	function argumentRow(path: string[], argument: string): SchemaTreeNode {
+		let node = schemaBranches(schema).find((b) => b.branch === path[0]);
+		if (!node) throw new Error(`no ${path[0]} branch`);
+		for (const step of path.slice(1)) {
+			const next = childNodes(schema, node).find((c) => c.name === step);
+			if (!next) throw new Error(`no ${step} under ${node.name}`);
+			node = next;
+		}
+		const args = childNodes(schema, node).find((c) => c.kind === "arguments");
+		if (!args) throw new Error(`${node.name} takes no arguments`);
+		const found = childNodes(schema, args).find((c) => c.name === argument);
+		if (!found) throw new Error(`no argument ${argument}`);
+		return found;
+	}
+
+	it("writes the argument onto the selection the document already has", () => {
+		const doc = `query Existing {\n  user(id: "1") {\n    posts {\n      id\n    }\n  }\n}\n`;
+		const result = inserted(
+			insertionForNode(
+				schema,
+				argumentRow(["query", "user", "posts"], "first"),
+				doc,
+				doc.indexOf("id\n    }")
+			)!
+		);
+
+		expect(result.text).toContain("posts(first: $first)");
+		expect(result.text).toContain("query Existing($first: Int)");
+		expect(result.variables).toEqual({ first: 0 });
+		expect(result.placement).toBe("argument");
+		expectValid(result.text);
+	});
+
+	it("leaves the caret on what it just wrote", () => {
+		// Without a marker of its own the edit would report the end of the
+		// document, which is where `applyEdits` puts an unmarked insertion.
+		const doc = `query Existing {\n  user(id: "1") {\n    posts {\n      id\n    }\n  }\n}\n`;
+		const result = inserted(
+			insertionForNode(
+				schema,
+				argumentRow(["query", "user", "posts"], "first"),
+				doc,
+				doc.indexOf("id\n    }")
+			)!
+		);
+
+		expect(result.text.slice(0, result.cursor)).toMatch(/first: \$first$/);
+	});
+
+	it("appends to an argument list the field already carries", () => {
+		const doc = `query Existing {\n  search(term: $term) {\n    __typename\n  }\n}\n`;
+		const result = inserted(
+			insertionForNode(
+				schema,
+				argumentRow(["query", "search"], "ranking"),
+				doc,
+				doc.indexOf("__typename")
+			)!
+		);
+
+		expect(result.text).toContain("search(term: $term, ranking: $ranking)");
+		// An enum takes its first value: any of them parses and none is more
+		// correct than another.
+		expect(result.variables).toEqual({ ranking: "RELEVANCE" });
+	});
+
+	it("writes the field first when the document does not have it", () => {
+		/*
+		 * The row is under `posts`, and a user clicking `first` is not asking to
+		 * do the two steps themselves. Mutation check: return a refusal instead of
+		 * inserting the field, and the assertion on `posts(first: $first)` reddens.
+		 */
+		const result = inserted(
+			insertionForNode(schema, argumentRow(["query", "user", "posts"], "first"), "", 0)!
+		);
+
+		expect(result.text).toContain("posts(first: $first)");
+		expect(result.variables).toEqual({ id: "", first: 0 });
+		expect(result.placement).toBe("new-operation");
+		expectValid(result.text);
+	});
+
+	it("does not write a required argument twice when the field insertion wrote it", () => {
+		// `search(term:)` is required, so inserting the field already writes it.
+		const result = inserted(insertionForNode(schema, argumentRow(["query", "search"], "term"), "", 0)!);
+
+		expect(result.text.match(/term: \$term/g)).toHaveLength(1);
+		expectValid(result.text);
+	});
+
+	it("reports an argument the selection already carries instead of writing a second", () => {
+		const doc = `query Existing {\n  search(term: $term, ranking: RELEVANCE) {\n    __typename\n  }\n}\n`;
+		const result = insertionForNode(
+			schema,
+			argumentRow(["query", "search"], "ranking"),
+			doc,
+			doc.indexOf("__typename")
+		);
+
+		expect(result && isAlreadyPresent(result)).toBe(true);
+		if (result && isAlreadyPresent(result)) {
+			expect(doc.slice(result.start, result.end)).toBe("ranking");
+			expect(result.label).toBe("ranking on search");
+		}
+	});
+
+	it("inserts nothing for the Arguments heading itself", () => {
+		const posts = childNodes(
+			schema,
+			childNodes(schema, schemaBranches(schema).find((b) => b.branch === "query")!).find(
+				(c) => c.name === "user"
+			)!
+		).find((c) => c.name === "posts")!;
+		const heading = childNodes(schema, posts).find((c) => c.kind === "arguments")!;
+
+		// A container's activation is its toggle, which the row handles.
+		expect(insertionForNode(schema, heading, "", 0)).toBeNull();
+	});
+
+	it("refuses an argument the schema no longer declares", () => {
+		const result = insertArgument(schema, "", 0, {
+			parentTypeName: "User",
+			fieldName: "posts",
+			rootPath: null,
+			argumentName: "gone",
+		});
+
+		expect(isRefusal(result)).toBe(true);
+		if (isRefusal(result)) expect(result.reason).toContain("gone");
+	});
+
+	it("names the subscription, not the argument, when it refuses one", () => {
+		const live = buildSchema(`
+			type Post { id: ID! }
+			type Query { ping: String }
+			type Subscription { postAdded(room: ID!): Post }
+		`);
+		const branch = schemaBranches(live).find((b) => b.branch === "subscription")!;
+		const field = childNodes(live, branch).find((c) => c.name === "postAdded")!;
+		const args = childNodes(live, field).find((c) => c.kind === "arguments")!;
+		const room = childNodes(live, args).find((c) => c.name === "room")!;
+
+		const result = insertionForNode(live, room, "", 0);
+		expect(result && isRefusal(result)).toBe(true);
+		// What cannot be run is the subscription, not the argument.
+		if (result && isRefusal(result)) expect(result.reason).toContain("postAdded");
 	});
 });
 

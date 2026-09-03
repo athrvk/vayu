@@ -58,6 +58,7 @@ import {
 	isUnionType,
 	parse,
 	type FieldNode,
+	type GraphQLArgument,
 	type GraphQLCompositeType,
 	type GraphQLField,
 	type GraphQLNamedType,
@@ -90,6 +91,12 @@ export interface InsertRequest {
 	rootPath: FieldStep[] | null;
 }
 
+/** A field insertion that also writes one of the field's arguments onto it. */
+export interface ArgumentInsertRequest extends InsertRequest {
+	/** The argument to write, by the name the schema declares it under. */
+	argumentName: string;
+}
+
 export type InsertPlacement =
 	/** Into the selection set the cursor was already in. */
 	| "cursor"
@@ -98,7 +105,9 @@ export type InsertPlacement =
 	/** As a new operation appended to the document. */
 	| "new-operation"
 	/** As a new fragment definition appended to the document. */
-	| "fragment";
+	| "fragment"
+	/** Onto the argument list of a field the document already selects. */
+	| "argument";
 
 export interface DocumentInsertion {
 	/** The whole document after the edit. */
@@ -611,6 +620,158 @@ export function insertField(
 	return appendOperation(schema, text, fullPath, analysis?.operations ?? [], request.fieldName);
 }
 
+/**
+ * Write one of a field's arguments onto that field, as a variable.
+ *
+ * An argument is not a selection: it is written *onto* a field, so this needs
+ * the field to be in the document first. When it is not, the field is inserted
+ * by the ordinary rules and the argument goes onto what that wrote - which is
+ * what a user clicking `first` under `posts` is asking for, having no interest
+ * in doing the two steps themselves.
+ *
+ * The value is a `$variable` rather than a literal for the reason a required
+ * argument already is one: the pane merges a placeholder of the right shape into
+ * the Variables editor, where it can be typed over, and a literal written into
+ * the query would have to be found and edited in place instead.
+ */
+export function insertArgument(
+	schema: GraphQLSchema,
+	text: string,
+	cursor: number,
+	request: ArgumentInsertRequest
+): InsertResult {
+	const argument = declaredArgument(schema, request);
+	if (!argument) {
+		return {
+			refused: true,
+			reason: `${request.fieldName} no longer takes an argument called ${request.argumentName}.`,
+		};
+	}
+
+	const selected = selectedField(schema, text, cursor, request);
+	if (selected) return writeArgument(text, selected, argument);
+
+	const inserted = insertField(schema, text, cursor, request);
+	if (isRefusal(inserted) || isAlreadyPresent(inserted)) return inserted;
+
+	const written = selectedField(schema, inserted.text, inserted.cursor, request);
+	/*
+	 * The field is in the document now, so what is left is the argument - unless
+	 * writing the field already wrote it, which is the ordinary case for a
+	 * required one (`search(term: $term)`). Either way the field insertion is the
+	 * answer to report: it is the edit that happened, and the argument the user
+	 * clicked is on it.
+	 */
+	if (!written) return inserted;
+	const withArgument = writeArgument(inserted.text, written, argument);
+	if (isRefusal(withArgument) || isAlreadyPresent(withArgument)) return inserted;
+	return {
+		...withArgument,
+		variables: { ...inserted.variables, ...withArgument.variables },
+		placement: inserted.placement,
+	};
+}
+
+/** The argument the schema declares under that name, or null. */
+function declaredArgument(
+	schema: GraphQLSchema,
+	request: ArgumentInsertRequest
+): GraphQLArgument | null {
+	const owner = schema.getType(request.parentTypeName);
+	if (!isObjectType(owner) && !isInterfaceType(owner)) return null;
+	const field: GraphQLField<unknown, unknown> | undefined = owner.getFields()[request.fieldName];
+	if (!field) return null;
+	return field.args.find((a) => a.name === request.argumentName) ?? null;
+}
+
+/**
+ * The selection of `request`'s field the argument would land on, or null.
+ *
+ * The innermost enclosing set whose type owns the field wins, which is the rule
+ * `insertField` places by - so the argument lands on the selection the user is
+ * looking at rather than on a same-named field in another operation. An *alias*
+ * counts here, unlike in `presentLeaf`: `latest: posts` is still the `posts` the
+ * argument row belongs to, and the question is which selection to write onto
+ * rather than whether one is a duplicate of another.
+ */
+function selectedField(
+	schema: GraphQLSchema,
+	text: string,
+	cursor: number,
+	request: InsertRequest
+): { field: FieldNode; operation: OperationDefinitionNode } | null {
+	const chain = enclosingSets(schema, text, cursor)?.chain ?? [];
+	for (let depth = chain.length - 1; depth >= 0; depth--) {
+		const enclosing = chain[depth];
+		if (enclosing.typeName !== request.parentTypeName) continue;
+		const field = enclosing.selectionSet.selections.find(
+			(s): s is FieldNode => s.kind === Kind.FIELD && s.name.value === request.fieldName
+		);
+		if (field) return { field, operation: enclosing.operation };
+	}
+	return null;
+}
+
+/** The argument onto that selection, declared on the operation that gains it. */
+function writeArgument(
+	text: string,
+	target: { field: FieldNode; operation: OperationDefinitionNode },
+	argument: GraphQLArgument
+): InsertResult {
+	const { field, operation } = target;
+	const label = `${argument.name} on ${field.name.value}`;
+
+	const existing = (field.arguments ?? []).find((a) => a.name.value === argument.name);
+	if (existing) {
+		return {
+			alreadyPresent: true,
+			start: existing.name.loc!.start,
+			end: existing.name.loc!.end,
+			label,
+		};
+	}
+
+	const namer = new VariableNamer(declaredNames(operation));
+	const type = argument.type.toString();
+	const variable = namer.claim(
+		argument.name,
+		type,
+		placeholderFor(getNamedType(argument.type), type.includes("["))
+	);
+
+	const edits: Edit[] = [argumentEdit(text, field, `${argument.name}: $${variable}${CARET}`)];
+	const declaration = declareVariables(text, operation, namer.declarations);
+	if (declaration) edits.push(declaration);
+
+	return {
+		...applyEdits(text, edits),
+		variables: namer.values,
+		placement: "argument",
+		label,
+	};
+}
+
+/**
+ * An edit adding `argument` to a field's list, opening one when it has none.
+ *
+ * The caret rides inside `argument`, so it lands on what was just written rather
+ * than at the end of the document - which is where `applyEdits` puts it for an
+ * edit carrying no marker.
+ */
+function argumentEdit(text: string, field: FieldNode, argument: string): Edit {
+	const args = field.arguments ?? [];
+	if (args.length === 0) {
+		const at = field.name.loc!.end;
+		return { start: at, end: at, text: `(${argument})` };
+	}
+	const last = args[args.length - 1];
+	// The document parsed, so the list closes; the last argument's end is the
+	// honest fallback rather than an offset guessed from further away.
+	const close = text.indexOf(")", last.loc!.end);
+	const at = close === -1 ? last.loc!.end : close;
+	return { start: at, end: at, text: `, ${argument}` };
+}
+
 /** A whole new operation, named after the field so it can never be anonymous. */
 function appendOperation(
 	schema: GraphQLSchema,
@@ -818,9 +979,12 @@ export function insertionForNode(
 	query: string,
 	cursor: number
 ): InsertResult | null {
-	// A branch and a "Returned by" heading are containers. Activating one is the
-	// toggle, which the row already handles; there is nothing to write.
-	if (node.kind === "branch" || node.kind === "returned-by") return null;
+	// A branch, a "Returned by" heading and an "Arguments" heading are
+	// containers. Activating one is the toggle, which the row already handles;
+	// there is nothing to write.
+	if (node.kind === "branch" || node.kind === "returned-by" || node.kind === "arguments") {
+		return null;
+	}
 
 	if (node.kind === "input-field" || node.kind === "enum-value") {
 		return {
@@ -832,21 +996,38 @@ export function insertionForNode(
 	if (node.kind === "type") return insertTypeSelection(schema, query, cursor, node.name);
 
 	if (node.branch === "subscription") {
+		// Named for the field, even when the row is one of its arguments: what
+		// cannot be run is the subscription, not the argument.
+		const subject = node.argumentOwner?.fieldName ?? node.name;
 		return {
 			refused: true,
-			reason: `Subscriptions cannot be run here. Vayu sends one request and reads one response, so ${node.name} is shown for reference only.`,
+			reason: `Subscriptions cannot be run here. Vayu sends one request and reads one response, so ${subject} is shown for reference only.`,
 		};
 	}
 
-	return insertField(schema, query, cursor, {
+	if (node.kind === "argument") {
+		const owner = node.argumentOwner;
+		// Only a row built by `childNodes` reaches here, and that one always
+		// carries its field. A row that does not is not an argument of anything.
+		if (!owner) return { refused: true, reason: `${node.name} belongs to no field.` };
+		const field = { ...owner, rootPath: owner.rootPath };
+		return insertArgument(schema, query, cursor, {
+			...field,
+			rootPath: rootedPath(schema, field),
+			argumentName: node.name,
+		});
+	}
+
+	const field = {
 		parentTypeName: node.ownerTypeName ?? "",
 		fieldName: node.name,
-		rootPath: rootedPath(schema, node),
-	});
+		rootPath: node.rootPath,
+	};
+	return insertField(schema, query, cursor, { ...field, rootPath: rootedPath(schema, field) });
 }
 
 /**
- * The route to a row, borrowing one to its owner when the row has none.
+ * The route to a field, borrowing one to its owner when the row has none.
  *
  * A field found by search under a non-root type carries no path - `Post.title`
  * says nothing about how a `Post` is reached - and until now that made the
@@ -857,15 +1038,19 @@ export function insertionForNode(
  * best of those and appending this field is the same path the user would have
  * built by expanding the tree, arrived at without the expanding.
  *
+ * Takes the request rather than the row, because an argument row names its
+ * field in `argumentOwner` and its own `name` is the argument's: reading a field
+ * out of the row would build a step for a field that does not exist.
+ *
  * Still null when nothing returns the owner type, which is the honest answer and
  * the case `insertField` refuses out loud.
  */
-function rootedPath(schema: GraphQLSchema, node: SchemaTreeNode): FieldStep[] | null {
-	if (node.rootPath) return node.rootPath;
-	if (!node.ownerTypeName) return null;
-	const [best] = rootPathsToType(schema, node.ownerTypeName);
+function rootedPath(schema: GraphQLSchema, request: InsertRequest): FieldStep[] | null {
+	if (request.rootPath) return request.rootPath;
+	if (!request.parentTypeName) return null;
+	const [best] = rootPathsToType(schema, request.parentTypeName);
 	if (!best) return null;
-	return [...best, { parentTypeName: node.ownerTypeName, fieldName: node.name }];
+	return [...best, { parentTypeName: request.parentTypeName, fieldName: request.fieldName }];
 }
 
 /**

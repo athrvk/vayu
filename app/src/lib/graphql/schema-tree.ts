@@ -89,7 +89,39 @@ export type SchemaNodeKind =
 	 * it holds the root fields that answer with this type, and writes nothing
 	 * itself.
 	 */
-	| "returned-by";
+	| "returned-by"
+	/**
+	 * The "Arguments" container under a field row that takes some. A container
+	 * like "Returned by", and above the return type's own fields: the arguments
+	 * belong to the row you opened, its fields to the type that row answers with.
+	 */
+	| "arguments"
+	/** One argument under that container. */
+	| "argument";
+
+/** One argument of a field, as the schema declares it. */
+export interface SchemaArgument {
+	name: string;
+	/** The type as GraphQL spells it, e.g. `Int` or `[String!]`. */
+	type: string;
+	/** The default as GraphQL would print it, or null when there is none. */
+	defaultValue: string | null;
+}
+
+/**
+ * The field an argument belongs to.
+ *
+ * An argument is not a selection - it is written *onto* a field - so inserting
+ * one needs to know which field, and by which route. Carried on the row rather
+ * than recovered from it: an argument row's own `name` is the argument's, and
+ * reading a field out of it is exactly the misroute this exists to prevent.
+ */
+export interface ArgumentOwner {
+	parentTypeName: string;
+	fieldName: string;
+	/** The route to the field, or null when the field was not reached from a root. */
+	rootPath: FieldStep[] | null;
+}
 
 export interface SchemaTreeNode {
 	/** Unique within the tree: the expansion key, and the React key. */
@@ -100,8 +132,29 @@ export interface SchemaTreeNode {
 	/**
 	 * Arguments and result type as GraphQL spells them, e.g.
 	 * `(first: Int = 10): [Post!]!`. Empty for rows that have no signature.
+	 *
+	 * The whole signature, still - the row draws `returnType` instead, and this
+	 * is what the search index reads and what the row shows on hover. Folding the
+	 * arguments out of it would silently drop the middle tier of the search.
 	 */
 	signature: string;
+	/**
+	 * The result type as GraphQL spells it (`[Post!]!`), narrowed where the route
+	 * narrows (`Node → Post`). Empty on a row that answers with nothing: a
+	 * branch, a container, a type row, an enum value.
+	 *
+	 * What the row draws, because it is the short half of the signature and the
+	 * half a reader browsing is after. An argument list is unbounded, and drawn
+	 * inline it pushes the result type off the right edge of a 34% pane.
+	 */
+	returnType: string;
+	/**
+	 * The arguments this field takes, in declaration order. Empty on every other
+	 * kind. The row says how many there are and lists them as children.
+	 */
+	args: SchemaArgument[];
+	/** The field an argument row belongs to, or null on every other row. */
+	argumentOwner: ArgumentOwner | null;
 	/** The named type this row leads to, or null when the row is a leaf. */
 	typeName: string | null;
 	/**
@@ -135,6 +188,7 @@ const typeNodeId = (parentId: string, typeName: string): string => `${parentId}/
 const memberNodeId = (parentId: string, ownerTypeName: string, name: string): string =>
 	`${parentId}/${ownerTypeName}.${name}`;
 const returnedByNodeId = (typeRowId: string): string => `${typeRowId}/returned-by`;
+const argumentsNodeId = (fieldRowId: string): string => `${fieldRowId}/arguments`;
 
 /** The root operation type a branch stands for, or null for the Types branch. */
 export function branchRootTypeName(schema: GraphQLSchema, branch: SchemaBranchId): string | null {
@@ -176,6 +230,9 @@ export function schemaBranches(schema: GraphQLSchema): SchemaTreeNode[] {
 		kind: "branch" as const,
 		name: BRANCH_LABEL[branch],
 		signature: "",
+		returnType: "",
+		args: [],
+		argumentOwner: null,
 		typeName: branchRootTypeName(schema, branch),
 		ownerTypeName: null,
 		description: null,
@@ -319,17 +376,33 @@ function rootStep(ref: RootFieldRef): FieldStep {
 export function childNodes(schema: GraphQLSchema, node: SchemaTreeNode): SchemaTreeNode[] {
 	if (node.kind === "branch") return branchChildren(schema, node);
 	if (node.kind === "returned-by") return returnedByChildren(schema, node);
+	if (node.kind === "arguments") return argumentChildren(schema, node);
 
+	const members = typeMembers(schema, node);
+
+	/*
+	 * A field's arguments come before the fields of what it returns, because
+	 * that is the order they are written in: `posts(first: 10) { title }`. The
+	 * container is asked for before the type is even resolved, so a field whose
+	 * result type left the schema still lists what it takes.
+	 */
+	if (node.kind === "field") {
+		return node.args.length > 0 ? [argumentsNode(node), ...members] : members;
+	}
+
+	// Only a *type* row asks how it is reached. The same named type under a
+	// field row was reached by that field, which is the row above it.
+	if (node.kind !== "type" || !node.typeName) return members;
+	const returnedBy = rootFieldsReturning(schema, node.typeName);
+	return returnedBy.length > 0 ? [returnedByNode(node), ...members] : members;
+}
+
+/** The rows for what `node`'s type declares, or none when it has no type left. */
+function typeMembers(schema: GraphQLSchema, node: SchemaTreeNode): SchemaTreeNode[] {
 	if (!node.typeName) return [];
 	const type = schema.getType(node.typeName);
 	if (!type) return [];
-
-	const members = memberNodes(schema, node, type);
-	// Only a *type* row asks how it is reached. The same named type under a
-	// field row was reached by that field, which is the row above it.
-	if (node.kind !== "type") return members;
-	const returnedBy = rootFieldsReturning(schema, type.name);
-	return returnedBy.length > 0 ? [returnedByNode(node), ...members] : members;
+	return memberNodes(schema, node, type);
 }
 
 function branchChildren(schema: GraphQLSchema, node: SchemaTreeNode): SchemaTreeNode[] {
@@ -371,12 +444,92 @@ function returnedByChildren(schema: GraphQLSchema, node: SchemaTreeNode): Schema
 			{
 				...row,
 				signature: `${row.signature} → ${ref.narrowTo}`,
+				returnType: `${row.returnType} → ${ref.narrowTo}`,
 				typeName: ref.narrowTo,
-				expandable: hasChildren(schema.getType(ref.narrowTo)!),
+				// The arguments are still the field's, so a row that takes some
+				// still opens - the narrowing changes what it answers with, not
+				// what it asks for.
+				expandable: hasChildren(schema.getType(ref.narrowTo)!) || row.args.length > 0,
 				rootPath: [rootStep(ref)],
 			},
 		];
 	});
+}
+
+/**
+ * The arguments of the field an "Arguments" container hangs under.
+ *
+ * Read back off the schema rather than off the container's own `args`: the row
+ * carries what to *show*, and a row can outlive the schema it was built from by
+ * a refresh. Asking the schema means an argument that is gone lists nothing
+ * instead of offering an insertion that would not be legal.
+ */
+function argumentChildren(schema: GraphQLSchema, node: SchemaTreeNode): SchemaTreeNode[] {
+	const owner = node.argumentOwner;
+	if (!owner) return [];
+	const parent = schema.getType(owner.parentTypeName);
+	if (!isObjectType(parent) && !isInterfaceType(parent)) return [];
+	const field = parent.getFields()[owner.fieldName];
+	if (!field) return [];
+	return field.args.map((arg) => argumentNode(node.id, arg, owner, node.branch));
+}
+
+/** The "Arguments" container under a field row, carrying the field's identity. */
+function argumentsNode(fieldRow: SchemaTreeNode): SchemaTreeNode {
+	return {
+		id: argumentsNodeId(fieldRow.id),
+		kind: "arguments",
+		name: "Arguments",
+		signature: "",
+		returnType: "",
+		args: fieldRow.args,
+		argumentOwner: {
+			parentTypeName: fieldRow.ownerTypeName ?? "",
+			fieldName: fieldRow.name,
+			rootPath: fieldRow.rootPath,
+		},
+		typeName: null,
+		ownerTypeName: fieldRow.ownerTypeName,
+		description: null,
+		deprecationReason: null,
+		branch: fieldRow.branch,
+		expandable: true,
+		rootPath: null,
+	};
+}
+
+/**
+ * One argument row.
+ *
+ * Expandable when its type has members of its own, which is what makes an input
+ * object worth clicking: `filter: PostFilter` opens into the fields the value
+ * has to hold. Its `rootPath` is null - the route on the row is the field's, and
+ * it lives in `argumentOwner` where nothing will mistake it for a selection.
+ */
+function argumentNode(
+	parentId: string,
+	arg: GraphQLArgument,
+	owner: ArgumentOwner,
+	branch: SchemaBranchId
+): SchemaTreeNode {
+	const named = getNamedType(arg.type);
+	const value = schemaArgument(arg);
+	return {
+		id: memberNodeId(parentId, owner.fieldName, arg.name),
+		kind: "argument",
+		name: arg.name,
+		signature: typeSuffix(value),
+		returnType: value.type,
+		args: [],
+		argumentOwner: owner,
+		typeName: named.name,
+		ownerTypeName: owner.parentTypeName,
+		description: arg.description ?? null,
+		deprecationReason: arg.deprecationReason ?? null,
+		branch,
+		expandable: hasChildren(named),
+		rootPath: null,
+	};
 }
 
 function memberNodes(
@@ -407,6 +560,9 @@ function returnedByNode(typeRow: SchemaTreeNode): SchemaTreeNode {
 		kind: "returned-by",
 		name: "Returned by",
 		signature: "",
+		returnType: "",
+		args: [],
+		argumentOwner: null,
 		typeName: typeRow.typeName,
 		ownerTypeName: null,
 		description: null,
@@ -425,17 +581,25 @@ function fieldNode(
 	parentPath: FieldStep[] | null
 ): SchemaTreeNode {
 	const named = getNamedType(field.type);
+	const args = field.args.map(schemaArgument);
+	const returnType = field.type.toString();
 	return {
 		id: memberNodeId(parentId, ownerTypeName, field.name),
 		kind: "field",
 		name: field.name,
-		signature: `${argsSignature(field.args)}: ${field.type.toString()}`,
+		signature: `${argsSignature(args)}: ${returnType}`,
+		returnType,
+		args,
+		argumentOwner: null,
 		typeName: named.name,
 		ownerTypeName,
 		description: field.description ?? null,
 		deprecationReason: field.deprecationReason ?? null,
 		branch,
-		expandable: hasChildren(named),
+		// A field that takes arguments opens even when it answers with a scalar:
+		// the arguments are children, and a row that holds some and says it holds
+		// none is the dead chevron the other way round.
+		expandable: hasChildren(named) || args.length > 0,
 		rootPath: parentPath
 			? [...parentPath, { parentTypeName: ownerTypeName, fieldName: field.name }]
 			: null,
@@ -453,6 +617,9 @@ function inputFieldNode(
 		kind: "input-field",
 		name: field.name,
 		signature: `: ${field.type.toString()}${field.defaultValue === undefined ? "" : ` = ${JSON.stringify(field.defaultValue)}`}`,
+		returnType: field.type.toString(),
+		args: [],
+		argumentOwner: null,
 		typeName: named.name,
 		ownerTypeName: owner.name,
 		description: field.description ?? null,
@@ -474,6 +641,9 @@ function enumValueNode(
 		kind: "enum-value",
 		name,
 		signature: "",
+		returnType: "",
+		args: [],
+		argumentOwner: null,
 		typeName: null,
 		ownerTypeName: owner.name,
 		description: value.description ?? null,
@@ -495,6 +665,9 @@ function typeNode(
 		kind: "type",
 		name: type.name,
 		signature: typeKindLabel(type),
+		returnType: "",
+		args: [],
+		argumentOwner: null,
 		typeName: type.name,
 		ownerTypeName: null,
 		description: type.description ?? null,
@@ -528,14 +701,24 @@ function hasChildren(type: GraphQLNamedType): boolean {
 	return false;
 }
 
+/** An argument in the shape the rows and the signature both read. */
+function schemaArgument(arg: GraphQLArgument): SchemaArgument {
+	return {
+		name: arg.name,
+		type: arg.type.toString(),
+		defaultValue: arg.defaultValue === undefined ? null : formatDefault(arg.defaultValue),
+	};
+}
+
+/** `: Int = 10`, the half of an argument that follows its name. */
+function typeSuffix(arg: SchemaArgument): string {
+	return `: ${arg.type}${arg.defaultValue === null ? "" : ` = ${arg.defaultValue}`}`;
+}
+
 /** `(a: Int = 1, b: String!)`, or `""` when the field takes no arguments. */
-function argsSignature(args: readonly GraphQLArgument[]): string {
+function argsSignature(args: readonly SchemaArgument[]): string {
 	if (args.length === 0) return "";
-	const parts = args.map((a) => {
-		const suffix = a.defaultValue === undefined ? "" : ` = ${formatDefault(a.defaultValue)}`;
-		return `${a.name}: ${a.type.toString()}${suffix}`;
-	});
-	return `(${parts.join(", ")})`;
+	return `(${args.map((a) => `${a.name}${typeSuffix(a)}`).join(", ")})`;
 }
 
 /**
@@ -610,6 +793,14 @@ export interface SchemaSearchIndex {
  * operation type - and `insertionForNode` refuses both by kind, so a search hit
  * lands on the same refusal a Types-branch row does rather than guessing a
  * route through the graph.
+ *
+ * **Arguments are the one kind `childNodes` produces that is not indexed**, and
+ * the exception is what the rule above is for rather than a hole in it: an
+ * argument is already searchable through the field that takes it, whose whole
+ * signature is the middle tier here - typing `first` lists `User.posts`, the row
+ * the argument hangs under. Indexed as itself it would be a second `first` row
+ * with no address (`treeLocationOf` cannot place one) naming a type that does
+ * not declare it, which is a worse answer than the field.
  */
 export function buildSearchIndex(schema: GraphQLSchema): SchemaSearchIndex {
 	const entries: IndexEntry[] = [];
@@ -817,13 +1008,23 @@ export interface TreeLocation {
  * drift.
  *
  * Null for the rows that are not in the tree as themselves: a branch is already
- * the destination, and a "Returned by" container exists only under an expanded
- * type row.
+ * the destination, a "Returned by" container exists only under an expanded type
+ * row, and so do the "Arguments" container and its rows. An argument is also the
+ * one row whose `ownerTypeName` names the type of the *field* it belongs to
+ * rather than of itself, so the address below would be a field that does not
+ * exist - the misroute this guard is here to refuse rather than compute.
  */
 export function treeLocationOf(node: SchemaTreeNode): TreeLocation | null {
 	const typesBranch = branchNodeId("types");
 
-	if (node.kind === "branch" || node.kind === "returned-by") return null;
+	if (
+		node.kind === "branch" ||
+		node.kind === "returned-by" ||
+		node.kind === "arguments" ||
+		node.kind === "argument"
+	) {
+		return null;
+	}
 	if (node.kind === "type") {
 		return { expand: [typesBranch], id: typeNodeId(typesBranch, node.name) };
 	}
