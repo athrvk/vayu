@@ -868,9 +868,10 @@ describe("insertionForNode - an argument row", () => {
 	it("inserts nothing for the Arguments heading itself", () => {
 		const posts = childNodes(
 			schema,
-			childNodes(schema, schemaBranches(schema).find((b) => b.branch === "query")!).find(
-				(c) => c.name === "user"
-			)!
+			childNodes(
+				schema,
+				schemaBranches(schema).find((b) => b.branch === "query")!
+			).find((c) => c.name === "user")!
 		).find((c) => c.name === "posts")!;
 		const heading = childNodes(schema, posts).find((c) => c.kind === "arguments")!;
 
