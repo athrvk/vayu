@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import { boundCollections, type BoundSpec } from "@/services/openapi/bound-spec-match";
@@ -285,12 +285,24 @@ export function useSpecMatchQuery(
  * document is not stored, and one that will not read as OpenAPI - are answers
  * rather than transport hiccups, and retrying them only delays the sentence
  * that says so.
+ *
+ * **The previous answer stays on screen while the next one assembles**
+ * (`placeholderData`, issue #1311). Format is part of the key, so switching it
+ * is a cache miss, and without a placeholder `data` went undefined for the
+ * length of one engine round trip: the dialog's summary card - a bordered block
+ * of eight or so lines - was torn down for a one-line spinner and put back,
+ * moving both edges of a dialog that centres on itself. What the card states is
+ * a property of the collection, not of the serialisation: the counts are the
+ * same in JSON and YAML, and only `text` and `fileName` differ. So the honest
+ * placeholder is the previous format's answer, and `isFetching` is what the
+ * dialog shows while the new one is in flight.
  */
 export function useSpecExportQuery(collectionId: string, format: ExportFormat) {
 	const [opened] = useState(() => Date.now());
 	return useQuery({
 		queryKey: queryKeys.specs.export(collectionId, format, opened),
 		queryFn: () => apiService.exportSpec({ collectionId, format }),
+		placeholderData: keepPreviousData,
 		staleTime: Infinity,
 		retry: false,
 	});

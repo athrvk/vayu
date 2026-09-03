@@ -1412,7 +1412,14 @@ holds the finished document instead, keyed by format because the dialog toggles
 between two serializations of one answer, and by the moment the dialog mounted
 because a *collection* changes under its id in a way a document never does:
 that is what makes it fresh on every open and cached across a toggle, which
-neither `staleTime` alone can say.
+neither `staleTime` alone can say. A key per format also means a switch is a
+cache miss, so this is the one read that carries `placeholderData:
+keepPreviousData` (issue #1311): the counts the dialog prints belong to the
+collection rather than to the serialization, and are the same either way, so
+the previous answer is the honest thing to hold while the next one assembles.
+The dialog gates Copy and Download on `isFetching` for that window - the text
+under them is still the previous format's - and shows a placeholder shaped like
+its summary card on the first read, when there is nothing to keep.
 
 `specs.match(collectionId, fingerprint)` is the third of that family and the one
 that names no document (issue #761): the pairing of a collection's requests
