@@ -277,6 +277,30 @@ describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegac
 	});
 
 	/*
+	 * What the panel spends its space on, stated as a count rather than as a
+	 * list of absences. The wall this replaced grew one block at a time, and
+	 * every "is this still gone?" assertion only ever names a block someone has
+	 * already thought of - so this one names the whole of what may sit under
+	 * the editor: the snippets control, collapsed, and the one-line footer.
+	 * Mutation check: put any block back below the editor and the count moves.
+	 */
+	it("puts exactly two things under the editor: the snippets control and the one line", () => {
+		const { container } = render(<Panel />);
+		const panel = container.firstElementChild;
+		const children = Array.from(panel?.children ?? []);
+		const editorIndex = children.findIndex((child) =>
+			child.querySelector('[data-testid="code-editor"]')
+		);
+
+		expect(editorIndex, "the editor should be in the panel's own column").toBeGreaterThan(-1);
+
+		const below = children.slice(editorIndex + 1);
+		expect(below).toHaveLength(2);
+		expect(below[0].textContent).toMatch(/^snippets/i);
+		expect(below[1].textContent).toMatch(/scripting docs$/i);
+	});
+
+	/*
 	 * The quick reference is a handful of lines and the notes are a handful of
 	 * rules; everything else about the `pm` API lives in the scripting guide,
 	 * which a script author had no way to reach from the panel they write
