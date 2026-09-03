@@ -20,6 +20,12 @@ the shared conformance fixture
 (`engine/tests/fixtures/variable-resolution-conformance.json`), which the
 engine's gtest suite and the renderer's vitest suite both drive.
 
+**A third reader, MCP (issue #1207):** the same rule set is served as the MCP
+resource `vayu://variables/resolution`, and the `resolve_variables` tool
+answers which definition wins for a given collection/environment context and
+every definition it shadowed. See
+[MCP - Variables](../engine/mcp.md#variables).
+
 **One matcher in the renderer.** `{{name}}` is recognised by
 `VARIABLE_PATTERN` in `app/src/constants/variables.ts` and nowhere else -
 import it (or `containsVariableToken` / `isVariableToken`, which wrap the two
