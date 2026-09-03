@@ -33,6 +33,10 @@ export function CookiesSection({ tab }: ContextBarSectionProps) {
 	const clearCookies = useClearCookiesMutation();
 
 	if (isLoading) return <SectionLoading />;
+	// `useCookiesRelevance` takes both of this section's empty answers before the
+	// bar mounts it - no host is `hidden`, an empty jar is a dimmed header - so
+	// these bodies are what a caller that mounts the section directly sees, and
+	// the honest answer in the render where the last cookie goes away.
 	if (!host) return <SectionEmpty>This request has no host yet</SectionEmpty>;
 
 	return (

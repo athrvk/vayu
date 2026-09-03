@@ -46,8 +46,8 @@ export type SectionRelevance = "content" | "hidden" | { empty: string };
  *    later flickers, and the queries behind these answers are usually already
  *    warm (the request builder on the same screen holds `useRequestQuery`).
  *    The one exception is a verdict that guards an expensive mount - see
- *    `graphql-relevance.ts`, where the unknown case is `"hidden"` because
- *    revealing costs a 320KB chunk.
+ *    `useGraphQLRelevance` in `relevance.ts`, where the unknown case is
+ *    `"hidden"` because revealing costs a 320KB chunk.
  * 2. **Do not reach for data the section itself would not read.** The hook runs
  *    whenever the bar is open, including for a collapsed section, so an answer
  *    that costs a query the section does not already make is a query the bar

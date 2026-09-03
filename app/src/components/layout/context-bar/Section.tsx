@@ -35,6 +35,14 @@ interface ContextBarSectionFrameProps {
 	children: ReactNode;
 }
 
+/**
+ * The width of the chevron's column, shared with the empty header's blank stand-in
+ * for it below - the one thing that keeps every section title on the same left
+ * edge whether or not its section can be opened. Two hardcoded `w-3`s would line
+ * up until one of them changed.
+ */
+const CHEVRON_COLUMN = "w-3";
+
 export function ContextBarSectionFrame({
 	title,
 	expanded,
@@ -50,9 +58,9 @@ export function ContextBarSectionFrame({
 				)}
 			>
 				{expanded ? (
-					<ChevronDown className="w-3 h-3 shrink-0" />
+					<ChevronDown className={cn(CHEVRON_COLUMN, "h-3 shrink-0")} />
 				) : (
-					<ChevronRight className="w-3 h-3 shrink-0" />
+					<ChevronRight className={cn(CHEVRON_COLUMN, "h-3 shrink-0")} />
 				)}
 				{title}
 			</CollapsibleTrigger>
@@ -80,7 +88,7 @@ export function ContextBarSectionFrame({
 export function ContextBarSectionEmptyHeader({ title, note }: { title: string; note: string }) {
 	return (
 		<div className={cn(EYEBROW_CLASS, "flex items-center gap-1 py-2")}>
-			<span className="w-3 shrink-0" aria-hidden />
+			<span className={cn(CHEVRON_COLUMN, "shrink-0")} aria-hidden />
 			{title}
 			{/* The eyebrow's uppercase and tracking are the title's, not the
 			    note's: "NONE" set in the same caps reads as a second heading. */}
