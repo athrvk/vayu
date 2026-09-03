@@ -180,6 +180,16 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/src/lib/variable-resolution.conformance.test.ts",
 		paths: ["engine/tests/fixtures/variable-resolution-conformance.json"],
 	},
+	/*
+	 * The same fixture, read by the third implementation of the resolution order
+	 * (issue #1207): the MCP `resolve_variables` tool cannot import the
+	 * renderer's resolver across the process boundary, so it mirrors it and this
+	 * guard replays the fixture against both.
+	 */
+	mcpVariableOrigins: {
+		reader: "app/electron/mcp/variable-origins.conformance.test.ts",
+		paths: ["engine/tests/fixtures/variable-resolution-conformance.json"],
+	},
 	setCookie: {
 		reader: "app/src/modules/request-builder/components/ResponseViewer/parse-set-cookie.conformance.test.ts",
 		paths: ["engine/tests/fixtures/set-cookie-conformance.json"],
