@@ -162,9 +162,11 @@ conclusion about a combination the app never renders is not a finding.
   variant pairs `bg-x` with `hover:bg-x/80`, and `cn()` (tailwind-merge)
   replaces `bg-*` but not `hover:bg-*`, so the caller's fill wins at rest and
   the variant's hover wins on hover. → `badge-hover.test.tsx`
-- **`docs/design-system.md` values are checked against `index.css`**
+- **`docs/design-system.md` values are checked against `index.css`**, and the
+  paths its Source Files table names are checked to exist
   → `design-system-doc.test.ts`. Prose is not: if you change a value, read the
-  sentence around it.
+  sentence around it, and if you rename a component the doc describes, the table
+  row fails but the section around it will not.
 - **Accessibility has a section of its own** in `docs/design-system.md`
   ("Accessibility", after Focus & Interaction States): which check holds which
   rule, why a tooltip is not a name, why `outline-none` needs a replacement in
