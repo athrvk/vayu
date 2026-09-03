@@ -441,14 +441,40 @@ describe("what the pane says out loud", () => {
 		expect(reveals.get("graphql")).toEqual([4]);
 	});
 
-	it("inserts a type as a fragment", () => {
+	it("inserts a type as the operation that returns it, not a fragment", () => {
 		const view = mount("");
 		fireEvent.click(rowNamed("Types").querySelector("[data-tree-toggle]")!);
 		act(() => {
 			fireEvent.click(rowNamed("Post").querySelector("[data-tree-activate]")!);
 		});
 
-		expect(view.query()).toContain("fragment PostFields on Post");
-		expect(view.announcement()).toContain("as a new fragment");
+		/*
+		 * Mutation check: route a type row back to `insertFragment` and the
+		 * document is `fragment PostFields on Post { … }` and nothing else - it
+		 * parses, holds no operation, and Send gets nothing back.
+		 */
+		expect(view.query()).toContain("createPost(input: $input)");
+		expect(view.query()).not.toContain("fragment");
+		expect(view.announcement()).toContain("as a new operation");
+	});
+
+	it("shows a refusal in the pane, not only to a screen reader", () => {
+		const view = mount("");
+		insert("Subscription (not executable)", "postAdded");
+
+		// The live region still says it; the point is that a sighted user now
+		// sees why the click did nothing.
+		const notice = screen.getByTestId("explorer-notice");
+		expect(notice.textContent).toContain("Subscriptions cannot be run here");
+		expect(view.announcement()).toContain("Subscriptions cannot be run here");
+	});
+
+	it("clears the refusal once an insertion lands, so it answers this click", () => {
+		mount("");
+		insert("Subscription (not executable)", "postAdded");
+		expect(screen.queryByTestId("explorer-notice")).not.toBeNull();
+
+		insert("Query", "user");
+		expect(screen.queryByTestId("explorer-notice")).toBeNull();
 	});
 });

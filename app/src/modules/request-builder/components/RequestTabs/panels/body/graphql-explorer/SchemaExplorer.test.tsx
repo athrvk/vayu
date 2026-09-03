@@ -210,6 +210,127 @@ describe("search", () => {
 		expect(description.textContent).toBe("Search across users and posts.");
 		expect(description.className).not.toContain("truncate");
 	});
+
+	it("clips a name-matched row whose description happens to hold the term too", () => {
+		/*
+		 * `Query.search` is named `search` and described "Search across users and
+		 * posts." Deciding fullness from `descriptionStart` rather than from the
+		 * tier calls this a description match and draws the whole paragraph over
+		 * the results the user is reading. Mutation check: swap the tier test back
+		 * for `descriptionStart >= 0` and this reddens while the case above stays
+		 * green - the two pin the rule from both directions.
+		 */
+		renderExplorer();
+		fireEvent.change(screen.getByLabelText("Search schema"), { target: { value: "search" } });
+
+		expect(descriptionOf(rowNamed("search")!)!.className).toContain("truncate");
+	});
+});
+
+describe("search results carry the address a flat list threw away", () => {
+	const search = (term: string) =>
+		fireEvent.change(screen.getByLabelText("Search schema"), { target: { value: term } });
+
+	const groups = () =>
+		Array.from(document.querySelectorAll("[data-tree-group]")).map((g) =>
+			g.getAttribute("data-tree-group")
+		);
+
+	it("groups results under the same headings the tree uses, in its order", () => {
+		renderExplorer();
+		search("search");
+		expect(groups()).toEqual(["Query", "Types"]);
+	});
+
+	it("names the type that declares each field, so same-named rows differ", () => {
+		renderExplorer();
+		search("id");
+
+		// Three types declare `id`. Flattened they were three identical rows and
+		// the user could not tell which was reachable from Query.
+		const owners = rows()
+			.filter((r) => r.getAttribute("data-tree-label") === "id")
+			.map((r) => r.querySelector("[data-tree-owner]")?.textContent);
+		expect(owners).toEqual(expect.arrayContaining(["Node.", "User.", "Post."]));
+	});
+
+	it("keeps the owner out of the name, so highlighting still marks the name", () => {
+		renderExplorer();
+		search("handle");
+
+		const row = rowNamed("handle")!;
+		expect(row.querySelector("[data-tree-owner]")!.textContent).toBe("User.");
+		expect(name(row)).toBe("handle");
+	});
+
+	it("does not name an owner in the tree, where the row above is the owner", () => {
+		renderExplorer();
+		fireEvent.click(rowNamed("Query")!.querySelector("[data-tree-toggle]")!);
+		expect(rowNamed("search")!.querySelector("[data-tree-owner]")).toBeNull();
+	});
+
+	it("carries no expand toggle, since a result has nothing to expand", () => {
+		renderExplorer();
+		search("Post");
+
+		const row = rowNamed("Post")!;
+		// The type row *is* expandable in the tree; in the results the toggle
+		// would flip `aria-expanded` with nothing appearing beneath it.
+		expect(row.querySelector("[data-tree-toggle]")).toBeNull();
+		expect(row.getAttribute("aria-expanded")).toBeNull();
+	});
+
+	it("goes to the tree instead, opening the path and landing on the row", () => {
+		renderExplorer();
+		search("handle");
+
+		act(() => {
+			fireEvent.click(rowNamed("handle")!.querySelector("[data-tree-menu]")!);
+		});
+
+		// The search is spent and the tree is open at the row's own place.
+		expect((screen.getByLabelText("Search schema") as HTMLInputElement).value).toBe("");
+		const revealed = rowNamed("handle")!;
+		expect(revealed.getAttribute("data-tree-id")).toBe("branch:types/type:User/User.handle");
+		expect(document.activeElement).toBe(revealed);
+	});
+
+	it("leaves a path already open alone rather than closing half of it", () => {
+		renderExplorer();
+		fireEvent.click(rowNamed("Types")!.querySelector("[data-tree-toggle]")!);
+		search("handle");
+
+		act(() => {
+			fireEvent.click(rowNamed("handle")!.querySelector("[data-tree-menu]")!);
+		});
+
+		// Toggling the ancestors would have closed Types on the way down.
+		expect(rowNamed("User")).toBeTruthy();
+		expect(rowNamed("handle")).toBeTruthy();
+	});
+});
+
+describe("a row that holds rows opens instead of doing nothing", () => {
+	it("opens a branch when its own text is activated", () => {
+		const { onInsert } = renderExplorer();
+		fireEvent.click(rowNamed("Query")!.querySelector("[data-tree-activate]")!);
+
+		expect(rows().map((r) => r.getAttribute("data-tree-label"))).toContain("search");
+		// A branch is a container; there was never anything to insert.
+		expect(onInsert).not.toHaveBeenCalled();
+	});
+
+	it("lists the root fields that return a type, under the type", () => {
+		renderExplorer();
+		fireEvent.click(rowNamed("Types")!.querySelector("[data-tree-toggle]")!);
+		fireEvent.click(rowNamed("Post")!.querySelector("[data-tree-toggle]")!);
+
+		const returnedBy = rowNamed("Returned by")!;
+		fireEvent.click(returnedBy.querySelector("[data-tree-activate]")!);
+
+		// `Mutation.createPost` is the one root field answering with a Post.
+		expect(rows().map((r) => r.getAttribute("data-tree-label"))).toContain("createPost");
+	});
 });
 
 describe("showing the full description on demand", () => {

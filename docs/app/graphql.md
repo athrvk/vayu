@@ -46,8 +46,15 @@ control - to dock the explorer beside the editor.
   arguments and result type; descriptions sit beside them; a deprecated field or
   enum value is struck through, with the reason in its tooltip.
 - **Search** filters across every field and type in the schema at once. Press
-  `/` from anywhere in the tree to jump to the search box.
-- **Insert** a row by clicking it, or by pressing Enter with it focused.
+  `/` from anywhere in the tree to jump to the search box. Results are grouped
+  under the same Query / Mutation / Subscription / Types headings the tree uses,
+  and a field names the type that declares it - `User.handle`, so three types
+  that each declare an `id` are three rows you can tell apart. The control at
+  the left of a result **shows that row in the tree**: it opens the path, clears
+  the search and lands on the row.
+- **Insert** a row by clicking it, or by pressing Enter with it focused. Every
+  activation answers: it inserts, it selects the line you already have, or it
+  says in the pane why it could not.
 
 The tree is a full keyboard surface: arrows move, Right opens a row, Left closes
 it or steps out, Home and End jump to the ends, and typing letters jumps to the
@@ -55,8 +62,8 @@ row that starts with them.
 
 ### What insertion writes
 
-Inserting always leaves a document that parses. Where a field lands depends on
-where your cursor is:
+Inserting always leaves a document that parses **and can be sent**. Where a
+field lands depends on where your cursor is:
 
 - **Inside a selection set that can hold the field** - it is added there, as a
   sibling of what is already selected.
@@ -72,7 +79,18 @@ same edit. Object-typed fields arrive with their scalar fields selected and the
 cursor inside the braces; deprecated fields are browsable but are never selected
 for you.
 
-Selecting a **type** inserts a fragment definition on it instead.
+Selecting a **type** inserts the operation that returns it - `Post` writes the
+`createPost` mutation that answers with one, following the shortest route the
+schema offers and never a deprecated one. A fragment definition is written
+instead only when nothing in Query or Mutation returns the type *and* the
+document already holds an operation for the fragment to stand beside; with
+neither, Vayu says so rather than leaving you a document with nothing to run.
+Under a type row, **Returned by** lists the root fields that answer with it, so
+you can pick a different route than the one a click takes.
+
+A field found by **search** under a type you have not opened - `User.handle`,
+say - is inserted through that same route, so it no longer needs your cursor to
+already be inside a `User`.
 
 **Subscriptions are shown and cannot be inserted.** Vayu sends one HTTP request
 and reads one response, so a subscription has no transport here. Hiding the

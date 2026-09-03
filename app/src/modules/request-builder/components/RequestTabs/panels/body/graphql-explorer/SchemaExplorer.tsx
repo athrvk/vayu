@@ -32,11 +32,12 @@
  * state here would not survive it.
  */
 
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	AlertCircle,
 	ChevronDown,
 	ChevronRight,
+	ListTree,
 	Loader2,
 	PanelRightClose,
 	RefreshCw,
@@ -44,15 +45,20 @@ import {
 	Text,
 } from "lucide-react";
 import { Input, TooltipIconButton, EYEBROW_CLASS } from "@/components/ui";
+import { Callout } from "@/components/shared/Callout";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
 import { useExplorerStore } from "@/lib/graphql/explorer-store";
 import {
 	buildSearchIndex,
+	groupSearchMatches,
 	searchSchema,
 	splitAtMatch,
+	treeLocationOf,
 	visibleRows,
+	type SchemaSearchMatch,
 	type SchemaTreeNode,
+	type TreeLocation,
 } from "@/lib/graphql/schema-tree";
 import type { SchemaEntry } from "@/lib/graphql/schema-cache";
 import { SchemaStatusBadge } from "../SchemaStatusBadge";
@@ -72,11 +78,65 @@ const INDENT_STEP = 12;
  * so a row draws its name and its description whole without needing to know
  * which of the two modes produced it.
  */
-interface ExplorerRowModel {
+interface NodeRowModel {
+	kind: "row";
+	key: string;
 	node: SchemaTreeNode;
 	depth: number;
 	matchStart: number;
 	descriptionStart: number;
+	/**
+	 * Whether the *description* is why this row is in the results - not merely
+	 * whether it also contains the term. Only that earns the whole paragraph.
+	 */
+	descriptionMatched: boolean;
+	/**
+	 * Whether the row has to name its owner. In the tree the owner is the row
+	 * above it; in a flat result list it is the only thing telling
+	 * `App.accessScopes` from `AppInstallation.accessScopes`.
+	 */
+	showOwner: boolean;
+	/** Where this row lives in the tree, when it can be shown there. */
+	reveal: TreeLocation | null;
+}
+
+/** A heading over the results of one branch. Not a row the tree navigates. */
+interface GroupRowModel {
+	kind: "group";
+	key: string;
+	label: string;
+}
+
+type ExplorerRowModel = NodeRowModel | GroupRowModel;
+
+/**
+ * Search matches as rows, under the headings the tree uses.
+ *
+ * Flattened rather than nested inside a `role="group"` per branch: the roving
+ * treeview walks the DOM to decide what is a parent of what, and a wrapper
+ * holding several rows would make the first of them read as the parent of the
+ * rest. The headings are `presentation`, so the tree still contains only
+ * treeitems, and the disambiguation a screen reader needs rides on the row
+ * itself as its owner prefix rather than on a heading it would have to
+ * remember.
+ */
+function searchRows(matches: SchemaSearchMatch[]): ExplorerRowModel[] {
+	return groupSearchMatches(matches).flatMap((group) => [
+		{ kind: "group" as const, key: `group:${group.branch}`, label: group.label },
+		...group.matches.map(
+			(match): NodeRowModel => ({
+				kind: "row",
+				key: match.node.id,
+				node: match.node,
+				depth: 0,
+				matchStart: match.matchStart,
+				descriptionStart: match.descriptionStart,
+				descriptionMatched: match.tier === "description",
+				showOwner: match.node.ownerTypeName !== null,
+				reveal: treeLocationOf(match.node),
+			})
+		),
+	]);
 }
 
 export interface SchemaExplorerProps {
@@ -99,6 +159,14 @@ export interface SchemaExplorerProps {
 	 * the document is; it knows which row was activated.
 	 */
 	onInsert: (node: SchemaTreeNode) => void;
+	/**
+	 * What the last activation could not do, in words, or null.
+	 *
+	 * The pane is where the click happened, so it is where the answer belongs.
+	 * The live region says the same thing to a screen reader; for everyone else
+	 * a refusal that only reaches `sr-only` text is a click that did nothing.
+	 */
+	notice?: string | null;
 }
 
 export function SchemaExplorer({
@@ -107,6 +175,7 @@ export function SchemaExplorer({
 	onRefresh,
 	onClose,
 	onInsert,
+	notice = null,
 }: SchemaExplorerProps) {
 	const schema = entry?.schema ?? null;
 	const status = entry?.status ?? "idle";
@@ -117,6 +186,7 @@ export function SchemaExplorer({
 	const showDescriptions = view?.showDescriptions ?? false;
 	const setSearch = useExplorerStore((s) => s.setSearch);
 	const toggleExpanded = useExplorerStore((s) => s.toggleExpanded);
+	const revealPath = useExplorerStore((s) => s.revealPath);
 	const setScrollTop = useExplorerStore((s) => s.setScrollTop);
 	const toggleDescriptions = useExplorerStore((s) => s.toggleDescriptions);
 
@@ -143,20 +213,60 @@ export function SchemaExplorer({
 
 	const rows = useMemo<ExplorerRowModel[]>(() => {
 		if (!schema) return [];
-		if (term && searchIndex) {
-			return searchSchema(searchIndex, term).map((m) => ({
-				node: m.node,
-				depth: 0,
-				matchStart: m.matchStart,
-				descriptionStart: m.descriptionStart,
-			}));
-		}
-		return visibleRows(schema, expanded).map((row) => ({
-			...row,
-			matchStart: -1,
-			descriptionStart: -1,
-		}));
+		if (term && searchIndex) return searchRows(searchSchema(searchIndex, term));
+		return visibleRows(schema, expanded).map(
+			(row): NodeRowModel => ({
+				kind: "row",
+				key: row.node.id,
+				node: row.node,
+				depth: row.depth,
+				matchStart: -1,
+				descriptionStart: -1,
+				descriptionMatched: false,
+				showOwner: false,
+				reveal: null,
+			})
+		);
 	}, [schema, searchIndex, term, expanded]);
+
+	/*
+	 * Showing a search result where it lives.
+	 *
+	 * Two steps that cannot be one: the store opens the path and clears the
+	 * search, and only the render *after* that has a row to focus. A counter
+	 * rather than the id in state, because the id is not drawn from - keeping it
+	 * in a ref is one render per reveal instead of two, and the effect that
+	 * consumes it clears it so a later re-render cannot replay a jump the user
+	 * has since scrolled away from.
+	 */
+	const revealTarget = useRef<string | null>(null);
+	const [revealSeq, setRevealSeq] = useState(0);
+
+	const reveal = useCallback(
+		(location: TreeLocation) => {
+			revealTarget.current = location.id;
+			revealPath(schemaKey, location.expand);
+			setRevealSeq((n) => n + 1);
+		},
+		[revealPath, schemaKey]
+	);
+
+	useEffect(() => {
+		const id = revealTarget.current;
+		if (!id) return;
+		revealTarget.current = null;
+		/*
+		 * Read the attribute rather than building a selector: a row id holds
+		 * `:`, `.` and `/`, all of which mean something to a selector parser.
+		 */
+		const rendered = treeRef.current?.querySelectorAll<HTMLElement>("[data-tree-id]") ?? [];
+		const row = Array.from(rendered).find((el) => el.getAttribute("data-tree-id") === id);
+		// Absent only when the row sits past the growing window; the tree is open
+		// at the right place either way, so there is nothing to announce.
+		if (!row) return;
+		row.scrollIntoView({ block: "center" });
+		row.focus();
+	}, [revealSeq]);
 
 	const { visible, sentinelRef, hasMore } = useGrowingWindow(rows.length, ROW_WINDOW);
 
@@ -274,6 +384,18 @@ export function SchemaExplorer({
 				</p>
 			)}
 
+			{/*
+			 * What the last click could not do, where the click happened. The
+			 * shared notice primitive rather than a second copy of the stale-schema
+			 * strip above: one treatment for the whole app, and one place its
+			 * contrast is tuned.
+			 */}
+			{notice && (
+				<div className="px-2 py-1.5 shrink-0" data-testid="explorer-notice">
+					<Callout severity="info">{notice}</Callout>
+				</div>
+			)}
+
 			<div
 				ref={scrollerRef}
 				className="flex-1 min-h-0 overflow-auto"
@@ -297,22 +419,35 @@ export function SchemaExplorer({
 						onKeyDown={onKeyDown}
 						onFocus={roving.onFocus}
 					>
-						{rows
-							.slice(0, visible)
-							.map(({ node, depth, matchStart, descriptionStart }) => (
+						{rows.slice(0, visible).map((row) =>
+							row.kind === "group" ? (
+								<p
+									key={row.key}
+									role="presentation"
+									data-tree-group={row.label}
+									className={cn(EYEBROW_CLASS, "px-2 pt-2 pb-0.5 m-0")}
+								>
+									{row.label}
+								</p>
+							) : (
 								<ExplorerRow
-									key={node.id}
-									node={node}
-									depth={depth}
-									matchStart={matchStart}
-									descriptionStart={descriptionStart}
+									key={row.key}
+									node={row.node}
+									depth={row.depth}
+									matchStart={row.matchStart}
+									descriptionStart={row.descriptionStart}
+									descriptionMatched={row.descriptionMatched}
+									showOwner={row.showOwner}
+									reveal={row.reveal}
 									matchLength={term.length}
 									showDescription={showDescriptions}
-									expanded={expanded.has(node.id)}
-									onToggle={() => toggleExpanded(schemaKey, node.id)}
-									onInsert={() => onInsert(node)}
+									expanded={expanded.has(row.node.id)}
+									onToggle={() => toggleExpanded(schemaKey, row.node.id)}
+									onReveal={reveal}
+									onInsert={() => onInsert(row.node)}
 								/>
-							))}
+							)
+						)}
 						{hasMore && (
 							<div ref={sentinelRef} className="px-2 py-1">
 								<span className={EYEBROW_CLASS}>
@@ -334,12 +469,19 @@ interface ExplorerRowProps {
 	matchStart: number;
 	/** Where the search term matched `node.description`; -1 when nothing marks it. */
 	descriptionStart: number;
+	/** Whether the description is *why* this row matched. */
+	descriptionMatched: boolean;
+	/** Whether to prefix the name with the type that declares it. */
+	showOwner: boolean;
+	/** Where the row lives in the tree, or null when it is already there. */
+	reveal: TreeLocation | null;
 	/** Length of the search term, i.e. how much of the text the match covers. */
 	matchLength: number;
 	/** Whether the pane is showing full descriptions rather than one clipped line. */
 	showDescription: boolean;
 	expanded: boolean;
 	onToggle: () => void;
+	onReveal: (location: TreeLocation) => void;
 	onInsert: () => void;
 }
 
@@ -348,10 +490,14 @@ function ExplorerRow({
 	depth,
 	matchStart,
 	descriptionStart,
+	descriptionMatched,
+	showOwner,
+	reveal,
 	matchLength,
 	showDescription,
 	expanded,
 	onToggle,
+	onReveal,
 	onInsert,
 }: ExplorerRowProps) {
 	const deprecated = node.deprecationReason !== null;
@@ -359,13 +505,25 @@ function ExplorerRow({
 	const description = splitAtMatch(node.description ?? "", descriptionStart, matchLength);
 
 	/*
+	 * A branch and a "Returned by" heading hold rows; they write nothing. Their
+	 * activator opens them, so that pressing Enter on one does what its chevron
+	 * does rather than nothing at all.
+	 */
+	const container = node.kind === "branch" || node.kind === "returned-by";
+
+	/*
 	 * A description the term matched is always shown in full, whatever the
 	 * toggle says. Clipped to one line it is usually cut off *before* the word
 	 * that put the row in the results, which leaves the user a row they cannot
 	 * connect to what they typed - the failure the mark exists to prevent, and
 	 * the reason a description tier needs this and the name tier does not.
+	 *
+	 * It asks whether the description is *why* the row matched, not whether it
+	 * happens to contain the term: `Query.search` is named `search` and
+	 * described "Search across users and posts.", and the looser test drew every
+	 * such row's whole paragraph over the results the user was reading.
 	 */
-	const full = showDescription || descriptionStart >= 0;
+	const full = showDescription || descriptionMatched;
 	const title = [
 		node.description,
 		deprecated ? `Deprecated: ${node.deprecationReason}` : null,
@@ -386,15 +544,40 @@ function ExplorerRow({
 		 */
 		<div
 			role="treeitem"
-			aria-expanded={node.expandable ? expanded : undefined}
+			/*
+			 * Only a row that can actually open says it can. A search result is
+			 * derived from the index and has no children to show, so claiming
+			 * `aria-expanded` there both lies to a screen reader and hands the
+			 * treeview's Right arrow a toggle that changes nothing on screen.
+			 */
+			aria-expanded={node.expandable && !reveal ? expanded : undefined}
 			aria-level={depth + 1}
 			data-tree-label={node.name}
+			data-tree-id={node.id}
 			tabIndex={-1}
 			title={title || undefined}
 			style={{ paddingLeft: 4 + depth * INDENT_STEP }}
 			className="focus-row flex min-h-6 items-center gap-1 pr-2 hover:bg-accent transition-colors"
 		>
-			{node.expandable ? (
+			{reveal ? (
+				/*
+				 * In the results, the leading control goes to the tree rather
+				 * than expanding in place. It takes the row-actions slot the
+				 * roving treeview already reaches (Shift+Enter, Menu, Shift+F10),
+				 * so it is not a mouse-only affordance the way a second tab stop
+				 * inside a single-tab-stop tree would be.
+				 */
+				<button
+					type="button"
+					data-tree-menu
+					tabIndex={-1}
+					aria-label={`Show ${node.name} in the tree`}
+					onClick={() => onReveal(reveal)}
+					className="shrink-0 self-stretch flex items-center text-muted-foreground"
+				>
+					<ListTree className="w-3 h-3" />
+				</button>
+			) : node.expandable ? (
 				<button
 					type="button"
 					data-tree-toggle
@@ -423,7 +606,7 @@ function ExplorerRow({
 				type="button"
 				data-tree-activate
 				tabIndex={-1}
-				onClick={onInsert}
+				onClick={container ? onToggle : onInsert}
 				className={cn(
 					"flex min-w-0 self-stretch flex-1 text-left text-[11px] font-mono",
 					full ? "flex-col justify-center py-0.5" : "items-center gap-1"
@@ -432,34 +615,47 @@ function ExplorerRow({
 				<span
 					className={cn("flex min-w-0 max-w-full items-center gap-1", full && "w-full")}
 				>
-					<span
-						data-tree-name
-						className={cn(
-							"shrink-0",
-							deprecated && "line-through",
-							node.kind === "type" || node.kind === "branch"
-								? "text-foreground"
-								: "text-primary"
+					{/*
+					 * The owner rides *beside* the name rather than inside it: the
+					 * name is what the search marked and what a screen reader
+					 * reads as the row's subject, and folding the owner into it
+					 * would move both. No gap between the two, because
+					 * `App.accessScopes` is one address, not two words.
+					 */}
+					<span className="flex shrink-0 items-center">
+						{showOwner && node.ownerTypeName && (
+							<span data-tree-owner className="text-muted-foreground">
+								{node.ownerTypeName}.
+							</span>
 						)}
-					>
-						{/*
-						 * Three segments rather than one string, so the matched run
-						 * can be marked without the row's own colour moving: a field
-						 * name is `text-primary` and a type name `text-foreground`,
-						 * and `text-inherit` keeps that distinction through the tint.
-						 * The `mark` element needs both properties set - a bare one
-						 * arrives with the user agent's yellow-on-black.
-						 *
-						 * The three concatenate to exactly `node.name`, which is what
-						 * keeps the accessible row text unchanged by highlighting.
-						 */}
-						{name.before}
-						{name.match && (
-							<mark className="rounded-sm bg-primary/20 text-inherit">
-								{name.match}
-							</mark>
-						)}
-						{name.after}
+						<span
+							data-tree-name
+							className={cn(
+								deprecated && "line-through",
+								node.kind === "type" || node.kind === "branch"
+									? "text-foreground"
+									: "text-primary"
+							)}
+						>
+							{/*
+							 * Three segments rather than one string, so the matched run
+							 * can be marked without the row's own colour moving: a field
+							 * name is `text-primary` and a type name `text-foreground`,
+							 * and `text-inherit` keeps that distinction through the tint.
+							 * The `mark` element needs both properties set - a bare one
+							 * arrives with the user agent's yellow-on-black.
+							 *
+							 * The three concatenate to exactly `node.name`, which is what
+							 * keeps the accessible row text unchanged by highlighting.
+							 */}
+							{name.before}
+							{name.match && (
+								<mark className="rounded-sm bg-primary/20 text-inherit">
+									{name.match}
+								</mark>
+							)}
+							{name.after}
+						</span>
 					</span>
 					{node.signature && (
 						<span className="truncate text-muted-foreground">{node.signature}</span>

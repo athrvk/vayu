@@ -374,6 +374,18 @@ export function GraphQLBody({
 	 */
 	const [announcement, setAnnouncement] = useState("");
 	const [announcementSeq, setAnnouncementSeq] = useState(0);
+	/*
+	 * The same words as the announcement above, on screen, for the one outcome
+	 * that leaves nothing else to look at.
+	 *
+	 * An insertion shows itself in the editor and an already-there selects the
+	 * line it means; a refusal used to reach `sr-only` text alone, so a sighted
+	 * user clicking a row that cannot be inserted saw the click do nothing. Held
+	 * here rather than in the pane because this is where the decision is made,
+	 * and cleared by the next activation that lands - a refusal about the last
+	 * row is not an answer about this one.
+	 */
+	const [explorerNotice, setExplorerNotice] = useState<string | null>(null);
 	const [pendingVariables, setPendingVariables] = useState<string[]>([]);
 	// Stable, so the reveal effect below can depend on it without re-running per
 	// render. The two setters are stable already; this only says so.
@@ -645,9 +657,11 @@ export function GraphQLBody({
 		const result = insertionForNode(activeSchema, node, query, cursor);
 		if (!result) return;
 		if (isRefusal(result)) {
+			setExplorerNotice(result.reason);
 			announce(result.reason);
 			return;
 		}
+		setExplorerNotice(null);
 		/*
 		 * The leaf is already in the set the click would have added it to. Show
 		 * the user the line they already have instead of writing a second one -
@@ -846,6 +860,7 @@ export function GraphQLBody({
 						onRefresh={refresh}
 						onClose={() => setExplorerOpen(false)}
 						onInsert={handleExplorerInsert}
+						notice={explorerNotice}
 					/>
 				</ResizablePanel>
 			)}
