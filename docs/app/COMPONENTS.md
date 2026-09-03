@@ -1755,6 +1755,22 @@ ordering `lib/variable-suggestions.ts` builds and `VariableAutocomplete` draws.
 `CommandListboxProbe` reports them from inside the list for `aria-controls` and
 `aria-activedescendant`.
 
+**The field moves the highlight; the list scrolls it.** That split is not free:
+`cmdk` schedules its scroll inside `setState("value", …)`, the path its own
+`Command.Input` arrow handling takes, and a highlight arriving through the
+controlled `value` *prop* lands in a layout effect that assigns and emits with
+no scroll at all. So the highlight walked to the right row and the list stayed
+where it was - past the eighth entry, below the fold of `CommandList`'s
+`max-h-[300px]`, the only way to see what Enter would insert was the mouse
+(#1333). `CommandScrollIntoView` closes it the way `CommandListboxProbe` closes
+the ids: mounted inside the list, reading the highlight from `cmdk`'s store
+rather than from a prop, so a row the pointer highlighted and one the arrows
+reached take one code path - `cmdk` opts its own pointer handler out of
+scrolling, and `block: "nearest"` is why matching them costs nothing, since a
+row under the pointer is on screen already. A group's heading rides in with the
+first row of that group, matching `cmdk`, because the headings are what tells a
+generator from a stored variable.
+
 `EditableVariable` takes the scope as a **required** prop, because a token only
 renders where there is one. `RuntimeToken` serves all three run-time cases - a
 value produced when the request is sent rather than stored anywhere - and is one
