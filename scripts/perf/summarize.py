@@ -85,8 +85,8 @@ def packaged_rows(packaged: dict) -> list[tuple[str, str]]:
     """The packaged app's own cold start - the number a user would recognise.
 
     Reported ahead of the renderer-graph rows because it is the one that
-    describes a launch: process start to a window on screen, main process,
-    engine handshake and renderer included (#1165). `basis` says where the
+    describes a launch: process start to a window on screen, the main
+    process's own work and the renderer included (#1165). `basis` says where the
     clock started, since Electron cannot always report process creation and
     the fallback counts from later - two runs on different bases are not
     comparable, and the row is what makes that visible.

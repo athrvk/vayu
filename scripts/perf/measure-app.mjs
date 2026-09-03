@@ -15,7 +15,7 @@
  *     parsing the HTML, never hardcoded) and totals `app/dist`.
  *   - packagedStartup: launches the packaged app itself, 3 times, and reports
  *     the median time from process start to `ready-to-show` - a user's cold
- *     start, main process and engine handshake included (#1165). Only when
+ *     start, the main process's own work included (#1165). Only when
  *     `--packaged-dir` names an electron-builder output directory; the
  *     workflow packages first and passes it.
  *   - startup: runs `startup-harness.cjs` under Electron 3 times empty and 3
@@ -542,10 +542,13 @@ async function waitForEngineToExit() {
 /**
  * Time the packaged app from process start to `ready-to-show`, 3 times.
  *
- * This is the number #1165 asks for and the harness leg cannot give: the app's
- * own main process, its MCP and sidecar work, its engine handshake and the
- * renderer, in the layout a user installs. `VAYU_MEASURE_STARTUP=1` is what
- * makes the app print it at all - see `app/electron/startup-probe.ts`.
+ * This is the number #1165 asks for and the harness leg cannot give: the
+ * executable's own load, the main process's import graph, the window it
+ * creates and the renderer inside it, in the layout a user installs, with the
+ * sidecar spawn running alongside. Not the engine handshake - #1144 put the
+ * window ahead of that on purpose, and this measures what a user waits for.
+ * `VAYU_MEASURE_STARTUP=1` is what makes the app print the line at all - see
+ * `app/electron/startup-probe.ts`.
  */
 async function measurePackagedStartup(repoRoot, packagedDir) {
 	const unavailable = (note) => ({

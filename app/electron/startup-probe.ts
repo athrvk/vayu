@@ -17,11 +17,13 @@
  * plain `Error`, which `startEngine`'s catch turns into a modal box and a quit
  * (`main.ts`) - no window, no `ready-to-show`, no number. So the harness figure
  * covers the renderer's module graph and none of the main process's own work:
- * the MCP import (#1145), the sidecar spawn (#1148), the engine handshake
- * (#1144) - exactly the costs the startup cluster moved.
+ * the import graph it evaluates before `whenReady` (#1145's MCP barrel was the
+ * expensive half of it) and the window it then creates.
  *
  * `.github/workflows/perf-measure.yml` now packages the app and launches that,
- * where every one of those paths resolves. This is the line it reads.
+ * where every one of those paths resolves. This is the line it reads, and it
+ * measures what a user waits for: process start to a window on screen. Not the
+ * engine handshake, which #1144 deliberately put behind the window.
  *
  * Guarded by `VAYU_MEASURE_STARTUP=1` because a shipped app has no business
  * printing timings: unset - which is every real launch - nothing is written and
