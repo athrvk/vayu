@@ -119,9 +119,10 @@ const DEFAULT_OPTIONS = {
  * surface in the app that floats over *Monaco's* canvas rather than over a
  * declared app surface, so there is no `--rule` to inherit and it would fall
  * back to the invisible default. The fill cannot be relied on to separate it
- * either: the canvas is `--background` (#1321), which `--popover` sits a step
- * above in dark and is 96% against white in light. `border-border-strong` is
- * the edge that reads on both, and it is the token `Kbd` itself is built from.
+ * either: the canvas is painted from `--background` now, which `--popover`
+ * sits a step above in dark and is 96% against white in light (#1321).
+ * `border-border-strong` is the edge that reads on both, and it is the token
+ * `Kbd` itself is built from.
  */
 function LeaveEditorHint() {
 	return (

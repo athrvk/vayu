@@ -21,7 +21,7 @@
  * app that is dark.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, act } from "@testing-library/react";
 import type * as Monaco from "monaco-editor";
 import { CodeEditor } from "./code-editor";
@@ -53,20 +53,33 @@ function setMode(dark: boolean) {
 	document.documentElement.classList.toggle("dark", dark);
 }
 
+/**
+ * Renders one, and flushes the mount effects it schedules - the theme is
+ * registered from one of them.
+ */
+async function renderEditor() {
+	render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
+	await act(async () => {});
+}
+
+/*
+ * The document is reset before a case rather than after it: the editor from
+ * the previous case is unmounted by then, and its observer with it. Undoing
+ * the class in an `afterEach` instead would reach a still-mounted editor - a
+ * file's own `afterEach` runs before testing-library's cleanup - and the state
+ * update it caused would land outside `act`.
+ */
 beforeEach(() => {
+	document.documentElement.classList.remove("dark");
+	document.documentElement.removeAttribute("data-color-scheme");
 	defineTheme.mockClear();
 	lastTheme = undefined;
 });
 
-afterEach(() => {
-	document.documentElement.classList.remove("dark");
-	document.documentElement.removeAttribute("data-color-scheme");
-});
-
 describe("CodeEditor theme", () => {
-	it("uses the app's dark theme, not Monaco's", () => {
+	it("uses the app's dark theme, not Monaco's", async () => {
 		setMode(true);
-		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
+		await renderEditor();
 		expect(lastTheme).toBe("vayu-dark");
 		expect(defineTheme).toHaveBeenCalledWith(
 			"vayu-dark",
@@ -74,9 +87,9 @@ describe("CodeEditor theme", () => {
 		);
 	});
 
-	it("uses the app's light theme, not Monaco's", () => {
+	it("uses the app's light theme, not Monaco's", async () => {
 		setMode(false);
-		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
+		await renderEditor();
 		expect(lastTheme).toBe("vayu-light");
 		expect(defineTheme).toHaveBeenCalledWith(
 			"vayu-light",
@@ -86,7 +99,7 @@ describe("CodeEditor theme", () => {
 
 	it("follows a mode switch with the definition, then the name", async () => {
 		setMode(false);
-		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
+		await renderEditor();
 		defineTheme.mockClear();
 
 		await act(async () => {
@@ -102,7 +115,7 @@ describe("CodeEditor theme", () => {
 
 	it("redefines the theme when the accent scheme changes, without a remount", async () => {
 		setMode(true);
-		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
+		await renderEditor();
 		defineTheme.mockClear();
 
 		await act(async () => {

@@ -174,7 +174,7 @@ export function hslTokenToHex(value: string, alpha?: number): string | null {
 			[second, 0, chroma],
 			[chroma, 0, second],
 		] as const
-	)[sector < 0 ? 0 : sector];
+	)[sector];
 
 	const base = lightness - chroma / 2;
 	const rgb = `#${channel(r + base)}${channel(g + base)}${channel(b + base)}`;
@@ -207,7 +207,7 @@ export function currentEditorMode(root: HTMLElement = document.documentElement):
 }
 
 /** The tokens as the document currently resolves them, accent scheme included. */
-export function readTokenValues(root: HTMLElement = document.documentElement): TokenValues {
+function readTokenValues(root: HTMLElement = document.documentElement): TokenValues {
 	const computed = getComputedStyle(root);
 	const values: Record<string, string> = {};
 	for (const token of THEME_TOKENS)
