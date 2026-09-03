@@ -35,6 +35,16 @@ import RequestTabs from "./index";
 
 // The panels pull in Monaco, the variable inputs and the auth editors; none of
 // that is what this guards.
+/**
+ * The snippets list under a script editor reads the engine's completion table
+ * (#1223). Its own behaviour is `ScriptSnippets.test.tsx`; here it only needs
+ * to not reach for a QueryClient this suite does not set up.
+ */
+vi.mock("@/queries", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries")>()),
+	useScriptCompletionsQuery: () => ({ data: undefined, isPending: true, isError: false }),
+}));
+
 vi.mock("./panels/InfoPanel", () => ({ default: () => <div>info panel</div> }));
 vi.mock("./panels/ParamsPanel", () => ({ default: () => null }));
 vi.mock("./panels/HeadersPanel", () => ({ default: () => null }));

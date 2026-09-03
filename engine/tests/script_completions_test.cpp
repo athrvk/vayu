@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <regex>
 #include <set>
 #include <string>
 #include <vector>
@@ -910,6 +911,237 @@ TEST (ScriptCompletions, TheIterationDataAccessorsAreOffered) {
         << expected
         << " does not say it is absent outside a data-driven run: " << documentation;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Snippet metadata (issue #1223): which script kind a KIND_SNIPPET entry
+// belongs in (`context`) and the heading it is listed under (`group`). The
+// renderer's snippets surface reads both to filter by the panel a script
+// author has open; neither field means anything on a non-snippet entry.
+// ---------------------------------------------------------------------------
+
+TEST (ScriptCompletions, EverySnippetSaysWhichScriptItBelongsInAndWhereItIsListed) {
+    const auto completions = get_script_completions ();
+
+    static const std::set<std::string> allowed_contexts = { "pre", "test", "both" };
+    static const std::set<std::string> allowed_groups = { "Variables",
+        "Request", "Response", "Tests", "Signing", "Logging" };
+
+    int checked = 0;
+    for (const auto& item : completions) {
+        if (item.value ("kind", 0) != KIND_SNIPPET) {
+            continue;
+        }
+        const std::string label = item.value ("label", std::string{});
+        checked++;
+
+        ASSERT_TRUE (item.contains ("context")) << label << " has no context";
+        ASSERT_TRUE (item.contains ("group")) << label << " has no group";
+        const std::string context = item.value ("context", std::string{});
+        const std::string group   = item.value ("group", std::string{});
+        EXPECT_TRUE (allowed_contexts.count (context) > 0)
+        << label << " has an unrecognised context: " << context;
+        EXPECT_TRUE (allowed_groups.count (group) > 0)
+        << label << " has an unrecognised group: " << group;
+    }
+
+    EXPECT_GT (checked, 0)
+    << "no snippets were checked, so this guard proved nothing";
+}
+
+// Mutation check: give a non-snippet entry (say, `pm.request`) a `context` or
+// `group` key and this reddens, naming the entry.
+TEST (ScriptCompletions, OnlySnippetsCarryTheSnippetMetadata) {
+    const auto completions = get_script_completions ();
+
+    int checked = 0;
+    for (const auto& item : completions) {
+        if (item.value ("kind", 0) == KIND_SNIPPET) {
+            continue;
+        }
+        checked++;
+        const std::string label = item.value ("label", std::string{});
+        EXPECT_FALSE (item.contains ("context"))
+        << label << " is not a snippet but carries context";
+        EXPECT_FALSE (item.contains ("group")) << label << " is not a snippet but carries group";
+    }
+
+    EXPECT_GT (checked, 0)
+    << "no non-snippet entries were checked, so this guard proved nothing";
+}
+
+// Turns a snippet's `${1:foo}` into `foo`, and a bare `${1}` / `$0` into
+// nothing - just enough of Monaco's placeholder syntax to leave runnable JS,
+// not to make the result meaningful (a placeholder whose default text reads
+// as a value rather than an example, `${2:value}`, still leaves a bare
+// identifier - the test below declares the handful that occur as ordinary
+// variables rather than editing them out here).
+std::string strip_snippet_placeholders (const std::string& text) {
+    static const std::regex with_default (R"(\$\{\d+:([^}]*)\})");
+    static const std::regex bare (R"(\$\{?\d+\}?)");
+    return std::regex_replace (std::regex_replace (text, with_default, "$1"), bare, "");
+}
+
+// Snippets whose `context` is `pre` or `both` but that cannot run headless,
+// named with why - excluded here rather than silently skipped.
+bool cannot_run_headless (const std::string& label) {
+    // Calls pm.sendRequest, a real network transfer to a placeholder host -
+    // not something a headless unit test should depend on resolving,
+    // succeeding or failing within any particular time.
+    return label == "Fetch a token before the send";
+}
+
+TEST (ScriptCompletions, EveryPreRequestSnippetRunsAsAPreRequestScript) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    int checked = 0;
+    for (const auto& item : completions) {
+        if (item.value ("kind", 0) != KIND_SNIPPET) {
+            continue;
+        }
+        const std::string context = item.value ("context", std::string{});
+        if (context != "pre" && context != "both") {
+            continue;
+        }
+        const std::string label = item.value ("label", std::string{});
+        if (cannot_run_headless (label)) {
+            continue;
+        }
+        checked++;
+
+        vayu::Request request;
+        request.method       = vayu::HttpMethod::POST;
+        request.url          = "https://api.example.com/users";
+        request.body.mode    = vayu::BodyMode::Text;
+        request.body.content = R"({"field":"value"})";
+        vayu::Environment env;
+        // pm.crypto.hmacSha256 refuses a non-string, non-bytes key, and
+        // pm.environment.get answers undefined for a name nobody set.
+        env["secret"].value = "shh";
+
+        // `var value; ...` predeclares the placeholder defaults that read as
+        // a bare identifier rather than a literal (see
+        // strip_snippet_placeholders above), so the stripped text evaluates
+        // instead of throwing ReferenceError on text nobody meant to run.
+        const std::string script = "var value, key, id, field, token;\n" +
+        strip_snippet_placeholders (item.value ("insertText", std::string{}));
+
+        auto result = engine.execute_prerequest (script, request, env);
+        EXPECT_TRUE (result.success)
+        << label << " threw as a pre-request script: " << result.error_message;
+    }
+
+    EXPECT_GT (checked, 0)
+    << "no pre-request snippets were exercised, so this guard proved nothing";
+}
+
+// The other half of the pair above: a template offered under the Tests editor
+// has to run there. Without it only the Content-Type snippet was ever
+// executed, so a test template could break and CI would still be green while
+// the panel kept offering it.
+TEST (ScriptCompletions, EveryTestSnippetRunsAsATestScript) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    int checked = 0;
+    for (const auto& item : completions) {
+        if (item.value ("kind", 0) != KIND_SNIPPET) {
+            continue;
+        }
+        const std::string context = item.value ("context", std::string{});
+        if (context != "test" && context != "both") {
+            continue;
+        }
+        const std::string label = item.value ("label", std::string{});
+        checked++;
+
+        vayu::Request request;
+        request.method = vayu::HttpMethod::GET;
+        request.url    = "https://api.example.com/users";
+        vayu::Response response;
+        response.status_code = 200;
+        response.headers = { { "content-type", "application/json; charset=utf-8" } };
+        response.body = R"({"property":"x","token":"abc","name":"vayu","id":1})";
+        // The body carries the names the templates' own placeholder defaults
+        // use once stripped ("property"), so a template asserts against a
+        // response shaped like the one its example describes. `field` is
+        // deliberately absent: the value template compares json.field with the
+        // predeclared `value`, and undefined equals undefined.
+        vayu::Environment env;
+
+        // The same predeclaration the pre-request loop makes, for the
+        // placeholder defaults that read as an identifier rather than a
+        // literal once stripped.
+        const std::string script = "var value, key, id, field, token;\n" +
+        strip_snippet_placeholders (item.value ("insertText", std::string{}));
+
+        auto result = engine.execute_test (script, request, response, env);
+        EXPECT_TRUE (result.success)
+        << label << " threw as a test script: " << result.error_message;
+        for (const auto& test : result.tests) {
+            EXPECT_TRUE (test.passed)
+            << label << " fails against an ordinary JSON response: " << test.error_message;
+        }
+    }
+
+    EXPECT_GT (checked, 0)
+    << "no test snippets were exercised, so this guard proved nothing";
+}
+
+// ---------------------------------------------------------------------------
+// The retired app panel's prose (issue #1223): seven of its nine rules were
+// already in this table's documentation before this change; the other two
+// are C's additions to `pm.request`. Both halves are pinned here so a rule
+// silently dropped from a documentation string - the retired panel's or this
+// change's - reddens by name rather than by a reader noticing months later.
+// ---------------------------------------------------------------------------
+
+TEST (ScriptCompletions, TheRulesTheScriptPanelUsedToStateLiveInTheTable) {
+    const auto completions = get_script_completions ();
+
+    auto documentation_of = [&] (const char* label) {
+        const auto* item = find_by_label (completions, label);
+        EXPECT_NE (item, nullptr) << label << " is missing from the completion list";
+        return item ? item->value ("documentation", std::string{}) : std::string{};
+    };
+
+    const std::string request_headers = documentation_of ("pm.request.headers");
+    EXPECT_NE (request_headers.find ("case-sensitive"), std::string::npos) << request_headers;
+
+    const std::string request_headers_get =
+    documentation_of ("pm.request.headers.get");
+    EXPECT_NE (request_headers_get.find ("case-insensitively"), std::string::npos)
+    << request_headers_get;
+
+    const std::string request_headers_add =
+    documentation_of ("pm.request.headers.add");
+    EXPECT_NE (
+    request_headers_add.find ("Throws if one of that name already exists"), std::string::npos)
+    << request_headers_add;
+
+    const std::string response_headers =
+    documentation_of ("pm.response.headers");
+    EXPECT_NE (response_headers.find ("lower-cased"), std::string::npos) << response_headers;
+
+    const std::string response_headers_get =
+    documentation_of ("pm.response.headers.get");
+    EXPECT_NE (response_headers_get.find ("case-insensitively"), std::string::npos)
+    << response_headers_get;
+
+    const std::string request = documentation_of ("pm.request");
+    EXPECT_NE (request.find ("a script-set header overrides"), std::string::npos) << request;
+    EXPECT_NE (request.find ("what is sent"), std::string::npos) << request;
+
+    // The two the panel carried that this table did not.
+    EXPECT_NE (request.find ("rejects the whole edit"), std::string::npos) << request;
+    EXPECT_NE (request.find ("Console tab"), std::string::npos) << request;
+    EXPECT_NE (request.find ("a write to it does nothing"), std::string::npos) << request;
+
+    // The collection tab's retired grid said "Response (post only)"; the table
+    // said nothing about which hook has a response at all.
+    const std::string response = documentation_of ("pm.response");
+    EXPECT_NE (response.find ("A **test** script only"), std::string::npos) << response;
 }
 
 } // namespace

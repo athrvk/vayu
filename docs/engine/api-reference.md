@@ -6818,6 +6818,15 @@ Get script engine API completions for UI autocomplete.
 }
 ```
 
+An entry whose `kind` is `28` (Monaco's Snippet kind) carries two extra
+members no other entry does: `context`, one of `"pre"`, `"test"` or `"both"`,
+which script kind the template belongs in; and `group`, one of `"Variables"`,
+`"Request"`, `"Response"`, `"Tests"`, `"Signing"` or `"Logging"`, the heading
+it is listed under. A client uses the pair to build a filtered, grouped
+snippets picker for whichever panel - Pre-request or Tests - the author has
+open, rather than offering the whole table regardless of where it would run.
+Neither field is present on a non-snippet entry.
+
 ### GET /scripting/types
 
 The same `pm.*` surface as TypeScript declarations, for Monaco's TypeScript

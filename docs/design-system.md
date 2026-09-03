@@ -436,7 +436,7 @@ fainter still, 1.11 against 1.16, and neither is visible. In light the pair
 inverts, 1.11 and 1.32, so whichever token is chosen one theme gets no edge at
 all. A `bg-muted` block has to be defined by its fill instead, which separates
 from a card at 1.18 light / 1.15 dark - the treatment the console log slabs and
-the script panels' Quick Reference blocks use. `--accent` carries the same value
+the response viewer's boxed metadata use. `--accent` carries the same value
 as `--muted` in both themes and behaves identically.
 
 That fill-not-border guidance is about a *block* separating from its parent. An

@@ -2494,7 +2494,21 @@ export interface ScriptCompletion {
 	documentation: string;
 	sortText?: string;
 	filterText?: string;
+	/**
+	 * Snippet metadata, present only on the template entries (`kind` 28).
+	 *
+	 * `context` is which script kind the template belongs in, so the snippets
+	 * surface under a pre-request editor never offers a `pm.response` template;
+	 * `group` is the heading it is listed under. Both are the engine's to say -
+	 * the completion table is the single source for what the editor advertises,
+	 * and a second list in the renderer is how the two come to disagree.
+	 */
+	context?: ScriptSnippetContext;
+	group?: string;
 }
+
+/** Which script kind a snippet template belongs in. */
+export type ScriptSnippetContext = "pre" | "test" | "both";
 
 export interface ScriptCompletionsResponse {
 	version: string;
