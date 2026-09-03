@@ -27,6 +27,7 @@ import { useClientSettingsStore } from "@/stores";
 import { selectMonoStack } from "@/stores/client-settings-store";
 import { registerEditorChords } from "@/lib/editor-chords";
 import { ensureMonaco, useLoadedMonaco } from "@/lib/monaco-loader";
+import { useMonacoTheme } from "@/hooks/useMonacoTheme";
 // The hook's own module, not the barrel beside it: the barrel also exports the
 // provider, which reaches into the request builder for its writer, and a
 // `components/ui` primitive must not drag a module tree in behind it.
@@ -38,21 +39,6 @@ import { Skeleton } from "./skeleton";
 import { cn } from "@/lib/utils";
 
 type EditorOptions = NonNullable<EditorProps["options"]>;
-
-function useDarkMode() {
-	const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"));
-	useEffect(() => {
-		const observer = new MutationObserver(() => {
-			setIsDark(document.documentElement.classList.contains("dark"));
-		});
-		observer.observe(document.documentElement, {
-			attributes: true,
-			attributeFilter: ["class"],
-		});
-		return () => observer.disconnect();
-	}, []);
-	return isDark;
-}
 
 /**
  * The app's scrollbar thickness, in px, as declared by `::-webkit-scrollbar` in
@@ -132,10 +118,10 @@ const DEFAULT_OPTIONS = {
  * The border is not decoration and not `border-rule`. This chip is the one
  * surface in the app that floats over *Monaco's* canvas rather than over a
  * declared app surface, so there is no `--rule` to inherit and it would fall
- * back to the invisible default. The fill cannot separate it either: Monaco's
- * dark background is #1e1e1e against a `--popover` of #1a1a1f, and both are
- * white in light. `border-border-strong` is the edge that reads on both, and
- * it is the token `Kbd` itself is built from.
+ * back to the invisible default. The fill cannot be relied on to separate it
+ * either: the canvas is `--background` (#1321), which `--popover` sits a step
+ * above in dark and is 96% against white in light. `border-border-strong` is
+ * the edge that reads on both, and it is the token `Kbd` itself is built from.
  */
 function LeaveEditorHint() {
 	return (
@@ -188,7 +174,7 @@ export function CodeEditor({
 	className,
 	onMount,
 }: CodeEditorProps) {
-	const isDark = useDarkMode();
+	const themeName = useMonacoTheme();
 	const editor = useClientSettingsStore((s) => s.editor);
 	const monoStack = useClientSettingsStore(selectMonoStack);
 	const monaco = useLoadedMonaco();
@@ -292,7 +278,7 @@ export function CodeEditor({
 				height="100%"
 				language={language}
 				value={value}
-				theme={isDark ? "vs-dark" : "vs"}
+				theme={themeName}
 				onChange={onChange ? (v) => onChange(v ?? "") : undefined}
 				onMount={handleMount}
 				options={{
