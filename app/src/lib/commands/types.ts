@@ -63,6 +63,14 @@ export interface CommandSurfaces {
 	 * builder; absent whenever none is mounted.
 	 */
 	startLoadTest?: () => void;
+	/**
+	 * Send the request the builder currently holds, again from the live draft
+	 * rather than the saved copy (#1243). Contributed by the mounted request
+	 * builder, and only while it could actually send: absent with no builder on
+	 * screen, and absent for the window in which the builder's own Send button is
+	 * disabled or has become Stop.
+	 */
+	sendRequest?: () => void;
 }
 
 /**

@@ -38,11 +38,6 @@ const NO_COMMAND = new Map<Chord, string>([
 		"the palette cannot offer a row that opens the palette you are already in",
 	],
 	[
-		shortcuts.SEND_CHORD,
-		"Send needs the request builder's live draft, the way run-load-test does; " +
-			"nothing contributes it through live-surfaces yet - #1243",
-	],
-	[
 		shortcuts.LEAVE_EDITOR_CHORD,
 		"scoped to the editor that has focus; the palette takes focus away, so " +
 			"there would be no editor to leave by the time it ran",

@@ -95,6 +95,7 @@ vi.mock("./context", () => ({
 }));
 vi.mock("./components/RequestBuilderLayout", () => ({ default: () => null }));
 vi.mock("./components/LoadTestCommandSurface", () => ({ default: () => null }));
+vi.mock("./components/SendRequestCommandSurface", () => ({ default: () => null }));
 vi.mock("./components/LoadTestConfigDialog", () => ({
 	default: (props: Record<string, unknown>) => {
 		dialogProps = props;

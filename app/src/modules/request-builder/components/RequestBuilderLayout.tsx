@@ -25,6 +25,7 @@ import { useRequestBuilderContext } from "../context";
 import { SEND_CHORD, LOAD_TEST_CHORD, matchesChord } from "@/constants/shortcuts";
 import { ownsEnterKey } from "@/lib/keyboard";
 import { isModalOpen } from "@/lib/modal";
+import { canSendRequest } from "../utils/send-gate";
 import RequestBreadcrumb from "./RequestBreadcrumb";
 import UrlBar from "./UrlBar";
 import RequestTabs from "./RequestTabs";
@@ -77,19 +78,14 @@ export default function RequestBuilderLayout() {
 			if (isModalOpen()) return;
 
 			/*
-			 * Don't trigger if the request is already in flight or URL is empty.
-			 *
-			 * `isStreaming` is the second half of "in flight": once the engine has
-			 * answered and the socket is open, `isExecuting` goes false while the
-			 * run is very much still running (`RequestBuilderProvider` clears it
-			 * deliberately, so the Events tab is not hidden behind "Sending…").
-			 * Send *is* Stop for the whole of that window (#574), and the chord now
-			 * matches the button: it does nothing rather than silently replacing
-			 * the open stream with a new one - the run being replaced being exactly
-			 * the one the button in front of you would stop. Stopping is
-			 * destructive, so it stays a deliberate click.
+			 * Don't trigger if the request is already in flight or the URL is
+			 * empty. The predicate lives in `utils/send-gate.ts` because the
+			 * palette's Send row asks the same question through
+			 * `SendRequestCommandSurface`, and the two must not drift (#1243); the
+			 * reasoning behind it - in particular why `isStreaming` counts - is
+			 * written there.
 			 */
-			if (isExecuting || isStreaming || request.url.trim().length === 0) return;
+			if (!canSendRequest({ url: request.url, isExecuting, isStreaming })) return;
 
 			if (isSend) {
 				event.preventDefault();

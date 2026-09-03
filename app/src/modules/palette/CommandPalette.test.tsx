@@ -201,7 +201,7 @@ beforeEach(() => {
 	useImportModalStore.setState({ isOpen: false });
 	useSettingsStore.setState({ selectedCategory: "appearance", highlightedKey: null });
 	stampedCommand.id = null;
-	useLiveCommandSurfaceStore.setState({ startLoadTest: null });
+	useLiveCommandSurfaceStore.setState({ startLoadTest: null, sendRequest: null });
 });
 afterEach(cleanup);
 
@@ -726,6 +726,31 @@ describe("commands", () => {
 		pressEnter();
 
 		expect(started).toHaveBeenCalledTimes(1);
+		expect(useLayoutStore.getState().paletteOpen).toBe(false);
+	});
+
+	/* The same join, for the second live slot (#1243). */
+	it("offers the send command only while a mounted builder contributes it", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		renderPalette();
+		open();
+		expect(screen.queryByText('Send "Request"')).not.toBeInTheDocument();
+		cleanup();
+
+		const sent = vi.fn();
+		useLiveCommandSurfaceStore.setState({ sendRequest: sent });
+		renderPalette();
+		open();
+		expect(screen.getByText('Send "Request"')).toBeInTheDocument();
+
+		typeQuery('Send "Req');
+		pressEnter();
+
+		expect(sent).toHaveBeenCalledTimes(1);
 		expect(useLayoutStore.getState().paletteOpen).toBe(false);
 	});
 
