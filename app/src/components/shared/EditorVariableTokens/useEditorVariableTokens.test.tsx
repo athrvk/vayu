@@ -118,16 +118,22 @@ function mount(
 	options: { language?: string; readOnly?: boolean; withProvider?: boolean } = {}
 ) {
 	const { language = "json", readOnly = false, withProvider = true } = options;
-	const rendered = renderHook(() => useEditorVariableTokens({ language, readOnly }), {
-		wrapper: ({ children }) =>
-			withProvider ? (
-				<EditorVariableTokensContext.Provider value={contextValue}>
-					{children}
-				</EditorVariableTokensContext.Provider>
-			) : (
-				<>{children}</>
-			),
-	});
+	// Through `initialProps`, so a case can hand the mounted editor a different
+	// language or `readOnly` the way a body-mode switch would.
+	const rendered = renderHook(
+		(props: { language: string; readOnly: boolean }) => useEditorVariableTokens(props),
+		{
+			initialProps: { language, readOnly },
+			wrapper: ({ children }) =>
+				withProvider ? (
+					<EditorVariableTokensContext.Provider value={contextValue}>
+						{children}
+					</EditorVariableTokensContext.Provider>
+				) : (
+					<>{children}</>
+				),
+		}
+	);
 	// What `CodeEditor` does from `onMount`.
 	act(() => rendered.result.current(stub.editor, monacoStub));
 	return rendered;
@@ -268,6 +274,19 @@ describe("useEditorVariableTokens", () => {
 		rendered.unmount();
 		// A card left hanging over whatever replaces the editor is the failure
 		// this one guards.
+		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
+	});
+
+	it("takes it down the moment the editor stops painting tokens at all", () => {
+		variables.baseUrl = { value: "https://x", scope: "environment" };
+		const stub = stubEditor(["GET {{baseUrl}}"]);
+		const rendered = mount(stub);
+
+		hoverAt(stub, 8);
+		// A body mode that left the token languages, with the card still up.
+		act(() => rendered.rerender({ language: "javascript", readOnly: false }));
+		// Mutation check: drop the `if (!enabled) hideHover()` and the card hangs
+		// there until some later pointer event happens to arrive.
 		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
 	});
 

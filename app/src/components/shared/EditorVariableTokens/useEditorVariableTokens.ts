@@ -381,9 +381,12 @@ export function useEditorVariableTokens({
 	useEffect(() => {
 		live.current = { tokens, enabled };
 		installLatest.current = install;
+		// A card showing over a token this editor has stopped owning goes now,
+		// rather than at whatever pointer event happens to come next.
+		if (!enabled) hideHover();
 		install();
 		paint();
-	}, [tokens, enabled, install, paint]);
+	}, [tokens, enabled, hideHover, install, paint]);
 
 	useEffect(() => {
 		return () => {

@@ -33,9 +33,11 @@ import type { TokenHoverRequest } from "./context";
  *
  * The branches are `EditableVariable`'s, in its order and its wording - a
  * bound row above every scope, a secret as the word rather than its value or a
- * row of dots, `empty` for a definition that resolves to nothing. Two surfaces
- * answering one token differently is the defect this whole layer exists to
- * avoid; two spellings of the same answer is the same defect, smaller.
+ * row of dots, `empty` for a definition that resolves to nothing - and
+ * `RuntimeToken`'s for a generator, which is where a field routes one. Two
+ * surfaces answering one token differently is the defect this whole layer
+ * exists to avoid; two spellings of the same answer is the same defect,
+ * smaller.
  */
 function HoverAnswer({ kind, origins }: { kind: VariableTokenKind; origins: VariableOrigin[] }) {
 	const boundRow = origins.find((origin) => origin.scope === "row");

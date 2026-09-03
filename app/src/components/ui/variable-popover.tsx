@@ -500,7 +500,7 @@ export function VariablePopover({
 							 * It used to share the footer with the Enter and Esc keycaps:
 							 * a `truncate` span beside a `shrink-0` chip group inside a
 							 * `w-72` card, so "Shopify QA - expiring tokens" rendered as
-							 * "Shopify QA — expiring…" and the popover clipped the one
+							 * "Shopify QA - expiring…" and the popover clipped the one
 							 * fact it was opened to give. That is the shape the tooltips
 							 * already ruled out (issue #1195, `docs/design-system.md`);
 							 * this is the same shape one primitive over, so it takes the
