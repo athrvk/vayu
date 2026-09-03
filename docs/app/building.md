@@ -276,16 +276,16 @@ node scripts/perf/measure-app.mjs --out perf-app.json --packaged-dir app/release
 `--packaged-dir` is optional - without it the packaged leg reports
 `"unavailable"` and the renderer-graph figures still come out.
 
-**On a headless Linux box, run it under a display with a window manager.**
-`xvfb-run` alone supplies an X server that maps and focuses nothing, and the
-app's window is frameless: measured on the CI runner, the app came up whole -
-engine listening, MCP up, the renderer fetching from it - and never produced a
-frame, so `ready-to-show` never fired and the leg timed out. The harness's
-plain window became showable in that same session. What the workflow runs is:
-
-```bash
-xvfb-run -a bash -c "openbox --sm-disable & node scripts/perf/measure-app.mjs --out perf-app.json --packaged-dir app/release"
-```
+**On a headless Linux box the packaged figure is unreliable, and the CI runner
+is one.** Under `xvfb-run` the app produced a figure once in five runs there;
+the other four it came up whole - engine listening, MCP up, the renderer
+fetching config, collections and globals from it, inside a second - and then
+produced no frame, so `ready-to-show` never fired and the leg reported
+`"unavailable"` with that output in `note`. The harness's plain window becomes
+showable in the same session every time, and the app's window is frameless.
+Running a window manager in the session changed nothing. #1347 tracks it; the
+Windows and macOS figures are unaffected, as is a Linux desktop, where this has
+not been seen.
 
 **The packaged figure is the real cold start.** The workflow builds the
 renderer, compiles the Electron main process, stages the engine binary into

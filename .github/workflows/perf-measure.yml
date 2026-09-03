@@ -109,9 +109,7 @@ jobs:
             autoconf-archive \
             automake \
             libtool \
-            xvfb \
-            openbox \
-            x11-utils
+            xvfb
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
@@ -301,40 +299,28 @@ jobs:
             ls -l "$sandbox"
           done
 
-      # The Windows and macOS runners have a desktop session and launch the app
-      # directly. The Linux runner has no display at all, so Xvfb supplies one -
-      # and, since #1165, a window manager on top of it. A bare X server maps
-      # and focuses nothing: measured on this workflow's own runner, the
-      # packaged app came up whole - engine listening, MCP up, the renderer
-      # fetching from it - and never produced a frame, so `ready-to-show` never
-      # fired and the leg reported a 90-second timeout. The harness's plain
-      # window became showable in the same session, which is what makes this a
-      # property of the app's window rather than of Electron here.
+      # The cold-start leg is unreliable on the Linux runner and reliable on the
+      # other two, which is recorded here because the summary will show it: the
+      # packaged app produced a figure once in five runs (743 ms), and the other
+      # four times it came up whole - engine listening, MCP up, the renderer
+      # fetching config, collections and globals from it, all inside a second -
+      # and then produced no frame at all, so `ready-to-show` never fired and
+      # the leg timed out. The harness's plain window becomes showable in the
+      # same session every time; the app's is frameless. Running a window
+      # manager (openbox, waited for with `_NET_SUPPORTING_WM_CHECK`) changed
+      # nothing, so none is carried here. #1347 holds the evidence and is where
+      # a fix belongs. Until then the note in the summary carries the app's own
+      # output, and the Windows and macOS figures are the ones to read.
       - name: Measure the app
         shell: bash
+        env:
+          # xvfb on the Linux runner, which has no display; the Windows and
+          # macOS runners have a desktop session and launch the app directly.
+          LAUNCHER: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }}
         run: |
-          measure="node scripts/perf/measure-app.mjs --out perf-app.json --packaged-dir app/release"
-          if [ "${{ runner.os }}" != "Linux" ]; then
-            $measure
-            exit
-          fi
-          # openbox inside the session, not beside it: the display only exists
-          # for the length of xvfb-run's command, and it exits with it. Waited
-          # for rather than merely started - a backgrounded window manager takes
-          # a moment to claim the role, and the app launches about a second
-          # later: one run measured 743 ms and the next timed out with the same
-          # workflow, which is the shape of that race. `_NET_SUPPORTING_WM_CHECK`
-          # is the property a manager sets when it has taken over.
-          xvfb-run -a bash -c '
-            openbox --sm-disable &
-            for _ in $(seq 50); do
-              xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id" && break
-              sleep 0.2
-            done
-            if ! xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id"; then
-              echo "::warning::no window manager after 10s - the packaged leg will report unavailable"
-            fi
-            '"$measure"
+          $LAUNCHER node scripts/perf/measure-app.mjs \
+            --out perf-app.json \
+            --packaged-dir app/release
 
       # tee, not a plain redirect: a leg that reports "unavailable" is a green
       # job with a note in it, so the log has to carry the table too. That is
