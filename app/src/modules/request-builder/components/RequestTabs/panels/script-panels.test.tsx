@@ -122,6 +122,24 @@ function openFullList(container: HTMLElement) {
 describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegacy) => {
 	const Panel = () => <ScriptPanel variant={variant} />;
 
+	/*
+	 * The editor was a fixed 350px box in a pane with the window's height, the
+	 * third copy of one shape at a third size (#1323). jsdom has no layout, so
+	 * the fill is a class assertion. Mutation check: put `height="350px"` back on
+	 * the `CodeEditor` and drop `flex-1` from its wrapper - both cases fail.
+	 */
+	it("gives the editor the panel's remaining height, with a floor", () => {
+		const { container, getByTestId } = render(<Panel />);
+		const box = getByTestId("code-editor").parentElement!;
+		expect(box.className).toContain("flex-1");
+		expect(box.className).toContain("min-h-40");
+
+		const root = container.firstElementChild!;
+		for (const cls of ["flex", "flex-col", "flex-1", "min-h-0"]) {
+			expect(root.className, `root is missing ${cls}`).toContain(cls);
+		}
+	});
+
 	it("lists the variables the script references", () => {
 		const { container } = render(<Panel />);
 		expect(container.textContent).toContain("Names mentioned:");

@@ -167,7 +167,14 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 	};
 
 	return (
-		<div className="max-w-[680px] flex flex-col gap-3.5">
+		/*
+		 * `h-full` rather than the `flex-1` the request builder's editor tabs use:
+		 * this panel's `TabsContent` is force-mounted for the draft it protects
+		 * (see `CollectionDetail/index.tsx`) and stays a plain scroller, so the
+		 * column takes its height from the pane directly instead of being a flex
+		 * child of it.
+		 */
+		<div className="max-w-[680px] h-full flex flex-col gap-3.5">
 			<InfoBanner>
 				This script runs <strong>{isPre ? "before" : "after"} every request</strong> in this
 				collection. Scripts compose outer→inner: the parent collection runs first, then
@@ -272,8 +279,15 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 				</div>
 			)}
 
+			{/*
+			 * The editor fills what the rest of the column leaves, rather than the
+			 * 320px box it was - the tab panel already has the window's height. A
+			 * column, because the band naming the file keeps its own height above it
+			 * and the editor takes the remainder; `min-h-40` is the floor a short
+			 * window still shows.
+			 */}
 			<div
-				className="border border-border rounded-md overflow-hidden"
+				className="flex min-h-40 flex-1 flex-col border border-border rounded-md overflow-hidden"
 				onBlur={handleEditorFocusOut}
 			>
 				<div className="flex items-center gap-2.5 px-3 py-1.5 bg-panel border-b border-border">
@@ -282,14 +296,15 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 					</span>
 					<span className="ml-auto text-[10px] text-muted-foreground">JavaScript</span>
 				</div>
-				<CodeEditor
-					height="320px"
-					language="javascript"
-					ariaLabel={`Collection ${isPre ? "pre-request" : "post-request"} script`}
-					value={script}
-					onChange={setScript}
-					fontSize={12}
-				/>
+				<div className="min-h-0 flex-1">
+					<CodeEditor
+						language="javascript"
+						ariaLabel={`Collection ${isPre ? "pre-request" : "post-request"} script`}
+						value={script}
+						onChange={setScript}
+						fontSize={12}
+					/>
+				</div>
 			</div>
 
 			<div>

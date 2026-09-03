@@ -55,7 +55,13 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 	const hasReferencedVars = usedVars.length > 0;
 
 	return (
-		<div className="space-y-4">
+		/*
+		 * A column that fills the tab panel, for `BodyPanel`'s reason: the editor
+		 * was a fixed 350px box inside a pane with the window's height. Everything
+		 * but the editor keeps its intrinsic height; `min-h-0` is what lets the
+		 * editor shrink below its content when the window is short.
+		 */
+		<div className="flex min-h-0 flex-1 flex-col gap-4">
 			<div className="flex items-center justify-between">
 				<p className="text-sm text-muted-foreground">{config.intro}</p>
 				{hasReferencedVars && (
@@ -271,9 +277,8 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 				</div>
 			)}
 
-			<div className="rounded-md border border-rule surface-card bg-card overflow-hidden">
+			<div className="min-h-40 flex-1 rounded-md border border-rule surface-card bg-card overflow-hidden">
 				<CodeEditor
-					height="350px"
 					language="javascript"
 					ariaLabel={config.editorLabel}
 					value={script}
