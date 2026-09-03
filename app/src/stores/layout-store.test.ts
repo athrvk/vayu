@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useLayoutStore } from "./layout-store";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
+	CONTEXT_BAR_DEFAULT_COLLAPSED,
 	PANEL_MIN_WIDTH,
 	PANEL_MAX_WIDTH,
 	DEFAULT_DRAWER_WIDTH,
@@ -110,8 +111,20 @@ describe("layout-store context-bar sections", () => {
 		useLayoutStore.setState({ contextBarCollapsedSections: [] });
 	});
 
-	it("starts with every section expanded", () => {
-		expect(useLayoutStore.getState().contextBarCollapsedSections).toEqual([]);
+	it("starts every section expanded but the ones that ship collapsed", () => {
+		// The initial state, not the state this file's `beforeEach` installs:
+		// asserting the latter would pass with any default at all.
+		expect(useLayoutStore.getInitialState().contextBarCollapsedSections).toEqual([
+			...CONTEXT_BAR_DEFAULT_COLLAPSED,
+		]);
+	});
+
+	it("ships `code` collapsed, and nothing else", () => {
+		// Named rather than derived from the constant: the list is a deliberate
+		// exception to "a section ships expanded" (an expanded Code section
+		// composes over the network on mount), and growing it should be a
+		// decision someone makes here, not a constant quietly gaining an entry.
+		expect([...CONTEXT_BAR_DEFAULT_COLLAPSED]).toEqual(["code"]);
 	});
 
 	it("toggles one section without touching the others", () => {
@@ -134,6 +147,61 @@ describe("layout-store context-bar sections", () => {
 		// the in-memory state looks right either way.
 		const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.LAYOUT_STORE) ?? "{}");
 		expect(stored.state.contextBarCollapsedSections).toEqual(["code"]);
+	});
+
+	/*
+	 * The default and the migration are two halves of one change and neither
+	 * works alone. `persist` merges a *missing key* onto the initial state, so a
+	 * user who has ever collapsed anything carries an array that would outvote a
+	 * new default silently - which is exactly the failure these cases pin.
+	 */
+	describe("v3 -> v4 migration", () => {
+		const migrate = (
+			useLayoutStore.persist.getOptions() as unknown as {
+				migrate: (s: unknown, v: number) => Record<string, unknown>;
+			}
+		).migrate;
+
+		it("collapses `code` in a blob that predates the default", () => {
+			const migrated = migrate({ contextBarCollapsedSections: ["cookies"] }, 3);
+			expect(migrated.contextBarCollapsedSections).toEqual(["cookies", "code"]);
+		});
+
+		it("collapses `code` in a blob that had never collapsed anything", () => {
+			// The case the initial-state default cannot reach: the key is present
+			// and empty, so `persist` has nothing to merge in.
+			const migrated = migrate({ contextBarCollapsedSections: [] }, 3);
+			expect(migrated.contextBarCollapsedSections).toEqual(["code"]);
+		});
+
+		it("does not list `code` twice for a user who had already collapsed it", () => {
+			const migrated = migrate({ contextBarCollapsedSections: ["code"] }, 3);
+			expect(migrated.contextBarCollapsedSections).toEqual(["code"]);
+		});
+
+		it("prunes the retired `environment` id", () => {
+			const migrated = migrate(
+				{ contextBarCollapsedSections: ["environment", "auth"] },
+				3
+			);
+			expect(migrated.contextBarCollapsedSections).not.toContain("environment");
+			expect(migrated.contextBarCollapsedSections).toEqual(["auth", "code"]);
+		});
+
+		it("survives a blob with no collapse list at all", () => {
+			// Every field here is optional in a hand-edited or truncated blob, and
+			// a migration that throws takes the whole store down to its defaults.
+			const migrated = migrate({}, 3);
+			expect(migrated.contextBarCollapsedSections).toEqual(["code"]);
+		});
+
+		it("leaves a v4 blob alone, so an explicit expand is not undone", () => {
+			// A user who opens Code has removed it from the list. Re-running the
+			// v4 branch on every launch would put it back on every launch, which
+			// is the difference between a default and a policy.
+			const migrated = migrate({ contextBarCollapsedSections: [] }, 4);
+			expect(migrated.contextBarCollapsedSections).toEqual([]);
+		});
 	});
 });
 

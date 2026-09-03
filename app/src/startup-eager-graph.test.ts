@@ -102,6 +102,19 @@ describe("the always-mounted chrome does not defeat the split", () => {
 		expect(registry).not.toMatch(/^import \{ GraphQLSection \}/m);
 	});
 
+	it("keeps the GraphQL section's relevance hook out of the section's own file", () => {
+		// The registry has to name `useRelevance` eagerly - it is a field on a
+		// plain array entry, evaluated at module load - so a hook exported from
+		// `GraphQLSection.tsx` would import the parser into the entry chunk
+		// through the back door and quietly undo the split the case above
+		// guards. `relevance.ts` reads `request.bodyType` and nothing else.
+		const relevance = read("components", "layout", "context-bar", "relevance.ts");
+
+		expect(relevance).toContain("useGraphQLRelevance");
+		expect(relevance).not.toContain("./GraphQLSection");
+		expect(relevance).not.toMatch(/from "graphql/);
+	});
+
 	it("the settings registry the tree reads holds data, not panels", () => {
 		const registry = read("modules", "settings", "main", "app-panels.ts");
 
