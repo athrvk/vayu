@@ -22,6 +22,7 @@ import {
 import {
 	buildSearchIndex,
 	childNodes,
+	rootPathsToType,
 	schemaBranches,
 	searchSchema,
 	type SchemaTreeNode,
@@ -408,6 +409,42 @@ describe("insertFragment", () => {
 		expect(result.text).toContain("...PostFields2");
 	});
 
+	it("spreads into an interface selection, the case fragments exist for", () => {
+		/*
+		 * `fragment PostFields on Post` belongs inside a `Query.node: Node`
+		 * selection - Post implements Node - and an equality test on the host
+		 * refuses it while the user is looking straight at the set it goes in.
+		 * Mutation check: require `host.typeName === typeName` and this refuses.
+		 */
+		const doc = `query Existing {\n  node(id: "1") {\n    id\n  }\n}\n`;
+		const result = inserted(insertFragment(schema, doc, doc.indexOf("id\n  }"), "Post"));
+
+		expect(result.text).toContain("...PostFields");
+		expect(result.text).toContain("fragment PostFields on Post");
+		expectValid(result.text);
+	});
+
+	it("spreads into a union selection the type is a member of", () => {
+		const doc = `query Existing {\n  search(term: "x") {\n    __typename\n  }\n}\n`;
+		const result = inserted(insertFragment(schema, doc, doc.indexOf("__typename"), "User"));
+
+		expect(result.text).toContain("...UserFields");
+		expectValid(result.text);
+	});
+
+	it("prefers the set that is exactly the type over one it merely overlaps", () => {
+		// Both are on the chain: the User set inside the Node set. The one the
+		// user is in wins over the one the spread is only legal in.
+		const doc = `query Existing {\n  user(id: "1") {\n    id\n  }\n  node(id: "2") {\n    id\n  }\n}\n`;
+		const result = inserted(insertFragment(schema, doc, doc.indexOf("id\n  }"), "User"));
+
+		// The spread landed in `user`, not in `node`.
+		const spreadAt = result.text.indexOf("...UserFields");
+		expect(spreadAt).toBeGreaterThan(-1);
+		expect(spreadAt).toBeLessThan(result.text.indexOf("node(id:"));
+		expectValid(result.text);
+	});
+
 	it("refuses when nothing on screen selects the type, rather than orphaning it", () => {
 		const doc = `query Draft {\n  ping: __typename\n}\n`;
 		const result = insertFragment(schema, doc, doc.length - 1, "Post");
@@ -593,8 +630,47 @@ describe("insertionForNode - a type row", () => {
 		expect(result && isRefusal(result)).toBe(true);
 		if (result && isRefusal(result)) {
 			expect(result.reason).toContain("Orphan");
-			expect(result.reason).toContain("Put the cursor inside one");
+			expect(result.reason).toContain("Put the cursor inside a selection");
 		}
+	});
+
+	it("narrows with an inline fragment when the route runs through an interface", () => {
+		/*
+		 * `Query.node: Node` is the only way to reach some types on a Relay-shaped
+		 * schema, and `title` is not on `Node` - so the selection is only legal
+		 * inside `... on Post`. Mutation check: drop the narrowing from
+		 * `renderSteps` and `expectValid` reddens with "Cannot query field title
+		 * on type Node".
+		 */
+		const viaNode = rootPathsToType(schema, "Post").find((p) => p[0].fieldName === "node")!;
+		const result = inserted(
+			insertField(schema, "", 0, {
+				parentTypeName: "Query",
+				fieldName: "node",
+				rootPath: [...viaNode, { parentTypeName: "Post", fieldName: "title" }],
+			})
+		);
+
+		expect(result.text).toContain("... on Post");
+		expect(result.text).toContain("title");
+		expectValid(result.text);
+	});
+
+	it("selects the narrowed type's own fields, not the interface's", () => {
+		// The step wants Post's scalars; the field's declared type is the Node
+		// they are not on.
+		const viaNode = rootPathsToType(schema, "Post").find((p) => p[0].fieldName === "node")!;
+		const result = inserted(
+			insertField(schema, "", 0, {
+				parentTypeName: "Query",
+				fieldName: "node",
+				rootPath: viaNode,
+			})
+		);
+
+		expect(result.text).toContain("... on Post");
+		expect(result.text).toContain("body");
+		expectValid(result.text);
 	});
 
 	it("keeps the reason a fragment is impossible at all", () => {

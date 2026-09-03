@@ -67,6 +67,15 @@ export type SchemaBranchId = "query" | "mutation" | "subscription" | "types";
 export interface FieldStep {
 	parentTypeName: string;
 	fieldName: string;
+	/**
+	 * The concrete type this step's result must be narrowed to, when the field
+	 * declares an interface or a union and the route wants one of its members.
+	 *
+	 * `Query.node: Node` reaches a `Post`, and the only way to select `title`
+	 * through it is `node(id:) { ... on Post { title } }`. Absent on a step whose
+	 * field already returns what the route wanted, which is most of them.
+	 */
+	narrowTo?: string;
 }
 
 export type SchemaNodeKind =
@@ -195,12 +204,20 @@ function namedTypes(schema: GraphQLSchema): GraphQLNamedType[] {
 		.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** A root operation field whose result type is some named type. */
+/** A root operation field a named type can be reached through. */
 export interface RootFieldRef {
 	branch: SchemaBranchId;
 	parentTypeName: string;
 	fieldName: string;
 	deprecated: boolean;
+	/**
+	 * The type the route narrows to, or null when the field returns it outright.
+	 *
+	 * Set for a field declaring an interface or union that the wanted type is a
+	 * member of - the route exists, and every selection along it has to say
+	 * `... on <that type>`.
+	 */
+	narrowTo: string | null;
 }
 
 /**
@@ -224,6 +241,12 @@ function returnedByIndex(schema: GraphQLSchema): Map<string, RootFieldRef[]> {
 	if (cached) return cached;
 
 	const index = new Map<string, RootFieldRef[]>();
+	const add = (typeName: string, ref: RootFieldRef) => {
+		const refs = index.get(typeName) ?? [];
+		refs.push(ref);
+		index.set(typeName, refs);
+	};
+
 	for (const branch of ["query", "mutation"] as const) {
 		const rootName = branchRootTypeName(schema, branch);
 		const root = rootName ? schema.getType(rootName) : null;
@@ -231,23 +254,40 @@ function returnedByIndex(schema: GraphQLSchema): Map<string, RootFieldRef[]> {
 		for (const field of Object.values(root.getFields())) {
 			const named = getNamedType(field.type);
 			if (!isObjectType(named) && !isInterfaceType(named) && !isUnionType(named)) continue;
-			const refs = index.get(named.name) ?? [];
-			refs.push({
+			const ref = {
 				branch,
 				parentTypeName: root.name,
 				fieldName: field.name,
 				deprecated: field.deprecationReason != null,
-			});
-			index.set(named.name, refs);
+				narrowTo: null,
+			};
+			add(named.name, ref);
+			/*
+			 * Still one hop. A field declaring `Node` reaches a `Post` on every
+			 * real request, and keying only the declared type is what left a
+			 * Relay-shaped schema - one `node` field, every concrete type behind
+			 * it - with no route to anything at all.
+			 */
+			if (isInterfaceType(named) || isUnionType(named)) {
+				for (const member of schema.getPossibleTypes(named)) {
+					add(member.name, { ...ref, narrowTo: member.name });
+				}
+			}
 		}
 	}
 	/*
-	 * A deprecated root field is a route the schema is asking clients to stop
-	 * using, so it goes last and is never the one a click takes. `sort` is
-	 * stable, so within each half the schema's own declaration order survives.
+	 * A route that returns the type outright beats one that narrows to it, so a
+	 * schema declaring both keeps the answer it had before narrowing existed.
+	 * Then a deprecated root field, which is a route the schema is asking
+	 * clients to stop using, goes last and is never the one a click takes.
+	 * `sort` is stable, so within each group the declaration order survives.
 	 */
 	for (const refs of index.values()) {
-		refs.sort((a, b) => Number(a.deprecated) - Number(b.deprecated));
+		refs.sort(
+			(a, b) =>
+				Number(a.narrowTo !== null) - Number(b.narrowTo !== null) ||
+				Number(a.deprecated) - Number(b.deprecated)
+		);
 	}
 
 	returnedByCache.set(schema, index);
@@ -266,9 +306,13 @@ export function rootFieldsReturning(schema: GraphQLSchema, typeName: string): Ro
  * shortest" a fact rather than a heuristic.
  */
 export function rootPathsToType(schema: GraphQLSchema, typeName: string): FieldStep[][] {
-	return rootFieldsReturning(schema, typeName).map((ref) => [
-		{ parentTypeName: ref.parentTypeName, fieldName: ref.fieldName },
-	]);
+	return rootFieldsReturning(schema, typeName).map((ref) => [rootStep(ref)]);
+}
+
+/** A route's one step, carrying its narrowing only when it has one. */
+function rootStep(ref: RootFieldRef): FieldStep {
+	const step: FieldStep = { parentTypeName: ref.parentTypeName, fieldName: ref.fieldName };
+	return ref.narrowTo ? { ...step, narrowTo: ref.narrowTo } : step;
 }
 
 /** The rows one level under `node`, or an empty list when it has none. */
@@ -313,7 +357,25 @@ function returnedByChildren(schema: GraphQLSchema, node: SchemaTreeNode): Schema
 		const owner = schema.getType(ref.parentTypeName);
 		if (!isObjectType(owner)) return [];
 		const field = owner.getFields()[ref.fieldName];
-		return field ? [fieldNode(node.id, owner.name, field, ref.branch, [])] : [];
+		if (!field) return [];
+
+		const row = fieldNode(node.id, owner.name, field, ref.branch, []);
+		if (!ref.narrowTo) return [row];
+		/*
+		 * A narrowed route says so on the row, and leads to the type that was
+		 * asked for rather than the interface the field declares - otherwise
+		 * `node` under `Post` reads as returning a `Node` and expands into
+		 * `Node`'s one field, neither of which is what the row is offering.
+		 */
+		return [
+			{
+				...row,
+				signature: `${row.signature} → ${ref.narrowTo}`,
+				typeName: ref.narrowTo,
+				expandable: hasChildren(schema.getType(ref.narrowTo)!),
+				rootPath: [rootStep(ref)],
+			},
+		];
 	});
 }
 

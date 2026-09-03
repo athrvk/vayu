@@ -433,12 +433,46 @@ describe("splitAtMatch", () => {
 
 describe("the routes that reach a type", () => {
 	it("lists the root fields whose result type is this one", () => {
-		expect(rootFieldsReturning(schema, "Post")).toEqual([
+		expect(rootFieldsReturning(schema, "Post")[0]).toEqual({
+			branch: "mutation",
+			parentTypeName: "Mutation",
+			fieldName: "createPost",
+			deprecated: false,
+			narrowTo: null,
+		});
+	});
+
+	it("counts a field returning an interface or union the type belongs to", () => {
+		// `Query.node: Node` and `Query.search: [SearchResult!]!` both reach a
+		// Post on a real request; keying only the declared type is what left a
+		// Relay-shaped schema with no route to anything.
+		const routes = rootFieldsReturning(schema, "Post");
+		const narrowed = routes.filter((r) => r.narrowTo !== null);
+
+		expect(narrowed.map((r) => r.fieldName)).toEqual(["node", "search", "legacySearch"]);
+		expect(narrowed.every((r) => r.narrowTo === "Post")).toBe(true);
+	});
+
+	it("puts a route that returns the type outright ahead of one that narrows", () => {
+		// So a schema declaring both keeps the answer it had before narrowing
+		// existed - and a click never takes the longer way round.
+		const routes = rootFieldsReturning(schema, "User");
+		expect(routes[0]).toMatchObject({ fieldName: "user", narrowTo: null });
+		expect(routes.slice(1).every((r) => r.narrowTo === "User")).toBe(true);
+	});
+
+	it("leaves a schema of direct returns exactly as it was", () => {
+		const direct = buildSchema(`
+			type Only { tag: String }
+			type Query { only: Only }
+		`);
+		expect(rootFieldsReturning(direct, "Only")).toEqual([
 			{
-				branch: "mutation",
-				parentTypeName: "Mutation",
-				fieldName: "createPost",
+				branch: "query",
+				parentTypeName: "Query",
+				fieldName: "only",
 				deprecated: false,
+				narrowTo: null,
 			},
 		]);
 	});
@@ -453,7 +487,9 @@ describe("the routes that reach a type", () => {
 	it("keeps a subscription out, since one cannot be run here", () => {
 		// `Subscription.postAdded` also returns a Post. Offering it as the route
 		// would hand the user an operation this app refuses to send.
-		expect(rootFieldsReturning(schema, "Post").map((r) => r.branch)).toEqual(["mutation"]);
+		expect(rootFieldsReturning(schema, "Post").map((r) => r.branch)).not.toContain(
+			"subscription"
+		);
 	});
 
 	it("answers nothing for a type no root field returns", () => {
@@ -470,9 +506,17 @@ describe("the routes that reach a type", () => {
 	});
 
 	it("hands insertion a one-step path, so shortest is a fact not a guess", () => {
-		expect(rootPathsToType(schema, "User")).toEqual([
-			[{ parentTypeName: "Query", fieldName: "user" }],
+		expect(rootPathsToType(schema, "User")[0]).toEqual([
+			{ parentTypeName: "Query", fieldName: "user" },
 		]);
+		// No `narrowTo` key at all on a direct route, rather than an undefined
+		// one: the step is the shape insertion has always taken.
+		expect("narrowTo" in rootPathsToType(schema, "User")[0][0]).toBe(false);
+	});
+
+	it("carries the narrowing on a step that needs one", () => {
+		const viaNode = rootPathsToType(schema, "Post").find((p) => p[0].fieldName === "node");
+		expect(viaNode).toEqual([{ parentTypeName: "Query", fieldName: "node", narrowTo: "Post" }]);
 	});
 
 	it("shows the routes as a container above the type's own members", () => {
@@ -488,11 +532,30 @@ describe("the routes that reach a type", () => {
 		const post = childNamed(branch("types"), "Post");
 		const routes = childNodes(schema, childNamed(post, "Returned by"));
 
-		expect(routes.map((r) => r.name)).toEqual(["createPost"]);
+		expect(routes.map((r) => r.name)).toEqual(["createPost", "node", "search", "legacySearch"]);
 		expect(routes[0].rootPath).toEqual([
 			{ parentTypeName: "Mutation", fieldName: "createPost" },
 		]);
 		expect(routes[0].branch).toBe("mutation");
+	});
+
+	it("says on a narrowed route which type it leads to, and leads there", () => {
+		const post = childNamed(branch("types"), "Post");
+		const viaNode = childNamed(childNamed(post, "Returned by"), "node");
+
+		// Without this the row reads as returning a Node and expands into
+		// Node's one field, neither of which is what it is offering.
+		expect(viaNode.signature).toContain("→ Post");
+		expect(viaNode.typeName).toBe("Post");
+		expect(viaNode.rootPath).toEqual([
+			{ parentTypeName: "Query", fieldName: "node", narrowTo: "Post" },
+		]);
+		expect(childNodes(schema, viaNode).map((c) => c.name)).toEqual([
+			"id",
+			"title",
+			"body",
+			"author",
+		]);
 	});
 
 	it("omits the container for a type nothing returns", () => {

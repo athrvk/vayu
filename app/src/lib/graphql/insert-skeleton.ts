@@ -47,7 +47,9 @@
 
 import {
 	Kind,
+	doTypesOverlap,
 	getNamedType,
+	isCompositeType,
 	isEnumType,
 	isInterfaceType,
 	isNonNullType,
@@ -56,6 +58,7 @@ import {
 	isUnionType,
 	parse,
 	type FieldNode,
+	type GraphQLCompositeType,
 	type GraphQLField,
 	type GraphQLNamedType,
 	type GraphQLSchema,
@@ -297,16 +300,30 @@ function renderSteps(
 
 	const head = `${field.name}${renderArguments(field, namer)}`;
 
+	let body: string | null;
 	if (rest.length > 0) {
-		const inner = renderSteps(schema, rest, namer);
-		if (inner === null) return null;
-		return `${head} {\n${indentBlock(inner)}\n}`;
+		body = renderSteps(schema, rest, namer);
+		if (body === null) return null;
+	} else {
+		/*
+		 * The narrowing decides what to select, not just how to wrap it: the
+		 * step wants `Post`'s scalars, and the field's own type is the `Node`
+		 * they are not on.
+		 */
+		const target = step.narrowTo ? schema.getType(step.narrowTo) : getNamedType(field.type);
+		if (!target) return null;
+		const leaves = leafSelection(target);
+		if (!leaves) return `${head}${CARET}`;
+		body = `${leaves}${CARET}`;
 	}
 
-	const named = getNamedType(field.type);
-	const body = leafSelection(named);
-	if (!body) return `${head}${CARET}`;
-	return `${head} {\n${indentBlock(`${body}${CARET}`)}\n}`;
+	/*
+	 * An inline fragment, and only where the route the user opened named one -
+	 * this is not the "probably compatible" guessing the header refuses, it is
+	 * the narrowing without which the selection would not be legal at all.
+	 */
+	if (step.narrowTo) body = `... on ${step.narrowTo} {\n${indentBlock(body)}\n}`;
+	return `${head} {\n${indentBlock(body)}\n}`;
 }
 
 /** Shift every line of `block` one level in. */
@@ -652,6 +669,38 @@ function appendOperation(
  * a selection set the fragment applies to. Anywhere else is refused, which is
  * the same honest end as every other placement this module cannot make.
  */
+/**
+ * The selection set a fragment on `type` can be spread into, innermost first.
+ *
+ * **Compatibility, not equality.** A fragment on a concrete type belongs
+ * inside a selection of the interface it implements or the union it joins -
+ * `fragment PostFields on Post` spread into a `Query.node: Node` selection is
+ * the case named fragments exist for, and an equality test refuses it while
+ * the user is looking straight at the set it goes in.
+ *
+ * The predicate is `doTypesOverlap`, the one `PossibleFragmentSpreadsRule`
+ * validates with, so this cannot write a spread the server then rejects - the
+ * failure a hand-rolled subtype walk would eventually produce. An exact match
+ * still wins over an overlapping one: it is the set the user is in, not merely
+ * one the spread is legal in.
+ */
+function spreadHost(
+	schema: GraphQLSchema,
+	type: GraphQLCompositeType,
+	chain: EnclosingSet[]
+): EnclosingSet | null {
+	let overlapping: EnclosingSet | null = null;
+	for (let depth = chain.length - 1; depth >= 0; depth--) {
+		const host = chain[depth];
+		if (host.typeName === type.name) return host;
+		const hostType = schema.getType(host.typeName);
+		if (!overlapping && isCompositeType(hostType) && doTypesOverlap(schema, type, hostType)) {
+			overlapping = host;
+		}
+	}
+	return overlapping;
+}
+
 export function insertFragment(
 	schema: GraphQLSchema,
 	text: string,
@@ -666,17 +715,11 @@ export function insertFragment(
 		};
 	}
 
-	// Innermost first, the same order `insertField` prefers: the set closest to
-	// where the user is looking is the one they meant.
-	const chain = enclosingSets(schema, text, cursor)?.chain ?? [];
-	let host: EnclosingSet | null = null;
-	for (let depth = chain.length - 1; depth >= 0 && !host; depth--) {
-		if (chain[depth].typeName === typeName) host = chain[depth];
-	}
+	const host = spreadHost(schema, type, enclosingSets(schema, text, cursor)?.chain ?? []);
 	if (!host) {
 		return {
 			refused: true,
-			reason: `Nothing here selects a ${typeName}. Put the cursor inside one to add a fragment on it - a fragment nothing spreads is rejected with the rest of the document.`,
+			reason: `Nothing here can hold a fragment on ${typeName}. Put the cursor inside a selection that can - a fragment nothing spreads is rejected with the rest of the document.`,
 		};
 	}
 

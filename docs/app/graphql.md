@@ -81,14 +81,19 @@ for you.
 
 Selecting a **type** inserts the operation that returns it - `Post` writes the
 `createPost` mutation that answers with one, following the shortest route the
-schema offers and never a deprecated one. Where nothing in Query or Mutation
-returns the type - a type reachable only through its parent - Vayu writes a
-fragment on it **and the spread that uses it**, into the selection set your
-cursor is in. It needs that cursor: a fragment nothing spreads is rejected
-along with the rest of the document, so with nowhere to put the spread Vayu
-says so rather than handing you a request the server will refuse.
+schema offers and never a deprecated one. A route through a field that returns
+an interface or a union counts: `Query.node: Node` reaches a `Post`, and Vayu
+writes the `... on Post` the selection needs to be legal.
+
+Where nothing in Query or Mutation returns the type at all - one reachable only
+through its parent - Vayu writes a fragment on it **and the spread that uses
+it**, into a selection on screen that can hold it, including an interface or
+union selection the type belongs to. It needs that: a fragment nothing spreads
+is rejected along with the rest of the document, so with nowhere to put the
+spread Vayu says so rather than handing you a request the server will refuse.
 Under a type row, **Returned by** lists the root fields that answer with it, so
-you can pick a different route than the one a click takes.
+you can pick a different route than the one a click takes. A route that gets
+there through an interface or union says so - `node(id: ID!): Node → Post`.
 
 A field found by **search** under a type you have not opened - `User.handle`,
 say - is inserted through that same route, so it no longer needs your cursor to
