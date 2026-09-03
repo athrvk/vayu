@@ -42,6 +42,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
+import {
+	stubAllVariables,
+	stubOrigins,
+	stubScopeVariables,
+	type ScopeDefinitions,
+} from "@/lib/scoped-variables.testkit";
+import type { VariableScope } from "@/types";
 
 interface ProviderLike {
 	provideCompletionItems: (
@@ -72,13 +79,21 @@ vi.mock("@/lib/monaco-loader", () => ({
 /** The `collectionId` each provider handed the resolver, in call order. */
 const scopes: Array<string | undefined> = [];
 
-/** What the resolver reports - keyed the way `ResolvedVariable` is shaped. */
-const variables: Record<string, { value: string; scope: string; sourceId?: string }> = {};
+/**
+ * What each scope defines. The resolver's three views are derived from it
+ * (`scoped-variables.testkit`), so a case cannot describe a scope map that
+ * disagrees with the merged one - a state the real resolver cannot be in.
+ */
+const defs: ScopeDefinitions = {};
 
 vi.mock("./useVariableResolver", () => ({
 	useVariableResolver: (options?: { collectionId?: string }) => {
 		scopes.push(options?.collectionId);
-		return { getAllVariables: () => variables };
+		return {
+			getAllVariables: () => stubAllVariables(defs),
+			getScopeVariables: (scope: VariableScope) => stubScopeVariables(defs, scope),
+			getVariableOrigins: (name: string) => stubOrigins(defs, name),
+		};
 	},
 }));
 
@@ -114,7 +129,7 @@ beforeEach(() => {
 	scopes.length = 0;
 	registered.length = 0;
 	activeCollectionId.current = undefined;
-	for (const key of Object.keys(variables)) delete variables[key];
+	for (const scope of Object.keys(defs) as VariableScope[]) delete defs[scope];
 });
 
 describe("the Monaco completion providers resolve against the active collection", () => {
@@ -139,8 +154,10 @@ describe("the Monaco completion providers resolve against the active collection"
 describe("the body `{{` list offers the whole ancestor chain", () => {
 	it("offers a parent collection's variable, which `{{name}}` does resolve", () => {
 		activeCollectionId.current = "leaf";
-		variables.from_parent = { value: "1", scope: "collection", sourceId: "root" };
-		variables.from_leaf = { value: "2", scope: "collection", sourceId: "leaf" };
+		defs.collection = {
+			from_parent: { value: "1", sourceId: "root" },
+			from_leaf: { value: "2", sourceId: "leaf" },
+		};
 
 		const labels = labelsFor(() => useVariableCompletionProvider(), "{{");
 		expect(labels).toContain("from_parent");
@@ -151,9 +168,11 @@ describe("the body `{{` list offers the whole ancestor chain", () => {
 describe("the script list offers the ancestor chain the engine now walks (#234)", () => {
 	beforeEach(() => {
 		activeCollectionId.current = "leaf";
-		variables.from_parent = { value: "1", scope: "collection", sourceId: "root" };
-		variables.from_leaf = { value: "2", scope: "collection", sourceId: "leaf" };
-		variables.from_env = { value: "3", scope: "environment", sourceId: "e1" };
+		defs.collection = {
+			from_parent: { value: "1", sourceId: "root" },
+			from_leaf: { value: "2", sourceId: "leaf" },
+		};
+		defs.environment = { from_env: { value: "3", sourceId: "e1" } };
 	});
 
 	it("offers an ancestor's variable inside `pm.collectionVariables.get()`", () => {
