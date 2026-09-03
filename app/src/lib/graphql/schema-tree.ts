@@ -28,6 +28,15 @@
  * The search index *is* materialised, because a search has to see rows nobody
  * expanded. It is one pass over the type map with no traversal, so it is bounded
  * by the schema's size rather than by its shape.
+ *
+ * **One route into the graph is materialised too: which root fields return a
+ * given type.** It is the answer to the question a type row cannot otherwise
+ * answer - "how do I ask for one of these?" - and it is what turns a `Post` row
+ * from a dead end into `mutation { createPost { … } }`. It stops at the root
+ * operation types on purpose: a one-hop answer is one the user can check at a
+ * glance, whereas a search through the whole graph would offer routes nobody
+ * chose and would be back to guessing, which is the thing `rootPath` exists to
+ * avoid. A type nothing returns says so instead of being given a route.
  */
 
 import {
@@ -58,9 +67,29 @@ export type SchemaBranchId = "query" | "mutation" | "subscription" | "types";
 export interface FieldStep {
 	parentTypeName: string;
 	fieldName: string;
+	/**
+	 * The concrete type this step's result must be narrowed to, when the field
+	 * declares an interface or a union and the route wants one of its members.
+	 *
+	 * `Query.node: Node` reaches a `Post`, and the only way to select `title`
+	 * through it is `node(id:) { ... on Post { title } }`. Absent on a step whose
+	 * field already returns what the route wanted, which is most of them.
+	 */
+	narrowTo?: string;
 }
 
-export type SchemaNodeKind = "branch" | "field" | "type" | "input-field" | "enum-value";
+export type SchemaNodeKind =
+	| "branch"
+	| "field"
+	| "type"
+	| "input-field"
+	| "enum-value"
+	/**
+	 * The "Returned by" container under a type row. A container like a branch:
+	 * it holds the root fields that answer with this type, and writes nothing
+	 * itself.
+	 */
+	| "returned-by";
 
 export interface SchemaTreeNode {
 	/** Unique within the tree: the expansion key, and the React key. */
@@ -92,6 +121,20 @@ export interface SchemaTreeNode {
 	 */
 	rootPath: FieldStep[] | null;
 }
+
+/*
+ * Row ids, in one place.
+ *
+ * An id is both the expansion key and the address `treeLocationOf` reconstructs
+ * to walk a search result back to its place in the tree. Spelled out at each
+ * construction site, the two would be one edit away from disagreeing - and the
+ * failure is a Reveal that silently expands nothing.
+ */
+const branchNodeId = (branch: SchemaBranchId): string => `branch:${branch}`;
+const typeNodeId = (parentId: string, typeName: string): string => `${parentId}/type:${typeName}`;
+const memberNodeId = (parentId: string, ownerTypeName: string, name: string): string =>
+	`${parentId}/${ownerTypeName}.${name}`;
+const returnedByNodeId = (typeRowId: string): string => `${typeRowId}/returned-by`;
 
 /** The root operation type a branch stands for, or null for the Types branch. */
 export function branchRootTypeName(schema: GraphQLSchema, branch: SchemaBranchId): string | null {
@@ -129,7 +172,7 @@ export function schemaBranches(schema: GraphQLSchema): SchemaTreeNode[] {
 	if (namedTypes(schema).length > 0) branches.push("types");
 
 	return branches.map((branch) => ({
-		id: `branch:${branch}`,
+		id: branchNodeId(branch),
 		kind: "branch" as const,
 		name: BRANCH_LABEL[branch],
 		signature: "",
@@ -161,24 +204,186 @@ function namedTypes(schema: GraphQLSchema): GraphQLNamedType[] {
 		.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** The rows one level under `node`, or an empty list when it has none. */
-export function childNodes(schema: GraphQLSchema, node: SchemaTreeNode): SchemaTreeNode[] {
-	if (node.kind === "branch") {
-		if (node.branch === "types") {
-			return namedTypes(schema).map((type) => typeNode(node.id, type));
-		}
-		const rootName = branchRootTypeName(schema, node.branch);
+/** A root operation field a named type can be reached through. */
+export interface RootFieldRef {
+	branch: SchemaBranchId;
+	parentTypeName: string;
+	fieldName: string;
+	deprecated: boolean;
+	/**
+	 * The type the route narrows to, or null when the field returns it outright.
+	 *
+	 * Set for a field declaring an interface or union that the wanted type is a
+	 * member of - the route exists, and every selection along it has to say
+	 * `... on <that type>`.
+	 */
+	narrowTo: string | null;
+}
+
+/**
+ * Which root fields answer with which type, built once per schema.
+ *
+ * **Query and Mutation only.** A subscription is browsable here and cannot be
+ * run (the engine sends one request and reads one response), so offering one as
+ * the route to a type would hand the user an operation this app refuses to send.
+ *
+ * **Only types a selection can be written against are keyed.** A scalar is
+ * returned by half the schema and selecting one is not a thing the user does; a
+ * `String` row listing 200 root fields would be noise, and inserting "the
+ * shortest route to a String" is not a query anybody wanted. This is also what
+ * keeps the type-row rules and the tree's own children in step: both ask this
+ * one function, so neither can offer a route the other refuses.
+ */
+const returnedByCache = new WeakMap<GraphQLSchema, Map<string, RootFieldRef[]>>();
+
+function returnedByIndex(schema: GraphQLSchema): Map<string, RootFieldRef[]> {
+	const cached = returnedByCache.get(schema);
+	if (cached) return cached;
+
+	const index = new Map<string, RootFieldRef[]>();
+	const add = (typeName: string, ref: RootFieldRef) => {
+		const refs = index.get(typeName) ?? [];
+		refs.push(ref);
+		index.set(typeName, refs);
+	};
+
+	for (const branch of ["query", "mutation"] as const) {
+		const rootName = branchRootTypeName(schema, branch);
 		const root = rootName ? schema.getType(rootName) : null;
-		if (!isObjectType(root)) return [];
-		return Object.values(root.getFields()).map((field) =>
-			fieldNode(node.id, root.name, field, node.branch, [])
+		if (!isObjectType(root)) continue;
+		for (const field of Object.values(root.getFields())) {
+			const named = getNamedType(field.type);
+			if (!isObjectType(named) && !isInterfaceType(named) && !isUnionType(named)) continue;
+			const ref = {
+				branch,
+				parentTypeName: root.name,
+				fieldName: field.name,
+				deprecated: field.deprecationReason != null,
+				narrowTo: null,
+			};
+			add(named.name, ref);
+			/*
+			 * Still one hop. A field declaring `Node` reaches a `Post` on every
+			 * real request, and keying only the declared type is what left a
+			 * Relay-shaped schema - one `node` field, every concrete type behind
+			 * it - with no route to anything at all.
+			 */
+			if (isInterfaceType(named) || isUnionType(named)) {
+				for (const member of schema.getPossibleTypes(named)) {
+					add(member.name, { ...ref, narrowTo: member.name });
+				}
+			}
+		}
+	}
+	/*
+	 * A route that returns the type outright beats one that narrows to it, so a
+	 * schema declaring both keeps the answer it had before narrowing existed.
+	 * Then a deprecated root field, which is a route the schema is asking
+	 * clients to stop using, goes last and is never the one a click takes.
+	 * `sort` is stable, so within each group the declaration order survives.
+	 */
+	for (const refs of index.values()) {
+		refs.sort(
+			(a, b) =>
+				Number(a.narrowTo !== null) - Number(b.narrowTo !== null) ||
+				Number(a.deprecated) - Number(b.deprecated)
 		);
 	}
+
+	returnedByCache.set(schema, index);
+	return index;
+}
+
+/** The root fields whose result type is `typeName`, best route first. */
+export function rootFieldsReturning(schema: GraphQLSchema, typeName: string): RootFieldRef[] {
+	return returnedByIndex(schema).get(typeName) ?? [];
+}
+
+/**
+ * The routes from a root operation type to `typeName`, best first.
+ *
+ * Every route is one step long by construction, which is what makes "the
+ * shortest" a fact rather than a heuristic.
+ */
+export function rootPathsToType(schema: GraphQLSchema, typeName: string): FieldStep[][] {
+	return rootFieldsReturning(schema, typeName).map((ref) => [rootStep(ref)]);
+}
+
+/** A route's one step, carrying its narrowing only when it has one. */
+function rootStep(ref: RootFieldRef): FieldStep {
+	const step: FieldStep = { parentTypeName: ref.parentTypeName, fieldName: ref.fieldName };
+	return ref.narrowTo ? { ...step, narrowTo: ref.narrowTo } : step;
+}
+
+/** The rows one level under `node`, or an empty list when it has none. */
+export function childNodes(schema: GraphQLSchema, node: SchemaTreeNode): SchemaTreeNode[] {
+	if (node.kind === "branch") return branchChildren(schema, node);
+	if (node.kind === "returned-by") return returnedByChildren(schema, node);
 
 	if (!node.typeName) return [];
 	const type = schema.getType(node.typeName);
 	if (!type) return [];
 
+	const members = memberNodes(schema, node, type);
+	// Only a *type* row asks how it is reached. The same named type under a
+	// field row was reached by that field, which is the row above it.
+	if (node.kind !== "type") return members;
+	const returnedBy = rootFieldsReturning(schema, type.name);
+	return returnedBy.length > 0 ? [returnedByNode(node), ...members] : members;
+}
+
+function branchChildren(schema: GraphQLSchema, node: SchemaTreeNode): SchemaTreeNode[] {
+	if (node.branch === "types") {
+		return namedTypes(schema).map((type) => typeNode(schema, node.id, type));
+	}
+	const rootName = branchRootTypeName(schema, node.branch);
+	const root = rootName ? schema.getType(rootName) : null;
+	if (!isObjectType(root)) return [];
+	return Object.values(root.getFields()).map((field) =>
+		fieldNode(node.id, root.name, field, node.branch, [])
+	);
+}
+
+/**
+ * The root fields under a "Returned by" container.
+ *
+ * They carry a one-step `rootPath`, so activating one inserts the operation
+ * that reaches the type - the same row, and the same insertion, the user would
+ * have found by opening Query themselves.
+ */
+function returnedByChildren(schema: GraphQLSchema, node: SchemaTreeNode): SchemaTreeNode[] {
+	if (!node.typeName) return [];
+	return rootFieldsReturning(schema, node.typeName).flatMap((ref) => {
+		const owner = schema.getType(ref.parentTypeName);
+		if (!isObjectType(owner)) return [];
+		const field = owner.getFields()[ref.fieldName];
+		if (!field) return [];
+
+		const row = fieldNode(node.id, owner.name, field, ref.branch, []);
+		if (!ref.narrowTo) return [row];
+		/*
+		 * A narrowed route says so on the row, and leads to the type that was
+		 * asked for rather than the interface the field declares - otherwise
+		 * `node` under `Post` reads as returning a `Node` and expands into
+		 * `Node`'s one field, neither of which is what the row is offering.
+		 */
+		return [
+			{
+				...row,
+				signature: `${row.signature} → ${ref.narrowTo}`,
+				typeName: ref.narrowTo,
+				expandable: hasChildren(schema.getType(ref.narrowTo)!),
+				rootPath: [rootStep(ref)],
+			},
+		];
+	});
+}
+
+function memberNodes(
+	schema: GraphQLSchema,
+	node: SchemaTreeNode,
+	type: GraphQLNamedType
+): SchemaTreeNode[] {
 	if (isObjectType(type) || isInterfaceType(type)) {
 		return Object.values(type.getFields()).map((field) =>
 			fieldNode(node.id, type.name, field, node.branch, node.rootPath)
@@ -191,9 +396,25 @@ export function childNodes(schema: GraphQLSchema, node: SchemaTreeNode): SchemaT
 		return type.getValues().map((value) => enumValueNode(node.id, type, value.name, value));
 	}
 	if (isUnionType(type)) {
-		return type.getTypes().map((member) => typeNode(node.id, member, node.branch));
+		return type.getTypes().map((member) => typeNode(schema, node.id, member, node.branch));
 	}
 	return [];
+}
+
+function returnedByNode(typeRow: SchemaTreeNode): SchemaTreeNode {
+	return {
+		id: returnedByNodeId(typeRow.id),
+		kind: "returned-by",
+		name: "Returned by",
+		signature: "",
+		typeName: typeRow.typeName,
+		ownerTypeName: null,
+		description: null,
+		deprecationReason: null,
+		branch: typeRow.branch,
+		expandable: true,
+		rootPath: null,
+	};
 }
 
 function fieldNode(
@@ -205,7 +426,7 @@ function fieldNode(
 ): SchemaTreeNode {
 	const named = getNamedType(field.type);
 	return {
-		id: `${parentId}/${ownerTypeName}.${field.name}`,
+		id: memberNodeId(parentId, ownerTypeName, field.name),
 		kind: "field",
 		name: field.name,
 		signature: `${argsSignature(field.args)}: ${field.type.toString()}`,
@@ -228,7 +449,7 @@ function inputFieldNode(
 ): SchemaTreeNode {
 	const named = getNamedType(field.type);
 	return {
-		id: `${parentId}/${owner.name}.${field.name}`,
+		id: memberNodeId(parentId, owner.name, field.name),
 		kind: "input-field",
 		name: field.name,
 		signature: `: ${field.type.toString()}${field.defaultValue === undefined ? "" : ` = ${JSON.stringify(field.defaultValue)}`}`,
@@ -249,7 +470,7 @@ function enumValueNode(
 	value: { description?: string | null; deprecationReason?: string | null }
 ): SchemaTreeNode {
 	return {
-		id: `${parentId}/${owner.name}.${name}`,
+		id: memberNodeId(parentId, owner.name, name),
 		kind: "enum-value",
 		name,
 		signature: "",
@@ -264,12 +485,13 @@ function enumValueNode(
 }
 
 function typeNode(
+	schema: GraphQLSchema,
 	parentId: string,
 	type: GraphQLNamedType,
 	branch: SchemaBranchId = "types"
 ): SchemaTreeNode {
 	return {
-		id: `${parentId}/type:${type.name}`,
+		id: typeNodeId(parentId, type.name),
 		kind: "type",
 		name: type.name,
 		signature: typeKindLabel(type),
@@ -278,7 +500,11 @@ function typeNode(
 		description: type.description ?? null,
 		deprecationReason: null,
 		branch,
-		expandable: hasChildren(type),
+		// A type with no fields of its own is still expandable when something
+		// returns it: the "Returned by" container is a child like any other, and
+		// a row that holds one and says it holds nothing is the dead chevron
+		// pointing the other way.
+		expandable: hasChildren(type) || rootFieldsReturning(schema, type.name).length > 0,
 		rootPath: null,
 	};
 }
@@ -339,8 +565,20 @@ interface IndexEntry {
 	description: string;
 }
 
+/** Which of the three haystacks put a row in the results. */
+export type SchemaMatchTier = "name" | "signature" | "description";
+
 export interface SchemaSearchMatch {
 	node: SchemaTreeNode;
+	/**
+	 * Which haystack the row was found through - not merely which offsets are
+	 * set. Both offsets are reported whatever the tier, so a name match whose
+	 * description happens to mention the term also carries a `descriptionStart`;
+	 * the two questions "where do I mark it" and "why is this row here" have
+	 * different answers, and reading the second off the first is what drew a
+	 * 1,100-character description above the results a user was reading.
+	 */
+	tier: SchemaMatchTier;
 	/** Where the term matched in `node.name`, for highlighting. -1 for no match. */
 	matchStart: number;
 	/** Where the term matched in `node.description`, for highlighting. -1 for no match. */
@@ -384,7 +622,7 @@ export function buildSearchIndex(schema: GraphQLSchema): SchemaSearchIndex {
 	for (const type of Object.values(schema.getTypeMap())) {
 		if (type.name.startsWith("__")) continue;
 		const branch = rootBranch.get(type.name);
-		if (!branch) entries.push(entry(typeNode("search", type)));
+		if (!branch) entries.push(entry(typeNode(schema, "search", type)));
 		// A root operation type is always an object type, so the branches below
 		// are mutually exclusive with `branch` being set.
 		if (isObjectType(type) || isInterfaceType(type)) {
@@ -441,7 +679,10 @@ function entry(node: SchemaTreeNode): IndexEntry {
  * is what `descriptionStart` is for.
  *
  * Both offsets are reported whatever tier the row landed in, so a row whose
- * name *and* description mention the term marks both.
+ * name *and* description mention the term marks both - and the tier is reported
+ * beside them, because "mark it here" and "this is why the row is here" are
+ * different questions and only the second decides how much of a description the
+ * pane owes the reader.
  *
  * **Inside the name tier, the closest match wins** - earliest offset first, and
  * among equal offsets the shortest name. An exact match needs no special case:
@@ -467,11 +708,11 @@ export function searchSchema(
 	for (const item of index.entries) {
 		const matchStart = item.name.indexOf(needle);
 		const descriptionStart = item.description.indexOf(needle);
-		const match = { node: item.node, matchStart, descriptionStart };
+		const found = { node: item.node, matchStart, descriptionStart };
 
-		if (matchStart >= 0) byName.push(match);
-		else if (item.signature.includes(needle)) bySignature.push(match);
-		else if (descriptionStart >= 0) byDescription.push(match);
+		if (matchStart >= 0) byName.push({ ...found, tier: "name" });
+		else if (item.signature.includes(needle)) bySignature.push({ ...found, tier: "signature" });
+		else if (descriptionStart >= 0) byDescription.push({ ...found, tier: "description" });
 	}
 
 	/*
@@ -515,6 +756,86 @@ export function splitAtMatch(name: string, matchStart: number, length: number): 
 		before: name.slice(0, matchStart),
 		match: name.slice(matchStart, end),
 		after: name.slice(end),
+	};
+}
+
+/** Matches that share a branch, under the heading the tree uses for it. */
+export interface SchemaSearchGroup {
+	branch: SchemaBranchId;
+	label: string;
+	matches: SchemaSearchMatch[];
+}
+
+/** The order the tree shows its branches in, so results read the same way. */
+const GROUP_ORDER: readonly SchemaBranchId[] = ["query", "mutation", "subscription", "types"];
+
+/**
+ * Search matches under the same headings the tree uses.
+ *
+ * **A flat list of names is unreadable on a real schema.** Three types can
+ * declare a field called `accessScopes`, and flattened they are three identical
+ * rows: nothing on screen says which one is reachable from Query, and the user
+ * cannot pick. Grouping restores the half of the address the tree carried in its
+ * shape - the branch - and the row itself restores the other half by naming its
+ * owner.
+ *
+ * Ranking is *within* a group, not across: the order `searchSchema` decided is
+ * preserved as the partition is made, so the closest name match is still the
+ * first row of its group and a description match is still last in its own.
+ */
+export function groupSearchMatches(matches: SchemaSearchMatch[]): SchemaSearchGroup[] {
+	const byBranch = new Map<SchemaBranchId, SchemaSearchMatch[]>();
+	for (const match of matches) {
+		const group = byBranch.get(match.node.branch);
+		if (group) group.push(match);
+		else byBranch.set(match.node.branch, [match]);
+	}
+	return GROUP_ORDER.filter((branch) => byBranch.has(branch)).map((branch) => ({
+		branch,
+		label: BRANCH_LABEL[branch],
+		matches: byBranch.get(branch)!,
+	}));
+}
+
+/** Where a row sits in the tree: what to open, and the row to land on. */
+export interface TreeLocation {
+	/** Ids to expand, outermost first. */
+	expand: string[];
+	/** The row's id once everything above it is open. */
+	id: string;
+}
+
+/**
+ * Where a search result lives in the tree, so the pane can go there.
+ *
+ * A search row is built with an index-local id (`search:Post/Post.title`) and
+ * cannot be found in the tree under it. Its address is recoverable, though: a
+ * field of a root type hangs off that root's branch, and everything else hangs
+ * off its owning type under Types - which is exactly the id `childNodes` builds
+ * for it. Reconstructing rather than storing keeps one definition of where a row
+ * lives; the ids come from the same builders the tree uses, so the two cannot
+ * drift.
+ *
+ * Null for the rows that are not in the tree as themselves: a branch is already
+ * the destination, and a "Returned by" container exists only under an expanded
+ * type row.
+ */
+export function treeLocationOf(node: SchemaTreeNode): TreeLocation | null {
+	const typesBranch = branchNodeId("types");
+
+	if (node.kind === "branch" || node.kind === "returned-by") return null;
+	if (node.kind === "type") {
+		return { expand: [typesBranch], id: typeNodeId(typesBranch, node.name) };
+	}
+	if (!node.ownerTypeName) return null;
+	if (node.branch !== "types") {
+		const branch = branchNodeId(node.branch);
+		return { expand: [branch], id: memberNodeId(branch, node.ownerTypeName, node.name) };
+	}
+	const owner = typeNodeId(typesBranch, node.ownerTypeName);
+	return {
+		expand: [typesBranch, owner],
+		id: memberNodeId(owner, node.ownerTypeName, node.name),
 	};
 }
 

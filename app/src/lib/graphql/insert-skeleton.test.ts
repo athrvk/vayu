@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parse, validate, type GraphQLSchema } from "graphql";
+import { buildSchema, parse, validate, type GraphQLSchema } from "graphql";
 import { fixtureSchema } from "@/test/graphql-schema-fixture";
 import {
 	insertField,
@@ -22,6 +22,7 @@ import {
 import {
 	buildSearchIndex,
 	childNodes,
+	rootPathsToType,
 	schemaBranches,
 	searchSchema,
 	type SchemaTreeNode,
@@ -364,29 +365,96 @@ describe("insertField - a mutation", () => {
 });
 
 describe("insertFragment", () => {
+	/** A document whose innermost selection set is a `Post`, cursor inside it. */
+	const inPost = `mutation Draft($input: CreatePostInput!) {\n  createPost(input: $input) {\n    id\n  }\n}\n`;
+	const postCursor = inPost.indexOf("id\n  }");
+
 	it("writes a fragment on the type with its scalar fields", () => {
-		const result = inserted(insertFragment(schema, "", "Post"));
+		const result = inserted(insertFragment(schema, inPost, postCursor, "Post"));
 
 		expect(result.placement).toBe("fragment");
 		expect(result.text).toContain("fragment PostFields on Post");
 		expect(result.text).toContain("title");
-		expect(parse(result.text)).toBeTruthy();
+		expectValid(result.text);
+	});
+
+	it("spreads the fragment it wrote, since an unused one fails validation", () => {
+		/*
+		 * `Fragment "X" is never used` rejects the whole request, the operation
+		 * the user already had included. Mutation check: drop the spread edit and
+		 * `expectValid` reddens with exactly that message while the document
+		 * still parses - which is why parsing was never the test to run here.
+		 */
+		const result = inserted(insertFragment(schema, inPost, postCursor, "Post"));
+
+		expect(result.text).toContain("...PostFields");
+		expectValid(result.text);
 	});
 
 	it("gives a union fragment __typename, since a union has no fields", () => {
-		const result = inserted(insertFragment(schema, "", "SearchResult"));
+		const doc = `query Draft {\n  search(term: "x") {\n    __typename\n  }\n}\n`;
+		const result = inserted(
+			insertFragment(schema, doc, doc.indexOf("__typename"), "SearchResult")
+		);
+
+		expect(result.text).toContain("fragment SearchResultFields on SearchResult");
 		expect(result.text).toContain("__typename");
-		expect(parse(result.text)).toBeTruthy();
+		expectValid(result.text);
 	});
 
 	it("does not collide with a fragment the document already defines", () => {
-		const doc = `fragment PostFields on Post {\n  id\n}\n`;
-		const result = inserted(insertFragment(schema, doc, "Post"));
+		const doc = `${inPost}\nfragment PostFields on Post {\n  id\n}\n`;
+		const result = inserted(insertFragment(schema, doc, doc.indexOf("id\n  }"), "Post"));
 		expect(result.text).toContain("fragment PostFields2 on Post");
+		expect(result.text).toContain("...PostFields2");
+	});
+
+	it("spreads into an interface selection, the case fragments exist for", () => {
+		/*
+		 * `fragment PostFields on Post` belongs inside a `Query.node: Node`
+		 * selection - Post implements Node - and an equality test on the host
+		 * refuses it while the user is looking straight at the set it goes in.
+		 * Mutation check: require `host.typeName === typeName` and this refuses.
+		 */
+		const doc = `query Existing {\n  node(id: "1") {\n    id\n  }\n}\n`;
+		const result = inserted(insertFragment(schema, doc, doc.indexOf("id\n  }"), "Post"));
+
+		expect(result.text).toContain("...PostFields");
+		expect(result.text).toContain("fragment PostFields on Post");
+		expectValid(result.text);
+	});
+
+	it("spreads into a union selection the type is a member of", () => {
+		const doc = `query Existing {\n  search(term: "x") {\n    __typename\n  }\n}\n`;
+		const result = inserted(insertFragment(schema, doc, doc.indexOf("__typename"), "User"));
+
+		expect(result.text).toContain("...UserFields");
+		expectValid(result.text);
+	});
+
+	it("prefers the set that is exactly the type over one it merely overlaps", () => {
+		// Both are on the chain: the User set inside the Node set. The one the
+		// user is in wins over the one the spread is only legal in.
+		const doc = `query Existing {\n  user(id: "1") {\n    id\n  }\n  node(id: "2") {\n    id\n  }\n}\n`;
+		const result = inserted(insertFragment(schema, doc, doc.indexOf("id\n  }"), "User"));
+
+		// The spread landed in `user`, not in `node`.
+		const spreadAt = result.text.indexOf("...UserFields");
+		expect(spreadAt).toBeGreaterThan(-1);
+		expect(spreadAt).toBeLessThan(result.text.indexOf("node(id:"));
+		expectValid(result.text);
+	});
+
+	it("refuses when nothing on screen selects the type, rather than orphaning it", () => {
+		const doc = `query Draft {\n  ping: __typename\n}\n`;
+		const result = insertFragment(schema, doc, doc.length - 1, "Post");
+
+		expect(isRefusal(result)).toBe(true);
+		if (isRefusal(result)) expect(result.reason).toContain("Post");
 	});
 
 	it("refuses a type a fragment cannot be written on", () => {
-		const result = insertFragment(schema, "", "Ranking");
+		const result = insertFragment(schema, inPost, postCursor, "Ranking");
 		expect(isRefusal(result)).toBe(true);
 	});
 });
@@ -454,6 +522,183 @@ describe("insertionForNode - a row found by search", () => {
 		const result = inserted(insertionForNode(schema, searched("search"), "", 0)!);
 		expect(result.text).toContain("query Search");
 		expectValid(result.text);
+	});
+
+	it("reaches a non-root field through the route that returns its owner", () => {
+		/*
+		 * `User.handle` is the commonest search result there is - a field on a
+		 * type the user has not opened - and clicking it used to refuse whenever
+		 * the cursor was not already inside a `User`. `Query.user` returns one,
+		 * so the route exists and the click can take it.
+		 */
+		const result = inserted(insertionForNode(schema, searched("handle"), "", 0)!);
+
+		expect(result.text).toContain("user(id: $id)");
+		expect(result.text).toContain("handle");
+		expectValid(result.text);
+	});
+
+	it("takes the same route from the Types branch as from the search box", () => {
+		const fromSearch = insertionForNode(schema, searched("handle"), "", 0);
+		const fromTree = insertionForNode(schema, browsed("User", "handle"), "", 0);
+		expect(fromSearch).toEqual(fromTree);
+	});
+
+	it("still refuses a field nothing can reach, rather than inventing a route", () => {
+		// `Orphan` is returned by no root field, so `Orphan.tag` has no route and
+		// the refusal is the honest answer.
+		const orphaned = buildSchema(`
+			type Orphan { tag: String }
+			type Query { ping: String }
+		`);
+		const tag = searchSchema(buildSearchIndex(orphaned), "tag").find(
+			(m) => m.node.name === "tag"
+		)!;
+		const result = insertionForNode(orphaned, tag.node, "", 0);
+
+		expect(result && isRefusal(result)).toBe(true);
+		if (result && isRefusal(result)) expect(result.reason).toContain("Orphan");
+	});
+});
+
+/**
+ * A type row's whole job: answer "give me one of these" with something the user
+ * can press Send on. It used to answer with a fragment, which on an empty
+ * document is a file that parses and cannot be run.
+ */
+describe("insertionForNode - a type row", () => {
+	/** The Types-branch row for a named type. */
+	function typeRow(target: GraphQLSchema, name: string): SchemaTreeNode {
+		const types = schemaBranches(target).find((b) => b.branch === "types");
+		if (!types) throw new Error("no types branch");
+		const found = childNodes(target, types).find((t) => t.name === name);
+		if (!found) throw new Error(`no type ${name}`);
+		return found;
+	}
+
+	it("inserts the query that returns the type, not a fragment", () => {
+		const result = inserted(insertionForNode(schema, typeRow(schema, "User"), "", 0)!);
+
+		expect(result.text).toContain("user(id: $id)");
+		expect(result.text).not.toContain("fragment");
+		expectValid(result.text);
+	});
+
+	it("uses a mutation when that is what returns the type", () => {
+		const result = inserted(insertionForNode(schema, typeRow(schema, "Post"), "", 0)!);
+		expect(result.text).toContain("mutation");
+		expect(result.text).toContain("createPost(input: $input)");
+		expectValid(result.text);
+	});
+
+	it("does not route through a deprecated root field when another exists", () => {
+		// `Query.legacySearch` is deprecated; `Query.search` returns the same
+		// union and is the route a click should take.
+		const result = inserted(insertionForNode(schema, typeRow(schema, "SearchResult"), "", 0)!);
+		expect(result.text).toContain("search(term: $term)");
+		expect(result.text).not.toContain("legacySearch");
+	});
+
+	it("writes a fragment where its spread can go, and validates as a whole", () => {
+		/*
+		 * `Inner` is reachable only through `Outer`, so no root field returns it
+		 * and there is no query to write - but a document can still be sitting
+		 * inside one, which is exactly where a fragment on it belongs.
+		 */
+		const nested = buildSchema(`
+			type Inner { tag: String }
+			type Outer { inner: Inner }
+			type Query { outer: Outer }
+		`);
+		const doc = `query Existing {\n  outer {\n    inner {\n      tag\n    }\n  }\n}\n`;
+		const result = inserted(
+			insertionForNode(nested, typeRow(nested, "Inner"), doc, doc.indexOf("tag"))!
+		);
+
+		expect(result.text).toContain("fragment InnerFields on Inner");
+		expect(result.text).toContain("...InnerFields");
+		expect(validate(nested, parse(result.text)).map((e) => e.message)).toEqual([]);
+	});
+
+	it("refuses rather than leaving a fragment with nothing to spread it", () => {
+		const orphaned = buildSchema(`
+			type Orphan { tag: String }
+			type Query { ping: String }
+		`);
+		const result = insertionForNode(orphaned, typeRow(orphaned, "Orphan"), "", 0);
+
+		expect(result && isRefusal(result)).toBe(true);
+		if (result && isRefusal(result)) {
+			expect(result.reason).toContain("Orphan");
+			expect(result.reason).toContain("Put the cursor inside a selection");
+		}
+	});
+
+	it("narrows with an inline fragment when the route runs through an interface", () => {
+		/*
+		 * `Query.node: Node` is the only way to reach some types on a Relay-shaped
+		 * schema, and `title` is not on `Node` - so the selection is only legal
+		 * inside `... on Post`. Mutation check: drop the narrowing from
+		 * `renderSteps` and `expectValid` reddens with "Cannot query field title
+		 * on type Node".
+		 */
+		const viaNode = rootPathsToType(schema, "Post").find((p) => p[0].fieldName === "node")!;
+		const result = inserted(
+			insertField(schema, "", 0, {
+				parentTypeName: "Query",
+				fieldName: "node",
+				rootPath: [...viaNode, { parentTypeName: "Post", fieldName: "title" }],
+			})
+		);
+
+		expect(result.text).toContain("... on Post");
+		expect(result.text).toContain("title");
+		expectValid(result.text);
+	});
+
+	it("selects the narrowed type's own fields, not the interface's", () => {
+		// The step wants Post's scalars; the field's declared type is the Node
+		// they are not on.
+		const viaNode = rootPathsToType(schema, "Post").find((p) => p[0].fieldName === "node")!;
+		const result = inserted(
+			insertField(schema, "", 0, {
+				parentTypeName: "Query",
+				fieldName: "node",
+				rootPath: viaNode,
+			})
+		);
+
+		expect(result.text).toContain("... on Post");
+		expect(result.text).toContain("body");
+		expectValid(result.text);
+	});
+
+	it("keeps the reason a fragment is impossible at all", () => {
+		// An enum can be neither queried for nor fragmented on; the wording that
+		// says which is the fragment module's, and it survives the new routing.
+		const result = insertionForNode(schema, typeRow(schema, "Ranking"), "", 0);
+		expect(result && isRefusal(result)).toBe(true);
+		if (result && isRefusal(result)) expect(result.reason).toContain("object, interface");
+	});
+
+	it("never leaves the document without an operation, over every type row", () => {
+		const types = schemaBranches(schema).find((b) => b.branch === "types")!;
+		const rows = childNodes(schema, types);
+		// A guard that scanned nothing would pass forever.
+		expect(rows.length).toBeGreaterThan(4);
+
+		for (const row of rows) {
+			const result = insertionForNode(schema, row, "", 0);
+			if (!result || isRefusal(result) || isAlreadyPresent(result)) continue;
+			const operations = parse(result.text).definitions.filter(
+				(d) => d.kind === "OperationDefinition"
+			);
+			expect({ type: row.name, operations: operations.length }).toEqual({
+				type: row.name,
+				operations: 1,
+			});
+			expectValid(result.text);
+		}
 	});
 });
 

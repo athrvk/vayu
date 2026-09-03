@@ -36,6 +36,24 @@ describe("per-schema view state", () => {
 		expect(store().view("k").expanded).toEqual([]);
 	});
 
+	it("opens a whole path at once and spends the search that led there", () => {
+		store().setSearch("k", "handle");
+		store().revealPath("k", ["branch:types", "branch:types/type:User"]);
+
+		expect(store().view("k").expanded).toEqual(["branch:types", "branch:types/type:User"]);
+		// The result list is what the user is leaving; keeping the term would
+		// redraw it over the tree they asked to see.
+		expect(store().view("k").search).toBe("");
+	});
+
+	it("adds to a path rather than toggling it, so an open row stays open", () => {
+		store().toggleExpanded("k", "branch:types");
+		store().revealPath("k", ["branch:types", "branch:types/type:User"]);
+
+		// A toggle would have closed Types on the way down to User.
+		expect(store().view("k").expanded).toEqual(["branch:types", "branch:types/type:User"]);
+	});
+
 	it("keeps search, expansion, scroll and descriptions independent of each other", () => {
 		store().setSearch("k", "post");
 		store().toggleExpanded("k", "branch:types");
