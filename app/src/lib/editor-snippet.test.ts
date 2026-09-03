@@ -8,50 +8,81 @@
 /**
  * Inserting a template at the cursor (#1223).
  *
- * Monaco does not run under vitest, so what is checkable here is the contract
- * with it: the snippet reaches the *snippet controller* rather than being
- * spliced in as text - the difference between tab stops and a script containing
- * `${1:200}` - and the editor is focused first, since the click that asked for
- * the insertion landed on a list beside it.
+ * **The first version of this suite passed against code that did nothing.** It
+ * mocked the editor as a bare object with a `trigger` spy and asserted that
+ * `insertSnippetAtCursor` called it with `"editor.action.insertSnippet"` - so it
+ * checked the call the app makes, never that Monaco answers it. It does not:
+ * that command is VS Code's workbench, and the standalone editor registers the
+ * snippet controller as a *contribution* instead. `trigger` ignores an id it
+ * cannot resolve, so clicking a snippet silently did nothing while the suite
+ * stayed green.
+ *
+ * The fake below is therefore shaped like the real editor rather than like the
+ * call: `trigger` resolves nothing (as Monaco's does for an unknown action) and
+ * the only working door is `getContribution("snippetController2").insert`.
+ * Mutation check: put the `trigger` spelling back and every case here reddens.
  */
 
 import { describe, it, expect } from "vitest";
 import type * as Monaco from "monaco-editor";
 import { insertSnippetAtCursor } from "./editor-snippet";
 
-function fakeEditor() {
-	const calls: Array<{ order: number; action: string; payload: unknown }> = [];
-	let order = 0;
+function fakeEditor({ withController = true }: { withController?: boolean } = {}) {
+	const events: string[] = [];
+	const inserted: string[] = [];
+
+	const controller = {
+		getId: () => "snippetController2",
+		dispose: () => {},
+		insert: (template: string) => {
+			events.push("insert");
+			inserted.push(template);
+		},
+	};
+
 	const editor = {
-		focus: () => {
-			calls.push({ order: order++, action: "focus", payload: undefined });
+		focus: () => events.push("focus"),
+		/*
+		 * Monaco resolves the id against the editor's own action map and returns
+		 * without complaint when nothing matches - which is the whole reason the
+		 * wrong id was invisible. The fake does the same: no throw, no effect.
+		 */
+		trigger: (_source: string, _handlerId: string, _payload: unknown) => {
+			events.push("trigger");
 		},
-		trigger: (_source: string, action: string, payload: unknown) => {
-			calls.push({ order: order++, action, payload });
-		},
+		getContribution: (id: string) =>
+			withController && id === "snippetController2" ? controller : null,
 	} as unknown as Monaco.editor.IStandaloneCodeEditor;
-	return { editor, calls };
+
+	return { editor, events, inserted };
 }
 
 describe("insertSnippetAtCursor", () => {
-	it("drives Monaco's snippet controller, so placeholders become tab stops", () => {
-		const { editor, calls } = fakeEditor();
+	it("hands the template to the editor's snippet controller", () => {
+		const { editor, inserted } = fakeEditor();
 
 		expect(insertSnippetAtCursor(editor, 'pm.test("${1:name}", function () {});')).toBe(true);
 
-		const insert = calls.find((c) => c.action === "editor.action.insertSnippet");
-		expect(insert, "the snippet controller is the only correct door").toBeTruthy();
-		expect(insert?.payload).toEqual({ snippet: 'pm.test("${1:name}", function () {});' });
+		// Verbatim: the placeholders are what the controller turns into tab
+		// stops, and expanding them here would defeat the whole point.
+		expect(inserted).toEqual(['pm.test("${1:name}", function () {});']);
 	});
 
 	it("focuses the editor before inserting", () => {
-		const { editor, calls } = fakeEditor();
+		const { editor, events } = fakeEditor();
 
 		insertSnippetAtCursor(editor, "pm.response.json();");
 
-		const focus = calls.find((c) => c.action === "focus");
-		const insert = calls.find((c) => c.action === "editor.action.insertSnippet");
-		expect(focus!.order).toBeLessThan(insert!.order);
+		expect(events).toEqual(["focus", "insert"]);
+	});
+
+	it("reports failure when the editor carries no snippet controller", () => {
+		const { editor, events } = fakeEditor({ withController: false });
+
+		// The honest answer for a Monaco build that no longer registers it under
+		// this id - which is what a silent `trigger` could never tell us.
+		expect(insertSnippetAtCursor(editor, "pm.response.json();")).toBe(false);
+		expect(events).toEqual([]);
 	});
 
 	it("does nothing when no editor has mounted yet", () => {
@@ -59,10 +90,10 @@ describe("insertSnippetAtCursor", () => {
 		expect(insertSnippetAtCursor(undefined, "pm.response.json();")).toBe(false);
 	});
 
-	it("refuses an empty template rather than trigger an empty edit", () => {
-		const { editor, calls } = fakeEditor();
+	it("refuses an empty template rather than open an empty snippet session", () => {
+		const { editor, events } = fakeEditor();
 
 		expect(insertSnippetAtCursor(editor, "")).toBe(false);
-		expect(calls).toHaveLength(0);
+		expect(events).toEqual([]);
 	});
 });
